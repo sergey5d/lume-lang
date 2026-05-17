@@ -128,36 +128,52 @@ public final class OS {
 `,
 	}
 
-	if src, err := bundledStdlibFile(filepath.Join("alang", "stdlib", "List.java")); err == nil {
-		sources[filepath.Join("alang", "stdlib", "List.java")] = src
-	}
-	if src, err := bundledStdlibFile(filepath.Join("alang", "stdlib", "Set.java")); err == nil {
-		sources[filepath.Join("alang", "stdlib", "Set.java")] = src
-	}
-	if src, err := bundledStdlibFile(filepath.Join("alang", "stdlib", "Map.java")); err == nil {
-		sources[filepath.Join("alang", "stdlib", "Map.java")] = src
-	}
-
 	if registry, err := predef.Load(); err == nil {
-		if optionSources, err := optionJavaSourcesFromPredef(registry); err == nil {
-			for rel, src := range optionSources {
-				sources[rel] = src
+		if descriptor, ok := registry.Types["OS"]; ok && descriptor.Directives.JavaSkip {
+			// keep bundled inline runtime
+		} else {
+			delete(sources, filepath.Join("alang", "stdlib", "OS.java"))
+		}
+		if descriptor, ok := registry.Types["List"]; ok && descriptor.Directives.JavaSkip {
+			if src, err := bundledStdlibFile(filepath.Join("alang", "stdlib", "List.java")); err == nil {
+				sources[filepath.Join("alang", "stdlib", "List.java")] = src
 			}
 		}
-		if resultSources, err := resultJavaSourcesFromPredef(registry); err == nil {
-			for rel, src := range resultSources {
-				sources[rel] = src
+		if descriptor, ok := registry.Types["Set"]; ok && descriptor.Directives.JavaSkip {
+			if src, err := bundledStdlibFile(filepath.Join("alang", "stdlib", "Set.java")); err == nil {
+				sources[filepath.Join("alang", "stdlib", "Set.java")] = src
 			}
 		}
-		if eitherSources, err := eitherJavaSourcesFromPredef(registry); err == nil {
-			for rel, src := range eitherSources {
-				sources[rel] = src
+		if descriptor, ok := registry.Types["Map"]; ok && descriptor.Directives.JavaSkip {
+			if src, err := bundledStdlibFile(filepath.Join("alang", "stdlib", "Map.java")); err == nil {
+				sources[filepath.Join("alang", "stdlib", "Map.java")] = src
+			}
+		}
+		if descriptor, ok := registry.Types["Option"]; ok && !descriptor.Directives.JavaSkip {
+			if optionSources, err := optionJavaSourcesFromPredef(registry); err == nil {
+				for rel, src := range optionSources {
+					sources[rel] = src
+				}
+			}
+		}
+		if descriptor, ok := registry.Types["Result"]; ok && !descriptor.Directives.JavaSkip {
+			if resultSources, err := resultJavaSourcesFromPredef(registry); err == nil {
+				for rel, src := range resultSources {
+					sources[rel] = src
+				}
+			}
+		}
+		if descriptor, ok := registry.Types["Either"]; ok && !descriptor.Directives.JavaSkip {
+			if eitherSources, err := eitherJavaSourcesFromPredef(registry); err == nil {
+				for rel, src := range eitherSources {
+					sources[rel] = src
+				}
 			}
 		}
 		for arity := 2; arity <= 10; arity++ {
 			name := fmt.Sprintf("Tuple%d", arity)
 			decl, ok := registry.Types[name]
-			if !ok || decl.Kind != predef.KindRecord {
+			if !ok || decl.Kind != predef.KindRecord || decl.Directives.JavaSkip {
 				continue
 			}
 			if src, err := tupleJavaSourceFromDescriptor(decl); err == nil {

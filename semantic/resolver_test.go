@@ -96,8 +96,8 @@ enum MaybeInt {
 
 def run(value Int, maybe MaybeInt) Int {
 	match maybe {
-		SomeX(value) => value
-		NoneX => value
+		case SomeX(value) => value
+		case NoneX => value
 	}
 }
 `

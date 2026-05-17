@@ -3,6 +3,7 @@ package semantic
 import (
 	"a-lang/module"
 	"a-lang/parser"
+	"a-lang/predef"
 )
 
 type Resolver struct {
@@ -21,6 +22,7 @@ type Resolver struct {
 	importedInterfaces map[string]parser.Span
 	classTypes         map[string]typeDecl
 	ifaceTypes         map[string]typeDecl
+	ambientValues      map[string]bool
 	loopDepth          int
 	currentMethodCtor  bool
 }
@@ -60,7 +62,9 @@ func Analyze(program *parser.Program) []Diagnostic {
 		importedInterfaces: map[string]parser.Span{},
 		classTypes:         map[string]typeDecl{},
 		ifaceTypes:         map[string]typeDecl{},
+		ambientValues:      map[string]bool{},
 	}
+	resolver.installAmbientPredef()
 	resolver.resolveProgram(program)
 	return resolver.diagnostics
 }
@@ -90,13 +94,49 @@ func AnalyzeModule(mod *module.LoadedModule) []Diagnostic {
 			importedInterfaces: map[string]parser.Span{},
 			classTypes:         map[string]typeDecl{},
 			ifaceTypes:         map[string]typeDecl{},
+			ambientValues:      map[string]bool{},
 		}
+		resolver.installAmbientPredef()
 		resolver.installDirectImports(current)
 		resolver.resolveProgram(current.Program)
 		diagnostics = append(diagnostics, resolver.diagnostics...)
 	}
 	walk(mod)
 	return diagnostics
+}
+
+func (r *Resolver) installAmbientPredef() {
+	registry, err := predef.Load()
+	if err != nil {
+		panic(err)
+	}
+	for name, decl := range registry.Interfaces {
+		descriptor, ok := registry.Types[name]
+		if !ok || !descriptor.Directives.Interpreter {
+			continue
+		}
+		r.interfaces[name] = decl.Span
+		r.ifaceTypes[name] = typeDecl{span: decl.Span, arity: len(decl.TypeParameters)}
+	}
+	for name, decl := range registry.Classes {
+		descriptor, ok := registry.Types[name]
+		if !ok || !descriptor.Directives.Interpreter {
+			continue
+		}
+		if decl.Object {
+			r.objects[name] = decl.Span
+			r.ambientValues[name] = true
+		} else {
+			r.classes[name] = decl.Span
+			r.classTypes[name] = typeDecl{span: decl.Span, arity: len(decl.TypeParameters)}
+			r.ambientValues[name] = true
+			if decl.Enum {
+				for _, enumCase := range decl.Cases {
+					r.ambientValues[enumCase.Name] = true
+				}
+			}
+		}
+	}
 }
 
 func (r *Resolver) installDirectImports(mod *module.LoadedModule) {
@@ -620,7 +660,7 @@ func (r *Resolver) resolveBlockStatements(statements []parser.Statement) {
 func (r *Resolver) resolveExpr(expr parser.Expr) {
 	switch e := expr.(type) {
 	case *parser.Identifier:
-		if r.isDefined(e.Name) || r.importedGlobals[e.Name].span != (parser.Span{}) || r.functions[e.Name] != (parser.Span{}) || r.classes[e.Name] != (parser.Span{}) || r.objects[e.Name] != (parser.Span{}) || r.interfaces[e.Name] != (parser.Span{}) || r.importedClasses[e.Name] != (parser.Span{}) || r.importedObjects[e.Name] != (parser.Span{}) || r.importedInterfaces[e.Name] != (parser.Span{}) || r.imports[e.Name].functions != nil || r.imports[e.Name].globals != nil || isBuiltin(e.Name) {
+		if r.isDefined(e.Name) || r.importedGlobals[e.Name].span != (parser.Span{}) || r.functions[e.Name] != (parser.Span{}) || r.classes[e.Name] != (parser.Span{}) || r.objects[e.Name] != (parser.Span{}) || r.interfaces[e.Name] != (parser.Span{}) || r.importedClasses[e.Name] != (parser.Span{}) || r.importedObjects[e.Name] != (parser.Span{}) || r.importedInterfaces[e.Name] != (parser.Span{}) || r.imports[e.Name].functions != nil || r.imports[e.Name].globals != nil || r.isBuiltinValue(e.Name) {
 			return
 		}
 		r.addDiagnostic("undefined_name", "undefined name '"+e.Name+"'", e.Span)
@@ -952,14 +992,8 @@ func (r *Resolver) isTypeParameter(name string) bool {
 
 func builtinTypeArity(name string) (int, bool) {
 	switch name {
-	case "Int", "Int64", "Bool", "Str", "Rune", "Float", "Float64", "Printer", "OS", "Unit":
+	case "Int", "Int64", "Bool", "Rune", "Float", "Float64", "Unit":
 		return 0, true
-	case "List", "Set", "Array", "Option", "Iterable", "Iterator":
-		return 1, true
-	case "Map", "Result", "Either":
-		return 2, true
-	case "Eq", "Ordering":
-		return 1, true
 	default:
 		return 0, false
 	}
@@ -1057,12 +1091,12 @@ func (r *Resolver) currentTypeScope() typeScope {
 	return r.typeScopes[len(r.typeScopes)-1]
 }
 
-func isBuiltin(name string) bool {
+func (r *Resolver) isBuiltinValue(name string) bool {
 	switch name {
-	case "List", "Map", "Set", "Array", "Some", "None", "Ok", "Err", "Left", "Right", "OS":
+	case "List", "Map", "Set", "Array":
 		return true
 	default:
-		return isImplicitOSMethod(name)
+		return r.ambientValues[name] || isImplicitOSMethod(name)
 	}
 }
 

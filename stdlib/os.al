@@ -1,4 +1,6 @@
-# SKIP
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
 
 object OS with Printer {
     stdout Printer = ?

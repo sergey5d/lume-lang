@@ -1,11 +1,13 @@
 package predef
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 
 	"a-lang/parser"
@@ -38,11 +40,20 @@ type TypeDescriptor struct {
 	Fields                []parser.FieldDecl
 	Methods               []MethodDescriptor
 	ImplementedInterfaces []*parser.TypeRef
+	Directives            FileDirectives
+}
+
+type FileDirectives struct {
+	PreludeSkip bool
+	JavaSkip    bool
+	Interpreter bool
 }
 
 type Registry struct {
-	Program *parser.Program
-	Types   map[string]TypeDescriptor
+	Program    *parser.Program
+	Types      map[string]TypeDescriptor
+	Classes    map[string]*parser.ClassDecl
+	Interfaces map[string]*parser.InterfaceDecl
 }
 
 var (
@@ -77,10 +88,16 @@ func load() (*Registry, error) {
 	sort.Strings(paths)
 
 	registry := &Registry{
-		Program: &parser.Program{},
-		Types:   map[string]TypeDescriptor{},
+		Program:    &parser.Program{},
+		Types:      map[string]TypeDescriptor{},
+		Classes:    map[string]*parser.ClassDecl{},
+		Interfaces: map[string]*parser.InterfaceDecl{},
 	}
 	for _, path := range paths {
+		directives, err := ReadDirectives(path)
+		if err != nil {
+			return nil, err
+		}
 		src, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
@@ -94,6 +111,7 @@ func load() (*Registry, error) {
 		registry.Program.Classes = append(registry.Program.Classes, program.Classes...)
 
 		for _, decl := range program.Interfaces {
+			registry.Interfaces[decl.Name] = decl
 			methods := make([]MethodDescriptor, len(decl.Methods))
 			for i, method := range decl.Methods {
 				methods[i] = MethodDescriptor{
@@ -109,9 +127,11 @@ func load() (*Registry, error) {
 				TypeParameters:        append([]parser.TypeParameter(nil), decl.TypeParameters...),
 				Methods:               methods,
 				ImplementedInterfaces: append([]*parser.TypeRef(nil), decl.Extends...),
+				Directives:            directives,
 			}
 		}
 		for _, decl := range program.Classes {
+			registry.Classes[decl.Name] = decl
 			kind := KindClass
 			switch {
 			case decl.Object:
@@ -140,6 +160,7 @@ func load() (*Registry, error) {
 				Fields:                append([]parser.FieldDecl(nil), decl.Fields...),
 				Methods:               methods,
 				ImplementedInterfaces: append([]*parser.TypeRef(nil), decl.Implements...),
+				Directives:            directives,
 			}
 		}
 	}
@@ -152,4 +173,36 @@ func predefDir() (string, error) {
 		return "", fmt.Errorf("resolve predef directory: runtime caller unavailable")
 	}
 	return filepath.Join(filepath.Dir(file), "..", "stdlib"), nil
+}
+
+func ReadDirectives(path string) (FileDirectives, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return FileDirectives{}, err
+	}
+	defer file.Close()
+
+	var directives FileDirectives
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "#") {
+			break
+		}
+		switch line {
+		case "# SKIP", "# PRELUDE_SKIP":
+			directives.PreludeSkip = true
+		case "# JAVA_SKIP":
+			directives.JavaSkip = true
+		case "# INTERPRETER":
+			directives.Interpreter = true
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return FileDirectives{}, err
+	}
+	return directives, nil
 }

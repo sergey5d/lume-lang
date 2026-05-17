@@ -1,4 +1,6 @@
-# SKIP
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
 
 interface Printer {
     def print(value Str...) Unit

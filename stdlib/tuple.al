@@ -1,4 +1,5 @@
-# SKIP
+# PRELUDE_SKIP
+# INTERPRETER
 
 record Tuple2[A, B] {
     _1 A

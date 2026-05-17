@@ -1,4 +1,6 @@
-# SKIP
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
 
 interface Array[T] with Iterable[T] {
 

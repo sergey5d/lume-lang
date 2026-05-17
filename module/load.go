@@ -1,14 +1,13 @@
 package module
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"a-lang/parser"
+	"a-lang/predef"
 )
 
 type LoadedModule struct {
@@ -307,11 +306,11 @@ func loadPreludePrograms(stdlibDir, currentFile string) ([]*parser.Program, erro
 		if path == currentFile {
 			continue
 		}
-		skip, err := hasSkipMarker(path)
+		directives, err := predef.ReadDirectives(path)
 		if err != nil {
 			return nil, err
 		}
-		if skip {
+		if directives.PreludeSkip {
 			continue
 		}
 		paths = append(paths, path)
@@ -356,25 +355,4 @@ func mergePrelude(program *parser.Program, prelude []*parser.Program) *parser.Pr
 	merged.Interfaces = append(merged.Interfaces, program.Interfaces...)
 	merged.Classes = append(merged.Classes, program.Classes...)
 	return merged
-}
-
-func hasSkipMarker(path string) (bool, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		return strings.HasPrefix(line, "# SKIP"), nil
-	}
-	if err := scanner.Err(); err != nil {
-		return false, err
-	}
-	return false, nil
 }

@@ -1,4 +1,5 @@
-# SKIP
+# PRELUDE_SKIP
+# INTERPRETER
 
 enum Result[T, E] {
     def isOk() Bool = match this {

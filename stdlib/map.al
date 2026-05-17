@@ -1,4 +1,6 @@
-# SKIP
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
 
 interface Map[K, V] with Iterable[(K, V)] {
     def put(key K, value V) Map[K, V]

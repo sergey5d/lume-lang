@@ -1,4 +1,5 @@
-# SKIP
+# PRELUDE_SKIP
+# INTERPRETER
 
 enum Either[L, R] {
 

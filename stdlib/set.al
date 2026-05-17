@@ -1,4 +1,6 @@
-# SKIP
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
 
 interface Set[T] with Iterable[T] {
     def add(value T) Set[T]

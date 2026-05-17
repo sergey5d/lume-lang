@@ -40,6 +40,7 @@ type Interpreter struct {
 	classes       map[string]*parser.ClassDecl
 	objects       map[string]*parser.ClassDecl
 	interfaces    map[string]*parser.InterfaceDecl
+	enumCases     map[string]string
 	imports       map[string]*Interpreter
 	directImports map[string]runtimeImportedSymbol
 	publicGlobals map[string]bool
@@ -152,10 +153,12 @@ func New(program *parser.Program) *Interpreter {
 		classes:       map[string]*parser.ClassDecl{},
 		objects:       map[string]*parser.ClassDecl{},
 		interfaces:    map[string]*parser.InterfaceDecl{},
+		enumCases:     map[string]string{},
 		imports:       map[string]*Interpreter{},
 		directImports: map[string]runtimeImportedSymbol{},
 		publicGlobals: map[string]bool{},
 	}
+	in.installAmbientPredef()
 	for _, fn := range program.Functions {
 		in.functions[fn.Name] = fn
 	}
@@ -167,6 +170,11 @@ func New(program *parser.Program) *Interpreter {
 			in.objects[class.Name] = class
 		} else {
 			in.classes[class.Name] = class
+		}
+		if class.Enum {
+			for _, enumCase := range class.Cases {
+				in.enumCases[enumCase.Name] = class.Name
+			}
 		}
 	}
 	for _, stmt := range program.Statements {
@@ -181,6 +189,33 @@ func New(program *parser.Program) *Interpreter {
 		}
 	}
 	return in
+}
+
+func (in *Interpreter) installAmbientPredef() {
+	registry := builtinRegistry()
+	for name, decl := range registry.Interfaces {
+		descriptor, ok := registry.Types[name]
+		if !ok || !descriptor.Directives.Interpreter {
+			continue
+		}
+		in.interfaces[name] = decl
+	}
+	for name, decl := range registry.Classes {
+		descriptor, ok := registry.Types[name]
+		if !ok || !descriptor.Directives.Interpreter {
+			continue
+		}
+		if decl.Object {
+			in.objects[name] = decl
+		} else {
+			in.classes[name] = decl
+			if decl.Enum {
+				for _, enumCase := range decl.Cases {
+					in.enumCases[enumCase.Name] = decl.Name
+				}
+			}
+		}
+	}
 }
 
 func NewModule(mod *module.LoadedModule) *Interpreter {
@@ -267,15 +302,19 @@ func (in *Interpreter) execTopLevel(global *env) error {
 		}
 		global.define(localName, classRef{module: symbol.module, name: symbol.original}, false)
 	}
-	for _, class := range in.program.Classes {
-		if !class.Object {
+	for name, class := range in.objects {
+		if _, exists := global.get(name); exists {
+			continue
+		}
+		if name == "OS" {
+			global.define(name, newNativeOS(), false)
 			continue
 		}
 		value, err := in.construct(class, nil, global)
 		if err != nil {
 			return err
 		}
-		global.define(class.Name, value, false)
+		global.define(name, value, false)
 	}
 	for _, stmt := range in.program.Statements {
 		if _, signal, err := in.execStmt(stmt, global, nil); err != nil {
@@ -1503,10 +1542,13 @@ func (in *Interpreter) evalExpr(expr parser.Expr, local *env) (Value, error) {
 			return boundMethodRef{receiver: newNativeOS(), name: e.Name}, nil
 		}
 		switch e.Name {
-		case "List", "Set", "Map", "Array", "Some", "None", "Ok", "Err", "Left", "Right":
+		case "List", "Set", "Map", "Array":
 			return builtinRef{name: e.Name}, nil
 		case "OS":
 			return newNativeOS(), nil
+		}
+		if _, ok := in.enumCases[e.Name]; ok {
+			return builtinRef{name: e.Name}, nil
 		}
 		if _, ok := in.imports[e.Name]; ok {
 			return moduleRef{name: e.Name}, nil
@@ -2530,12 +2572,21 @@ func (in *Interpreter) identifierShadowsTypeName(local *env, name string) bool {
 	if _, ok := in.imports[name]; ok {
 		return true
 	}
+	if _, ok := in.classes[name]; ok {
+		return true
+	}
+	if _, ok := in.objects[name]; ok {
+		return true
+	}
+	if _, ok := in.enumCases[name]; ok {
+		return true
+	}
 	return isBuiltinRuntimeValue(name)
 }
 
 func isBuiltinRuntimeValue(name string) bool {
 	switch name {
-	case "List", "Set", "Map", "Array", "Some", "None", "Ok", "Err", "Left", "Right", "OS":
+	case "List", "Set", "Map", "Array", "OS":
 		return true
 	default:
 		return false
@@ -2811,6 +2862,28 @@ func (in *Interpreter) callBuiltin(name string, argExprs []parser.CallArg, args 
 		}
 		return m, nil
 	default:
+		if owner, ok := in.enumCases[name]; ok {
+			class, found := in.classes[owner]
+			if !found || !class.Enum {
+				return nil, RuntimeError{Message: "unknown enum case '" + name + "'", Span: span}
+			}
+			if args == nil {
+				args = make([]Value, len(argExprs))
+				for i, arg := range argExprs {
+					value, err := in.evalExpr(arg.Value, local)
+					if err != nil {
+						return nil, err
+					}
+					args[i] = value
+				}
+			}
+			for _, enumCase := range class.Cases {
+				if enumCase.Name == name {
+					return in.constructEnumCase(class, enumCase, args, local, span)
+				}
+			}
+			return nil, RuntimeError{Message: "unknown enum case '" + name + "'", Span: span}
+		}
 		return nil, RuntimeError{Message: "value is not callable", Span: span}
 	}
 }

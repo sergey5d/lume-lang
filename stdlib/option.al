@@ -1,4 +1,5 @@
-# SKIP
+# PRELUDE_SKIP
+# INTERPRETER
 
 enum Option[T] {
     def isSet() Bool = match this {
