@@ -1,10 +1,12 @@
 package module
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"a-lang/parser"
 )
@@ -305,15 +307,16 @@ func loadPreludePrograms(stdlibDir, currentFile string) ([]*parser.Program, erro
 		if path == currentFile {
 			continue
 		}
+		skip, err := hasSkipMarker(path)
+		if err != nil {
+			return nil, err
+		}
+		if skip {
+			continue
+		}
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
-	if _, err := os.Stat(filepath.Join(stdlibDir, "list.al")); err != nil {
-		predefList := filepath.Join(stdlibDir, "predef", "list.al")
-		if _, statErr := os.Stat(predefList); statErr == nil && predefList != currentFile {
-			paths = append(paths, predefList)
-		}
-	}
 
 	out := make([]*parser.Program, 0, len(paths))
 	for _, path := range paths {
@@ -353,4 +356,25 @@ func mergePrelude(program *parser.Program, prelude []*parser.Program) *parser.Pr
 	merged.Interfaces = append(merged.Interfaces, program.Interfaces...)
 	merged.Classes = append(merged.Classes, program.Classes...)
 	return merged
+}
+
+func hasSkipMarker(path string) (bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		return strings.HasPrefix(line, "# SKIP"), nil
+	}
+	if err := scanner.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }

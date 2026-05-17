@@ -6120,7 +6120,7 @@ func isBuiltinType(name string) bool {
 
 func isBuiltinInterfaceType(name string) bool {
 	switch name {
-	case "Eq", "Ordering", "List", "Set", "Map", "Printer", "Option", "Result", "Either":
+	case "Eq", "Ordering", "Iterable", "Iterator", "List", "Set", "Map", "Printer", "Option", "Result", "Either":
 		return true
 	default:
 		return false

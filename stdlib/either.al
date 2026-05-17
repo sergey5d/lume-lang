@@ -1,3 +1,5 @@
+# SKIP
+
 enum Either[L, R] {
 
     case Left {

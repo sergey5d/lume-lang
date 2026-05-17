@@ -1,3 +1,5 @@
+# SKIP
+
 interface Iterator[T] {
     def hasNext() Bool
     def next() T

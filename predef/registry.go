@@ -151,5 +151,5 @@ func predefDir() (string, error) {
 	if !ok {
 		return "", fmt.Errorf("resolve predef directory: runtime caller unavailable")
 	}
-	return filepath.Join(filepath.Dir(file), "..", "stdlib", "predef"), nil
+	return filepath.Join(filepath.Dir(file), "..", "stdlib"), nil
 }

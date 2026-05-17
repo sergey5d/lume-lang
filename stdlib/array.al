@@ -1,3 +1,5 @@
+# SKIP
+
 interface Array[T] with Iterable[T] {
 
     # TODO: think more about whether [] should stay declared here

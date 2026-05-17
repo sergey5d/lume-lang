@@ -1,3 +1,5 @@
+# SKIP
+
 object OS with Printer {
     stdout Printer = ?
     stderr Printer = ?

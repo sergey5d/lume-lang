@@ -1,3 +1,5 @@
+# SKIP
+
 interface List[T] with Iterable[T] {
     def append(value T) List[T]
     def map[X](f T -> X) List[X]

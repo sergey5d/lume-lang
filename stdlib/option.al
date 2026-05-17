@@ -1,3 +1,5 @@
+# SKIP
+
 enum Option[T] {
     def isSet() Bool = match this {
         case Some(_) => true

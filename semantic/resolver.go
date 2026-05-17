@@ -469,10 +469,10 @@ func (r *Resolver) resolveStatement(stmt parser.Statement) {
 		r.defineMutable(s.Function.Name, s.Span, false, "duplicate_binding", "duplicate binding '"+s.Function.Name+"'")
 		r.resolveTypeRef(s.Function.ReturnType)
 		r.pushScope()
-			for _, param := range s.Function.Parameters {
-				r.resolveTypeRef(param.Type)
-				r.defineMutable(param.Name, param.Span, false, "duplicate_parameter", "duplicate parameter '"+param.Name+"'")
-			}
+		for _, param := range s.Function.Parameters {
+			r.resolveTypeRef(param.Type)
+			r.defineMutable(param.Name, param.Span, false, "duplicate_parameter", "duplicate parameter '"+param.Name+"'")
+		}
 		r.resolveBlockStatements(s.Function.Body.Statements)
 		r.popScope()
 	case *parser.AssignmentStmt:
@@ -954,7 +954,7 @@ func builtinTypeArity(name string) (int, bool) {
 	switch name {
 	case "Int", "Int64", "Bool", "Str", "Rune", "Float", "Float64", "Printer", "OS", "Unit":
 		return 0, true
-	case "List", "Set", "Array", "Option":
+	case "List", "Set", "Array", "Option", "Iterable", "Iterator":
 		return 1, true
 	case "Map", "Result", "Either":
 		return 2, true

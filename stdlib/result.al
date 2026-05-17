@@ -1,3 +1,5 @@
+# SKIP
+
 enum Result[T, E] {
     def isOk() Bool = match this {
         case Ok(_) => true
