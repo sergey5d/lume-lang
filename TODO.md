@@ -11,19 +11,6 @@
   - In particular, `zipWithIndex` producing another `Array[...]` may be the wrong result shape for a fixed-size collection surface.
   - Decide whether those APIs should instead return `List[...]`, `Iterable[...]`, or be omitted from `Array` entirely.
 
-- Revisit `Option[T]` representation.
-  - Current implementation still models `Option` as a class-like builtin for historical/runtime convenience.
-  - Long-term direction should likely be an enum-based shape now that `match` exists and enum support is much better.
-  - Clean up duplicated builtin declarations such as `Option` that currently exist in both `stdlib/` and `stdlib/predef/`, and settle on one source of truth.
-  - Candidate surface shape:
-
-```txt
-enum Option[T] {
-    case None
-    case Some { value T }
-}
-```
-
 ## Enum Follow-Ups
 
 - Think through auto-generated constant values for enum-wide fields.

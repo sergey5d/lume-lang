@@ -54,29 +54,6 @@ Notes:
 
 These are the first places where the syntax seems too clever relative to the value it gives.
 
-### 1. Remove `apply` callable-object magic
-
-Current issue:
-
-- objects or instances can become callable through `apply`
-- this adds hidden dispatch rules
-- it makes the language surface less obvious
-
-Preferred direction:
-
-- keep ordinary constructor calls
-- use explicit factory methods when needed
-
-Examples:
-
-```txt
-Range(10)
-Range.of(10)
-Person.make("Ada")
-```
-
-instead of relying on generic `apply`-style callability.
-
 ### 2. Remove tuple-range magic in `for`
 
 Current issue:
