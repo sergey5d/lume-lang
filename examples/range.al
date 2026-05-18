@@ -41,7 +41,7 @@ def main() Unit {
     OS.println("descending total", descendingTotal)
 
     var steppedTotal = 0
-    for item <- Range.apply(10, 4, -2) {
+    for item <- Range.create(10, 4, -2) {
         OS.println("stepped", item)
         steppedTotal += item
     }

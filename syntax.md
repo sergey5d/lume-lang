@@ -569,7 +569,7 @@ Object:
 
 ```txt
 object Range {
-    def apply(end Int) IntRange = IntRange(0, end, 1)
+    def create(end Int) IntRange = IntRange(0, end, 1)
 }
 ```
 
@@ -659,7 +659,7 @@ Enum cases are data-only:
 
 Behavior for enums belongs on the enum itself, either inline or in `impl Enum { ... }` blocks, and case-specific behavior should be expressed with `match`.
 
-## Calls and `apply`
+## Calls
 
 Normal call:
 
@@ -673,18 +673,17 @@ Named arguments:
 format(prefix = "item", value = 5)
 ```
 
-Instances with `apply` can be called like functions:
+Methods are called explicitly:
 
 ```txt
 adder Adder = Adder(5)
-adder(7)
+adder.add(7)
 ```
 
-Objects with `apply` can also be called:
+Factory-style object helpers follow the same rule:
 
 ```txt
-Range(10)
-Range.apply(10, 0, -1)
+Range.create(10, 0, -1)
 ```
 
 ## Lists, Arrays, Tuples

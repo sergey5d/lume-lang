@@ -54,10 +54,10 @@ Likely missing methods:
 
 These can mostly live in the stdlib, but may still need runtime support in places.
 
-Open construction tension:
-- whether some collection families should keep a special factory entry such as `apply`/call-style construction so user code can write `List(...)`, `Set(...)`, and `Map(...)` transparently while the runtime still chooses a backing implementation
-- the competing direction is to avoid `apply` magic and require explicit factory names like `of`, `from`, or `empty`, which are more obvious but make builtin-looking collection construction heavier
-- this matters most for abstract collection surfaces that may want stable user-facing construction syntax without exposing implementation classes directly
+Construction direction:
+- avoid `apply` call magic for collections and similar surfaces
+- prefer explicit factory names like `of`, `from`, or `empty`
+- when a type wants custom construction sugar, prefer descriptive helpers like `create`, `from`, or `make`
 
 ## Medium Priority
 

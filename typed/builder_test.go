@@ -19,10 +19,12 @@ func parseProgram(t *testing.T, src string) *parser.Program {
 func TestBuildTypedProgram(t *testing.T) {
 	src := `
 class Counter {
-	private count Int
-	private ticks Int := 0
+	hidden count Int
+	hidden var ticks Int = 0
+}
 
-	def this(count Int) {
+impl Counter {
+	def init(count Int) {
 		this.count = count
 	}
 

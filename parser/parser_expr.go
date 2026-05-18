@@ -349,7 +349,7 @@ func (p *Parser) parseAnonymousInterfaceExpr() (Expr, error) {
 		private := p.match(TokenPrivate)
 		switch p.peek().Type {
 		case TokenDef, TokenImpl:
-			method, err := p.parseMethodLike(annotations, private, false)
+			method, err := p.parseMethodLike(annotations, private)
 			if err != nil {
 				return nil, err
 			}
@@ -702,7 +702,7 @@ func (p *Parser) parsePartialExprAfterStart(start Token) (Expr, error) {
 func (p *Parser) parseMatchExprAfterKeyword(start Token, partial bool) (Expr, error) {
 	var (
 		value Expr
-		err error
+		err   error
 	)
 	if p.check(TokenLBrace) {
 		value = &PlaceholderExpr{Span: tokenSpan(start)}

@@ -2095,12 +2095,12 @@ def run() Int {
 `
 
 	in := New(parseProgram(t, src))
-	value, err := in.Call("run")
-	if err != nil {
-		t.Fatalf("Call returned error: %v", err)
+	_, err := in.Call("run")
+	if err == nil {
+		t.Fatal("expected direct object call to fail")
 	}
-	if value != int64(5) {
-		t.Fatalf("expected 5, got %#v", value)
+	if !strings.Contains(err.Error(), "object 'Range' is not callable") {
+		t.Fatalf("expected not callable error, got %v", err)
 	}
 }
 
@@ -2116,7 +2116,7 @@ impl Adder {
 
 def run() Int {
 	adder Adder = Adder(5)
-	return adder(7)
+	return adder.apply(7)
 }
 `
 
@@ -2142,7 +2142,7 @@ impl Adder {
 
 def run() Int {
 	adder Adder = Adder(5)
-	return adder(7)
+	return adder.apply(7)
 }
 `
 

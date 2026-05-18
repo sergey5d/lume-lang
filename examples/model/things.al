@@ -21,7 +21,7 @@ impl B {
 }
 
 object C {
-    def apply(value Int) Int = value + 1
+    def bump(value Int) Int = value + 1
 
     def print(value Int) Int = value + 10
 

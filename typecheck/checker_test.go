@@ -3,6 +3,7 @@ package typecheck
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"a-lang/module"
@@ -956,8 +957,15 @@ def run() Int {
 `
 
 	result := Analyze(parseProgram(t, src))
-	if len(result.Diagnostics) != 0 {
-		t.Fatalf("expected no diagnostics, got %#v", result.Diagnostics)
+	found := false
+	for _, diag := range result.Diagnostics {
+		if diag.Code == "invalid_call_target" && strings.Contains(diag.Message, "object 'Range' is not callable") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected invalid_call_target diagnostic, got %#v", result.Diagnostics)
 	}
 }
 
@@ -1025,7 +1033,7 @@ impl Adder {
 
 def run() Int {
 	adder Adder = Adder(5)
-	return adder(7)
+	return adder.apply(7)
 }
 `
 
@@ -1047,7 +1055,7 @@ impl Adder {
 
 def run() Int {
 	adder Adder = Adder(5)
-	return adder(7)
+	return adder.apply(7)
 }
 `
 
@@ -1300,7 +1308,7 @@ impl B {
 }
 
 object C {
-	def apply(value Int) Int = value + 1
+	def bump(value Int) Int = value + 1
 	def print(value Int) Int = value + 10
 	def printLn(value Int) Int = value + 100
 }
@@ -1321,8 +1329,8 @@ def run() Int {
 	aliasA AliasA = AliasA()
 	valueB AliasB = AliasB()
 	named Named = value
-	total Int = C(4) + printN(2) + print(3)
-	return total + things.C(5)
+	total Int = C.bump(4) + printN(2) + print(3)
+	return total + things.C.bump(5)
 }
 `)
 

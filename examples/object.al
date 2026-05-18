@@ -12,11 +12,11 @@ class B {
 object A {
     var count Int = 2
 
-    # explicit apply declaration
-    def apply(sizeValue Int) B = B(size = sizeValue)
+    # explicit factory method
+    def create(sizeValue Int) B = B(size = sizeValue)
 
-    # explicit apply declaration
-    def apply(str Str) B = B(size = 1)
+    # explicit factory method
+    def create(str Str) B = B(size = 1)
 
     def value() Int = count
 
@@ -27,8 +27,8 @@ object A {
 
 def main() Int {
 
-    b1 B = A.apply(5)
-    b2 B = A.apply("string of strings")
+    b1 B = A.create(5)
+    b2 B = A.create("string of strings")
 
     OS.println("value", A.value())
     OS.println("test", A.test(5))

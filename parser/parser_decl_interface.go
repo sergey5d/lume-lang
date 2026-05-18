@@ -69,7 +69,7 @@ func (p *Parser) parseInterfaceMethod(annotations []Annotation) (InterfaceMethod
 	if err != nil {
 		return InterfaceMethod{}, err
 	}
-	nameLexeme, _, err := p.parseDeclaredMethodName(false, "expected method name")
+	nameLexeme, _, err := p.parseDeclaredMethodName("expected method name")
 	if err != nil {
 		return InterfaceMethod{}, err
 	}

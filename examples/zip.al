@@ -48,8 +48,8 @@ def main() Unit {
     OS.println("array zip", arrayLeft, arrayRight)
     OS.println("array zipWithIndex", arrayIndexedValue, arrayIndexedPos)
 
-    rangePairs = Range(10, 13).zip(List("p", "q"))
-    rangeIndexed = Range(7, 9).zipWithIndex()
+    rangePairs = Range.create(10, 13).zip(List("p", "q"))
+    rangeIndexed = Range.create(7, 9).zipWithIndex()
 
     unwrap rangePair <- rangePairs.get(1) else {
         ()

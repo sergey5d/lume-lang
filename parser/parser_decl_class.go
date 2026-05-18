@@ -81,7 +81,7 @@ func (p *Parser) parseEnumLike(private bool) (*ClassDecl, error) {
 			decl.Fields = append(decl.Fields, field)
 		case TokenDef, TokenPartial:
 			sawNonField = true
-			method, err := p.parseMethodLike(annotations, false, false)
+			method, err := p.parseMethodLike(annotations, false)
 			if err != nil {
 				return nil, err
 			}
@@ -163,7 +163,7 @@ func (p *Parser) parseClassLike(kind TokenType, record bool, private bool, noun 
 				return nil, fmt.Errorf("%s methods must be declared in top-level impl blocks", noun)
 			}
 			sawMethod = true
-			method, err := p.parseMethodLike(annotations, private, false)
+			method, err := p.parseMethodLike(annotations, private)
 			if err != nil {
 				return nil, err
 			}
@@ -205,12 +205,12 @@ func (p *Parser) parseField(annotations []Annotation, private bool, allowPrivate
 	}
 	field := FieldDecl{
 		Annotations: annotations,
-		Name:     name.Lexeme,
-		Type:     typ,
-		Mutable:  mutable,
-		Deferred: true,
-		Private:  private,
-		Span:     span,
+		Name:        name.Lexeme,
+		Type:        typ,
+		Mutable:     mutable,
+		Deferred:    true,
+		Private:     private,
+		Span:        span,
 	}
 	switch p.peek().Type {
 	case TokenAssign, TokenColonAssign:
@@ -247,11 +247,11 @@ func (p *Parser) parseField(annotations []Annotation, private bool, allowPrivate
 	return field, nil
 }
 
-func (p *Parser) parseMethodLike(annotations []Annotation, private bool, allowShortApply bool) (*MethodDecl, error) {
-	return p.parseMethod(annotations, private, allowShortApply)
+func (p *Parser) parseMethodLike(annotations []Annotation, private bool) (*MethodDecl, error) {
+	return p.parseMethod(annotations, private)
 }
 
-func (p *Parser) parseMethod(annotations []Annotation, private bool, allowShortApply bool) (*MethodDecl, error) {
+func (p *Parser) parseMethod(annotations []Annotation, private bool) (*MethodDecl, error) {
 	start := p.peek()
 	partial := false
 	switch p.peek().Type {
@@ -268,7 +268,7 @@ func (p *Parser) parseMethod(annotations []Annotation, private bool, allowShortA
 		return nil, fmt.Errorf("expected 'def' or 'partial'")
 	}
 	start = p.previous()
-	nameLexeme, isOperator, err := p.parseDeclaredMethodName(allowShortApply, "expected method name")
+	nameLexeme, isOperator, err := p.parseDeclaredMethodName("expected method name")
 	if err != nil {
 		return nil, err
 	}
@@ -407,10 +407,7 @@ func (p *Parser) parseOperatorName() (string, Span, error) {
 	}
 }
 
-func (p *Parser) parseDeclaredMethodName(allowShortApply bool, identifierMessage string) (string, bool, error) {
-	if allowShortApply && p.check(TokenLParen) {
-		return "apply", false, nil
-	}
+func (p *Parser) parseDeclaredMethodName(identifierMessage string) (string, bool, error) {
 	if p.check(TokenIdentifier) {
 		name, err := p.consume(TokenIdentifier, identifierMessage)
 		if err != nil {
@@ -554,7 +551,7 @@ func (p *Parser) parseTopLevelImpl(program *Program) error {
 		if !p.check(TokenDef) && !p.check(TokenPartial) {
 			return fmt.Errorf("expected method declaration in impl block, got %s", p.peek().String())
 		}
-		method, err := p.parseMethodLike(annotations, private, false)
+		method, err := p.parseMethodLike(annotations, private)
 		if err != nil {
 			return err
 		}

@@ -7,11 +7,11 @@ class Adder {
 }
 
 impl Adder {
-    def apply(value Int) Int = amount + value
+    def add(value Int) Int = amount + value
 }
 
 def main() Int {
     adder Adder = Adder(5)
-    OS.println(adder(7))
+    OS.println(adder.add(7))
     0
 }

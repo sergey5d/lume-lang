@@ -2026,15 +2026,7 @@ func (in *Interpreter) evalCall(call *parser.CallExpr, local *env) (Value, error
 			}
 		}
 		if class.Object {
-			value, ok := fn.module.globals.get(fn.name)
-			if !ok {
-				return nil, RuntimeError{Message: "undefined object '" + fn.name + "'", Span: call.Span}
-			}
-			argsOnly := make([]Value, len(ordered))
-			for i, arg := range ordered {
-				argsOnly[i] = arg
-			}
-			return fn.module.invokeCallableValue(value.value, argsOnly, local, call.Span)
+			return nil, RuntimeError{Message: "object '" + fn.name + "' is not callable", Span: call.Span}
 		}
 		if hasNamedParserArgs(call.Args) {
 			reordered, err := reorderConstructorValueArgs(class, args, call.Span)
@@ -2074,46 +2066,16 @@ func (in *Interpreter) evalCall(call *parser.CallExpr, local *env) (Value, error
 		}
 		return in.callClosure(fn, namedArgValues(args))
 	case *instance:
-		return in.callApplyMethod(fn, args, call.Args, local, call.Span)
+		if fn.class != nil && fn.class.Object {
+			return nil, RuntimeError{Message: "object '" + fn.class.Name + "' is not callable", Span: call.Span}
+		}
+		if fn.class != nil {
+			return nil, RuntimeError{Message: "value of type '" + fn.class.Name + "' is not callable", Span: call.Span}
+		}
+		return nil, RuntimeError{Message: "value is not callable", Span: call.Span}
 	default:
 		return nil, RuntimeError{Message: "value is not callable", Span: call.Span}
 	}
-}
-
-func (in *Interpreter) callApplyMethod(obj *instance, args []namedValueArg, parserArgs []parser.CallArg, local *env, span parser.Span) (Value, error) {
-	var firstErr error
-	var fallbackMethod *parser.MethodDecl
-	var fallbackArgs []Value
-	for _, method := range obj.class.Methods {
-		if method.Name != "apply" {
-			continue
-		}
-		ordered := namedArgValues(args)
-		if hasNamedParserArgs(parserArgs) {
-			reordered, err := reorderNamedValueArgs(method.Parameters, args, span, "method 'apply'")
-			if err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				continue
-			}
-			ordered = reordered
-			if fallbackMethod == nil {
-				fallbackMethod = method
-				fallbackArgs = ordered
-			}
-		}
-		if in.runtimeMethodMatches(method, ordered) {
-			return in.callMethod(obj, method, ordered, local)
-		}
-	}
-	if fallbackMethod != nil {
-		return in.callMethod(obj, fallbackMethod, fallbackArgs, local)
-	}
-	if firstErr != nil {
-		return nil, firstErr
-	}
-	return nil, RuntimeError{Message: "value is not callable", Span: span}
 }
 
 func (in *Interpreter) callClosure(fn *closure, args []Value) (Value, error) {
@@ -3044,11 +3006,13 @@ func (in *Interpreter) invokeCallableValue(callee Value, args []Value, local *en
 	case boundMethodRef:
 		return in.invokeBoundMethod(fn.receiver, fn.name, args, local, span)
 	case *instance:
-		named := make([]namedValueArg, len(args))
-		for i, arg := range args {
-			named[i] = namedValueArg{Value: arg, Span: span}
+		if fn.class != nil && fn.class.Object {
+			return nil, RuntimeError{Message: "object '" + fn.class.Name + "' is not callable", Span: span}
 		}
-		return in.callApplyMethod(fn, named, nil, local, span)
+		if fn.class != nil {
+			return nil, RuntimeError{Message: "value of type '" + fn.class.Name + "' is not callable", Span: span}
+		}
+		return nil, RuntimeError{Message: "value is not callable", Span: span}
 	default:
 		return nil, RuntimeError{Message: "value is not callable", Span: span}
 	}

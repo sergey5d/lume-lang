@@ -2665,13 +2665,21 @@ func (c *Checker) checkCall(call *parser.CallExpr) *Type {
 			return c.checkBuiltinConstructorCall(ident.Name, call)
 		}
 		if object, ok := c.objects[ident.Name]; ok {
-			return c.checkApplyCall(object, &Type{Kind: TypeObject, Name: object.name}, call.Args, call.Span, "object '"+object.decl.Name+"' is not callable")
+			for _, arg := range call.Args {
+				c.checkExpr(arg.Value)
+			}
+			c.addDiagnostic("invalid_call_target", "object '"+object.decl.Name+"' is not callable", call.Span)
+			return unknownType
 		}
 		if class, ok := c.classes[ident.Name]; ok {
 			return c.checkConstructorCall(class, call)
 		}
-		if object, ok := c.importedObjects[ident.Name]; ok {
-			return c.checkApplyCall(object, &Type{Kind: TypeObject, Name: object.name}, call.Args, call.Span, "object '"+ident.Name+"' is not callable")
+		if _, ok := c.importedObjects[ident.Name]; ok {
+			for _, arg := range call.Args {
+				c.checkExpr(arg.Value)
+			}
+			c.addDiagnostic("invalid_call_target", "object '"+ident.Name+"' is not callable", call.Span)
+			return unknownType
 		}
 		if class, ok := c.importedClasses[ident.Name]; ok {
 			return c.checkConstructorCall(class, call)
@@ -2769,21 +2777,11 @@ func (c *Checker) checkCall(call *parser.CallExpr) *Type {
 	}
 
 	calleeType := c.checkExpr(call.Callee)
-	if calleeType.Kind == TypeClass {
-		if info, ok := c.classes[calleeType.Name]; ok {
-			return c.checkInstanceApplyCall(info, calleeType, call.Args, call.Span)
-		}
-	}
-	if calleeType.Kind == TypeObject {
-		if info, ok := c.lookupObjectInfo(calleeType.Name); ok {
-			return c.checkInstanceApplyCall(info, calleeType, call.Args, call.Span)
-		}
-	}
 	if hasNamedCallArgs(call.Args) {
 		for _, arg := range call.Args {
 			c.checkExpr(arg.Value)
 		}
-		c.addDiagnostic("invalid_named_argument", "named arguments require a direct function, method, constructor, or callable object", call.Span)
+		c.addDiagnostic("invalid_named_argument", "named arguments require a direct function, method, or constructor", call.Span)
 		return unknownType
 	}
 	if calleeType.Kind != TypeFunction || calleeType.Signature == nil {
@@ -2805,45 +2803,6 @@ func (c *Checker) checkCall(call *parser.CallExpr) *Type {
 			continue
 		}
 		argType = c.checkExpr(arg.Value)
-	}
-	return sig.ReturnType
-}
-
-func (c *Checker) checkApplyCall(class classInfo, receiverType *Type, args []parser.CallArg, span parser.Span, missingMessage string) *Type {
-	applyMethods, ok := class.methods["apply"]
-	if !ok || len(applyMethods) == 0 {
-		for _, arg := range args {
-			c.checkExpr(arg.Value)
-		}
-		c.addDiagnostic("invalid_call_target", missingMessage, span)
-		return unknownType
-	}
-	var (
-		method      methodInfo
-		okMethod    bool
-		orderedArgs []parser.Expr
-	)
-	if hasNamedCallArgs(args) {
-		method, orderedArgs, okMethod = c.resolveNamedMethodOverload(class, receiverType, "apply", args, span)
-	} else {
-		orderedArgs = callArgValues(args)
-		argTypes := c.checkArgTypes(orderedArgs)
-		method, okMethod = c.resolveMethodOverload(class, receiverType, "apply", argTypes, span)
-	}
-	if !okMethod {
-		return unknownType
-	}
-	sig, ok := c.resolveMethodCallSignature(class, receiverType, method.decl, orderedArgs, span)
-	if !ok {
-		return unknownType
-	}
-	for i := range orderedArgs {
-		if expected, ok := paramTypeForArg(sig, i); ok {
-			argType := c.checkExprWithExpected(orderedArgs[i], expected)
-			c.requireAssignable(argType, expected, exprSpan(orderedArgs[i]), "invalid_argument_type", "cannot pass "+argType.String()+" to parameter of type "+expected.String())
-		} else {
-			c.checkExpr(orderedArgs[i])
-		}
 	}
 	return sig.ReturnType
 }
@@ -3032,10 +2991,6 @@ func inferTypeArgsFromTypes(actual, template *Type, inferred map[string]*Type, t
 		}
 	}
 	return true
-}
-
-func (c *Checker) checkInstanceApplyCall(class classInfo, receiverType *Type, args []parser.CallArg, span parser.Span) *Type {
-	return c.checkApplyCall(class, receiverType, args, span, "value of type '"+receiverType.String()+"' is not callable")
 }
 
 func (c *Checker) checkBuiltinConstructorCall(name string, call *parser.CallExpr) *Type {
@@ -3598,7 +3553,9 @@ func (c *Checker) checkMethodCall(member *parser.MemberExpr, args []parser.CallA
 			return c.checkConstructorCall(class, call)
 		}
 		if object, ok := info.objects[member.Name]; ok {
-			return c.checkApplyCall(object, &Type{Kind: TypeObject, Name: object.name}, args, member.Span, "object '"+object.decl.Name+"' is not callable")
+			c.checkArgTypes(callArgValues(args))
+			c.addDiagnostic("invalid_call_target", "object '"+object.decl.Name+"' is not callable", member.Span)
+			return unknownType
 		}
 		c.checkArgTypes(callArgValues(args))
 		c.addDiagnostic("unknown_member", "unknown imported member '"+member.Name+"' on module '"+receiverType.Name+"'", member.Span)

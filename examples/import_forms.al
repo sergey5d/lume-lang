@@ -26,7 +26,7 @@ def main() Int {
     OS.println(named.label())
     OS.println(aliasA.label())
     OS.println(valueB.label())
-    OS.println(apply(4) + things.C(5))
+    OS.println(bump(4) + things.C.bump(5))
     OS.println(printN(12))
     OS.println(print(100))
     return 0

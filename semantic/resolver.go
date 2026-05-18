@@ -69,6 +69,8 @@ func Analyze(program *parser.Program) []Diagnostic {
 	return resolver.diagnostics
 }
 
+// AnalyzeModule resolves a loaded module graph after the loader has already
+// expanded implicit prelude files and explicit imports.
 func AnalyzeModule(mod *module.LoadedModule) []Diagnostic {
 	seen := map[string]bool{}
 	var diagnostics []Diagnostic
@@ -105,6 +107,8 @@ func AnalyzeModule(mod *module.LoadedModule) []Diagnostic {
 	return diagnostics
 }
 
+// installAmbientPredef exposes stdlib declarations that should behave like
+// ambient language names even when they are not merged into each source file.
 func (r *Resolver) installAmbientPredef() {
 	registry, err := predef.Load()
 	if err != nil {
@@ -139,6 +143,9 @@ func (r *Resolver) installAmbientPredef() {
 	}
 }
 
+// installDirectImports binds `import foo/{bar}` style names into the local
+// resolver namespace so later identifier lookup can treat them as ordinary
+// references.
 func (r *Resolver) installDirectImports(mod *module.LoadedModule) {
 	for localName, symbol := range mod.SymbolImports {
 		if symbol.IsFunction {
@@ -219,6 +226,8 @@ func (r *Resolver) installDirectImports(mod *module.LoadedModule) {
 	}
 }
 
+// moduleImportInfo captures the names visible through module aliases such as
+// `util.SomeType` or `math.add` without flattening them into local scope.
 func moduleImportInfo(mod *module.LoadedModule) map[string]importInfo {
 	out := map[string]importInfo{}
 	currentPackage := mod.Program.PackageName
@@ -269,6 +278,8 @@ func moduleImportInfo(mod *module.LoadedModule) map[string]importInfo {
 	return out
 }
 
+// resolveProgram performs the main top-level pass: collect declarations, resolve
+// globals in declaration order, then walk function/interface/class bodies.
 func (r *Resolver) resolveProgram(program *parser.Program) {
 	for _, fn := range program.Functions {
 		if previous, exists := r.functions[fn.Name]; exists {
@@ -326,6 +337,8 @@ func (r *Resolver) resolveProgram(program *parser.Program) {
 	r.popScope()
 }
 
+// resolveGlobals resolves top-level value initializers before later globals are
+// registered, matching the language's declaration-order visibility.
 func (r *Resolver) resolveGlobals(statements []parser.Statement) {
 	r.pushScope()
 	defer r.popScope()
@@ -354,6 +367,8 @@ func (r *Resolver) resolveGlobals(statements []parser.Statement) {
 	}
 }
 
+// resolveFunction checks type parameters, parameter types, and the function body
+// under a fresh value/type scope.
 func (r *Resolver) resolveFunction(fn *parser.FunctionDecl) {
 	r.pushTypeScope()
 	defer r.popTypeScope()
@@ -372,6 +387,8 @@ func (r *Resolver) resolveFunction(fn *parser.FunctionDecl) {
 	r.resolveBlock(fn.Body)
 }
 
+// resolveInterface validates inherited interfaces and default method bodies
+// without treating interface methods as full class members.
 func (r *Resolver) resolveInterface(decl *parser.InterfaceDecl) {
 	r.pushTypeScope()
 	defer r.popTypeScope()
@@ -403,6 +420,8 @@ func (r *Resolver) resolveInterface(decl *parser.InterfaceDecl) {
 	}
 }
 
+// resolveClass installs class-local bindings like `this` and fields, then walks
+// enum cases and methods in the scopes they execute under.
 func (r *Resolver) resolveClass(decl *parser.ClassDecl) {
 	r.pushTypeScope()
 	defer r.popTypeScope()
@@ -463,6 +482,8 @@ func (r *Resolver) resolveClass(decl *parser.ClassDecl) {
 	}
 }
 
+// resolveMethod handles both ordinary methods and constructors, toggling the
+// constructor flag so `init(...)` calls can be treated specially later on.
 func (r *Resolver) resolveMethod(method *parser.MethodDecl) {
 	r.pushTypeScope()
 	defer r.popTypeScope()
@@ -484,6 +505,7 @@ func (r *Resolver) resolveMethod(method *parser.MethodDecl) {
 	r.resolveBlockStatements(method.Body.Statements)
 }
 
+// resolveBlock creates a new lexical value scope for a `{ ... }` block.
 func (r *Resolver) resolveBlock(block *parser.BlockStmt) {
 	r.pushScope()
 	defer r.popScope()
@@ -493,6 +515,8 @@ func (r *Resolver) resolveBlock(block *parser.BlockStmt) {
 	}
 }
 
+// resolveStatement is the main statement dispatcher. It is responsible for
+// scope creation, loop-depth tracking, and declaration-before-use checks.
 func (r *Resolver) resolveStatement(stmt parser.Statement) {
 	switch s := stmt.(type) {
 	case *parser.ValStmt:
@@ -651,12 +675,16 @@ func (r *Resolver) resolveStatement(stmt parser.Statement) {
 	}
 }
 
+// resolveBlockStatements walks statements in-place when the surrounding code has
+// already created the correct scope.
 func (r *Resolver) resolveBlockStatements(statements []parser.Statement) {
 	for _, stmt := range statements {
 		r.resolveStatement(stmt)
 	}
 }
 
+// resolveExpr validates names and types that appear inside expressions without
+// attempting to compute final types or overload choices.
 func (r *Resolver) resolveExpr(expr parser.Expr) {
 	switch e := expr.(type) {
 	case *parser.Identifier:
@@ -786,6 +814,8 @@ func (r *Resolver) resolveExpr(expr parser.Expr) {
 	}
 }
 
+// resolveAssignment validates the target side separately from the value side so
+// reassignment/operator-specific diagnostics stay precise.
 func (r *Resolver) resolveAssignment(stmt *parser.AssignmentStmt) {
 	switch target := stmt.Target.(type) {
 	case *parser.Identifier:
@@ -812,6 +842,8 @@ func (r *Resolver) resolveAssignment(stmt *parser.AssignmentStmt) {
 	r.resolveExpr(stmt.Value)
 }
 
+// resolveMatchPattern installs pattern bindings into the current case scope and
+// resolves any nested literal/type references inside the pattern.
 func (r *Resolver) resolveMatchPattern(pattern parser.Pattern) {
 	switch p := pattern.(type) {
 	case *parser.WildcardPattern:
@@ -836,10 +868,14 @@ func (r *Resolver) resolveMatchPattern(pattern parser.Pattern) {
 	}
 }
 
+// defineMutable is the common entry point for new value bindings in the current
+// scope, delegating the shadowing policy to defineMutableAllowShadow.
 func (r *Resolver) defineMutable(name string, span parser.Span, mutable bool, code, message string) {
 	r.defineMutableAllowShadow(name, span, mutable, code, message, false)
 }
 
+// defineMutableAllowShadow centralizes duplicate/shadowing diagnostics so the
+// many binding forms in the language behave consistently.
 func (r *Resolver) defineMutableAllowShadow(name string, span parser.Span, mutable bool, code, message string, allowOuterShadow bool) {
 	if name == "_" {
 		return
@@ -865,6 +901,8 @@ func (r *Resolver) defineMutableAllowShadow(name string, span parser.Span, mutab
 	current[name] = symbol{span: span, mutable: mutable}
 }
 
+// defineType records a type parameter or locally visible type name in the
+// current type scope while guarding against duplicates.
 func (r *Resolver) defineType(name string, span parser.Span, code, message string) {
 	current := r.currentTypeScope()
 	if previous, exists := current[name]; exists {
@@ -875,6 +913,8 @@ func (r *Resolver) defineType(name string, span parser.Span, code, message strin
 	current[name] = span
 }
 
+// resolveTypeRef validates structural type syntax and arity, but intentionally
+// stops short of producing a typed representation.
 func (r *Resolver) resolveTypeRef(ref *parser.TypeRef) {
 	if ref == nil {
 		return
@@ -937,6 +977,8 @@ func (r *Resolver) resolveTypeRef(ref *parser.TypeRef) {
 	r.addDiagnostic("undefined_type", "undefined type '"+ref.Name+"'", ref.Span)
 }
 
+// resolveTypePatternRef applies the stricter runtime-pattern rules used by
+// `match`, especially around erased generic types.
 func (r *Resolver) resolveTypePatternRef(ref *parser.TypeRef) {
 	if ref == nil {
 		return
@@ -957,6 +999,8 @@ func (r *Resolver) resolveTypePatternRef(ref *parser.TypeRef) {
 	r.resolveTypeRef(ref)
 }
 
+// typePatternUsesErasedGeneric answers whether a runtime type test would lose
+// generic arguments and therefore must reject explicit type arguments in the pattern.
 func (r *Resolver) typePatternUsesErasedGeneric(ref *parser.TypeRef) bool {
 	if ref == nil || ref.Name == "" {
 		return false
@@ -973,6 +1017,8 @@ func (r *Resolver) typePatternUsesErasedGeneric(ref *parser.TypeRef) bool {
 	return false
 }
 
+// resolveTypeParameterBounds validates interface-style bounds after the current
+// type parameters have been installed into scope.
 func (r *Resolver) resolveTypeParameterBounds(params []parser.TypeParameter) {
 	for _, param := range params {
 		for _, bound := range param.Bounds {
@@ -1017,6 +1063,8 @@ func (r *Resolver) isDefined(name string) bool {
 	return ok
 }
 
+// lookup searches local scopes first, then top-level/imported globals, matching
+// the runtime name lookup order for plain identifiers.
 func (r *Resolver) lookup(name string) (symbol, bool) {
 	for i := len(r.scopes) - 1; i >= 0; i-- {
 		if sym, ok := r.scopes[i][name]; ok {
@@ -1032,6 +1080,8 @@ func (r *Resolver) lookup(name string) (symbol, bool) {
 	return symbol{}, false
 }
 
+// lookupOuter is used for shadowing diagnostics so a new binding can reject an
+// existing outer binding without matching itself in the current scope.
 func (r *Resolver) lookupOuter(name string) (symbol, bool) {
 	if len(r.scopes) > 1 {
 		for i := len(r.scopes) - 2; i >= 0; i-- {
@@ -1091,6 +1141,8 @@ func (r *Resolver) currentTypeScope() typeScope {
 	return r.typeScopes[len(r.typeScopes)-1]
 }
 
+// isBuiltinValue covers truly special runtime constructor names plus ambient
+// predef values that the resolver should accept without explicit imports.
 func (r *Resolver) isBuiltinValue(name string) bool {
 	switch name {
 	case "List", "Map", "Set", "Array":
