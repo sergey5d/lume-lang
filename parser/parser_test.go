@@ -1662,6 +1662,19 @@ impl Vec {
 	}
 }
 
+func TestParseIncrementDecrementFormsRejected(t *testing.T) {
+	for _, src := range []string{
+		"count++",
+		"count--",
+		"++count",
+		"--count",
+	} {
+		if _, err := ParseExpr(src); err == nil {
+			t.Fatalf("expected parse error for %q", src)
+		}
+	}
+}
+
 func TestParsePrivateClassDecl(t *testing.T) {
 	src := `
 hidden class Hidden {
