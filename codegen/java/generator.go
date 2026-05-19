@@ -149,6 +149,11 @@ public final class OS {
 				sources[filepath.Join("alang", "stdlib", "Map.java")] = src
 			}
 		}
+		if descriptor, ok := registry.Types["IntRange"]; ok && descriptor.Directives.JavaSkip {
+			if src, err := bundledStdlibFile(filepath.Join("alang", "stdlib", "IntRange.java")); err == nil {
+				sources[filepath.Join("alang", "stdlib", "IntRange.java")] = src
+			}
+		}
 		if descriptor, ok := registry.Types["Option"]; ok && !descriptor.Directives.JavaSkip {
 			if optionSources, err := optionJavaSourcesFromPredef(registry); err == nil {
 				for rel, src := range optionSources {
@@ -1392,11 +1397,6 @@ func (g *Generator) writeStmt(stmt lower.Stmt) error {
 		g.indent--
 		g.line("}")
 	case *lower.ForEach:
-		if ok, err := g.writeRangeLoop(s); err != nil {
-			return err
-		} else if ok {
-			return nil
-		}
 		iterable, err := g.expr(s.Iterable)
 		if err != nil {
 			return err
@@ -1658,6 +1658,9 @@ func (g *Generator) expr(expr lower.Expr) (string, error) {
 		if e.Name == "Set" {
 			return g.collectionLiteral("Set", e.Args)
 		}
+		if e.Name == "Range" {
+			return g.rangeCallExpr(e.Args)
+		}
 		if e.Name == "Some" {
 			return g.optionCallExpr("Some", e.Args, nil)
 		}
@@ -1743,6 +1746,9 @@ func (g *Generator) expr(expr lower.Expr) (string, error) {
 		}
 		if callee, ok := e.Callee.(*lower.VarRef); ok && callee.Name == "Set" {
 			return g.collectionLiteral("Set", e.Args)
+		}
+		if callee, ok := e.Callee.(*lower.VarRef); ok && callee.Name == "Range" {
+			return g.rangeCallExpr(e.Args)
 		}
 		if callee, ok := e.Callee.(*lower.VarRef); ok && callee.Name == "Some" {
 			return g.optionCallExpr("Some", e.Args, nil)
@@ -2101,6 +2107,25 @@ func (g *Generator) recordLiteral(record *lower.RecordLiteral) (string, error) {
 	return fmt.Sprintf("new %s(%s)", g.recordClassName(record.Type), strings.Join(args, ", ")), nil
 }
 
+func (g *Generator) rangeCallExpr(args []lower.Expr) (string, error) {
+	switch len(args) {
+	case 2:
+		rendered, err := g.exprList(args)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("new IntRange(%s)", rendered), nil
+	case 3:
+		rendered, err := g.exprList(args)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("new IntRange(%s)", rendered), nil
+	default:
+		return "", fmt.Errorf("Range constructor expects 2 or 3 arguments, got %d", len(args))
+	}
+}
+
 func (g *Generator) foreachItemType(iterable lower.Expr) (string, error) {
 	switch e := iterable.(type) {
 	case interface{ GetType() *typecheck.Type }:
@@ -2113,6 +2138,8 @@ func (g *Generator) foreachItemType(iterable lower.Expr) (string, error) {
 		return g.javaType(t.Args[0], false)
 	case t.Kind == typecheck.TypeInterface && (t.Name == "List" || t.Name == "Set" || t.Name == "Iterable") && len(t.Args) == 1:
 		return g.javaReferenceType(t.Args[0])
+	case t.Kind == typecheck.TypeClass && t.Name == "IntRange":
+		return "long", nil
 	default:
 		return "", fmt.Errorf("unsupported foreach iterable type %s", t.String())
 	}

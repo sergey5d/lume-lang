@@ -568,8 +568,8 @@ When a class, record, or object implements an interface method inside an `impl T
 Object:
 
 ```txt
-object Range {
-    def create(end Int) IntRange = IntRange(0, end, 1)
+object MathBox {
+    def double(value Int) Int = value * 2
 }
 ```
 
@@ -680,10 +680,10 @@ adder Adder = Adder(5)
 adder.add(7)
 ```
 
-Factory-style object helpers follow the same rule:
+Range construction is explicit:
 
 ```txt
-Range.create(10, 0, -1)
+Range(10, 0, -1)
 ```
 
 ## Lists, Arrays, Tuples
@@ -780,28 +780,7 @@ result = if value > 0 {
 }
 ```
 
-Shorthand expression form:
-
-```txt
-result = if value > 0 then 1 else 0
-```
-
-Multiline shorthand is also valid:
-
-```txt
-result = if value > 0 then 1
-else 0
-```
-
-This also extends through `else if` chains:
-
-```txt
-result = if value > 0 then 1
-else if value < 0 then -1
-else 0
-```
-
-`else` does not require `:`. It accepts either a block or a single-line body.
+`if` uses brace-delimited branches only. `else` does not require `:`.
 
 ## `unwrap`
 
@@ -864,15 +843,15 @@ for item <- [1, 2, 3] {
 }
 ```
 
-Tuple range loop:
+Range loop:
 
 ```txt
-for i <- (0, 10) {
+for i <- Range(0, 10) {
     OS.println(i)
 }
 ```
 
-In a `for` loop only, a two-element tuple `(start, end)` with both elements of type `Int` acts like a built-in range. It is start-inclusive and end-exclusive, with ascending and descending traversal following the same behavior as `Range(start, end)`.
+`Range(start, end)` is start-inclusive and end-exclusive. With two arguments it automatically chooses a step of `1` or `-1` based on the bounds, and `Range(start, end, step)` allows an explicit step.
 
 Destructuring loop:
 

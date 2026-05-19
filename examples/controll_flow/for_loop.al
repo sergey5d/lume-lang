@@ -15,7 +15,7 @@ def main() Int {
 		total += item
 	}
 
-	for item <- (4, 6) {
+	for item <- Range(4, 6) {
 		OS.println("item " + item)
 		total += item
 	}

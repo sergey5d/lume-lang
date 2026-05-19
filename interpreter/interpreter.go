@@ -1561,6 +1561,9 @@ func (in *Interpreter) evalExpr(expr parser.Expr, local *env) (Value, error) {
 		if _, ok := in.classes[e.Name]; ok {
 			return classRef{module: in, name: e.Name}, nil
 		}
+		if e.Name == "Range" {
+			return builtinRef{name: e.Name}, nil
+		}
 		return nil, RuntimeError{Message: "undefined name '" + e.Name + "'", Span: e.Span}
 	case *parser.IntegerLiteral:
 		n, err := strconv.ParseInt(e.Value, 10, 64)
@@ -2694,6 +2697,36 @@ func (in *Interpreter) callBuiltin(name string, argExprs []parser.CallArg, args 
 			}
 		}
 		return &nativeArray{items: append([]Value(nil), args...)}, nil
+	case "Range":
+		if len(argExprs) != 2 && len(argExprs) != 3 {
+			return nil, RuntimeError{Message: fmt.Sprintf("Range constructor expects 2 or 3 arguments, got %d", len(argExprs)), Span: span}
+		}
+		if args == nil {
+			args = make([]Value, len(argExprs))
+			for i, arg := range argExprs {
+				value, err := in.evalExpr(arg.Value, local)
+				if err != nil {
+					return nil, err
+				}
+				args[i] = value
+			}
+		}
+		start, ok := args[0].(int64)
+		if !ok {
+			return nil, RuntimeError{Message: "Range start must be Int", Span: span}
+		}
+		end, ok := args[1].(int64)
+		if !ok {
+			return nil, RuntimeError{Message: "Range end must be Int", Span: span}
+		}
+		if len(args) == 2 {
+			return in.constructStdlibRange(start, end, nil, local, span)
+		}
+		step, ok := args[2].(int64)
+		if !ok {
+			return nil, RuntimeError{Message: "Range step must be Int", Span: span}
+		}
+		return in.constructStdlibRange(start, end, &step, local, span)
 	case "Set":
 		if args == nil {
 			args = make([]Value, len(argExprs))
@@ -3679,34 +3712,6 @@ func (in *Interpreter) iterableToSlice(value Value, local *env, span parser.Span
 		return items.items, true
 	case *nativeArray:
 		return items.items, true
-	case *nativeTuple:
-		if len(items.items) != 2 {
-			return nil, false
-		}
-		start, ok := items.items[0].(int64)
-		if !ok {
-			return nil, false
-		}
-		end, ok := items.items[1].(int64)
-		if !ok {
-			return nil, false
-		}
-		step := int64(1)
-		if start > end {
-			step = -1
-		}
-		var out []Value
-		for current := start; ; current += step {
-			if step > 0 {
-				if current >= end {
-					break
-				}
-			} else if current <= end {
-				break
-			}
-			out = append(out, current)
-		}
-		return out, true
 	case *nativeSet:
 		out := make([]Value, 0, len(items.order))
 		for _, key := range items.order {
@@ -3735,6 +3740,20 @@ func (in *Interpreter) iterableToSlice(value Value, local *env, span parser.Span
 		out = append(out, nextValue)
 	}
 	return out, true
+}
+
+func (in *Interpreter) constructStdlibRange(start, end int64, step *int64, local *env, span parser.Span) (Value, error) {
+	class, ok := in.classes["IntRange"]
+	if !ok {
+		return nil, RuntimeError{Message: "stdlib IntRange is not available", Span: span}
+	}
+	actualStep := int64(1)
+	if step != nil {
+		actualStep = *step
+	} else if start > end {
+		actualStep = -1
+	}
+	return in.construct(class, []Value{start, end, actualStep}, local)
 }
 
 func (in *Interpreter) invokeMethod(receiver Value, name string, args []Value, local *env, span parser.Span) (Value, error) {

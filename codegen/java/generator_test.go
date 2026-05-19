@@ -235,11 +235,11 @@ def run() Int {
 	}
 }
 
-func TestGenerateCompilesWithTupleRangeLoop(t *testing.T) {
+func TestGenerateCompilesWithRangeLoop(t *testing.T) {
 	src := `
 def run(limit Int) Int {
 	var total Int = 0
-	for i <- (0, limit) {
+	for i <- Range(0, limit) {
 		total += i
 	}
 	return total
@@ -253,8 +253,24 @@ def run(limit Int) Int {
 	}
 
 	text := string(source)
-	if !strings.Contains(text, "for (long i = 0L; i < limit; i++)") {
-		t.Fatalf("expected tuple range loop lowering in generated Java, got:\n%s", text)
+	if !strings.Contains(text, "for (long i : new IntRange(0L, limit))") {
+		t.Fatalf("expected Range(...) foreach lowering in generated Java, got:\n%s", text)
+	}
+
+	tmpDir := t.TempDir()
+	if err := WriteStdlibSupport(tmpDir); err != nil {
+		t.Fatalf("WriteStdlibSupport returned error: %v", err)
+	}
+	path := filepath.Join(tmpDir, "Pkg_Default.java")
+	if err := os.WriteFile(path, source, 0o644); err != nil {
+		t.Fatalf("write generated source: %v", err)
+	}
+
+	javaFiles := collectJavaFiles(t, tmpDir)
+	cmd := exec.Command("javac", javaFiles...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("javac failed: %v\n%s\n%s", err, text, string(output))
 	}
 }
 

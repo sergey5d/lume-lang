@@ -239,16 +239,16 @@ def run() Int {
 	}
 }
 
-func TestForTupleRangeLoops(t *testing.T) {
+func TestForRangeLoops(t *testing.T) {
 	src := `
 def run() Int {
 	var total Int = 0
 
-	for item <- (1, 4) {
+	for item <- Range(1, 4) {
 		total += item
 	}
 
-	for item <- (5, 1) {
+	for item <- Range(5, 1) {
 		total += item
 	}
 

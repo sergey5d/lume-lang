@@ -1145,7 +1145,7 @@ func (r *Resolver) currentTypeScope() typeScope {
 // predef values that the resolver should accept without explicit imports.
 func (r *Resolver) isBuiltinValue(name string) bool {
 	switch name {
-	case "List", "Map", "Set", "Array":
+	case "List", "Map", "Set", "Array", "Range":
 		return true
 	default:
 		return r.ambientValues[name] || isImplicitOSMethod(name)

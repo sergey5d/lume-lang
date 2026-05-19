@@ -15,7 +15,7 @@ impl DisjointSet {
 
     def init(size Int) {
         this.arr := Array.ofLength(size)
-        for i <- (0, size) {
+        for i <- Range(0, size) {
             this.arr[i] := i
         }
     }
@@ -51,9 +51,9 @@ impl DisjointSet {
 def findCircleNumUnion(isConnected List[List[Int]]) Int {
     set = DisjointSet(isConnected.size())
 
-    for i <- (0, isConnected.size()) {
+    for i <- Range(0, isConnected.size()) {
         row = isConnected[i]
-        for j <- (0, row.size()) {
+        for j <- Range(0, row.size()) {
             if i != j && row[j] != 0 {
                 set.union(i, j)
             }
@@ -62,7 +62,7 @@ def findCircleNumUnion(isConnected List[List[Int]]) Int {
 
     parentSet Set[Int] = Set()
 
-    for i <- (0, isConnected.size()) {
+    for i <- Range(0, isConnected.size()) {
         parentSet.add(set.findParent(i))
     }
 
@@ -71,13 +71,13 @@ def findCircleNumUnion(isConnected List[List[Int]]) Int {
 
 def findCircleNumTraversal(isConnected List[List[Int]]) Int {
     directConns Array[Set[Int]] = Array.ofLength(isConnected.size())
-    for i <- (0, directConns.size()) {
+    for i <- Range(0, directConns.size()) {
         directConns[i] := Set()
     }
 
-    for i <- (0, isConnected.size()) {
+    for i <- Range(0, isConnected.size()) {
         row = isConnected[i]
-        for j <- (0, row.size()) {
+        for j <- Range(0, row.size()) {
             if i != j && row[j] != 0 {
                 directConns[i].add(j)
                 directConns[j].add(i)
@@ -88,7 +88,7 @@ def findCircleNumTraversal(isConnected List[List[Int]]) Int {
     var areaCount Int = 0
     visitedAll Set[Int] = Set()
 
-    for i <- (0, isConnected.size()) {
+    for i <- Range(0, isConnected.size()) {
         if !visitedAll.contains(i) {
             areaCount += 1
 

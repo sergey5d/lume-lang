@@ -1317,11 +1317,8 @@ func (c *Checker) checkForClause(binding parser.ForBinding) {
 
 func (c *Checker) forIterableElementType(t *Type, expr parser.Expr) *Type {
 	if t != nil && t.Kind == TypeTuple {
-		if len(t.Args) != 2 || !sameType(t.Args[0], builtin("Int")) || !sameType(t.Args[1], builtin("Int")) {
-			c.addDiagnostic("invalid_for_range", "tuple ranges in for loops must have shape (Int, Int)", exprSpan(expr))
-			return unknownType
-		}
-		return builtin("Int")
+		c.addDiagnostic("invalid_for_range", "tuple range syntax is no longer supported; use Range(start, end)", exprSpan(expr))
+		return unknownType
 	}
 	return c.iterableElementType(t)
 }
@@ -2661,7 +2658,7 @@ func (c *Checker) checkCall(call *parser.CallExpr) *Type {
 			}
 			return classType
 		}
-		if isBuiltinValue(ident.Name) {
+		if isBuiltinValue(ident.Name) && !c.callNameShadowed(ident.Name) {
 			return c.checkBuiltinConstructorCall(ident.Name, call)
 		}
 		if object, ok := c.objects[ident.Name]; ok {
@@ -3065,6 +3062,23 @@ func (c *Checker) checkBuiltinConstructorCall(name string, call *parser.CallExpr
 			}
 		}
 		return &Type{Kind: TypeBuiltin, Name: "Array", Args: []*Type{elemType}}
+	case "Range":
+		rangeType := &Type{Kind: TypeClass, Name: "IntRange"}
+		if _, ok := c.lookupClassInfo("IntRange"); !ok {
+			rangeType = &Type{Kind: TypeInterface, Name: "Iterable", Args: []*Type{builtin("Int")}}
+		}
+		if len(call.Args) != 2 && len(call.Args) != 3 {
+			for _, arg := range call.Args {
+				c.checkExpr(arg.Value)
+			}
+			c.addDiagnostic("invalid_argument_count", fmt.Sprintf("Range constructor expects 2 or 3 arguments, got %d", len(call.Args)), call.Span)
+			return rangeType
+		}
+		for _, arg := range call.Args {
+			argType := c.checkExpr(arg.Value)
+			c.requireAssignable(argType, builtin("Int"), exprSpan(arg.Value), "invalid_argument_type", "Range constructor arguments must be Int")
+		}
+		return rangeType
 	case "Some":
 		optionType := &Type{Kind: TypeInterface, Name: "Option", Args: []*Type{unknownType}}
 		if _, ok := c.lookupClassInfo("Option"); ok {
@@ -5439,6 +5453,34 @@ func (c *Checker) lookupObjectInfo(name string) (classInfo, bool) {
 	return classInfo{}, false
 }
 
+func (c *Checker) callNameShadowed(name string) bool {
+	if _, _, ok := c.lookupWithDepth(name); ok {
+		return true
+	}
+	if _, ok := c.globals[name]; ok {
+		return true
+	}
+	if _, ok := c.functions[name]; ok {
+		return true
+	}
+	if _, ok := c.imports[name]; ok {
+		return true
+	}
+	if _, ok := c.objects[name]; ok {
+		return true
+	}
+	if _, ok := c.classes[name]; ok {
+		return true
+	}
+	if _, ok := c.importedObjects[name]; ok {
+		return true
+	}
+	if _, ok := c.importedClasses[name]; ok {
+		return true
+	}
+	return false
+}
+
 func (c *Checker) identifierShadowsTypeName(name string) bool {
 	if _, _, ok := c.lookupWithDepth(name); ok {
 		return true
@@ -6086,7 +6128,7 @@ func isBuiltinInterfaceType(name string) bool {
 
 func isBuiltinValue(name string) bool {
 	switch name {
-	case "List", "Map", "Set", "Array", "Some", "None", "Ok", "Err", "Left", "Right":
+	case "List", "Map", "Set", "Array", "Range", "Some", "None", "Ok", "Err", "Left", "Right":
 		return true
 	default:
 		return false

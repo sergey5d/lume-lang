@@ -87,7 +87,7 @@ func (l *Lexer) nextToken() (Token, error) {
 			if l.match('.') {
 				return l.token(TokenEllipsis, "...", startLine, startColumn), nil
 			}
-			return Token{}, fmt.Errorf("unexpected token '..' @ %d:%d; use (start, end) or Range(...) instead", startLine, startColumn)
+			return Token{}, fmt.Errorf("unexpected token '..' @ %d:%d; use Range(start, end) instead", startLine, startColumn)
 		}
 		return l.token(TokenDot, ".", startLine, startColumn), nil
 	case '?':

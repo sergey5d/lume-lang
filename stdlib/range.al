@@ -1,3 +1,7 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
+
 record IntRange with Iterable[Int] {
     start Int
     end Int
@@ -55,15 +59,4 @@ impl RangeIterator {
         this.current := this.current + this.step
         value
     }
-}
-
-object Range {
-    def create(start Int, end Int) IntRange {
-        if start < end {
-            return IntRange(start = start, end = end, step = 1)
-        }
-        return IntRange(start = start, end = end, step = -1)
-    }
-
-    def create(start Int, end Int, step Int) IntRange = IntRange(start = start, end = end, step = step)
 }

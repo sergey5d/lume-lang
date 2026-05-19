@@ -969,7 +969,7 @@ def run() Int {
 	}
 }
 
-func TestAnalyzeForTupleRangeRequiresTwoInts(t *testing.T) {
+func TestAnalyzeForTupleRangeSyntaxRejected(t *testing.T) {
 	src := `
 def run() Unit {
 	for item <- ("x", 4) {

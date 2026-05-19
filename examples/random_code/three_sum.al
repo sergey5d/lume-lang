@@ -24,7 +24,7 @@ object Solution {
 
         res List[List[Int]] = []
 
-        for i <- (0, nums.size()) {
+        for i <- Range(0, nums.size()) {
             if nums[i] > 0 {
                 return res
             }
@@ -82,7 +82,7 @@ object Solution {
 
         res List[List[Int]] = []
 
-        for i <- (0, nums.size()) {
+        for i <- Range(0, nums.size()) {
             if nums[i] > 0 {
                 return res
             }

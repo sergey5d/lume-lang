@@ -31,7 +31,7 @@ def doSomeWork(a Int, b Int) Bool {
 		}
 	}
 
-	for a <- (1, 100) {
+	for a <- Range(1, 100) {
 
 	}
 
