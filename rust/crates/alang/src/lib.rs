@@ -10,4 +10,5 @@ pub mod typecheck;
 
 pub use diagnostic::{Diagnostic, Severity};
 pub use lexer::{Keyword, LexResult, Token, TokenKind, lex};
+pub use parser::{ParseResult, parse_program};
 pub use source::{LineColumn, SourceFile, Span};

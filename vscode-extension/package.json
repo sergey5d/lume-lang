@@ -1,7 +1,7 @@
 {
-  "name": "a-lang-syntax",
-  "displayName": "a-lang Syntax",
-  "description": "Syntax highlighting and language configuration for a-lang.",
+  "name": "lume-syntax",
+  "displayName": "Lume Syntax",
+  "description": "Syntax highlighting and language configuration for Lume.",
   "version": "0.0.1",
   "publisher": "sergeyd",
   "license": "UNLICENSED",
@@ -14,22 +14,22 @@
   "contributes": {
     "languages": [
       {
-        "id": "a-lang",
+        "id": "lume",
         "aliases": [
-          "a-lang",
-          "a"
+          "Lume",
+          "lume"
         ],
         "extensions": [
-          ".al"
+          ".lum"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "a-lang",
-        "scopeName": "source.a-lang",
-        "path": "./syntaxes/a-lang.tmLanguage.json"
+        "language": "lume",
+        "scopeName": "source.lume",
+        "path": "./syntaxes/lume.tmLanguage.json"
       }
     ]
   }

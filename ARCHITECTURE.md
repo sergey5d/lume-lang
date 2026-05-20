@@ -20,7 +20,7 @@ The details below describe what each package owns and what it expects from the o
 
 ### 1. Source Text
 
-The entrypoint starts with a `.al` source file.
+The entrypoint starts with a `.lum` source file.
 
 `main.go` reads the file and then drives the front-end pipeline:
 

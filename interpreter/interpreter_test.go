@@ -61,13 +61,13 @@ def run(input Int) Int {
 
 func TestModulePublicFunctionAndBinding(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.al"), `
+	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
 package lib
 
 public def exportedValue() Int = 7
 public answer Int = 5
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.al"), `
+	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
 package app
 
 import lib
@@ -78,7 +78,7 @@ def run() Int {
 }
 `)
 
-	mod, err := module.Load(filepath.Join(dir, "main.al"))
+	mod, err := module.Load(filepath.Join(dir, "main.lum"))
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -94,7 +94,7 @@ def run() Int {
 
 func TestModuleObjectMethodImports(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.al"), `
+	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
 package lib
 
 object Tools {
@@ -102,7 +102,7 @@ object Tools {
 	def twice(value Int) Int = value * 2
 }
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.al"), `
+	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
 package app
 
 import lib/Tools/*
@@ -113,7 +113,7 @@ def run() Int {
 }
 `)
 
-	mod, err := module.Load(filepath.Join(dir, "main.al"))
+	mod, err := module.Load(filepath.Join(dir, "main.lum"))
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}

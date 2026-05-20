@@ -42,4 +42,23 @@ impl Span {
             end_pos,
         }
     }
+
+    pub const fn cover(self, other: Span) -> Self {
+        let (start, start_pos) = if self.start <= other.start {
+            (self.start, self.start_pos)
+        } else {
+            (other.start, other.start_pos)
+        };
+        let (end, end_pos) = if self.end >= other.end {
+            (self.end, self.end_pos)
+        } else {
+            (other.end, other.end_pos)
+        };
+        Self {
+            start,
+            end,
+            start_pos,
+            end_pos,
+        }
+    }
 }

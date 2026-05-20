@@ -499,7 +499,7 @@ func TestOutputPathUsesPackageStructure(t *testing.T) {
 }
 
 func TestOutputPathUsesSourceFileNameWhenPackageMissing(t *testing.T) {
-	path := OutputPathFor("bin/java/src", "", "/tmp/find_circle_num.al")
+	path := OutputPathFor("bin/java/src", "", "/tmp/find_circle_num.lum")
 	expected := filepath.Join("bin/java/src", "Pkg_FindCircleNum.java")
 	if path != expected {
 		t.Fatalf("expected output path %q, got %q", expected, path)
@@ -630,7 +630,7 @@ func TestWriteStdlibSupportCopiesBundledSetAndMapRuntime(t *testing.T) {
 }
 
 func TestGenerateFindCircleNumCompilesWithJavac(t *testing.T) {
-	srcBytes, err := os.ReadFile(filepath.Join("..", "..", "examples", "random_code", "find_circle_num.al"))
+	srcBytes, err := os.ReadFile(filepath.Join("..", "..", "examples", "random_code", "find_circle_num.lum"))
 	if err != nil {
 		t.Fatalf("read example source: %v", err)
 	}

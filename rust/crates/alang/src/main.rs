@@ -1,6 +1,6 @@
 use std::{env, fs, process::ExitCode};
 
-use alang::{Diagnostic, Severity, SourceFile, lex};
+use lume::{Diagnostic, Severity, SourceFile, lex, parse_program};
 
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
@@ -11,21 +11,11 @@ fn main() -> ExitCode {
 
     match command.as_str() {
         "tokens" => {
-            let Some(path) = args.next() else {
-                eprintln!("missing source file for 'tokens'");
-                print_usage();
-                return ExitCode::from(2);
+            let file = match read_source(&mut args, "tokens") {
+                Ok(file) => file,
+                Err(code) => return code,
             };
-
-            let text = match fs::read_to_string(&path) {
-                Ok(text) => text,
-                Err(err) => {
-                    eprintln!("read {path}: {err}");
-                    return ExitCode::from(1);
-                }
-            };
-
-            let file = SourceFile::new(path.clone(), text);
+            let path = file.name.clone();
             let result = lex(&file);
             for token in &result.tokens {
                 println!(
@@ -44,9 +34,39 @@ fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
-        "parse" | "check" | "run" => {
+        "parse" => {
+            let file = match read_source(&mut args, "parse") {
+                Ok(file) => file,
+                Err(code) => return code,
+            };
+            let path = file.name.clone();
+            let lexed = lex(&file);
+            if lexed.has_errors() {
+                for diagnostic in &lexed.diagnostics {
+                    print_diagnostic(&path, diagnostic);
+                }
+                return ExitCode::from(1);
+            }
+
+            let parsed = parse_program(&lexed.tokens);
+            if !parsed.diagnostics.is_empty() {
+                for diagnostic in &parsed.diagnostics {
+                    print_diagnostic(&path, diagnostic);
+                }
+                return ExitCode::from(1);
+            }
+
+            match parsed.program {
+                Some(program) => {
+                    println!("{program:#?}");
+                    ExitCode::SUCCESS
+                }
+                None => ExitCode::from(1),
+            }
+        }
+        "check" | "run" => {
             eprintln!(
-                "'{command}' is not implemented yet in Rust; the current Rust implementation starts with lexing"
+                "'{command}' is not implemented yet in Rust; the current Rust implementation supports lexing and parsing"
             );
             ExitCode::from(2)
         }
@@ -60,10 +80,31 @@ fn main() -> ExitCode {
 
 fn print_usage() {
     eprintln!("usage:");
-    eprintln!("  alang tokens <file>");
-    eprintln!("  alang parse <file>   # planned");
-    eprintln!("  alang check <file>   # planned");
-    eprintln!("  alang run <file>     # planned");
+    eprintln!("  lume tokens <file>");
+    eprintln!("  lume parse <file>");
+    eprintln!("  lume check <file>   # planned");
+    eprintln!("  lume run <file>     # planned");
+}
+
+fn read_source(
+    args: &mut impl Iterator<Item = String>,
+    command: &str,
+) -> Result<SourceFile, ExitCode> {
+    let Some(path) = args.next() else {
+        eprintln!("missing source file for '{command}'");
+        print_usage();
+        return Err(ExitCode::from(2));
+    };
+
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) => {
+            eprintln!("read {path}: {err}");
+            return Err(ExitCode::from(1));
+        }
+    };
+
+    Ok(SourceFile::new(path, text))
 }
 
 fn print_diagnostic(path: &str, diagnostic: &Diagnostic) {

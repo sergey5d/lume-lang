@@ -80,7 +80,7 @@ func load() (*Registry, error) {
 	}
 	var paths []string
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".al" {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".lum" {
 			continue
 		}
 		paths = append(paths, filepath.Join(dir, entry.Name()))

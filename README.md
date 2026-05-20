@@ -1,6 +1,6 @@
-# a-lang
+# Lume
 
-`a-lang` is a small experimental programming language implemented in Go.
+`Lume` is a small experimental programming language implemented in Go.
 
 The repository currently contains:
 
@@ -14,26 +14,26 @@ The repository currently contains:
 
 The interpreter is the most practical execution path right now.
 
-There is also a new Rust implementation scaffold under [rust/README.md](/Users/sergeyd/Projects/a-lang/rust/README.md). It starts with a real lexer and CLI entrypoint, and is intended to grow toward a lowered-IR interpreter.
+There is also a new Rust implementation scaffold under [rust/README.md](/Users/sergeyd/Projects/a-lang/rust/README.md). It starts with a real lexer and parser entrypoint, and is intended to grow toward a lowered-IR interpreter.
 
 ## Current CLI
 
 Run a program by calling its `main` function:
 
 ```bash
-go run . example.al
+go run . example.lum
 ```
 
 Run a different entry function:
 
 ```bash
-go run . example.al run myEntry
+go run . example.lum run myEntry
 ```
 
 Print the parsed AST instead of running:
 
 ```bash
-go run . example.al ast
+go run . example.lum ast
 ```
 
 Before running, the CLI always:

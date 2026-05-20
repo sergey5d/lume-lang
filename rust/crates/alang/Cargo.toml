@@ -1,13 +1,12 @@
 [package]
-name = "alang"
+name = "lume"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "alang"
+name = "lume"
 path = "src/lib.rs"
 
 [[bin]]
-name = "alang"
+name = "lume"
 path = "src/main.rs"
-

@@ -81,7 +81,7 @@ func load(path string, cache map[string]*LoadedModule, loading map[string]bool) 
 
 	baseDir := filepath.Dir(abs)
 	for _, imp := range program.Imports {
-		childPath := filepath.Join(baseDir, filepath.FromSlash(imp.Path)+".al")
+		childPath := filepath.Join(baseDir, filepath.FromSlash(imp.Path)+".lum")
 		child, err := load(childPath, cache, loading)
 		if err != nil {
 			return nil, fmt.Errorf("load import %q: %w", imp.Path, err)
@@ -299,7 +299,7 @@ func loadPreludePrograms(stdlibDir, currentFile string) ([]*parser.Program, erro
 	}
 	var paths []string
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".al" {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".lum" {
 			continue
 		}
 		path := filepath.Join(stdlibDir, entry.Name())

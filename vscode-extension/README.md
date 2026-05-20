@@ -1,11 +1,11 @@
-# a-lang VS Code Extension
+# Lume VS Code Extension
 
 This is a minimal VS Code extension that adds:
 
-- `.al` file association
+- `.lum` file association
 - line comments with `#`
 - bracket / auto-close rules
-- TextMate-based syntax highlighting for a-lang
+- TextMate-based syntax highlighting for Lume
 
 ## Install locally
 
@@ -19,7 +19,7 @@ For development, the easiest path is:
 1. Open `/Users/sergeyd/Projects/a-lang/vscode-extension` in VS Code.
 2. Press `F5`.
 3. A new Extension Development Host window opens.
-4. Open any `.al` file there to see highlighting.
+4. Open any `.lum` file there to see highlighting.
 
 ## Notes
 

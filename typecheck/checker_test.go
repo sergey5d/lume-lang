@@ -1067,7 +1067,7 @@ def run() Int {
 
 func TestAnalyzeModuleAllowsPrivateClassWithinSamePackage(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "app.al"), `
+	writeModuleFile(t, filepath.Join(dir, "app.lum"), `
 package app
 
 hidden class Hidden {
@@ -1077,7 +1077,7 @@ impl Hidden {
 	def value() Int = 7
 }
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.al"), `
+	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
 package app
 
 import app
@@ -1088,7 +1088,7 @@ def run() Int {
 }
 `)
 
-	mod, err := module.Load(filepath.Join(dir, "main.al"))
+	mod, err := module.Load(filepath.Join(dir, "main.lum"))
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -1100,7 +1100,7 @@ def run() Int {
 
 func TestAnalyzeModuleRejectsPrivateClassAcrossPackages(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.al"), `
+	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
 package lib
 
 hidden class Hidden {
@@ -1110,7 +1110,7 @@ impl Hidden {
 	def value() Int = 7
 }
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.al"), `
+	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
 package app
 
 import lib
@@ -1121,7 +1121,7 @@ def run() Int {
 }
 `)
 
-	mod, err := module.Load(filepath.Join(dir, "main.al"))
+	mod, err := module.Load(filepath.Join(dir, "main.lum"))
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -1143,12 +1143,12 @@ def run() Int {
 
 func TestAnalyzeModuleRejectsPrivateFunctionWithinSamePackage(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "app.al"), `
+	writeModuleFile(t, filepath.Join(dir, "app.lum"), `
 package app
 
 hidden def localValue() Int = 7
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.al"), `
+	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
 package app
 
 import app
@@ -1158,7 +1158,7 @@ def run() Int {
 }
 `)
 
-	mod, err := module.Load(filepath.Join(dir, "main.al"))
+	mod, err := module.Load(filepath.Join(dir, "main.lum"))
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -1180,12 +1180,12 @@ def run() Int {
 
 func TestAnalyzeModuleRejectsPrivateFunctionAcrossPackages(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.al"), `
+	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
 package lib
 
 hidden def localValue() Int = 7
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.al"), `
+	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
 package app
 
 import lib
@@ -1195,7 +1195,7 @@ def run() Int {
 }
 `)
 
-	mod, err := module.Load(filepath.Join(dir, "main.al"))
+	mod, err := module.Load(filepath.Join(dir, "main.lum"))
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -1217,12 +1217,12 @@ def run() Int {
 
 func TestAnalyzeModuleAllowsPublicFunctionAcrossPackages(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.al"), `
+	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
 package lib
 
 public def exportedValue() Int = 7
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.al"), `
+	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
 package app
 
 import lib
@@ -1232,7 +1232,7 @@ def run() Int {
 }
 `)
 
-	mod, err := module.Load(filepath.Join(dir, "main.al"))
+	mod, err := module.Load(filepath.Join(dir, "main.lum"))
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -1244,12 +1244,12 @@ def run() Int {
 
 func TestAnalyzeModuleAllowsPublicBindingAcrossPackages(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.al"), `
+	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
 package lib
 
 public answer Int = 7
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.al"), `
+	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
 package app
 
 import lib
@@ -1260,7 +1260,7 @@ def run() Int {
 }
 `)
 
-	mod, err := module.Load(filepath.Join(dir, "main.al"))
+	mod, err := module.Load(filepath.Join(dir, "main.lum"))
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
@@ -1286,7 +1286,7 @@ public answer = 7
 
 func TestAnalyzeModuleExtendedImports(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "model", "things.al"), `
+	writeModuleFile(t, filepath.Join(dir, "model", "things.lum"), `
 package things
 
 interface Named {
@@ -1313,7 +1313,7 @@ object C {
 	def printLn(value Int) Int = value + 100
 }
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.al"), `
+	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
 package app
 
 import model/things
@@ -1334,7 +1334,7 @@ def run() Int {
 }
 `)
 
-	mod, err := module.Load(filepath.Join(dir, "main.al"))
+	mod, err := module.Load(filepath.Join(dir, "main.lum"))
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}

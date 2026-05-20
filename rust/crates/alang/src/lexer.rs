@@ -380,7 +380,7 @@ mod tests {
     use super::*;
 
     fn source(text: &str) -> SourceFile {
-        SourceFile::new("test.al", text)
+        SourceFile::new("test.lum", text)
     }
 
     #[test]

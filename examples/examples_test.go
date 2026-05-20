@@ -24,7 +24,7 @@ func TestExamples(t *testing.T) {
 		if d.IsDir() {
 			return nil
 		}
-		if filepath.Ext(path) == ".al" {
+		if filepath.Ext(path) == ".lum" {
 			paths = append(paths, path)
 		}
 		return nil

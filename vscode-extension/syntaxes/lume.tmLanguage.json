@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "a-lang",
-  "scopeName": "source.a-lang",
+  "name": "lume",
+  "scopeName": "source.lume",
   "patterns": [
     {
       "include": "#comments"
@@ -41,7 +41,7 @@
     "comments": {
       "patterns": [
         {
-          "name": "comment.line.number-sign.a-lang",
+          "name": "comment.line.number-sign.lume",
           "match": "#.*$"
         }
       ]
@@ -49,27 +49,27 @@
     "strings": {
       "patterns": [
         {
-          "name": "string.quoted.double.multiline.a-lang",
+          "name": "string.quoted.double.multiline.lume",
           "begin": "\"\"\"",
           "end": "\"\"\"",
           "patterns": [
             {
-              "name": "constant.character.escape.a-lang",
+              "name": "constant.character.escape.lume",
               "match": "\\\\."
             }
           ]
         },
         {
-          "name": "string.quoted.double.a-lang",
+          "name": "string.quoted.double.lume",
           "begin": "\"",
           "end": "\"",
           "patterns": [
             {
-              "name": "constant.character.escape.a-lang",
+              "name": "constant.character.escape.lume",
               "match": "\\\\."
             },
             {
-              "name": "meta.interpolation.a-lang",
+              "name": "meta.interpolation.lume",
               "begin": "\\$\\{",
               "end": "\\}",
               "patterns": [
@@ -85,7 +85,7 @@
     "numbers": {
       "patterns": [
         {
-          "name": "constant.numeric.a-lang",
+          "name": "constant.numeric.lume",
           "match": "\\b\\d+(?:\\.\\d+)?\\b"
         }
       ]
@@ -93,11 +93,11 @@
     "keywords": {
       "patterns": [
         {
-          "name": "keyword.control.a-lang",
+          "name": "keyword.control.lume",
           "match": "\\b(?:if|then|else|for|while|yield|partial|match|unwrap|return|break|is)\\b"
         },
         {
-          "name": "keyword.declaration.a-lang",
+          "name": "keyword.declaration.lume",
           "match": "\\b(?:def|class|record|enum|interface|object|impl|import|package|with|hidden|public|case|var)\\b"
         }
       ]
@@ -105,14 +105,14 @@
     "enumCases": {
       "patterns": [
         {
-          "name": "meta.enum.case.a-lang",
+          "name": "meta.enum.case.lume",
           "match": "\\b(case)\\b\\s+([A-Z][A-Za-z0-9_]*)",
           "captures": {
             "1": {
-              "name": "keyword.declaration.a-lang"
+              "name": "keyword.declaration.lume"
             },
             "2": {
-              "name": "entity.name.type.variant.a-lang"
+              "name": "entity.name.type.variant.lume"
             }
           }
         }
@@ -121,17 +121,17 @@
     "controlShorthand": {
       "patterns": [
         {
-          "name": "meta.control.shorthand.a-lang",
+          "name": "meta.control.shorthand.lume",
           "begin": "\\b(if|then|else|for|yield|match|partial|unwrap)\\b",
           "beginCaptures": {
             "1": {
-              "name": "keyword.control.a-lang"
+              "name": "keyword.control.lume"
             }
           },
           "end": ":",
           "endCaptures": {
             "0": {
-              "name": "keyword.operator.a-lang"
+              "name": "keyword.operator.lume"
             }
           },
           "patterns": [
@@ -145,7 +145,7 @@
     "constants": {
       "patterns": [
         {
-          "name": "constant.language.a-lang",
+          "name": "constant.language.lume",
           "match": "\\b(?:true|false|this)\\b"
         }
       ]
@@ -153,11 +153,11 @@
     "types": {
       "patterns": [
         {
-          "name": "support.type.builtin.a-lang",
+          "name": "support.type.builtin.lume",
           "match": "\\b(?:Int|Str|Bool|Float|Unit|Array|List|Set|Map|Option|Result|Either|Iterator|Printer|OS)\\b"
         },
         {
-          "name": "entity.name.type.a-lang",
+          "name": "entity.name.type.lume",
           "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
         }
       ]
@@ -165,7 +165,7 @@
     "constructors": {
       "patterns": [
         {
-          "name": "support.function.constructor.a-lang",
+          "name": "support.function.constructor.lume",
           "match": "\\b(?:Some|None|Ok|Err|Left|Right)\\b"
         }
       ]
@@ -173,7 +173,7 @@
     "functions": {
       "patterns": [
         {
-          "name": "entity.name.function.a-lang",
+          "name": "entity.name.function.lume",
           "match": "\\b[a-zA-Z_][A-Za-z0-9_]*\\s*(?=\\()"
         }
       ]
@@ -181,31 +181,31 @@
     "operators": {
       "patterns": [
         {
-          "name": "keyword.operator.assignment.a-lang",
+          "name": "keyword.operator.assignment.lume",
           "match": "<-|:=|="
         },
         {
-          "name": "keyword.operator.comparison.a-lang",
+          "name": "keyword.operator.comparison.lume",
           "match": "==|!=|<=|>=|<|>"
         },
         {
-          "name": "keyword.operator.logical.a-lang",
+          "name": "keyword.operator.logical.lume",
           "match": "&&|\\|\\|"
         },
         {
-          "name": "keyword.operator.arrow.a-lang",
+          "name": "keyword.operator.arrow.lume",
           "match": "=>|->"
         },
         {
-          "name": "keyword.operator.symbolic.a-lang",
+          "name": "keyword.operator.symbolic.lume",
           "match": "::|:\\+|\\+\\+|:-|--|<<|>>|[+\\-*/%&|]"
         },
         {
-          "name": "punctuation.separator.arguments.a-lang",
+          "name": "punctuation.separator.arguments.lume",
           "match": ","
         },
         {
-          "name": "punctuation.accessor.dot.a-lang",
+          "name": "punctuation.accessor.dot.lume",
           "match": "\\."
         }
       ]

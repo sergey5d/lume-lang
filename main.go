@@ -21,7 +21,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: a-lang <file> [run [entry [args...]]|ast|java]")
+		fmt.Fprintln(os.Stderr, "usage: lume <file> [run [entry [args...]]|ast|java]")
 		os.Exit(1)
 	}
 
@@ -221,7 +221,7 @@ func generateJavaTree(root string) error {
 		if d.IsDir() {
 			return nil
 		}
-		if filepath.Ext(path) != ".al" {
+		if filepath.Ext(path) != ".lum" {
 			return nil
 		}
 		generated, outputPath, err := generateJavaFile(path)
