@@ -16,7 +16,7 @@ This is a minimal VS Code extension that adds:
 
 For development, the easiest path is:
 
-1. Open `/Users/sergeyd/Projects/a-lang/vscode-extension` in VS Code.
+1. Open `vscode-extension` in VS Code.
 2. Press `F5`.
 3. A new Extension Development Host window opens.
 4. Open any `.lum` file there to see highlighting.

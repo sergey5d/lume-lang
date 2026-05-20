@@ -14,7 +14,7 @@ The repository currently contains:
 
 The interpreter is the most practical execution path right now.
 
-There is also a new Rust implementation scaffold under [rust/README.md](/Users/sergeyd/Projects/a-lang/rust/README.md). It starts with a real lexer and parser entrypoint, and is intended to grow toward a lowered-IR interpreter.
+There is also a new Rust implementation scaffold under `rust/README.md`. It starts with a real lexer and parser entrypoint, and is intended to grow toward a lowered-IR interpreter.
 
 ## Current CLI
 
@@ -288,7 +288,7 @@ It already handles:
 Run the full test suite:
 
 ```bash
-GOCACHE=/Users/sergeyd/Projects/a-lang/.gocache go test ./...
+go test ./...
 ```
 
 ## Current Priorities
