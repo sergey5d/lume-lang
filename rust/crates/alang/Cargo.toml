@@ -1,0 +1,13 @@
+[package]
+name = "alang"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "alang"
+path = "src/lib.rs"
+
+[[bin]]
+name = "alang"
+path = "src/main.rs"
+

@@ -14,6 +14,8 @@ The repository currently contains:
 
 The interpreter is the most practical execution path right now.
 
+There is also a new Rust implementation scaffold under [rust/README.md](/Users/sergeyd/Projects/a-lang/rust/README.md). It starts with a real lexer and CLI entrypoint, and is intended to grow toward a lowered-IR interpreter.
+
 ## Current CLI
 
 Run a program by calling its `main` function:
