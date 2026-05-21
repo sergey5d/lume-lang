@@ -32,7 +32,7 @@ rust/
   Cargo.toml
   README.md
   crates/
-    alang/
+    lume/
       Cargo.toml
       src/
         main.rs
