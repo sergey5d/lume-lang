@@ -5,6 +5,7 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keyword {
+    As,
     Break,
     Case,
     Class,
@@ -18,6 +19,7 @@ pub enum Keyword {
     Impl,
     Import,
     Interface,
+    Is,
     Match,
     Object,
     Package,
@@ -25,11 +27,13 @@ pub enum Keyword {
     Public,
     Record,
     Return,
+    Then,
     True,
     Unwrap,
     Var,
     While,
     With,
+    Yield,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +41,7 @@ pub enum TokenKind {
     Keyword(Keyword),
     Identifier,
     Integer,
+    Float,
     String,
     Newline,
     LParen,
@@ -48,10 +53,16 @@ pub enum TokenKind {
     Comma,
     Dot,
     Colon,
+    ColonPlus,
+    ColonMinus,
+    ColonColon,
     At,
     Question,
+    Ellipsis,
     Plus,
+    PlusPlus,
     Minus,
+    MinusMinus,
     Star,
     Slash,
     Percent,
@@ -173,6 +184,31 @@ impl<'a> Lexer<'a> {
 
     fn lex_string(&mut self) {
         let start = self.mark();
+        if self.peek_n(0) == Some('"') && self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"')
+        {
+            self.bump();
+            self.bump();
+            self.bump();
+            while let Some(ch) = self.peek() {
+                if ch == '"' && self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') {
+                    self.bump();
+                    self.bump();
+                    self.bump();
+                    self.push_token(TokenKind::String, start, self.mark());
+                    return;
+                }
+                self.bump();
+            }
+
+            self.error(
+                "unterminated_string",
+                "unterminated multiline string literal",
+                start,
+                self.mark(),
+            );
+            return;
+        }
+
         self.bump();
 
         let mut escaped = false;
@@ -205,7 +241,26 @@ impl<'a> Lexer<'a> {
         while matches!(self.peek(), Some('0'..='9')) {
             self.bump();
         }
-        self.push_token(TokenKind::Integer, start, self.mark());
+        let kind = if self.peek() == Some('.')
+            && self.peek_n(1) != Some('.')
+            && !matches!(self.peek_n(1), Some('A'..='Z' | 'a'..='z' | '_'))
+        {
+            self.bump();
+            while matches!(self.peek(), Some('0'..='9')) {
+                self.bump();
+            }
+            TokenKind::Float
+        } else if self.peek() == Some('.') && self.peek_n(1).is_some_and(|ch| ch.is_ascii_digit())
+        {
+            self.bump();
+            while matches!(self.peek(), Some('0'..='9')) {
+                self.bump();
+            }
+            TokenKind::Float
+        } else {
+            TokenKind::Integer
+        };
+        self.push_token(kind, start, self.mark());
     }
 
     fn lex_identifier_or_keyword(&mut self) {
@@ -215,6 +270,7 @@ impl<'a> Lexer<'a> {
         }
         let lexeme = self.slice(start.byte, self.byte_index);
         let kind = match lexeme.as_str() {
+            "as" => TokenKind::Keyword(Keyword::As),
             "break" => TokenKind::Keyword(Keyword::Break),
             "case" => TokenKind::Keyword(Keyword::Case),
             "class" => TokenKind::Keyword(Keyword::Class),
@@ -228,6 +284,7 @@ impl<'a> Lexer<'a> {
             "impl" => TokenKind::Keyword(Keyword::Impl),
             "import" => TokenKind::Keyword(Keyword::Import),
             "interface" => TokenKind::Keyword(Keyword::Interface),
+            "is" => TokenKind::Keyword(Keyword::Is),
             "match" => TokenKind::Keyword(Keyword::Match),
             "object" => TokenKind::Keyword(Keyword::Object),
             "package" => TokenKind::Keyword(Keyword::Package),
@@ -235,11 +292,13 @@ impl<'a> Lexer<'a> {
             "public" => TokenKind::Keyword(Keyword::Public),
             "record" => TokenKind::Keyword(Keyword::Record),
             "return" => TokenKind::Keyword(Keyword::Return),
+            "then" => TokenKind::Keyword(Keyword::Then),
             "true" => TokenKind::Keyword(Keyword::True),
             "unwrap" => TokenKind::Keyword(Keyword::Unwrap),
             "var" => TokenKind::Keyword(Keyword::Var),
             "while" => TokenKind::Keyword(Keyword::While),
             "with" => TokenKind::Keyword(Keyword::With),
+            "yield" => TokenKind::Keyword(Keyword::Yield),
             _ => TokenKind::Identifier,
         };
         self.result.tokens.push(Token {
@@ -262,13 +321,19 @@ impl<'a> Lexer<'a> {
             '[' => Some(TokenKind::LBracket),
             ']' => Some(TokenKind::RBracket),
             ',' => Some(TokenKind::Comma),
+            '.' if self.take('.') && self.take('.') => Some(TokenKind::Ellipsis),
             '.' => Some(TokenKind::Dot),
+            ':' if self.take('+') => Some(TokenKind::ColonPlus),
+            ':' if self.take('-') => Some(TokenKind::ColonMinus),
+            ':' if self.take(':') => Some(TokenKind::ColonColon),
             ':' if self.take('=') => Some(TokenKind::ColonAssign),
             ':' => Some(TokenKind::Colon),
             '@' => Some(TokenKind::At),
             '?' => Some(TokenKind::Question),
+            '+' if self.take('+') => Some(TokenKind::PlusPlus),
             '+' if self.take('=') => Some(TokenKind::PlusEq),
             '+' => Some(TokenKind::Plus),
+            '-' if self.take('-') => Some(TokenKind::MinusMinus),
             '-' if self.take('>') => Some(TokenKind::Arrow),
             '-' if self.take('=') => Some(TokenKind::MinusEq),
             '-' => Some(TokenKind::Minus),
@@ -334,6 +399,10 @@ impl<'a> Lexer<'a> {
 
     fn peek(&self) -> Option<char> {
         self.chars.get(self.index).copied()
+    }
+
+    fn peek_n(&self, offset: usize) -> Option<char> {
+        self.chars.get(self.index + offset).copied()
     }
 
     fn bump(&mut self) -> Option<char> {
@@ -423,5 +492,21 @@ mod tests {
         let result = lex(&source("value = \"oops\n"));
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(result.diagnostics[0].code, "unterminated_string");
+    }
+
+    #[test]
+    fn lexes_extended_language_tokens() {
+        let result = lex(&source(
+            "import model/things/{A as Alias}\nif true then 1 else 0\nitems = for value <- values yield value :+ 1 ++ more\nspread Str... = \"\"\"\nhello\n\"\"\"\npi = 1.25\n",
+        ));
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
+        assert!(kinds.contains(&TokenKind::Keyword(Keyword::As)));
+        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Then)));
+        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
+        assert!(kinds.contains(&TokenKind::ColonPlus));
+        assert!(kinds.contains(&TokenKind::PlusPlus));
+        assert!(kinds.contains(&TokenKind::Ellipsis));
+        assert!(kinds.contains(&TokenKind::Float));
     }
 }

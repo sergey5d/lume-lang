@@ -17,6 +17,22 @@ pub struct PackageDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportDecl {
     pub path: String,
+    pub object_name: Option<String>,
+    pub wildcard: bool,
+    pub symbols: Vec<ImportSymbol>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportSymbol {
+    pub name: String,
+    pub alias: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Annotation {
+    pub value: Expr,
     pub span: Span,
 }
 
@@ -46,6 +62,7 @@ pub enum TypeKind {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDecl {
+    pub annotations: Vec<Annotation>,
     pub visibility: Visibility,
     pub kind: TypeKind,
     pub name: String,
@@ -64,6 +81,7 @@ pub enum TypeMember {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumCaseDecl {
+    pub annotations: Vec<Annotation>,
     pub name: String,
     pub fields: Vec<FieldDecl>,
     pub span: Span,
@@ -78,6 +96,7 @@ pub struct ImplBlock {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDecl {
+    pub annotations: Vec<Annotation>,
     pub visibility: Visibility,
     pub name: String,
     pub type_params: Vec<TypeParam>,
@@ -89,6 +108,7 @@ pub struct FunctionDecl {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MethodDecl {
+    pub annotations: Vec<Annotation>,
     pub visibility: Visibility,
     pub name: String,
     pub type_params: Vec<TypeParam>,
@@ -106,6 +126,7 @@ pub enum CallableBody {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldDecl {
+    pub annotations: Vec<Annotation>,
     pub visibility: Visibility,
     pub mutable: bool,
     pub name: String,
@@ -141,6 +162,10 @@ pub enum TypeRef {
         fields: Vec<TupleTypeField>,
         span: Span,
     },
+    Record {
+        fields: Vec<RecordTypeField>,
+        span: Span,
+    },
     Function {
         params: Vec<TypeRef>,
         ret: Box<TypeRef>,
@@ -155,11 +180,19 @@ pub struct TupleTypeField {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordTypeField {
+    pub name: String,
+    pub ty: TypeRef,
+    pub span: Span,
+}
+
 impl TypeRef {
     pub fn span(&self) -> Span {
         match self {
             TypeRef::Named { span, .. }
             | TypeRef::Tuple { span, .. }
+            | TypeRef::Record { span, .. }
             | TypeRef::Function { span, .. } => *span,
         }
     }
@@ -176,16 +209,39 @@ pub enum Stmt {
     Binding(BindingStmt),
     Assignment(AssignmentStmt),
     If(IfStmt),
+    Match(MatchStmt),
     While(WhileStmt),
     For(ForStmt),
     Return(ReturnStmt),
     Break(BreakStmt),
     Expr(ExprStmt),
+    Unwrap(UnwrapStmt),
+    UnwrapBlock(UnwrapBlockStmt),
     LocalFunction(FunctionDecl),
+}
+
+impl Stmt {
+    pub fn span(&self) -> Span {
+        match self {
+            Stmt::Binding(stmt) => stmt.span,
+            Stmt::Assignment(stmt) => stmt.span,
+            Stmt::If(stmt) => stmt.span,
+            Stmt::Match(stmt) => stmt.span,
+            Stmt::While(stmt) => stmt.span,
+            Stmt::For(stmt) => stmt.span,
+            Stmt::Return(stmt) => stmt.span,
+            Stmt::Break(stmt) => stmt.span,
+            Stmt::Expr(stmt) => stmt.span,
+            Stmt::Unwrap(stmt) => stmt.span,
+            Stmt::UnwrapBlock(stmt) => stmt.span,
+            Stmt::LocalFunction(function) => function.span,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BindingStmt {
+    pub visibility: Visibility,
     pub bindings: Vec<Binding>,
     pub values: Vec<Expr>,
     pub span: Span,
@@ -207,6 +263,7 @@ pub enum AssignOp {
     SubAssign,
     MulAssign,
     DivAssign,
+    ModAssign,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -219,7 +276,9 @@ pub struct AssignmentStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
-    pub condition: Expr,
+    pub condition: Option<Expr>,
+    pub bindings: Vec<Binding>,
+    pub binding_value: Option<Expr>,
     pub then_block: Block,
     pub else_branch: Option<ElseBranch>,
     pub span: Span,
@@ -232,6 +291,28 @@ pub enum ElseBranch {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct MatchStmt {
+    pub partial: bool,
+    pub value: Expr,
+    pub cases: Vec<MatchCase>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchCase {
+    pub pattern: Pattern,
+    pub guard: Option<Expr>,
+    pub body: MatchCaseBody,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MatchCaseBody {
+    Block(Block),
+    Expr(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct WhileStmt {
     pub condition: Expr,
     pub body: Block,
@@ -240,9 +321,16 @@ pub struct WhileStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForStmt {
-    pub bindings: Vec<Binding>,
-    pub iterable: Expr,
+    pub bindings: Vec<ForBinding>,
     pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForBinding {
+    pub bindings: Vec<Binding>,
+    pub iterable: Option<Expr>,
+    pub values: Vec<Expr>,
     pub span: Span,
 }
 
@@ -264,12 +352,76 @@ pub struct ExprStmt {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct UnwrapStmt {
+    pub bindings: Vec<Binding>,
+    pub value: Expr,
+    pub else_block: Option<Block>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnwrapBlockStmt {
+    pub clauses: Vec<UnwrapStmt>,
+    pub else_block: Option<Block>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    Wildcard {
+        span: Span,
+    },
+    Binding {
+        name: String,
+        span: Span,
+    },
+    Type {
+        name: Option<String>,
+        target: TypeRef,
+        span: Span,
+    },
+    Literal {
+        value: Expr,
+        span: Span,
+    },
+    Tuple {
+        elements: Vec<Pattern>,
+        span: Span,
+    },
+    Constructor {
+        path: Vec<String>,
+        args: Vec<Pattern>,
+        span: Span,
+    },
+}
+
+impl Pattern {
+    pub fn span(&self) -> Span {
+        match self {
+            Pattern::Wildcard { span }
+            | Pattern::Binding { span, .. }
+            | Pattern::Type { span, .. }
+            | Pattern::Literal { span, .. }
+            | Pattern::Tuple { span, .. }
+            | Pattern::Constructor { span, .. } => *span,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Identifier {
         name: String,
         span: Span,
     },
+    Placeholder {
+        span: Span,
+    },
     Integer {
+        raw: String,
+        span: Span,
+    },
+    Float {
         raw: String,
         span: Span,
     },
@@ -307,6 +459,21 @@ pub enum Expr {
         index: Box<Expr>,
         span: Span,
     },
+    RecordUpdate {
+        receiver: Box<Expr>,
+        updates: Vec<CallArg>,
+        span: Span,
+    },
+    RecordLiteral {
+        fields: Vec<CallArg>,
+        values: Vec<Expr>,
+        span: Span,
+    },
+    AnonymousInterface {
+        interfaces: Vec<TypeRef>,
+        methods: Vec<MethodDecl>,
+        span: Span,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,
@@ -318,15 +485,39 @@ pub enum Expr {
         right: Box<Expr>,
         span: Span,
     },
+    Is {
+        left: Box<Expr>,
+        target: TypeRef,
+        span: Span,
+    },
     If {
         condition: Box<Expr>,
         then_block: Block,
         else_branch: Box<ElseExprBranch>,
         span: Span,
     },
+    Block {
+        body: Block,
+        span: Span,
+    },
+    Match {
+        partial: bool,
+        value: Box<Expr>,
+        cases: Vec<MatchCase>,
+        span: Span,
+    },
+    ForYield {
+        bindings: Vec<ForBinding>,
+        yield_body: Block,
+        span: Span,
+    },
     Lambda {
         params: Vec<LambdaParam>,
         body: LambdaBody,
+        span: Span,
+    },
+    Group {
+        inner: Box<Expr>,
         span: Span,
     },
 }
@@ -335,7 +526,9 @@ impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Identifier { span, .. }
+            | Expr::Placeholder { span }
             | Expr::Integer { span, .. }
+            | Expr::Float { span, .. }
             | Expr::String { span, .. }
             | Expr::Bool { span, .. }
             | Expr::Unit { span }
@@ -344,10 +537,18 @@ impl Expr {
             | Expr::Call { span, .. }
             | Expr::Member { span, .. }
             | Expr::Index { span, .. }
+            | Expr::RecordUpdate { span, .. }
+            | Expr::RecordLiteral { span, .. }
+            | Expr::AnonymousInterface { span, .. }
             | Expr::Unary { span, .. }
             | Expr::Binary { span, .. }
+            | Expr::Is { span, .. }
             | Expr::If { span, .. }
-            | Expr::Lambda { span, .. } => *span,
+            | Expr::Block { span, .. }
+            | Expr::Match { span, .. }
+            | Expr::ForYield { span, .. }
+            | Expr::Lambda { span, .. }
+            | Expr::Group { span, .. } => *span,
         }
     }
 }
@@ -389,6 +590,8 @@ pub enum BinaryOp {
     Colon,
     Or,
     And,
+    BitOr,
+    BitAnd,
     Eq,
     NotEq,
     Less,
@@ -400,4 +603,9 @@ pub enum BinaryOp {
     Mul,
     Div,
     Mod,
+    Concat,
+    Remove,
+    Append,
+    Prepend,
+    Compose,
 }
