@@ -423,6 +423,14 @@ pub enum Intrinsic {
     Println,
     Printf,
     Panic,
+    IterInit,
+    IterHasNext,
+    IterNext,
+    ListAppend,
+    UnwrapPresent,
+    UnwrapValue,
+    VariantIs(String),
+    VariantField(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use crate::{
     ast::{
         self, AssignOp, BinaryOp as AstBinaryOp, Block, CallableBody, ElseBranch, ElseExprBranch,
-        Expr, FunctionDecl, ImplBlock, Item, MethodDecl, Stmt, TypeDecl, TypeMember, TypeRef,
+        Expr, FunctionDecl, ImplBlock, Item, MatchCaseBody, MethodDecl, Pattern, Stmt, TypeDecl,
+        TypeMember, TypeRef,
     },
     diagnostic::Diagnostic,
     ir,
@@ -56,6 +57,7 @@ struct Lowerer<'a> {
     diagnostics: Vec<Diagnostic>,
     program: ir::Program,
     type_ids: HashMap<String, ir::TypeId>,
+    case_fields: HashMap<String, Vec<String>>,
     function_ids: HashMap<String, ir::FunctionId>,
     global_ids: HashMap<String, ir::GlobalId>,
     function_work: Vec<FunctionWork>,
@@ -70,6 +72,7 @@ impl<'a> Lowerer<'a> {
             diagnostics: Vec::new(),
             program: ir::Program::new(source.package.as_ref().map(|pkg| pkg.name.clone())),
             type_ids: HashMap::new(),
+            case_fields: HashMap::new(),
             function_ids: HashMap::new(),
             global_ids: HashMap::new(),
             function_work: Vec::new(),
@@ -188,6 +191,9 @@ impl<'a> Lowerer<'a> {
             });
                 }
                 TypeMember::Case(case) => {
+                    let field_names = case.fields.iter().map(|field| field.name.clone()).collect::<Vec<_>>();
+                    self.case_fields
+                        .insert(format!("{}.{}", decl.name, case.name), field_names);
                     let case_fields = case
                         .fields
                         .iter()
@@ -320,6 +326,7 @@ impl<'a> Lowerer<'a> {
                 function,
                 &self.global_ids,
                 &self.function_ids,
+                &self.case_fields,
                 &mut self.diagnostics,
             );
             for (index, param) in job.decl.params.iter().enumerate() {
@@ -341,6 +348,7 @@ impl<'a> Lowerer<'a> {
                 function,
                 &self.global_ids,
                 &self.function_ids,
+                &self.case_fields,
                 &mut self.diagnostics,
             );
             lowerer.bind_existing("this", job.this_local);
@@ -384,6 +392,7 @@ struct FunctionLowerer<'a> {
     diagnostics: &'a mut Vec<Diagnostic>,
     globals: &'a HashMap<String, ir::GlobalId>,
     functions: &'a HashMap<String, ir::FunctionId>,
+    case_fields: &'a HashMap<String, Vec<String>>,
     scopes: Vec<HashMap<String, ir::LocalId>>,
     implicit_fields: HashMap<String, ir::Type>,
     this_local: Option<ir::LocalId>,
@@ -391,11 +400,40 @@ struct FunctionLowerer<'a> {
     current_block: Option<ir::BlockId>,
 }
 
+#[derive(Debug, Clone)]
+struct PendingBinding {
+    name: String,
+    ty: ir::Type,
+    source: PendingBindingSource,
+}
+
+#[derive(Debug, Clone)]
+enum PendingBindingSource {
+    Operand(ir::Operand),
+    RValue(ir::RValue),
+}
+
+#[derive(Debug, Clone)]
+struct PatternPlan {
+    condition: ir::Operand,
+    bindings: Vec<PendingBinding>,
+}
+
+impl PatternPlan {
+    fn always_true() -> Self {
+        Self {
+            condition: ir::Operand::Const(ir::Constant::Bool(true)),
+            bindings: Vec::new(),
+        }
+    }
+}
+
 impl<'a> FunctionLowerer<'a> {
     fn new(
         function: &'a mut ir::Function,
         globals: &'a HashMap<String, ir::GlobalId>,
         functions: &'a HashMap<String, ir::FunctionId>,
+        case_fields: &'a HashMap<String, Vec<String>>,
         diagnostics: &'a mut Vec<Diagnostic>,
     ) -> Self {
         let entry = function.entry;
@@ -404,6 +442,7 @@ impl<'a> FunctionLowerer<'a> {
             diagnostics,
             globals,
             functions,
+            case_fields,
             scopes: vec![HashMap::new()],
             implicit_fields: HashMap::new(),
             this_local: None,
@@ -460,6 +499,17 @@ impl<'a> FunctionLowerer<'a> {
         }
         self.pop_scope();
         tail
+    }
+
+    fn lower_block_statements(&mut self, block: &Block) {
+        self.push_scope();
+        for stmt in &block.statements {
+            self.lower_stmt(stmt);
+            if self.current_block.is_none() {
+                break;
+            }
+        }
+        self.pop_scope();
     }
 
     fn lower_stmt(&mut self, stmt: &Stmt) {
@@ -525,6 +575,7 @@ impl<'a> FunctionLowerer<'a> {
             }
             Stmt::If(stmt) => self.lower_if_stmt(stmt),
             Stmt::While(stmt) => self.lower_while_stmt(stmt),
+            Stmt::For(stmt) => self.lower_for_stmt(stmt),
             Stmt::Return(ret) => {
                 let value = ret.value.as_ref().map(|expr| self.lower_expr(expr));
                 self.terminate(ir::Terminator {
@@ -551,23 +602,9 @@ impl<'a> FunctionLowerer<'a> {
                     },
                 });
             }
-            Stmt::Match(stmt) => {
-                self.unsupported(
-                    if stmt.partial {
-                        "partial match lowering is not implemented yet"
-                    } else {
-                        "match statement lowering is not implemented yet"
-                    },
-                    stmt.span,
-                );
-            }
-            Stmt::For(stmt) => self.unsupported("for-loop lowering is not implemented yet", stmt.span),
-            Stmt::Unwrap(stmt) => {
-                self.unsupported("unwrap lowering is not implemented yet", stmt.span)
-            }
-            Stmt::UnwrapBlock(stmt) => {
-                self.unsupported("unwrap block lowering is not implemented yet", stmt.span)
-            }
+            Stmt::Match(stmt) => self.lower_match_stmt(stmt),
+            Stmt::Unwrap(stmt) => self.lower_unwrap_stmt(stmt, None),
+            Stmt::UnwrapBlock(stmt) => self.lower_unwrap_block(stmt),
             Stmt::LocalFunction(function) => {
                 self.unsupported(
                     format!("local function '{}' lowering is not implemented yet", function.name),
@@ -596,7 +633,7 @@ impl<'a> FunctionLowerer<'a> {
         });
 
         self.current_block = Some(then_block);
-        let _ = self.lower_block_value(&stmt.then_block);
+        self.lower_block_statements(&stmt.then_block);
         if self.current_block.is_some() {
             self.terminate(ir::Terminator::goto(join_block));
         }
@@ -617,7 +654,7 @@ impl<'a> FunctionLowerer<'a> {
         match branch {
             ElseBranch::If(stmt) => self.lower_if_stmt(stmt),
             ElseBranch::Block(block) => {
-                let _ = self.lower_block_value(block);
+                self.lower_block_statements(block);
             }
         }
     }
@@ -642,13 +679,805 @@ impl<'a> FunctionLowerer<'a> {
 
         self.loop_exits.push(exit_block);
         self.current_block = Some(body_block);
-        let _ = self.lower_block_value(&stmt.body);
+        self.lower_block_statements(&stmt.body);
         if self.current_block.is_some() {
             self.terminate(ir::Terminator::goto(cond_block));
         }
         self.loop_exits.pop();
 
         self.current_block = Some(exit_block);
+    }
+
+    fn lower_for_stmt(&mut self, stmt: &ast::ForStmt) {
+        if stmt.bindings.is_empty() {
+            let body_block = self.function.add_block();
+            let exit_block = self.function.add_block();
+            self.terminate(ir::Terminator::goto(body_block));
+            self.loop_exits.push(exit_block);
+            self.current_block = Some(body_block);
+            self.lower_block_statements(&stmt.body);
+            if self.current_block.is_some() {
+                self.terminate(ir::Terminator::goto(body_block));
+            }
+            self.loop_exits.pop();
+            self.current_block = Some(exit_block);
+            return;
+        }
+        self.lower_for_bindings(&stmt.bindings, &|this| this.lower_block_statements(&stmt.body), stmt.span);
+    }
+
+    fn lower_for_yield_expr(
+        &mut self,
+        bindings: &[ast::ForBinding],
+        yield_body: &Block,
+        span: Span,
+    ) -> ir::Operand {
+        let result = self.function.add_temp(ir::Type::list(ir::Type::Unknown));
+        self.push_statement(ir::Statement {
+            span: Some(span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(result),
+                value: ir::RValue::List(Vec::new()),
+            },
+        });
+
+        if bindings.is_empty() {
+            let body_block = self.function.add_block();
+            let exit_block = self.function.add_block();
+            self.terminate(ir::Terminator::goto(body_block));
+            self.loop_exits.push(exit_block);
+            self.current_block = Some(body_block);
+            let yielded = self
+                .lower_block_value(yield_body)
+                .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
+            self.push_statement(ir::Statement {
+                span: Some(span),
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Local(result),
+                    value: ir::RValue::Call {
+                        callee: ir::Callee::Intrinsic(ir::Intrinsic::ListAppend),
+                        args: vec![
+                            ir::Operand::Copy(Box::new(ir::Place::Local(result))),
+                            yielded,
+                        ],
+                    },
+                },
+            });
+            if self.current_block.is_some() {
+                self.terminate(ir::Terminator::goto(body_block));
+            }
+            self.loop_exits.pop();
+            self.current_block = Some(exit_block);
+            return ir::Operand::Copy(Box::new(ir::Place::Local(result)));
+        }
+
+        self.lower_for_bindings(
+            bindings,
+            &|this| {
+                let yielded = this.lower_block_value(yield_body).unwrap_or(ir::Operand::Const(ir::Constant::Unit));
+                this.push_statement(ir::Statement {
+                    span: Some(span),
+                    kind: ir::StatementKind::Assign {
+                        target: ir::Place::Local(result),
+                        value: ir::RValue::Call {
+                            callee: ir::Callee::Intrinsic(ir::Intrinsic::ListAppend),
+                            args: vec![
+                                ir::Operand::Copy(Box::new(ir::Place::Local(result))),
+                                yielded,
+                            ],
+                        },
+                    },
+                });
+            },
+            span,
+        );
+
+        ir::Operand::Copy(Box::new(ir::Place::Local(result)))
+    }
+
+    fn lower_for_bindings(
+        &mut self,
+        bindings: &[ast::ForBinding],
+        body: &dyn Fn(&mut Self),
+        span: Span,
+    ) {
+        if bindings.is_empty() {
+            body(self);
+            return;
+        }
+
+        let first = &bindings[0];
+        if !first.values.is_empty() && first.iterable.is_none() {
+            for (index, binding) in first.bindings.iter().enumerate() {
+                if binding.name == "_" {
+                    continue;
+                }
+                let ty = binding.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
+                let local_id = self
+                    .function
+                    .add_local(binding.name.clone(), ty, binding.mutable, ir::LocalKind::Binding);
+                self.current_scope().insert(binding.name.clone(), local_id);
+                if let Some(value) = first.values.get(index) {
+                    let operand = self.lower_expr(value);
+                    self.push_statement(ir::Statement {
+                        span: Some(binding.span),
+                        kind: ir::StatementKind::Assign {
+                            target: ir::Place::Local(local_id),
+                            value: ir::RValue::Use(operand),
+                        },
+                    });
+                }
+            }
+            self.lower_for_bindings(&bindings[1..], body, span);
+            return;
+        }
+
+        let Some(iterable) = &first.iterable else {
+            self.unsupported("for binding requires an iterable source", first.span);
+            return;
+        };
+
+        let iter_value = self.lower_expr(iterable);
+        let iter_local = self.function.add_temp(ir::Type::Unknown);
+        self.push_statement(ir::Statement {
+            span: Some(iterable.span()),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(iter_local),
+                value: ir::RValue::Call {
+                    callee: ir::Callee::Intrinsic(ir::Intrinsic::IterInit),
+                    args: vec![iter_value],
+                },
+            },
+        });
+
+        let cond_block = self.function.add_block();
+        let body_block = self.function.add_block();
+        let exit_block = self.function.add_block();
+        self.terminate(ir::Terminator::goto(cond_block));
+
+        self.current_block = Some(cond_block);
+        let has_next = self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::IterHasNext),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(iter_local)))],
+            },
+            ir::Type::Bool,
+            Some(first.span),
+        );
+        self.terminate(ir::Terminator {
+            span: Some(span),
+            kind: ir::TerminatorKind::Branch {
+                condition: has_next,
+                then_block: body_block,
+                else_block: exit_block,
+            },
+        });
+
+        self.loop_exits.push(exit_block);
+        self.current_block = Some(body_block);
+        self.push_scope();
+        let item = self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::IterNext),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(iter_local)))],
+            },
+            ir::Type::Unknown,
+            Some(first.span),
+        );
+        self.bind_for_values(&first.bindings, item);
+        self.lower_for_bindings(&bindings[1..], body, span);
+        self.pop_scope();
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(cond_block));
+        }
+        self.loop_exits.pop();
+        self.current_block = Some(exit_block);
+    }
+
+    fn bind_for_values(&mut self, bindings: &[ast::Binding], item: ir::Operand) {
+        if bindings.len() <= 1 {
+            if let Some(binding) = bindings.first() {
+                self.bind_loop_binding(binding, item);
+            }
+            return;
+        }
+
+        for (index, binding) in bindings.iter().enumerate() {
+            let field_value = self.emit_temp_from_rvalue(
+                ir::RValue::Field {
+                    base: item.clone(),
+                    name: format!("_{}", index + 1),
+                },
+                ir::Type::Unknown,
+                Some(binding.span),
+            );
+            self.bind_loop_binding(binding, field_value);
+        }
+    }
+
+    fn bind_loop_binding(&mut self, binding: &ast::Binding, value: ir::Operand) {
+        if binding.name == "_" {
+            return;
+        }
+        let ty = binding.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
+        let local_id = self
+            .function
+            .add_local(binding.name.clone(), ty, binding.mutable, ir::LocalKind::Binding);
+        self.current_scope().insert(binding.name.clone(), local_id);
+        self.push_statement(ir::Statement {
+            span: Some(binding.span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(local_id),
+                value: ir::RValue::Use(value),
+            },
+        });
+    }
+
+    fn lower_unwrap_block(&mut self, stmt: &ast::UnwrapBlockStmt) {
+        let failure_value = self.function.add_temp(ir::Type::Unknown);
+        let fallback_block = self.function.add_block();
+        let continue_block = self.function.add_block();
+
+        for clause in &stmt.clauses {
+            self.lower_unwrap_stmt(clause, Some((failure_value, fallback_block)));
+            if self.current_block.is_none() {
+                break;
+            }
+        }
+
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(continue_block));
+        }
+
+        self.current_block = Some(fallback_block);
+        if let Some(else_block) = &stmt.else_block {
+            let value = self
+                .lower_block_value(else_block)
+                .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
+            self.terminate(ir::Terminator::ret(Some(value)));
+        } else {
+            self.terminate(ir::Terminator::ret(Some(ir::Operand::Copy(Box::new(
+                ir::Place::Local(failure_value),
+            )))));
+        }
+
+        self.current_block = Some(continue_block);
+    }
+
+    fn lower_unwrap_stmt(
+        &mut self,
+        stmt: &ast::UnwrapStmt,
+        shared_fallback: Option<(ir::LocalId, ir::BlockId)>,
+    ) {
+        let source = self.lower_expr(&stmt.value);
+        let source_local = self.function.add_temp(ir::Type::Unknown);
+        self.push_statement(ir::Statement {
+            span: Some(stmt.value.span()),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(source_local),
+                value: ir::RValue::Use(source),
+            },
+        });
+
+        let success_block = self.function.add_block();
+        let failure_block = if let Some((_, target)) = shared_fallback {
+            target
+        } else {
+            self.function.add_block()
+        };
+        let continue_block = self.function.add_block();
+
+        let present = self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapPresent),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+            },
+            ir::Type::Bool,
+            Some(stmt.span),
+        );
+        self.terminate(ir::Terminator {
+            span: Some(stmt.span),
+            kind: ir::TerminatorKind::Branch {
+                condition: present,
+                then_block: success_block,
+                else_block: failure_block,
+            },
+        });
+
+        self.current_block = Some(success_block);
+        let inner = self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapValue),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+            },
+            ir::Type::Unknown,
+            Some(stmt.span),
+        );
+        self.bind_unwrap_values(&stmt.bindings, inner);
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(continue_block));
+        }
+
+        if let Some((failure_local, fallback_target)) = shared_fallback {
+            self.current_block = Some(failure_block);
+            self.push_statement(ir::Statement {
+                span: Some(stmt.span),
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Local(failure_local),
+                    value: ir::RValue::Use(ir::Operand::Copy(Box::new(ir::Place::Local(
+                        source_local,
+                    )))),
+                },
+            });
+            self.terminate(ir::Terminator::goto(fallback_target));
+        } else {
+            self.current_block = Some(failure_block);
+            if let Some(else_block) = &stmt.else_block {
+                let value = self
+                    .lower_block_value(else_block)
+                    .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
+                self.terminate(ir::Terminator::ret(Some(value)));
+            } else {
+                self.terminate(ir::Terminator::ret(Some(ir::Operand::Copy(Box::new(
+                    ir::Place::Local(source_local),
+                )))));
+            }
+        }
+
+        self.current_block = Some(continue_block);
+    }
+
+    fn bind_unwrap_values(&mut self, bindings: &[ast::Binding], item: ir::Operand) {
+        if bindings.len() <= 1 {
+            if let Some(binding) = bindings.first() {
+                self.bind_unwrap_binding(binding, item);
+            }
+            return;
+        }
+
+        for (index, binding) in bindings.iter().enumerate() {
+            let field_value = self.emit_temp_from_rvalue(
+                ir::RValue::Field {
+                    base: item.clone(),
+                    name: format!("_{}", index + 1),
+                },
+                ir::Type::Unknown,
+                Some(binding.span),
+            );
+            self.bind_unwrap_binding(binding, field_value);
+        }
+    }
+
+    fn bind_unwrap_binding(&mut self, binding: &ast::Binding, value: ir::Operand) {
+        if binding.name == "_" {
+            return;
+        }
+        let ty = binding.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
+        let local_id = self
+            .function
+            .add_local(binding.name.clone(), ty, false, ir::LocalKind::Binding);
+        self.current_scope().insert(binding.name.clone(), local_id);
+        self.push_statement(ir::Statement {
+            span: Some(binding.span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(local_id),
+                value: ir::RValue::Use(value),
+            },
+        });
+    }
+
+    fn lower_match_stmt(&mut self, stmt: &ast::MatchStmt) {
+        let scrutinee = self.lower_expr(&stmt.value);
+        let join_block = self.function.add_block();
+        self.current_block = self.current_block.or(Some(self.function.entry));
+
+        for (index, case) in stmt.cases.iter().enumerate() {
+            let body_block = self.function.add_block();
+            let fail_block = if index + 1 == stmt.cases.len() {
+                join_block
+            } else {
+                self.function.add_block()
+            };
+            self.lower_match_case(
+                scrutinee.clone(),
+                case,
+                body_block,
+                fail_block,
+                None,
+                false,
+                join_block,
+                stmt.span,
+            );
+            self.current_block = Some(fail_block);
+        }
+
+        if self.current_block.is_some() && self.current_block != Some(join_block) {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+        self.current_block = Some(join_block);
+    }
+
+    fn lower_match_expr(
+        &mut self,
+        partial: bool,
+        value: &Expr,
+        cases: &[ast::MatchCase],
+        span: Span,
+    ) -> ir::Operand {
+        let scrutinee = self.lower_expr(value);
+        let result = self.function.add_temp(if partial {
+            ir::Type::option(ir::Type::Unknown)
+        } else {
+            ir::Type::Unknown
+        });
+        let join_block = self.function.add_block();
+        self.current_block = self.current_block.or(Some(self.function.entry));
+
+        for case in cases {
+            let body_block = self.function.add_block();
+            let fail_block = self.function.add_block();
+            self.lower_match_case(
+                scrutinee.clone(),
+                case,
+                body_block,
+                fail_block,
+                Some(result),
+                partial,
+                join_block,
+                span,
+            );
+            self.current_block = Some(fail_block);
+        }
+
+        if let Some(block) = self.current_block_mut() {
+            let default_value = if partial {
+                ir::RValue::Call {
+                    callee: ir::Callee::Named {
+                        path: vec!["None".to_string()],
+                    },
+                    args: Vec::new(),
+                }
+            } else {
+                ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit))
+            };
+            block.push(ir::Statement {
+                span: Some(span),
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Local(result),
+                    value: default_value,
+                },
+            });
+            block.set_terminator(ir::Terminator::goto(join_block));
+        }
+
+        self.current_block = Some(join_block);
+        ir::Operand::Copy(Box::new(ir::Place::Local(result)))
+    }
+
+    fn lower_match_case(
+        &mut self,
+        scrutinee: ir::Operand,
+        case: &ast::MatchCase,
+        body_block: ir::BlockId,
+        fail_block: ir::BlockId,
+        result_target: Option<ir::LocalId>,
+        partial: bool,
+        join_block: ir::BlockId,
+        span: Span,
+    ) {
+        let plan = self.lower_pattern_plan(scrutinee, &case.pattern);
+        let mut condition = plan.condition;
+        if let Some(guard) = &case.guard {
+            let guard_block = self.function.add_block();
+            self.terminate(ir::Terminator {
+                span: Some(case.span),
+                kind: ir::TerminatorKind::Branch {
+                    condition,
+                    then_block: guard_block,
+                    else_block: fail_block,
+                },
+            });
+            self.current_block = Some(guard_block);
+            self.push_scope();
+            self.apply_pending_bindings(plan.bindings.clone());
+            condition = self.lower_expr(guard);
+            self.terminate(ir::Terminator {
+                span: Some(case.span),
+                kind: ir::TerminatorKind::Branch {
+                    condition,
+                    then_block: body_block,
+                    else_block: fail_block,
+                },
+            });
+            self.pop_scope();
+        } else {
+            self.terminate(ir::Terminator {
+                span: Some(case.span),
+                kind: ir::TerminatorKind::Branch {
+                    condition,
+                    then_block: body_block,
+                    else_block: fail_block,
+                },
+            });
+        }
+
+        self.current_block = Some(body_block);
+        self.push_scope();
+        self.apply_pending_bindings(plan.bindings);
+        match &case.body {
+            MatchCaseBody::Block(block) => {
+                if let Some(target) = result_target {
+                    let value = self
+                        .lower_block_value(block)
+                        .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
+                    self.assign_match_result(target, value, partial, span);
+                } else {
+                    self.lower_block_statements(block);
+                }
+            }
+            MatchCaseBody::Expr(expr) => {
+                let value = self.lower_expr(expr);
+                if let Some(target) = result_target {
+                    self.assign_match_result(target, value, partial, span);
+                } else {
+                    self.push_statement(ir::Statement {
+                        span: Some(case.span),
+                        kind: ir::StatementKind::Eval {
+                            value: ir::RValue::Use(value),
+                        },
+                    });
+                }
+            }
+        }
+        self.pop_scope();
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+    }
+
+    fn assign_match_result(
+        &mut self,
+        target: ir::LocalId,
+        value: ir::Operand,
+        partial: bool,
+        span: Span,
+    ) {
+        let rvalue = if partial {
+            ir::RValue::Call {
+                callee: ir::Callee::Named {
+                    path: vec!["Some".to_string()],
+                },
+                args: vec![value],
+            }
+        } else {
+            ir::RValue::Use(value)
+        };
+        self.push_statement(ir::Statement {
+            span: Some(span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(target),
+                value: rvalue,
+            },
+        });
+    }
+
+    fn lower_pattern_plan(&mut self, scrutinee: ir::Operand, pattern: &Pattern) -> PatternPlan {
+        match pattern {
+            Pattern::Wildcard { .. } => PatternPlan::always_true(),
+            Pattern::Binding { name, .. } => {
+                if name == "_" {
+                    PatternPlan::always_true()
+                } else {
+                    PatternPlan {
+                        condition: self.bool_const(true),
+                        bindings: vec![PendingBinding {
+                            name: name.clone(),
+                            ty: ir::Type::Unknown,
+                            source: PendingBindingSource::Operand(scrutinee),
+                        }],
+                    }
+                }
+            }
+            Pattern::Literal { value, span } => {
+                let right = self.lower_expr(value);
+                let condition = self.emit_temp_from_rvalue(
+                    ir::RValue::Binary {
+                        op: ir::BinaryOp::Eq,
+                        left: scrutinee,
+                        right,
+                    },
+                    ir::Type::Bool,
+                    Some(*span),
+                );
+                PatternPlan {
+                    condition,
+                    bindings: Vec::new(),
+                }
+            }
+            Pattern::Type { name, target, span } => {
+                let ty = lower_type_ref(target);
+                let condition = self.emit_temp_from_rvalue(
+                    ir::RValue::TypeTest {
+                        operand: scrutinee.clone(),
+                        ty: ty.clone(),
+                    },
+                    ir::Type::Bool,
+                    Some(*span),
+                );
+                let bindings = if let Some(binding_name) = name {
+                    if binding_name != "_" {
+                        vec![PendingBinding {
+                            name: binding_name.clone(),
+                            ty: ty.clone(),
+                            source: PendingBindingSource::RValue(ir::RValue::Cast {
+                                operand: scrutinee,
+                                ty,
+                            }),
+                        }]
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+                PatternPlan { condition, bindings }
+            }
+            Pattern::Tuple { elements, span } => {
+                let mut conditions = Vec::new();
+                let mut bindings = Vec::new();
+                for (index, element) in elements.iter().enumerate() {
+                    let field = self.emit_temp_from_rvalue(
+                        ir::RValue::Field {
+                            base: scrutinee.clone(),
+                            name: format!("_{}", index + 1),
+                        },
+                        ir::Type::Unknown,
+                        Some(*span),
+                    );
+                    let plan = self.lower_pattern_plan(field, element);
+                    conditions.push(plan.condition);
+                    bindings.extend(plan.bindings);
+                }
+                PatternPlan {
+                    condition: self.combine_conditions(conditions, *span),
+                    bindings,
+                }
+            }
+            Pattern::Constructor { path, args, span } => {
+                let case_name = path.last().cloned().unwrap_or_default();
+                let base_condition = self.emit_temp_from_rvalue(
+                    ir::RValue::Call {
+                        callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantIs(case_name.clone())),
+                        args: vec![scrutinee.clone()],
+                    },
+                    ir::Type::Bool,
+                    Some(*span),
+                );
+                let mut conditions = vec![base_condition];
+                let mut bindings = Vec::new();
+                let field_names = self.lookup_case_fields(path, args.len());
+                for (index, arg) in args.iter().enumerate() {
+                    let field_name = field_names
+                        .as_ref()
+                        .and_then(|names| names.get(index).cloned())
+                        .unwrap_or_else(|| format!("_{}", index + 1));
+                    let field = self.emit_temp_from_rvalue(
+                        ir::RValue::Call {
+                            callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantField(field_name)),
+                            args: vec![scrutinee.clone()],
+                        },
+                        ir::Type::Unknown,
+                        Some(arg.span()),
+                    );
+                    let plan = self.lower_pattern_plan(field, arg);
+                    conditions.push(plan.condition);
+                    bindings.extend(plan.bindings);
+                }
+                PatternPlan {
+                    condition: self.combine_conditions(conditions, *span),
+                    bindings,
+                }
+            }
+        }
+    }
+
+    fn lookup_case_fields(&self, path: &[String], arity: usize) -> Option<Vec<String>> {
+        let case_name = path.last()?;
+        if arity == 0 {
+            return Some(Vec::new());
+        }
+        match case_name.as_str() {
+            "Some" | "Ok" | "Left" | "Right" => {
+                return Some(vec!["value".to_string()]);
+            }
+            "Err" => {
+                return Some(vec!["error".to_string()]);
+            }
+            "None" => return Some(Vec::new()),
+            _ => {}
+        }
+
+        if path.len() >= 2 {
+            let key = format!("{}.{}", path[path.len() - 2], case_name);
+            if let Some(fields) = self.case_fields.get(&key) {
+                return Some(fields.clone());
+            }
+        }
+
+        let matches = self
+            .case_fields
+            .iter()
+            .filter_map(|(key, fields)| {
+                if key.ends_with(&format!(".{case_name}")) {
+                    Some(fields.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if matches.len() == 1 {
+            return matches.into_iter().next();
+        }
+        None
+    }
+
+    fn apply_pending_bindings(&mut self, bindings: Vec<PendingBinding>) {
+        for binding in bindings {
+            let local_id = self
+                .function
+                .add_local(binding.name.clone(), binding.ty, false, ir::LocalKind::Binding);
+            self.current_scope().insert(binding.name.clone(), local_id);
+            let value = match binding.source {
+                PendingBindingSource::Operand(value) => ir::RValue::Use(value),
+                PendingBindingSource::RValue(value) => value,
+            };
+            self.push_statement(ir::Statement {
+                span: None,
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Local(local_id),
+                    value,
+                },
+            });
+        }
+    }
+
+    fn emit_temp_from_rvalue(
+        &mut self,
+        value: ir::RValue,
+        ty: ir::Type,
+        span: Option<Span>,
+    ) -> ir::Operand {
+        let temp = self.function.add_temp(ty);
+        self.push_statement(ir::Statement {
+            span,
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(temp),
+                value,
+            },
+        });
+        ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
+    }
+
+    fn combine_conditions(&mut self, conditions: Vec<ir::Operand>, span: Span) -> ir::Operand {
+        let mut iter = conditions.into_iter();
+        let Some(first) = iter.next() else {
+            return self.bool_const(true);
+        };
+        iter.fold(first, |left, right| {
+            self.emit_temp_from_rvalue(
+                ir::RValue::Binary {
+                    op: ir::BinaryOp::And,
+                    left,
+                    right,
+                },
+                ir::Type::Bool,
+                Some(span),
+            )
+        })
+    }
+
+    fn bool_const(&self, value: bool) -> ir::Operand {
+        ir::Operand::Const(ir::Constant::Bool(value))
     }
 
     fn lower_expr(&mut self, expr: &Expr) -> ir::Operand {
@@ -681,6 +1510,17 @@ impl<'a> FunctionLowerer<'a> {
                 span,
             } => self.lower_if_expr(condition, then_block, else_branch, *span),
             Expr::Block { body, .. } => self.lower_block_expr(body),
+            Expr::Match {
+                partial,
+                value,
+                cases,
+                span,
+            } => self.lower_match_expr(*partial, value, cases, *span),
+            Expr::ForYield {
+                bindings,
+                yield_body,
+                span,
+            } => self.lower_for_yield_expr(bindings, yield_body, *span),
             _ => {
                 let Some(rvalue) = self.lower_rvalue(expr) else {
                     self.unsupported("expression form is not implemented in lowering", expr.span());
@@ -816,21 +1656,6 @@ impl<'a> FunctionLowerer<'a> {
                 operand: self.lower_expr(left),
                 ty: lower_type_ref(target),
             }),
-            Expr::Match { partial, span, .. } => {
-                self.unsupported(
-                    if *partial {
-                        "partial match expression lowering is not implemented yet"
-                    } else {
-                        "match expression lowering is not implemented yet"
-                    },
-                    *span,
-                );
-                None
-            }
-            Expr::ForYield { span, .. } => {
-                self.unsupported("for-yield lowering is not implemented yet", *span);
-                None
-            }
             Expr::Lambda { span, .. } => {
                 self.unsupported("lambda lowering is not implemented yet", *span);
                 None
@@ -1341,23 +2166,56 @@ mod tests {
     }
 
     #[test]
-    fn reports_unsupported_match_lowering() {
+    fn lowers_match_unwrap_and_for_forms() {
         let program = parse_inline(
             r#"
             def main() Int {
-                value Int = match 1 {
-                    case _ => 0
+                total Int = 0
+                unwrap item <- Some(3)
+                total = match item {
+                    case 1 => 10
+                    case _ => 20
                 }
-                return value
+                for value <- [1, 2, 3] {
+                    total += value
+                }
+                return total
             }
             "#,
         );
 
         let lowered = lower_program(&program);
-        assert!(!lowered.diagnostics.is_empty());
-        assert!(lowered
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "lower_unsupported"));
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
+        assert!(main.blocks.len() >= 8, "{:#?}", main.blocks);
+        assert!(main.blocks.iter().any(|block| matches!(
+            block.terminator.kind,
+            ir::TerminatorKind::Branch { .. }
+        )));
+        assert!(main.blocks.iter().any(|block| {
+            block.statements.iter().any(|stmt| matches!(
+                stmt.kind,
+                ir::StatementKind::Assign {
+                    value: ir::RValue::Call {
+                        callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapPresent),
+                        ..
+                    },
+                    ..
+                }
+            ))
+        }));
+        assert!(main.blocks.iter().any(|block| {
+            block.statements.iter().any(|stmt| matches!(
+                stmt.kind,
+                ir::StatementKind::Assign {
+                    value: ir::RValue::Call {
+                        callee: ir::Callee::Intrinsic(ir::Intrinsic::IterHasNext),
+                        ..
+                    },
+                    ..
+                }
+            ))
+        }));
     }
 }

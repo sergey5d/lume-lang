@@ -17,7 +17,7 @@ source
 
 ## Current Scope
 
-The Rust implementation now has five real building blocks:
+The Rust implementation now has six real building blocks:
 
 - a lexer that tokenizes Lume source and reports lexical diagnostics
 - a recursive-descent parser that builds a source-shaped AST
@@ -26,14 +26,14 @@ The Rust implementation now has five real building blocks:
   common control-flow forms
 - a real interpreter-oriented IR with program, type, global, function, local,
   block, statement, terminator, operand, and rvalue structures
-- a first lowering pass that maps declarations plus core function/control-flow
-  bodies into that IR
+- a first lowering pass that maps declarations plus real control-flow bodies
+  into that IR
 
 The interpreter is still scaffolded. Lowering is now real, but intentionally
-partial: functions, methods, globals, `if`, `while`, assignments, calls, and
-basic expressions lower into CFG blocks, while richer forms like `match`,
-`for`, `unwrap`, lambdas, and record updates still report targeted lowering
-diagnostics.
+partial: functions, methods, globals, `if`, `while`, `match`, `for`,
+`for ... yield`, `unwrap`, assignments, calls, and core expressions lower into
+CFG blocks, while richer forms like lambdas, local functions, anonymous
+interfaces, and record updates still report targeted lowering diagnostics.
 
 ## Layout
 
@@ -97,7 +97,8 @@ as:
 - unknown imported module members
 
 The library also has a `lower_program(...)` entry point that produces the new
-IR and reports explicit lowering diagnostics for language features that are not
+IR and already lowers the main statement/control-flow surface used by the Rust
+tests. It still reports explicit diagnostics for features that are not
 implemented yet on the Rust path.
 
 ## Near-Term Direction
@@ -105,7 +106,7 @@ implemented yet on the Rust path.
 The intended next steps are:
 
 1. strengthen the type checker so it covers more of the full language surface
-2. widen lowering coverage for `match`, `for`, `unwrap`, lambdas, and updates
+2. widen lowering coverage for lambdas, local functions, and record updates
 3. execute the lowered IR in Rust rather than interpreting the source AST
 4. port more of the stdlib/runtime behavior onto the Rust path
 
