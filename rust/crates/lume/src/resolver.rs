@@ -95,31 +95,37 @@ pub fn resolve_path(path: impl AsRef<Path>) -> Result<ResolveResult, String> {
     Ok(ResolveResult { diagnostics })
 }
 
+pub(crate) fn load_module_graph(path: impl AsRef<Path>) -> Result<(ModuleGraph, PathBuf), String> {
+    let mut graph = ModuleGraph::default();
+    let root = load_module(path.as_ref(), &mut graph, &mut HashSet::new())?;
+    Ok((graph, root))
+}
+
 #[derive(Debug, Clone, Default)]
-struct ModuleGraph {
-    modules: HashMap<PathBuf, LoadedModule>,
+pub(crate) struct ModuleGraph {
+    pub(crate) modules: HashMap<PathBuf, LoadedModule>,
 }
 
 #[derive(Debug, Clone)]
-struct LoadedModule {
-    path: PathBuf,
-    display_path: String,
-    program: Program,
-    imports: HashMap<String, PathBuf>,
-    symbol_imports: HashMap<String, ImportedSymbol>,
-    dependencies: Vec<PathBuf>,
+pub(crate) struct LoadedModule {
+    pub(crate) path: PathBuf,
+    pub(crate) display_path: String,
+    pub(crate) program: Program,
+    pub(crate) imports: HashMap<String, PathBuf>,
+    pub(crate) symbol_imports: HashMap<String, ImportedSymbol>,
+    pub(crate) dependencies: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
-struct ImportedSymbol {
-    original_name: String,
-    object_name: Option<String>,
-    kind: ImportedKind,
-    module_path: PathBuf,
+pub(crate) struct ImportedSymbol {
+    pub(crate) original_name: String,
+    pub(crate) object_name: Option<String>,
+    pub(crate) kind: ImportedKind,
+    pub(crate) module_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ImportedKind {
+pub(crate) enum ImportedKind {
     Function,
     Value,
     Type,
@@ -189,8 +195,8 @@ impl AmbientRegistry {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct FileDirectives {
-    interpreter: bool,
+pub(crate) struct FileDirectives {
+    pub(crate) interpreter: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -249,7 +255,7 @@ struct ModuleNamespace {
     objects: HashMap<String, TypeInfo>,
 }
 
-fn load_module(
+pub(crate) fn load_module(
     path: &Path,
     graph: &mut ModuleGraph,
     loading: &mut HashSet<PathBuf>,
@@ -383,7 +389,7 @@ fn load_module(
     Ok(abs)
 }
 
-fn parse_program_from_path(path: &Path) -> Result<Program, String> {
+pub(crate) fn parse_program_from_path(path: &Path) -> Result<Program, String> {
     let text = fs::read_to_string(path)
         .map_err(|err| format!("read {}: {err}", path.display()))?;
     let file = SourceFile::new(path.display().to_string(), text);
@@ -432,7 +438,7 @@ fn module_alias(path: &str) -> String {
     path.rsplit('/').next().unwrap_or(path).to_string()
 }
 
-fn read_directives(path: &Path) -> Result<FileDirectives, String> {
+pub(crate) fn read_directives(path: &Path) -> Result<FileDirectives, String> {
     let text = fs::read_to_string(path)
         .map_err(|err| format!("read {}: {err}", path.display()))?;
     let mut directives = FileDirectives::default();
@@ -452,7 +458,7 @@ fn read_directives(path: &Path) -> Result<FileDirectives, String> {
     Ok(directives)
 }
 
-fn find_stdlib_dir(start: &Path) -> Result<PathBuf, String> {
+pub(crate) fn find_stdlib_dir(start: &Path) -> Result<PathBuf, String> {
     let mut dir = fs::canonicalize(start)
         .map_err(|err| format!("resolve {}: {err}", start.display()))?;
     loop {
@@ -470,7 +476,7 @@ fn find_stdlib_dir(start: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn collect_module_order(
+pub(crate) fn collect_module_order(
     graph: &ModuleGraph,
     root: &Path,
     seen: &mut HashSet<PathBuf>,

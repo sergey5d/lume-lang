@@ -17,14 +17,16 @@ source
 
 ## Current Scope
 
-The Rust implementation now has three real frontend pieces:
+The Rust implementation now has four real frontend pieces:
 
 - a lexer that tokenizes Lume source and reports lexical diagnostics
 - a recursive-descent parser that builds a source-shaped AST
 - a semantic resolver that performs early name binding and structure checks
+- a first-pass type checker for values, calls, constructors, imports, and
+  common control-flow forms
 
-The type checker, lowering, and interpreter modules are still scaffolded so we
-have a clean place to keep building without reworking the crate layout later.
+Lowering and the interpreter modules are still scaffolded so we have a clean
+place to keep building without reworking the crate layout later.
 
 ## Layout
 
@@ -72,15 +74,18 @@ file. Right now it covers:
 - blocks, bindings, assignments, `if`, `while`, `for`, `return`, and `break`
 - calls, member access, indexing, lists, tuples, lambdas, and `if` expressions
 
-The `check` command resolves the requested file and its imports, installs
-ambient stdlib names from `stdlib/*.lum`, and reports early semantic diagnostics
-such as:
+The `check` command resolves and type-checks the requested file and its imports,
+installs ambient stdlib names from `stdlib/*.lum`, and reports diagnostics such
+as:
 
 - duplicate top-level declarations
 - duplicate or shadowing local bindings
 - undefined value names
 - undefined type names
 - generic arity mismatches
+- argument and return type mismatches
+- invalid assignment and binding types
+- incorrect constructor arity and named arguments
 - invalid `break` outside a loop
 - unknown imported module members
 
@@ -88,8 +93,8 @@ such as:
 
 The intended next steps are:
 
-1. define a typed semantic layer that does not depend on source-shaped nodes
-2. lower that typed tree into a compact interpreter-oriented IR
+1. strengthen the type checker so it covers more of the full language surface
+2. lower the checked program into a compact interpreter-oriented IR
 3. execute the lowered IR in Rust rather than interpreting the source AST
 4. port more of the stdlib/runtime behavior onto the Rust path
 

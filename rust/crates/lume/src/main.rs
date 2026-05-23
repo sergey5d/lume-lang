@@ -1,6 +1,6 @@
 use std::{env, fs, process::ExitCode};
 
-use lume::{Diagnostic, Severity, SourceFile, lex, parse_program, resolve_path};
+use lume::{Diagnostic, Severity, SourceFile, check_path, lex, parse_program};
 
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
@@ -71,7 +71,7 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             };
 
-            match resolve_path(&path) {
+            match check_path(&path) {
                 Ok(result) => {
                     if result.diagnostics.is_empty() {
                         ExitCode::SUCCESS

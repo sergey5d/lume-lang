@@ -14,3 +14,4 @@ pub use lexer::{Keyword, LexResult, Token, TokenKind, lex};
 pub use parser::{ParseResult, parse_program};
 pub use resolver::{CheckResult, LocatedDiagnostic, ResolveResult, resolve_path, resolve_program};
 pub use source::{LineColumn, SourceFile, Span};
+pub use typecheck::{CheckResult as TypeCheckResult, PathCheckResult, check_path, check_program};
