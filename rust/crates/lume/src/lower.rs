@@ -1894,14 +1894,22 @@ impl<'a> FunctionLowerer<'a> {
                 op,
                 right,
                 span,
-            } => Some(ir::RValue::Binary {
-                op: map_binary_op(*op).unwrap_or_else(|| {
-                    self.unsupported("binary operator lowering is not implemented yet", *span);
-                    ir::BinaryOp::Add
-                }),
-                left: self.lower_expr(left),
-                right: self.lower_expr(right),
-            }),
+            } => {
+                if *op == AstBinaryOp::Colon {
+                    return Some(ir::RValue::Tuple(vec![
+                        self.lower_expr(left),
+                        self.lower_expr(right),
+                    ]));
+                }
+                Some(ir::RValue::Binary {
+                    op: map_binary_op(*op).unwrap_or_else(|| {
+                        self.unsupported("binary operator lowering is not implemented yet", *span);
+                        ir::BinaryOp::Add
+                    }),
+                    left: self.lower_expr(left),
+                    right: self.lower_expr(right),
+                })
+            }
             Expr::Call { callee, args, .. } => Some(ir::RValue::Call {
                 callee: self.lower_callee(callee),
                 args: args.iter().map(|arg| self.lower_expr(&arg.value)).collect(),
@@ -3078,6 +3086,32 @@ mod tests {
                 stmt.kind,
                 ir::StatementKind::Assign {
                     value: ir::RValue::RecordUpdate { .. },
+                    ..
+                }
+            ))
+        }));
+    }
+
+    #[test]
+    fn lowers_map_constructor_pairs_without_binary_operator_errors() {
+        let program = parse_inline(
+            r#"
+            def main() Unit {
+                entries = Map("a": 1, "bbb": 2)
+                OS.println(entries)
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
+        assert!(main.blocks.iter().any(|block| {
+            block.statements.iter().any(|stmt| matches!(
+                stmt.kind,
+                ir::StatementKind::Assign {
+                    value: ir::RValue::Tuple(_),
                     ..
                 }
             ))
