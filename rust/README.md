@@ -26,9 +26,14 @@ The Rust implementation now has five real building blocks:
   common control-flow forms
 - a real interpreter-oriented IR with program, type, global, function, local,
   block, statement, terminator, operand, and rvalue structures
+- a first lowering pass that maps declarations plus core function/control-flow
+  bodies into that IR
 
-Lowering and the interpreter are still scaffolded, but they now have a real IR
-shape to target instead of a placeholder `Program { functions: Vec<Function> }`.
+The interpreter is still scaffolded. Lowering is now real, but intentionally
+partial: functions, methods, globals, `if`, `while`, assignments, calls, and
+basic expressions lower into CFG blocks, while richer forms like `match`,
+`for`, `unwrap`, lambdas, and record updates still report targeted lowering
+diagnostics.
 
 ## Layout
 
@@ -91,12 +96,16 @@ as:
 - invalid `break` outside a loop
 - unknown imported module members
 
+The library also has a `lower_program(...)` entry point that produces the new
+IR and reports explicit lowering diagnostics for language features that are not
+implemented yet on the Rust path.
+
 ## Near-Term Direction
 
 The intended next steps are:
 
 1. strengthen the type checker so it covers more of the full language surface
-2. lower the checked program into a compact interpreter-oriented IR
+2. widen lowering coverage for `match`, `for`, `unwrap`, lambdas, and updates
 3. execute the lowered IR in Rust rather than interpreting the source AST
 4. port more of the stdlib/runtime behavior onto the Rust path
 
