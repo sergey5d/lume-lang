@@ -17,16 +17,18 @@ source
 
 ## Current Scope
 
-The Rust implementation now has four real frontend pieces:
+The Rust implementation now has five real building blocks:
 
 - a lexer that tokenizes Lume source and reports lexical diagnostics
 - a recursive-descent parser that builds a source-shaped AST
 - a semantic resolver that performs early name binding and structure checks
 - a first-pass type checker for values, calls, constructors, imports, and
   common control-flow forms
+- a real interpreter-oriented IR with program, type, global, function, local,
+  block, statement, terminator, operand, and rvalue structures
 
-Lowering and the interpreter modules are still scaffolded so we have a clean
-place to keep building without reworking the crate layout later.
+Lowering and the interpreter are still scaffolded, but they now have a real IR
+shape to target instead of a placeholder `Program { functions: Vec<Function> }`.
 
 ## Layout
 
