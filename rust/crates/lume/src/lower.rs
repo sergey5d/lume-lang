@@ -319,19 +319,22 @@ impl<'a> Lowerer<'a> {
     fn lower_top_level_functions(&mut self) {
         let work = self.function_work.clone();
         for job in work {
-            let Some(function) = self.program.function_mut(job.id) else {
+            if self.program.function(job.id).is_none() {
                 continue;
-            };
+            }
             let mut lowerer = FunctionLowerer::new(
-                function,
+                &mut self.program,
+                job.id,
                 &self.global_ids,
                 &self.function_ids,
                 &self.case_fields,
                 &mut self.diagnostics,
             );
             for (index, param) in job.decl.params.iter().enumerate() {
-                if let Some(local_id) = lowerer.function.params.get(index).copied() {
-                    lowerer.bind_existing(&param.name, local_id);
+                if let Some(local_id) = lowerer.function().params.get(index).copied() {
+                    if param.name != "_" {
+                        lowerer.bind_existing(&param.name, local_id);
+                    }
                 }
             }
             lowerer.lower_callable_body(&job.decl.body, job.decl.span);
@@ -341,11 +344,12 @@ impl<'a> Lowerer<'a> {
     fn lower_methods(&mut self) {
         let work = self.method_work.clone();
         for job in work {
-            let Some(function) = self.program.function_mut(job.id) else {
+            if self.program.function(job.id).is_none() {
                 continue;
-            };
+            }
             let mut lowerer = FunctionLowerer::new(
-                function,
+                &mut self.program,
+                job.id,
                 &self.global_ids,
                 &self.function_ids,
                 &self.case_fields,
@@ -356,8 +360,10 @@ impl<'a> Lowerer<'a> {
                 lowerer.bind_implicit_field(&field.name, field.ty.clone());
             }
             for (index, param) in job.decl.params.iter().enumerate() {
-                if let Some(local_id) = lowerer.function.params.get(index).copied() {
-                    lowerer.bind_existing(&param.name, local_id);
+                if let Some(local_id) = lowerer.function().params.get(index).copied() {
+                    if param.name != "_" {
+                        lowerer.bind_existing(&param.name, local_id);
+                    }
                 }
             }
             if let Some(body) = &job.decl.body {
@@ -388,16 +394,26 @@ impl<'a> Lowerer<'a> {
 }
 
 struct FunctionLowerer<'a> {
-    function: &'a mut ir::Function,
+    program: &'a mut ir::Program,
+    function_id: ir::FunctionId,
     diagnostics: &'a mut Vec<Diagnostic>,
     globals: &'a HashMap<String, ir::GlobalId>,
     functions: &'a HashMap<String, ir::FunctionId>,
     case_fields: &'a HashMap<String, Vec<String>>,
     scopes: Vec<HashMap<String, ir::LocalId>>,
     implicit_fields: HashMap<String, ir::Type>,
+    capture_sources: HashMap<String, CaptureSource>,
+    capture_locals: HashMap<String, ir::LocalId>,
+    closure_captures: Vec<ir::Operand>,
     this_local: Option<ir::LocalId>,
     loop_exits: Vec<ir::BlockId>,
     current_block: Option<ir::BlockId>,
+}
+
+#[derive(Debug, Clone)]
+struct CaptureSource {
+    operand: ir::Operand,
+    ty: ir::Type,
 }
 
 #[derive(Debug, Clone)]
@@ -430,31 +446,87 @@ impl PatternPlan {
 
 impl<'a> FunctionLowerer<'a> {
     fn new(
-        function: &'a mut ir::Function,
+        program: &'a mut ir::Program,
+        function_id: ir::FunctionId,
         globals: &'a HashMap<String, ir::GlobalId>,
         functions: &'a HashMap<String, ir::FunctionId>,
         case_fields: &'a HashMap<String, Vec<String>>,
         diagnostics: &'a mut Vec<Diagnostic>,
     ) -> Self {
-        let entry = function.entry;
+        let entry = program
+            .function(function_id)
+            .map(|function| function.entry)
+            .unwrap_or(ir::BlockId(0));
         let mut this = Self {
-            function,
+            program,
+            function_id,
             diagnostics,
             globals,
             functions,
             case_fields,
             scopes: vec![HashMap::new()],
             implicit_fields: HashMap::new(),
+            capture_sources: HashMap::new(),
+            capture_locals: HashMap::new(),
+            closure_captures: Vec::new(),
             this_local: None,
             loop_exits: Vec::new(),
             current_block: Some(entry),
         };
-        if let Some(first) = this.function.locals.first() {
+        if let Some(first) = this.function().locals.first() {
             if first.name == "this" {
                 this.this_local = Some(first.id);
             }
         }
         this
+    }
+
+    fn with_capture_sources(
+        mut self,
+        capture_sources: HashMap<String, CaptureSource>,
+        implicit_fields: HashMap<String, ir::Type>,
+    ) -> Self {
+        self.capture_sources = capture_sources;
+        self.implicit_fields = implicit_fields;
+        self
+    }
+
+    fn finish_closure_captures(self) -> Vec<ir::Operand> {
+        self.closure_captures
+    }
+
+    fn function(&self) -> &ir::Function {
+        self.program
+            .function(self.function_id)
+            .expect("active lowered function")
+    }
+
+    fn function_mut(&mut self) -> &mut ir::Function {
+        self.program
+            .function_mut(self.function_id)
+            .expect("active lowered function")
+    }
+
+    fn add_local(
+        &mut self,
+        name: impl Into<String>,
+        ty: ir::Type,
+        mutable: bool,
+        kind: ir::LocalKind,
+    ) -> ir::LocalId {
+        self.function_mut().add_local(name, ty, mutable, kind)
+    }
+
+    fn add_capture(&mut self, name: impl Into<String>, ty: ir::Type) -> ir::LocalId {
+        self.function_mut().add_capture(name, ty)
+    }
+
+    fn add_temp(&mut self, ty: ir::Type) -> ir::LocalId {
+        self.function_mut().add_temp(ty)
+    }
+
+    fn add_block(&mut self) -> ir::BlockId {
+        self.function_mut().add_block()
     }
 
     fn bind_existing(&mut self, name: &str, local: ir::LocalId) {
@@ -532,9 +604,8 @@ impl<'a> FunctionLowerer<'a> {
                         continue;
                     }
                     let ty = local.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
-                    let local_id = self
-                        .function
-                        .add_local(local.name.clone(), ty, local.mutable, ir::LocalKind::Binding);
+                    let local_id =
+                        self.add_local(local.name.clone(), ty, local.mutable, ir::LocalKind::Binding);
                     self.current_scope().insert(local.name.clone(), local_id);
                     if let Some(expr) = binding.values.get(index) {
                         let value = self.lower_expr(expr);
@@ -605,13 +676,206 @@ impl<'a> FunctionLowerer<'a> {
             Stmt::Match(stmt) => self.lower_match_stmt(stmt),
             Stmt::Unwrap(stmt) => self.lower_unwrap_stmt(stmt, None),
             Stmt::UnwrapBlock(stmt) => self.lower_unwrap_block(stmt),
-            Stmt::LocalFunction(function) => {
-                self.unsupported(
-                    format!("local function '{}' lowering is not implemented yet", function.name),
-                    function.span,
-                )
+            Stmt::LocalFunction(function) => self.lower_local_function_stmt(function),
+        }
+    }
+
+    fn lower_local_function_stmt(&mut self, function: &FunctionDecl) {
+        let ty = ir::Type::Function {
+            params: function
+                .params
+                .iter()
+                .map(|param| {
+                    param.ty
+                        .as_ref()
+                        .map(lower_type_ref)
+                        .unwrap_or(ir::Type::Unknown)
+                })
+                .collect(),
+            ret: Box::new(
+                function
+                    .return_type
+                    .as_ref()
+                    .map(lower_type_ref)
+                    .unwrap_or(ir::Type::Unknown),
+            ),
+        };
+        let local_id = self.add_local(function.name.clone(), ty, false, ir::LocalKind::Binding);
+        self.current_scope().insert(function.name.clone(), local_id);
+
+        let closure = self.lower_nested_function_decl(function);
+        self.push_statement(ir::Statement {
+            span: Some(function.span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(local_id),
+                value: closure,
+            },
+        });
+    }
+
+    fn lower_nested_function_decl(&mut self, function: &FunctionDecl) -> ir::RValue {
+        let mut nested = ir::Function::new(
+            function.name.clone(),
+            ir::FunctionKind::Local {
+                parent: self.function_id,
+            },
+            function
+                .return_type
+                .as_ref()
+                .map(lower_type_ref)
+                .unwrap_or(ir::Type::Unknown),
+        );
+        nested.span = Some(function.span);
+        for param in &function.params {
+            nested.add_param(
+                param.name.clone(),
+                param.ty
+                    .as_ref()
+                    .map(lower_type_ref)
+                    .unwrap_or(ir::Type::Unknown),
+            );
+        }
+        let function_id = self.program.add_function(nested);
+        let capture_sources = self.visible_capture_sources(Some(&function.name));
+        let implicit_fields = self.implicit_fields.clone();
+        let captures = {
+            let mut lowerer = FunctionLowerer::new(
+                self.program,
+                function_id,
+                self.globals,
+                self.functions,
+                self.case_fields,
+                self.diagnostics,
+            )
+            .with_capture_sources(capture_sources, implicit_fields);
+            for (index, param) in function.params.iter().enumerate() {
+                if let Some(local_id) = lowerer.function().params.get(index).copied() {
+                    if param.name != "_" {
+                        lowerer.bind_existing(&param.name, local_id);
+                    }
+                }
+            }
+            lowerer.lower_callable_body(&function.body, function.span);
+            lowerer.finish_closure_captures()
+        };
+        ir::RValue::Closure {
+            function: function_id,
+            captures,
+        }
+    }
+
+    fn lower_lambda_rvalue(
+        &mut self,
+        params: &[ast::LambdaParam],
+        body: &ast::LambdaBody,
+        span: Span,
+    ) -> ir::RValue {
+        let nested_name = format!("lambda${}${}", self.function_id.0, self.function().blocks.len());
+        let mut nested =
+            ir::Function::new(nested_name, ir::FunctionKind::Lambda, ir::Type::Unknown);
+        nested.span = Some(span);
+        for param in params {
+            nested.add_param(
+                param.name.clone(),
+                param.ty
+                    .as_ref()
+                    .map(lower_type_ref)
+                    .unwrap_or(ir::Type::Unknown),
+            );
+        }
+        let function_id = self.program.add_function(nested);
+        let capture_sources = self.visible_capture_sources(None);
+        let implicit_fields = self.implicit_fields.clone();
+        let captures = {
+            let mut lowerer = FunctionLowerer::new(
+                self.program,
+                function_id,
+                self.globals,
+                self.functions,
+                self.case_fields,
+                self.diagnostics,
+            )
+            .with_capture_sources(capture_sources, implicit_fields);
+            for (index, param) in params.iter().enumerate() {
+                if let Some(local_id) = lowerer.function().params.get(index).copied() {
+                    if param.name != "_" {
+                        lowerer.bind_existing(&param.name, local_id);
+                    }
+                }
+            }
+            match body {
+                ast::LambdaBody::Expr(expr) => {
+                    lowerer.lower_callable_body(&CallableBody::Expr((**expr).clone()), span);
+                }
+                ast::LambdaBody::Block(block) => {
+                    lowerer.lower_callable_body(&CallableBody::Block(block.clone()), span);
+                }
+            }
+            lowerer.finish_closure_captures()
+        };
+        ir::RValue::Closure {
+            function: function_id,
+            captures,
+        }
+    }
+
+    fn lower_placeholder_lambda(&mut self, expr: &Expr) -> ir::Operand {
+        let param_name = format!("v{}", self.function().locals.len() + 1);
+        let rewritten = rewrite_placeholder_expr(expr, &param_name);
+        let rvalue = self.lower_lambda_rvalue(
+            &[ast::LambdaParam {
+                name: param_name,
+                ty: None,
+                span: expr.span(),
+            }],
+            &ast::LambdaBody::Expr(Box::new(rewritten)),
+            expr.span(),
+        );
+        let temp = self.add_temp(ir::Type::Unknown);
+        self.push_statement(ir::Statement {
+            span: Some(expr.span()),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(temp),
+                value: rvalue,
+            },
+        });
+        ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
+    }
+
+    fn visible_capture_sources(&self, excluded_name: Option<&str>) -> HashMap<String, CaptureSource> {
+        let mut sources = HashMap::new();
+        for scope in &self.scopes {
+            for (name, local) in scope {
+                if name == "_" || excluded_name.is_some_and(|excluded| excluded == name) {
+                    continue;
+                }
+                let ty = self
+                    .function()
+                    .locals
+                    .get(local.0)
+                    .map(|local| local.ty.clone())
+                    .unwrap_or(ir::Type::Unknown);
+                sources.insert(
+                    name.clone(),
+                    CaptureSource {
+                        operand: ir::Operand::Copy(Box::new(ir::Place::Local(*local))),
+                        ty,
+                    },
+                );
             }
         }
+        if let Some(this_local) = self.this_local {
+            sources.entry("this".to_string()).or_insert_with(|| CaptureSource {
+                operand: ir::Operand::Copy(Box::new(ir::Place::Local(this_local))),
+                ty: self
+                    .function()
+                    .locals
+                    .get(this_local.0)
+                    .map(|local| local.ty.clone())
+                    .unwrap_or(ir::Type::Unknown),
+            });
+        }
+        sources
     }
 
     fn lower_if_stmt(&mut self, stmt: &ast::IfStmt) {
@@ -619,9 +883,9 @@ impl<'a> FunctionLowerer<'a> {
             self.unsupported("if unwrap lowering is not implemented yet", stmt.span);
             return;
         };
-        let then_block = self.function.add_block();
-        let else_block = self.function.add_block();
-        let join_block = self.function.add_block();
+        let then_block = self.add_block();
+        let else_block = self.add_block();
+        let join_block = self.add_block();
         let cond = self.lower_expr(condition);
         self.terminate(ir::Terminator {
             span: Some(stmt.span),
@@ -660,9 +924,9 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_while_stmt(&mut self, stmt: &ast::WhileStmt) {
-        let cond_block = self.function.add_block();
-        let body_block = self.function.add_block();
-        let exit_block = self.function.add_block();
+        let cond_block = self.add_block();
+        let body_block = self.add_block();
+        let exit_block = self.add_block();
 
         self.terminate(ir::Terminator::goto(cond_block));
 
@@ -690,8 +954,8 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_for_stmt(&mut self, stmt: &ast::ForStmt) {
         if stmt.bindings.is_empty() {
-            let body_block = self.function.add_block();
-            let exit_block = self.function.add_block();
+            let body_block = self.add_block();
+            let exit_block = self.add_block();
             self.terminate(ir::Terminator::goto(body_block));
             self.loop_exits.push(exit_block);
             self.current_block = Some(body_block);
@@ -712,7 +976,7 @@ impl<'a> FunctionLowerer<'a> {
         yield_body: &Block,
         span: Span,
     ) -> ir::Operand {
-        let result = self.function.add_temp(ir::Type::list(ir::Type::Unknown));
+        let result = self.add_temp(ir::Type::list(ir::Type::Unknown));
         self.push_statement(ir::Statement {
             span: Some(span),
             kind: ir::StatementKind::Assign {
@@ -722,8 +986,8 @@ impl<'a> FunctionLowerer<'a> {
         });
 
         if bindings.is_empty() {
-            let body_block = self.function.add_block();
-            let exit_block = self.function.add_block();
+            let body_block = self.add_block();
+            let exit_block = self.add_block();
             self.terminate(ir::Terminator::goto(body_block));
             self.loop_exits.push(exit_block);
             self.current_block = Some(body_block);
@@ -793,9 +1057,8 @@ impl<'a> FunctionLowerer<'a> {
                     continue;
                 }
                 let ty = binding.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
-                let local_id = self
-                    .function
-                    .add_local(binding.name.clone(), ty, binding.mutable, ir::LocalKind::Binding);
+                let local_id =
+                    self.add_local(binding.name.clone(), ty, binding.mutable, ir::LocalKind::Binding);
                 self.current_scope().insert(binding.name.clone(), local_id);
                 if let Some(value) = first.values.get(index) {
                     let operand = self.lower_expr(value);
@@ -818,7 +1081,7 @@ impl<'a> FunctionLowerer<'a> {
         };
 
         let iter_value = self.lower_expr(iterable);
-        let iter_local = self.function.add_temp(ir::Type::Unknown);
+        let iter_local = self.add_temp(ir::Type::Unknown);
         self.push_statement(ir::Statement {
             span: Some(iterable.span()),
             kind: ir::StatementKind::Assign {
@@ -830,9 +1093,9 @@ impl<'a> FunctionLowerer<'a> {
             },
         });
 
-        let cond_block = self.function.add_block();
-        let body_block = self.function.add_block();
-        let exit_block = self.function.add_block();
+        let cond_block = self.add_block();
+        let body_block = self.add_block();
+        let exit_block = self.add_block();
         self.terminate(ir::Terminator::goto(cond_block));
 
         self.current_block = Some(cond_block);
@@ -900,9 +1163,8 @@ impl<'a> FunctionLowerer<'a> {
             return;
         }
         let ty = binding.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
-        let local_id = self
-            .function
-            .add_local(binding.name.clone(), ty, binding.mutable, ir::LocalKind::Binding);
+        let local_id =
+            self.add_local(binding.name.clone(), ty, binding.mutable, ir::LocalKind::Binding);
         self.current_scope().insert(binding.name.clone(), local_id);
         self.push_statement(ir::Statement {
             span: Some(binding.span),
@@ -914,9 +1176,9 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_unwrap_block(&mut self, stmt: &ast::UnwrapBlockStmt) {
-        let failure_value = self.function.add_temp(ir::Type::Unknown);
-        let fallback_block = self.function.add_block();
-        let continue_block = self.function.add_block();
+        let failure_value = self.add_temp(ir::Type::Unknown);
+        let fallback_block = self.add_block();
+        let continue_block = self.add_block();
 
         for clause in &stmt.clauses {
             self.lower_unwrap_stmt(clause, Some((failure_value, fallback_block)));
@@ -950,7 +1212,7 @@ impl<'a> FunctionLowerer<'a> {
         shared_fallback: Option<(ir::LocalId, ir::BlockId)>,
     ) {
         let source = self.lower_expr(&stmt.value);
-        let source_local = self.function.add_temp(ir::Type::Unknown);
+        let source_local = self.add_temp(ir::Type::Unknown);
         self.push_statement(ir::Statement {
             span: Some(stmt.value.span()),
             kind: ir::StatementKind::Assign {
@@ -959,13 +1221,13 @@ impl<'a> FunctionLowerer<'a> {
             },
         });
 
-        let success_block = self.function.add_block();
+        let success_block = self.add_block();
         let failure_block = if let Some((_, target)) = shared_fallback {
             target
         } else {
-            self.function.add_block()
+            self.add_block()
         };
-        let continue_block = self.function.add_block();
+        let continue_block = self.add_block();
 
         let present = self.emit_temp_from_rvalue(
             ir::RValue::Call {
@@ -1053,9 +1315,7 @@ impl<'a> FunctionLowerer<'a> {
             return;
         }
         let ty = binding.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
-        let local_id = self
-            .function
-            .add_local(binding.name.clone(), ty, false, ir::LocalKind::Binding);
+        let local_id = self.add_local(binding.name.clone(), ty, false, ir::LocalKind::Binding);
         self.current_scope().insert(binding.name.clone(), local_id);
         self.push_statement(ir::Statement {
             span: Some(binding.span),
@@ -1068,15 +1328,15 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_match_stmt(&mut self, stmt: &ast::MatchStmt) {
         let scrutinee = self.lower_expr(&stmt.value);
-        let join_block = self.function.add_block();
-        self.current_block = self.current_block.or(Some(self.function.entry));
+        let join_block = self.add_block();
+        self.current_block = self.current_block.or(Some(self.function().entry));
 
         for (index, case) in stmt.cases.iter().enumerate() {
-            let body_block = self.function.add_block();
+            let body_block = self.add_block();
             let fail_block = if index + 1 == stmt.cases.len() {
                 join_block
             } else {
-                self.function.add_block()
+                self.add_block()
             };
             self.lower_match_case(
                 scrutinee.clone(),
@@ -1105,17 +1365,17 @@ impl<'a> FunctionLowerer<'a> {
         span: Span,
     ) -> ir::Operand {
         let scrutinee = self.lower_expr(value);
-        let result = self.function.add_temp(if partial {
+        let result = self.add_temp(if partial {
             ir::Type::option(ir::Type::Unknown)
         } else {
             ir::Type::Unknown
         });
-        let join_block = self.function.add_block();
-        self.current_block = self.current_block.or(Some(self.function.entry));
+        let join_block = self.add_block();
+        self.current_block = self.current_block.or(Some(self.function().entry));
 
         for case in cases {
-            let body_block = self.function.add_block();
-            let fail_block = self.function.add_block();
+            let body_block = self.add_block();
+            let fail_block = self.add_block();
             self.lower_match_case(
                 scrutinee.clone(),
                 case,
@@ -1168,7 +1428,7 @@ impl<'a> FunctionLowerer<'a> {
         let plan = self.lower_pattern_plan(scrutinee, &case.pattern);
         let mut condition = plan.condition;
         if let Some(guard) = &case.guard {
-            let guard_block = self.function.add_block();
+            let guard_block = self.add_block();
             self.terminate(ir::Terminator {
                 span: Some(case.span),
                 kind: ir::TerminatorKind::Branch {
@@ -1423,9 +1683,8 @@ impl<'a> FunctionLowerer<'a> {
 
     fn apply_pending_bindings(&mut self, bindings: Vec<PendingBinding>) {
         for binding in bindings {
-            let local_id = self
-                .function
-                .add_local(binding.name.clone(), binding.ty, false, ir::LocalKind::Binding);
+            let local_id =
+                self.add_local(binding.name.clone(), binding.ty, false, ir::LocalKind::Binding);
             self.current_scope().insert(binding.name.clone(), local_id);
             let value = match binding.source {
                 PendingBindingSource::Operand(value) => ir::RValue::Use(value),
@@ -1447,7 +1706,7 @@ impl<'a> FunctionLowerer<'a> {
         ty: ir::Type,
         span: Option<Span>,
     ) -> ir::Operand {
-        let temp = self.function.add_temp(ty);
+        let temp = self.add_temp(ty);
         self.push_statement(ir::Statement {
             span,
             kind: ir::StatementKind::Assign {
@@ -1483,6 +1742,9 @@ impl<'a> FunctionLowerer<'a> {
     fn lower_expr(&mut self, expr: &Expr) -> ir::Operand {
         if self.current_block.is_none() {
             return ir::Operand::Const(ir::Constant::Unit);
+        }
+        if !matches!(expr, Expr::Lambda { .. }) && contains_placeholder_expr(expr) {
+            return self.lower_placeholder_lambda(expr);
         }
         match expr {
             Expr::Identifier { name, span } => self.lookup_value(name).unwrap_or_else(|| {
@@ -1526,7 +1788,7 @@ impl<'a> FunctionLowerer<'a> {
                     self.unsupported("expression form is not implemented in lowering", expr.span());
                     return ir::Operand::Const(ir::Constant::Unit);
                 };
-                let temp = self.function.add_temp(ir::Type::Unknown);
+                let temp = self.add_temp(ir::Type::Unknown);
                 self.push_statement(ir::Statement {
                     span: Some(expr.span()),
                     kind: ir::StatementKind::Assign {
@@ -1546,10 +1808,10 @@ impl<'a> FunctionLowerer<'a> {
         else_branch: &ElseExprBranch,
         span: Span,
     ) -> ir::Operand {
-        let temp = self.function.add_temp(ir::Type::Unknown);
-        let then_id = self.function.add_block();
-        let else_id = self.function.add_block();
-        let join_id = self.function.add_block();
+        let temp = self.add_temp(ir::Type::Unknown);
+        let then_id = self.add_block();
+        let else_id = self.add_block();
+        let join_id = self.add_block();
 
         let cond = self.lower_expr(condition);
         self.terminate(ir::Terminator {
@@ -1656,22 +1918,26 @@ impl<'a> FunctionLowerer<'a> {
                 operand: self.lower_expr(left),
                 ty: lower_type_ref(target),
             }),
-            Expr::Lambda { span, .. } => {
-                self.unsupported("lambda lowering is not implemented yet", *span);
-                None
-            }
+            Expr::Lambda { params, body, span } => Some(self.lower_lambda_rvalue(params, body, *span)),
             Expr::AnonymousInterface { span, .. } => {
                 self.unsupported("anonymous interface lowering is not implemented yet", *span);
                 None
             }
-            Expr::RecordUpdate { span, .. } => {
-                self.unsupported("record update lowering is not implemented yet", *span);
-                None
-            }
-            Expr::Placeholder { span } => {
-                self.unsupported("placeholder lowering is not implemented yet", *span);
-                None
-            }
+            Expr::RecordUpdate {
+                receiver,
+                updates,
+                ..
+            } => Some(ir::RValue::RecordUpdate {
+                base: self.lower_expr(receiver),
+                updates: updates
+                    .iter()
+                    .map(|update| ir::NamedOperand {
+                        name: update.name.clone().unwrap_or_default(),
+                        value: self.lower_expr(&update.value),
+                    })
+                    .collect(),
+            }),
+            Expr::Placeholder { .. } => None,
             _ => None,
         }
     }
@@ -1739,18 +2005,45 @@ impl<'a> FunctionLowerer<'a> {
         if let Some(global) = self.globals.get(name).copied() {
             return Some(ir::Place::Global(global));
         }
+        if let Some(local) = self.capture_local(name) {
+            return Some(ir::Place::Local(local));
+        }
         if let (Some(this_local), Some(_)) = (self.this_local, self.implicit_fields.get(name)) {
             return Some(ir::Place::Field {
                 base: Box::new(ir::Operand::Copy(Box::new(ir::Place::Local(this_local)))),
                 name: name.to_string(),
             });
         }
+        if self.implicit_fields.contains_key(name) {
+            if let Some(this_local) = self.capture_local("this") {
+                self.this_local = Some(this_local);
+                return Some(ir::Place::Field {
+                    base: Box::new(ir::Operand::Copy(Box::new(ir::Place::Local(this_local)))),
+                    name: name.to_string(),
+                });
+            }
+        }
         None
+    }
+
+    fn capture_local(&mut self, name: &str) -> Option<ir::LocalId> {
+        if let Some(local) = self.capture_locals.get(name).copied() {
+            return Some(local);
+        }
+        let source = self.capture_sources.get(name).cloned()?;
+        let local = self.add_capture(name.to_string(), source.ty);
+        self.root_scope().insert(name.to_string(), local);
+        if name == "this" {
+            self.this_local = Some(local);
+        }
+        self.capture_locals.insert(name.to_string(), local);
+        self.closure_captures.push(source.operand);
+        Some(local)
     }
 
     fn current_block_mut(&mut self) -> Option<&mut ir::BasicBlock> {
         let current = self.current_block?;
-        self.function.block_mut(current)
+        self.function_mut().block_mut(current)
     }
 
     fn push_statement(&mut self, statement: ir::Statement) {
@@ -1767,7 +2060,7 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn block_has_predecessor(&self, target: ir::BlockId) -> bool {
-        self.function.blocks.iter().any(|block| match &block.terminator.kind {
+        self.function().blocks.iter().any(|block| match &block.terminator.kind {
             ir::TerminatorKind::Goto(dest) => *dest == target,
             ir::TerminatorKind::Branch {
                 then_block,
@@ -1786,6 +2079,13 @@ impl<'a> FunctionLowerer<'a> {
             self.scopes.push(HashMap::new());
         }
         self.scopes.last_mut().expect("scope")
+    }
+
+    fn root_scope(&mut self) -> &mut HashMap<String, ir::LocalId> {
+        if self.scopes.is_empty() {
+            self.scopes.push(HashMap::new());
+        }
+        self.scopes.first_mut().expect("root scope")
     }
 
     fn push_scope(&mut self) {
@@ -1891,6 +2191,519 @@ fn expr_path(expr: &Expr) -> Option<Vec<String>> {
         }
         Expr::Group { inner, .. } => expr_path(inner),
         _ => None,
+    }
+}
+
+fn contains_placeholder_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Placeholder { .. } => true,
+        Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
+            items.iter().any(contains_placeholder_expr)
+        }
+        Expr::Call { callee, args, .. } => {
+            contains_placeholder_expr(callee)
+                || args.iter().any(|arg| contains_placeholder_expr(&arg.value))
+        }
+        Expr::Member { receiver, .. } => contains_placeholder_expr(receiver),
+        Expr::Index { receiver, index, .. } => {
+            contains_placeholder_expr(receiver) || contains_placeholder_expr(index)
+        }
+        Expr::RecordUpdate { receiver, updates, .. } => {
+            contains_placeholder_expr(receiver)
+                || updates.iter().any(|update| contains_placeholder_expr(&update.value))
+        }
+        Expr::RecordLiteral { fields, .. } => fields.iter().any(|field| contains_placeholder_expr(&field.value)),
+        Expr::AnonymousInterface { methods, .. } => methods.iter().any(|method| {
+            body_contains_placeholder(&method.body)
+        }),
+        Expr::Unary { expr, .. } => contains_placeholder_expr(expr),
+        Expr::Binary { left, right, .. } => {
+            contains_placeholder_expr(left) || contains_placeholder_expr(right)
+        }
+        Expr::Is { left, .. } => contains_placeholder_expr(left),
+        Expr::If {
+            condition,
+            then_block,
+            else_branch,
+            ..
+        } => {
+            contains_placeholder_expr(condition)
+                || block_contains_placeholder(then_block)
+                || match else_branch.as_ref() {
+                    ElseExprBranch::If(expr) => contains_placeholder_expr(expr),
+                    ElseExprBranch::Block(block) => block_contains_placeholder(block),
+                }
+        }
+        Expr::Block { body, .. } => block_contains_placeholder(body),
+        Expr::Match { value, cases, .. } => {
+            contains_placeholder_expr(value)
+                || cases.iter().any(|case| match &case.body {
+                    MatchCaseBody::Expr(expr) => contains_placeholder_expr(expr),
+                    MatchCaseBody::Block(block) => block_contains_placeholder(block),
+                })
+        }
+        Expr::ForYield {
+            bindings,
+            yield_body,
+            ..
+        } => {
+            bindings.iter().any(|binding| {
+                binding
+                    .iterable
+                    .as_ref()
+                    .is_some_and(contains_placeholder_expr)
+                    || binding.values.iter().any(contains_placeholder_expr)
+            }) || block_contains_placeholder(yield_body)
+        }
+        Expr::Lambda { .. } => false,
+        Expr::Group { inner, .. } => contains_placeholder_expr(inner),
+        Expr::Identifier { .. }
+        | Expr::Integer { .. }
+        | Expr::Float { .. }
+        | Expr::String { .. }
+        | Expr::Bool { .. }
+        | Expr::Unit { .. } => false,
+    }
+}
+
+fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
+    match expr {
+        Expr::Placeholder { span } => Expr::Identifier {
+            name: name.to_string(),
+            span: *span,
+        },
+        Expr::ListLiteral { items, span } => Expr::ListLiteral {
+            items: items
+                .iter()
+                .map(|item| rewrite_placeholder_expr(item, name))
+                .collect(),
+            span: *span,
+        },
+        Expr::TupleLiteral { items, span } => Expr::TupleLiteral {
+            items: items
+                .iter()
+                .map(|item| rewrite_placeholder_expr(item, name))
+                .collect(),
+            span: *span,
+        },
+        Expr::Call { callee, args, span } => Expr::Call {
+            callee: Box::new(rewrite_placeholder_expr(callee, name)),
+            args: args
+                .iter()
+                .map(|arg| ast::CallArg {
+                    name: arg.name.clone(),
+                    value: rewrite_placeholder_expr(&arg.value, name),
+                    span: arg.span,
+                })
+                .collect(),
+            span: *span,
+        },
+        Expr::Member {
+            receiver,
+            name: member,
+            span,
+        } => Expr::Member {
+            receiver: Box::new(rewrite_placeholder_expr(receiver, name)),
+            name: member.clone(),
+            span: *span,
+        },
+        Expr::Index {
+            receiver,
+            index,
+            span,
+        } => Expr::Index {
+            receiver: Box::new(rewrite_placeholder_expr(receiver, name)),
+            index: Box::new(rewrite_placeholder_expr(index, name)),
+            span: *span,
+        },
+        Expr::RecordUpdate {
+            receiver,
+            updates,
+            span,
+        } => Expr::RecordUpdate {
+            receiver: Box::new(rewrite_placeholder_expr(receiver, name)),
+            updates: updates
+                .iter()
+                .map(|update| ast::CallArg {
+                    name: update.name.clone(),
+                    value: rewrite_placeholder_expr(&update.value, name),
+                    span: update.span,
+                })
+                .collect(),
+            span: *span,
+        },
+        Expr::RecordLiteral { fields, values, span } => Expr::RecordLiteral {
+            fields: fields
+                .iter()
+                .map(|field| ast::CallArg {
+                    name: field.name.clone(),
+                    value: rewrite_placeholder_expr(&field.value, name),
+                    span: field.span,
+                })
+                .collect(),
+            values: values
+                .iter()
+                .map(|value| rewrite_placeholder_expr(value, name))
+                .collect(),
+            span: *span,
+        },
+        Expr::AnonymousInterface {
+            interfaces,
+            methods,
+            span,
+        } => Expr::AnonymousInterface {
+            interfaces: interfaces.clone(),
+            methods: methods
+                .iter()
+                .map(|method| ast::MethodDecl {
+                    annotations: method.annotations.clone(),
+                    visibility: method.visibility,
+                    name: method.name.clone(),
+                    type_params: method.type_params.clone(),
+                    params: method.params.clone(),
+                    return_type: method.return_type.clone(),
+                    body: method.body.as_ref().map(|body| rewrite_callable_body(body, name)),
+                    span: method.span,
+                })
+                .collect(),
+            span: *span,
+        },
+        Expr::Unary { op, expr, span } => Expr::Unary {
+            op: *op,
+            expr: Box::new(rewrite_placeholder_expr(expr, name)),
+            span: *span,
+        },
+        Expr::Binary {
+            left,
+            op,
+            right,
+            span,
+        } => Expr::Binary {
+            left: Box::new(rewrite_placeholder_expr(left, name)),
+            op: *op,
+            right: Box::new(rewrite_placeholder_expr(right, name)),
+            span: *span,
+        },
+        Expr::Is { left, target, span } => Expr::Is {
+            left: Box::new(rewrite_placeholder_expr(left, name)),
+            target: target.clone(),
+            span: *span,
+        },
+        Expr::If {
+            condition,
+            then_block,
+            else_branch,
+            span,
+        } => Expr::If {
+            condition: Box::new(rewrite_placeholder_expr(condition, name)),
+            then_block: rewrite_block(then_block, name),
+            else_branch: Box::new(match else_branch.as_ref() {
+                ElseExprBranch::If(expr) => {
+                    ElseExprBranch::If(Box::new(rewrite_placeholder_expr(expr, name)))
+                }
+                ElseExprBranch::Block(block) => ElseExprBranch::Block(rewrite_block(block, name)),
+            }),
+            span: *span,
+        },
+        Expr::Block { body, span } => Expr::Block {
+            body: rewrite_block(body, name),
+            span: *span,
+        },
+        Expr::Match {
+            partial,
+            value,
+            cases,
+            span,
+        } => Expr::Match {
+            partial: *partial,
+            value: Box::new(rewrite_placeholder_expr(value, name)),
+            cases: cases
+                .iter()
+                .map(|case| ast::MatchCase {
+                    pattern: case.pattern.clone(),
+                    guard: case.guard.as_ref().map(|guard| rewrite_placeholder_expr(guard, name)),
+                    body: match &case.body {
+                        MatchCaseBody::Expr(expr) => {
+                            MatchCaseBody::Expr(rewrite_placeholder_expr(expr, name))
+                        }
+                        MatchCaseBody::Block(block) => MatchCaseBody::Block(rewrite_block(block, name)),
+                    },
+                    span: case.span,
+                })
+                .collect(),
+            span: *span,
+        },
+        Expr::ForYield {
+            bindings,
+            yield_body,
+            span,
+        } => Expr::ForYield {
+            bindings: bindings
+                .iter()
+                .map(|binding| ast::ForBinding {
+                    bindings: binding.bindings.clone(),
+                    iterable: binding
+                        .iterable
+                        .as_ref()
+                        .map(|iterable| rewrite_placeholder_expr(iterable, name)),
+                    values: binding
+                        .values
+                        .iter()
+                        .map(|value| rewrite_placeholder_expr(value, name))
+                        .collect(),
+                    span: binding.span,
+                })
+                .collect(),
+            yield_body: rewrite_block(yield_body, name),
+            span: *span,
+        },
+        Expr::Lambda { .. } => expr.clone(),
+        Expr::Group { inner, span } => Expr::Group {
+            inner: Box::new(rewrite_placeholder_expr(inner, name)),
+            span: *span,
+        },
+        Expr::Identifier { .. }
+        | Expr::Integer { .. }
+        | Expr::Float { .. }
+        | Expr::String { .. }
+        | Expr::Bool { .. }
+        | Expr::Unit { .. } => expr.clone(),
+    }
+}
+
+fn rewrite_callable_body(body: &CallableBody, name: &str) -> CallableBody {
+    match body {
+        CallableBody::Expr(expr) => CallableBody::Expr(rewrite_placeholder_expr(expr, name)),
+        CallableBody::Block(block) => CallableBody::Block(rewrite_block(block, name)),
+    }
+}
+
+fn rewrite_block(block: &Block, name: &str) -> Block {
+    Block {
+        statements: block
+            .statements
+            .iter()
+            .map(|stmt| rewrite_stmt(stmt, name))
+            .collect(),
+        span: block.span,
+    }
+}
+
+fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
+    match stmt {
+        Stmt::Binding(binding) => Stmt::Binding(ast::BindingStmt {
+            visibility: binding.visibility,
+            bindings: binding.bindings.clone(),
+            values: binding
+                .values
+                .iter()
+                .map(|value| rewrite_placeholder_expr(value, name))
+                .collect(),
+            span: binding.span,
+        }),
+        Stmt::Assignment(assignment) => Stmt::Assignment(ast::AssignmentStmt {
+            targets: assignment
+                .targets
+                .iter()
+                .map(|target| rewrite_placeholder_expr(target, name))
+                .collect(),
+            operator: assignment.operator,
+            values: assignment
+                .values
+                .iter()
+                .map(|value| rewrite_placeholder_expr(value, name))
+                .collect(),
+            span: assignment.span,
+        }),
+        Stmt::If(stmt) => Stmt::If(ast::IfStmt {
+            condition: stmt
+                .condition
+                .as_ref()
+                .map(|condition| rewrite_placeholder_expr(condition, name)),
+            bindings: stmt.bindings.clone(),
+            binding_value: stmt
+                .binding_value
+                .as_ref()
+                .map(|value| rewrite_placeholder_expr(value, name)),
+            then_block: rewrite_block(&stmt.then_block, name),
+            else_branch: stmt.else_branch.as_ref().map(|branch| match branch {
+                ElseBranch::If(stmt) => ElseBranch::If(Box::new(match rewrite_stmt(&Stmt::If((**stmt).clone()), name) {
+                    Stmt::If(stmt) => stmt,
+                    _ => unreachable!(),
+                })),
+                ElseBranch::Block(block) => ElseBranch::Block(rewrite_block(block, name)),
+            }),
+            span: stmt.span,
+        }),
+        Stmt::Match(stmt) => Stmt::Match(ast::MatchStmt {
+            partial: stmt.partial,
+            value: rewrite_placeholder_expr(&stmt.value, name),
+            cases: rewrite_match_cases(&stmt.cases, name),
+            span: stmt.span,
+        }),
+        Stmt::While(stmt) => Stmt::While(ast::WhileStmt {
+            condition: rewrite_placeholder_expr(&stmt.condition, name),
+            body: rewrite_block(&stmt.body, name),
+            span: stmt.span,
+        }),
+        Stmt::For(stmt) => Stmt::For(ast::ForStmt {
+            bindings: stmt
+                .bindings
+                .iter()
+                .map(|binding| ast::ForBinding {
+                    bindings: binding.bindings.clone(),
+                    iterable: binding
+                        .iterable
+                        .as_ref()
+                        .map(|iterable| rewrite_placeholder_expr(iterable, name)),
+                    values: binding
+                        .values
+                        .iter()
+                        .map(|value| rewrite_placeholder_expr(value, name))
+                        .collect(),
+                    span: binding.span,
+                })
+                .collect(),
+            body: rewrite_block(&stmt.body, name),
+            span: stmt.span,
+        }),
+        Stmt::Return(stmt) => Stmt::Return(ast::ReturnStmt {
+            value: stmt
+                .value
+                .as_ref()
+                .map(|value| rewrite_placeholder_expr(value, name)),
+            span: stmt.span,
+        }),
+        Stmt::Break(stmt) => Stmt::Break(stmt.clone()),
+        Stmt::Expr(stmt) => Stmt::Expr(ast::ExprStmt {
+            expr: rewrite_placeholder_expr(&stmt.expr, name),
+            span: stmt.span,
+        }),
+        Stmt::Unwrap(stmt) => Stmt::Unwrap(ast::UnwrapStmt {
+            bindings: stmt.bindings.clone(),
+            value: rewrite_placeholder_expr(&stmt.value, name),
+            else_block: stmt.else_block.as_ref().map(|block| rewrite_block(block, name)),
+            span: stmt.span,
+        }),
+        Stmt::UnwrapBlock(stmt) => Stmt::UnwrapBlock(ast::UnwrapBlockStmt {
+            clauses: stmt
+                .clauses
+                .iter()
+                .map(|clause| ast::UnwrapStmt {
+                    bindings: clause.bindings.clone(),
+                    value: rewrite_placeholder_expr(&clause.value, name),
+                    else_block: clause.else_block.as_ref().map(|block| rewrite_block(block, name)),
+                    span: clause.span,
+                })
+                .collect(),
+            else_block: stmt.else_block.as_ref().map(|block| rewrite_block(block, name)),
+            span: stmt.span,
+        }),
+        Stmt::LocalFunction(function) => Stmt::LocalFunction(ast::FunctionDecl {
+            annotations: function.annotations.clone(),
+            visibility: function.visibility,
+            name: function.name.clone(),
+            type_params: function.type_params.clone(),
+            params: function.params.clone(),
+            return_type: function.return_type.clone(),
+            body: rewrite_callable_body(&function.body, name),
+            span: function.span,
+        }),
+    }
+}
+
+fn rewrite_match_cases(cases: &[ast::MatchCase], name: &str) -> Vec<ast::MatchCase> {
+    cases
+        .iter()
+        .map(|case| ast::MatchCase {
+            pattern: case.pattern.clone(),
+            guard: case
+                .guard
+                .as_ref()
+                .map(|guard| rewrite_placeholder_expr(guard, name)),
+            body: match &case.body {
+                MatchCaseBody::Expr(expr) => MatchCaseBody::Expr(rewrite_placeholder_expr(expr, name)),
+                MatchCaseBody::Block(block) => MatchCaseBody::Block(rewrite_block(block, name)),
+            },
+            span: case.span,
+        })
+        .collect()
+}
+
+fn block_contains_placeholder(block: &Block) -> bool {
+    block.statements.iter().any(stmt_contains_placeholder)
+}
+
+fn body_contains_placeholder(body: &Option<CallableBody>) -> bool {
+    body.as_ref().is_some_and(|body| match body {
+        CallableBody::Expr(expr) => contains_placeholder_expr(expr),
+        CallableBody::Block(block) => block_contains_placeholder(block),
+    })
+}
+
+fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Binding(binding) => binding.values.iter().any(contains_placeholder_expr),
+        Stmt::Assignment(assignment) => {
+            assignment.targets.iter().any(contains_placeholder_expr)
+                || assignment.values.iter().any(contains_placeholder_expr)
+        }
+        Stmt::If(stmt) => {
+            stmt.condition
+                .as_ref()
+                .is_some_and(contains_placeholder_expr)
+                || stmt
+                    .binding_value
+                    .as_ref()
+                    .is_some_and(contains_placeholder_expr)
+                || block_contains_placeholder(&stmt.then_block)
+                || stmt.else_branch.as_ref().is_some_and(|branch| match branch {
+                    ElseBranch::If(stmt) => stmt_contains_placeholder(&Stmt::If((**stmt).clone())),
+                    ElseBranch::Block(block) => block_contains_placeholder(block),
+                })
+        }
+        Stmt::Match(stmt) => {
+            contains_placeholder_expr(&stmt.value)
+                || stmt.cases.iter().any(|case| match &case.body {
+                    MatchCaseBody::Expr(expr) => contains_placeholder_expr(expr),
+                    MatchCaseBody::Block(block) => block_contains_placeholder(block),
+                })
+        }
+        Stmt::While(stmt) => {
+            contains_placeholder_expr(&stmt.condition) || block_contains_placeholder(&stmt.body)
+        }
+        Stmt::For(stmt) => {
+            stmt.bindings.iter().any(|binding| {
+                binding
+                    .iterable
+                    .as_ref()
+                    .is_some_and(contains_placeholder_expr)
+                    || binding.values.iter().any(contains_placeholder_expr)
+            }) || block_contains_placeholder(&stmt.body)
+        }
+        Stmt::Return(stmt) => stmt
+            .value
+            .as_ref()
+            .is_some_and(contains_placeholder_expr),
+        Stmt::Break(_) => false,
+        Stmt::Expr(stmt) => contains_placeholder_expr(&stmt.expr),
+        Stmt::Unwrap(stmt) => {
+            contains_placeholder_expr(&stmt.value)
+                || stmt
+                    .else_block
+                    .as_ref()
+                    .is_some_and(block_contains_placeholder)
+        }
+        Stmt::UnwrapBlock(stmt) => {
+            stmt.clauses
+                .iter()
+                .any(|clause| contains_placeholder_expr(&clause.value))
+                || stmt
+                    .else_block
+                    .as_ref()
+                    .is_some_and(block_contains_placeholder)
+        }
+        Stmt::LocalFunction(function) => body_contains_placeholder(&Some(function.body.clone())),
     }
 }
 
@@ -2213,6 +3026,58 @@ mod tests {
                         callee: ir::Callee::Intrinsic(ir::Intrinsic::IterHasNext),
                         ..
                     },
+                    ..
+                }
+            ))
+        }));
+    }
+
+    #[test]
+    fn lowers_local_functions_lambdas_record_updates_and_placeholders() {
+        let program = parse_inline(
+            r#"
+            record Amount {
+                amount Int
+                description Str
+            }
+
+            def main() Int {
+                base = 10
+                inc (Int) -> Int = _ + 1
+                plus = value Int -> value + base
+
+                def add(value Int) Int = plus(value)
+
+                current = Amount(1, "a")
+                updated = current with { amount = add(inc(1)) }
+                return updated.amount
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        assert!(
+            ir.functions.len() >= 4,
+            "expected nested functions for lambdas/local defs, got {:#?}",
+            ir.functions
+        );
+        let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
+        assert!(main.blocks.iter().any(|block| {
+            block.statements.iter().any(|stmt| matches!(
+                stmt.kind,
+                ir::StatementKind::Assign {
+                    value: ir::RValue::Closure { .. },
+                    ..
+                }
+            ))
+        }));
+        assert!(main.blocks.iter().any(|block| {
+            block.statements.iter().any(|stmt| matches!(
+                stmt.kind,
+                ir::StatementKind::Assign {
+                    value: ir::RValue::RecordUpdate { .. },
                     ..
                 }
             ))

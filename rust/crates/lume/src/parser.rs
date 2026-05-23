@@ -1158,9 +1158,28 @@ impl<'a> Parser<'a> {
     fn try_parse_lambda_expr(&mut self) -> Option<Expr> {
         let checkpoint = self.checkpoint();
         if self.at(TokenKind::Identifier) {
-            if let Some(param) = self.parse_lambda_param() {
+            if let Some((name, start)) = self.expect_identifier("expected lambda parameter") {
+                let mut ty = None;
+                let ty_checkpoint = self.checkpoint();
+                if self.can_start_type_ref() {
+                    if let Some(primary) = self.parse_primary_type_ref() {
+                        if self.at(TokenKind::Arrow) {
+                            ty = Some(primary);
+                        } else {
+                            self.restore(ty_checkpoint);
+                            ty = self.parse_type_ref();
+                        }
+                    } else {
+                        self.restore(ty_checkpoint);
+                    }
+                }
                 if self.match_token(TokenKind::Arrow) {
-                    let start = param.span;
+                    let end = ty.as_ref().map(TypeRef::span).unwrap_or(start);
+                    let param = LambdaParam {
+                        name,
+                        ty,
+                        span: start.cover(end),
+                    };
                     let body = match self.parse_lambda_body() {
                         Some(body) => body,
                         None => {
@@ -2689,6 +2708,18 @@ def run(flag Bool) Int {
     #[test]
     fn parses_lambda_expression() {
         let result = parse("def make() Unit = values.map((x, y) -> x + y)\n");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn parses_single_param_typed_lambda_without_parens() {
+        let result = parse(
+            r#"
+def main() Unit {
+    value = item Int -> item + 1
+}
+"#,
+        );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 

@@ -53,24 +53,26 @@ pub fn check_path(path: impl AsRef<Path>) -> Result<PathCheckResult, String> {
 
     let (graph, root_path) = load_module_graph(path.as_ref())?;
     let stdlib_dir = find_stdlib_dir(path.as_ref().parent().unwrap_or_else(|| Path::new(".")))?;
-    let world = World::from_graph(graph, root_path, stdlib_dir)?;
+    let mut world = World::from_graph(graph, root_path, stdlib_dir)?;
 
     let mut diagnostics = Vec::new();
-    for module_path in &world.order {
-        let Some(module) = world.modules.get(module_path) else {
+    for module_path in world.order.clone() {
+        let Some(module) = world.modules.get(&module_path) else {
             continue;
         };
-        let mut checker = Checker::new(&world, module);
-        checker.check_module();
-        diagnostics.extend(
-            checker
-                .diagnostics
-                .into_iter()
-                .map(|diagnostic| crate::resolver::LocatedDiagnostic {
-                    path: module.display_path.clone(),
-                    diagnostic,
-                }),
-        );
+        let display_path = module.display_path.clone();
+        let (module_diagnostics, checked_globals) = {
+            let mut checker = Checker::new(&world, module);
+            checker.check_module();
+            (checker.diagnostics, checker.globals.clone())
+        };
+        world.checked_globals.insert(module_path.clone(), checked_globals);
+        diagnostics.extend(module_diagnostics.into_iter().map(|diagnostic| {
+            crate::resolver::LocatedDiagnostic {
+                path: display_path.clone(),
+                diagnostic,
+            }
+        }));
     }
 
     Ok(PathCheckResult { diagnostics })
@@ -515,6 +517,7 @@ struct Checker<'a> {
     diagnostics: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, ValueInfo>>,
     type_params: Vec<HashSet<String>>,
+    placeholder_hints: Vec<Ty>,
     current_return: Ty,
     loop_depth: usize,
     globals: HashMap<String, ValueInfo>,
@@ -528,6 +531,7 @@ impl<'a> Checker<'a> {
             diagnostics: Vec::new(),
             scopes: Vec::new(),
             type_params: Vec::new(),
+            placeholder_hints: Vec::new(),
             current_return: Ty::Unknown,
             loop_depth: 0,
             globals: HashMap::new(),
@@ -554,9 +558,10 @@ impl<'a> Checker<'a> {
                 .iter()
                 .map(|expr| self.check_expr(expr))
                 .collect::<Vec<_>>();
+            let slot_types = self.binding_slot_types(&binding_stmt.bindings, &value_types);
             for (index, binding) in binding_stmt.bindings.iter().enumerate() {
                 let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
-                let inferred = value_types.get(index).cloned().unwrap_or(Ty::Unknown);
+                let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
                 let ty = explicit.clone().unwrap_or_else(|| inferred.clone());
                 if let Some(expected) = explicit {
                     self.require_assignable(
@@ -752,9 +757,10 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|expr| self.check_expr(expr))
                     .collect::<Vec<_>>();
+                let slot_types = self.binding_slot_types(&binding_stmt.bindings, &value_types);
                 for (index, binding) in binding_stmt.bindings.iter().enumerate() {
                     let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
-                    let inferred = value_types.get(index).cloned().unwrap_or(Ty::Unknown);
+                    let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
                     let ty = explicit.clone().unwrap_or_else(|| inferred.clone());
                     if let Some(expected) = explicit {
                         self.require_assignable(
@@ -838,18 +844,23 @@ impl<'a> Checker<'a> {
             Stmt::Unwrap(stmt) => {
                 let value_ty = self.check_expr(&stmt.value);
                 let inner = self.unwrap_inner_type(&value_ty);
-                for binding in &stmt.bindings {
+                let slot_types = self.destructure_slots(&inner, stmt.bindings.len());
+                for (index, binding) in stmt.bindings.iter().enumerate() {
+                    let inferred = slot_types
+                        .get(index)
+                        .cloned()
+                        .unwrap_or(Ty::Unknown);
                     let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
-                    let ty = explicit.clone().unwrap_or_else(|| inner.clone());
+                    let ty = explicit.clone().unwrap_or_else(|| inferred.clone());
                     if let Some(expected) = explicit {
                         self.require_assignable(
-                            &inner,
+                            &inferred,
                             &expected,
                             binding.span,
                             "invalid_binding_type",
                             format!(
                                 "cannot unwrap '{}' into binding '{}' of type '{}'",
-                                inner.describe(),
+                                inferred.describe(),
                                 binding.name,
                                 expected.describe()
                             ),
@@ -943,11 +954,42 @@ impl<'a> Checker<'a> {
         for value in &binding.values {
             self.check_expr(value);
         }
-        for local in &binding.bindings {
+        let slot_types = self.destructure_slots(&item_ty, binding.bindings.len());
+        for (index, local) in binding.bindings.iter().enumerate() {
+            let inferred = slot_types
+                .get(index)
+                .cloned()
+                .unwrap_or(Ty::Unknown);
             let explicit = local.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
-            let ty = explicit.clone().unwrap_or_else(|| item_ty.clone());
+            let ty = explicit.clone().unwrap_or_else(|| inferred.clone());
             self.define_local(&local.name, ty, local.mutable);
         }
+    }
+
+    fn binding_slot_types(&self, bindings: &[crate::ast::Binding], value_types: &[Ty]) -> Vec<Ty> {
+        if bindings.len() > 1 && value_types.len() == 1 {
+            return self.destructure_slots(&value_types[0], bindings.len());
+        }
+        (0..bindings.len())
+            .map(|index| value_types.get(index).cloned().unwrap_or(Ty::Unknown))
+            .collect()
+    }
+
+    fn destructure_slots(&self, ty: &Ty, count: usize) -> Vec<Ty> {
+        let mut slots = match ty {
+            Ty::Tuple(items) => items.clone(),
+            Ty::Record(fields) => fields.iter().map(|(_, ty)| ty.clone()).collect(),
+            Ty::Named(name, _) => self
+                .lookup_any_type(name)
+                .map(|sig| sig.fields.iter().map(|field| field.ty.clone()).collect())
+                .unwrap_or_default(),
+            Ty::Unknown => vec![Ty::Unknown; count],
+            _ => Vec::new(),
+        };
+        if slots.len() < count {
+            slots.resize(count, Ty::Unknown);
+        }
+        slots
     }
 
     fn check_assignment(&mut self, assignment: &AssignmentStmt) {
@@ -1035,6 +1077,19 @@ impl<'a> Checker<'a> {
     }
 
     fn check_expr(&mut self, expr: &Expr) -> Ty {
+        self.check_expr_against(expr, &Ty::Unknown)
+    }
+
+    fn check_expr_against(&mut self, expr: &Expr, expected: &Ty) -> Ty {
+        if let Ty::Function(params, ret) = expected {
+            if !matches!(expr, Expr::Lambda { .. }) && contains_placeholder_expr(expr) {
+                let placeholder_ty = params.first().cloned().unwrap_or(Ty::Unknown);
+                self.placeholder_hints.push(placeholder_ty);
+                let body_ty = self.check_expr_against(expr, ret);
+                self.placeholder_hints.pop();
+                return Ty::Function(params.clone(), Box::new(body_ty));
+            }
+        }
         match expr {
             Expr::Identifier { name, span } => self
                 .lookup_value(name)
@@ -1045,7 +1100,7 @@ impl<'a> Checker<'a> {
                     self.add_error("undefined_name", format!("undefined name '{}'", name), *span);
                     Ty::Unknown
                 }),
-            Expr::Placeholder { .. } => Ty::Unknown,
+            Expr::Placeholder { .. } => self.placeholder_hints.last().cloned().unwrap_or(Ty::Unknown),
             Expr::Integer { .. } => Ty::int(),
             Expr::Float { .. } => Ty::float(),
             Expr::String { .. } => Ty::str(),
@@ -1067,6 +1122,9 @@ impl<'a> Checker<'a> {
                 if let Some(ty) = self.module_member_value_type(expr) {
                     return ty;
                 }
+                if let Some(ty) = self.static_member_value_type(receiver, name) {
+                    return ty;
+                }
                 let receiver_ty = self.check_expr(receiver);
                 self.member_type(&receiver_ty, name).unwrap_or_else(|| {
                     self.add_error(
@@ -1086,10 +1144,26 @@ impl<'a> Checker<'a> {
             } => {
                 let receiver_ty = self.check_expr(receiver);
                 let index_ty = self.check_expr(index);
-                if !index_ty.is_int_like() && !matches!(index_ty, Ty::Unknown) {
+                let valid_index = match &receiver_ty {
+                    Ty::Named(name, args) if (name == "Array" || name == "List") && args.len() == 1 => {
+                        index_ty.is_int_like() || matches!(index_ty, Ty::Unknown)
+                    }
+                    Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
+                        self.is_assignable(&index_ty, &args[0]) || matches!(index_ty, Ty::Unknown)
+                    }
+                    _ => index_ty.is_int_like() || matches!(index_ty, Ty::Unknown),
+                };
+                if !valid_index {
                     self.add_error(
                         "invalid_index_type",
-                        format!("index expression expects Int, got '{}'", index_ty.describe()),
+                        match &receiver_ty {
+                            Ty::Named(name, args) if name == "Map" && args.len() == 2 => format!(
+                                "index expression expects '{}', got '{}'",
+                                args[0].describe(),
+                                index_ty.describe()
+                            ),
+                            _ => format!("index expression expects Int, got '{}'", index_ty.describe()),
+                        },
                         index.span(),
                     );
                 }
@@ -1194,26 +1268,54 @@ impl<'a> Checker<'a> {
                 self.pop_scope();
                 Ty::list(yield_ty)
             }
-            Expr::Lambda { params, body, .. } => {
-                self.push_scope();
-                let mut param_types = Vec::new();
-                for param in params {
-                    let ty = param
-                        .ty
-                        .as_ref()
-                        .map(|ty| self.ty_from_type_ref(ty))
-                        .unwrap_or(Ty::Unknown);
-                    param_types.push(ty.clone());
-                    self.define_local(&param.name, ty, false);
-                }
-                let ret = match body {
-                    LambdaBody::Expr(expr) => self.check_expr(expr),
-                    LambdaBody::Block(block) => self.check_block(block),
-                };
-                self.pop_scope();
-                Ty::Function(param_types, Box::new(ret))
-            }
+            Expr::Lambda { params, body, .. } => self.check_lambda_expr(params, body, expected),
             Expr::Group { inner, .. } => self.check_expr(inner),
+        }
+    }
+
+    fn check_lambda_expr(
+        &mut self,
+        params: &[crate::ast::LambdaParam],
+        body: &LambdaBody,
+        expected: &Ty,
+    ) -> Ty {
+        let (expected_params, expected_ret) = match expected {
+            Ty::Function(params, ret) => (Some(params.clone()), Some(ret.as_ref().clone())),
+            _ => (None, None),
+        };
+        let external_params = expected_params.clone().unwrap_or_else(|| vec![Ty::Unknown; params.len()]);
+        let destructured_external = matches!(&expected_params, Some(params_hint) if params_hint.len() == 1 && params.len() != 1);
+        let hinted_params = match expected_params {
+            Some(ref params_hint) if params_hint.len() == params.len() => params_hint.clone(),
+            Some(ref params_hint) if destructured_external => {
+                self.destructure_slots(&params_hint[0], params.len())
+            }
+            _ => vec![Ty::Unknown; params.len()],
+        };
+
+        self.push_scope();
+        let mut param_types = Vec::new();
+        for (index, param) in params.iter().enumerate() {
+            let ty = param
+                .ty
+                .as_ref()
+                .map(|ty| self.ty_from_type_ref(ty))
+                .unwrap_or_else(|| hinted_params.get(index).cloned().unwrap_or(Ty::Unknown));
+            param_types.push(ty.clone());
+            self.define_local(&param.name, ty, false);
+        }
+        let ret = match body {
+            LambdaBody::Expr(expr) => expected_ret
+                .as_ref()
+                .map(|ret| self.check_expr_against(expr, ret))
+                .unwrap_or_else(|| self.check_expr(expr)),
+            LambdaBody::Block(block) => self.check_block(block),
+        };
+        self.pop_scope();
+        if destructured_external {
+            Ty::Function(external_params, Box::new(ret))
+        } else {
+            Ty::Function(param_types, Box::new(ret))
         }
     }
 
@@ -1228,25 +1330,20 @@ impl<'a> Checker<'a> {
             return ty;
         }
         if let Some((params, ret)) = self.callable_signature(callee) {
-            self.check_call_args(&params, args, span);
-            return ret;
+            return self.check_signature_call(&params, &ret, args, span);
         }
         let callee_ty = self.check_expr(callee);
         match callee_ty {
             Ty::Function(params, ret) => {
-                self.check_call_args(
-                    &params
-                        .into_iter()
-                        .map(|ty| ParamSig {
-                            name: String::new(),
-                            ty,
-                            variadic: false,
-                        })
-                        .collect::<Vec<_>>(),
-                    args,
-                    span,
-                );
-                *ret
+                let sig_params = params
+                    .into_iter()
+                    .map(|ty| ParamSig {
+                        name: String::new(),
+                        ty,
+                        variadic: false,
+                    })
+                    .collect::<Vec<_>>();
+                self.check_signature_call(&sig_params, &ret, args, span)
             }
             Ty::Unknown => Ty::Unknown,
             other => {
@@ -1258,6 +1355,64 @@ impl<'a> Checker<'a> {
                 Ty::Unknown
             }
         }
+    }
+
+    fn check_signature_call(
+        &mut self,
+        params: &[ParamSig],
+        ret: &Ty,
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) -> Ty {
+        let min_required = params.iter().filter(|param| !param.variadic).count();
+        let max_allowed = if params.last().is_some_and(|param| param.variadic) {
+            usize::MAX
+        } else {
+            params.len()
+        };
+        if args.len() < min_required || args.len() > max_allowed {
+            self.add_error(
+                "invalid_argument_count",
+                format!(
+                    "call expects {}..{} arguments, got {}",
+                    min_required,
+                    if max_allowed == usize::MAX { "many".to_string() } else { max_allowed.to_string() },
+                    args.len()
+                ),
+                span,
+            );
+        }
+
+        let mut subst = HashMap::new();
+        let mut checked_args = Vec::new();
+        for (index, arg) in args.iter().enumerate() {
+            let raw_expected = params
+                .get(index)
+                .or_else(|| params.last().filter(|param| param.variadic))
+                .map(|param| param.ty.clone())
+                .unwrap_or(Ty::Unknown);
+            let expected = substitute_type(&raw_expected, &subst);
+            let actual = self.check_expr_against(&arg.value, &expected);
+            infer_type_subst(&expected, &actual, &mut subst);
+            checked_args.push((arg.span, actual, raw_expected));
+        }
+
+        for (arg_span, actual, raw_expected) in checked_args {
+            let expected = materialize_type(&substitute_type(&raw_expected, &subst));
+            self.require_assignable(
+                &actual,
+                &expected,
+                arg_span,
+                "invalid_argument_type",
+                format!(
+                    "argument has type '{}' but parameter expects '{}'",
+                    actual.describe(),
+                    expected.describe()
+                ),
+            );
+        }
+
+        materialize_type(&substitute_type(ret, &subst))
     }
 
     fn try_check_constructor_call(
@@ -1272,8 +1427,7 @@ impl<'a> Checker<'a> {
                     return Some(ty);
                 }
                 if let Some(case) = self.world.lookup_enum_case(self.module, name) {
-                    self.check_constructor_args(&case.params, args, span);
-                    return Some(case.result);
+                    return Some(self.check_constructor_signature(&case.params, &case.result, args, span));
                 }
                 if let Some(sig) = self.lookup_type_local(name) {
                     return Some(self.check_named_type_constructor(&sig, args, span));
@@ -1299,10 +1453,29 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if let Expr::Identifier { name: type_name, .. } = receiver.as_ref() {
+                    if type_name == "Array" && name == "ofLength" {
+                        if args.len() != 1 {
+                            self.add_error(
+                                "invalid_argument_count",
+                                format!("Array.ofLength expects 1 argument, got {}", args.len()),
+                                span,
+                            );
+                        }
+                        if let Some(arg) = args.first() {
+                            let ty = self.check_expr(&arg.value);
+                            self.require_assignable(
+                                &ty,
+                                &Ty::int(),
+                                arg.span,
+                                "invalid_argument_type",
+                                format!("Array.ofLength expects Int length, got '{}'", ty.describe()),
+                            );
+                        }
+                        return Some(Ty::Named("Array".to_string(), vec![Ty::Unknown]));
+                    }
                     if let Some(sig) = self.lookup_type_local(type_name) {
                         if let Some(case) = sig.enum_cases.get(name).cloned() {
-                            self.check_constructor_args(&case.params, args, span);
-                            return Some(case.result);
+                            return Some(self.check_constructor_signature(&case.params, &case.result, args, span));
                         }
                         if sig.kind == TypeKind::Object {
                             return None;
@@ -1310,14 +1483,12 @@ impl<'a> Checker<'a> {
                     }
                     if let Some(sig) = self.world.lookup_imported_type(self.module, type_name) {
                         if let Some(case) = sig.enum_cases.get(name).cloned() {
-                            self.check_constructor_args(&case.params, args, span);
-                            return Some(case.result);
+                            return Some(self.check_constructor_signature(&case.params, &case.result, args, span));
                         }
                     }
                     if let Some(sig) = self.world.ambient.types.get(type_name) {
                         if let Some(case) = sig.enum_cases.get(name).cloned() {
-                            self.check_constructor_args(&case.params, args, span);
-                            return Some(case.result);
+                            return Some(self.check_constructor_signature(&case.params, &case.result, args, span));
                         }
                     }
                 }
@@ -1379,7 +1550,17 @@ impl<'a> Checker<'a> {
                 let mut key = Ty::Unknown;
                 let mut value = Ty::Unknown;
                 for arg in args {
-                    match self.check_expr(&arg.value) {
+                    match &arg.value {
+                        Expr::Binary {
+                            left,
+                            op: BinaryOp::Colon,
+                            right,
+                            ..
+                        } => {
+                            key = join_types(&key, &self.check_expr(left));
+                            value = join_types(&value, &self.check_expr(right));
+                        }
+                        _ => match self.check_expr(&arg.value) {
                         Ty::Tuple(items) if items.len() == 2 => {
                             key = join_types(&key, &items[0]);
                             value = join_types(&value, &items[1]);
@@ -1394,6 +1575,7 @@ impl<'a> Checker<'a> {
                                 arg.span,
                             );
                         }
+                    },
                     }
                 }
                 Some(Ty::Named("Map".to_string(), vec![key, value]))
@@ -1410,14 +1592,23 @@ impl<'a> Checker<'a> {
     ) -> Ty {
         if let Some(overloads) = sig.methods.get("init") {
             if let Some(ctor) = choose_overload(overloads, args) {
-                self.check_call_args(&ctor.params, args, span);
-                return Ty::Named(
+                let ret = Ty::Named(
                     sig.name.clone(),
                     sig.type_params
                         .iter()
                         .map(|name| Ty::TypeParam(name.clone()))
                         .collect(),
                 );
+                let params = ctor
+                    .params
+                    .iter()
+                    .map(|param| FieldSig {
+                        name: param.name.clone(),
+                        ty: param.ty.clone(),
+                        mutable: false,
+                    })
+                    .collect::<Vec<_>>();
+                return self.check_constructor_signature(&params, &ret, args, span);
             }
         }
 
@@ -1427,14 +1618,73 @@ impl<'a> Checker<'a> {
             .filter(|field| !field.mutable || sig.kind == TypeKind::Record || sig.kind == TypeKind::Class)
             .cloned()
             .collect::<Vec<_>>();
-        self.check_constructor_args(&fields, args, span);
-        Ty::Named(
+        let ret = Ty::Named(
             sig.name.clone(),
             sig.type_params
                 .iter()
                 .map(|name| Ty::TypeParam(name.clone()))
                 .collect(),
-        )
+        );
+        self.check_constructor_signature(&fields, &ret, args, span)
+    }
+
+    fn check_constructor_signature(
+        &mut self,
+        params: &[FieldSig],
+        ret: &Ty,
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) -> Ty {
+        if args.iter().all(|arg| arg.name.is_none()) {
+            let sig_params = params
+                .iter()
+                .map(|param| ParamSig {
+                    name: param.name.clone(),
+                    ty: param.ty.clone(),
+                    variadic: false,
+                })
+                .collect::<Vec<_>>();
+            return self.check_signature_call(&sig_params, ret, args, span);
+        }
+
+        let mut subst = HashMap::new();
+        let mut checked_args = Vec::new();
+        for arg in args {
+            let Some(name) = arg.name.as_ref() else {
+                let actual = self.check_expr(&arg.value);
+                checked_args.push((arg.span, actual, Ty::Unknown, String::new()));
+                continue;
+            };
+            let expected = params
+                .iter()
+                .find(|param| param.name == *name)
+                .map(|param| substitute_type(&param.ty, &subst))
+                .unwrap_or(Ty::Unknown);
+            let actual = self.check_expr_against(&arg.value, &expected);
+            infer_type_subst(&expected, &actual, &mut subst);
+            checked_args.push((arg.span, actual, expected, name.clone()));
+        }
+
+        for (arg_span, actual, expected, field_name) in checked_args {
+            self.require_assignable(
+                &actual,
+                &materialize_type(&expected),
+                arg_span,
+                "invalid_argument_type",
+                if field_name.is_empty() {
+                    format!("constructor argument has type '{}' but expects '{}'", actual.describe(), expected.describe())
+                } else {
+                    format!(
+                        "argument for '{}' has type '{}' but expects '{}'",
+                        field_name,
+                        actual.describe(),
+                        expected.describe()
+                    )
+                },
+            );
+        }
+
+        materialize_type(&substitute_type(ret, &subst))
     }
 
     fn callable_signature(&mut self, callee: &Expr) -> Option<(Vec<ParamSig>, Ty)> {
@@ -1455,6 +1705,9 @@ impl<'a> Checker<'a> {
                         return Some((sig.params, sig.ret));
                     }
                 }
+                if let Some(sig) = self.static_method_sig(receiver, name) {
+                    return Some((sig.params, sig.ret));
+                }
                 let receiver_ty = self.check_expr(receiver);
                 let method = self.member_method_sig(&receiver_ty, name)?;
                 Some((method.params, method.ret))
@@ -1463,117 +1716,37 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_call_args(&mut self, params: &[ParamSig], args: &[crate::ast::CallArg], span: crate::source::Span) {
-        let min_required = params.iter().filter(|param| !param.variadic).count();
-        let max_allowed = if params.last().is_some_and(|param| param.variadic) {
-            usize::MAX
-        } else {
-            params.len()
+    fn static_member_value_type(&self, receiver: &Expr, name: &str) -> Option<Ty> {
+        let Expr::Identifier { name: type_name, .. } = receiver else {
+            return None;
         };
-        if args.len() < min_required || args.len() > max_allowed {
-            self.add_error(
-                "invalid_argument_count",
-                format!(
-                    "call expects {}..{} arguments, got {}",
-                    min_required,
-                    if max_allowed == usize::MAX { "many".to_string() } else { max_allowed.to_string() },
-                    args.len()
-                ),
-                span,
-            );
+        if let Some(sig) = self.lookup_any_object(type_name) {
+            if let Some(methods) = self.method_sigs_for_type(&sig, name) {
+                let first = methods.first()?;
+                return Some(Ty::Function(
+                    first.params.iter().map(|param| param.ty.clone()).collect(),
+                    Box::new(first.ret.clone()),
+                ));
+            }
         }
-        for (index, arg) in args.iter().enumerate() {
-            let actual = self.check_expr(&arg.value);
-            let expected = params
-                .get(index)
-                .or_else(|| params.last().filter(|param| param.variadic))
-                .map(|param| param.ty.clone())
-                .unwrap_or(Ty::Unknown);
-            self.require_assignable(
-                &actual,
-                &expected,
-                arg.span,
-                "invalid_argument_type",
-                format!(
-                    "argument has type '{}' but parameter expects '{}'",
-                    actual.describe(),
-                    expected.describe()
-                ),
-            );
+        let sig = self.lookup_any_non_object_type(type_name)?;
+        if let Some(case) = sig.enum_cases.get(name) {
+            return Some(case.result.clone());
         }
+        None
     }
 
-    fn check_constructor_args(
-        &mut self,
-        params: &[FieldSig],
-        args: &[crate::ast::CallArg],
-        span: crate::source::Span,
-    ) {
-        if args.iter().all(|arg| arg.name.is_none()) {
-            if args.len() != params.len() {
-                self.add_error(
-                    "invalid_argument_count",
-                    format!(
-                        "constructor expects {} arguments, got {}",
-                        params.len(),
-                        args.len()
-                    ),
-                    span,
-                );
-            }
-            for (arg, param) in args.iter().zip(params.iter()) {
-                let actual = self.check_expr(&arg.value);
-                self.require_assignable(
-                    &actual,
-                    &param.ty,
-                    arg.span,
-                    "invalid_argument_type",
-                    format!(
-                        "argument for '{}' has type '{}' but expects '{}'",
-                        param.name,
-                        actual.describe(),
-                        param.ty.describe()
-                    ),
-                );
-            }
-            return;
-        }
-
-        let mut seen = HashSet::new();
-        for arg in args {
-            let actual = self.check_expr(&arg.value);
-            let Some(name) = arg.name.as_ref() else {
-                continue;
-            };
-            if !seen.insert(name.clone()) {
-                self.add_error(
-                    "duplicate_named_argument",
-                    format!("duplicate named argument '{}'", name),
-                    arg.span,
-                );
-                continue;
-            }
-            if let Some(param) = params.iter().find(|param| &param.name == name) {
-                self.require_assignable(
-                    &actual,
-                    &param.ty,
-                    arg.span,
-                    "invalid_argument_type",
-                    format!(
-                        "argument for '{}' has type '{}' but expects '{}'",
-                        name,
-                        actual.describe(),
-                        param.ty.describe()
-                    ),
-                );
-            } else {
-                self.add_error(
-                    "unknown_named_argument",
-                    format!("unknown named argument '{}'", name),
-                    arg.span,
-                );
+    fn static_method_sig(&self, receiver: &Expr, name: &str) -> Option<FunctionSig> {
+        let Expr::Identifier { name: type_name, .. } = receiver else {
+            return None;
+        };
+        if let Some(sig) = self.lookup_any_object(type_name) {
+            if let Some(method) = self.method_sigs_for_type(&sig, name)?.first().cloned() {
+                return Some(method);
             }
         }
+        let sig = self.lookup_any_non_object_type(type_name)?;
+        self.method_sigs_for_type(&sig, name)?.first().cloned()
     }
 
     fn check_binary_expr(&mut self, left: &Ty, op: BinaryOp, right: &Ty, span: crate::source::Span) -> Ty {
@@ -1663,8 +1836,14 @@ impl<'a> Checker<'a> {
             Pattern::Constructor { path, args, .. } => {
                 let case_name = path.last().cloned().unwrap_or_default();
                 if let Some(case) = self.lookup_case_by_path(path) {
+                    let mut subst = HashMap::new();
+                    infer_type_subst(&case.result, scrutinee, &mut subst);
                     for (pattern, param) in args.iter().zip(case.params.iter()) {
-                        self.bind_pattern(pattern, &param.ty);
+                        self.bind_pattern(pattern, &materialize_type(&substitute_type(&param.ty, &subst)));
+                    }
+                } else if let Some(fields) = self.lookup_destructured_type_fields(path) {
+                    for (pattern, field_ty) in args.iter().zip(fields.iter()) {
+                        self.bind_pattern(pattern, field_ty);
                     }
                 } else {
                     for pattern in args {
@@ -1686,20 +1865,8 @@ impl<'a> Checker<'a> {
         match path {
             [case_name] => self.world.lookup_enum_case(self.module, case_name),
             [type_name, case_name] => self
-                .lookup_type_local(type_name)
-                .and_then(|sig| sig.enum_cases.get(case_name).cloned())
-                .or_else(|| {
-                    self.world
-                        .lookup_imported_type(self.module, type_name)
-                        .and_then(|sig| sig.enum_cases.get(case_name).cloned())
-                })
-                .or_else(|| {
-                    self.world
-                        .ambient
-                        .types
-                        .get(type_name)
-                        .and_then(|sig| sig.enum_cases.get(case_name).cloned())
-                }),
+                .lookup_any_non_object_type(type_name)
+                .and_then(|sig| sig.enum_cases.get(case_name).cloned()),
             [module_alias, type_name, case_name] => self
                 .world
                 .lookup_module_alias(self.module, module_alias)
@@ -1707,6 +1874,18 @@ impl<'a> Checker<'a> {
                 .and_then(|sig| sig.enum_cases.get(case_name).cloned()),
             _ => None,
         }
+    }
+
+    fn lookup_destructured_type_fields(&self, path: &[String]) -> Option<Vec<Ty>> {
+        let sig = match path {
+            [name] => self.lookup_any_type(name),
+            [module_alias, name] => self
+                .world
+                .lookup_module_alias(self.module, module_alias)
+                .and_then(|module| module.types.get(name).cloned().or_else(|| module.objects.get(name).cloned())),
+            _ => None,
+        }?;
+        Some(sig.fields.iter().map(|field| field.ty.clone()).collect())
     }
 
     fn unwrap_inner_type(&self, ty: &Ty) -> Ty {
@@ -1754,20 +1933,20 @@ impl<'a> Checker<'a> {
         match receiver {
             Ty::Named(type_name, args) => {
                 let sig = self
-                    .lookup_type_local(type_name)
-                    .or_else(|| self.world.lookup_imported_type(self.module, type_name))
-                    .or_else(|| self.world.ambient.types.get(type_name).cloned())
-                    .or_else(|| self.world.ambient.objects.get(type_name).cloned())?;
+                    .lookup_any_type(type_name)?;
                 let subst = sig
                     .type_params
                     .iter()
                     .cloned()
                     .zip(args.iter().cloned())
                     .collect::<HashMap<_, _>>();
+                if let Some(case) = sig.enum_cases.get(name) {
+                    return Some(substitute_type(&case.result, &subst));
+                }
                 if let Some(field) = sig.fields.iter().find(|field| field.name == name) {
                     return Some(substitute_type(&field.ty, &subst));
                 }
-                if let Some(methods) = sig.methods.get(name) {
+                if let Some(methods) = self.method_sigs_for_type(&sig, name) {
                     let first = methods.first()?;
                     return Some(Ty::Function(
                         first
@@ -1792,12 +1971,8 @@ impl<'a> Checker<'a> {
     fn member_method_sig(&self, receiver: &Ty, name: &str) -> Option<FunctionSig> {
         match receiver {
             Ty::Named(type_name, args) => {
-                let sig = self
-                    .lookup_type_local(type_name)
-                    .or_else(|| self.world.lookup_imported_type(self.module, type_name))
-                    .or_else(|| self.world.ambient.types.get(type_name).cloned())
-                    .or_else(|| self.world.ambient.objects.get(type_name).cloned())?;
-                let first = sig.methods.get(name)?.first()?.clone();
+                let sig = self.lookup_any_type(type_name)?;
+                let first = self.method_sigs_for_type(&sig, name)?.first()?.clone();
                 let subst = sig
                     .type_params
                     .iter()
@@ -1819,6 +1994,37 @@ impl<'a> Checker<'a> {
             }
             _ => None,
         }
+    }
+
+    fn method_sigs_for_type(&self, sig: &TypeSig, name: &str) -> Option<Vec<FunctionSig>> {
+        let mut seen = HashSet::new();
+        self.method_sigs_for_type_inner(sig, name, &mut seen)
+    }
+
+    fn method_sigs_for_type_inner(
+        &self,
+        sig: &TypeSig,
+        name: &str,
+        seen: &mut HashSet<String>,
+    ) -> Option<Vec<FunctionSig>> {
+        if !seen.insert(sig.name.clone()) {
+            return None;
+        }
+        if let Some(methods) = sig.methods.get(name) {
+            return Some(methods.clone());
+        }
+        for bound in &sig.with_bounds {
+            let Ty::Named(bound_name, _) = bound else {
+                continue;
+            };
+            let Some(bound_sig) = self.lookup_any_type(bound_name) else {
+                continue;
+            };
+            if let Some(methods) = self.method_sigs_for_type_inner(&bound_sig, name, seen) {
+                return Some(methods);
+            }
+        }
+        None
     }
 
     fn module_member_value_type(&self, expr: &Expr) -> Option<Ty> {
@@ -1951,9 +2157,91 @@ impl<'a> Checker<'a> {
             .or_else(|| self.module.objects.get(name).cloned())
     }
 
+    fn lookup_object_local(&self, name: &str) -> Option<TypeSig> {
+        self.module.objects.get(name).cloned()
+    }
+
+    fn lookup_unique_module_type(&self, name: &str) -> Option<TypeSig> {
+        let mut matches = self
+            .world
+            .modules
+            .values()
+            .filter_map(|module| {
+                module
+                    .types
+                    .get(name)
+                    .cloned()
+                    .or_else(|| module.objects.get(name).cloned())
+            })
+            .collect::<Vec<_>>();
+        if matches.len() == 1 {
+            matches.pop()
+        } else {
+            None
+        }
+    }
+
+    fn lookup_unique_module_object(&self, name: &str) -> Option<TypeSig> {
+        let mut matches = self
+            .world
+            .modules
+            .values()
+            .filter_map(|module| module.objects.get(name).cloned())
+            .collect::<Vec<_>>();
+        if matches.len() == 1 {
+            matches.pop()
+        } else {
+            None
+        }
+    }
+
+    fn lookup_any_object(&self, name: &str) -> Option<TypeSig> {
+        self.lookup_object_local(name)
+            .or_else(|| {
+                self.module.symbol_imports.get(name).and_then(|imported| {
+                    (imported.kind == ImportedKind::Object)
+                        .then(|| self.world.modules.get(&imported.module_path))
+                        .flatten()
+                        .and_then(|module| module.objects.get(&imported.original_name).cloned())
+                })
+            })
+            .or_else(|| self.lookup_unique_module_object(name))
+            .or_else(|| self.world.ambient.objects.get(name).cloned())
+    }
+
+    fn lookup_any_non_object_type(&self, name: &str) -> Option<TypeSig> {
+        self.module
+            .types
+            .get(name)
+            .cloned()
+            .or_else(|| {
+                self.module.symbol_imports.get(name).and_then(|imported| {
+                    matches!(imported.kind, ImportedKind::Type | ImportedKind::Interface)
+                        .then(|| self.world.modules.get(&imported.module_path))
+                        .flatten()
+                        .and_then(|module| module.types.get(&imported.original_name).cloned())
+                })
+            })
+            .or_else(|| {
+                let mut matches = self
+                    .world
+                    .modules
+                    .values()
+                    .filter_map(|module| module.types.get(name).cloned())
+                    .collect::<Vec<_>>();
+                if matches.len() == 1 {
+                    matches.pop()
+                } else {
+                    None
+                }
+            })
+            .or_else(|| self.world.ambient.types.get(name).cloned())
+    }
+
     fn lookup_any_type(&self, name: &str) -> Option<TypeSig> {
         self.lookup_type_local(name)
             .or_else(|| self.world.lookup_imported_type(self.module, name))
+            .or_else(|| self.lookup_unique_module_type(name))
             .or_else(|| self.world.ambient.types.get(name).cloned())
             .or_else(|| self.world.ambient.objects.get(name).cloned())
     }
@@ -2309,6 +2597,68 @@ fn choose_overload<'a>(
         .or_else(|| overloads.first())
 }
 
+fn infer_type_subst(expected: &Ty, actual: &Ty, subst: &mut HashMap<String, Ty>) {
+    match expected {
+        Ty::TypeParam(name) => {
+            let actual = materialize_type(actual);
+            subst
+                .entry(name.clone())
+                .and_modify(|existing| *existing = join_types(existing, &actual))
+                .or_insert(actual);
+        }
+        Ty::Named(expected_name, expected_args) => {
+            if let Ty::Named(actual_name, actual_args) = actual {
+                if expected_name == actual_name && expected_args.len() == actual_args.len() {
+                    for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
+                        infer_type_subst(expected_arg, actual_arg, subst);
+                    }
+                }
+            }
+        }
+        Ty::Tuple(expected_items) => {
+            if let Ty::Tuple(actual_items) = actual {
+                for (expected_item, actual_item) in expected_items.iter().zip(actual_items.iter()) {
+                    infer_type_subst(expected_item, actual_item, subst);
+                }
+            }
+        }
+        Ty::Record(expected_fields) => {
+            if let Ty::Record(actual_fields) = actual {
+                for (expected_name, expected_ty) in expected_fields {
+                    if let Some((_, actual_ty)) = actual_fields
+                        .iter()
+                        .find(|(actual_name, _)| actual_name == expected_name)
+                    {
+                        infer_type_subst(expected_ty, actual_ty, subst);
+                    }
+                }
+            }
+        }
+        Ty::Function(expected_params, expected_ret) => {
+            if let Ty::Function(actual_params, actual_ret) = actual {
+                if expected_params.len() == actual_params.len() {
+                    for (expected_param, actual_param) in expected_params.iter().zip(actual_params.iter()) {
+                        infer_type_subst(expected_param, actual_param, subst);
+                    }
+                } else if expected_params.len() == 1 && actual_params.len() != 1 {
+                    let expected_slots = match &expected_params[0] {
+                        Ty::Tuple(items) => items.clone(),
+                        Ty::Record(fields) => fields.iter().map(|(_, ty)| ty.clone()).collect(),
+                        _ => Vec::new(),
+                    };
+                    if expected_slots.len() == actual_params.len() {
+                        for (expected_param, actual_param) in expected_slots.iter().zip(actual_params.iter()) {
+                            infer_type_subst(expected_param, actual_param, subst);
+                        }
+                    }
+                }
+                infer_type_subst(expected_ret, actual_ret, subst);
+            }
+        }
+        Ty::Unknown => {}
+    }
+}
+
 fn substitute_type(ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
     match ty {
         Ty::TypeParam(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
@@ -2326,6 +2676,25 @@ fn substitute_type(ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
         Ty::Function(params, ret) => Ty::Function(
             params.iter().map(|param| substitute_type(param, subst)).collect(),
             Box::new(substitute_type(ret, subst)),
+        ),
+        Ty::Unknown => Ty::Unknown,
+    }
+}
+
+fn materialize_type(ty: &Ty) -> Ty {
+    match ty {
+        Ty::TypeParam(_) => Ty::Unknown,
+        Ty::Named(name, args) => Ty::Named(name.clone(), args.iter().map(materialize_type).collect()),
+        Ty::Tuple(items) => Ty::Tuple(items.iter().map(materialize_type).collect()),
+        Ty::Record(fields) => Ty::Record(
+            fields
+                .iter()
+                .map(|(name, ty)| (name.clone(), materialize_type(ty)))
+                .collect(),
+        ),
+        Ty::Function(params, ret) => Ty::Function(
+            params.iter().map(materialize_type).collect(),
+            Box::new(materialize_type(ret)),
         ),
         Ty::Unknown => Ty::Unknown,
     }
@@ -2408,6 +2777,155 @@ fn module_alias_and_member(expr: &Expr) -> Option<(String, String)> {
     }
 }
 
+fn contains_placeholder_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Placeholder { .. } => true,
+        Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
+            items.iter().any(contains_placeholder_expr)
+        }
+        Expr::Call { callee, args, .. } => {
+            contains_placeholder_expr(callee)
+                || args.iter().any(|arg| contains_placeholder_expr(&arg.value))
+        }
+        Expr::Member { receiver, .. } => contains_placeholder_expr(receiver),
+        Expr::Index { receiver, index, .. } => {
+            contains_placeholder_expr(receiver) || contains_placeholder_expr(index)
+        }
+        Expr::RecordUpdate { receiver, updates, .. } => {
+            contains_placeholder_expr(receiver)
+                || updates.iter().any(|arg| contains_placeholder_expr(&arg.value))
+        }
+        Expr::RecordLiteral { fields, .. } => fields.iter().any(|field| contains_placeholder_expr(&field.value)),
+        Expr::AnonymousInterface { methods, .. } => methods.iter().any(|method| {
+            method
+                .body
+                .as_ref()
+                .is_some_and(|body| match body {
+                    CallableBody::Expr(expr) => contains_placeholder_expr(expr),
+                    CallableBody::Block(block) => block.statements.iter().any(stmt_contains_placeholder),
+                })
+        }),
+        Expr::Unary { expr, .. } => contains_placeholder_expr(expr),
+        Expr::Binary { left, right, .. } => {
+            contains_placeholder_expr(left) || contains_placeholder_expr(right)
+        }
+        Expr::Is { left, .. } => contains_placeholder_expr(left),
+        Expr::If {
+            condition,
+            then_block,
+            else_branch,
+            ..
+        } => {
+            contains_placeholder_expr(condition)
+                || then_block.statements.iter().any(stmt_contains_placeholder)
+                || match else_branch.as_ref() {
+                    ElseExprBranch::If(expr) => contains_placeholder_expr(expr),
+                    ElseExprBranch::Block(block) => block.statements.iter().any(stmt_contains_placeholder),
+                }
+        }
+        Expr::Block { body, .. } => body.statements.iter().any(stmt_contains_placeholder),
+        Expr::Match { value, cases, .. } => {
+            contains_placeholder_expr(value)
+                || cases.iter().any(|case| match &case.body {
+                    MatchCaseBody::Expr(expr) => contains_placeholder_expr(expr),
+                    MatchCaseBody::Block(block) => block.statements.iter().any(stmt_contains_placeholder),
+                })
+        }
+        Expr::ForYield {
+            yield_body, bindings, ..
+        } => {
+            bindings.iter().any(|binding| {
+                binding
+                    .iterable
+                    .as_ref()
+                    .is_some_and(contains_placeholder_expr)
+                    || binding.values.iter().any(contains_placeholder_expr)
+            })
+                || yield_body.statements.iter().any(stmt_contains_placeholder)
+        }
+        Expr::Lambda { body, .. } => match body {
+            LambdaBody::Expr(expr) => contains_placeholder_expr(expr),
+            LambdaBody::Block(block) => block.statements.iter().any(stmt_contains_placeholder),
+        },
+        Expr::Group { inner, .. } => contains_placeholder_expr(inner),
+        Expr::Identifier { .. }
+        | Expr::Integer { .. }
+        | Expr::Float { .. }
+        | Expr::String { .. }
+        | Expr::Bool { .. }
+        | Expr::Unit { .. } => false,
+    }
+}
+
+fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Binding(binding) => binding.values.iter().any(contains_placeholder_expr),
+        Stmt::Assignment(assignment) => assignment.values.iter().any(contains_placeholder_expr),
+        Stmt::Expr(expr) => contains_placeholder_expr(&expr.expr),
+        Stmt::If(stmt) => {
+            stmt.condition
+                .as_ref()
+                .is_some_and(contains_placeholder_expr)
+                || stmt
+                    .binding_value
+                    .as_ref()
+                    .is_some_and(contains_placeholder_expr)
+                || stmt.then_block.statements.iter().any(stmt_contains_placeholder)
+                || stmt
+                    .else_branch
+                    .as_ref()
+                    .is_some_and(|branch| match branch {
+                        ElseBranch::If(stmt) => stmt_contains_placeholder(&Stmt::If((**stmt).clone())),
+                        ElseBranch::Block(block) => block.statements.iter().any(stmt_contains_placeholder),
+                    })
+        }
+        Stmt::While(stmt) => {
+            contains_placeholder_expr(&stmt.condition)
+                || stmt.body.statements.iter().any(stmt_contains_placeholder)
+        }
+        Stmt::For(stmt) => {
+            stmt.bindings.iter().any(|binding| {
+                binding
+                    .iterable
+                    .as_ref()
+                    .is_some_and(contains_placeholder_expr)
+                    || binding.values.iter().any(contains_placeholder_expr)
+            })
+                || stmt.body.statements.iter().any(stmt_contains_placeholder)
+        }
+        Stmt::Unwrap(stmt) => {
+            contains_placeholder_expr(&stmt.value)
+                || stmt
+                    .else_block
+                    .as_ref()
+                    .is_some_and(|block| block.statements.iter().any(stmt_contains_placeholder))
+        }
+        Stmt::UnwrapBlock(stmt) => {
+            stmt.clauses.iter().any(|clause| contains_placeholder_expr(&clause.value))
+                || stmt
+                    .else_block
+                    .as_ref()
+                    .is_some_and(|block| block.statements.iter().any(stmt_contains_placeholder))
+        }
+        Stmt::Match(stmt) => {
+            contains_placeholder_expr(&stmt.value)
+                || stmt.cases.iter().any(|case| match &case.body {
+                    MatchCaseBody::Expr(expr) => contains_placeholder_expr(expr),
+                    MatchCaseBody::Block(block) => block.statements.iter().any(stmt_contains_placeholder),
+                })
+        }
+        Stmt::LocalFunction(function) => match &function.body {
+            CallableBody::Expr(expr) => contains_placeholder_expr(expr),
+            CallableBody::Block(block) => block.statements.iter().any(stmt_contains_placeholder),
+        },
+        Stmt::Return(stmt) => stmt
+            .value
+            .as_ref()
+            .is_some_and(|expr| contains_placeholder_expr(expr)),
+        Stmt::Break(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2477,5 +2995,28 @@ def main() Int {
     fn checks_bumper_example() {
         let result = check_path(workspace_root().join("examples/random_code/bumper.lum")).expect("typecheck");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_parity_examples() {
+        let root = workspace_root();
+        let paths = [
+            "examples/tuple_destructuring.lum",
+            "examples/record_destructuring.lum",
+            "examples/class_destructuring.lum",
+            "examples/enums.lum",
+            "examples/enum_object_same_name.lum",
+            "examples/imports.lum",
+            "examples/interface_default_methods.lum",
+            "examples/list_hof.lum",
+            "examples/set_map_hof.lum",
+            "examples/placeholder_lambda.lum",
+            "examples/zip.lum",
+        ];
+
+        for path in paths {
+            let result = check_path(root.join(path)).unwrap_or_else(|err| panic!("{path}: {err}"));
+            assert!(result.diagnostics.is_empty(), "{path}: {:#?}", result.diagnostics);
+        }
     }
 }

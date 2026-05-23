@@ -162,6 +162,7 @@ enum Value {
     Object(Rc<RefCell<ObjectValue>>),
     Variant(Rc<VariantValue>),
     Iterator(Rc<RefCell<IteratorState>>),
+    Closure(Rc<ClosureValue>),
 }
 
 impl Value {
@@ -311,6 +312,7 @@ impl Value {
                 }
             }
             Value::Iterator(_) => "<iterator>".to_string(),
+            Value::Closure(_) => "<closure>".to_string(),
         }
     }
 }
@@ -332,6 +334,12 @@ struct VariantValue {
     enum_name: String,
     case_name: String,
     fields: Vec<(String, Value)>,
+}
+
+#[derive(Debug, Clone)]
+struct ClosureValue {
+    function: ir::FunctionId,
+    captures: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -379,7 +387,7 @@ impl<'a> Interpreter<'a> {
     fn run(&mut self, requested_entry: Option<&str>) -> Result<Option<Value>, Diagnostic> {
         self.ensure_globals()?;
         let entry = self.select_entry(requested_entry)?;
-        let value = self.call_function(entry, None, Vec::new(), None)?;
+        let value = self.call_function(entry, None, None, Vec::new(), None)?;
         Ok((!matches!(value, Value::Unit)).then_some(value))
     }
 
@@ -428,6 +436,7 @@ impl<'a> Interpreter<'a> {
         &mut self,
         id: ir::FunctionId,
         receiver: Option<Value>,
+        captures: Option<Vec<Value>>,
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
@@ -455,6 +464,32 @@ impl<'a> Interpreter<'a> {
             if let Some(first_local) = function.locals.first() {
                 frame.locals[first_local.id.0] = receiver;
             }
+        }
+
+        let capture_slots = function
+            .locals
+            .iter()
+            .filter(|local| {
+                matches!(local.kind, ir::LocalKind::Capture)
+                    && !(matches!(function.kind, ir::FunctionKind::Method { .. })
+                        && local.name == "this")
+            })
+            .map(|local| local.id)
+            .collect::<Vec<_>>();
+        let captures = captures.unwrap_or_default();
+        if captures.len() != capture_slots.len() {
+            return Err(self.runtime_error(
+                span,
+                format!(
+                    "function '{}' expects {} captures, got {}",
+                    function.name,
+                    capture_slots.len(),
+                    captures.len()
+                ),
+            ));
+        }
+        for (slot, value) in capture_slots.into_iter().zip(captures) {
+            frame.locals[slot.0] = value;
         }
 
         if args.len() != function.params.len() {
@@ -591,6 +626,19 @@ impl<'a> Interpreter<'a> {
                     })
                     .collect::<Result<Vec<_>, Diagnostic>>()?,
             )))),
+            ir::RValue::RecordUpdate { base, updates } => {
+                let base = self.eval_operand_ref(frame, base, span)?;
+                let updates = updates
+                    .iter()
+                    .map(|update| {
+                        Ok((
+                            update.name.clone(),
+                            self.eval_operand_ref(frame, &update.value, span)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?;
+                self.record_update_value(base, updates, span)
+            }
             ir::RValue::Construct { ty, fields } => self.construct_value(frame, ty, fields, span),
             ir::RValue::Variant {
                 enum_name,
@@ -611,10 +659,15 @@ impl<'a> Interpreter<'a> {
                 let operand = self.eval_operand_ref(frame, operand, span)?;
                 Ok(Value::Bool(self.value_matches_type(&operand, ty)))
             }
-            ir::RValue::Closure { .. } => Err(self.runtime_error(
-                span,
-                "closure execution is not implemented in the Rust IR interpreter yet",
-            )),
+            ir::RValue::Closure { function, captures } => Ok(Value::Closure(Rc::new(
+                ClosureValue {
+                    function: *function,
+                    captures: captures
+                        .iter()
+                        .map(|capture| self.eval_operand_ref(frame, capture, span))
+                        .collect::<Result<Vec<_>, _>>()?,
+                },
+            ))),
         }
     }
 
@@ -718,7 +771,7 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match callee {
-            ir::Callee::Direct(id) => self.call_function(*id, None, args, span),
+            ir::Callee::Direct(id) => self.call_function(*id, None, None, args, span),
             ir::Callee::Indirect(value) => {
                 let callee = self.eval_operand_ref(frame, value, span)?;
                 self.invoke_value(callee, args, span)
@@ -735,10 +788,17 @@ impl<'a> Interpreter<'a> {
     fn invoke_value(
         &mut self,
         callee: Value,
-        _args: Vec<Value>,
+        args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match callee {
+            Value::Closure(closure) => self.call_function(
+                closure.function,
+                None,
+                Some(closure.captures.clone()),
+                args,
+                span,
+            ),
             Value::Object(object) => {
                 let object = object.borrow();
                 Err(self.runtime_error(
@@ -764,7 +824,7 @@ impl<'a> Interpreter<'a> {
         if path.len() == 1 {
             let name = &path[0];
             if let Some(function) = self.lookup_function(name) {
-                return self.call_function(function, None, args, span);
+                return self.call_function(function, None, None, args, span);
             }
             return self.invoke_root_named(name, args, span);
         }
@@ -953,7 +1013,7 @@ impl<'a> Interpreter<'a> {
 
         if let Some(init) = self.find_method(type_name, "init") {
             let receiver = object.clone();
-            let _ = self.call_function(init, Some(receiver), args, span)?;
+            let _ = self.call_function(init, Some(receiver), None, args, span)?;
             return Ok(Some(object));
         }
 
@@ -1039,6 +1099,52 @@ impl<'a> Interpreter<'a> {
             case_name: case_name.to_string(),
             fields: values,
         })))
+    }
+
+    fn record_update_value(
+        &mut self,
+        base: Value,
+        updates: Vec<(String, Value)>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        match base {
+            Value::Record(fields) => {
+                let mut next = fields.borrow().clone();
+                for (name, value) in updates {
+                    if let Some((_, slot)) = next.iter_mut().find(|(field, _)| *field == name) {
+                        *slot = value;
+                    } else {
+                        return Err(self.runtime_error(
+                            span,
+                            format!("record has no field '{}'", name),
+                        ));
+                    }
+                }
+                Ok(Value::Record(Rc::new(RefCell::new(next))))
+            }
+            Value::Object(object) => {
+                let object = object.borrow();
+                let mut next = object.fields.clone();
+                for (name, value) in updates {
+                    if let Some((_, slot)) = next.iter_mut().find(|(field, _)| *field == name) {
+                        *slot = value;
+                    } else {
+                        return Err(self.runtime_error(
+                            span,
+                            format!("object '{}' has no field '{}'", object.type_name, name),
+                        ));
+                    }
+                }
+                Ok(Value::Object(Rc::new(RefCell::new(ObjectValue {
+                    type_name: object.type_name.clone(),
+                    fields: next,
+                }))))
+            }
+            other => Err(self.runtime_error(
+                span,
+                format!("cannot update fields on {}", other.render()),
+            )),
+        }
     }
 
     fn construct_enum_case(
@@ -1347,7 +1453,7 @@ impl<'a> Interpreter<'a> {
             Value::Object(object) => {
                 let type_name = object.borrow().type_name.clone();
                 if let Some(function) = self.find_method(&type_name, method) {
-                    return self.call_function(function, Some(receiver), args, span);
+                    return self.call_function(function, Some(receiver), None, args, span);
                 }
             }
             _ => {}
@@ -1561,7 +1667,7 @@ impl<'a> Interpreter<'a> {
             unreachable!();
         };
         if let Some(function) = self.find_method(&variant.enum_name, method) {
-            return self.call_function(function, Some(receiver), args, span);
+            return self.call_function(function, Some(receiver), None, args, span);
         }
         Err(self.runtime_error(
             span,
@@ -1654,7 +1760,7 @@ impl<'a> Interpreter<'a> {
                 .collect(),
         })));
         if let Some(init) = self.find_method(&ty.name, "init") {
-            let _ = self.call_function(init, Some(value.clone()), Vec::new(), span)?;
+            let _ = self.call_function(init, Some(value.clone()), None, Vec::new(), span)?;
         }
         self.object_singletons[ty.id.0] = Some(value.clone());
         Ok(Some(value))

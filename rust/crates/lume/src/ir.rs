@@ -452,6 +452,10 @@ pub enum RValue {
     Tuple(Vec<Operand>),
     List(Vec<Operand>),
     Record(Vec<NamedOperand>),
+    RecordUpdate {
+        base: Operand,
+        updates: Vec<NamedOperand>,
+    },
     Construct {
         ty: Type,
         fields: Vec<NamedOperand>,
