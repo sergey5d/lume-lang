@@ -10,6 +10,7 @@ pub mod source;
 pub mod typecheck;
 
 pub use diagnostic::{Diagnostic, Severity};
+pub use interpreter::{PathRunResult, RunResult, run_path, run_program, run_program_entry};
 pub use lexer::{Keyword, LexResult, Token, TokenKind, lex};
 pub use lower::{LowerResult, lower_program};
 pub use parser::{ParseResult, parse_program};

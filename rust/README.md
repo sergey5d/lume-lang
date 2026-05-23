@@ -17,7 +17,7 @@ source
 
 ## Current Scope
 
-The Rust implementation now has six real building blocks:
+The Rust implementation now has seven real building blocks:
 
 - a lexer that tokenizes Lume source and reports lexical diagnostics
 - a recursive-descent parser that builds a source-shaped AST
@@ -28,12 +28,17 @@ The Rust implementation now has six real building blocks:
   block, statement, terminator, operand, and rvalue structures
 - a first lowering pass that maps declarations plus real control-flow bodies
   into that IR
+- a first real IR interpreter that can execute lowered single-module programs
+  with globals, user-defined types/methods, `match`, `for`, `for ... yield`,
+  `unwrap`, and core stdlib/runtime helpers like `Option`, `Result`, `Either`,
+  `List`, `Range`, and `OS.println`
 
-The interpreter is still scaffolded. Lowering is now real, but intentionally
-partial: functions, methods, globals, `if`, `while`, `match`, `for`,
-`for ... yield`, `unwrap`, assignments, calls, and core expressions lower into
-CFG blocks, while richer forms like lambdas, local functions, anonymous
-interfaces, and record updates still report targeted lowering diagnostics.
+The Rust runtime is now real, but still intentionally scoped. The current
+single-module interpreter covers the lowered control-flow core and enough
+runtime behavior to execute real examples, while richer features like lambdas,
+local functions, anonymous interfaces, record updates, and imported-module
+execution still report targeted diagnostics or remain outside the runnable
+subset.
 
 ## Layout
 
@@ -67,6 +72,7 @@ From the repository root:
 cargo run --manifest-path rust/Cargo.toml -p lume -- tokens hello.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- parse examples/random_code/bumper.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- check examples/import_forms.lum
+cargo run --manifest-path rust/Cargo.toml -p lume -- run examples/range.lum
 ```
 
 The `tokens` command prints the token stream with spans.
@@ -101,13 +107,27 @@ IR and already lowers the main statement/control-flow surface used by the Rust
 tests. It still reports explicit diagnostics for features that are not
 implemented yet on the Rust path.
 
+The `run` command now executes the lowered IR for the current single-file
+runnable subset. It supports:
+
+- top-level globals and entry functions (`main` by default, then `run`)
+- user-defined classes/records/objects/enums with methods
+- `if`, `while`, `match`, `for`, `for ... yield`, `return`, and `break`
+- `unwrap` over `Option`, `Result`, and `Either`
+- builtin constructors and helpers like `Range`, `List`, `Some`, `None`,
+  `Ok`, `Err`, `Left`, `Right`, and `OS.println`
+
+It still intentionally rejects imported-module execution on the Rust path for
+now, because lowering/runtime linking across multiple modules is not finished
+yet.
+
 ## Near-Term Direction
 
 The intended next steps are:
 
 1. strengthen the type checker so it covers more of the full language surface
 2. widen lowering coverage for lambdas, local functions, and record updates
-3. execute the lowered IR in Rust rather than interpreting the source AST
+3. widen the interpreter/runtime beyond the current single-module subset
 4. port more of the stdlib/runtime behavior onto the Rust path
 
 That keeps the Rust implementation aligned with the direction we discussed:

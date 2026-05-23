@@ -1,6 +1,6 @@
 use std::{env, fs, process::ExitCode};
 
-use lume::{Diagnostic, Severity, SourceFile, check_path, lex, parse_program};
+use lume::{Diagnostic, Severity, SourceFile, check_path, lex, parse_program, run_path};
 
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
@@ -89,10 +89,31 @@ fn main() -> ExitCode {
             }
         }
         "run" => {
-            eprintln!(
-                "'run' is not implemented yet in Rust; the current Rust implementation supports lexing, parsing, and semantic resolution"
-            );
-            ExitCode::from(2)
+            let Some(path) = args.next() else {
+                eprintln!("missing source file for 'run'");
+                print_usage();
+                return ExitCode::from(2);
+            };
+            let requested_entry = args.next();
+            match run_path(&path, requested_entry.as_deref()) {
+                Ok(result) => {
+                    if !result.diagnostics.is_empty() {
+                        for located in &result.diagnostics {
+                            print_diagnostic(&located.path, &located.diagnostic);
+                        }
+                        return ExitCode::from(1);
+                    }
+                    print!("{}", result.output);
+                    if let Some(value) = result.return_value {
+                        println!("{value}");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(err) => {
+                    eprintln!("{err}");
+                    ExitCode::from(1)
+                }
+            }
         }
         _ => {
             eprintln!("unknown command '{command}'");
@@ -107,7 +128,7 @@ fn print_usage() {
     eprintln!("  lume tokens <file>");
     eprintln!("  lume parse <file>");
     eprintln!("  lume check <file>");
-    eprintln!("  lume run <file>     # planned");
+    eprintln!("  lume run <file> [entry]");
 }
 
 fn read_source(
