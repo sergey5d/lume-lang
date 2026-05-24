@@ -1438,26 +1438,7 @@ impl<'a> Interpreter<'a> {
                 if args.len() != 1 {
                     return Err(self.runtime_error(span, "VariantField expects 1 argument"));
                 }
-                match &args[0] {
-                    Value::Variant(variant) => variant
-                        .fields
-                        .iter()
-                        .find(|(name, _)| name == field_name)
-                        .map(|(_, value)| value.clone())
-                        .ok_or_else(|| {
-                            self.runtime_error(
-                                span,
-                                format!(
-                                    "variant '{}.{}' has no field '{}'",
-                                    variant.enum_name, variant.case_name, field_name
-                                ),
-                            )
-                        }),
-                    _ => Err(self.runtime_error(
-                        span,
-                        "VariantField expects an enum variant receiver",
-                    )),
-                }
+                Ok(pattern_field_value(&args[0], field_name).unwrap_or(Value::Unit))
             }
         }
     }
@@ -2999,6 +2980,16 @@ fn tuple_member(items: &[Value], name: &str) -> Option<Value> {
     items.get(index.checked_sub(1)?).cloned()
 }
 
+fn pattern_field_value(value: &Value, name: &str) -> Option<Value> {
+    match value {
+        Value::Variant(variant) => lookup_named_field(&variant.fields, name),
+        Value::Object(object) => lookup_named_field(&object.borrow().fields, name),
+        Value::Record(fields) => lookup_named_field(&fields.borrow(), name),
+        Value::Tuple(items) => tuple_member(items, name),
+        _ => None,
+    }
+}
+
 fn push_unique(items: &mut Vec<Value>, value: Value) {
     if !items.iter().any(|existing| values_equal(existing, &value)) {
         items.push(value);
@@ -3397,5 +3388,53 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "red\npalette\n");
+    }
+
+    #[test]
+    fn runs_match_patterns_for_records_classes_and_partial_enums() {
+        let program = lower_inline(
+            r#"
+            record Amount {
+                count Int
+                label Str
+            }
+
+            class PairBox {
+                left Int
+                right Int
+            }
+
+            enum MaybeInt {
+                case NoneX
+                case SomeX {
+                    value Int
+                }
+            }
+
+            def main() Unit {
+                amount Amount = Amount(42, "hello")
+                pair PairBox = PairBox(5, 9)
+                values = List(MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3))
+                partialMapped List[Option[Int]] = values.map(partial {
+                    case SomeX(x) => x + 1
+                })
+
+                OS.println(match amount {
+                    case Amount(count, label) => count + "-" + label
+                })
+                OS.println(match pair {
+                    case PairBox(left, right) => left + right
+                })
+                unwrap first <- partialMapped.get(0) else ()
+                unwrap second <- partialMapped.get(1) else ()
+                OS.println(first.getOr(0))
+                OS.println(second.isEmpty())
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "42-hello\n14\n2\ntrue\n");
     }
 }

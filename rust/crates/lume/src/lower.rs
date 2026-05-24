@@ -451,6 +451,18 @@ struct PatternPlan {
     bindings: Vec<PendingBinding>,
 }
 
+#[derive(Debug, Clone)]
+enum ConstructorPatternKind {
+    EnumCase {
+        case_name: String,
+        field_names: Vec<String>,
+    },
+    TypeDestructure {
+        ty: ir::Type,
+        field_names: Vec<String>,
+    },
+}
+
 impl PatternPlan {
     fn always_true() -> Self {
         Self {
@@ -1620,22 +1632,38 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             Pattern::Constructor { path, args, span } => {
-                let case_name = path.last().cloned().unwrap_or_default();
-                let base_condition = self.emit_temp_from_rvalue(
-                    ir::RValue::Call {
-                        callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantIs(case_name.clone())),
-                        args: vec![scrutinee.clone()],
-                    },
-                    ir::Type::Bool,
-                    Some(*span),
-                );
+                let Some(kind) = self.lookup_constructor_pattern_kind(path, args.len()) else {
+                    self.unsupported("constructor pattern lowering could not resolve target", *span);
+                    return PatternPlan::always_true();
+                };
+                let base_condition = match &kind {
+                    ConstructorPatternKind::EnumCase { case_name, .. } => self.emit_temp_from_rvalue(
+                        ir::RValue::Call {
+                            callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantIs(case_name.clone())),
+                            args: vec![scrutinee.clone()],
+                        },
+                        ir::Type::Bool,
+                        Some(*span),
+                    ),
+                    ConstructorPatternKind::TypeDestructure { ty, .. } => self.emit_temp_from_rvalue(
+                        ir::RValue::TypeTest {
+                            operand: scrutinee.clone(),
+                            ty: ty.clone(),
+                        },
+                        ir::Type::Bool,
+                        Some(*span),
+                    ),
+                };
                 let mut conditions = vec![base_condition];
                 let mut bindings = Vec::new();
-                let field_names = self.lookup_case_fields(path, args.len());
+                let field_names = match kind {
+                    ConstructorPatternKind::EnumCase { field_names, .. }
+                    | ConstructorPatternKind::TypeDestructure { field_names, .. } => field_names,
+                };
                 for (index, arg) in args.iter().enumerate() {
                     let field_name = field_names
-                        .as_ref()
-                        .and_then(|names| names.get(index).cloned())
+                        .get(index)
+                        .cloned()
                         .unwrap_or_else(|| format!("_{}", index + 1));
                     let field = self.emit_temp_from_rvalue(
                         ir::RValue::Call {
@@ -1657,10 +1685,42 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
+    fn lookup_constructor_pattern_kind(
+        &self,
+        path: &[String],
+        arity: usize,
+    ) -> Option<ConstructorPatternKind> {
+        if let Some(field_names) = self.lookup_case_fields(path, arity) {
+            return Some(ConstructorPatternKind::EnumCase {
+                case_name: path.last().cloned().unwrap_or_default(),
+                field_names,
+            });
+        }
+        if let Some((ty, field_names)) = self.lookup_destructured_type_fields(path, arity) {
+            return Some(ConstructorPatternKind::TypeDestructure { ty, field_names });
+        }
+        None
+    }
+
     fn lookup_case_fields(&self, path: &[String], arity: usize) -> Option<Vec<String>> {
         let case_name = path.last()?;
         if arity == 0 {
-            return Some(Vec::new());
+            if path.len() >= 2 {
+                let type_name = &path[path.len() - 2];
+                let has_case = self
+                    .program
+                    .types
+                    .iter()
+                    .filter(|ty| ty.kind == ast::TypeKind::Enum && ty.name == *type_name)
+                    .flat_map(|ty| ty.enum_cases.iter())
+                    .any(|case| case.name == *case_name);
+                if has_case {
+                    return Some(Vec::new());
+                }
+            }
+            if matches!(case_name.as_str(), "None" | "Some" | "Ok" | "Err" | "Left" | "Right") {
+                return Some(Vec::new());
+            }
         }
         match case_name.as_str() {
             "Some" | "Ok" | "Left" | "Right" => {
@@ -1695,6 +1755,31 @@ impl<'a> FunctionLowerer<'a> {
             return matches.into_iter().next();
         }
         None
+    }
+
+    fn lookup_destructured_type_fields(
+        &self,
+        path: &[String],
+        arity: usize,
+    ) -> Option<(ir::Type, Vec<String>)> {
+        let type_name = match path {
+            [name] => name,
+            [_, name] => name,
+            _ => return None,
+        };
+        let ty = self
+            .program
+            .types
+            .iter()
+            .find(|ty| {
+                ty.name == *type_name
+                    && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+                    && ty.fields.len() == arity
+            })?;
+        Some((
+            ir::Type::named(type_name.clone()),
+            ty.fields.iter().map(|field| field.name.clone()).collect(),
+        ))
     }
 
     fn apply_pending_bindings(&mut self, bindings: Vec<PendingBinding>) {
