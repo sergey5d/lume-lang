@@ -24,6 +24,7 @@ pub struct Program {
     pub globals: Vec<Global>,
     pub functions: Vec<Function>,
     pub types: Vec<TypeDef>,
+    pub global_init: Option<FunctionId>,
     pub entry: Option<FunctionId>,
 }
 
@@ -64,6 +65,10 @@ impl Program {
 
     pub fn set_entry(&mut self, function: FunctionId) {
         self.entry = Some(function);
+    }
+
+    pub fn set_global_init(&mut self, function: FunctionId) {
+        self.global_init = Some(function);
     }
 
     pub fn function(&self, id: FunctionId) -> Option<&Function> {

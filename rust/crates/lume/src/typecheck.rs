@@ -196,6 +196,7 @@ struct FieldSig {
     name: String,
     ty: Ty,
     mutable: bool,
+    has_initializer: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -519,6 +520,8 @@ struct Checker<'a> {
     type_params: Vec<HashSet<String>>,
     placeholder_hints: Vec<Ty>,
     current_return: Ty,
+    current_owner: Option<TypeSig>,
+    current_method: Option<String>,
     loop_depth: usize,
     globals: HashMap<String, ValueInfo>,
 }
@@ -533,6 +536,8 @@ impl<'a> Checker<'a> {
             type_params: Vec::new(),
             placeholder_hints: Vec::new(),
             current_return: Ty::Unknown,
+            current_owner: None,
+            current_method: None,
             loop_depth: 0,
             globals: HashMap::new(),
         }
@@ -679,6 +684,8 @@ impl<'a> Checker<'a> {
 
     fn check_method(&mut self, method: &MethodDecl, owner: &TypeSig) {
         let previous_return = self.current_return.clone();
+        let previous_owner = self.current_owner.clone();
+        let previous_method = self.current_method.clone();
         self.push_type_params(method.type_params.iter().map(|param| param.name.as_str()));
         let expected_return = method
             .return_type
@@ -686,6 +693,8 @@ impl<'a> Checker<'a> {
             .map(|ty| self.ty_from_type_ref(ty))
             .unwrap_or(Ty::Unknown);
         self.current_return = expected_return.clone();
+        self.current_owner = Some(owner.clone());
+        self.current_method = Some(method.name.clone());
         self.push_scope();
 
         let self_ty = Ty::Named(
@@ -727,20 +736,35 @@ impl<'a> Checker<'a> {
         self.pop_scope();
         self.pop_type_params();
         self.current_return = previous_return;
+        self.current_owner = previous_owner;
+        self.current_method = previous_method;
     }
 
     fn check_callable_body(&mut self, body: &CallableBody) -> Ty {
         match body {
-            CallableBody::Expr(expr) => self.check_expr(expr),
-            CallableBody::Block(block) => self.check_block(block),
+            CallableBody::Expr(expr) => self.check_expr_against(expr, &self.current_return.clone()),
+            CallableBody::Block(block) => self.check_block_against(block, &self.current_return.clone()),
         }
     }
 
     fn check_block(&mut self, block: &Block) -> Ty {
+        self.check_block_against(block, &Ty::Unknown)
+    }
+
+    fn check_block_against(&mut self, block: &Block, expected: &Ty) -> Ty {
         self.push_scope();
         let mut last = Ty::unit();
         for (index, statement) in block.statements.iter().enumerate() {
-            let ty = self.check_stmt(statement);
+            let ty = if index + 1 == block.statements.len() {
+                match statement {
+                    Stmt::Expr(expr_stmt) => self.check_expr_against(&expr_stmt.expr, expected),
+                    Stmt::If(stmt) => self.check_if_stmt_value(stmt, expected),
+                    Stmt::Match(stmt) => self.check_match_stmt_value(stmt, expected),
+                    _ => self.check_stmt(statement),
+                }
+            } else {
+                self.check_stmt(statement)
+            };
             if index + 1 == block.statements.len() {
                 last = ty;
             }
@@ -749,13 +773,102 @@ impl<'a> Checker<'a> {
         last
     }
 
+    fn check_if_stmt_value(&mut self, stmt: &IfStmt, expected: &Ty) -> Ty {
+        if let Some(value) = &stmt.binding_value {
+            let value_ty = self.check_expr(value);
+            let inner = self.unwrap_inner_type(&value_ty);
+            let slot_types = self.destructure_slots(&inner, stmt.bindings.len());
+            self.push_scope();
+            for (index, binding) in stmt.bindings.iter().enumerate() {
+                let inferred = slot_types
+                    .get(index)
+                    .cloned()
+                    .unwrap_or(Ty::Unknown);
+                let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
+                let ty = explicit.clone().unwrap_or_else(|| inferred.clone());
+                self.define_local(&binding.name, ty, false);
+            }
+            let then_ty = self.check_block_against(&stmt.then_block, expected);
+            self.pop_scope();
+            let else_ty = stmt
+                .else_branch
+                .as_ref()
+                .map(|branch| self.check_else_branch_value(branch, expected))
+                .unwrap_or_else(Ty::unit);
+            return join_types(&then_ty, &else_ty);
+        }
+        if let Some(condition) = &stmt.condition {
+            let condition_ty = self.check_expr(condition);
+            self.require_bool(&condition_ty, condition.span(), "if condition must be Bool");
+        }
+        let then_ty = self.check_block_against(&stmt.then_block, expected);
+        let else_ty = stmt
+            .else_branch
+            .as_ref()
+            .map(|branch| self.check_else_branch_value(branch, expected))
+            .unwrap_or_else(Ty::unit);
+        join_types(&then_ty, &else_ty)
+    }
+
+    fn check_else_branch_value(&mut self, branch: &ElseBranch, expected: &Ty) -> Ty {
+        match branch {
+            ElseBranch::If(stmt) => self.check_if_stmt_value(stmt, expected),
+            ElseBranch::Block(block) => self.check_block_against(block, expected),
+        }
+    }
+
+    fn check_match_stmt_value(&mut self, stmt: &crate::ast::MatchStmt, expected: &Ty) -> Ty {
+        let value_ty = self.check_expr(&stmt.value);
+        let mut result = Ty::Unknown;
+        for case in &stmt.cases {
+            self.push_scope();
+            self.bind_pattern(&case.pattern, &value_ty);
+            if let Some(guard) = &case.guard {
+                let guard_ty = self.check_expr(guard);
+                self.require_bool(&guard_ty, guard.span(), "match guard must be Bool");
+            }
+            let ty = match &case.body {
+                MatchCaseBody::Block(block) => self.check_block_against(block, expected),
+                MatchCaseBody::Expr(expr) => self.check_expr_against(expr, expected),
+            };
+            self.pop_scope();
+            result = join_types(&result, &ty);
+        }
+        if stmt.partial {
+            Ty::option(result)
+        } else {
+            result
+        }
+    }
+
     fn check_stmt(&mut self, statement: &Stmt) -> Ty {
         match statement {
             Stmt::Binding(binding_stmt) => {
                 let value_types = binding_stmt
                     .values
                     .iter()
-                    .map(|expr| self.check_expr(expr))
+                    .enumerate()
+                    .map(|(index, expr)| {
+                        if binding_stmt.bindings.len() == 1 {
+                            if let Some(expected) = binding_stmt.bindings[0]
+                                .ty
+                                .as_ref()
+                                .map(|ty| self.ty_from_type_ref(ty))
+                            {
+                                return self.check_expr_against(expr, &expected);
+                            }
+                        }
+                        if let Some(expected) = binding_stmt
+                            .bindings
+                            .get(index)
+                            .and_then(|binding| binding.ty.as_ref())
+                            .map(|ty| self.ty_from_type_ref(ty))
+                        {
+                            self.check_expr_against(expr, &expected)
+                        } else {
+                            self.check_expr(expr)
+                        }
+                    })
                     .collect::<Vec<_>>();
                 let slot_types = self.binding_slot_types(&binding_stmt.bindings, &value_types);
                 for (index, binding) in binding_stmt.bindings.iter().enumerate() {
@@ -815,12 +928,12 @@ impl<'a> Checker<'a> {
                 Ty::unit()
             }
             Stmt::Return(return_stmt) => {
+                let expected = self.current_return.clone();
                 let actual = return_stmt
                     .value
                     .as_ref()
-                    .map(|expr| self.check_expr(expr))
+                    .map(|expr| self.check_expr_against(expr, &expected))
                     .unwrap_or_else(Ty::unit);
-                let expected = self.current_return.clone();
                 self.require_assignable(
                     &actual,
                     &expected,
@@ -902,10 +1015,15 @@ impl<'a> Checker<'a> {
         if let Some(value) = &stmt.binding_value {
             let value_ty = self.check_expr(value);
             let inner = self.unwrap_inner_type(&value_ty);
+            let slot_types = self.destructure_slots(&inner, stmt.bindings.len());
             self.push_scope();
-            for binding in &stmt.bindings {
+            for (index, binding) in stmt.bindings.iter().enumerate() {
+                let inferred = slot_types
+                    .get(index)
+                    .cloned()
+                    .unwrap_or(Ty::Unknown);
                 let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
-                let ty = explicit.clone().unwrap_or_else(|| inner.clone());
+                let ty = explicit.clone().unwrap_or_else(|| inferred.clone());
                 self.define_local(&binding.name, ty, false);
             }
             self.check_block(&stmt.then_block);
@@ -976,6 +1094,9 @@ impl<'a> Checker<'a> {
     }
 
     fn destructure_slots(&self, ty: &Ty, count: usize) -> Vec<Ty> {
+        if count <= 1 {
+            return vec![ty.clone()];
+        }
         let mut slots = match ty {
             Ty::Tuple(items) => items.clone(),
             Ty::Record(fields) => fields.iter().map(|(_, ty)| ty.clone()).collect(),
@@ -1176,30 +1297,59 @@ impl<'a> Checker<'a> {
                 }
                 base
             }
-            Expr::RecordLiteral { fields, .. } => Ty::Record(
-                fields
-                    .iter()
-                    .filter_map(|field| {
-                        field
-                            .name
-                            .as_ref()
-                            .map(|name| (name.clone(), self.check_expr(&field.value)))
-                    })
-                    .collect(),
-            ),
+            Expr::RecordLiteral { fields, values, .. } => {
+                if !fields.is_empty() {
+                    return Ty::Record(
+                        fields
+                            .iter()
+                            .filter_map(|field| {
+                                field
+                                    .name
+                                    .as_ref()
+                                    .map(|name| (name.clone(), self.check_expr(&field.value)))
+                            })
+                            .collect(),
+                    );
+                }
+                if let Ty::Record(expected_fields) = expected {
+                    let mut actual_fields = Vec::new();
+                    for (index, value) in values.iter().enumerate() {
+                        let expected_ty = expected_fields
+                            .get(index)
+                            .map(|(_, ty)| ty.clone())
+                            .unwrap_or(Ty::Unknown);
+                        let actual = self.check_expr_against(value, &expected_ty);
+                        let name = expected_fields
+                            .get(index)
+                            .map(|(name, _)| name.clone())
+                            .unwrap_or_else(|| format!("_{}", index + 1));
+                        actual_fields.push((name, actual));
+                    }
+                    Ty::Record(actual_fields)
+                } else {
+                    Ty::Record(Vec::new())
+                }
+            }
             Expr::AnonymousInterface { .. } => Ty::Unknown,
             Expr::Unary { op, expr, span } => {
                 let inner = self.check_expr(expr);
                 match op {
                     crate::ast::UnaryOp::Neg => {
-                        if !inner.is_numeric() && !matches!(inner, Ty::Unknown) {
+                        if inner.is_numeric() || matches!(inner, Ty::Unknown) {
+                            inner
+                        } else if let Some(methods) = self.member_method_sigs(&inner, "-") {
+                            methods
+                                .first()
+                                .map(|method| method.ret.clone())
+                                .unwrap_or(Ty::Unknown)
+                        } else {
                             self.add_error(
                                 "invalid_unary_operand",
                                 format!("unary '-' expects numeric operand, got '{}'", inner.describe()),
                                 *span,
                             );
+                            Ty::Unknown
                         }
-                        inner
                     }
                     crate::ast::UnaryOp::Not => {
                         self.require_bool(&inner, *span, "unary '!' expects Bool");
@@ -1234,7 +1384,7 @@ impl<'a> Checker<'a> {
                 let else_ty = self.check_else_expr_branch(else_branch);
                 join_types(&then_ty, &else_ty)
             }
-            Expr::Block { body, .. } => self.check_block(body),
+            Expr::Block { body, .. } => self.check_block_against(body, expected),
             Expr::Match {
                 partial,
                 value,
@@ -1309,9 +1459,17 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .map(|ret| self.check_expr_against(expr, ret))
                 .unwrap_or_else(|| self.check_expr(expr)),
-            LambdaBody::Block(block) => self.check_block(block),
+            LambdaBody::Block(block) => self.check_block_against(
+                block,
+                expected_ret.as_ref().unwrap_or(&Ty::Unknown),
+            ),
         };
         self.pop_scope();
+        let ret = if expected_ret.as_ref().is_some_and(|expected| *expected == Ty::unit()) {
+            Ty::unit()
+        } else {
+            ret
+        };
         if destructured_external {
             Ty::Function(external_params, Box::new(ret))
         } else {
@@ -1329,7 +1487,7 @@ impl<'a> Checker<'a> {
         if let Some(ty) = self.try_check_constructor_call(callee, args, span) {
             return ty;
         }
-        if let Some((params, ret)) = self.callable_signature(callee) {
+        if let Some((params, ret)) = self.callable_signature_for_args(callee, args) {
             return self.check_signature_call(&params, &ret, args, span);
         }
         let callee_ty = self.check_expr(callee);
@@ -1364,13 +1522,18 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
     ) -> Ty {
+        let arrangement = arrange_param_args(params, args);
         let min_required = params.iter().filter(|param| !param.variadic).count();
         let max_allowed = if params.last().is_some_and(|param| param.variadic) {
             usize::MAX
         } else {
             params.len()
         };
-        if args.len() < min_required || args.len() > max_allowed {
+        if arrangement.overflow > 0
+            || arrangement.missing_required > 0
+            || args.len() < min_required
+            || args.len() > max_allowed
+        {
             self.add_error(
                 "invalid_argument_count",
                 format!(
@@ -1385,16 +1548,15 @@ impl<'a> Checker<'a> {
 
         let mut subst = HashMap::new();
         let mut checked_args = Vec::new();
-        for (index, arg) in args.iter().enumerate() {
-            let raw_expected = params
-                .get(index)
-                .or_else(|| params.last().filter(|param| param.variadic))
-                .map(|param| param.ty.clone())
-                .unwrap_or(Ty::Unknown);
-            let expected = substitute_type(&raw_expected, &subst);
-            let actual = self.check_expr_against(&arg.value, &expected);
-            infer_type_subst(&expected, &actual, &mut subst);
-            checked_args.push((arg.span, actual, raw_expected));
+        for (index, param) in params.iter().enumerate() {
+            let slot = arrangement.slots.get(index).map(Vec::as_slice).unwrap_or(&[]);
+            let raw_expected = param.ty.clone();
+            for arg in slot {
+                let expected = substitute_type(&raw_expected, &subst);
+                let actual = self.check_expr_against(&arg.value, &expected);
+                infer_type_subst(&expected, &actual, &mut subst);
+                checked_args.push((arg.span, actual, raw_expected.clone()));
+            }
         }
 
         for (arg_span, actual, raw_expected) in checked_args {
@@ -1425,6 +1587,15 @@ impl<'a> Checker<'a> {
             Expr::Identifier { name, .. } => {
                 if let Some(ty) = self.check_builtin_constructor(name, args, span) {
                     return Some(ty);
+                }
+                if name == "init"
+                    && self.current_method.as_deref() == Some("init")
+                    && self.current_owner.is_some()
+                {
+                    return self
+                        .current_owner
+                        .clone()
+                        .map(|owner| self.check_named_type_constructor(&owner, args, span));
                 }
                 if let Some(case) = self.world.lookup_enum_case(self.module, name) {
                     return Some(self.check_constructor_signature(&case.params, &case.result, args, span));
@@ -1591,7 +1762,7 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
     ) -> Ty {
         if let Some(overloads) = sig.methods.get("init") {
-            if let Some(ctor) = choose_overload(overloads, args) {
+            if let Some(ctor) = self.choose_overload(overloads, args) {
                 let ret = Ty::Named(
                     sig.name.clone(),
                     sig.type_params
@@ -1606,6 +1777,7 @@ impl<'a> Checker<'a> {
                         name: param.name.clone(),
                         ty: param.ty.clone(),
                         mutable: false,
+                        has_initializer: false,
                     })
                     .collect::<Vec<_>>();
                 return self.check_constructor_signature(&params, &ret, args, span);
@@ -1636,33 +1808,61 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
     ) -> Ty {
         if args.iter().all(|arg| arg.name.is_none()) {
-            let sig_params = params
-                .iter()
-                .map(|param| ParamSig {
-                    name: param.name.clone(),
-                    ty: param.ty.clone(),
-                    variadic: false,
-                })
-                .collect::<Vec<_>>();
-            return self.check_signature_call(&sig_params, ret, args, span);
+            if args.len() == 1 {
+                if let Some(record_ty) = self.extract_constructor_record_arg(&args[0].value, params) {
+                    return self.check_record_constructor_conversion(params, ret, &record_ty, span);
+                }
+            }
+            let arrangement = arrange_constructor_args(params, args);
+            let min_required = params.iter().filter(|param| !param.has_initializer).count();
+            if arrangement.overflow > 0 || arrangement.missing_required > 0 || args.len() < min_required || args.len() > params.len() {
+                self.add_error(
+                    "invalid_argument_count",
+                    format!("call expects {}..{} arguments, got {}", min_required, params.len(), args.len()),
+                    span,
+                );
+            }
+            let mut subst = HashMap::new();
+            let mut checked_args = Vec::new();
+            for (index, param) in params.iter().enumerate() {
+                for arg in arrangement.slots.get(index).map(Vec::as_slice).unwrap_or(&[]) {
+                    let expected = substitute_type(&param.ty, &subst);
+                    let actual = self.check_expr_against(&arg.value, &expected);
+                    infer_type_subst(&expected, &actual, &mut subst);
+                    checked_args.push((arg.span, actual, param.ty.clone(), String::new()));
+                }
+            }
+            for (arg_span, actual, raw_expected, _) in checked_args {
+                let expected = materialize_type(&substitute_type(&raw_expected, &subst));
+                self.require_assignable(
+                    &actual,
+                    &expected,
+                    arg_span,
+                    "invalid_argument_type",
+                    format!("constructor argument has type '{}' but expects '{}'", actual.describe(), expected.describe()),
+                );
+            }
+            return materialize_type(&substitute_type(ret, &subst));
         }
 
+        let arrangement = arrange_constructor_args(params, args);
+        if arrangement.overflow > 0 || arrangement.missing_required > 0 {
+            let min_required = params.iter().filter(|param| !param.has_initializer).count();
+            self.add_error(
+                "invalid_argument_count",
+                format!("call expects {}..{} arguments, got {}", min_required, params.len(), args.len()),
+                span,
+            );
+        }
         let mut subst = HashMap::new();
         let mut checked_args = Vec::new();
-        for arg in args {
-            let Some(name) = arg.name.as_ref() else {
-                let actual = self.check_expr(&arg.value);
-                checked_args.push((arg.span, actual, Ty::Unknown, String::new()));
-                continue;
-            };
-            let expected = params
-                .iter()
-                .find(|param| param.name == *name)
-                .map(|param| substitute_type(&param.ty, &subst))
-                .unwrap_or(Ty::Unknown);
-            let actual = self.check_expr_against(&arg.value, &expected);
-            infer_type_subst(&expected, &actual, &mut subst);
-            checked_args.push((arg.span, actual, expected, name.clone()));
+        for (index, param) in params.iter().enumerate() {
+            for arg in arrangement.slots.get(index).map(Vec::as_slice).unwrap_or(&[]) {
+                let expected = substitute_type(&param.ty, &subst);
+                let actual = self.check_expr_against(&arg.value, &expected);
+                infer_type_subst(&expected, &actual, &mut subst);
+                checked_args.push((arg.span, actual, expected, param.name.clone()));
+            }
         }
 
         for (arg_span, actual, expected, field_name) in checked_args {
@@ -1687,11 +1887,18 @@ impl<'a> Checker<'a> {
         materialize_type(&substitute_type(ret, &subst))
     }
 
-    fn callable_signature(&mut self, callee: &Expr) -> Option<(Vec<ParamSig>, Ty)> {
+    fn callable_signature_for_args(
+        &mut self,
+        callee: &Expr,
+        args: &[crate::ast::CallArg],
+    ) -> Option<(Vec<ParamSig>, Ty)> {
         match callee {
             Expr::Identifier { name, .. } => {
                 if let Some(functions) = self.lookup_functions(name) {
-                    let sig = functions.first()?.clone();
+                    let sig = self
+                        .choose_overload(&functions, args)
+                        .or_else(|| functions.first())
+                        ?.clone();
                     return Some((sig.params, sig.ret));
                 }
                 None
@@ -1701,15 +1908,26 @@ impl<'a> Checker<'a> {
                     .and_then(|(alias, member)| self.world.lookup_module_alias(self.module, &alias).map(|module| (module, member)))
                 {
                     if let Some(functions) = module.functions.get(&member) {
-                        let sig = functions.first()?.clone();
+                        let sig = self
+                            .choose_overload(functions, args)
+                            .or_else(|| functions.first())
+                            ?.clone();
                         return Some((sig.params, sig.ret));
                     }
                 }
-                if let Some(sig) = self.static_method_sig(receiver, name) {
+                if let Some(sigs) = self.static_method_sigs(receiver, name) {
+                    let sig = self
+                        .choose_overload(&sigs, args)
+                        .or_else(|| sigs.first())
+                        ?.clone();
                     return Some((sig.params, sig.ret));
                 }
                 let receiver_ty = self.check_expr(receiver);
-                let method = self.member_method_sig(&receiver_ty, name)?;
+                let methods = self.member_method_sigs(&receiver_ty, name)?;
+                let method = self
+                    .choose_overload(&methods, args)
+                    .or_else(|| methods.first())
+                    ?.clone();
                 Some((method.params, method.ret))
             }
             _ => None,
@@ -1736,17 +1954,15 @@ impl<'a> Checker<'a> {
         None
     }
 
-    fn static_method_sig(&self, receiver: &Expr, name: &str) -> Option<FunctionSig> {
+    fn static_method_sigs(&self, receiver: &Expr, name: &str) -> Option<Vec<FunctionSig>> {
         let Expr::Identifier { name: type_name, .. } = receiver else {
             return None;
         };
         if let Some(sig) = self.lookup_any_object(type_name) {
-            if let Some(method) = self.method_sigs_for_type(&sig, name)?.first().cloned() {
-                return Some(method);
-            }
+            return self.method_sigs_for_type(&sig, name);
         }
         let sig = self.lookup_any_non_object_type(type_name)?;
-        self.method_sigs_for_type(&sig, name)?.first().cloned()
+        self.method_sigs_for_type(&sig, name)
     }
 
     fn check_binary_expr(&mut self, left: &Ty, op: BinaryOp, right: &Ty, span: crate::source::Span) -> Ty {
@@ -1968,29 +2184,34 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn member_method_sig(&self, receiver: &Ty, name: &str) -> Option<FunctionSig> {
+    fn member_method_sigs(&self, receiver: &Ty, name: &str) -> Option<Vec<FunctionSig>> {
         match receiver {
             Ty::Named(type_name, args) => {
                 let sig = self.lookup_any_type(type_name)?;
-                let first = self.method_sigs_for_type(&sig, name)?.first()?.clone();
+                let methods = self.method_sigs_for_type(&sig, name)?;
                 let subst = sig
                     .type_params
                     .iter()
                     .cloned()
                     .zip(args.iter().cloned())
                     .collect::<HashMap<_, _>>();
-                Some(FunctionSig {
-                    params: first
-                        .params
+                Some(
+                    methods
                         .into_iter()
-                        .map(|param| ParamSig {
-                            name: param.name,
-                            ty: substitute_type(&param.ty, &subst),
-                            variadic: param.variadic,
+                        .map(|method| FunctionSig {
+                            params: method
+                                .params
+                                .into_iter()
+                                .map(|param| ParamSig {
+                                    name: param.name,
+                                    ty: substitute_type(&param.ty, &subst),
+                                    variadic: param.variadic,
+                                })
+                                .collect(),
+                            ret: substitute_type(&method.ret, &subst),
                         })
                         .collect(),
-                    ret: substitute_type(&first.ret, &subst),
-                })
+                )
             }
             _ => None,
         }
@@ -2082,10 +2303,139 @@ impl<'a> Checker<'a> {
             }
             Expr::Member { receiver, name, .. } => {
                 matches!(name.as_str(), "print" | "println" | "printf" | "panic")
-                    && matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "OS")
+                    && path_starts_with_os(receiver)
             }
             _ => false,
         }
+    }
+
+    fn choose_overload<'b>(
+        &self,
+        overloads: &'b [FunctionSig],
+        args: &[crate::ast::CallArg],
+    ) -> Option<&'b FunctionSig> {
+        let arg_types = args
+            .iter()
+            .map(|arg| self.probe_expr_type(&arg.value))
+            .collect::<Vec<_>>();
+        overloads
+            .iter()
+            .filter_map(|sig| {
+                let arrangement = arrange_param_args(&sig.params, args);
+                if arrangement.overflow > 0 || arrangement.missing_required > 0 {
+                    return None;
+                }
+                let mut score = 0usize;
+                for (index, param) in sig.params.iter().enumerate() {
+                    for arg in arrangement.slots.get(index).map(Vec::as_slice).unwrap_or(&[]) {
+                        let arg_index = args
+                            .iter()
+                            .position(|candidate| std::ptr::eq(candidate, *arg))
+                            .unwrap_or(0);
+                        let actual = &arg_types[arg_index];
+                        if !matches!(actual, Ty::Unknown) {
+                            if self.is_assignable(actual, &param.ty) {
+                                score += 2;
+                            } else {
+                                return None;
+                            }
+                        }
+                        if arg.name.as_deref() == Some(param.name.as_str()) {
+                            score += 1;
+                        }
+                    }
+                }
+                Some((score, sig))
+            })
+            .max_by_key(|(score, _)| *score)
+            .map(|(_, sig)| sig)
+    }
+
+    fn probe_expr_type(&self, expr: &Expr) -> Ty {
+        match expr {
+            Expr::Identifier { name, .. } => self
+                .lookup_value(name)
+                .map(|value| value.ty)
+                .or_else(|| self.lookup_function_type(name))
+                .or_else(|| self.lookup_named_constructor_type(name))
+                .unwrap_or(Ty::Unknown),
+            Expr::Integer { .. } => Ty::int(),
+            Expr::Float { .. } => Ty::float(),
+            Expr::String { .. } => Ty::str(),
+            Expr::Bool { .. } => Ty::bool(),
+            Expr::Unit { .. } => Ty::unit(),
+            Expr::RecordLiteral { fields, .. } => Ty::Record(
+                fields
+                    .iter()
+                    .filter_map(|field| field.name.as_ref().map(|name| (name.clone(), self.probe_expr_type(&field.value))))
+                    .collect(),
+            ),
+            _ => Ty::Unknown,
+        }
+    }
+
+    fn extract_constructor_record_arg(&mut self, expr: &Expr, params: &[FieldSig]) -> Option<Ty> {
+        match expr {
+            Expr::RecordLiteral { fields, values, .. } if !fields.is_empty() => Some(Ty::Record(
+                fields
+                    .iter()
+                    .filter_map(|field| field.name.as_ref().map(|name| (name.clone(), self.check_expr(&field.value))))
+                    .collect(),
+            )),
+            Expr::RecordLiteral { fields, values, .. } if fields.is_empty() && !values.is_empty() => Some(Ty::Record(
+                values
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, value)| params.get(index).map(|param| (param.name.clone(), self.check_expr(value))))
+                    .collect(),
+            )),
+            _ => {
+                let actual = self.check_expr(expr);
+                matches!(actual, Ty::Record(_)).then_some(actual)
+            }
+        }
+    }
+
+    fn check_record_constructor_conversion(
+        &mut self,
+        params: &[FieldSig],
+        ret: &Ty,
+        record_ty: &Ty,
+        span: crate::source::Span,
+    ) -> Ty {
+        let Ty::Record(fields) = record_ty else {
+            return materialize_type(ret);
+        };
+        let min_required = params.iter().filter(|param| !param.has_initializer).count();
+        let present = params
+            .iter()
+            .filter(|param| fields.iter().any(|(name, _)| name == &param.name))
+            .count();
+        if present < min_required {
+            self.add_error(
+                "invalid_argument_count",
+                format!("call expects {}..{} arguments, got 1", min_required, params.len()),
+                span,
+            );
+        }
+        for param in params {
+            let Some((_, actual)) = fields.iter().find(|(name, _)| name == &param.name) else {
+                continue;
+            };
+            self.require_assignable(
+                actual,
+                &param.ty,
+                span,
+                "invalid_argument_type",
+                format!(
+                    "argument for '{}' has type '{}' but expects '{}'",
+                    param.name,
+                    actual.describe(),
+                    param.ty.describe()
+                ),
+            );
+        }
+        materialize_type(ret)
     }
 
     fn lookup_functions(&self, name: &str) -> Option<Vec<FunctionSig>> {
@@ -2465,6 +2815,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                     .or_else(|| field.initializer.as_ref().and_then(infer_literal_type))
                     .unwrap_or(Ty::Unknown),
                 mutable: field.mutable,
+                has_initializer: field.initializer.is_some(),
             }),
             TypeMember::Method(method) => {
                 methods
@@ -2488,6 +2839,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                             .map(|ty| convert_type_ref(ty, &owner_params))
                             .unwrap_or(Ty::Unknown),
                         mutable: field.mutable,
+                        has_initializer: false,
                     })
                     .collect::<Vec<_>>();
                 enum_cases.insert(
@@ -2587,14 +2939,120 @@ fn impl_target_type_params(reference: &TypeRef) -> Vec<String> {
     }
 }
 
-fn choose_overload<'a>(
-    overloads: &'a [FunctionSig],
-    args: &[crate::ast::CallArg],
-) -> Option<&'a FunctionSig> {
-    overloads
+struct ArgArrangement<'a> {
+    slots: Vec<Vec<&'a crate::ast::CallArg>>,
+    overflow: usize,
+    missing_required: usize,
+}
+
+fn arrange_param_args<'a>(
+    params: &[ParamSig],
+    args: &'a [crate::ast::CallArg],
+) -> ArgArrangement<'a> {
+    let mut slots = vec![Vec::new(); params.len()];
+    let mut positional_index = 0usize;
+    let mut overflow = 0usize;
+    for arg in args {
+        if let Some(name) = &arg.name {
+            if let Some(index) = params.iter().position(|param| param.name == *name) {
+                if params[index].variadic || slots[index].is_empty() {
+                    slots[index].push(arg);
+                } else {
+                    overflow += 1;
+                }
+            } else {
+                overflow += 1;
+            }
+            continue;
+        }
+
+        while positional_index < params.len()
+            && !params[positional_index].variadic
+            && !slots[positional_index].is_empty()
+        {
+            positional_index += 1;
+        }
+        if params.last().is_some_and(|param| param.variadic) && positional_index >= params.len().saturating_sub(1) {
+            if let Some(slot) = slots.last_mut() {
+                slot.push(arg);
+            } else {
+                overflow += 1;
+            }
+        } else if positional_index < params.len() {
+            slots[positional_index].push(arg);
+            if !params[positional_index].variadic {
+                positional_index += 1;
+            }
+        } else {
+            overflow += 1;
+        }
+    }
+
+    let missing_required = params
         .iter()
-        .find(|sig| sig.params.len() == args.len() || sig.params.last().is_some_and(|param| param.variadic))
-        .or_else(|| overloads.first())
+        .enumerate()
+        .filter(|(index, param)| !param.variadic && slots[*index].is_empty())
+        .count();
+
+    ArgArrangement {
+        slots,
+        overflow,
+        missing_required,
+    }
+}
+
+fn arrange_constructor_args<'a>(
+    params: &[FieldSig],
+    args: &'a [crate::ast::CallArg],
+) -> ArgArrangement<'a> {
+    let mut slots = vec![Vec::new(); params.len()];
+    let mut positional_index = 0usize;
+    let mut overflow = 0usize;
+    for arg in args {
+        if let Some(name) = &arg.name {
+            if let Some(index) = params.iter().position(|param| param.name == *name) {
+                if slots[index].is_empty() {
+                    slots[index].push(arg);
+                } else {
+                    overflow += 1;
+                }
+            } else {
+                overflow += 1;
+            }
+            continue;
+        }
+
+        while positional_index < params.len() && !slots[positional_index].is_empty() {
+            positional_index += 1;
+        }
+        if positional_index < params.len() {
+            slots[positional_index].push(arg);
+            positional_index += 1;
+        } else {
+            overflow += 1;
+        }
+    }
+
+    let missing_required = params
+        .iter()
+        .enumerate()
+        .filter(|(index, param)| !param.has_initializer && slots[*index].is_empty())
+        .count();
+
+    ArgArrangement {
+        slots,
+        overflow,
+        missing_required,
+    }
+}
+
+fn path_starts_with_os(expr: &Expr) -> bool {
+    match expr {
+        Expr::Identifier { name, .. } => name == "OS",
+        Expr::Member { receiver, .. } => path_starts_with_os(receiver),
+        Expr::Group { inner, .. } => path_starts_with_os(inner),
+        _ => false,
+    }
 }
 
 fn infer_type_subst(expected: &Ty, actual: &Ty, subst: &mut HashMap<String, Ty>) {

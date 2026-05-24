@@ -1000,6 +1000,11 @@ impl<'a> Interpreter<'a> {
         if self.globals_ready {
             return Ok(());
         }
+        if let Some(init) = self.program.global_init {
+            let _ = self.call_function(init, None, None, Vec::new(), None)?;
+            self.globals_ready = true;
+            return Ok(());
+        }
         for global in &self.program.globals {
             if let Some(initializer) = &global.initializer {
                 let value = self.eval_rvalue(initializer, None, None)?;
@@ -1085,7 +1090,13 @@ impl<'a> Interpreter<'a> {
         }
 
         for (param, value) in function.params.iter().zip(args) {
-            frame.locals[param.0] = value;
+            let ty = function
+                .locals
+                .get(param.0)
+                .map(|local| local.ty.clone())
+                .unwrap_or(ir::Type::Unknown);
+            let coerced = self.coerce_value_to_type(value, &ty);
+            frame.locals[param.0] = coerced;
         }
 
         let mut block_id = function.entry;
@@ -1131,10 +1142,22 @@ impl<'a> Interpreter<'a> {
                     block_id = matched.unwrap_or(default);
                 }
                 ir::TerminatorKind::Return(value) => {
-                    return value
+                    let returned = value
                         .map(|operand| self.eval_operand(&frame, &operand, block.terminator.span))
                         .transpose()?
-                        .map_or(Ok(Value::Unit), Ok);
+                        .unwrap_or(Value::Unit);
+                    if function.name == "init" {
+                        if let (Some(Value::Object(receiver)), Value::Object(result)) =
+                            (frame.locals.first().cloned(), returned.clone())
+                        {
+                            let result = result.borrow();
+                            if receiver.borrow().type_name == result.type_name {
+                                receiver.borrow_mut().fields = result.fields.clone();
+                                return Ok(Value::Unit);
+                            }
+                        }
+                    }
+                    return Ok(self.coerce_value_to_type(returned, &function.return_ty));
                 }
                 ir::TerminatorKind::Unreachable => {
                     return Err(self.runtime_error(
@@ -1339,6 +1362,14 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    fn field_default_value(&self, field: &ir::Field) -> Value {
+        field
+            .initializer
+            .as_ref()
+            .map(|constant| self.constant_value(constant))
+            .unwrap_or_else(|| Value::default_for_type(&field.ty))
+    }
+
     fn read_place(
         &mut self,
         frame: Option<&Frame>,
@@ -1378,14 +1409,27 @@ impl<'a> Interpreter<'a> {
                 let Some(slot) = frame.locals.get_mut(id.0) else {
                     return Err(self.runtime_error(span, format!("unknown local {}", id.0)));
                 };
-                *slot = value;
+                let ty = self
+                    .program
+                    .function(frame.function)
+                    .and_then(|function| function.locals.get(id.0))
+                    .map(|local| local.ty.clone())
+                    .unwrap_or(ir::Type::Unknown);
+                *slot = self.coerce_value_to_type(value, &ty);
                 Ok(())
             }
             ir::Place::Global(id) => {
+                let ty = self
+                    .program
+                    .globals
+                    .get(id.0)
+                    .map(|global| global.ty.clone())
+                    .unwrap_or(ir::Type::Unknown);
+                let coerced = self.coerce_value_to_type(value, &ty);
                 let Some(slot) = self.globals.get_mut(id.0) else {
                     return Err(self.runtime_error(span, format!("unknown global {}", id.0)));
                 };
-                *slot = value;
+                *slot = coerced;
                 Ok(())
             }
             ir::Place::Field { base, name } => {
@@ -1468,6 +1512,9 @@ impl<'a> Interpreter<'a> {
 
         if path[0] == "OS" && path.len() == 2 {
             return self.invoke_os_method(&path[1], args, span);
+        }
+        if path[0] == "OS" && path.len() == 3 && matches!(path[1].as_str(), "stdout" | "stderr") {
+            return self.invoke_os_method(&path[2], args, span);
         }
 
         if path[0] == "Array" && path.len() == 2 && path[1] == "ofLength" {
@@ -1610,6 +1657,10 @@ impl<'a> Interpreter<'a> {
         let type_name = &path[0];
         let member = &path[1];
 
+        if type_name == "OS" && matches!(member.as_str(), "stdout" | "stderr") && args.is_empty() {
+            return self.lookup_object_singleton("OS", span);
+        }
+
         if self
             .lookup_type_by_kind(type_name, crate::ast::TypeKind::Enum)
             .is_some_and(|ty| ty.enum_cases.iter().any(|case| case.name == *member))
@@ -1738,12 +1789,20 @@ impl<'a> Interpreter<'a> {
             fields: ty
                 .fields
                 .iter()
-                .map(|field| (field.name.clone(), Value::default_for_type(&field.ty)))
+                .map(|field| (field.name.clone(), self.field_default_value(field)))
                 .collect(),
         })));
 
-        if let Some(init) = self.find_method_for_kind(type_name, crate::ast::TypeKind::Class, "init")
-            .or_else(|| self.find_method_for_kind(type_name, crate::ast::TypeKind::Record, "init"))
+        if let Some(init) = self
+            .find_method_overload_for_kind(type_name, crate::ast::TypeKind::Class, "init", &args)
+            .or_else(|| {
+                self.find_method_overload_for_kind(
+                    type_name,
+                    crate::ast::TypeKind::Record,
+                    "init",
+                    &args,
+                )
+            })
         {
             let receiver = object.clone();
             let _ = self.call_function(init, Some(receiver), None, args, span)?;
@@ -2214,7 +2273,7 @@ impl<'a> Interpreter<'a> {
                     )
                 };
                 if let Some(function) =
-                    self.find_method_for_kind(&type_name, kind, method)
+                    self.find_method_overload_for_kind(&type_name, kind, method, &args)
                 {
                     return self.call_function(function, Some(receiver), None, args, span);
                 }
@@ -2927,6 +2986,20 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Value::Int(text.chars().count() as i64))
             }
+            "split" => {
+                let [separator] = args.as_slice() else {
+                    return Err(self.runtime_error(span, "Str.split expects 1 argument"));
+                };
+                let separator = match separator {
+                    Value::String(value) => value.clone(),
+                    _ => return Err(self.runtime_error(span, "Str.split separator must be Str")),
+                };
+                Ok(Value::List(Rc::new(RefCell::new(
+                    text.split(&separator)
+                        .map(|part| Value::String(part.to_string()))
+                        .collect(),
+                ))))
+            }
             _ => Err(self.runtime_error(
                 span,
                 format!("unsupported Str method '{}'", method),
@@ -2979,6 +3052,30 @@ impl<'a> Interpreter<'a> {
                     } else {
                         Ok(args[0].clone())
                     }
+                }
+                "getOrElse" => {
+                    if args.len() != 1 {
+                        return Err(self.runtime_error(span, "Option.getOrElse expects 1 argument"));
+                    }
+                    if variant.case_name == "Some" {
+                        Ok(variant.fields[0].1.clone())
+                    } else {
+                        Ok(args[0].clone())
+                    }
+                }
+                "iterator" => {
+                    if !args.is_empty() {
+                        return Err(self.runtime_error(span, "Option.iterator expects 0 arguments"));
+                    }
+                    let values = if variant.case_name == "Some" {
+                        vec![variant.fields[0].1.clone()]
+                    } else {
+                        Vec::new()
+                    };
+                    Ok(Value::Iterator(Rc::new(RefCell::new(IteratorState::List {
+                        items: Rc::new(RefCell::new(values)),
+                        index: 0,
+                    }))))
                 }
                 _ => Err(self.runtime_error(
                     span,
@@ -3093,8 +3190,12 @@ impl<'a> Interpreter<'a> {
         let Value::Variant(variant) = &receiver else {
             unreachable!();
         };
-        if let Some(function) =
-            self.find_method_for_kind(&variant.enum_name, crate::ast::TypeKind::Enum, method)
+        if let Some(function) = self.find_method_overload_for_kind(
+            &variant.enum_name,
+            crate::ast::TypeKind::Enum,
+            method,
+            &args,
+        )
         {
             return self.call_function(function, Some(receiver), None, args, span);
         }
@@ -3221,59 +3322,117 @@ impl<'a> Interpreter<'a> {
             fields: ty
                 .fields
                 .iter()
-                .map(|field| (field.name.clone(), Value::default_for_type(&field.ty)))
+                .map(|field| (field.name.clone(), self.field_default_value(field)))
                 .collect(),
         })));
-        if let Some(init) = self.find_method_for_kind(&ty.name, crate::ast::TypeKind::Object, "init") {
+        if let Some(init) =
+            self.find_method_overload_for_kind(&ty.name, crate::ast::TypeKind::Object, "init", &[])
+        {
             let _ = self.call_function(init, Some(value.clone()), None, Vec::new(), span)?;
         }
         self.object_singletons[ty.id.0] = Some(value.clone());
         Ok(Some(value))
     }
 
-    fn find_method_for_kind(
+    fn find_method_overload_for_kind(
         &self,
         owner: &str,
         kind: crate::ast::TypeKind,
         method: &str,
+        args: &[Value],
     ) -> Option<ir::FunctionId> {
         let mut visited = HashSet::new();
-        self.find_method_for_kind_inner(owner, kind, method, &mut visited)
+        let mut candidates = Vec::new();
+        self.collect_methods_for_kind_inner(owner, kind, method, &mut visited, &mut candidates);
+        self.choose_function_overload(&candidates, args)
     }
 
-    fn find_method_for_kind_inner(
+    fn collect_methods_for_kind_inner(
         &self,
         owner: &str,
         kind: crate::ast::TypeKind,
         method: &str,
         visited: &mut HashSet<(String, crate::ast::TypeKind)>,
-    ) -> Option<ir::FunctionId> {
+        out: &mut Vec<ir::FunctionId>,
+    ) {
         if !visited.insert((owner.to_string(), kind)) {
-            return None;
+            return;
         }
-        let ty = self
+        let Some(ty) = self
             .program
             .types
             .iter()
-            .find(|ty| ty.name == owner && ty.kind == kind)?;
-        if let Some(found) = ty.methods.iter().copied().find(|id| {
+            .find(|ty| ty.name == owner && ty.kind == kind) else {
+            return;
+        };
+        out.extend(ty.methods.iter().copied().filter(|id| {
             self.program
                 .function(*id)
                 .is_some_and(|function| function.name == method)
-        }) {
-            return Some(found);
-        }
+        }));
         for bound in &ty.with_bounds {
             let ir::Type::Named { name, .. } = bound else {
                 continue;
             };
-            if let Some(found) =
-                self.find_method_for_kind_inner(name, crate::ast::TypeKind::Interface, method, visited)
-            {
-                return Some(found);
+            self.collect_methods_for_kind_inner(
+                name,
+                crate::ast::TypeKind::Interface,
+                method,
+                visited,
+                out,
+            );
+        }
+    }
+
+    fn choose_function_overload(
+        &self,
+        candidates: &[ir::FunctionId],
+        args: &[Value],
+    ) -> Option<ir::FunctionId> {
+        let mut best = None;
+        let mut best_score = i32::MIN;
+        for candidate in candidates {
+            let Some(function) = self.program.function(*candidate) else {
+                continue;
+            };
+            let mut score = if function.params.len() == args.len() {
+                10
+            } else if function.params.len() == 1 && args.len() > 1 {
+                let Some(local) = function.locals.get(function.params[0].0) else {
+                    continue;
+                };
+                let ir::Type::Tuple(items) = &local.ty else {
+                    continue;
+                };
+                if items.len() != args.len()
+                    || !args
+                        .iter()
+                        .zip(items)
+                        .all(|(arg, ty)| self.value_matches_type(arg, ty))
+                {
+                    continue;
+                }
+                5 + 2 * args.len() as i32
+            } else {
+                continue;
+            };
+
+            if function.params.len() == args.len() {
+                for (param, arg) in function.params.iter().zip(args) {
+                    let Some(local) = function.locals.get(param.0) else {
+                        continue;
+                    };
+                    if self.value_matches_type(arg, &local.ty) {
+                        score += 2;
+                    }
+                }
+            }
+            if score > best_score {
+                best = Some(*candidate);
+                best_score = score;
             }
         }
-        None
+        best
     }
 
     fn get_member(
@@ -3284,6 +3443,9 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         match base {
             Value::Object(object) => {
+                if matches!(name, "stdout" | "stderr") && object.borrow().type_name == "OS" {
+                    return Ok(Value::Object(object.clone()));
+                }
                 let object = object.borrow();
                 lookup_named_field(&object.fields, name).ok_or_else(|| {
                     self.runtime_error(
@@ -3336,7 +3498,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn index_value(
-        &self,
+        &mut self,
         base: Value,
         index: Value,
         span: Option<Span>,
@@ -3364,14 +3526,11 @@ impl<'a> Interpreter<'a> {
                 let index = normalize_index(items.len(), index)
                     .ok_or_else(|| self.runtime_error(span, format!("tuple index {} out of bounds", index)))?;
                 items
-                .get(index)
-                .cloned()
-                .ok_or_else(|| self.runtime_error(span, format!("tuple index {} out of bounds", index)))
+                    .get(index)
+                    .cloned()
+                    .ok_or_else(|| self.runtime_error(span, format!("tuple index {} out of bounds", index)))
             }
-            _ => Err(self.runtime_error(
-                span,
-                format!("cannot index into {}", base.render()),
-            )),
+            other => self.invoke_method(other, "[]", vec![Value::Int(index)], span),
         }
     }
 
@@ -3406,7 +3565,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn eval_unary(
-        &self,
+        &mut self,
         op: ir::UnaryOp,
         operand: Value,
         span: Option<Span>,
@@ -3415,14 +3574,14 @@ impl<'a> Interpreter<'a> {
             ir::UnaryOp::Neg => match operand {
                 Value::Int(value) => Ok(Value::Int(-value)),
                 Value::Float(value) => Ok(Value::Float(-value)),
-                _ => Err(self.runtime_error(span, "unary '-' expects Int or Float")),
+                other => self.invoke_method(other, "-", Vec::new(), span),
             },
             ir::UnaryOp::Not => Ok(Value::Bool(!operand.as_bool(self, span, "logical not")?)),
         }
     }
 
     fn eval_binary(
-        &self,
+        &mut self,
         op: ir::BinaryOp,
         left: Value,
         right: Value,
@@ -3437,20 +3596,20 @@ impl<'a> Interpreter<'a> {
                 (Value::String(_), _) | (_, Value::String(_)) => {
                     Ok(Value::String(format!("{}{}", left.render(), right.render())))
                 }
-                _ => Err(self.runtime_error(span, "binary '+' expects numeric or string values")),
+                _ => self.invoke_method(left, "+", vec![right], span),
             },
-            ir::BinaryOp::Sub => numeric_binary(left, right, span, |lhs, rhs| lhs - rhs, |lhs, rhs| {
+            ir::BinaryOp::Sub => numeric_binary_or_method(left, right, span, "-", |lhs, rhs| lhs - rhs, |lhs, rhs| {
                 lhs - rhs
             }, self),
-            ir::BinaryOp::Mul => numeric_binary(left, right, span, |lhs, rhs| lhs * rhs, |lhs, rhs| {
+            ir::BinaryOp::Mul => numeric_binary_or_method(left, right, span, "*", |lhs, rhs| lhs * rhs, |lhs, rhs| {
                 lhs * rhs
             }, self),
-            ir::BinaryOp::Div => numeric_binary(left, right, span, |lhs, rhs| lhs / rhs, |lhs, rhs| {
+            ir::BinaryOp::Div => numeric_binary_or_method(left, right, span, "/", |lhs, rhs| lhs / rhs, |lhs, rhs| {
                 lhs / rhs
             }, self),
             ir::BinaryOp::Mod => match (left, right) {
                 (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs % rhs)),
-                _ => Err(self.runtime_error(span, "binary '%' expects Int values")),
+                (left, right) => self.invoke_method(left, "%", vec![right], span),
             },
             ir::BinaryOp::Eq => Ok(Value::Bool(values_equal(&left, &right))),
             ir::BinaryOp::NotEq => Ok(Value::Bool(!values_equal(&left, &right))),
@@ -3480,7 +3639,14 @@ impl<'a> Interpreter<'a> {
                     items.extend(rhs.borrow().iter().cloned());
                     Ok(Value::List(Rc::new(RefCell::new(items))))
                 }
-                _ => Err(self.runtime_error(span, "binary '++' expects List values")),
+                (Value::Set(lhs), Value::Set(rhs)) => {
+                    let mut items = lhs.borrow().clone();
+                    for value in rhs.borrow().iter().cloned() {
+                        push_unique(&mut items, value);
+                    }
+                    Ok(Value::Set(Rc::new(RefCell::new(items))))
+                }
+                _ => Err(self.runtime_error(span, "binary '++' expects List or Set values")),
             },
         }
     }
@@ -3540,6 +3706,67 @@ impl<'a> Interpreter<'a> {
             },
             ir::Type::Function { .. } => matches!(value, Value::Closure(_)),
             ir::Type::TypeParam(_) => true,
+        }
+    }
+
+    fn coerce_value_to_type(&self, value: Value, ty: &ir::Type) -> Value {
+        match ty {
+            ir::Type::Record(fields) => match value {
+                Value::Tuple(items) if items.len() == fields.len() => Value::Record(Rc::new(
+                    RefCell::new(
+                        fields
+                            .iter()
+                            .zip(items)
+                            .map(|(field, value)| {
+                                (
+                                    field.name.clone(),
+                                    self.coerce_value_to_type(value, &field.ty),
+                                )
+                            })
+                            .collect(),
+                    ),
+                )),
+                Value::Record(record) => {
+                    let values = record.borrow();
+                    if fields
+                        .iter()
+                        .all(|field| lookup_named_field(&values, &field.name).is_some())
+                    {
+                        Value::Record(Rc::new(RefCell::new(
+                            fields
+                                .iter()
+                                .map(|field| {
+                                    (
+                                        field.name.clone(),
+                                        self.coerce_value_to_type(
+                                            lookup_named_field(&values, &field.name)
+                                                .expect("record field lookup"),
+                                            &field.ty,
+                                        ),
+                                    )
+                                })
+                                .collect(),
+                        )))
+                    } else if values.len() == fields.len() {
+                        Value::Record(Rc::new(RefCell::new(
+                            fields
+                                .iter()
+                                .zip(values.iter())
+                                .map(|(field, (_, value))| {
+                                    (
+                                        field.name.clone(),
+                                        self.coerce_value_to_type(value.clone(), &field.ty),
+                                    )
+                                })
+                                .collect(),
+                        )))
+                    } else {
+                        Value::Record(record.clone())
+                    }
+                }
+                other => other,
+            },
+            _ => value,
         }
     }
 
@@ -3770,20 +3997,24 @@ fn values_equal(left: &Value, right: &Value) -> bool {
     }
 }
 
-fn numeric_binary(
+fn numeric_binary_or_method(
     left: Value,
     right: Value,
     span: Option<Span>,
+    method: &str,
     int_op: impl FnOnce(i64, i64) -> i64,
     float_op: impl FnOnce(f64, f64) -> f64,
-    in_: &Interpreter<'_>,
+    in_: &mut Interpreter<'_>,
 ) -> Result<Value, Diagnostic> {
-    match (left, right) {
+    match (left.clone(), right.clone()) {
         (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(int_op(lhs, rhs))),
-        (lhs, rhs) => Ok(Value::Float(float_op(
-            lhs.as_number(in_, span, "numeric binary operator")?,
-            rhs.as_number(in_, span, "numeric binary operator")?,
-        ))),
+        (lhs, rhs) if matches!(lhs, Value::Float(_) | Value::Int(_)) && matches!(rhs, Value::Float(_) | Value::Int(_)) => {
+            Ok(Value::Float(float_op(
+                lhs.as_number(in_, span, "numeric binary operator")?,
+                rhs.as_number(in_, span, "numeric binary operator")?,
+            )))
+        }
+        _ => in_.invoke_method(left, method, vec![right], span),
     }
 }
 
@@ -4092,6 +4323,91 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "42-hello\n14\n2\ntrue\n");
+    }
+
+    #[test]
+    fn runs_global_record_updates_through_synthetic_initializer() {
+        let program = lower_inline(
+            r#"
+            record Amount {
+                amount Int
+                description Str
+                count Int
+            }
+
+            impl Amount {
+                def multiple(other Amount) Amount = Amount(
+                    amount = this.amount * other.amount,
+                    description = this.description + " " + other.description,
+                    count = 0
+                )
+            }
+
+            a1 = Amount(10, "description", 5)
+            a2 = a1.multiple(a1)
+            a3 = a2 with { amount = 101, description = a2.description + " updated" }
+            a4 = a3 with { amount = 102 } with { count = 7 }
+
+            def main() Unit {
+                OS.println(a2.amount, a2.description)
+                OS.println(a3.amount, a3.description)
+                OS.println(a4.amount, a4.description)
+                OS.println(a4.count)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "100 description description\n101 description description updated\n102 description description updated\n7\n"
+        );
+    }
+
+    #[test]
+    fn runs_nested_constructor_patterns_with_shared_case_names() {
+        let program = lower_inline(
+            r#"
+            class Apple {
+                size Int
+            }
+
+            record Amount {
+                count Int
+                label Str
+            }
+
+            enum MaybeApple {
+                case NoneX
+                case SomeX {
+                    value Apple
+                }
+            }
+
+            enum MaybeAmount {
+                case NoneX
+                case SomeX {
+                    value Amount
+                }
+            }
+
+            def main() Unit {
+                OS.println(match MaybeApple.SomeX(Apple(12)) {
+                    case SomeX(Apple(size)) => "apple " + size
+                    case MaybeApple.NoneX => "apple none"
+                })
+                OS.println(match MaybeAmount.SomeX(Amount(13, "cad")) {
+                    case SomeX(Amount(count, label)) => "amount " + count + " " + label
+                    case MaybeAmount.NoneX => "amount none"
+                })
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "apple 12\namount 13 cad\n");
     }
 
     #[test]

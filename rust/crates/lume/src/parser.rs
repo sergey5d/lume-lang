@@ -18,12 +18,14 @@ struct Parser<'a> {
     tokens: &'a [Token],
     index: usize,
     diagnostics: Vec<Diagnostic>,
+    allow_trailing_block_call: bool,
 }
 
 #[derive(Clone, Copy)]
 struct Checkpoint {
     index: usize,
     diagnostics_len: usize,
+    allow_trailing_block_call: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -32,6 +34,7 @@ impl<'a> Parser<'a> {
             tokens,
             index: 0,
             diagnostics: Vec::new(),
+            allow_trailing_block_call: true,
         }
     }
 
@@ -778,10 +781,14 @@ impl<'a> Parser<'a> {
             if self.is_binding_start() && self.binding_list_followed_by_left_arrow(self.index) {
                 let bindings = self.parse_binding_list(false)?;
                 self.consume(TokenKind::LeftArrow, "expected '<-' after if binding")?;
-                let value = self.parse_expr()?;
+                let value = self.parse_expr_without_trailing_block_call()?;
                 (None, bindings, Some(value))
             } else {
-                (Some(self.parse_expr()?), Vec::new(), None)
+                (
+                    Some(self.parse_expr_without_trailing_block_call()?),
+                    Vec::new(),
+                    None,
+                )
             };
         let then_block = self.parse_then_stmt_body_block("if")?;
         let else_branch = if self.match_keyword(Keyword::Else) {
@@ -815,7 +822,7 @@ impl<'a> Parser<'a> {
 
     fn parse_while_stmt(&mut self) -> Option<WhileStmt> {
         let start = self.consume_keyword(Keyword::While, "expected 'while'")?;
-        let condition = self.parse_expr()?;
+        let condition = self.parse_expr_without_trailing_block_call()?;
         let body = self.parse_block()?;
         Some(WhileStmt {
             condition,
@@ -828,7 +835,7 @@ impl<'a> Parser<'a> {
         let start = self.consume_keyword(Keyword::For, "expected 'for'")?;
         let bindings = self.parse_binding_list(false)?;
         self.consume(TokenKind::LeftArrow, "expected '<-' in for loop")?;
-        let iterable = self.parse_expr()?;
+        let iterable = self.parse_expr_without_trailing_block_call()?;
         let body = self.parse_block()?;
         Some(ForStmt {
             bindings: vec![ForBinding {
@@ -917,7 +924,7 @@ impl<'a> Parser<'a> {
         let value = if self.at(TokenKind::LBrace) {
             Expr::Placeholder { span: start }
         } else {
-            self.parse_expr()?
+            self.parse_expr_without_trailing_block_call()?
         };
         let (cases, end) = self.parse_match_cases()?;
         Some(MatchStmt {
@@ -1155,6 +1162,14 @@ impl<'a> Parser<'a> {
         self.parse_colon_expr()
     }
 
+    fn parse_expr_without_trailing_block_call(&mut self) -> Option<Expr> {
+        let previous = self.allow_trailing_block_call;
+        self.allow_trailing_block_call = false;
+        let result = self.parse_expr();
+        self.allow_trailing_block_call = previous;
+        result
+    }
+
     fn try_parse_lambda_expr(&mut self) -> Option<Expr> {
         let checkpoint = self.checkpoint();
         if self.at(TokenKind::Identifier) {
@@ -1266,7 +1281,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_if_expr(&mut self, start: Span) -> Option<Expr> {
-        let condition = self.parse_expr()?;
+        let condition = self.parse_expr_without_trailing_block_call()?;
         let then_block = self.parse_then_expr_body_block("if")?;
         self.consume_keyword(Keyword::Else, "expected 'else' in if expression")?;
         self.skip_newlines();
@@ -1293,7 +1308,7 @@ impl<'a> Parser<'a> {
         let value = if self.at(TokenKind::LBrace) {
             Expr::Placeholder { span: start }
         } else {
-            self.parse_expr()?
+            self.parse_expr_without_trailing_block_call()?
         };
         let (cases, end) = self.parse_match_cases()?;
         Some(Expr::Match {
@@ -1310,7 +1325,7 @@ impl<'a> Parser<'a> {
         } else {
             let bindings = self.parse_binding_list(false)?;
             self.consume(TokenKind::LeftArrow, "expected '<-' after for bindings")?;
-            let iterable = self.parse_expr()?;
+            let iterable = self.parse_expr_without_trailing_block_call()?;
             vec![ForBinding {
                 span: bindings
                     .first()
@@ -1338,7 +1353,7 @@ impl<'a> Parser<'a> {
             let mutable = self.match_keyword(Keyword::Var);
             let clause_bindings = self.parse_binding_list(mutable)?;
             if self.match_token(TokenKind::LeftArrow) {
-                let iterable = self.parse_expr()?;
+                let iterable = self.parse_expr_without_trailing_block_call()?;
                 let span = clause_bindings
                     .first()
                     .map(|binding| binding.span)
@@ -1389,29 +1404,7 @@ impl<'a> Parser<'a> {
 
     fn parse_record_literal_expr(&mut self, start: Span) -> Option<Expr> {
         if self.match_token(TokenKind::LBrace) {
-            let mut fields = Vec::new();
-            self.skip_newlines();
-            while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-                let (name, name_span) = self.expect_identifier("expected record field name")?;
-                self.consume(TokenKind::Eq, "expected '=' after record field name")?;
-                let value = self.parse_expr()?;
-                fields.push(CallArg {
-                    name: Some(name),
-                    span: name_span.cover(value.span()),
-                    value,
-                });
-                self.skip_newlines();
-                if !self.match_token(TokenKind::Comma) && self.at(TokenKind::Identifier) {
-                    continue;
-                }
-                self.skip_newlines();
-            }
-            let end = self.consume(TokenKind::RBrace, "expected '}' after record literal")?;
-            return Some(Expr::RecordLiteral {
-                fields,
-                values: Vec::new(),
-                span: start.cover(end),
-            });
+            return self.finish_brace_record_literal_expr(start);
         }
         self.consume(TokenKind::LParen, "expected '{' or '(' after 'record'")?;
         let mut values = Vec::new();
@@ -1426,6 +1419,37 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_brace_record_literal_expr(&mut self) -> Option<Expr> {
+        let start = self.consume(TokenKind::LBrace, "expected '{'")?;
+        self.finish_brace_record_literal_expr(start)
+    }
+
+    fn finish_brace_record_literal_expr(&mut self, start: Span) -> Option<Expr> {
+        let mut fields = Vec::new();
+        self.skip_newlines();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            let (name, name_span) = self.expect_identifier("expected record field name")?;
+            self.consume(TokenKind::Eq, "expected '=' after record field name")?;
+            let value = self.parse_expr()?;
+            fields.push(CallArg {
+                name: Some(name),
+                span: name_span.cover(value.span()),
+                value,
+            });
+            self.skip_newlines();
+            if !self.match_token(TokenKind::Comma) && self.at(TokenKind::Identifier) {
+                continue;
+            }
+            self.skip_newlines();
+        }
+        let end = self.consume(TokenKind::RBrace, "expected '}' after record literal")?;
+        Some(Expr::RecordLiteral {
+            fields,
+            values: Vec::new(),
+            span: start.cover(end),
+        })
+    }
+
     fn is_anonymous_interface_expr_start(&self) -> bool {
         if !self.can_start_type_ref() {
             return false;
@@ -1434,6 +1458,7 @@ impl<'a> Parser<'a> {
             tokens: self.tokens,
             index: self.index,
             diagnostics: Vec::new(),
+            allow_trailing_block_call: self.allow_trailing_block_call,
         };
         let Some(_) = parser.parse_type_ref() else {
             return false;
@@ -1817,6 +1842,30 @@ impl<'a> Parser<'a> {
                 };
                 continue;
             }
+            if self.allow_trailing_block_call && self.at(TokenKind::LBrace) {
+                let start = expr.span();
+                let checkpoint = self.checkpoint();
+                let arg = if let Some(record) = self.parse_brace_record_literal_expr() {
+                    record
+                } else {
+                    self.restore(checkpoint);
+                    let block = self.parse_block()?;
+                    Expr::Block {
+                        span: block.span,
+                        body: block,
+                    }
+                };
+                expr = Expr::Call {
+                    callee: Box::new(expr),
+                    args: vec![CallArg {
+                        name: None,
+                        span: arg.span(),
+                        value: arg.clone(),
+                    }],
+                    span: start.cover(arg.span()),
+                };
+                continue;
+            }
             break;
         }
         Some(expr)
@@ -1932,11 +1981,17 @@ impl<'a> Parser<'a> {
             TokenKind::LBracket => self.parse_list_literal(),
             TokenKind::LParen => self.parse_group_or_tuple_expr(),
             TokenKind::LBrace => {
-                let block = self.parse_block()?;
-                Some(Expr::Block {
-                    span: block.span,
-                    body: block,
-                })
+                let checkpoint = self.checkpoint();
+                if let Some(record) = self.parse_brace_record_literal_expr() {
+                    Some(record)
+                } else {
+                    self.restore(checkpoint);
+                    let block = self.parse_block()?;
+                    Some(Expr::Block {
+                        span: block.span,
+                        body: block,
+                    })
+                }
             }
             _ => {
                 self.error_at_current("expected_expression", "expected expression");
@@ -2278,12 +2333,14 @@ impl<'a> Parser<'a> {
         Checkpoint {
             index: self.index,
             diagnostics_len: self.diagnostics.len(),
+            allow_trailing_block_call: self.allow_trailing_block_call,
         }
     }
 
     fn restore(&mut self, checkpoint: Checkpoint) {
         self.index = checkpoint.index;
         self.diagnostics.truncate(checkpoint.diagnostics_len);
+        self.allow_trailing_block_call = checkpoint.allow_trailing_block_call;
     }
 
     fn skip_newlines(&mut self) {

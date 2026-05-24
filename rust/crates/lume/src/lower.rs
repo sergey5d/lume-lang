@@ -386,21 +386,42 @@ impl<'a> Lowerer<'a> {
     }
 
     fn lower_global_initializers(&mut self) {
+        if self.global_inits.is_empty() {
+            return;
+        }
+
+        let mut init = ir::Function::new(
+            "__globals_init",
+            ir::FunctionKind::Synthetic,
+            ir::Type::Unit,
+        );
+        init.visibility = ast::Visibility::Hidden;
+        let init_id = self.program.add_function(init);
+        self.program.set_global_init(init_id);
+
         let jobs = self.global_inits.clone();
+        let mut lowerer = FunctionLowerer::new(
+            &mut self.program,
+            init_id,
+            &self.global_ids,
+            &self.function_ids,
+            &self.case_fields,
+            &mut self.diagnostics,
+        );
         for job in jobs {
-            let value = lower_global_expr(
-                &job.expr,
-                &self.program,
-                &self.global_ids,
-                &self.function_ids,
-                &mut self.diagnostics,
-            );
-            let Some(global) = self.program.globals.get_mut(job.id.0) else {
-                continue;
-            };
-            if let Some(value) = value {
-                global.initializer = Some(value);
-            }
+            let value = lowerer.lower_expr(&job.expr);
+            lowerer.push_statement(ir::Statement {
+                span: Some(job.expr.span()),
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Global(job.id),
+                    value: ir::RValue::Use(value),
+                },
+            });
+        }
+        if let Some(block) = lowerer.current_block_mut() {
+            block.set_terminator(ir::Terminator::ret(Some(ir::Operand::Const(
+                ir::Constant::Unit,
+            ))));
         }
     }
 
@@ -618,12 +639,32 @@ impl<'a> FunctionLowerer<'a> {
         }
         match stmt {
             Stmt::Binding(binding) => {
+                let destructure_single_value = binding.bindings.len() > 1 && binding.values.len() == 1;
+                let source_value = destructure_single_value
+                    .then(|| self.lower_expr(&binding.values[0]));
+                let destructure_fields = destructure_single_value
+                    .then(|| self.destructure_field_names(&binding.values[0], binding.bindings.len()));
                 for (index, local) in binding.bindings.iter().enumerate() {
                     if local.name == "_" {
-                        if let Some(expr) = binding.values.get(index) {
-                            let value = self.lower_expr(expr);
+                        if let Some(value) = if destructure_single_value {
+                            source_value.clone().map(|base| {
+                                self.emit_temp_from_rvalue(
+                                    ir::RValue::Field {
+                                        base,
+                                        name: destructure_fields
+                                            .as_ref()
+                                            .and_then(|fields| fields.get(index).cloned())
+                                            .unwrap_or_else(|| format!("_{}", index + 1)),
+                                    },
+                                    ir::Type::Unknown,
+                                    Some(local.span),
+                                )
+                            })
+                        } else {
+                            binding.values.get(index).map(|expr| self.lower_expr(expr))
+                        } {
                             self.push_statement(ir::Statement {
-                                span: Some(expr.span()),
+                                span: Some(local.span),
                                 kind: ir::StatementKind::Eval {
                                     value: ir::RValue::Use(value),
                                 },
@@ -635,8 +676,23 @@ impl<'a> FunctionLowerer<'a> {
                     let local_id =
                         self.add_local(local.name.clone(), ty, local.mutable, ir::LocalKind::Binding);
                     self.current_scope().insert(local.name.clone(), local_id);
-                    if let Some(expr) = binding.values.get(index) {
-                        let value = self.lower_expr(expr);
+                    if let Some(value) = if destructure_single_value {
+                        source_value.clone().map(|base| {
+                            self.emit_temp_from_rvalue(
+                                ir::RValue::Field {
+                                    base,
+                                    name: destructure_fields
+                                        .as_ref()
+                                        .and_then(|fields| fields.get(index).cloned())
+                                        .unwrap_or_else(|| format!("_{}", index + 1)),
+                                },
+                                ir::Type::Unknown,
+                                Some(local.span),
+                            )
+                        })
+                    } else {
+                        binding.values.get(index).map(|expr| self.lower_expr(expr))
+                    } {
                         self.push_statement(ir::Statement {
                             span: Some(local.span),
                             kind: ir::StatementKind::Assign {
@@ -1367,6 +1423,17 @@ impl<'a> FunctionLowerer<'a> {
         });
     }
 
+    fn destructure_field_names(&self, expr: &Expr, count: usize) -> Vec<String> {
+        if let Expr::Call { callee, .. } = expr {
+            if let Some(path) = expr_path(callee) {
+                if let Some((_, fields)) = self.lookup_destructured_type_fields(&path, count) {
+                    return fields;
+                }
+            }
+        }
+        (0..count).map(|index| format!("_{}", index + 1)).collect()
+    }
+
     fn lower_unwrap_block(&mut self, stmt: &ast::UnwrapBlockStmt) {
         let failure_value = self.add_temp(ir::Type::Unknown);
         let fallback_block = self.add_block();
@@ -1918,6 +1985,11 @@ impl<'a> FunctionLowerer<'a> {
         if matches.len() == 1 {
             return matches.into_iter().next();
         }
+        if let Some(first) = matches.first() {
+            if matches.iter().all(|fields| fields == first) {
+                return Some(first.clone());
+            }
+        }
         None
     }
 
@@ -2226,15 +2298,23 @@ impl<'a> FunctionLowerer<'a> {
             Expr::TupleLiteral { items, .. } => Some(ir::RValue::Tuple(
                 items.iter().map(|item| self.lower_expr(item)).collect(),
             )),
-            Expr::RecordLiteral { fields, .. } => Some(ir::RValue::Record(
-                fields
-                    .iter()
-                    .map(|field| ir::NamedOperand {
-                        name: field.name.clone().unwrap_or_default(),
-                        value: self.lower_expr(&field.value),
-                    })
-                    .collect(),
-            )),
+            Expr::RecordLiteral { fields, values, .. } => {
+                if fields.is_empty() && !values.is_empty() {
+                    Some(ir::RValue::Tuple(
+                        values.iter().map(|value| self.lower_expr(value)).collect(),
+                    ))
+                } else {
+                    Some(ir::RValue::Record(
+                        fields
+                            .iter()
+                            .map(|field| ir::NamedOperand {
+                                name: field.name.clone().unwrap_or_default(),
+                                value: self.lower_expr(&field.value),
+                            })
+                            .collect(),
+                    ))
+                }
+            }
             Expr::Unary { op, expr, .. } => Some(ir::RValue::Unary {
                 op: match op {
                     ast::UnaryOp::Neg => ir::UnaryOp::Neg,
@@ -2248,6 +2328,15 @@ impl<'a> FunctionLowerer<'a> {
                 right,
                 span,
             } => {
+                if *op == AstBinaryOp::Append {
+                    return Some(ir::RValue::Call {
+                        callee: ir::Callee::Method {
+                            receiver: self.lower_expr(left),
+                            method: "append".to_string(),
+                        },
+                        args: vec![self.lower_expr(right)],
+                    });
+                }
                 if *op == AstBinaryOp::Colon {
                     return Some(ir::RValue::Tuple(vec![
                         self.lower_expr(left),
@@ -2306,6 +2395,17 @@ impl<'a> FunctionLowerer<'a> {
         if let Some(path) = expr_path(callee) {
             if path.len() == 1 {
                 let name = &path[0];
+                if name == "init" && self.function().name == "init" {
+                    if let ir::FunctionKind::Method { owner } = self.function().kind {
+                        if let Some(owner_name) =
+                            self.program.types.get(owner.0).map(|ty| ty.name.clone())
+                        {
+                            return ir::Callee::Named {
+                                path: vec![owner_name],
+                            };
+                        }
+                    }
+                }
                 if let Some(intrinsic) = intrinsic_for_name(name) {
                     return ir::Callee::Intrinsic(intrinsic);
                 }
@@ -3195,279 +3295,6 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
     }
 }
 
-fn lower_global_expr(
-    expr: &Expr,
-    program: &ir::Program,
-    globals: &HashMap<String, ir::GlobalId>,
-    functions: &HashMap<String, ir::FunctionId>,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Option<ir::RValue> {
-    match expr {
-        Expr::Identifier { name, span } => {
-            if let Some(global) = globals.get(name).copied() {
-                Some(ir::RValue::Use(ir::Operand::Copy(Box::new(ir::Place::Global(global)))))
-            } else if is_named_runtime_value_path(program, &[name.clone()]) {
-                Some(ir::RValue::Call {
-                    callee: ir::Callee::Named {
-                        path: vec![name.clone()],
-                    },
-                    args: Vec::new(),
-                })
-            } else {
-                diagnostics.push(Diagnostic::error(
-                    "lower_unsupported",
-                    format!("unknown global value '{}' in initializer lowering", name),
-                    *span,
-                ));
-                None
-            }
-        }
-        Expr::Integer { raw, .. } => Some(ir::RValue::Use(ir::Operand::Const(
-            ir::Constant::Int(raw.parse::<i64>().unwrap_or(0)),
-        ))),
-        Expr::Float { raw, .. } => Some(ir::RValue::Use(ir::Operand::Const(
-            ir::Constant::Float(raw.parse::<f64>().unwrap_or(0.0)),
-        ))),
-        Expr::String { raw, .. } => Some(ir::RValue::Use(ir::Operand::Const(
-            ir::Constant::String(raw.clone()),
-        ))),
-        Expr::Bool { value, .. } => Some(ir::RValue::Use(ir::Operand::Const(
-            ir::Constant::Bool(*value),
-        ))),
-        Expr::Unit { .. } => Some(ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit))),
-        Expr::Group { inner, .. } => lower_global_expr(inner, program, globals, functions, diagnostics),
-        Expr::Unary { op, expr, .. } => Some(ir::RValue::Unary {
-            op: match op {
-                ast::UnaryOp::Neg => ir::UnaryOp::Neg,
-                ast::UnaryOp::Not => ir::UnaryOp::Not,
-            },
-            operand: lower_global_operand(expr, globals, program, diagnostics)?,
-        }),
-        Expr::Binary {
-            left,
-            op,
-            right,
-            span,
-        } => Some(ir::RValue::Binary {
-            op: map_binary_op(*op).unwrap_or_else(|| {
-                diagnostics.push(Diagnostic::error(
-                    "lower_unsupported",
-                    "binary operator is not supported in global initializer lowering",
-                    *span,
-                ));
-                ir::BinaryOp::Add
-            }),
-            left: lower_global_operand(left, globals, program, diagnostics)?,
-            right: lower_global_operand(right, globals, program, diagnostics)?,
-        }),
-        Expr::ListLiteral { items, .. } => Some(ir::RValue::List(
-            items
-                .iter()
-                .map(|item| lower_global_operand(item, globals, program, diagnostics))
-                .collect::<Option<Vec<_>>>()?,
-        )),
-        Expr::TupleLiteral { items, .. } => Some(ir::RValue::Tuple(
-            items
-                .iter()
-                .map(|item| lower_global_operand(item, globals, program, diagnostics))
-                .collect::<Option<Vec<_>>>()?,
-        )),
-        Expr::Call { callee, args, .. } => Some(ir::RValue::Call {
-            callee: lower_global_callee(callee, globals, functions, program, diagnostics),
-            args: args
-                .iter()
-                .map(|arg| lower_global_operand(&arg.value, globals, program, diagnostics))
-                .collect::<Option<Vec<_>>>()?,
-        }),
-        Expr::Member { receiver, name, .. } => {
-            if let Some(path) = expr_path(expr).filter(|path| is_named_runtime_value_path(program, path)) {
-                Some(ir::RValue::Call {
-                    callee: ir::Callee::Named { path },
-                    args: Vec::new(),
-                })
-            } else {
-                Some(ir::RValue::Field {
-                    base: lower_global_operand(receiver, globals, program, diagnostics)?,
-                    name: name.clone(),
-                })
-            }
-        }
-        Expr::Index { receiver, index, .. } => Some(ir::RValue::Index {
-            base: lower_global_operand(receiver, globals, program, diagnostics)?,
-            index: lower_global_operand(index, globals, program, diagnostics)?,
-        }),
-        Expr::RecordUpdate { .. } => lower_global_record_update(expr, globals, program, diagnostics),
-        Expr::Is { left, target, .. } => Some(ir::RValue::TypeTest {
-            operand: lower_global_operand(left, globals, program, diagnostics)?,
-            ty: lower_type_ref(target),
-        }),
-        other => {
-            diagnostics.push(Diagnostic::error(
-                "lower_unsupported",
-                "global initializer expression is not implemented in lowering",
-                other.span(),
-            ));
-            None
-        }
-    }
-}
-
-fn lower_global_operand(
-    expr: &Expr,
-    globals: &HashMap<String, ir::GlobalId>,
-    program: &ir::Program,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Option<ir::Operand> {
-    match expr {
-        Expr::Identifier { name, span } => globals
-            .get(name)
-            .copied()
-            .map(|global| ir::Operand::Copy(Box::new(ir::Place::Global(global))))
-            .or_else(|| {
-                if is_named_runtime_value_path(program, &[name.clone()]) {
-                    diagnostics.push(Diagnostic::error(
-                        "lower_unsupported",
-                        format!(
-                            "global initializer operand '{}' needs temporary lowering, which is not implemented yet",
-                            name
-                        ),
-                        *span,
-                    ));
-                    return None;
-                }
-                diagnostics.push(Diagnostic::error(
-                    "lower_unsupported",
-                    format!("unknown global value '{}' in initializer lowering", name),
-                    *span,
-                ));
-                None
-            }),
-        Expr::Integer { raw, .. } => Some(ir::Operand::Const(ir::Constant::Int(
-            raw.parse::<i64>().unwrap_or(0),
-        ))),
-        Expr::Float { raw, .. } => Some(ir::Operand::Const(ir::Constant::Float(
-            raw.parse::<f64>().unwrap_or(0.0),
-        ))),
-        Expr::String { raw, .. } => Some(ir::Operand::Const(ir::Constant::String(raw.clone()))),
-        Expr::Bool { value, .. } => Some(ir::Operand::Const(ir::Constant::Bool(*value))),
-        Expr::Unit { .. } => Some(ir::Operand::Const(ir::Constant::Unit)),
-        Expr::Group { inner, .. } => lower_global_operand(inner, globals, program, diagnostics),
-        _ => {
-            diagnostics.push(Diagnostic::error(
-                "lower_unsupported",
-                "complex operand in global initializer lowering needs temps, which are not implemented yet",
-                expr.span(),
-            ));
-            None
-        }
-    }
-}
-
-fn lower_global_callee(
-    callee: &Expr,
-    globals: &HashMap<String, ir::GlobalId>,
-    functions: &HashMap<String, ir::FunctionId>,
-    program: &ir::Program,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> ir::Callee {
-    if let Some(path) = expr_path(callee) {
-        if path.len() == 1 {
-            let name = &path[0];
-            if let Some(intrinsic) = intrinsic_for_name(name) {
-                return ir::Callee::Intrinsic(intrinsic);
-            }
-            if let Some(function) = functions.get(name).copied() {
-                return ir::Callee::Direct(function);
-            }
-            if let Some(global) = globals.get(name).copied() {
-                return ir::Callee::Indirect(ir::Operand::Copy(Box::new(ir::Place::Global(global))));
-            }
-            if is_named_runtime_callee_path(program, &path) {
-                return ir::Callee::Named { path };
-            }
-        }
-        if is_named_runtime_callee_path(program, &path) {
-            return ir::Callee::Named { path };
-        }
-    }
-
-    if let Expr::Member { receiver, name, .. } = callee {
-        if let Some(base) = lower_global_operand(receiver, globals, program, diagnostics) {
-            return ir::Callee::Method {
-                receiver: base,
-                method: name.clone(),
-            };
-        }
-    }
-
-    diagnostics.push(Diagnostic::error(
-        "lower_unsupported",
-        "global initializer callee is not implemented in lowering",
-        callee.span(),
-    ));
-    ir::Callee::Named {
-        path: vec!["<error>".to_string()],
-    }
-}
-
-fn lower_global_record_update(
-    expr: &Expr,
-    globals: &HashMap<String, ir::GlobalId>,
-    program: &ir::Program,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Option<ir::RValue> {
-    let (base, updates) = flatten_global_record_update(expr, diagnostics)?;
-    Some(ir::RValue::RecordUpdate {
-        base: lower_global_operand(base, globals, program, diagnostics)?,
-        updates: updates
-            .iter()
-            .map(|update| {
-                Some(ir::NamedOperand {
-                    name: update.name.clone().unwrap_or_default(),
-                    value: lower_global_operand(&update.value, globals, program, diagnostics)?,
-                })
-            })
-            .collect::<Option<Vec<_>>>()?,
-    })
-}
-
-fn flatten_global_record_update<'a>(
-    expr: &'a Expr,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Option<(&'a Expr, Vec<&'a ast::CallArg>)> {
-    let mut current = expr;
-    let mut chunks: Vec<&'a [ast::CallArg]> = Vec::new();
-    loop {
-        match current {
-            Expr::RecordUpdate {
-                receiver,
-                updates,
-                ..
-            } => {
-                chunks.push(updates.as_slice());
-                current = receiver.as_ref();
-            }
-            Expr::Identifier { .. }
-            | Expr::Member { .. }
-            | Expr::Index { .. }
-            | Expr::Group { .. } => break,
-            other => {
-                diagnostics.push(Diagnostic::error(
-                    "lower_unsupported",
-                    "record update receiver is not implemented in global initializer lowering",
-                    other.span(),
-                ));
-                return None;
-            }
-        }
-    }
-
-    let mut merged = Vec::new();
-    for updates in chunks.into_iter().rev() {
-        merged.extend(updates.iter());
-    }
-    Some((current, merged))
-}
 
 #[cfg(test)]
 mod tests {
