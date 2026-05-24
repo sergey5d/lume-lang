@@ -870,6 +870,105 @@ impl<'a> FunctionLowerer<'a> {
         ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
     }
 
+    fn lower_callable_closure(
+        &mut self,
+        name: &str,
+        params: &[ast::Param],
+        return_type: Option<&TypeRef>,
+        body: Option<&CallableBody>,
+        span: Span,
+    ) -> ir::RValue {
+        let nested_name = format!("anon${}${name}", self.function_id.0);
+        let mut nested = ir::Function::new(
+            nested_name,
+            ir::FunctionKind::Lambda,
+            return_type.map(lower_type_ref).unwrap_or(ir::Type::Unknown),
+        );
+        nested.span = Some(span);
+        for param in params {
+            nested.add_param(
+                param.name.clone(),
+                param.ty
+                    .as_ref()
+                    .map(lower_type_ref)
+                    .unwrap_or(ir::Type::Unknown),
+            );
+        }
+        let function_id = self.program.add_function(nested);
+        let capture_sources = self.visible_capture_sources(None);
+        let implicit_fields = self.implicit_fields.clone();
+        let captures = {
+            let mut lowerer = FunctionLowerer::new(
+                self.program,
+                function_id,
+                self.globals,
+                self.functions,
+                self.case_fields,
+                self.diagnostics,
+            )
+            .with_capture_sources(capture_sources, implicit_fields);
+            for (index, param) in params.iter().enumerate() {
+                if let Some(local_id) = lowerer.function().params.get(index).copied() {
+                    if param.name != "_" {
+                        lowerer.bind_existing(&param.name, local_id);
+                    }
+                }
+            }
+            if let Some(body) = body {
+                lowerer.lower_callable_body(body, span);
+            } else if let Some(block) = lowerer.current_block_mut() {
+                block.set_terminator(ir::Terminator::ret(Some(ir::Operand::Const(
+                    ir::Constant::Unit,
+                ))));
+            }
+            lowerer.finish_closure_captures()
+        };
+        ir::RValue::Closure {
+            function: function_id,
+            captures,
+        }
+    }
+
+    fn lower_anonymous_interface_rvalue(&mut self, methods: &[MethodDecl]) -> ir::RValue {
+        let fields = methods
+            .iter()
+            .map(|method| {
+                let ty = ir::Type::Function {
+                    params: method
+                        .params
+                        .iter()
+                        .map(|param| {
+                            param.ty
+                                .as_ref()
+                                .map(lower_type_ref)
+                                .unwrap_or(ir::Type::Unknown)
+                        })
+                        .collect(),
+                    ret: Box::new(
+                        method
+                            .return_type
+                            .as_ref()
+                            .map(lower_type_ref)
+                            .unwrap_or(ir::Type::Unknown),
+                    ),
+                };
+                let closure = self.lower_callable_closure(
+                    &method.name,
+                    &method.params,
+                    method.return_type.as_ref(),
+                    method.body.as_ref(),
+                    method.span,
+                );
+                let operand = self.emit_temp_from_rvalue(closure, ty, Some(method.span));
+                ir::NamedOperand {
+                    name: method.name.clone(),
+                    value: operand,
+                }
+            })
+            .collect();
+        ir::RValue::Record(fields)
+    }
+
     fn visible_capture_sources(&self, excluded_name: Option<&str>) -> HashMap<String, CaptureSource> {
         let mut sources = HashMap::new();
         for scope in &self.scopes {
@@ -907,8 +1006,12 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_if_stmt(&mut self, stmt: &ast::IfStmt) {
+        if let Some(value) = &stmt.binding_value {
+            self.lower_if_unwrap_stmt(stmt, value);
+            return;
+        }
         let Some(condition) = stmt.condition.as_ref() else {
-            self.unsupported("if unwrap lowering is not implemented yet", stmt.span);
+            self.unsupported("if statement requires a condition or unwrap binding", stmt.span);
             return;
         };
         let then_block = self.add_block();
@@ -926,6 +1029,67 @@ impl<'a> FunctionLowerer<'a> {
 
         self.current_block = Some(then_block);
         self.lower_block_statements(&stmt.then_block);
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        self.current_block = Some(else_block);
+        if let Some(branch) = &stmt.else_branch {
+            self.lower_else_branch(branch);
+        }
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        let join_used = self.block_has_predecessor(join_block);
+        self.current_block = if join_used { Some(join_block) } else { None };
+    }
+
+    fn lower_if_unwrap_stmt(&mut self, stmt: &ast::IfStmt, value: &Expr) {
+        let source = self.lower_expr(value);
+        let source_local = self.add_temp(ir::Type::Unknown);
+        self.push_statement(ir::Statement {
+            span: Some(value.span()),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(source_local),
+                value: ir::RValue::Use(source),
+            },
+        });
+
+        let then_block = self.add_block();
+        let else_block = self.add_block();
+        let join_block = self.add_block();
+
+        let present = self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapPresent),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+            },
+            ir::Type::Bool,
+            Some(stmt.span),
+        );
+        self.terminate(ir::Terminator {
+            span: Some(stmt.span),
+            kind: ir::TerminatorKind::Branch {
+                condition: present,
+                then_block,
+                else_block,
+            },
+        });
+
+        self.current_block = Some(then_block);
+        let inner = self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapValue),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+            },
+            ir::Type::Unknown,
+            Some(stmt.span),
+        );
+        self.push_scope();
+        self.bind_unwrap_values(&stmt.bindings, inner);
+        self.lower_block_statements(&stmt.then_block);
+        self.pop_scope();
         if self.current_block.is_some() {
             self.terminate(ir::Terminator::goto(join_block));
         }
@@ -1877,6 +2041,18 @@ impl<'a> FunctionLowerer<'a> {
             Expr::String { raw, .. } => ir::Operand::Const(ir::Constant::String(raw.clone())),
             Expr::Bool { value, .. } => ir::Operand::Const(ir::Constant::Bool(*value)),
             Expr::Unit { .. } => ir::Operand::Const(ir::Constant::Unit),
+            Expr::Binary {
+                left,
+                op: AstBinaryOp::And,
+                right,
+                span,
+            } => self.lower_logical_expr(left, AstBinaryOp::And, right, *span),
+            Expr::Binary {
+                left,
+                op: AstBinaryOp::Or,
+                right,
+                span,
+            } => self.lower_logical_expr(left, AstBinaryOp::Or, right, *span),
             Expr::If {
                 condition,
                 then_block,
@@ -1911,6 +2087,63 @@ impl<'a> FunctionLowerer<'a> {
                 ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
             }
         }
+    }
+
+    fn lower_logical_expr(
+        &mut self,
+        left: &Expr,
+        op: AstBinaryOp,
+        right: &Expr,
+        span: Span,
+    ) -> ir::Operand {
+        let temp = self.add_temp(ir::Type::Bool);
+        let right_block = self.add_block();
+        let short_block = self.add_block();
+        let join_block = self.add_block();
+
+        let left_value = self.lower_expr(left);
+        let (then_block, else_block, short_value) = match op {
+            AstBinaryOp::And => (right_block, short_block, false),
+            AstBinaryOp::Or => (short_block, right_block, true),
+            _ => unreachable!(),
+        };
+        self.terminate(ir::Terminator {
+            span: Some(span),
+            kind: ir::TerminatorKind::Branch {
+                condition: left_value,
+                then_block,
+                else_block,
+            },
+        });
+
+        self.current_block = Some(short_block);
+        self.push_statement(ir::Statement {
+            span: Some(span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(temp),
+                value: ir::RValue::Use(ir::Operand::Const(ir::Constant::Bool(short_value))),
+            },
+        });
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        self.current_block = Some(right_block);
+        let right_value = self.lower_expr(right);
+        self.push_statement(ir::Statement {
+            span: Some(span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(temp),
+                value: ir::RValue::Use(right_value),
+            },
+        });
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        let join_used = self.block_has_predecessor(join_block);
+        self.current_block = if join_used { Some(join_block) } else { None };
+        ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
     }
 
     fn lower_if_expr(
@@ -2047,9 +2280,8 @@ impl<'a> FunctionLowerer<'a> {
                 ty: lower_type_ref(target),
             }),
             Expr::Lambda { params, body, span } => Some(self.lower_lambda_rvalue(params, body, *span)),
-            Expr::AnonymousInterface { span, .. } => {
-                self.unsupported("anonymous interface lowering is not implemented yet", *span);
-                None
+            Expr::AnonymousInterface { methods, .. } => {
+                Some(self.lower_anonymous_interface_rvalue(methods))
             }
             Expr::RecordUpdate {
                 receiver,
@@ -2083,8 +2315,13 @@ impl<'a> FunctionLowerer<'a> {
                 if let Some(value) = self.lookup_value(name) {
                     return ir::Callee::Indirect(value);
                 }
+                if is_named_runtime_callee_path(self.program, &path) {
+                    return ir::Callee::Named { path };
+                }
             }
-            return ir::Callee::Named { path };
+            if is_named_runtime_callee_path(self.program, &path) {
+                return ir::Callee::Named { path };
+            }
         }
 
         if let Expr::Member { receiver, name, .. } = callee {
@@ -2351,6 +2588,32 @@ fn is_named_runtime_value_path(program: &ir::Program, path: &[String]) -> bool {
         && (builtin_zero_arg_value_name(&path[0]) || unique_bare_enum_case_value_exists(program, &path[0]))
 }
 
+fn is_named_runtime_callee_path(program: &ir::Program, path: &[String]) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    if path.len() == 1 {
+        return builtin_callable_root_name(&path[0])
+            || declared_type_exists(program, &path[0])
+            || unique_bare_enum_case_exists(program, &path[0]);
+    }
+    explicit_enum_case_exists(program, &path[0], &path[1])
+        || object_type_exists(program, &path[0])
+        || builtin_callable_root_name(&path[0])
+        || declared_type_exists(program, &path[0])
+}
+
+fn declared_type_exists(program: &ir::Program, name: &str) -> bool {
+    program.types.iter().any(|ty| ty.name == name)
+}
+
+fn builtin_callable_root_name(name: &str) -> bool {
+    matches!(
+        name,
+        "OS" | "Range" | "List" | "Array" | "Set" | "Map" | "Some" | "None" | "Ok" | "Err" | "Left" | "Right"
+    )
+}
+
 fn object_type_exists(program: &ir::Program, name: &str) -> bool {
     program
         .types
@@ -2360,6 +2623,15 @@ fn object_type_exists(program: &ir::Program, name: &str) -> bool {
 
 fn builtin_zero_arg_value_name(name: &str) -> bool {
     matches!(name, "None")
+}
+
+fn explicit_enum_case_exists(program: &ir::Program, type_name: &str, case_name: &str) -> bool {
+    program
+        .types
+        .iter()
+        .filter(|ty| ty.kind == ast::TypeKind::Enum && ty.name == type_name)
+        .flat_map(|ty| ty.enum_cases.iter())
+        .any(|case| case.name == case_name)
 }
 
 fn explicit_enum_case_value_exists(program: &ir::Program, type_name: &str, case_name: &str) -> bool {
@@ -2378,6 +2650,17 @@ fn unique_bare_enum_case_value_exists(program: &ir::Program, case_name: &str) ->
         .filter(|ty| ty.kind == ast::TypeKind::Enum)
         .flat_map(|ty| ty.enum_cases.iter())
         .filter(|case| case.name == case_name && enum_case_is_value(case))
+        .count()
+        == 1
+}
+
+fn unique_bare_enum_case_exists(program: &ir::Program, case_name: &str) -> bool {
+    program
+        .types
+        .iter()
+        .filter(|ty| ty.kind == ast::TypeKind::Enum)
+        .flat_map(|ty| ty.enum_cases.iter())
+        .filter(|case| case.name == case_name)
         .count()
         == 1
 }
@@ -3013,6 +3296,7 @@ fn lower_global_expr(
             base: lower_global_operand(receiver, globals, program, diagnostics)?,
             index: lower_global_operand(index, globals, program, diagnostics)?,
         }),
+        Expr::RecordUpdate { .. } => lower_global_record_update(expr, globals, program, diagnostics),
         Expr::Is { left, target, .. } => Some(ir::RValue::TypeTest {
             operand: lower_global_operand(left, globals, program, diagnostics)?,
             ty: lower_type_ref(target),
@@ -3098,8 +3382,13 @@ fn lower_global_callee(
             if let Some(global) = globals.get(name).copied() {
                 return ir::Callee::Indirect(ir::Operand::Copy(Box::new(ir::Place::Global(global))));
             }
+            if is_named_runtime_callee_path(program, &path) {
+                return ir::Callee::Named { path };
+            }
         }
-        return ir::Callee::Named { path };
+        if is_named_runtime_callee_path(program, &path) {
+            return ir::Callee::Named { path };
+        }
     }
 
     if let Expr::Member { receiver, name, .. } = callee {
@@ -3119,6 +3408,65 @@ fn lower_global_callee(
     ir::Callee::Named {
         path: vec!["<error>".to_string()],
     }
+}
+
+fn lower_global_record_update(
+    expr: &Expr,
+    globals: &HashMap<String, ir::GlobalId>,
+    program: &ir::Program,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<ir::RValue> {
+    let (base, updates) = flatten_global_record_update(expr, diagnostics)?;
+    Some(ir::RValue::RecordUpdate {
+        base: lower_global_operand(base, globals, program, diagnostics)?,
+        updates: updates
+            .iter()
+            .map(|update| {
+                Some(ir::NamedOperand {
+                    name: update.name.clone().unwrap_or_default(),
+                    value: lower_global_operand(&update.value, globals, program, diagnostics)?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?,
+    })
+}
+
+fn flatten_global_record_update<'a>(
+    expr: &'a Expr,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<(&'a Expr, Vec<&'a ast::CallArg>)> {
+    let mut current = expr;
+    let mut chunks: Vec<&'a [ast::CallArg]> = Vec::new();
+    loop {
+        match current {
+            Expr::RecordUpdate {
+                receiver,
+                updates,
+                ..
+            } => {
+                chunks.push(updates.as_slice());
+                current = receiver.as_ref();
+            }
+            Expr::Identifier { .. }
+            | Expr::Member { .. }
+            | Expr::Index { .. }
+            | Expr::Group { .. } => break,
+            other => {
+                diagnostics.push(Diagnostic::error(
+                    "lower_unsupported",
+                    "record update receiver is not implemented in global initializer lowering",
+                    other.span(),
+                ));
+                return None;
+            }
+        }
+    }
+
+    let mut merged = Vec::new();
+    for updates in chunks.into_iter().rev() {
+        merged.extend(updates.iter());
+    }
+    Some((current, merged))
 }
 
 #[cfg(test)]

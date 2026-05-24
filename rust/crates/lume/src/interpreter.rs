@@ -1202,6 +1202,33 @@ impl<'a> Interpreter<'a> {
                 self.eval_unary(*op, operand, span)
             }
             ir::RValue::Binary { op, left, right } => {
+                if matches!(op, ir::BinaryOp::And | ir::BinaryOp::Or) {
+                    let left = self.eval_operand_ref(frame, left, span)?;
+                    let left_bool = left.as_bool(self, span, "left side of boolean operator")?;
+                    return match op {
+                        ir::BinaryOp::And => {
+                            if !left_bool {
+                                Ok(Value::Bool(false))
+                            } else {
+                                let right = self.eval_operand_ref(frame, right, span)?;
+                                Ok(Value::Bool(
+                                    right.as_bool(self, span, "right side of &&")?,
+                                ))
+                            }
+                        }
+                        ir::BinaryOp::Or => {
+                            if left_bool {
+                                Ok(Value::Bool(true))
+                            } else {
+                                let right = self.eval_operand_ref(frame, right, span)?;
+                                Ok(Value::Bool(
+                                    right.as_bool(self, span, "right side of ||")?,
+                                ))
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+                }
                 let left = self.eval_operand_ref(frame, left, span)?;
                 let right = self.eval_operand_ref(frame, right, span)?;
                 self.eval_binary(*op, left, right, span)
@@ -1905,27 +1932,43 @@ impl<'a> Interpreter<'a> {
                     .collect(),
             })));
         }
-        if args.len() != case.fields.len() {
+        let required = case
+            .fields
+            .iter()
+            .filter(|field| field.initializer.is_none())
+            .count();
+        if args.len() < required || args.len() > case.fields.len() {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "enum case '{}.{}' expects {} arguments, got {}",
+                    "enum case '{}.{}' expects {}..{} arguments, got {}",
                     ty.name,
                     case_name,
+                    required,
                     case.fields.len(),
                     args.len()
                 ),
             ));
         }
+        let mut values = Vec::with_capacity(case.fields.len());
+        let mut supplied = args.into_iter().peekable();
+        for (index, field) in case.fields.iter().enumerate() {
+            let required_remaining = case.fields[index + 1..]
+                .iter()
+                .filter(|field| field.initializer.is_none())
+                .count();
+            let supplied_remaining = supplied.len();
+            let value = if field.initializer.is_none() || supplied_remaining > required_remaining {
+                supplied.next().expect("enum case arg")
+            } else {
+                self.constant_value(field.initializer.as_ref().expect("initializer"))
+            };
+            values.push((field.name.clone(), value));
+        }
         Ok(Value::Variant(Rc::new(VariantValue {
             enum_name: ty.name.clone(),
             case_name: case_name.to_string(),
-            fields: case
-                .fields
-                .iter()
-                .zip(args)
-                .map(|(field, value)| (field.name.clone(), value))
-                .collect(),
+            fields: values,
         })))
     }
 
@@ -2156,15 +2199,27 @@ impl<'a> Interpreter<'a> {
             Value::Iterator(iterator) => {
                 return self.invoke_iterator_method(receiver.clone(), iterator, method, args, span)
             }
+            Value::Record(fields) => {
+                if let Some(value) = lookup_named_field(&fields.borrow(), method) {
+                    return self.invoke_value(value, args, span);
+                }
+            }
             Value::Object(object) => {
-                let (type_name, kind) = {
+                let (type_name, kind, field_fallback) = {
                     let object = object.borrow();
-                    (object.type_name.clone(), object.kind)
+                    (
+                        object.type_name.clone(),
+                        object.kind,
+                        lookup_named_field(&object.fields, method),
+                    )
                 };
                 if let Some(function) =
                     self.find_method_for_kind(&type_name, kind, method)
                 {
                     return self.call_function(function, Some(receiver), None, args, span);
+                }
+                if let Some(value) = field_fallback {
+                    return self.invoke_value(value, args, span);
                 }
             }
             _ => {}
@@ -3182,16 +3237,43 @@ impl<'a> Interpreter<'a> {
         kind: crate::ast::TypeKind,
         method: &str,
     ) -> Option<ir::FunctionId> {
-        self.program
+        let mut visited = HashSet::new();
+        self.find_method_for_kind_inner(owner, kind, method, &mut visited)
+    }
+
+    fn find_method_for_kind_inner(
+        &self,
+        owner: &str,
+        kind: crate::ast::TypeKind,
+        method: &str,
+        visited: &mut HashSet<(String, crate::ast::TypeKind)>,
+    ) -> Option<ir::FunctionId> {
+        if !visited.insert((owner.to_string(), kind)) {
+            return None;
+        }
+        let ty = self
+            .program
             .types
             .iter()
-            .filter(|ty| ty.name == owner && ty.kind == kind)
-            .flat_map(|ty| ty.methods.iter().copied())
-            .find(|id| {
-                self.program
-                    .function(*id)
-                    .is_some_and(|function| function.name == method)
-            })
+            .find(|ty| ty.name == owner && ty.kind == kind)?;
+        if let Some(found) = ty.methods.iter().copied().find(|id| {
+            self.program
+                .function(*id)
+                .is_some_and(|function| function.name == method)
+        }) {
+            return Some(found);
+        }
+        for bound in &ty.with_bounds {
+            let ir::Type::Named { name, .. } = bound else {
+                continue;
+            };
+            if let Some(found) =
+                self.find_method_for_kind_inner(name, crate::ast::TypeKind::Interface, method, visited)
+            {
+                return Some(found);
+            }
+        }
+        None
     }
 
     fn get_member(
@@ -3268,20 +3350,24 @@ impl<'a> Interpreter<'a> {
                 .map_or_else(Value::option_none, Value::option_some));
         }
         let index = index.as_int(self, span, "index")?;
-        if index < 0 {
-            return Err(self.runtime_error(span, "index must be non-negative"));
-        }
-        let index = index as usize;
         match base {
-            Value::List(items) => items
-                .borrow()
+            Value::List(items) => {
+                let items = items.borrow();
+                let index = normalize_index(items.len(), index)
+                    .ok_or_else(|| self.runtime_error(span, format!("list index {} out of bounds", index)))?;
+                items
                 .get(index)
                 .cloned()
-                .ok_or_else(|| self.runtime_error(span, format!("list index {} out of bounds", index))),
-            Value::Tuple(items) => items
+                .ok_or_else(|| self.runtime_error(span, format!("list index {} out of bounds", index)))
+            }
+            Value::Tuple(items) => {
+                let index = normalize_index(items.len(), index)
+                    .ok_or_else(|| self.runtime_error(span, format!("tuple index {} out of bounds", index)))?;
+                items
                 .get(index)
                 .cloned()
-                .ok_or_else(|| self.runtime_error(span, format!("tuple index {} out of bounds", index))),
+                .ok_or_else(|| self.runtime_error(span, format!("tuple index {} out of bounds", index)))
+            }
             _ => Err(self.runtime_error(
                 span,
                 format!("cannot index into {}", base.render()),
@@ -3301,13 +3387,11 @@ impl<'a> Interpreter<'a> {
             return Ok(());
         }
         let index = index.as_int(self, span, "index")?;
-        if index < 0 {
-            return Err(self.runtime_error(span, "index must be non-negative"));
-        }
-        let index = index as usize;
         match base {
             Value::List(items) => {
                 let mut items = items.borrow_mut();
+                let index = normalize_index(items.len(), index)
+                    .ok_or_else(|| self.runtime_error(span, format!("list index {} out of bounds", index)))?;
                 let Some(slot) = items.get_mut(index) else {
                     return Err(self.runtime_error(span, format!("list index {} out of bounds", index)));
                 };
@@ -3532,6 +3616,16 @@ fn set_named_field(fields: &mut [(String, Value)], name: &str, value: Value) -> 
 fn tuple_member(items: &[Value], name: &str) -> Option<Value> {
     let index = name.strip_prefix('_')?.parse::<usize>().ok()?;
     items.get(index.checked_sub(1)?).cloned()
+}
+
+fn normalize_index(len: usize, index: i64) -> Option<usize> {
+    if index >= 0 {
+        let index = index as usize;
+        (index < len).then_some(index)
+    } else {
+        let offset = (-index) as usize;
+        (offset <= len).then_some(len - offset)
+    }
 }
 
 fn pattern_field_value(value: &Value, name: &str) -> Option<Value> {
@@ -3998,6 +4092,128 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "42-hello\n14\n2\ntrue\n");
+    }
+
+    #[test]
+    fn runs_if_unwrap_bindings() {
+        let program = lower_inline(
+            r#"
+            def main() Int {
+                values = [7]
+                if value <- values.get(0) {
+                    OS.println("binding " + value)
+                } else {
+                    OS.println("binding none")
+                }
+                return 0
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "binding 7\n");
+        assert_eq!(run.return_value.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn runs_anonymous_interface_methods() {
+        let program = lower_inline(
+            r#"
+            interface Reader {
+                def read() Str
+            }
+
+            interface Closer {
+                def close() Unit
+            }
+
+            def main() Unit {
+                handler = Reader with Closer {
+                    def read() Str = "x"
+                    def close() Unit = OS.println("closed")
+                }
+
+                single = Reader {
+                    def read() Str = "solo"
+                }
+
+                OS.println(handler.read())
+                handler.close()
+                OS.println(single.read())
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "x\nclosed\nsolo\n");
+    }
+
+    #[test]
+    fn runs_interface_default_methods_and_overrides() {
+        let program = lower_inline(
+            r#"
+            interface Hopper {
+                def hop() Str = "hop"
+            }
+
+            interface FirstChoice {
+                def choose() Str = "first"
+            }
+
+            interface SecondChoice {
+                def choose() Str = "second"
+            }
+
+            class Rabbit with Hopper {}
+
+            class PreferFirst with FirstChoice, SecondChoice {}
+
+            def main() Unit {
+                rabbit = Rabbit()
+                prefer = PreferFirst()
+                OS.println(rabbit.hop())
+                OS.println(prefer.choose())
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "hop\nfirst\n");
+    }
+
+    #[test]
+    fn runs_enum_case_defaults_and_short_circuit_boolean_ops() {
+        let program = lower_inline(
+            r#"
+            enum Outcome {
+                tag Str
+
+                case Left {
+                    value Str
+                    tag = "left"
+                }
+            }
+
+            def boom() Bool {
+                OS.println("boom")
+                true
+            }
+
+            def main() Unit {
+                left = Outcome.Left("bad")
+                if true || boom() {
+                    OS.println(left.tag)
+                }
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "left\n");
     }
 
     #[test]
