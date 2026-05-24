@@ -1743,7 +1743,7 @@ impl<'a> FunctionLowerer<'a> {
         if self.current_block.is_none() {
             return ir::Operand::Const(ir::Constant::Unit);
         }
-        if !matches!(expr, Expr::Lambda { .. }) && contains_placeholder_expr(expr) {
+        if should_lower_as_placeholder_lambda(expr) {
             return self.lower_placeholder_lambda(expr);
         }
         match expr {
@@ -2271,6 +2271,19 @@ fn contains_placeholder_expr(expr: &Expr) -> bool {
         | Expr::String { .. }
         | Expr::Bool { .. }
         | Expr::Unit { .. } => false,
+    }
+}
+
+fn should_lower_as_placeholder_lambda(expr: &Expr) -> bool {
+    if matches!(expr, Expr::Lambda { .. }) || !contains_placeholder_expr(expr) {
+        return false;
+    }
+    match expr {
+        Expr::Call { callee, .. } => contains_placeholder_expr(callee),
+        Expr::RecordUpdate { receiver, .. } => contains_placeholder_expr(receiver),
+        Expr::Member { receiver, .. } => contains_placeholder_expr(receiver),
+        Expr::Index { receiver, .. } => contains_placeholder_expr(receiver),
+        _ => true,
     }
 }
 
