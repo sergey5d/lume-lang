@@ -1,19 +1,18 @@
 use std::{
     cell::RefCell,
+    collections::HashSet,
     fmt,
-    fs,
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
 };
 
 use crate::{
+    ast,
     diagnostic::Diagnostic,
     ir,
-    lex,
     lower::lower_program,
-    parse_program,
-    resolver::LocatedDiagnostic,
-    source::{LineColumn, SourceFile, Span},
+    resolver::{load_module_graph, LoadedModule, LocatedDiagnostic, ModuleGraph},
+    source::{LineColumn, Span},
     typecheck::check_path,
 };
 
@@ -67,55 +66,12 @@ pub fn run_path(path: impl AsRef<Path>, requested_entry: Option<&str>) -> Result
         });
     }
 
-    let text = fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
-    let file = SourceFile::new(path.display().to_string(), text);
-    let lexed = lex(&file);
-    if !lexed.diagnostics.is_empty() {
-        return Ok(PathRunResult {
-            diagnostics: lexed
-                .diagnostics
-                .into_iter()
-                .map(|diagnostic| LocatedDiagnostic {
-                    path: file.name.clone(),
-                    diagnostic,
-                })
-                .collect(),
-            output: String::new(),
-            return_value: None,
-        });
-    }
-
-    let parsed = parse_program(&lexed.tokens);
-    if !parsed.diagnostics.is_empty() {
-        return Ok(PathRunResult {
-            diagnostics: parsed
-                .diagnostics
-                .into_iter()
-                .map(|diagnostic| LocatedDiagnostic {
-                    path: file.name.clone(),
-                    diagnostic,
-                })
-                .collect(),
-            output: String::new(),
-            return_value: None,
-        });
-    }
-
-    let program = parsed.program.expect("program after successful parse");
-    if !program.imports.is_empty() {
-        return Ok(PathRunResult {
-            diagnostics: vec![LocatedDiagnostic {
-                path: file.name.clone(),
-                diagnostic: Diagnostic::error(
-                    "runtime_unsupported",
-                    "the Rust IR interpreter currently executes one module at a time and does not run imported modules yet",
-                    program.imports[0].span,
-                ),
-            }],
-            output: String::new(),
-            return_value: None,
-        });
-    }
+    let (graph, root_path) = load_module_graph(path)?;
+    let root_module = graph
+        .modules
+        .get(&root_path)
+        .ok_or_else(|| format!("loaded root module missing {}", root_path.display()))?;
+    let program = merged_runtime_program(&graph, &root_path)?;
 
     let lowered = lower_program(&program);
     if !lowered.diagnostics.is_empty() {
@@ -124,7 +80,7 @@ pub fn run_path(path: impl AsRef<Path>, requested_entry: Option<&str>) -> Result
                 .diagnostics
                 .into_iter()
                 .map(|diagnostic| LocatedDiagnostic {
-                    path: file.name.clone(),
+                    path: root_module.display_path.clone(),
                     diagnostic,
                 })
                 .collect(),
@@ -140,13 +96,611 @@ pub fn run_path(path: impl AsRef<Path>, requested_entry: Option<&str>) -> Result
             .diagnostics
             .into_iter()
             .map(|diagnostic| LocatedDiagnostic {
-                path: file.name.clone(),
+                path: root_module.display_path.clone(),
                 diagnostic,
             })
             .collect(),
         output: run.output,
         return_value: run.return_value,
     })
+}
+
+fn merged_runtime_program(graph: &ModuleGraph, root: &PathBuf) -> Result<ast::Program, String> {
+    let mut order = Vec::new();
+    let mut seen = HashSet::new();
+    collect_runtime_module_order(graph, root, &mut seen, &mut order);
+
+    let root_module = graph
+        .modules
+        .get(root)
+        .ok_or_else(|| format!("loaded root module missing {}", root.display()))?;
+
+    let mut merged = ast::Program {
+        package: root_module.program.package.clone(),
+        imports: Vec::new(),
+        items: Vec::new(),
+        span: root_module.program.span,
+    };
+
+    merged.items.extend(prepare_runtime_module(root_module, graph, true).items);
+    for path in order {
+        if &path == root {
+            continue;
+        }
+        let Some(module) = graph.modules.get(&path) else {
+            continue;
+        };
+        merged.items.extend(prepare_runtime_module(module, graph, false).items);
+    }
+
+    Ok(merged)
+}
+
+fn collect_runtime_module_order(
+    graph: &ModuleGraph,
+    root: &PathBuf,
+    seen: &mut HashSet<PathBuf>,
+    out: &mut Vec<PathBuf>,
+) {
+    if !seen.insert(root.clone()) {
+        return;
+    }
+    let Some(module) = graph.modules.get(root) else {
+        return;
+    };
+    for dependency in &module.dependencies {
+        collect_runtime_module_order(graph, dependency, seen, out);
+    }
+    out.push(root.clone());
+}
+
+fn prepare_runtime_module(
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+    is_root: bool,
+) -> ast::Program {
+    let mut program = module.program.clone();
+    rewrite_program_for_runtime(&mut program, module, graph);
+    program.imports.clear();
+    if !is_root {
+        program.items.retain(|item| {
+            !matches!(item, ast::Item::Function(function) if function.name == "main")
+        });
+    }
+    program
+}
+
+fn rewrite_program_for_runtime(
+    program: &mut ast::Program,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    for item in &mut program.items {
+        rewrite_item_for_runtime(item, module, graph);
+    }
+}
+
+fn rewrite_item_for_runtime(
+    item: &mut ast::Item,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    match item {
+        ast::Item::Function(function) => rewrite_function_for_runtime(function, module, graph),
+        ast::Item::Type(decl) => rewrite_type_decl_for_runtime(decl, module, graph),
+        ast::Item::Impl(block) => rewrite_impl_block_for_runtime(block, module, graph),
+        ast::Item::Statement(stmt) => rewrite_stmt_for_runtime(stmt, module, graph),
+    }
+}
+
+fn rewrite_type_decl_for_runtime(
+    decl: &mut ast::TypeDecl,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    for bound in &mut decl.with_bounds {
+        rewrite_type_ref_for_runtime(bound, module);
+    }
+    for member in &mut decl.members {
+        match member {
+            ast::TypeMember::Field(field) => {
+                if let Some(ty) = &mut field.ty {
+                    rewrite_type_ref_for_runtime(ty, module);
+                }
+                if let Some(initializer) = &mut field.initializer {
+                    rewrite_expr_for_runtime(initializer, module, graph);
+                }
+            }
+            ast::TypeMember::Method(method) => rewrite_method_for_runtime(method, module, graph),
+            ast::TypeMember::Case(case) => {
+                for field in &mut case.fields {
+                    if let Some(ty) = &mut field.ty {
+                        rewrite_type_ref_for_runtime(ty, module);
+                    }
+                    if let Some(initializer) = &mut field.initializer {
+                        rewrite_expr_for_runtime(initializer, module, graph);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn rewrite_impl_block_for_runtime(
+    block: &mut ast::ImplBlock,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    rewrite_type_ref_for_runtime(&mut block.target, module);
+    for method in &mut block.methods {
+        rewrite_method_for_runtime(method, module, graph);
+    }
+}
+
+fn rewrite_function_for_runtime(
+    function: &mut ast::FunctionDecl,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    for param in &mut function.params {
+        if let Some(ty) = &mut param.ty {
+            rewrite_type_ref_for_runtime(ty, module);
+        }
+    }
+    if let Some(ret) = &mut function.return_type {
+        rewrite_type_ref_for_runtime(ret, module);
+    }
+    rewrite_callable_body_for_runtime(&mut function.body, module, graph);
+}
+
+fn rewrite_method_for_runtime(
+    method: &mut ast::MethodDecl,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    for param in &mut method.params {
+        if let Some(ty) = &mut param.ty {
+            rewrite_type_ref_for_runtime(ty, module);
+        }
+    }
+    if let Some(ret) = &mut method.return_type {
+        rewrite_type_ref_for_runtime(ret, module);
+    }
+    if let Some(body) = &mut method.body {
+        rewrite_callable_body_for_runtime(body, module, graph);
+    }
+}
+
+fn rewrite_callable_body_for_runtime(
+    body: &mut ast::CallableBody,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    match body {
+        ast::CallableBody::Block(block) => rewrite_block_for_runtime(block, module, graph),
+        ast::CallableBody::Expr(expr) => rewrite_expr_for_runtime(expr, module, graph),
+    }
+}
+
+fn rewrite_block_for_runtime(
+    block: &mut ast::Block,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    for stmt in &mut block.statements {
+        rewrite_stmt_for_runtime(stmt, module, graph);
+    }
+}
+
+fn rewrite_stmt_for_runtime(
+    stmt: &mut ast::Stmt,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    match stmt {
+        ast::Stmt::Binding(binding) => {
+            for local in &mut binding.bindings {
+                if let Some(ty) = &mut local.ty {
+                    rewrite_type_ref_for_runtime(ty, module);
+                }
+            }
+            for value in &mut binding.values {
+                rewrite_expr_for_runtime(value, module, graph);
+            }
+        }
+        ast::Stmt::Assignment(assign) => {
+            for target in &mut assign.targets {
+                rewrite_expr_for_runtime(target, module, graph);
+            }
+            for value in &mut assign.values {
+                rewrite_expr_for_runtime(value, module, graph);
+            }
+        }
+        ast::Stmt::If(stmt) => rewrite_if_stmt_for_runtime(stmt, module, graph),
+        ast::Stmt::Match(stmt) => {
+            rewrite_expr_for_runtime(&mut stmt.value, module, graph);
+            for case in &mut stmt.cases {
+                rewrite_match_case_for_runtime(case, module, graph);
+            }
+        }
+        ast::Stmt::While(stmt) => {
+            rewrite_expr_for_runtime(&mut stmt.condition, module, graph);
+            rewrite_block_for_runtime(&mut stmt.body, module, graph);
+        }
+        ast::Stmt::For(stmt) => {
+            for binding in &mut stmt.bindings {
+                rewrite_for_binding_for_runtime(binding, module, graph);
+            }
+            rewrite_block_for_runtime(&mut stmt.body, module, graph);
+        }
+        ast::Stmt::Return(stmt) => {
+            if let Some(value) = &mut stmt.value {
+                rewrite_expr_for_runtime(value, module, graph);
+            }
+        }
+        ast::Stmt::Break(_) => {}
+        ast::Stmt::Expr(stmt) => rewrite_expr_for_runtime(&mut stmt.expr, module, graph),
+        ast::Stmt::Unwrap(stmt) => rewrite_unwrap_stmt_for_runtime(stmt, module, graph),
+        ast::Stmt::UnwrapBlock(stmt) => {
+            for clause in &mut stmt.clauses {
+                rewrite_unwrap_stmt_for_runtime(clause, module, graph);
+            }
+            if let Some(block) = &mut stmt.else_block {
+                rewrite_block_for_runtime(block, module, graph);
+            }
+        }
+        ast::Stmt::LocalFunction(function) => rewrite_function_for_runtime(function, module, graph),
+    }
+}
+
+fn rewrite_if_stmt_for_runtime(
+    stmt: &mut ast::IfStmt,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    if let Some(condition) = &mut stmt.condition {
+        rewrite_expr_for_runtime(condition, module, graph);
+    }
+    for binding in &mut stmt.bindings {
+        if let Some(ty) = &mut binding.ty {
+            rewrite_type_ref_for_runtime(ty, module);
+        }
+    }
+    if let Some(value) = &mut stmt.binding_value {
+        rewrite_expr_for_runtime(value, module, graph);
+    }
+    rewrite_block_for_runtime(&mut stmt.then_block, module, graph);
+    if let Some(branch) = &mut stmt.else_branch {
+        rewrite_else_branch_for_runtime(branch, module, graph);
+    }
+}
+
+fn rewrite_unwrap_stmt_for_runtime(
+    stmt: &mut ast::UnwrapStmt,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    for binding in &mut stmt.bindings {
+        if let Some(ty) = &mut binding.ty {
+            rewrite_type_ref_for_runtime(ty, module);
+        }
+    }
+    rewrite_expr_for_runtime(&mut stmt.value, module, graph);
+    if let Some(block) = &mut stmt.else_block {
+        rewrite_block_for_runtime(block, module, graph);
+    }
+}
+
+fn rewrite_for_binding_for_runtime(
+    binding: &mut ast::ForBinding,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    for local in &mut binding.bindings {
+        if let Some(ty) = &mut local.ty {
+            rewrite_type_ref_for_runtime(ty, module);
+        }
+    }
+    if let Some(iterable) = &mut binding.iterable {
+        rewrite_expr_for_runtime(iterable, module, graph);
+    }
+    for value in &mut binding.values {
+        rewrite_expr_for_runtime(value, module, graph);
+    }
+}
+
+fn rewrite_else_branch_for_runtime(
+    branch: &mut ast::ElseBranch,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    match branch {
+        ast::ElseBranch::If(stmt) => rewrite_if_stmt_for_runtime(stmt.as_mut(), module, graph),
+        ast::ElseBranch::Block(block) => rewrite_block_for_runtime(block, module, graph),
+    }
+}
+
+fn rewrite_match_case_for_runtime(
+    case: &mut ast::MatchCase,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    rewrite_pattern_for_runtime(&mut case.pattern, module);
+    if let Some(guard) = &mut case.guard {
+        rewrite_expr_for_runtime(guard, module, graph);
+    }
+    match &mut case.body {
+        ast::MatchCaseBody::Block(block) => rewrite_block_for_runtime(block, module, graph),
+        ast::MatchCaseBody::Expr(expr) => rewrite_expr_for_runtime(expr, module, graph),
+    }
+}
+
+fn rewrite_pattern_for_runtime(pattern: &mut ast::Pattern, module: &LoadedModule) {
+    match pattern {
+        ast::Pattern::Wildcard { .. } | ast::Pattern::Binding { .. } => {}
+        ast::Pattern::Type { target, .. } => rewrite_type_ref_for_runtime(target, module),
+        ast::Pattern::Literal { value, .. } => {
+            // handled by parent expr rewrite when embedded in match cases
+            let _ = value;
+        }
+        ast::Pattern::Tuple { elements, .. } => {
+            for element in elements {
+                rewrite_pattern_for_runtime(element, module);
+            }
+        }
+        ast::Pattern::Constructor { path, args, .. } => {
+            rewrite_pattern_path_for_runtime(path, module);
+            for arg in args {
+                rewrite_pattern_for_runtime(arg, module);
+            }
+        }
+    }
+}
+
+fn rewrite_expr_for_runtime(
+    expr: &mut ast::Expr,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    match expr {
+        ast::Expr::Identifier { name, span } => {
+            if let Some(path) = rewritten_imported_symbol_path(module, name) {
+                *expr = expr_from_path(path, *span);
+            }
+        }
+        ast::Expr::Placeholder { .. }
+        | ast::Expr::Integer { .. }
+        | ast::Expr::Float { .. }
+        | ast::Expr::String { .. }
+        | ast::Expr::Bool { .. }
+        | ast::Expr::Unit { .. } => {}
+        ast::Expr::ListLiteral { items, .. } | ast::Expr::TupleLiteral { items, .. } => {
+            for item in items {
+                rewrite_expr_for_runtime(item, module, graph);
+            }
+        }
+        ast::Expr::Call { callee, args, span } => {
+            rewrite_expr_for_runtime(callee, module, graph);
+            for arg in args {
+                rewrite_expr_for_runtime(&mut arg.value, module, graph);
+            }
+            if let Some(path) = rewritten_expr_path(module, callee) {
+                *callee = Box::new(expr_from_path(path, *span));
+            }
+        }
+        ast::Expr::Member {
+            receiver,
+            name,
+            span,
+        } => {
+            rewrite_expr_for_runtime(receiver, module, graph);
+            let mut current_path = match expr_path_ast(receiver) {
+                Some(path) => path,
+                None => return,
+            };
+            current_path.push(name.clone());
+            if let Some(path) = rewritten_path_segments(module, &current_path) {
+                *expr = expr_from_path(path, *span);
+            }
+        }
+        ast::Expr::Index { receiver, index, .. } => {
+            rewrite_expr_for_runtime(receiver, module, graph);
+            rewrite_expr_for_runtime(index, module, graph);
+        }
+        ast::Expr::RecordUpdate { receiver, updates, .. } => {
+            rewrite_expr_for_runtime(receiver, module, graph);
+            for update in updates {
+                rewrite_expr_for_runtime(&mut update.value, module, graph);
+            }
+        }
+        ast::Expr::RecordLiteral { fields, values, .. } => {
+            for field in fields {
+                rewrite_expr_for_runtime(&mut field.value, module, graph);
+            }
+            for value in values {
+                rewrite_expr_for_runtime(value, module, graph);
+            }
+        }
+        ast::Expr::AnonymousInterface {
+            interfaces,
+            methods,
+            ..
+        } => {
+            for interface in interfaces {
+                rewrite_type_ref_for_runtime(interface, module);
+            }
+            for method in methods {
+                rewrite_method_for_runtime(method, module, graph);
+            }
+        }
+        ast::Expr::Unary { expr: inner, .. } => rewrite_expr_for_runtime(inner, module, graph),
+        ast::Expr::Binary { left, right, .. } => {
+            rewrite_expr_for_runtime(left, module, graph);
+            rewrite_expr_for_runtime(right, module, graph);
+        }
+        ast::Expr::Is { left, target, .. } => {
+            rewrite_expr_for_runtime(left, module, graph);
+            rewrite_type_ref_for_runtime(target, module);
+        }
+        ast::Expr::If {
+            condition,
+            then_block,
+            else_branch,
+            ..
+        } => {
+            rewrite_expr_for_runtime(condition, module, graph);
+            rewrite_block_for_runtime(then_block, module, graph);
+            rewrite_else_expr_branch_for_runtime(else_branch, module, graph);
+        }
+        ast::Expr::Block { body, .. } => rewrite_block_for_runtime(body, module, graph),
+        ast::Expr::Match {
+            value,
+            cases,
+            ..
+        } => {
+            rewrite_expr_for_runtime(value, module, graph);
+            for case in cases {
+                rewrite_match_case_for_runtime(case, module, graph);
+            }
+        }
+        ast::Expr::ForYield {
+            bindings,
+            yield_body,
+            ..
+        } => {
+            for binding in bindings {
+                rewrite_for_binding_for_runtime(binding, module, graph);
+            }
+            rewrite_block_for_runtime(yield_body, module, graph);
+        }
+        ast::Expr::Lambda { params, body, .. } => {
+            for param in params {
+                if let Some(ty) = &mut param.ty {
+                    rewrite_type_ref_for_runtime(ty, module);
+                }
+            }
+            match body {
+                ast::LambdaBody::Expr(expr) => rewrite_expr_for_runtime(expr, module, graph),
+                ast::LambdaBody::Block(block) => rewrite_block_for_runtime(block, module, graph),
+            }
+        }
+        ast::Expr::Group { inner, .. } => rewrite_expr_for_runtime(inner, module, graph),
+    }
+}
+
+fn rewrite_else_expr_branch_for_runtime(
+    branch: &mut ast::ElseExprBranch,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    match branch {
+        ast::ElseExprBranch::If(expr) => rewrite_expr_for_runtime(expr, module, graph),
+        ast::ElseExprBranch::Block(block) => rewrite_block_for_runtime(block, module, graph),
+    }
+}
+
+fn rewrite_type_ref_for_runtime(reference: &mut ast::TypeRef, module: &LoadedModule) {
+    match reference {
+        ast::TypeRef::Named { name, args, .. } => {
+            if let Some(path) = rewritten_imported_symbol_path(module, name) {
+                if path.len() == 1 {
+                    *name = path[0].clone();
+                }
+            }
+            for arg in args {
+                rewrite_type_ref_for_runtime(arg, module);
+            }
+        }
+        ast::TypeRef::Tuple { fields, .. } => {
+            for field in fields {
+                rewrite_type_ref_for_runtime(&mut field.ty, module);
+            }
+        }
+        ast::TypeRef::Record { fields, .. } => {
+            for field in fields {
+                rewrite_type_ref_for_runtime(&mut field.ty, module);
+            }
+        }
+        ast::TypeRef::Function { params, ret, .. } => {
+            for param in params {
+                rewrite_type_ref_for_runtime(param, module);
+            }
+            rewrite_type_ref_for_runtime(ret, module);
+        }
+    }
+}
+
+fn rewrite_pattern_path_for_runtime(path: &mut Vec<String>, module: &LoadedModule) {
+    if path.is_empty() {
+        return;
+    }
+    if let Some(rewritten) = rewritten_path_segments(module, path) {
+        *path = rewritten;
+    }
+}
+
+fn rewritten_expr_path(module: &LoadedModule, expr: &ast::Expr) -> Option<Vec<String>> {
+    let path = expr_path_ast(expr)?;
+    rewritten_path_segments(module, &path)
+}
+
+fn rewritten_path_segments(module: &LoadedModule, path: &[String]) -> Option<Vec<String>> {
+    if path.is_empty() {
+        return None;
+    }
+    if let Some(symbol) = module.symbol_imports.get(&path[0]) {
+        let mut target = imported_symbol_path(symbol);
+        target.extend(path.iter().skip(1).cloned());
+        return Some(target);
+    }
+    if module.imports.contains_key(&path[0]) && path.len() > 1 {
+        return Some(path[1..].to_vec());
+    }
+    None
+}
+
+fn rewritten_imported_symbol_path(module: &LoadedModule, name: &str) -> Option<Vec<String>> {
+    module
+        .symbol_imports
+        .get(name)
+        .map(imported_symbol_path)
+}
+
+fn imported_symbol_path(symbol: &crate::resolver::ImportedSymbol) -> Vec<String> {
+    if let Some(object_name) = &symbol.object_name {
+        vec![object_name.clone(), symbol.original_name.clone()]
+    } else {
+        vec![symbol.original_name.clone()]
+    }
+}
+
+fn expr_from_path(path: Vec<String>, span: Span) -> ast::Expr {
+    let mut iter = path.into_iter();
+    let Some(first) = iter.next() else {
+        return ast::Expr::Unit { span };
+    };
+    let mut expr = ast::Expr::Identifier { name: first, span };
+    for name in iter {
+        expr = ast::Expr::Member {
+            receiver: Box::new(expr),
+            name,
+            span,
+        };
+    }
+    expr
+}
+
+fn expr_path_ast(expr: &ast::Expr) -> Option<Vec<String>> {
+    match expr {
+        ast::Expr::Identifier { name, .. } => Some(vec![name.clone()]),
+        ast::Expr::Member { receiver, name, .. } => {
+            let mut path = expr_path_ast(receiver)?;
+            path.push(name.clone());
+            Some(path)
+        }
+        ast::Expr::Group { inner, .. } => expr_path_ast(inner),
+        _ => None,
+    }
 }
 
 #[derive(Clone)]
@@ -3190,6 +3744,7 @@ fn decode_string_literal(raw: &str) -> String {
 mod tests {
     use super::*;
     use crate::{SourceFile, lex, parse_program};
+    use std::path::PathBuf;
 
     fn lower_inline(src: &str) -> ir::Program {
         let file = SourceFile::new("test.lum", src);
@@ -3201,6 +3756,13 @@ mod tests {
         let lowered = lower_program(&program);
         assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
         lowered.program.expect("lowered program")
+    }
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .canonicalize()
+            .expect("repo root")
     }
 
     #[test]
@@ -3436,5 +3998,30 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "42-hello\n14\n2\ntrue\n");
+    }
+
+    #[test]
+    fn run_path_executes_plain_module_imports() {
+        let path = repo_root().join("examples/imports.lum");
+        let run = run_path(path, None).expect("run imports");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "hello, Ada\n36\n");
+    }
+
+    #[test]
+    fn run_path_executes_symbol_and_object_import_forms() {
+        let path = repo_root().join("examples/import_forms.lum");
+        let run = run_path(path, None).expect("run import forms");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "A\nA\nB\n11\n112\n110\n");
+        assert_eq!(run.return_value.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn run_path_executes_public_imports_across_modules() {
+        let path = repo_root().join("examples/pub_imports.lum");
+        let run = run_path(path, None).expect("run pub imports");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "hello, Ada\nhello!\n");
     }
 }
