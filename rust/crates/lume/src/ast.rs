@@ -51,7 +51,7 @@ pub enum Visibility {
     Hidden,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TypeKind {
     Class,
     Record,

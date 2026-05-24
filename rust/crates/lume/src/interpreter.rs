@@ -349,6 +349,7 @@ impl fmt::Debug for Value {
 #[derive(Debug, Clone)]
 struct ObjectValue {
     type_name: String,
+    kind: crate::ast::TypeKind,
     fields: Vec<(String, Value)>,
 }
 
@@ -884,10 +885,6 @@ impl<'a> Interpreter<'a> {
             return self.invoke_root_named(name, args, span);
         }
 
-        if let Some(receiver) = self.resolve_runtime_path(frame, &path[..path.len() - 1], span)? {
-            return self.invoke_method(receiver, &path[path.len() - 1], args, span);
-        }
-
         if path[0] == "OS" && path.len() == 2 {
             return self.invoke_os_method(&path[1], args, span);
         }
@@ -907,12 +904,13 @@ impl<'a> Interpreter<'a> {
         }
 
         if path.len() == 2 {
-            if let Some(singleton) = self.lookup_object_singleton(&path[0], span)? {
-                return self.invoke_method(singleton, &path[1], args, span);
-            }
             if let Some(value) = self.construct_named_path(path, args.clone(), span)? {
                 return Ok(value);
             }
+        }
+
+        if let Some(receiver) = self.resolve_runtime_path(frame, &path[..path.len() - 1], span)? {
+            return self.invoke_method(receiver, &path[path.len() - 1], args, span);
         }
 
         Err(self.runtime_error(
@@ -927,16 +925,70 @@ impl<'a> Interpreter<'a> {
         path: &[String],
         span: Option<Span>,
     ) -> Result<Option<Value>, Diagnostic> {
+        self.resolve_named_value_path(frame, path, span)
+    }
+
+    fn resolve_named_value_path(
+        &mut self,
+        frame: Option<&Frame>,
+        path: &[String],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
         let Some(first) = path.first() else {
             return Ok(None);
         };
-        let Some(mut value) = self.lookup_runtime_value(frame, first) else {
+
+        if path.len() >= 2 {
+            if let Some(mut value) = self.construct_named_path_value(&path[0], &path[1], span)? {
+                for segment in &path[2..] {
+                    value = self.get_member(value, segment, span)?;
+                }
+                return Ok(Some(value));
+            }
+        }
+
+        let Some(mut value) = self.resolve_named_root(frame, first, span)? else {
             return Ok(None);
         };
         for segment in &path[1..] {
             value = self.get_member(value, segment, span)?;
         }
         Ok(Some(value))
+    }
+
+    fn resolve_named_root(
+        &mut self,
+        frame: Option<&Frame>,
+        name: &str,
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+        if let Some(value) = self.lookup_runtime_value(frame, name) {
+            return Ok(Some(value));
+        }
+        if let Some(value) = self.lookup_object_singleton(name, span)? {
+            return Ok(Some(value));
+        }
+        if name == "None" {
+            return Ok(Some(Value::option_none()));
+        }
+        match self.construct_enum_case(None, name, Vec::new(), span) {
+            Ok(value) => Ok(Some(value)),
+            Err(error) if error.code == "runtime_error" => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn construct_named_path_value(
+        &mut self,
+        type_name: &str,
+        member: &str,
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+        self.construct_named_path(
+            &[type_name.to_string(), member.to_string()],
+            Vec::new(),
+            span,
+        )
     }
 
     fn invoke_root_named(
@@ -947,6 +999,11 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         if let Some(value) = self.construct_builtin(name, &args, span)? {
             return Ok(value);
+        }
+        if args.is_empty() {
+            if let Some(value) = self.lookup_object_singleton(name, span)? {
+                return Ok(value);
+            }
         }
         if let Some(value) = self.construct_named_type(name, args.clone(), span)? {
             return Ok(value);
@@ -972,14 +1029,13 @@ impl<'a> Interpreter<'a> {
         let type_name = &path[0];
         let member = &path[1];
 
-        if let Some(ty) = self.lookup_type(type_name) {
-            if ty.kind == crate::ast::TypeKind::Enum
-                && ty.enum_cases.iter().any(|case| case.name == *member)
-            {
-                return self
-                    .construct_enum_case(Some(type_name), member, args, span)
-                    .map(Some);
-            }
+        if self
+            .lookup_type_by_kind(type_name, crate::ast::TypeKind::Enum)
+            .is_some_and(|ty| ty.enum_cases.iter().any(|case| case.name == *member))
+        {
+            return self
+                .construct_enum_case(Some(type_name), member, args, span)
+                .map(Some);
         }
         Ok(None)
     }
@@ -1081,18 +1137,23 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Option<Value>, Diagnostic> {
-        let Some(ty) = self.lookup_type(type_name).cloned() else {
+        let Some(ty) = self
+            .program
+            .types
+            .iter()
+            .find(|ty| {
+                ty.name == type_name
+                    && ty.kind != crate::ast::TypeKind::Enum
+                    && ty.kind != crate::ast::TypeKind::Object
+            })
+            .cloned()
+        else {
             return Ok(None);
         };
-        if ty.kind == crate::ast::TypeKind::Enum {
-            return Err(self.runtime_error(
-                span,
-                format!("enum '{}' must be constructed through a case", type_name),
-            ));
-        }
 
         let object = Value::Object(Rc::new(RefCell::new(ObjectValue {
             type_name: type_name.to_string(),
+            kind: ty.kind,
             fields: ty
                 .fields
                 .iter()
@@ -1100,7 +1161,9 @@ impl<'a> Interpreter<'a> {
                 .collect(),
         })));
 
-        if let Some(init) = self.find_method(type_name, "init") {
+        if let Some(init) = self.find_method_for_kind(type_name, crate::ast::TypeKind::Class, "init")
+            .or_else(|| self.find_method_for_kind(type_name, crate::ast::TypeKind::Record, "init"))
+        {
             let receiver = object.clone();
             let _ = self.call_function(init, Some(receiver), None, args, span)?;
             return Ok(Some(object));
@@ -1226,6 +1289,7 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Value::Object(Rc::new(RefCell::new(ObjectValue {
                     type_name: object.type_name.clone(),
+                    kind: object.kind,
                     fields: next,
                 }))))
             }
@@ -1271,6 +1335,22 @@ impl<'a> Interpreter<'a> {
             .iter()
             .find(|case| case.name == case_name)
             .expect("matched case");
+        if args.is_empty() && case.fields.iter().all(|field| field.initializer.is_some()) {
+            return Ok(Value::Variant(Rc::new(VariantValue {
+                enum_name: ty.name.clone(),
+                case_name: case_name.to_string(),
+                fields: case
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        (
+                            field.name.clone(),
+                            self.constant_value(field.initializer.as_ref().expect("initializer")),
+                        )
+                    })
+                    .collect(),
+            })));
+        }
         if args.len() != case.fields.len() {
             return Err(self.runtime_error(
                 span,
@@ -1542,8 +1622,13 @@ impl<'a> Interpreter<'a> {
                 return self.invoke_iterator_method(receiver.clone(), iterator, method, args, span)
             }
             Value::Object(object) => {
-                let type_name = object.borrow().type_name.clone();
-                if let Some(function) = self.find_method(&type_name, method) {
+                let (type_name, kind) = {
+                    let object = object.borrow();
+                    (object.type_name.clone(), object.kind)
+                };
+                if let Some(function) =
+                    self.find_method_for_kind(&type_name, kind, method)
+                {
                     return self.call_function(function, Some(receiver), None, args, span);
                 }
             }
@@ -2418,7 +2503,9 @@ impl<'a> Interpreter<'a> {
         let Value::Variant(variant) = &receiver else {
             unreachable!();
         };
-        if let Some(function) = self.find_method(&variant.enum_name, method) {
+        if let Some(function) =
+            self.find_method_for_kind(&variant.enum_name, crate::ast::TypeKind::Enum, method)
+        {
             return self.call_function(function, Some(receiver), None, args, span);
         }
         Err(self.runtime_error(
@@ -2513,8 +2600,15 @@ impl<'a> Interpreter<'a> {
             .map(|function| function.id)
     }
 
-    fn lookup_type(&self, name: &str) -> Option<&ir::TypeDef> {
-        self.program.types.iter().find(|ty| ty.name == name)
+    fn lookup_type_by_kind(
+        &self,
+        name: &str,
+        kind: crate::ast::TypeKind,
+    ) -> Option<&ir::TypeDef> {
+        self.program
+            .types
+            .iter()
+            .find(|ty| ty.name == name && ty.kind == kind)
     }
 
     fn lookup_object_singleton(
@@ -2522,37 +2616,47 @@ impl<'a> Interpreter<'a> {
         name: &str,
         span: Option<Span>,
     ) -> Result<Option<Value>, Diagnostic> {
-        let Some(ty) = self.lookup_type(name).cloned() else {
+        let Some(ty) = self
+            .lookup_type_by_kind(name, crate::ast::TypeKind::Object)
+            .cloned()
+        else {
             return Ok(None);
         };
-        if ty.kind != crate::ast::TypeKind::Object {
-            return Ok(None);
-        }
         if let Some(existing) = &self.object_singletons[ty.id.0] {
             return Ok(Some(existing.clone()));
         }
         let value = Value::Object(Rc::new(RefCell::new(ObjectValue {
             type_name: ty.name.clone(),
+            kind: ty.kind,
             fields: ty
                 .fields
                 .iter()
                 .map(|field| (field.name.clone(), Value::default_for_type(&field.ty)))
                 .collect(),
         })));
-        if let Some(init) = self.find_method(&ty.name, "init") {
+        if let Some(init) = self.find_method_for_kind(&ty.name, crate::ast::TypeKind::Object, "init") {
             let _ = self.call_function(init, Some(value.clone()), None, Vec::new(), span)?;
         }
         self.object_singletons[ty.id.0] = Some(value.clone());
         Ok(Some(value))
     }
 
-    fn find_method(&self, owner: &str, method: &str) -> Option<ir::FunctionId> {
-        let ty = self.lookup_type(owner)?;
-        ty.methods.iter().copied().find(|id| {
-            self.program
-                .function(*id)
-                .is_some_and(|function| function.name == method)
-        })
+    fn find_method_for_kind(
+        &self,
+        owner: &str,
+        kind: crate::ast::TypeKind,
+        method: &str,
+    ) -> Option<ir::FunctionId> {
+        self.program
+            .types
+            .iter()
+            .filter(|ty| ty.name == owner && ty.kind == kind)
+            .flat_map(|ty| ty.methods.iter().copied())
+            .find(|id| {
+                self.program
+                    .function(*id)
+                    .is_some_and(|function| function.name == method)
+            })
     }
 
     fn get_member(
@@ -3216,5 +3320,82 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "some 5\nnone true\nok 9\nerr missing\n");
+    }
+
+    #[test]
+    fn runs_enum_methods_and_default_case_values() {
+        let program = lower_inline(
+            r#"
+            enum Color {
+                color Str
+                temperature Int
+
+                def isReddish() Bool = temperature % 5 == 0
+
+                case Black {
+                    color = "xxx"
+                    temperature = 1
+                }
+                case Red {
+                    color = "xxx2"
+                    temperature = 10
+                }
+            }
+
+            enum OptionX[T] {
+                def isDefined() Bool = this != None
+
+                case NoneX
+                case SomeX {
+                    value T
+                }
+            }
+
+            def main() Unit {
+                black = Color.Black
+                someInt = OptionX.SomeX(5)
+                noneInt = OptionX.NoneX
+
+                OS.println("reddish", black.isReddish())
+                OS.println("defined", someInt.isDefined())
+                OS.println("none", noneInt == OptionX.NoneX)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "reddish false\ndefined true\nnone true\n");
+    }
+
+    #[test]
+    fn runs_enum_and_object_with_same_name() {
+        let program = lower_inline(
+            r#"
+            enum Color {
+                def label() Str = match this {
+                    case Color.Red => "red"
+                    case Color.Blue => "blue"
+                }
+
+                case Red
+                case Blue
+            }
+
+            object Color {
+                def palette() Str = "palette"
+            }
+
+            def main() Unit {
+                color Color = Color.Red
+                OS.println(color.label())
+                OS.println(Color.palette())
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "red\npalette\n");
     }
 }

@@ -119,6 +119,7 @@ pub struct Field {
     pub mutable: bool,
     pub name: String,
     pub ty: Type,
+    pub initializer: Option<Constant>,
     pub span: Option<Span>,
 }
 
