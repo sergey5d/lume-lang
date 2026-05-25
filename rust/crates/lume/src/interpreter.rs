@@ -2133,15 +2133,11 @@ impl<'a> Interpreter<'a> {
         if args.is_empty() {
             return Err(self.runtime_error(span, "printf expects at least 1 argument"));
         }
-        let mut text = args[0].render();
-        for value in &args[1..] {
-            if let Some(index) = text.find("{}") {
-                text.replace_range(index..index + 2, &value.render());
-            } else {
-                text.push(' ');
-                text.push_str(&value.render());
-            }
-        }
+        let format = match &args[0] {
+            Value::String(value) => value.clone(),
+            other => other.render(),
+        };
+        let text = format_printf(&format, &args[1..]).map_err(|message| self.runtime_error(span, message))?;
         self.output.push_str(&text);
         Ok(Value::Unit)
     }
@@ -4037,10 +4033,17 @@ fn default_span() -> Span {
 }
 
 fn decode_string_literal(raw: &str) -> String {
-    let body = raw
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .unwrap_or(raw);
+    let body = if raw.starts_with("\"\"\"") && raw.ends_with("\"\"\"") && raw.len() >= 6 {
+        &raw[3..raw.len() - 3]
+    } else {
+        raw.strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .unwrap_or(raw)
+    };
+    decode_string_contents(body)
+}
+
+fn decode_string_contents(body: &str) -> String {
     let mut out = String::new();
     let mut chars = body.chars();
     while let Some(ch) = chars.next() {
@@ -4055,6 +4058,7 @@ fn decode_string_literal(raw: &str) -> String {
             Some('\\') => out.push('\\'),
             Some('"') => out.push('"'),
             Some('0') => out.push('\0'),
+            Some('$') => out.push('$'),
             Some(other) => {
                 out.push('\\');
                 out.push(other);
@@ -4063,6 +4067,250 @@ fn decode_string_literal(raw: &str) -> String {
         }
     }
     out
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct PrintfSpec {
+    verb: char,
+    left_align: bool,
+    force_sign: bool,
+    zero_pad: bool,
+    alternate: bool,
+    width: Option<usize>,
+    precision: Option<usize>,
+}
+
+fn format_printf(format: &str, args: &[Value]) -> Result<String, String> {
+    let chars: Vec<char> = format.chars().collect();
+    let mut out = String::new();
+    let mut index = 0usize;
+    let mut arg_index = 0usize;
+
+    while index < chars.len() {
+        if chars[index] != '%' {
+            out.push(chars[index]);
+            index += 1;
+            continue;
+        }
+        if index + 1 < chars.len() && chars[index + 1] == '%' {
+            out.push('%');
+            index += 2;
+            continue;
+        }
+
+        let (spec, next_index) = parse_printf_spec(&chars, index + 1)?;
+        let Some(value) = args.get(arg_index) else {
+            return Err("printf is missing an argument".to_string());
+        };
+        arg_index += 1;
+        out.push_str(&format_printf_value(value, spec));
+        index = next_index;
+    }
+
+    if arg_index < args.len() {
+        for value in &args[arg_index..] {
+            out.push(' ');
+            out.push_str(&value.render());
+        }
+    }
+
+    Ok(out)
+}
+
+fn parse_printf_spec(chars: &[char], mut index: usize) -> Result<(PrintfSpec, usize), String> {
+    let mut spec = PrintfSpec::default();
+
+    while index < chars.len() {
+        match chars[index] {
+            '-' => spec.left_align = true,
+            '+' => spec.force_sign = true,
+            '0' => spec.zero_pad = true,
+            '#' => spec.alternate = true,
+            ' ' => {}
+            _ => break,
+        }
+        index += 1;
+    }
+
+    let width_start = index;
+    while index < chars.len() && chars[index].is_ascii_digit() {
+        index += 1;
+    }
+    if index > width_start {
+        spec.width = chars[width_start..index]
+            .iter()
+            .collect::<String>()
+            .parse::<usize>()
+            .ok();
+    }
+
+    if index < chars.len() && chars[index] == '.' {
+        index += 1;
+        let precision_start = index;
+        while index < chars.len() && chars[index].is_ascii_digit() {
+            index += 1;
+        }
+        let precision_digits: String = chars[precision_start..index].iter().collect();
+        spec.precision = Some(if precision_digits.is_empty() {
+            0
+        } else {
+            precision_digits
+                .parse::<usize>()
+                .map_err(|_| "invalid printf precision".to_string())?
+        });
+    }
+
+    let Some(&verb) = chars.get(index) else {
+        return Err("dangling '%' in printf format".to_string());
+    };
+    spec.verb = verb;
+    Ok((spec, index + 1))
+}
+
+fn format_printf_value(value: &Value, spec: PrintfSpec) -> String {
+    let rendered = match spec.verb {
+        's' => {
+            let mut text = match value {
+                Value::String(text) => text.clone(),
+                other => other.render(),
+            };
+            if let Some(precision) = spec.precision {
+                text = text.chars().take(precision).collect();
+            }
+            text
+        }
+        'q' => match value {
+            Value::String(text) => format!("{text:?}"),
+            other => format!("{:?}", other.render()),
+        },
+        'd' => render_int_like(value, 10, false, spec.force_sign, spec.alternate),
+        'x' => render_int_like(value, 16, false, spec.force_sign, spec.alternate),
+        'X' => render_int_like(value, 16, true, spec.force_sign, spec.alternate),
+        'o' => render_int_like(value, 8, false, spec.force_sign, spec.alternate),
+        'b' => render_int_like(value, 2, false, spec.force_sign, spec.alternate),
+        'f' => render_float_like(value, FloatVerb::Fixed, spec.precision, spec.force_sign),
+        'e' => render_float_like(value, FloatVerb::LowerExp, spec.precision, spec.force_sign),
+        'E' => render_float_like(value, FloatVerb::UpperExp, spec.precision, spec.force_sign),
+        'g' | 'G' => render_float_like(value, FloatVerb::General, spec.precision, spec.force_sign),
+        't' => match value {
+            Value::Bool(flag) => flag.to_string(),
+            other => other.render(),
+        },
+        'v' => value.render(),
+        _ => {
+            let mut text = String::from("%");
+            text.push(spec.verb);
+            text.push_str(&value.render());
+            text
+        }
+    };
+
+    apply_printf_width(rendered, spec)
+}
+
+fn render_int_like(
+    value: &Value,
+    radix: u32,
+    uppercase: bool,
+    force_sign: bool,
+    alternate: bool,
+) -> String {
+    let Some(number) = value_as_i64(value) else {
+        return value.render();
+    };
+
+    let abs = number.unsigned_abs();
+    let mut digits = match radix {
+        2 => format!("{abs:b}"),
+        8 => format!("{abs:o}"),
+        16 if uppercase => format!("{abs:X}"),
+        16 => format!("{abs:x}"),
+        _ => abs.to_string(),
+    };
+    if alternate {
+        let prefix = match radix {
+            2 => "0b",
+            8 => "0o",
+            16 if uppercase => "0X",
+            16 => "0x",
+            _ => "",
+        };
+        digits = format!("{prefix}{digits}");
+    }
+    if number < 0 {
+        format!("-{digits}")
+    } else if force_sign {
+        format!("+{digits}")
+    } else {
+        digits
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FloatVerb {
+    Fixed,
+    LowerExp,
+    UpperExp,
+    General,
+}
+
+fn render_float_like(value: &Value, verb: FloatVerb, precision: Option<usize>, force_sign: bool) -> String {
+    let Some(number) = value_as_f64(value) else {
+        return value.render();
+    };
+    let precision = precision.unwrap_or(6);
+    let mut rendered = match verb {
+        FloatVerb::Fixed => format!("{number:.precision$}"),
+        FloatVerb::LowerExp => format!("{number:.precision$e}"),
+        FloatVerb::UpperExp => format!("{number:.precision$E}"),
+        FloatVerb::General => format!("{number:.precision$}"),
+    };
+    if force_sign && number >= 0.0 {
+        rendered.insert(0, '+');
+    }
+    rendered
+}
+
+fn apply_printf_width(mut rendered: String, spec: PrintfSpec) -> String {
+    let Some(width) = spec.width else {
+        return rendered;
+    };
+
+    let rendered_len = rendered.chars().count();
+    if rendered_len >= width {
+        return rendered;
+    }
+
+    let pad_char = if spec.zero_pad && !spec.left_align { '0' } else { ' ' };
+    let pad: String = std::iter::repeat_n(pad_char, width - rendered_len).collect();
+
+    if spec.left_align {
+        rendered.push_str(&pad);
+        return rendered;
+    }
+
+    if pad_char == '0' && (rendered.starts_with('-') || rendered.starts_with('+')) {
+        let sign = rendered.remove(0);
+        return format!("{sign}{pad}{rendered}");
+    }
+
+    format!("{pad}{rendered}")
+}
+
+fn value_as_i64(value: &Value) -> Option<i64> {
+    match value {
+        Value::Int(number) => Some(*number),
+        Value::Float(number) => Some(*number as i64),
+        _ => None,
+    }
+}
+
+fn value_as_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Int(number) => Some(*number as f64),
+        Value::Float(number) => Some(*number),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -4198,6 +4446,34 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "some 5\nnone true\nok 9\nerr missing\n");
+    }
+
+    #[test]
+    fn runs_string_interpolation_multiline_strings_and_printf() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                name Str = "world"
+                count Int = 6
+                text Str = """
+hello
+$name
+\n
+"""
+                OS.println("hello $name ${count + 1} \$done")
+                OS.println(text)
+                OS.printf("fmt %d\n", 7)
+                OS.stdout.printf("pair %s %d\n", "left", 9)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "hello world 7 $done\n\nhello\n$name\n\n\n\nfmt 7\npair left 9\n"
+        );
     }
 
     #[test]
