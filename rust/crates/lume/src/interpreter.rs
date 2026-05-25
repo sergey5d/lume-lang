@@ -4555,6 +4555,10 @@ mod tests {
         Some(out.join("\n"))
     }
 
+    fn count_defined(values: &[bool]) -> usize {
+        values.iter().filter(|value| **value).count()
+    }
+
     fn normalize_example_output(value: &str) -> String {
         value.trim_end_matches('\n').to_string()
     }
@@ -4566,6 +4570,83 @@ mod tests {
             actual.push('\n');
         }
         actual
+    }
+
+    fn render_located_diagnostic_for_example(diagnostic: &LocatedDiagnostic) -> String {
+        format!(
+            "{} at {}:{}: {}",
+            diagnostic.diagnostic.code,
+            diagnostic.diagnostic.span.start_pos.line,
+            diagnostic.diagnostic.span.start_pos.column,
+            diagnostic.diagnostic.message
+        )
+    }
+
+    fn render_run_failure(path: &Path) -> String {
+        match run_path(path, None) {
+            Ok(result) => {
+                if result.diagnostics.is_empty() {
+                    return "expected example to fail, but it succeeded".to_string();
+                }
+                let mut seen = HashSet::new();
+                let mut messages = Vec::new();
+                for diagnostic in &result.diagnostics {
+                    let message = render_located_diagnostic_for_example(diagnostic);
+                    if seen.insert(message.clone()) {
+                        messages.push(message);
+                    }
+                }
+                messages.join("\n")
+            }
+            Err(err) => err,
+        }
+    }
+
+    fn matches_failure_regex(pattern: &str, text: &str) -> bool {
+        fn matches_from(pattern: &[u8], pi: usize, text: &[u8], ti: usize) -> bool {
+            if pi == pattern.len() {
+                return ti == text.len();
+            }
+
+            if pattern[pi..].starts_with(b"[0-9]+") {
+                let mut end = ti;
+                while end < text.len() && text[end].is_ascii_digit() {
+                    end += 1;
+                }
+                for next in (ti + 1)..=end {
+                    if matches_from(pattern, pi + 6, text, next) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            if pi + 1 < pattern.len() && pattern[pi] == b'.' && pattern[pi + 1] == b'*' {
+                let next_pi = if pi + 2 < pattern.len() && pattern[pi + 2] == b'?' {
+                    pi + 3
+                } else {
+                    pi + 2
+                };
+                for next in ti..=text.len() {
+                    if matches_from(pattern, next_pi, text, next) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            if pi + 1 < pattern.len() && pattern[pi] == b'\\' {
+                return ti < text.len()
+                    && pattern[pi + 1] == text[ti]
+                    && matches_from(pattern, pi + 2, text, ti + 1);
+            }
+
+            ti < text.len()
+                && pattern[pi] == text[ti]
+                && matches_from(pattern, pi + 1, text, ti + 1)
+        }
+
+        matches_from(pattern.as_bytes(), 0, text.as_bytes(), 0)
     }
 
     #[test]
@@ -4754,8 +4835,7 @@ $name
         );
     }
 
-    #[test]
-    fn run_path_matches_expected_output_headers_for_examples() {
+    fn collect_header_parity_failures(include_failures: bool) -> (Vec<String>, Vec<String>) {
         let root = repo_root();
         let mut files = Vec::new();
         collect_lum_files(&root.join("examples"), &mut files);
@@ -4764,35 +4844,79 @@ $name
         let mut failures = Vec::new();
         let mut passed = Vec::new();
         for path in files {
-            if path.components().any(|component| component.as_os_str() == "failures") {
-                continue;
-            }
-
             let text = fs::read_to_string(&path).expect("source text");
             if should_skip_example(&text) {
                 continue;
             }
 
-            let Some(expected) = parse_comment_block(&text, "# EXPECT:") else {
+            let expected_output = parse_comment_block(&text, "# EXPECT:");
+            let expected_failure = parse_comment_block(&text, "# FAIL:");
+            let expected_failure_regex = parse_comment_block(&text, "# FAIL_REGEX:");
+
+            if count_defined(&[
+                expected_output.is_some(),
+                expected_failure.is_some(),
+                expected_failure_regex.is_some(),
+            ]) > 1
+            {
+                failures.push(format!(
+                    "{}\nexample cannot declare more than one of # EXPECT, # FAIL, or # FAIL_REGEX",
+                    path.strip_prefix(&root).unwrap_or(&path).display()
+                ));
+                continue;
+            }
+
+            if expected_output.is_none()
+                && expected_failure.is_none()
+                && expected_failure_regex.is_none()
+            {
+                continue;
+            }
+
+            let relative = path.strip_prefix(&root).unwrap_or(&path).display().to_string();
+            if let Some(expected) = expected_failure {
+                if !include_failures {
+                    continue;
+                }
+                let actual = render_run_failure(&path);
+                if normalize_example_output(&actual) != normalize_example_output(&expected) {
+                    failures.push(format!(
+                        "{}\nexpected failure:\n{}\nactual failure:\n{}",
+                        relative, expected, actual
+                    ));
+                } else {
+                    passed.push(relative);
+                }
+                continue;
+            }
+
+            if let Some(expected_regex) = expected_failure_regex {
+                if !include_failures {
+                    continue;
+                }
+                let actual = normalize_example_output(&render_run_failure(&path));
+                if !matches_failure_regex(&expected_regex, &actual) {
+                    failures.push(format!(
+                        "{}\nexpected failure regex:\n{}\nactual failure:\n{}",
+                        relative, expected_regex, actual
+                    ));
+                } else {
+                    passed.push(relative);
+                }
+                continue;
+            }
+
+            let Some(expected) = expected_output else {
                 continue;
             };
 
-            let relative = path.strip_prefix(&root).unwrap_or(&path).display().to_string();
             match run_path(&path, None) {
                 Ok(result) => {
                     if !result.diagnostics.is_empty() {
                         let rendered = result
                             .diagnostics
                             .iter()
-                            .map(|diagnostic| {
-                                format!(
-                                    "{}:{}:{} {}",
-                                    diagnostic.path,
-                                    diagnostic.diagnostic.span.start_pos.line,
-                                    diagnostic.diagnostic.span.start_pos.column,
-                                    diagnostic.diagnostic.message
-                                )
-                            })
+                            .map(render_located_diagnostic_for_example)
                             .collect::<Vec<_>>()
                             .join("\n");
                         failures.push(format!(
@@ -4819,6 +4943,13 @@ $name
             }
         }
 
+        (failures, passed)
+    }
+
+    #[test]
+    fn run_path_matches_expected_output_headers_for_examples() {
+        let (failures, passed) = collect_header_parity_failures(false);
+
         if failures.is_empty() {
             println!("Rust # EXPECT parity passed for {} examples:", passed.len());
             for relative in &passed {
@@ -4829,6 +4960,25 @@ $name
         assert!(
             failures.is_empty(),
             "Rust # EXPECT parity failures:\n\n{}",
+            failures.join("\n\n")
+        );
+    }
+
+    #[test]
+    #[ignore = "Rust # FAIL parity still differs from Go on many diagnostics and rejection rules"]
+    fn run_path_matches_all_headers_for_examples() {
+        let (failures, passed) = collect_header_parity_failures(true);
+
+        if failures.is_empty() {
+            println!("Rust example parity passed for {} examples:", passed.len());
+            for relative in &passed {
+                println!("PASS {}", relative);
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "Rust example parity failures:\n\n{}",
             failures.join("\n\n")
         );
     }
