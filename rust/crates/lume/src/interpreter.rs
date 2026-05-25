@@ -4640,6 +4640,7 @@ $name
         files.sort();
 
         let mut failures = Vec::new();
+        let mut passed = Vec::new();
         for path in files {
             if path.components().any(|component| component.as_os_str() == "failures") {
                 continue;
@@ -4685,12 +4686,21 @@ $name
                             "{}\nexpected:\n{}\nactual:\n{}",
                             relative, expected, actual
                         ));
+                    } else {
+                        passed.push(relative);
                     }
                 }
                 Err(err) => failures.push(format!(
                     "{}\nexpected output:\n{}\nrun_path error:\n{}",
                     relative, expected, err
                 )),
+            }
+        }
+
+        if failures.is_empty() {
+            println!("Rust # EXPECT parity passed for {} examples:", passed.len());
+            for relative in &passed {
+                println!("PASS {}", relative);
             }
         }
 
