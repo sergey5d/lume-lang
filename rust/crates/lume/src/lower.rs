@@ -227,8 +227,8 @@ impl<'a> Lowerer<'a> {
     fn define_impl_block(&mut self, block: &ImplBlock) {
         let Some(target_name) = named_type_name(&block.target) else {
             self.add_error(
-                "unsupported_impl_target",
-                "lowering currently expects a named impl target",
+                "lower_invariant",
+                "impl target should be resolved to a named type before lowering",
                 block.span,
             );
             return;
@@ -737,7 +737,10 @@ impl<'a> FunctionLowerer<'a> {
                         ir::RValue::Use(self.lower_expr(value_expr))
                     } else {
                         let Some(op) = map_assign_op(assignment.operator) else {
-                            self.unsupported("unsupported assignment operator in lowering", assignment.span);
+                            self.invariant(
+                                "assignment operator should map before lowering",
+                                assignment.span,
+                            );
                             continue;
                         };
                         let current = ir::Operand::Copy(Box::new(target.clone()));
@@ -770,7 +773,7 @@ impl<'a> FunctionLowerer<'a> {
                         kind: ir::TerminatorKind::Goto(exit),
                     });
                 } else {
-                    self.unsupported("break outside lowered loop", stmt.span);
+                    self.invariant("break should be rejected before lowering", stmt.span);
                 }
             }
             Stmt::Expr(expr) => {
@@ -1092,7 +1095,10 @@ impl<'a> FunctionLowerer<'a> {
             return;
         }
         let Some(condition) = stmt.condition.as_ref() else {
-            self.unsupported("if statement requires a condition or unwrap binding", stmt.span);
+            self.invariant(
+                "if statement should have a condition or unwrap binding before lowering",
+                stmt.span,
+            );
             return;
         };
         let then_block = self.add_block();
@@ -1364,7 +1370,10 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         let Some(iterable) = &first.iterable else {
-            self.unsupported("for binding requires an iterable source", first.span);
+            self.invariant(
+                "for binding should have an iterable source before lowering",
+                first.span,
+            );
             return;
         };
 
@@ -2644,7 +2653,10 @@ impl<'a> FunctionLowerer<'a> {
     fn lower_place(&mut self, expr: &Expr) -> Option<ir::Place> {
         match expr {
             Expr::Identifier { name, span } => self.lookup_place(name).or_else(|| {
-                self.unsupported(format!("unknown assignment target '{}'", name), *span);
+                self.invariant(
+                    format!("assignment target '{}' should resolve before lowering", name),
+                    *span,
+                );
                 None
             }),
             Expr::Member { receiver, name, .. } => Some(ir::Place::Field {
@@ -2657,7 +2669,7 @@ impl<'a> FunctionLowerer<'a> {
             }),
             Expr::Group { inner, .. } => self.lower_place(inner),
             _ => {
-                self.unsupported("invalid assignment target during lowering", expr.span());
+                self.invariant("assignment target should be validated before lowering", expr.span());
                 None
             }
         }
@@ -2768,9 +2780,9 @@ impl<'a> FunctionLowerer<'a> {
         self.scopes.pop();
     }
 
-    fn unsupported(&mut self, message: impl Into<String>, span: Span) {
+    fn invariant(&mut self, message: impl Into<String>, span: Span) {
         self.diagnostics
-            .push(Diagnostic::error("lower_unsupported", message, span));
+            .push(Diagnostic::error("lower_invariant", message, span));
     }
 
     fn add_error(&mut self, code: &'static str, message: impl Into<String>, span: Span) {
