@@ -1271,9 +1271,33 @@ impl<'a> Resolver<'a> {
                     format!("duplicate binding '{}'", function.name),
                     false,
                 );
-                self.resolve_function(function);
+                self.resolve_local_function(function);
             }
         }
+    }
+
+    fn resolve_local_function(&mut self, function: &FunctionDecl) {
+        self.push_type_scope();
+        for param in &function.type_params {
+            self.define_type_param(param);
+        }
+        self.resolve_type_parameter_bounds(&function.type_params);
+        self.resolve_type_ref(function.return_type.as_ref());
+        self.push_scope();
+        for param in &function.params {
+            self.resolve_type_ref(param.ty.as_ref());
+            self.define_value(
+                param.name.as_str(),
+                param.span,
+                false,
+                "duplicate_parameter",
+                format!("duplicate parameter '{}'", param.name),
+                false,
+            );
+        }
+        self.resolve_callable_body(&function.body);
+        self.pop_scope();
+        self.pop_type_scope();
     }
 
     fn resolve_unwrap(&mut self, stmt: &UnwrapStmt) {

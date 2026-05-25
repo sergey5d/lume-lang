@@ -10,7 +10,7 @@ use crate::{
         AssignOp, AssignmentStmt, BinaryOp, Block, CallableBody, ElseBranch,
         ElseExprBranch, Expr, ForBinding, FunctionDecl, IfStmt, ImplBlock, Item, LambdaBody,
         MatchCase, MatchCaseBody, MethodDecl, Pattern, Program, Stmt, TypeDecl, TypeKind,
-        TypeMember, TypeRef,
+        TypeMember, TypeRef, Visibility,
     },
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, collect_module_order,
@@ -196,6 +196,7 @@ struct FieldSig {
     name: String,
     ty: Ty,
     mutable: bool,
+    hidden: bool,
     has_initializer: bool,
 }
 
@@ -639,6 +640,28 @@ impl<'a> Checker<'a> {
         for member in &decl.members {
             match member {
                 TypeMember::Field(field) => {
+                    if decl.kind == TypeKind::Enum {
+                        if field.visibility == Visibility::Hidden {
+                            self.add_error(
+                                "invalid_enum_field",
+                                format!(
+                                    "enum '{}' cannot declare private field '{}'",
+                                    decl.name, field.name
+                                ),
+                                field.span,
+                            );
+                        }
+                        if field.mutable {
+                            self.add_error(
+                                "invalid_enum_field",
+                                format!(
+                                    "enum '{}' cannot declare mutable field '{}'",
+                                    decl.name, field.name
+                                ),
+                                field.span,
+                            );
+                        }
+                    }
                     if let Some(initializer) = &field.initializer {
                         let actual = self.check_expr(initializer);
                         let expected = field
@@ -660,8 +683,43 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
-                TypeMember::Method(method) => self.check_method(method, &type_sig),
-                TypeMember::Case(_) => {}
+                TypeMember::Method(method) => {
+                    if decl.kind == TypeKind::Interface && method.name == "init" {
+                        self.add_error(
+                            "invalid_interface_method",
+                            format!(
+                                "interface '{}': interfaces cannot declare constructors",
+                                decl.name
+                            ),
+                            method.span,
+                        );
+                    }
+                    self.check_method(method, &type_sig)
+                }
+                TypeMember::Case(case) => {
+                    for field in &case.fields {
+                        if field.visibility == Visibility::Hidden {
+                            self.add_error(
+                                "invalid_enum_case_field",
+                                format!(
+                                    "enum case '{}' cannot declare private field '{}'",
+                                    case.name, field.name
+                                ),
+                                field.span,
+                            );
+                        }
+                        if field.mutable {
+                            self.add_error(
+                                "invalid_enum_case_field",
+                                format!(
+                                    "enum case '{}' cannot declare mutable field '{}'",
+                                    case.name, field.name
+                                ),
+                                field.span,
+                            );
+                        }
+                    }
+                }
             }
         }
 
@@ -673,8 +731,21 @@ impl<'a> Checker<'a> {
             return;
         };
         let Some(type_sig) = self.lookup_type_local(target_name) else {
+            self.add_error(
+                "unknown_impl_target",
+                format!("unknown impl target '{}'", target_name),
+                block.span,
+            );
             return;
         };
+        if type_sig.kind == TypeKind::Interface {
+            self.add_error(
+                "unknown_impl_target",
+                format!("unknown impl target '{}'", target_name),
+                block.span,
+            );
+            return;
+        }
         self.push_type_params(type_sig.type_params.iter().map(String::as_str));
         for method in &block.methods {
             self.check_method(method, &type_sig);
@@ -683,6 +754,13 @@ impl<'a> Checker<'a> {
     }
 
     fn check_method(&mut self, method: &MethodDecl, owner: &TypeSig) {
+        if owner.kind == TypeKind::Record && method.name == "init" {
+            self.add_error(
+                "invalid_record_method",
+                format!("record '{}': records cannot declare constructors", owner.name),
+                method.span,
+            );
+        }
         let previous_return = self.current_return.clone();
         let previous_owner = self.current_owner.clone();
         let previous_method = self.current_method.clone();
@@ -834,6 +912,9 @@ impl<'a> Checker<'a> {
             self.pop_scope();
             result = join_types(&result, &ty);
         }
+        if !stmt.partial {
+            self.check_match_exhaustiveness(&value_ty, &stmt.cases, stmt.span);
+        }
         if stmt.partial {
             Ty::option(result)
         } else {
@@ -905,6 +986,9 @@ impl<'a> Checker<'a> {
                 let value_ty = self.check_expr(&stmt.value);
                 for case in &stmt.cases {
                     self.check_match_case(case, &value_ty);
+                }
+                if !stmt.partial {
+                    self.check_match_exhaustiveness(&value_ty, &stmt.cases, stmt.span);
                 }
                 Ty::unit()
             }
@@ -1166,6 +1250,19 @@ impl<'a> Checker<'a> {
             }
             Expr::Member { receiver, name, span } => {
                 let receiver_ty = self.check_expr(receiver);
+                if let Some(field) = self.field_sig_for_member(&receiver_ty, name) {
+                    if !field.mutable && !self.can_assign_immutable_field(receiver, &receiver_ty, name) {
+                        self.add_error(
+                            "assign_immutable",
+                            format!(
+                                "cannot assign to immutable field '{}' outside constructor",
+                                name
+                            ),
+                            *span,
+                        );
+                    }
+                    return field.ty.clone();
+                }
                 self.member_type(&receiver_ty, name).unwrap_or_else(|| {
                     self.add_error(
                         "unknown_member",
@@ -1290,8 +1387,31 @@ impl<'a> Checker<'a> {
                 }
                 self.index_result_type(&receiver_ty)
             }
-            Expr::RecordUpdate { receiver, updates, .. } => {
+            Expr::RecordUpdate { receiver, updates, span } => {
                 let base = self.check_expr(receiver);
+                match &base {
+                    Ty::Named(name, _) => {
+                        if let Some(sig) = self.lookup_any_type(name) {
+                            if sig.kind == TypeKind::Class
+                                && sig.fields.iter().any(|field| field.hidden)
+                            {
+                                self.add_error(
+                                    "invalid_record_update",
+                                    "class update requires a class without private fields",
+                                    *span,
+                                );
+                            }
+                        }
+                    }
+                    Ty::Unknown => {}
+                    _ => {
+                        self.add_error(
+                            "invalid_record_update",
+                            "update requires a record or class value",
+                            *span,
+                        );
+                    }
+                }
                 for update in updates {
                     self.check_expr(&update.value);
                 }
@@ -1389,13 +1509,16 @@ impl<'a> Checker<'a> {
                 partial,
                 value,
                 cases,
-                ..
+                span,
             } => {
                 let value_ty = self.check_expr(value);
                 let mut result = Ty::Unknown;
                 for case in cases {
                     let current = self.check_match_case(case, &value_ty);
                     result = join_types(&result, &current);
+                }
+                if !*partial {
+                    self.check_match_exhaustiveness(&value_ty, cases, *span);
                 }
                 if *partial {
                     Ty::option(result)
@@ -1566,11 +1689,19 @@ impl<'a> Checker<'a> {
                 &expected,
                 arg_span,
                 "invalid_argument_type",
-                format!(
-                    "argument has type '{}' but parameter expects '{}'",
-                    actual.describe(),
-                    expected.describe()
-                ),
+                if matches!(actual, Ty::Record(_)) && matches!(expected, Ty::Record(_)) {
+                    format!(
+                        "cannot pass {} to parameter of type {}",
+                        actual.describe(),
+                        expected.describe()
+                    )
+                } else {
+                    format!(
+                        "argument has type '{}' but parameter expects '{}'",
+                        actual.describe(),
+                        expected.describe()
+                    )
+                },
             );
         }
 
@@ -1761,15 +1892,22 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
     ) -> Ty {
+        let ret = Ty::Named(
+            sig.name.clone(),
+            sig.type_params
+                .iter()
+                .map(|name| Ty::TypeParam(name.clone()))
+                .collect(),
+        );
+
+        if args.len() == 1 {
+            if let Some(record_ty) = self.extract_constructor_record_arg(&args[0].value, &sig.fields) {
+                return self.check_record_constructor_conversion(sig, &ret, &record_ty, span);
+            }
+        }
+
         if let Some(overloads) = sig.methods.get("init") {
             if let Some(ctor) = self.choose_overload(overloads, args) {
-                let ret = Ty::Named(
-                    sig.name.clone(),
-                    sig.type_params
-                        .iter()
-                        .map(|name| Ty::TypeParam(name.clone()))
-                        .collect(),
-                );
                 let params = ctor
                     .params
                     .iter()
@@ -1777,6 +1915,7 @@ impl<'a> Checker<'a> {
                         name: param.name.clone(),
                         ty: param.ty.clone(),
                         mutable: false,
+                        hidden: false,
                         has_initializer: false,
                     })
                     .collect::<Vec<_>>();
@@ -1787,16 +1926,24 @@ impl<'a> Checker<'a> {
         let fields = sig
             .fields
             .iter()
-            .filter(|field| !field.mutable || sig.kind == TypeKind::Record || sig.kind == TypeKind::Class)
+            .filter(|field| !field.hidden || !field.has_initializer)
             .cloned()
             .collect::<Vec<_>>();
-        let ret = Ty::Named(
-            sig.name.clone(),
-            sig.type_params
-                .iter()
-                .map(|name| Ty::TypeParam(name.clone()))
-                .collect(),
-        );
+        if args.len() == 1 {
+            let actual = self.check_expr(&args[0].value);
+            if matches!(actual, Ty::Named(_, _)) && fields.len() != 1 {
+                self.add_error(
+                    "no_matching_overload",
+                    format!(
+                        "no constructor overload for class '{}' matches {} arguments",
+                        sig.name,
+                        args.len()
+                    ),
+                    span,
+                );
+                return ret;
+            }
+        }
         self.check_constructor_signature(&fields, &ret, args, span)
     }
 
@@ -1808,11 +1955,6 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
     ) -> Ty {
         if args.iter().all(|arg| arg.name.is_none()) {
-            if args.len() == 1 {
-                if let Some(record_ty) = self.extract_constructor_record_arg(&args[0].value, params) {
-                    return self.check_record_constructor_conversion(params, ret, &record_ty, span);
-                }
-            }
             let arrangement = arrange_constructor_args(params, args);
             let min_required = params.iter().filter(|param| !param.has_initializer).count();
             if arrangement.overflow > 0 || arrangement.missing_required > 0 || args.len() < min_required || args.len() > params.len() {
@@ -2077,6 +2219,81 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn check_match_exhaustiveness(
+        &mut self,
+        value_ty: &Ty,
+        cases: &[MatchCase],
+        span: crate::source::Span,
+    ) {
+        let Ty::Named(name, _) = value_ty else {
+            return;
+        };
+        let Some(sig) = self.lookup_any_type(name) else {
+            return;
+        };
+        if sig.kind != TypeKind::Enum || sig.enum_cases.is_empty() {
+            return;
+        }
+
+        let mut covered = HashSet::new();
+        let mut wildcard = false;
+        for case in cases {
+            if case.guard.is_some() {
+                continue;
+            }
+            match &case.pattern {
+                Pattern::Wildcard { .. } | Pattern::Binding { .. } => {
+                    wildcard = true;
+                    break;
+                }
+                Pattern::Constructor { path, .. } => {
+                    if let Some(case_name) = self.match_case_name_for_enum(path, &sig.name) {
+                        covered.insert(case_name);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if wildcard {
+            return;
+        }
+        let missing = sig
+            .enum_cases
+            .keys()
+            .filter(|case_name| !covered.contains(case_name.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            return;
+        }
+        self.add_error(
+            "non_exhaustive_match",
+            format!("match does not cover enum cases: {}", missing.join(", ")),
+            span,
+        );
+    }
+
+    fn match_case_name_for_enum<'b>(&self, path: &'b [String], enum_name: &str) -> Option<&'b str> {
+        match path {
+            [case_name] => self
+                .lookup_any_type(enum_name)
+                .and_then(|sig| sig.enum_cases.contains_key(case_name).then_some(case_name.as_str()))
+                .or_else(|| {
+                    self.lookup_case_by_path(path)
+                        .filter(|case| matches!(&case.result, Ty::Named(name, _) if name == enum_name))
+                        .map(|_| case_name.as_str())
+                }),
+            [type_name, case_name] if type_name == enum_name => Some(case_name.as_str()),
+            [module_alias, type_name, case_name] => self
+                .world
+                .lookup_module_alias(self.module, module_alias)
+                .and_then(|module| module.types.get(type_name))
+                .filter(|sig| sig.name == enum_name)
+                .map(|_| case_name.as_str()),
+            _ => None,
+        }
+    }
+
     fn lookup_case_by_path(&self, path: &[String]) -> Option<EnumCaseSig> {
         match path {
             [case_name] => self.world.lookup_enum_case(self.module, case_name),
@@ -2143,6 +2360,36 @@ impl<'a> Checker<'a> {
             Ty::Unknown => Ty::Unknown,
             _ => Ty::Unknown,
         }
+    }
+
+    fn field_sig_for_member(&self, receiver: &Ty, name: &str) -> Option<FieldSig> {
+        let Ty::Named(type_name, _) = receiver else {
+            return None;
+        };
+        let sig = self.lookup_any_type(type_name)?;
+        sig.fields.iter().find(|field| field.name == name).cloned()
+    }
+
+    fn can_assign_immutable_field(&self, receiver: &Expr, receiver_ty: &Ty, field_name: &str) -> bool {
+        if self.current_method.as_deref() != Some("init") {
+            return false;
+        }
+        let Some(owner) = &self.current_owner else {
+            return false;
+        };
+        let Expr::Identifier { name, .. } = receiver else {
+            return false;
+        };
+        if name != "this" {
+            return false;
+        }
+        let Ty::Named(receiver_name, _) = receiver_ty else {
+            return false;
+        };
+        if receiver_name != &owner.name {
+            return false;
+        }
+        owner.fields.iter().any(|field| field.name == field_name)
     }
 
     fn member_type(&self, receiver: &Ty, name: &str) -> Option<Ty> {
@@ -2398,7 +2645,7 @@ impl<'a> Checker<'a> {
 
     fn check_record_constructor_conversion(
         &mut self,
-        params: &[FieldSig],
+        sig: &TypeSig,
         ret: &Ty,
         record_ty: &Ty,
         span: crate::source::Span,
@@ -2406,33 +2653,83 @@ impl<'a> Checker<'a> {
         let Ty::Record(fields) = record_ty else {
             return materialize_type(ret);
         };
-        let min_required = params.iter().filter(|param| !param.has_initializer).count();
-        let present = params
+        if sig
+            .fields
             .iter()
-            .filter(|param| fields.iter().any(|(name, _)| name == &param.name))
-            .count();
-        if present < min_required {
+            .any(|field| field.hidden && !field.has_initializer)
+        {
             self.add_error(
-                "invalid_argument_count",
-                format!("call expects {}..{} arguments, got 1", min_required, params.len()),
+                "no_matching_overload",
+                format!(
+                    "class/record '{}' cannot be built from an anonymous record because it has private fields without initializers",
+                    sig.name
+                ),
                 span,
             );
+            return materialize_type(ret);
         }
-        for param in params {
-            let Some((_, actual)) = fields.iter().find(|(name, _)| name == &param.name) else {
+
+        let visible_fields = sig
+            .fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .collect::<Vec<_>>();
+        let required_visible = visible_fields
+            .iter()
+            .filter(|field| !field.has_initializer)
+            .count();
+
+        if fields.len() < required_visible || fields.len() > visible_fields.len() {
+            self.add_error(
+                "no_matching_overload",
+                format!(
+                    "class/record '{}' requires an anonymous record with exactly matching field names and types",
+                    sig.name
+                ),
+                span,
+            );
+            return materialize_type(ret);
+        }
+
+        for field in &visible_fields {
+            let Some((_, actual)) = fields.iter().find(|(name, _)| name == &field.name) else {
+                if !field.has_initializer {
+                    self.add_error(
+                        "no_matching_overload",
+                        format!(
+                            "class/record '{}' requires an anonymous record with exactly matching field names and types",
+                            sig.name
+                        ),
+                        span,
+                    );
+                    return materialize_type(ret);
+                }
                 continue;
             };
-            self.require_assignable(
-                actual,
-                &param.ty,
-                span,
-                "invalid_argument_type",
+            if !self.is_assignable(actual, &field.ty) {
+                self.add_error(
+                    "no_matching_overload",
+                    format!(
+                        "class/record '{}' requires an anonymous record with exactly matching field names and types",
+                        sig.name
+                    ),
+                    span,
+                );
+                return materialize_type(ret);
+            }
+        }
+
+        if fields
+            .iter()
+            .any(|(name, _)| !visible_fields.iter().any(|field| field.name == *name))
+        {
+            self.add_error(
+                "no_matching_overload",
                 format!(
-                    "argument for '{}' has type '{}' but expects '{}'",
-                    param.name,
-                    actual.describe(),
-                    param.ty.describe()
+                    "class/record '{}' requires an anonymous record with exactly matching field names and types",
+                    sig.name
                 ),
+                span,
             );
         }
         materialize_type(ret)
@@ -2815,6 +3112,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                     .or_else(|| field.initializer.as_ref().and_then(infer_literal_type))
                     .unwrap_or(Ty::Unknown),
                 mutable: field.mutable,
+                hidden: field.visibility == Visibility::Hidden,
                 has_initializer: field.initializer.is_some(),
             }),
             TypeMember::Method(method) => {
@@ -2839,6 +3137,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                             .map(|ty| convert_type_ref(ty, &owner_params))
                             .unwrap_or(Ty::Unknown),
                         mutable: field.mutable,
+                        hidden: field.visibility == Visibility::Hidden,
                         has_initializer: false,
                     })
                     .collect::<Vec<_>>();

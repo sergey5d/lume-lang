@@ -203,6 +203,13 @@ impl<'a> Parser<'a> {
             | TokenKind::Keyword(Keyword::Object)
             | TokenKind::Keyword(Keyword::Interface)
             | TokenKind::Keyword(Keyword::Enum) => {
+                if visibility == Visibility::Public {
+                    self.error_at_current(
+                        "unexpected_visibility",
+                        "'public' is only supported for top-level functions and immutable bindings",
+                    );
+                    return None;
+                }
                 let decl = self.parse_type_decl(annotations, visibility)?;
                 Some(Item::Type(decl))
             }
@@ -225,6 +232,13 @@ impl<'a> Parser<'a> {
                 Some(Item::Impl(block))
             }
             _ => {
+                if visibility == Visibility::Public && self.at_keyword(Keyword::Var) {
+                    self.error_at_current(
+                        "unexpected_visibility",
+                        "'public' is only supported for immutable named top-level bindings",
+                    );
+                    return None;
+                }
                 if self.is_binding_start() {
                     if !annotations.is_empty() {
                         self.error_at_current(
@@ -234,6 +248,18 @@ impl<'a> Parser<'a> {
                         return None;
                     }
                     let mut stmt = self.try_parse_binding_stmt()?;
+                    if visibility == Visibility::Public
+                        && stmt
+                            .bindings
+                            .iter()
+                            .any(|binding| binding.name == "_" || binding.mutable)
+                    {
+                        self.error_at_current(
+                            "unexpected_visibility",
+                            "'public' is only supported for immutable named top-level bindings",
+                        );
+                        return None;
+                    }
                     stmt.visibility = visibility;
                     return Some(Item::Statement(Stmt::Binding(stmt)));
                 }
@@ -247,7 +273,11 @@ impl<'a> Parser<'a> {
                 if visibility != Visibility::Default {
                     self.error_at_current(
                         "unexpected_visibility",
-                        "visibility modifiers are only valid on declarations",
+                        if visibility == Visibility::Public {
+                            "'public' is only supported for top-level functions and immutable bindings"
+                        } else {
+                            "visibility modifiers are only valid on declarations"
+                        },
                     );
                     return None;
                 }
@@ -426,6 +456,17 @@ impl<'a> Parser<'a> {
             }
 
             let member_visibility = self.parse_visibility();
+            if member_visibility == Visibility::Public {
+                let message = match kind {
+                    TypeKind::Interface => "public is not allowed inside interfaces",
+                    TypeKind::Enum => "public is not allowed on enum members",
+                    TypeKind::Class => "public is not allowed on class members",
+                    TypeKind::Record => "public is not allowed on record members",
+                    TypeKind::Object => "public is not allowed on object members",
+                };
+                self.error_at_current("unexpected_visibility", message);
+                return None;
+            }
             match self.current_kind() {
                 TokenKind::Keyword(Keyword::Def) => {
                     let method =
@@ -493,6 +534,21 @@ impl<'a> Parser<'a> {
     fn parse_impl_block(&mut self) -> Option<ImplBlock> {
         let start = self.consume_keyword(Keyword::Impl, "expected 'impl'")?;
         let target = self.parse_type_ref()?;
+        if self.match_token(TokenKind::Dot) {
+            let _ = self.expect_identifier("expected enum case name after '.'")?;
+            let owner = match &target {
+                TypeRef::Named { name, .. } => name.as_str(),
+                _ => "enum",
+            };
+            self.error_at_current(
+                "unexpected_impl_target",
+                format!(
+                    "enum cases cannot declare methods; move methods to enum '{}'",
+                    owner
+                ),
+            );
+            return None;
+        }
         self.skip_newlines();
         self.consume(TokenKind::LBrace, "expected '{' after impl target")?;
         self.skip_newlines();
@@ -668,6 +724,13 @@ impl<'a> Parser<'a> {
         let start = self.consume_keyword(Keyword::Var, "expected 'var'")?;
         let bindings = self.parse_binding_list(true)?;
         self.consume(TokenKind::Eq, "expected '=' after bindings")?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"=\"",
+            );
+            return None;
+        }
         let values = self.parse_expr_list()?;
         let end = values.last().map(Expr::span).unwrap_or(start);
         Some(BindingStmt {
@@ -689,6 +752,13 @@ impl<'a> Parser<'a> {
         };
         if !self.match_token(TokenKind::Eq) {
             self.restore(checkpoint);
+            return None;
+        }
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"=\"",
+            );
             return None;
         }
         let Some(values) = self.parse_expr_list() else {
@@ -755,6 +825,16 @@ impl<'a> Parser<'a> {
                 self.restore(checkpoint);
                 return None;
             };
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                format!(
+                    "expected expression on same line after \"{}\"",
+                    self.tokens[self.index.saturating_sub(1)].lexeme
+                ),
+            );
+            return None;
+        }
         let Some(values) = self.parse_expr_list() else {
             self.restore(checkpoint);
             return None;
@@ -781,6 +861,13 @@ impl<'a> Parser<'a> {
             if self.is_binding_start() && self.binding_list_followed_by_left_arrow(self.index) {
                 let bindings = self.parse_binding_list(false)?;
                 self.consume(TokenKind::LeftArrow, "expected '<-' after if binding")?;
+                if self.at(TokenKind::Newline) {
+                    self.error_at_current(
+                        "expected_expression",
+                        "expected expression on same line after \"<-\"",
+                    );
+                    return None;
+                }
                 let value = self.parse_expr_without_trailing_block_call()?;
                 (None, bindings, Some(value))
             } else {
@@ -792,7 +879,13 @@ impl<'a> Parser<'a> {
             };
         let then_block = self.parse_then_stmt_body_block("if")?;
         let else_branch = if self.match_keyword(Keyword::Else) {
-            self.skip_newlines();
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "unexpected_token",
+                    "else body must stay on the same line unless it uses '{ ... }'",
+                );
+                return None;
+            }
             if self.at_keyword(Keyword::If) {
                 Some(ElseBranch::If(Box::new(self.parse_if_stmt()?)))
             } else {
@@ -835,7 +928,21 @@ impl<'a> Parser<'a> {
         let start = self.consume_keyword(Keyword::For, "expected 'for'")?;
         let bindings = self.parse_binding_list(false)?;
         self.consume(TokenKind::LeftArrow, "expected '<-' in for loop")?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"<-\"",
+            );
+            return None;
+        }
         let iterable = self.parse_expr_without_trailing_block_call()?;
+        if !self.at(TokenKind::LBrace) {
+            self.error_at_current(
+                "unexpected_token",
+                "for requires a '{ ... }' block body; one-line for forms are not supported",
+            );
+            return None;
+        }
         let body = self.parse_block()?;
         Some(ForStmt {
             bindings: vec![ForBinding {
@@ -860,6 +967,13 @@ impl<'a> Parser<'a> {
         }
         let bindings = self.parse_binding_list(false)?;
         self.consume(TokenKind::LeftArrow, "expected '<-' after unwrap bindings")?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"<-\"",
+            );
+            return None;
+        }
         let value = self.parse_expr()?;
         let else_block = if self.match_keyword(Keyword::Else) {
             Some(self.parse_block_or_inline_stmt_body("unwrap else")?)
@@ -884,6 +998,13 @@ impl<'a> Parser<'a> {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let bindings = self.parse_binding_list(false)?;
             self.consume(TokenKind::LeftArrow, "expected '<-' in unwrap block")?;
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "expected_expression",
+                    "expected expression on same line after \"<-\"",
+                );
+                return None;
+            }
             let value = self.parse_expr()?;
             let span = bindings
                 .first()
@@ -936,10 +1057,30 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_match_cases(&mut self) -> Option<(Vec<MatchCase>, Span)> {
+        if !self.at(TokenKind::LBrace) {
+            self.error_at_current(
+                "unexpected_token",
+                format!(
+                    "expected end of expression, got {}",
+                    self.next_significant_token_string()
+                ),
+            );
+            return None;
+        }
         self.consume(TokenKind::LBrace, "expected '{' after match value")?;
         self.skip_newlines();
         let mut cases = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            if !self.at_keyword(Keyword::Case) {
+                self.error_at_current(
+                    "unexpected_token",
+                    format!(
+                        "expected 'case' before match pattern, got {}",
+                        self.next_significant_token_string()
+                    ),
+                );
+                return None;
+            }
             self.consume_keyword(Keyword::Case, "expected 'case' before match pattern")?;
             let pattern = self.parse_pattern()?;
             let guard = if self.match_keyword(Keyword::If) {
@@ -1284,7 +1425,13 @@ impl<'a> Parser<'a> {
         let condition = self.parse_expr_without_trailing_block_call()?;
         let then_block = self.parse_then_expr_body_block("if")?;
         self.consume_keyword(Keyword::Else, "expected 'else' in if expression")?;
-        self.skip_newlines();
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "unexpected_token",
+                "else body must stay on the same line unless it uses '{ ... }'",
+            );
+            return None;
+        }
         let else_branch = if self.at_keyword(Keyword::If) {
             let else_start = self.consume_keyword(Keyword::If, "expected 'if'")?;
             let else_if = self.parse_if_expr(else_start)?;
@@ -1393,6 +1540,13 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::LBrace) {
             self.parse_block()
         } else {
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "unexpected_token",
+                    "yield body must stay on the same line unless it uses '{ ... }'",
+                );
+                return None;
+            }
             let expr = self.parse_expr()?;
             let span = expr.span();
             Some(Block {
@@ -1550,16 +1704,39 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
         }
-        self.consume_keyword(
-            Keyword::Then,
-            Box::leak(format!("expected '{{' or 'then' after {owner}").into_boxed_str()),
-        )?;
+        if !self.at_keyword(Keyword::Then) {
+            self.error_at_current(
+                "unexpected_token",
+                format!(
+                    "expected end of expression, got {}",
+                    self.next_significant_token_string()
+                ),
+            );
+            return None;
+        }
+        self.consume_keyword(Keyword::Then, "expected 'then'")?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "unexpected_token",
+                format!(
+                    "{owner} then-body must stay on the same line unless it uses '{{ ... }}'"
+                ),
+            );
+            return None;
+        }
         self.parse_block_or_inline_stmt_body(owner)
     }
 
     fn parse_block_or_inline_stmt_body(&mut self, owner: &'static str) -> Option<Block> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
+        }
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "unexpected_token",
+                format!("{owner} body must stay on the same line unless it uses '{{ ... }}'"),
+            );
+            return None;
         }
         if self.at(TokenKind::Eof) {
             self.error_at_current("expected_statement", format!("expected statement after {owner}"));
@@ -1577,16 +1754,39 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
         }
-        self.consume_keyword(
-            Keyword::Then,
-            Box::leak(format!("expected '{{' or 'then' after {owner}").into_boxed_str()),
-        )?;
+        if !self.at_keyword(Keyword::Then) {
+            self.error_at_current(
+                "unexpected_token",
+                format!(
+                    "expected end of expression, got {}",
+                    self.next_significant_token_string()
+                ),
+            );
+            return None;
+        }
+        self.consume_keyword(Keyword::Then, "expected 'then'")?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "unexpected_token",
+                format!(
+                    "{owner} then-body must stay on the same line unless it uses '{{ ... }}'"
+                ),
+            );
+            return None;
+        }
         self.parse_block_or_inline_expr_body(owner)
     }
 
     fn parse_block_or_inline_expr_body(&mut self, owner: &'static str) -> Option<Block> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
+        }
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "unexpected_token",
+                format!("{owner} body must stay on the same line unless it uses '{{ ... }}'"),
+            );
+            return None;
         }
         if self.at(TokenKind::Eof) {
             self.error_at_current(
@@ -2584,6 +2784,70 @@ impl<'a> Parser<'a> {
             }
         }
         fallback
+    }
+
+    fn next_significant_token(&self) -> &Token {
+        let mut index = self.index;
+        while let Some(token) = self.tokens.get(index) {
+            if token.kind != TokenKind::Newline {
+                return token;
+            }
+            index += 1;
+        }
+        self.current()
+    }
+
+    fn next_significant_token_string(&self) -> String {
+        self.format_token_like(self.next_significant_token())
+    }
+
+    fn format_token_like(&self, token: &Token) -> String {
+        format!(
+            "{}(\"{}\" @ {}:{})",
+            self.token_kind_label(token.kind),
+            token.lexeme,
+            token.span.start_pos.line,
+            token.span.start_pos.column
+        )
+    }
+
+    fn token_kind_label(&self, kind: TokenKind) -> &'static str {
+        match kind {
+            TokenKind::Identifier => "IDENT",
+            TokenKind::Integer => "INT",
+            TokenKind::Float => "FLOAT",
+            TokenKind::String => "STRING",
+            TokenKind::Keyword(Keyword::Case) => "CASE",
+            TokenKind::Keyword(Keyword::If) => "IF",
+            TokenKind::Keyword(Keyword::Then) => "THEN",
+            TokenKind::Keyword(Keyword::Else) => "ELSE",
+            TokenKind::Keyword(Keyword::Match) => "MATCH",
+            TokenKind::Keyword(Keyword::Partial) => "PARTIAL",
+            TokenKind::Keyword(Keyword::For) => "FOR",
+            TokenKind::Keyword(Keyword::Yield) => "YIELD",
+            TokenKind::Keyword(Keyword::Unwrap) => "UNWRAP",
+            TokenKind::Keyword(Keyword::Def) => "DEF",
+            TokenKind::Keyword(Keyword::Class) => "CLASS",
+            TokenKind::Keyword(Keyword::Record) => "RECORD",
+            TokenKind::Keyword(Keyword::Object) => "OBJECT",
+            TokenKind::Keyword(Keyword::Interface) => "INTERFACE",
+            TokenKind::Keyword(Keyword::Enum) => "ENUM",
+            TokenKind::Keyword(Keyword::Public) => "PUB",
+            TokenKind::Keyword(Keyword::Hidden) => "PRIVATE",
+            TokenKind::Keyword(Keyword::Var) => "VAR",
+            TokenKind::LBrace => "{",
+            TokenKind::RBrace => "}",
+            TokenKind::LParen => "(",
+            TokenKind::RParen => ")",
+            TokenKind::LBracket => "[",
+            TokenKind::RBracket => "]",
+            TokenKind::Eq => "=",
+            TokenKind::FatArrow => "=>",
+            TokenKind::LeftArrow => "<-",
+            TokenKind::Newline => "NEWLINE",
+            TokenKind::Eof => "EOF",
+            _ => "TOKEN",
+        }
     }
 
     fn advance(&mut self) {

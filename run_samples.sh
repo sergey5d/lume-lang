@@ -16,7 +16,7 @@ run_rust_samples() {
   (
     cd "$ROOT"
     cargo test --manifest-path rust/Cargo.toml -p lume \
-      interpreter::tests::run_path_matches_expected_output_headers_for_examples \
+      interpreter::tests::run_path_matches_all_headers_for_examples \
       -- --exact --nocapture
   )
 }

@@ -2080,7 +2080,7 @@ impl<'a> Interpreter<'a> {
             ir::Intrinsic::Println => self.invoke_print(true, args),
             ir::Intrinsic::Printf => self.invoke_printf(args, span),
             ir::Intrinsic::Panic => {
-                let message = args.first().map(Value::render).unwrap_or_else(|| "panic".to_string());
+                let message = self.render_panic_message(&args, span);
                 Err(self.runtime_error(span, message))
             }
             ir::Intrinsic::IterInit => {
@@ -2148,7 +2148,7 @@ impl<'a> Interpreter<'a> {
             "println" => self.invoke_print(true, args),
             "printf" => self.invoke_printf(args, span),
             "panic" => {
-                let message = args.first().map(Value::render).unwrap_or_else(|| "panic".to_string());
+                let message = self.render_panic_message(&args, span);
                 Err(self.runtime_error(span, message))
             }
             _ => Err(self.runtime_error(
@@ -2178,6 +2178,22 @@ impl<'a> Interpreter<'a> {
         let text = format_printf(&format, &args[1..]).map_err(|message| self.runtime_error(span, message))?;
         self.output.push_str(&text);
         Ok(Value::Unit)
+    }
+
+    fn render_panic_message(&self, args: &[Value], span: Option<Span>) -> String {
+        let message = if args.is_empty() {
+            "panic".to_string()
+        } else {
+            args.iter().map(Value::render).collect::<String>()
+        };
+        if let Some(span) = span {
+            format!(
+                "panic: {} at {}:{}",
+                message, span.start_pos.line, span.start_pos.column
+            )
+        } else {
+            format!("panic: {}", message)
+        }
     }
 
     fn iter_init(&mut self, value: Value, span: Option<Span>) -> Result<Value, Diagnostic> {
@@ -4582,6 +4598,47 @@ mod tests {
         )
     }
 
+    fn extract_primary_load_error_message(err: &str) -> Option<String> {
+        let trimmed = err.trim();
+        if !(trimmed.starts_with("parse ") || trimmed.starts_with("lex ")) {
+            return None;
+        }
+
+        let Some(message_start) = trimmed.find(" error[").map(|index| index + " error[".len()) else {
+            return None;
+        };
+        let Some(after_code) = trimmed[message_start..].find("] ").map(|index| message_start + index + 2) else {
+            return None;
+        };
+        let rest = &trimmed[after_code..];
+        let mut end = rest.len();
+        for (index, _) in rest.match_indices("; ") {
+            let tail = &rest[index + 2..];
+            let bytes = tail.as_bytes();
+            let mut line_end = 0usize;
+            while line_end < bytes.len() && bytes[line_end].is_ascii_digit() {
+                line_end += 1;
+            }
+            if line_end == 0 || line_end >= bytes.len() || bytes[line_end] != b':' {
+                continue;
+            }
+            let mut col_end = line_end + 1;
+            while col_end < bytes.len() && bytes[col_end].is_ascii_digit() {
+                col_end += 1;
+            }
+            if col_end == line_end + 1 {
+                continue;
+            }
+            let remainder = &tail[col_end..];
+            if remainder.starts_with(" error[") || remainder.starts_with(" warning[") {
+                end = index;
+                break;
+            }
+        }
+        let first_message = rest[..end].trim();
+        Some(first_message.to_string())
+    }
+
     fn render_run_failure(path: &Path) -> String {
         match run_path(path, None) {
             Ok(result) => {
@@ -4598,7 +4655,7 @@ mod tests {
                 }
                 messages.join("\n")
             }
-            Err(err) => err,
+            Err(err) => extract_primary_load_error_message(&err).unwrap_or(err),
         }
     }
 
@@ -4646,7 +4703,26 @@ mod tests {
                 && matches_from(pattern, pi + 1, text, ti + 1)
         }
 
-        matches_from(pattern.as_bytes(), 0, text.as_bytes(), 0)
+        fn strip_diagnostic_prefix(text: &str) -> String {
+            text.lines()
+                .map(|line| {
+                    line.split_once(": ")
+                        .and_then(|(head, message)| head.contains(" at ").then_some(message))
+                        .unwrap_or(line)
+                        .to_string()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        let stripped = strip_diagnostic_prefix(text);
+        let mut variants = vec![text.to_string(), stripped.clone()];
+        variants.extend(text.lines().map(str::to_string));
+        variants.extend(stripped.lines().map(str::to_string));
+
+        variants
+            .into_iter()
+            .any(|candidate| matches_from(pattern.as_bytes(), 0, candidate.as_bytes(), 0))
     }
 
     #[test]
@@ -4965,7 +5041,6 @@ $name
     }
 
     #[test]
-    #[ignore = "Rust # FAIL parity still differs from Go on many diagnostics and rejection rules"]
     fn run_path_matches_all_headers_for_examples() {
         let (failures, passed) = collect_header_parity_failures(true);
 

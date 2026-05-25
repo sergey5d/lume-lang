@@ -17,7 +17,7 @@ source
 
 ## Current Scope
 
-The Rust implementation now has seven real building blocks:
+The Rust implementation now has eight real building blocks:
 
 - a lexer that tokenizes Lume source and reports lexical diagnostics
 - a recursive-descent parser that builds a source-shaped AST
@@ -33,7 +33,7 @@ The Rust implementation now has seven real building blocks:
   `unwrap`, closures, record updates, imports, and the stdlib/runtime helpers
   needed by the checked-in examples
 - a repo-wide Rust parity test that runs non-skipped `examples/*.lum` files and
-  compares output against their `# EXPECT:` headers
+  validates `# EXPECT:`, `# FAIL:`, and `# FAIL_REGEX:` headers
 
 ## Layout
 
