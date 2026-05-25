@@ -491,6 +491,13 @@ impl PatternPlan {
             bindings: Vec::new(),
         }
     }
+
+    fn always_false() -> Self {
+        Self {
+            condition: ir::Operand::Const(ir::Constant::Bool(false)),
+            bindings: Vec::new(),
+        }
+    }
 }
 
 impl<'a> FunctionLowerer<'a> {
@@ -1897,8 +1904,12 @@ impl<'a> FunctionLowerer<'a> {
             }
             Pattern::Constructor { path, args, span } => {
                 let Some(kind) = self.lookup_constructor_pattern_kind(path, args.len()) else {
-                    self.unsupported("constructor pattern lowering could not resolve target", *span);
-                    return PatternPlan::always_true();
+                    self.add_error(
+                        "lower_invariant",
+                        "constructor pattern should be resolved before lowering",
+                        *span,
+                    );
+                    return PatternPlan::always_false();
                 };
                 let base_condition = match &kind {
                     ConstructorPatternKind::EnumCase { case_name, .. } => self.emit_temp_from_rvalue(
@@ -2129,7 +2140,11 @@ impl<'a> FunctionLowerer<'a> {
                         Some(*span),
                     );
                 }
-                self.unsupported(format!("unknown value '{}' during lowering", name), *span);
+                self.add_error(
+                    "lower_invariant",
+                    format!("value '{}' should resolve before lowering", name),
+                    *span,
+                );
                 ir::Operand::Const(ir::Constant::Unit)
             }),
             Expr::Group { inner, .. } => self.lower_expr(inner),
@@ -2176,22 +2191,42 @@ impl<'a> FunctionLowerer<'a> {
                 yield_body,
                 span,
             } => self.lower_for_yield_expr(bindings, yield_body, *span),
-            _ => {
-                let Some(rvalue) = self.lower_rvalue(expr) else {
-                    self.unsupported("expression form is not implemented in lowering", expr.span());
-                    return ir::Operand::Const(ir::Constant::Unit);
-                };
-                let temp = self.add_temp(ir::Type::Unknown);
-                self.push_statement(ir::Statement {
-                    span: Some(expr.span()),
-                    kind: ir::StatementKind::Assign {
-                        target: ir::Place::Local(temp),
-                        value: rvalue,
-                    },
-                });
-                ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
+            Expr::ListLiteral { .. }
+            | Expr::TupleLiteral { .. }
+            | Expr::RecordLiteral { .. }
+            | Expr::AnonymousInterface { .. }
+            | Expr::Unary { .. }
+            | Expr::Binary { .. }
+            | Expr::Call { .. }
+            | Expr::Member { .. }
+            | Expr::Index { .. }
+            | Expr::RecordUpdate { .. }
+            | Expr::Is { .. }
+            | Expr::Lambda { .. } => self.lower_expr_from_rvalue(expr),
+            Expr::Placeholder { span } => {
+                self.add_error(
+                    "lower_invariant",
+                    "bare placeholder expression should be rewritten before lowering",
+                    *span,
+                );
+                ir::Operand::Const(ir::Constant::Unit)
             }
         }
+    }
+
+    fn lower_expr_from_rvalue(&mut self, expr: &Expr) -> ir::Operand {
+        let rvalue = self
+            .lower_rvalue(expr)
+            .expect("rvalue-backed expression should lower to an rvalue");
+        let temp = self.add_temp(ir::Type::Unknown);
+        self.push_statement(ir::Statement {
+            span: Some(expr.span()),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(temp),
+                value: rvalue,
+            },
+        });
+        ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
     }
 
     fn lower_logical_expr(
@@ -2359,32 +2394,8 @@ impl<'a> FunctionLowerer<'a> {
                 left,
                 op,
                 right,
-                span,
-            } => {
-                if *op == AstBinaryOp::Append {
-                    return Some(ir::RValue::Call {
-                        callee: ir::Callee::Method {
-                            receiver: self.lower_expr(left),
-                            method: "append".to_string(),
-                        },
-                        args: vec![self.lower_expr(right)],
-                    });
-                }
-                if *op == AstBinaryOp::Colon {
-                    return Some(ir::RValue::Tuple(vec![
-                        self.lower_expr(left),
-                        self.lower_expr(right),
-                    ]));
-                }
-                Some(ir::RValue::Binary {
-                    op: map_binary_op(*op).unwrap_or_else(|| {
-                        self.unsupported("binary operator lowering is not implemented yet", *span);
-                        ir::BinaryOp::Add
-                    }),
-                    left: self.lower_expr(left),
-                    right: self.lower_expr(right),
-                })
-            }
+                ..
+            } => Some(self.lower_binary_rvalue(left, *op, right)),
             Expr::Call { callee, args, .. } => Some(ir::RValue::Call {
                 callee: self.lower_callee(callee),
                 args: self
@@ -2425,6 +2436,44 @@ impl<'a> FunctionLowerer<'a> {
             }),
             Expr::Placeholder { .. } => None,
             _ => None,
+        }
+    }
+
+    fn lower_binary_rvalue(
+        &mut self,
+        left: &Expr,
+        op: AstBinaryOp,
+        right: &Expr,
+    ) -> ir::RValue {
+        match op {
+            AstBinaryOp::Colon => {
+                ir::RValue::Tuple(vec![self.lower_expr(left), self.lower_expr(right)])
+            }
+            AstBinaryOp::Append => self.lower_operator_method_rvalue(left, ":+", right),
+            AstBinaryOp::Concat => self.lower_operator_method_rvalue(left, "++", right),
+            AstBinaryOp::Remove => self.lower_operator_method_rvalue(left, "--", right),
+            AstBinaryOp::Prepend => self.lower_operator_method_rvalue(left, ":-", right),
+            AstBinaryOp::Compose => self.lower_operator_method_rvalue(left, "::", right),
+            _ => ir::RValue::Binary {
+                op: map_binary_op(op).expect("non-special binary operator should map to IR"),
+                left: self.lower_expr(left),
+                right: self.lower_expr(right),
+            },
+        }
+    }
+
+    fn lower_operator_method_rvalue(
+        &mut self,
+        left: &Expr,
+        method: &str,
+        right: &Expr,
+    ) -> ir::RValue {
+        ir::RValue::Call {
+            callee: ir::Callee::Method {
+                receiver: self.lower_expr(left),
+                method: method.to_string(),
+            },
+            args: vec![self.lower_expr(right)],
         }
     }
 
@@ -2722,6 +2771,10 @@ impl<'a> FunctionLowerer<'a> {
     fn unsupported(&mut self, message: impl Into<String>, span: Span) {
         self.diagnostics
             .push(Diagnostic::error("lower_unsupported", message, span));
+    }
+
+    fn add_error(&mut self, code: &'static str, message: impl Into<String>, span: Span) {
+        self.diagnostics.push(Diagnostic::error(code, message, span));
     }
 }
 
@@ -3733,5 +3786,53 @@ mod tests {
                 }
             ))
         }));
+    }
+
+    #[test]
+    fn lowers_symbolic_binary_operators_as_method_calls() {
+        let program = parse_inline(
+            r#"
+            class Vec {}
+
+            impl Vec {
+                def :+(value Int) Vec = this
+                def :-(value Int) Vec = this
+                def --(other Vec) Vec = this
+            }
+
+            def main() Unit {
+                left Vec = Vec()
+                right Vec = Vec()
+                a = left :+ 1
+                b = left :- 1
+                c = left -- right
+                d = List(1) ++ List(2)
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
+        let mut methods = Vec::new();
+        for block in &main.blocks {
+            for stmt in &block.statements {
+                if let ir::StatementKind::Assign {
+                    value: ir::RValue::Call {
+                        callee: ir::Callee::Method { method, .. },
+                        ..
+                    },
+                    ..
+                } = &stmt.kind
+                {
+                    methods.push(method.clone());
+                }
+            }
+        }
+        assert!(methods.iter().any(|method| method == ":+"), "{methods:#?}");
+        assert!(methods.iter().any(|method| method == ":-"), "{methods:#?}");
+        assert!(methods.iter().any(|method| method == "--"), "{methods:#?}");
+        assert!(methods.iter().any(|method| method == "++"), "{methods:#?}");
     }
 }

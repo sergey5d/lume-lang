@@ -2333,6 +2333,23 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match method {
+            ":+" => {
+                let [value] = args.as_slice() else {
+                    return Err(self.runtime_error(span, "operator :+ expects 1 argument"));
+                };
+                let mut next = items.borrow().clone();
+                next.push(value.clone());
+                Ok(Value::List(Rc::new(RefCell::new(next))))
+            }
+            "++" => {
+                let [other] = args.as_slice() else {
+                    return Err(self.runtime_error(span, "operator ++ expects 1 argument"));
+                };
+                let rhs = iterable_values(other.clone(), span, self)?;
+                let mut next = items.borrow().clone();
+                next.extend(rhs);
+                Ok(Value::List(Rc::new(RefCell::new(next))))
+            }
             "append" => {
                 if args.len() != 1 {
                     return Err(self.runtime_error(span, "List.append expects 1 argument"));
@@ -2653,6 +2670,25 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match method {
+            ":+" => {
+                let [value] = args.as_slice() else {
+                    return Err(self.runtime_error(span, "operator :+ expects 1 argument"));
+                };
+                let mut next = items.borrow().clone();
+                push_unique(&mut next, value.clone());
+                Ok(Value::Set(Rc::new(RefCell::new(next))))
+            }
+            "++" => {
+                let [other] = args.as_slice() else {
+                    return Err(self.runtime_error(span, "operator ++ expects 1 argument"));
+                };
+                let rhs = iterable_values(other.clone(), span, self)?;
+                let mut next = items.borrow().clone();
+                for value in rhs {
+                    push_unique(&mut next, value);
+                }
+                Ok(Value::Set(Rc::new(RefCell::new(next))))
+            }
             "add" => {
                 let [value] = args.as_slice() else {
                     return Err(self.runtime_error(span, "Set.add expects 1 argument"));
@@ -2807,6 +2843,16 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match method {
+            "++" => {
+                let [other] = args.as_slice() else {
+                    return Err(self.runtime_error(span, "operator ++ expects 1 argument"));
+                };
+                let mut next = entries.borrow().clone();
+                for (key, value) in iterable_map_entries(other.clone(), span, self)? {
+                    map_put_entry(&mut next, key, value);
+                }
+                Ok(Value::Map(Rc::new(RefCell::new(next))))
+            }
             "put" => {
                 if args.len() != 2 {
                     return Err(self.runtime_error(span, "Map.put expects 2 arguments"));
@@ -4012,6 +4058,34 @@ fn iterable_values(
     }
 }
 
+fn iterable_map_entries(
+    value: Value,
+    span: Option<Span>,
+    in_: &Interpreter<'_>,
+) -> Result<Vec<(Value, Value)>, Diagnostic> {
+    match value {
+        Value::Map(entries) => Ok(entries.borrow().clone()),
+        other => {
+            let items = iterable_values(other, span, in_)?;
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    Value::Tuple(values) if values.len() == 2 => {
+                        out.push((values[0].clone(), values[1].clone()));
+                    }
+                    value => {
+                        return Err(in_.runtime_error(
+                            span,
+                            format!("expected map entry tuple, got {}", value.render()),
+                        ));
+                    }
+                }
+            }
+            Ok(out)
+        }
+    }
+}
+
 fn values_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Unit, Value::Unit) => true,
@@ -4546,6 +4620,54 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "range 1\nrange 2\nrange 3\ntotal 6\n");
+        assert_eq!(run.return_value, None);
+    }
+
+    #[test]
+    fn runs_symbolic_collection_and_operator_methods() {
+        let program = lower_inline(
+            r#"
+            class Vec {
+                hidden var items Array[Int]
+            }
+
+            impl Vec {
+                def init(left Int, right Int) {
+                    this.items := Array.ofLength(2)
+                    this.items[0] := left
+                    this.items[1] := right
+                }
+
+                def [](index Int) Int = items[index]
+                def :+(value Int) Vec = Vec(this[0] + value, this[1] + value)
+                def :-(value Int) Vec = Vec(this[0] - value, this[1] - value)
+                def --(other Vec) Vec = Vec(this[0] - other[0], this[1] - other[1])
+            }
+
+            def main() Unit {
+                items = List(1, 2)
+                appended = items :+ 3
+                merged = appended ++ List(4, 5)
+                OS.println(merged[4])
+
+                seen = Set(1, 2)
+                all = seen ++ Set(3)
+                OS.println(all.size())
+
+                pairs = Map("a": 1) ++ Map("b": 2)
+                OS.println(pairs.size())
+
+                left Vec = Vec(5, 6)
+                OS.println((left :+ 2)[0])
+                OS.println((left :- 1)[1])
+                OS.println((left -- Vec(1, 2))[0])
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "5\n3\n2\n7\n5\n4\n");
         assert_eq!(run.return_value, None);
     }
 
