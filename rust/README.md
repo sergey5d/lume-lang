@@ -28,17 +28,12 @@ The Rust implementation now has seven real building blocks:
   block, statement, terminator, operand, and rvalue structures
 - a first lowering pass that maps declarations plus real control-flow bodies
   into that IR
-- a first real IR interpreter that can execute lowered single-module programs
-  with globals, user-defined types/methods, `match`, `for`, `for ... yield`,
-  `unwrap`, and core stdlib/runtime helpers like `Option`, `Result`, `Either`,
-  `List`, `Range`, and `OS.println`
-
-The Rust runtime is now real, but still intentionally scoped. The current
-single-module interpreter covers the lowered control-flow core and enough
-runtime behavior to execute real examples, while richer features like lambdas,
-local functions, anonymous interfaces, record updates, and imported-module
-execution still report targeted diagnostics or remain outside the runnable
-subset.
+- a real IR interpreter that executes lowered multi-module programs with
+  globals, user-defined types/methods, `match`, `for`, `for ... yield`,
+  `unwrap`, closures, record updates, imports, and the stdlib/runtime helpers
+  needed by the checked-in examples
+- a repo-wide Rust parity test that runs non-skipped `examples/*.lum` files and
+  compares output against their `# EXPECT:` headers
 
 ## Layout
 
@@ -103,12 +98,10 @@ as:
 - unknown imported module members
 
 The library also has a `lower_program(...)` entry point that produces the new
-IR and already lowers the main statement/control-flow surface used by the Rust
-tests. It still reports explicit diagnostics for features that are not
-implemented yet on the Rust path.
+IR used by the interpreter and the Rust tests.
 
-The `run` command now executes the lowered IR for the current single-file
-runnable subset. It supports:
+The `run` command executes the lowered IR for the current Rust implementation.
+It supports:
 
 - top-level globals and entry functions (`main` by default, then `run`)
 - user-defined classes/records/objects/enums with methods
@@ -116,19 +109,18 @@ runnable subset. It supports:
 - `unwrap` over `Option`, `Result`, and `Either`
 - builtin constructors and helpers like `Range`, `List`, `Some`, `None`,
   `Ok`, `Err`, `Left`, `Right`, and `OS.println`
-
-It still intentionally rejects imported-module execution on the Rust path for
-now, because lowering/runtime linking across multiple modules is not finished
-yet.
+- imported-module execution through the resolver/runtime merge path
+- string interpolation, multiline strings, and `%`-style `printf`
 
 ## Near-Term Direction
 
 The intended next steps are:
 
-1. strengthen the type checker so it covers more of the full language surface
-2. widen lowering coverage for lambdas, local functions, and record updates
-3. widen the interpreter/runtime beyond the current single-module subset
-4. port more of the stdlib/runtime behavior onto the Rust path
+1. tighten output parity further by comparing more behavior against the Go path
+2. remove the remaining latent `unsupported` branches in lowering/runtime
+3. widen unexercised stdlib/runtime behavior beyond the current sample set
+4. decide whether Rust should replace only the interpreter path or also the
+   backend/codegen tooling
 
 That keeps the Rust implementation aligned with the direction we discussed:
 optimize one implementation path instead of maintaining multiple backends.

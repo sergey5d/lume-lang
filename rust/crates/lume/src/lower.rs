@@ -608,9 +608,27 @@ impl<'a> FunctionLowerer<'a> {
         for (index, stmt) in block.statements.iter().enumerate() {
             let is_last = index + 1 == block.statements.len();
             if is_last {
-                if let Stmt::Expr(expr_stmt) = stmt {
-                    tail = Some(self.lower_expr(&expr_stmt.expr));
-                    break;
+                match stmt {
+                    Stmt::Expr(expr_stmt) => {
+                        tail = Some(self.lower_expr(&expr_stmt.expr));
+                        break;
+                    }
+                    Stmt::If(if_stmt) => {
+                        if let Some(value) = self.lower_if_stmt_tail_value(if_stmt) {
+                            tail = Some(value);
+                            break;
+                        }
+                    }
+                    Stmt::Match(match_stmt) => {
+                        tail = Some(self.lower_match_expr(
+                            match_stmt.partial,
+                            &match_stmt.value,
+                            &match_stmt.cases,
+                            match_stmt.span,
+                        ));
+                        break;
+                    }
+                    _ => {}
                 }
             }
             self.lower_stmt(stmt);
@@ -1169,6 +1187,21 @@ impl<'a> FunctionLowerer<'a> {
                 self.lower_block_statements(block);
             }
         }
+    }
+
+    fn lower_if_stmt_tail_value(&mut self, stmt: &ast::IfStmt) -> Option<ir::Operand> {
+        let condition = stmt.condition.clone()?;
+        if !stmt.bindings.is_empty() || stmt.binding_value.is_some() {
+            return None;
+        }
+        let else_branch = lower_if_stmt_else_expr(stmt.else_branch.as_ref()?)?;
+        let expr = Expr::If {
+            condition: Box::new(condition),
+            then_block: stmt.then_block.clone(),
+            else_branch: Box::new(else_branch),
+            span: stmt.span,
+        };
+        Some(self.lower_expr(&expr))
     }
 
     fn lower_while_stmt(&mut self, stmt: &ast::WhileStmt) {
@@ -2354,7 +2387,11 @@ impl<'a> FunctionLowerer<'a> {
             }
             Expr::Call { callee, args, .. } => Some(ir::RValue::Call {
                 callee: self.lower_callee(callee),
-                args: args.iter().map(|arg| self.lower_expr(&arg.value)).collect(),
+                args: self
+                    .reorder_call_args(callee, args)
+                    .into_iter()
+                    .map(|arg| self.lower_expr(&arg.value))
+                    .collect(),
             }),
             Expr::Member { receiver, name, .. } => Some(ir::RValue::Field {
                 base: self.lower_expr(receiver),
@@ -2432,6 +2469,127 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         ir::Callee::Indirect(self.lower_expr(callee))
+    }
+
+    fn reorder_call_args<'b>(
+        &self,
+        callee: &Expr,
+        args: &'b [ast::CallArg],
+    ) -> Vec<&'b ast::CallArg> {
+        if args.iter().all(|arg| arg.name.is_none()) {
+            return args.iter().collect();
+        }
+
+        self.call_param_names(callee, args)
+            .and_then(|param_names| arrange_named_call_args(&param_names, args))
+            .unwrap_or_else(|| args.iter().collect())
+    }
+
+    fn call_param_names(
+        &self,
+        callee: &Expr,
+        args: &[ast::CallArg],
+    ) -> Option<Vec<String>> {
+        if let Some(path) = expr_path(callee) {
+            if path.len() == 1 {
+                let name = &path[0];
+                if let Some(id) = self.functions.get(name).copied() {
+                    return self.function_param_names(id);
+                }
+                if let Some(type_def) = self
+                    .program
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == *name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record | ast::TypeKind::Object))
+                {
+                    if let Some(params) = self.constructor_param_names(type_def, args) {
+                        return Some(params);
+                    }
+                }
+                for ty in &self.program.types {
+                    if ty.kind == ast::TypeKind::Enum {
+                        if let Some(case) = ty.enum_cases.iter().find(|case| case.name == *name) {
+                            return Some(case.fields.iter().map(|field| field.name.clone()).collect());
+                        }
+                    }
+                }
+            } else if path.len() == 2 {
+                let owner = &path[0];
+                let member = &path[1];
+                if let Some(type_def) = self.program.types.iter().find(|ty| ty.name == *owner) {
+                    if type_def.kind == ast::TypeKind::Enum {
+                        if let Some(case) = type_def.enum_cases.iter().find(|case| case.name == *member) {
+                            return Some(case.fields.iter().map(|field| field.name.clone()).collect());
+                        }
+                    }
+                    if let Some(params) = self.method_param_names(member, args, Some(owner)) {
+                        return Some(params);
+                    }
+                }
+            }
+        }
+
+        if let Expr::Member { name, receiver, .. } = callee {
+            let _ = receiver;
+            return self.method_param_names(name, args, None);
+        }
+
+        None
+    }
+
+    fn function_param_names(&self, id: ir::FunctionId) -> Option<Vec<String>> {
+        let function = self.program.function(id)?;
+        Some(param_names_from_function(function))
+    }
+
+    fn method_param_names(
+        &self,
+        method: &str,
+        args: &[ast::CallArg],
+        owner_hint: Option<&str>,
+    ) -> Option<Vec<String>> {
+        self.program
+            .types
+            .iter()
+            .filter(|ty| owner_hint.is_none_or(|hint| ty.name == hint))
+            .flat_map(|ty| ty.methods.iter().copied())
+            .filter_map(|id| {
+                let function = self.program.function(id)?;
+                (function.name == method).then_some((id, function))
+            })
+            .find_map(|(id, function)| {
+                let names = param_names_from_function(function);
+                let _ = id;
+                if arrange_named_call_args(&names, args).is_some() || args.len() == names.len() {
+                    Some(names)
+                } else {
+                    None
+                }
+            })
+    }
+
+    fn constructor_param_names(
+        &self,
+        ty: &ir::TypeDef,
+        args: &[ast::CallArg],
+    ) -> Option<Vec<String>> {
+        let mut init_candidates = ty
+            .methods
+            .iter()
+            .copied()
+            .filter_map(|id| {
+                let function = self.program.function(id)?;
+                (function.name == "init").then_some(function)
+            })
+            .collect::<Vec<_>>();
+        init_candidates.sort_by_key(|function| function.params.len());
+        for function in init_candidates {
+            let names = param_names_from_function(function);
+            if arrange_named_call_args(&names, args).is_some() {
+                return Some(names);
+            }
+        }
+        Some(ty.fields.iter().map(|field| field.name.clone()).collect())
     }
 
     fn lower_place(&mut self, expr: &Expr) -> Option<ir::Place> {
@@ -2839,6 +2997,63 @@ fn contains_placeholder_expr(expr: &Expr) -> bool {
         | Expr::Bool { .. }
         | Expr::Unit { .. } => false,
     }
+}
+
+fn lower_if_stmt_else_expr(branch: &ElseBranch) -> Option<ElseExprBranch> {
+    match branch {
+        ElseBranch::Block(block) => Some(ElseExprBranch::Block(block.clone())),
+        ElseBranch::If(stmt) => {
+            let condition = stmt.condition.clone()?;
+            if !stmt.bindings.is_empty() || stmt.binding_value.is_some() {
+                return None;
+            }
+            let else_branch = lower_if_stmt_else_expr(stmt.else_branch.as_ref()?)?;
+            Some(ElseExprBranch::If(Box::new(Expr::If {
+                condition: Box::new(condition),
+                then_block: stmt.then_block.clone(),
+                else_branch: Box::new(else_branch),
+                span: stmt.span,
+            })))
+        }
+    }
+}
+
+fn arrange_named_call_args<'a>(
+    params: &[String],
+    args: &'a [ast::CallArg],
+) -> Option<Vec<&'a ast::CallArg>> {
+    let mut slots = vec![None; params.len()];
+    let mut positional_index = 0usize;
+    for arg in args {
+        if let Some(name) = &arg.name {
+            let index = params.iter().position(|param| param == name)?;
+            if slots[index].is_some() {
+                return None;
+            }
+            slots[index] = Some(arg);
+            continue;
+        }
+
+        while positional_index < params.len() && slots[positional_index].is_some() {
+            positional_index += 1;
+        }
+        if positional_index >= params.len() {
+            return None;
+        }
+        slots[positional_index] = Some(arg);
+        positional_index += 1;
+    }
+
+    Some(slots.into_iter().flatten().collect())
+}
+
+fn param_names_from_function(function: &ir::Function) -> Vec<String> {
+    function
+        .params
+        .iter()
+        .filter_map(|param| function.locals.get(param.0))
+        .map(|local| local.name.clone())
+        .collect()
 }
 
 fn should_lower_as_placeholder_lambda(expr: &Expr) -> bool {

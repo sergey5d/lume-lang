@@ -1814,6 +1814,44 @@ impl<'a> Interpreter<'a> {
                 Value::Object(object) => object.borrow_mut(),
                 _ => unreachable!(),
             };
+            if args.len() == 1 {
+                match &args[0] {
+                    Value::Tuple(items) if items.len() <= fields.fields.len() => {
+                        for (index, value) in items.iter().cloned().enumerate() {
+                            fields.fields[index].1 =
+                                self.coerce_value_to_type(value, &ty.fields[index].ty);
+                        }
+                        return Ok(Some(object.clone()));
+                    }
+                    Value::Record(values) => {
+                        let values = values.borrow();
+                        if ty
+                            .fields
+                            .iter()
+                            .all(|field| lookup_named_field(&values, &field.name).is_some())
+                        {
+                            for (index, field) in ty.fields.iter().enumerate() {
+                                let value = lookup_named_field(&values, &field.name)
+                                    .expect("named constructor field")
+                                    .clone();
+                                fields.fields[index].1 =
+                                    self.coerce_value_to_type(value, &field.ty);
+                            }
+                            return Ok(Some(object.clone()));
+                        }
+                        if values.len() <= fields.fields.len() {
+                            for (index, ((_, value), field)) in
+                                values.iter().zip(&ty.fields).enumerate()
+                            {
+                                fields.fields[index].1 =
+                                    self.coerce_value_to_type(value.clone(), &field.ty);
+                            }
+                            return Ok(Some(object.clone()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
             if args.len() > fields.fields.len() {
                 return Err(self.runtime_error(
                     span,
@@ -3674,7 +3712,10 @@ impl<'a> Interpreter<'a> {
                 Value::Set(_) => name == "Set",
                 Value::Map(_) => name == "Map",
                 Value::Iterator(_) => name == "Iterator" || name == "IntRange",
-                Value::Object(object) => object.borrow().type_name == *name,
+                Value::Object(object) => {
+                    let object = object.borrow();
+                    self.object_matches_named_type(&object.type_name, object.kind, name)
+                }
                 Value::Variant(variant) => variant.enum_name == *name,
                 Value::String(_) => name == "Str",
                 Value::Int(_) => name == "Int" || name == "Int64",
@@ -3764,6 +3805,46 @@ impl<'a> Interpreter<'a> {
             },
             _ => value,
         }
+    }
+
+    fn object_matches_named_type(
+        &self,
+        type_name: &str,
+        kind: crate::ast::TypeKind,
+        expected: &str,
+    ) -> bool {
+        if type_name == expected {
+            return true;
+        }
+        let mut visited = HashSet::new();
+        self.type_satisfies_named(type_name, kind, expected, &mut visited)
+    }
+
+    fn type_satisfies_named(
+        &self,
+        type_name: &str,
+        kind: crate::ast::TypeKind,
+        expected: &str,
+        visited: &mut HashSet<(String, crate::ast::TypeKind)>,
+    ) -> bool {
+        if !visited.insert((type_name.to_string(), kind)) {
+            return false;
+        }
+        let Some(ty) = self.lookup_type_by_kind(type_name, kind) else {
+            return false;
+        };
+        ty.with_bounds.iter().any(|bound| {
+            let ir::Type::Named { name, .. } = bound else {
+                return false;
+            };
+            name == expected
+                || self.type_satisfies_named(
+                    name,
+                    crate::ast::TypeKind::Interface,
+                    expected,
+                    visited,
+                )
+        })
     }
 
     fn runtime_error(&self, span: Option<Span>, message: impl Into<String>) -> Diagnostic {
@@ -4317,7 +4398,10 @@ fn value_as_f64(value: &Value) -> Option<f64> {
 mod tests {
     use super::*;
     use crate::{SourceFile, lex, parse_program};
-    use std::path::PathBuf;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
 
     fn lower_inline(src: &str) -> ir::Program {
         let file = SourceFile::new("test.lum", src);
@@ -4336,6 +4420,78 @@ mod tests {
             .join("../../..")
             .canonicalize()
             .expect("repo root")
+    }
+
+    fn collect_lum_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        let entries = fs::read_dir(dir).expect("read dir");
+        for entry in entries {
+            let entry = entry.expect("dir entry");
+            let path = entry.path();
+            if path.is_dir() {
+                collect_lum_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "lum") {
+                out.push(path);
+            }
+        }
+    }
+
+    fn should_skip_example(src: &str) -> bool {
+        for line in src.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed == "# SKIP" || trimmed.starts_with("# SKIP:") {
+                return true;
+            }
+            if !trimmed.starts_with('#') {
+                return false;
+            }
+        }
+        false
+    }
+
+    fn parse_comment_block(src: &str, header: &str) -> Option<String> {
+        let lines: Vec<&str> = src.split('\n').collect();
+        let mut start = None;
+        for (index, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed == header {
+                start = Some(index + 1);
+                break;
+            }
+            if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                break;
+            }
+        }
+        let start = start?;
+
+        let mut out = Vec::new();
+        for line in &lines[start..] {
+            let trimmed = line.trim();
+            if !trimmed.starts_with('#') {
+                break;
+            }
+            let mut content = trimmed.trim_start_matches('#');
+            if let Some(stripped) = content.strip_prefix(' ') {
+                content = stripped;
+            }
+            out.push(content);
+        }
+        Some(out.join("\n"))
+    }
+
+    fn normalize_example_output(value: &str) -> String {
+        value.trim_end_matches('\n').to_string()
+    }
+
+    fn render_run_output(result: &PathRunResult) -> String {
+        let mut actual = result.output.clone();
+        if let Some(value) = &result.return_value {
+            actual.push_str(value);
+            actual.push('\n');
+        }
+        actual
     }
 
     #[test]
@@ -4473,6 +4629,75 @@ $name
         assert_eq!(
             run.output,
             "hello world 7 $done\n\nhello\n$name\n\n\n\nfmt 7\npair left 9\n"
+        );
+    }
+
+    #[test]
+    fn run_path_matches_expected_output_headers_for_examples() {
+        let root = repo_root();
+        let mut files = Vec::new();
+        collect_lum_files(&root.join("examples"), &mut files);
+        files.sort();
+
+        let mut failures = Vec::new();
+        for path in files {
+            if path.components().any(|component| component.as_os_str() == "failures") {
+                continue;
+            }
+
+            let text = fs::read_to_string(&path).expect("source text");
+            if should_skip_example(&text) {
+                continue;
+            }
+
+            let Some(expected) = parse_comment_block(&text, "# EXPECT:") else {
+                continue;
+            };
+
+            let relative = path.strip_prefix(&root).unwrap_or(&path).display().to_string();
+            match run_path(&path, None) {
+                Ok(result) => {
+                    if !result.diagnostics.is_empty() {
+                        let rendered = result
+                            .diagnostics
+                            .iter()
+                            .map(|diagnostic| {
+                                format!(
+                                    "{}:{}:{} {}",
+                                    diagnostic.path,
+                                    diagnostic.diagnostic.span.start_pos.line,
+                                    diagnostic.diagnostic.span.start_pos.column,
+                                    diagnostic.diagnostic.message
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        failures.push(format!(
+                            "{}\nexpected output:\n{}\nactual diagnostics:\n{}",
+                            relative, expected, rendered
+                        ));
+                        continue;
+                    }
+
+                    let actual = render_run_output(&result);
+                    if normalize_example_output(&actual) != normalize_example_output(&expected) {
+                        failures.push(format!(
+                            "{}\nexpected:\n{}\nactual:\n{}",
+                            relative, expected, actual
+                        ));
+                    }
+                }
+                Err(err) => failures.push(format!(
+                    "{}\nexpected output:\n{}\nrun_path error:\n{}",
+                    relative, expected, err
+                )),
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "Rust # EXPECT parity failures:\n\n{}",
+            failures.join("\n\n")
         );
     }
 

@@ -43,6 +43,26 @@ Before running, the CLI always:
 3. runs type checking
 4. aborts if diagnostics are reported
 
+## Sample Sweeps
+
+Run the checked example suite through the Rust interpreter:
+
+```bash
+./run_samples.sh rust
+```
+
+Run the existing Go example suite:
+
+```bash
+./run_samples.sh go
+```
+
+Run both:
+
+```bash
+./run_samples.sh both
+```
+
 ## Example
 
 ```txt
