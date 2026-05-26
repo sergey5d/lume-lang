@@ -1964,6 +1964,14 @@ def run(user { name Str, age Int }) Int {
 	}
 }
 
+func TestRejectBareBraceRecordCallArgInsideParens(t *testing.T) {
+	if _, err := ParseExpr(`MixedProfile({ name = "Liam", age = 8 })`); err == nil {
+		t.Fatalf("expected parse error for bare brace record argument inside call parentheses")
+	} else if got := err.Error(); got != "bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(record { ... })'" {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+}
+
 func TestRejectInvalidRuneLiterals(t *testing.T) {
 	cases := []string{
 		"def bad() Bool { a = '' return true }",

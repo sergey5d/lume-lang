@@ -762,7 +762,6 @@ impl<'a> Parser<'a> {
             return None;
         }
         let Some(values) = self.parse_expr_list() else {
-            self.restore(checkpoint);
             return None;
         };
         let start = bindings[0].span;
@@ -2090,6 +2089,13 @@ impl<'a> Parser<'a> {
                     span,
                 });
             } else {
+                if self.is_bare_record_call_arg_start() {
+                    self.error_at_current(
+                        "unexpected_token",
+                        "bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(record { ... })'",
+                    );
+                    return None;
+                }
                 let value = self.parse_expr()?;
                 args.push(CallArg {
                     name: None,
@@ -2178,23 +2184,38 @@ impl<'a> Parser<'a> {
             TokenKind::LBracket => self.parse_list_literal(),
             TokenKind::LParen => self.parse_group_or_tuple_expr(),
             TokenKind::LBrace => {
-                let checkpoint = self.checkpoint();
-                if let Some(record) = self.parse_brace_record_literal_expr() {
-                    Some(record)
-                } else {
-                    self.restore(checkpoint);
-                    let block = self.parse_block()?;
-                    Some(Expr::Block {
-                        span: block.span,
-                        body: block,
-                    })
-                }
+                let block = self.parse_block()?;
+                Some(Expr::Block {
+                    span: block.span,
+                    body: block,
+                })
             }
             _ => {
                 self.error_at_current("expected_expression", "expected expression");
                 None
             }
         }
+    }
+
+    fn is_bare_record_call_arg_start(&self) -> bool {
+        if !self.at(TokenKind::LBrace) {
+            return false;
+        }
+        let mut lookahead = self.index + 1;
+        while self
+            .tokens
+            .get(lookahead)
+            .is_some_and(|token| token.kind == TokenKind::Newline)
+        {
+            lookahead += 1;
+        }
+        self.tokens
+            .get(lookahead)
+            .is_some_and(|token| token.kind == TokenKind::Identifier)
+            && self
+                .tokens
+                .get(lookahead + 1)
+                .is_some_and(|token| token.kind == TokenKind::Eq)
     }
 
     fn parse_list_literal(&mut self) -> Option<Expr> {

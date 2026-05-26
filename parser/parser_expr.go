@@ -801,15 +801,10 @@ func (p *Parser) parseCallArgs() ([]CallArg, error) {
 				if seenNamed {
 					return nil, fmt.Errorf("positional arguments cannot follow named arguments")
 				}
-				var (
-					expr Expr
-					err  error
-				)
 				if p.isBareAnonymousRecordCallArgStart() {
-					expr, err = p.parseAnonymousRecordExpr(p.advance())
-				} else {
-					expr, err = p.parseExpressionWithOptions(0, true)
+					return nil, fmt.Errorf("bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(record { ... })'")
 				}
+				expr, err := p.parseExpressionWithOptions(0, true)
 				if err != nil {
 					return nil, err
 				}

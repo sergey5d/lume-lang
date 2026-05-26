@@ -358,6 +358,10 @@ userRecord = record {
 
 user User = User(userRecord)
 person Person = Person(record("Ben", 12, "NYC"))
+profile MixedProfile = MixedProfile {
+    name = "Liam"
+    age = 8
+}
 ```
 
 Rules for this conversion:
@@ -372,6 +376,8 @@ Rules for this conversion:
 - explicit constructors are ignored for this conversion path
 - named record/class values do not structurally convert to other named record/class values
 - nested inner conversions must still be explicit, for example `owner = Person(record { ... })`
+- `Type { ... }` is allowed as sugar for passing a single anonymous record argument
+- `Type({ ... })` is not supported; plain `{ ... }` inside call parentheses is treated as a block, not as an anonymous record literal
 
 Anonymous record shapes are structural:
 - field names and field types must match at compile time

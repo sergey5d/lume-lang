@@ -1,0 +1,14 @@
+# FAIL:
+# bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(record { ... })'
+
+class MixedProfile {
+    name Str
+    age Int
+}
+
+def main() Unit {
+    _ MixedProfile = MixedProfile({
+        name = "Liam"
+        age = 8
+    })
+}
