@@ -1,5 +1,12 @@
+//! Parsed Lume syntax tree.
+//!
+//! This file defines the high-level source-facing representation produced by
+//! the Rust parser. The AST keeps the language's rich surface syntax intact so
+//! later phases can resolve names, typecheck, and lower into the simpler IR.
+
 use crate::source::Span;
 
+/// A parsed source file with an optional module header, imports, and top-level items.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Program {
     pub module: Option<ModuleDecl>,
@@ -8,12 +15,14 @@ pub struct Program {
     pub span: Option<Span>,
 }
 
+/// The file-level `module ...` declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModuleDecl {
     pub name: String,
     pub span: Span,
 }
 
+/// A single `import ...` declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportDecl {
     pub path: String,
@@ -23,6 +32,7 @@ pub struct ImportDecl {
     pub span: Span,
 }
 
+/// One imported symbol inside a selective import list.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportSymbol {
     pub name: String,
@@ -30,12 +40,14 @@ pub struct ImportSymbol {
     pub span: Span,
 }
 
+/// Source-level annotation attached to a declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Annotation {
     pub value: Expr,
     pub span: Span,
 }
 
+/// A top-level AST item.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     Function(FunctionDecl),
@@ -44,6 +56,7 @@ pub enum Item {
     Statement(Stmt),
 }
 
+/// Visibility modifier carried by declarations and fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Default,
@@ -51,6 +64,7 @@ pub enum Visibility {
     Hidden,
 }
 
+/// The surface category of a type declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TypeKind {
     Class,
@@ -60,6 +74,7 @@ pub enum TypeKind {
     Enum,
 }
 
+/// A `class`, `record`, `object`, `interface`, or `enum` declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDecl {
     pub annotations: Vec<Annotation>,
@@ -72,6 +87,7 @@ pub struct TypeDecl {
     pub span: Span,
 }
 
+/// A member that can appear inside a type declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeMember {
     Field(FieldDecl),
@@ -79,6 +95,7 @@ pub enum TypeMember {
     Case(EnumCaseDecl),
 }
 
+/// A single enum case declaration, including any payload fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumCaseDecl {
     pub annotations: Vec<Annotation>,
@@ -87,6 +104,7 @@ pub struct EnumCaseDecl {
     pub span: Span,
 }
 
+/// An `impl` block that adds methods to an existing type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplBlock {
     pub target: TypeRef,
@@ -94,6 +112,7 @@ pub struct ImplBlock {
     pub span: Span,
 }
 
+/// A top-level function declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDecl {
     pub annotations: Vec<Annotation>,
@@ -106,6 +125,7 @@ pub struct FunctionDecl {
     pub span: Span,
 }
 
+/// A method declaration that belongs to a type or anonymous interface literal.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MethodDecl {
     pub annotations: Vec<Annotation>,
@@ -118,12 +138,14 @@ pub struct MethodDecl {
     pub span: Span,
 }
 
+/// The body of a callable, either as a block or a single expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CallableBody {
     Block(Block),
     Expr(Expr),
 }
 
+/// A field declared on a type or enum case payload.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldDecl {
     pub annotations: Vec<Annotation>,
@@ -136,6 +158,7 @@ pub struct FieldDecl {
     pub span: Span,
 }
 
+/// A generic type parameter and its optional bounds.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeParam {
     pub name: String,
@@ -143,6 +166,7 @@ pub struct TypeParam {
     pub span: Span,
 }
 
+/// A named callable parameter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
     pub name: String,
@@ -151,6 +175,7 @@ pub struct Param {
     pub span: Span,
 }
 
+/// A source-level type reference.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeRef {
     Named {
@@ -173,6 +198,7 @@ pub enum TypeRef {
     },
 }
 
+/// One field inside a tuple type, optionally carrying a label.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TupleTypeField {
     pub name: Option<String>,
@@ -180,6 +206,7 @@ pub struct TupleTypeField {
     pub span: Span,
 }
 
+/// One field inside a record type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordTypeField {
     pub name: String,
@@ -198,12 +225,14 @@ impl TypeRef {
     }
 }
 
+/// A block of statements delimited by braces.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub statements: Vec<Stmt>,
     pub span: Span,
 }
 
+/// A statement form that can appear inside a block.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Binding(BindingStmt),
@@ -239,6 +268,7 @@ impl Stmt {
     }
 }
 
+/// A `var`/`def`-style binding statement that introduces one or more names.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BindingStmt {
     pub visibility: Visibility,
@@ -247,6 +277,7 @@ pub struct BindingStmt {
     pub span: Span,
 }
 
+/// A single binding introduced by a binding statement or loop/unwrap form.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Binding {
     pub name: String,
@@ -256,6 +287,7 @@ pub struct Binding {
     pub span: Span,
 }
 
+/// Supported assignment operators after parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssignOp {
     Reassign,
@@ -266,6 +298,7 @@ pub enum AssignOp {
     ModAssign,
 }
 
+/// An assignment statement, including compound assignments.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssignmentStmt {
     pub targets: Vec<Expr>,
@@ -274,6 +307,7 @@ pub struct AssignmentStmt {
     pub span: Span,
 }
 
+/// An `if` statement, including unwrap-style conditional bindings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
     pub condition: Option<Expr>,
@@ -284,12 +318,14 @@ pub struct IfStmt {
     pub span: Span,
 }
 
+/// The alternative branch of an `if` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ElseBranch {
     If(Box<IfStmt>),
     Block(Block),
 }
 
+/// A `match` or `partial` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchStmt {
     pub partial: bool,
@@ -298,6 +334,7 @@ pub struct MatchStmt {
     pub span: Span,
 }
 
+/// One `case` arm inside a match statement or expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchCase {
     pub pattern: Pattern,
@@ -306,12 +343,14 @@ pub struct MatchCase {
     pub span: Span,
 }
 
+/// The body attached to a single match arm.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MatchCaseBody {
     Block(Block),
     Expr(Expr),
 }
 
+/// A `while` loop statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WhileStmt {
     pub condition: Expr,
@@ -319,6 +358,7 @@ pub struct WhileStmt {
     pub span: Span,
 }
 
+/// A `for` loop statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForStmt {
     pub bindings: Vec<ForBinding>,
@@ -326,6 +366,7 @@ pub struct ForStmt {
     pub span: Span,
 }
 
+/// One generator/binding clause inside a `for` loop or `for ... yield`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForBinding {
     pub bindings: Vec<Binding>,
@@ -334,23 +375,27 @@ pub struct ForBinding {
     pub span: Span,
 }
 
+/// A `return` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReturnStmt {
     pub value: Option<Expr>,
     pub span: Span,
 }
 
+/// A `break` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BreakStmt {
     pub span: Span,
 }
 
+/// An expression used as a statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExprStmt {
     pub expr: Expr,
     pub span: Span,
 }
 
+/// A single `unwrap` statement with an optional `else` block.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnwrapStmt {
     pub bindings: Vec<Binding>,
@@ -359,6 +404,7 @@ pub struct UnwrapStmt {
     pub span: Span,
 }
 
+/// A chained `unwrap { ... } else { ... }` statement form.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnwrapBlockStmt {
     pub clauses: Vec<UnwrapStmt>,
@@ -366,6 +412,7 @@ pub struct UnwrapBlockStmt {
     pub span: Span,
 }
 
+/// A pattern used by `match`, `partial`, and related destructuring forms.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Wildcard {
@@ -408,6 +455,7 @@ impl Pattern {
     }
 }
 
+/// A source-level expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Identifier {
@@ -553,12 +601,14 @@ impl Expr {
     }
 }
 
+/// The alternative branch of an expression-form `if`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ElseExprBranch {
     If(Box<Expr>),
     Block(Block),
 }
 
+/// A single lambda parameter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LambdaParam {
     pub name: String,
@@ -566,12 +616,14 @@ pub struct LambdaParam {
     pub span: Span,
 }
 
+/// The body of a lambda expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LambdaBody {
     Expr(Box<Expr>),
     Block(Block),
 }
 
+/// A call argument, optionally carrying a source-level name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallArg {
     pub name: Option<String>,
@@ -579,12 +631,14 @@ pub struct CallArg {
     pub span: Span,
 }
 
+/// Supported unary operators in source syntax.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Neg,
     Not,
 }
 
+/// Supported binary operators in source syntax.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Colon,

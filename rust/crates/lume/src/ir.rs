@@ -1,23 +1,36 @@
+//! Lowered Lume intermediate representation.
+//!
+//! This file defines the smaller execution-oriented form produced after
+//! parsing, resolution, and typechecking. The IR strips away most surface
+//! syntax and models programs as functions, locals, basic blocks, statements,
+//! terminators, and typed values that the interpreter can execute directly.
+
 use crate::{
     ast::{TypeKind, Visibility},
     source::Span,
 };
 
+/// Stable id for a lowered type definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TypeId(pub usize);
 
+/// Stable id for a lowered global slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlobalId(pub usize);
 
+/// Stable id for a lowered function body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FunctionId(pub usize);
 
+/// Stable id for a local slot inside one function frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LocalId(pub usize);
 
+/// Stable id for a basic block inside one function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlockId(pub usize);
 
+/// A lowered module containing globals, functions, types, and entrypoints.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Program {
     pub module: Option<String>,
@@ -80,6 +93,7 @@ impl Program {
     }
 }
 
+/// A lowered type definition with fields, methods, and enum-case metadata.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDef {
     pub id: TypeId,
@@ -111,6 +125,7 @@ impl TypeDef {
     }
 }
 
+/// A lowered enum case payload description.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumCase {
     pub name: String,
@@ -118,6 +133,7 @@ pub struct EnumCase {
     pub span: Option<Span>,
 }
 
+/// A lowered field description shared by types and enum cases.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
     pub visibility: Visibility,
@@ -128,6 +144,7 @@ pub struct Field {
     pub span: Option<Span>,
 }
 
+/// A top-level storage slot visible across lowered functions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Global {
     pub id: GlobalId,
@@ -153,6 +170,7 @@ impl Global {
     }
 }
 
+/// The role a lowered function plays in the program.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FunctionKind {
     TopLevel,
@@ -162,6 +180,7 @@ pub enum FunctionKind {
     Synthetic,
 }
 
+/// A lowered function body with locals and control-flow blocks.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub id: FunctionId,
@@ -248,6 +267,7 @@ impl Function {
     }
 }
 
+/// The purpose of a local slot inside one lowered function.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LocalKind {
     Param,
@@ -256,6 +276,7 @@ pub enum LocalKind {
     Temp,
 }
 
+/// A lowered local slot in a function frame.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Local {
     pub id: LocalId,
@@ -266,6 +287,7 @@ pub struct Local {
     pub span: Option<Span>,
 }
 
+/// A basic block of straight-line lowered statements ending in one terminator.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BasicBlock {
     pub id: BlockId,
@@ -291,6 +313,7 @@ impl BasicBlock {
     }
 }
 
+/// A lowered statement executed within a basic block.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Statement {
     pub span: Option<Span>,
@@ -313,12 +336,14 @@ impl Statement {
     }
 }
 
+/// The two statement shapes used by the current IR.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatementKind {
     Assign { target: Place, value: RValue },
     Eval { value: RValue },
 }
 
+/// The final control-flow action for a basic block.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Terminator {
     pub span: Option<Span>,
@@ -359,6 +384,7 @@ impl Terminator {
     }
 }
 
+/// The CFG edge kinds used by the lowered interpreter.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TerminatorKind {
     Goto(BlockId),
@@ -376,12 +402,14 @@ pub enum TerminatorKind {
     Unreachable,
 }
 
+/// One arm inside a lowered `Switch` terminator.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SwitchArm {
     pub value: SwitchValue,
     pub target: BlockId,
 }
 
+/// The simple discriminant values a lowered switch can branch on directly.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SwitchValue {
     Bool(bool),
@@ -390,6 +418,7 @@ pub enum SwitchValue {
     EnumCase(String),
 }
 
+/// A writable storage location in lowered code.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Place {
     Local(LocalId),
@@ -398,6 +427,7 @@ pub enum Place {
     Index { base: Box<Operand>, index: Box<Operand> },
 }
 
+/// A by-value or by-reference input to lowered statements and rvalues.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operand {
     Copy(Box<Place>),
@@ -405,6 +435,7 @@ pub enum Operand {
     Const(Constant),
 }
 
+/// An interpreter-ready constant value embedded directly in IR.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Unit,
@@ -414,6 +445,7 @@ pub enum Constant {
     String(String),
 }
 
+/// The callable target of a lowered call expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Callee {
     Direct(FunctionId),
@@ -423,6 +455,7 @@ pub enum Callee {
     Named { path: Vec<String> },
 }
 
+/// Built-in runtime operations that lowering models without user code.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intrinsic {
     Print,
@@ -439,6 +472,7 @@ pub enum Intrinsic {
     VariantField(String),
 }
 
+/// A value-producing lowered operation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RValue {
     Use(Operand),
@@ -493,18 +527,21 @@ pub enum RValue {
     },
 }
 
+/// A named operand used for records, constructors, and enum payload fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NamedOperand {
     pub name: String,
     pub value: Operand,
 }
 
+/// Supported unary operators in lowered code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Neg,
     Not,
 }
 
+/// Supported binary operators in lowered code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
@@ -525,6 +562,7 @@ pub enum BinaryOp {
     Concat,
 }
 
+/// The lowered type vocabulary used by typechecking, lowering, and interpretation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Unknown,
@@ -564,6 +602,7 @@ impl Type {
     }
 }
 
+/// A named field inside a lowered record type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NamedType {
     pub name: String,
