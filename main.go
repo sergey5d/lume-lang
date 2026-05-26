@@ -91,12 +91,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "lowering: %v\n", err)
 			os.Exit(1)
 		}
-		generated, err := java.GenerateForPackageSource(lowered, program.PackageName, os.Args[1])
+		generated, err := java.GenerateForPackageSource(lowered, program.ModuleName, os.Args[1])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "java generation: %v\n", err)
 			os.Exit(1)
 		}
-		outputPath := java.OutputPathFor("bin/java/src", program.PackageName, os.Args[1])
+		outputPath := java.OutputPathFor("bin/java/src", program.ModuleName, os.Args[1])
 		if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 			fmt.Fprintf(os.Stderr, "create java output dir: %v\n", err)
 			os.Exit(1)
@@ -291,11 +291,11 @@ func generateJavaFile(path string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("lowering: %w", err)
 	}
-	generated, err := java.GenerateForPackageSource(lowered, program.PackageName, path)
+	generated, err := java.GenerateForPackageSource(lowered, program.ModuleName, path)
 	if err != nil {
 		return nil, "", fmt.Errorf("java generation: %w", err)
 	}
-	return generated, java.OutputPathFor("bin/java/src", program.PackageName, path), nil
+	return generated, java.OutputPathFor("bin/java/src", program.ModuleName, path), nil
 }
 
 func formatDiagnostic(d semantic.Diagnostic, src string) string {

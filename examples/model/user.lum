@@ -2,7 +2,7 @@
 # Ada
 # 36
 
-package user
+module user
 
 class Person {
     name Str

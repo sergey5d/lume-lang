@@ -2,7 +2,7 @@
 # hello, Ada
 # 36
 
-package app
+module app
 import util
 import model/user
 

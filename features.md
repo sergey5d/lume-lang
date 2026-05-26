@@ -79,7 +79,7 @@ Finalized policy:
 
 ### 6. Module / Visibility Polish
 
-Current package/import support is usable.
+Current module/import support is usable.
 
 Settled direction:
 - top-level bindings are private by default
@@ -89,7 +89,7 @@ Settled direction:
 
 Still open:
 - whether object members should ever be importable directly, for example importing `OS.println`-style names without importing the whole object surface
-- if both a wide package import and a renamed selective import target the same package, the wide import should come first and the `as` import should come after it
+- if both a wide module import and a renamed selective import target the same module, the wide import should come first and the `as` import should come after it
 
 ## Longer-OS Ideas
 
@@ -244,6 +244,39 @@ Open questions:
 - how strict constructor matching should be
 - whether anonymous record -> tuple should exist at all
 - whether explicit tuple projection should use a builtin like `tuple(instance)`
+
+### Record Binding From String Templates
+
+One possible future feature is record binding from interpolated-looking string templates, where a template shape declares the fields to extract.
+
+Example direction:
+
+```txt
+record1 = "$time_local-$agent"
+```
+
+Possible meaning:
+- produce something like `record { time_local Str, agent Str }`
+- use the template itself as the binding/extraction surface
+
+Possible larger example:
+
+```txt
+"$remote_addr - $remote_user [$time_local] \"$request\" $status $body_bytes_sent \"$http_referer\" \"$http_user_agent\""
+```
+
+This could be useful for:
+- log parsing
+- simple structured extraction from line-oriented text
+- lightweight record creation without repeating field names separately
+
+Open questions:
+- whether this should be a pure binding/extraction feature, a parser combinator surface, or just syntax sugar over regex/string parsing
+- how field types would be inferred
+- whether all extracted fields should default to `Str`
+- how escaping and delimiter ambiguity should work
+- whether the result should be an anonymous record or a named type when a context type is available
+- whether failure should produce `Option`, `Result`, or a runtime error
 
 ### Match Totality / Partial Match Behavior
 

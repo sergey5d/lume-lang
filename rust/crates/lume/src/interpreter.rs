@@ -116,7 +116,7 @@ fn merged_runtime_program(graph: &ModuleGraph, root: &PathBuf) -> Result<ast::Pr
         .ok_or_else(|| format!("loaded root module missing {}", root.display()))?;
 
     let mut merged = ast::Program {
-        package: root_module.program.package.clone(),
+        module: root_module.program.module.clone(),
         imports: Vec::new(),
         items: Vec::new(),
         span: root_module.program.span,

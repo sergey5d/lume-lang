@@ -221,9 +221,9 @@ func (c *Checker) installBuiltinInterfaces() {
 }
 
 func (c *Checker) installModuleImports(current *module.LoadedModule) {
-	currentPackage := current.Program.PackageName
+	currentModule := current.Program.ModuleName
 	for alias, imported := range current.Imports {
-		samePackage := currentPackage != "" && imported.Program.PackageName == currentPackage
+		sameModule := currentModule != "" && imported.Program.ModuleName == currentModule
 		info := moduleInfo{
 			functions:     map[string]Signature{},
 			functionDecls: map[string]*parser.FunctionDecl{},
@@ -264,7 +264,7 @@ func (c *Checker) installModuleImports(current *module.LoadedModule) {
 			}
 		}
 		for _, decl := range imported.Program.Interfaces {
-			if decl.Private && !samePackage {
+			if decl.Private && !sameModule {
 				continue
 			}
 			qualified := imported.Path + "::" + decl.Name
@@ -279,7 +279,7 @@ func (c *Checker) installModuleImports(current *module.LoadedModule) {
 			c.interfaces[qualified] = iface
 		}
 		for _, decl := range imported.Program.Classes {
-			if decl.Private && !samePackage {
+			if decl.Private && !sameModule {
 				continue
 			}
 			qualified := imported.Path + "::" + decl.Name
@@ -320,21 +320,21 @@ func (c *Checker) installModuleImports(current *module.LoadedModule) {
 		c.imports[alias] = info
 	}
 	for localName, symbol := range current.SymbolImports {
-		samePackage := currentPackage != "" && symbol.Module.SourceProgram.PackageName == currentPackage
+		sameModule := currentModule != "" && symbol.Module.SourceProgram.ModuleName == currentModule
 		if symbol.IsFunction {
 			if symbol.ObjectName != "" {
 				for _, decl := range symbol.Module.SourceProgram.Classes {
 					if !decl.Object || decl.Name != symbol.ObjectName {
 						continue
 					}
-					if decl.Private && !samePackage {
+					if decl.Private && !sameModule {
 						break
 					}
 					for _, method := range decl.Methods {
 						if method.Name != symbol.OriginalName {
 							continue
 						}
-						if method.Private && !samePackage {
+						if method.Private && !sameModule {
 							break
 						}
 						sig := c.instantiateMethodSignature(method, decl, nil)
@@ -393,7 +393,7 @@ func (c *Checker) installModuleImports(current *module.LoadedModule) {
 				if decl.Name != symbol.OriginalName {
 					continue
 				}
-				if decl.Private && !samePackage {
+				if decl.Private && !sameModule {
 					break
 				}
 				info := interfaceInfo{
@@ -415,7 +415,7 @@ func (c *Checker) installModuleImports(current *module.LoadedModule) {
 			if decl.Name != symbol.OriginalName {
 				continue
 			}
-			if decl.Private && !samePackage {
+			if decl.Private && !sameModule {
 				break
 			}
 			class := classInfo{

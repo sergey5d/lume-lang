@@ -20,7 +20,7 @@ pub struct BlockId(pub usize);
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Program {
-    pub package: Option<String>,
+    pub module: Option<String>,
     pub globals: Vec<Global>,
     pub functions: Vec<Function>,
     pub types: Vec<TypeDef>,
@@ -29,9 +29,9 @@ pub struct Program {
 }
 
 impl Program {
-    pub fn new(package: Option<String>) -> Self {
+    pub fn new(module: Option<String>) -> Self {
         Self {
-            package,
+            module,
             ..Self::default()
         }
     }

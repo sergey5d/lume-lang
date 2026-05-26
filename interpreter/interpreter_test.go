@@ -61,14 +61,14 @@ def run(input Int) Int {
 
 func TestModulePublicFunctionAndBinding(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
-package lib
+writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
+module lib
 
 public def exportedValue() Int = 7
 public answer Int = 5
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
-package app
+writeModuleFile(t, filepath.Join(dir, "main.lum"), `
+module app
 
 import lib
 import lib/{answer as direct}
@@ -94,16 +94,16 @@ def run() Int {
 
 func TestModuleObjectMethodImports(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
-package lib
+writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
+module lib
 
 object Tools {
 	def inc(value Int) Int = value + 1
 	def twice(value Int) Int = value * 2
 }
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
-package app
+writeModuleFile(t, filepath.Join(dir, "main.lum"), `
+module app
 
 import lib/Tools/*
 import lib/Tools/{twice as double}

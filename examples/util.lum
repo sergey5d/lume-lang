@@ -1,4 +1,4 @@
 # SKIP
-package util
+module util
 
 public def greet(name Str) Str = "hello, " + name

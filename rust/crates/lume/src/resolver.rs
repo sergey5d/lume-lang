@@ -285,11 +285,11 @@ pub(crate) fn load_module(
     };
 
     let mut import_paths = HashMap::<String, String>::new();
-    let package_name = module
+    let module_name = module
         .program
-        .package
+        .module
         .as_ref()
-        .map(|package| package.name.as_str());
+        .map(|module| module.name.as_str());
     let imports = module.program.imports.clone();
     for import in imports {
         let child_path = base_dir.join(format!("{}.lum", import.path));
@@ -318,11 +318,11 @@ pub(crate) fn load_module(
                     alias
                 ));
             }
-            if let Some(child_package) = child.program.package.as_ref() {
-                if child_package.name != alias {
+            if let Some(child_module) = child.program.module.as_ref() {
+                if child_module.name != alias {
                     return Err(format!(
-                        "import '{}' expected package '{}', got '{}'",
-                        import.path, alias, child_package.name
+                        "import '{}' expected module '{}', got '{}'",
+                        import.path, alias, child_module.name
                     ));
                 }
             }
@@ -331,25 +331,25 @@ pub(crate) fn load_module(
             continue;
         }
 
-        let same_package = package_name.is_some_and(|current| {
+        let same_module = module_name.is_some_and(|current| {
             child
                 .program
-                .package
+                .module
                 .as_ref()
-                .is_some_and(|package| package.name == current)
+                .is_some_and(|module| module.name == current)
         });
         let mut symbols = import.symbols.clone();
         if let Some(object_name) = import.object_name.as_deref() {
             if import.wildcard {
-                symbols = exported_object_members(child, object_name, same_package);
+                symbols = exported_object_members(child, object_name, same_module);
             }
         } else if import.wildcard {
-            symbols = exported_symbols(child, same_package);
+            symbols = exported_symbols(child, same_module);
         }
 
         for symbol in symbols {
             let resolved = if let Some(object_name) = import.object_name.as_deref() {
-                resolve_imported_object_member(child, object_name, symbol.name.as_str(), same_package)
+                resolve_imported_object_member(child, object_name, symbol.name.as_str(), same_module)
                     .ok_or_else(|| {
                         format!(
                             "import '{}' has no visible member '{}' on object '{}'",
@@ -357,7 +357,7 @@ pub(crate) fn load_module(
                         )
                     })?
             } else {
-                resolve_imported_symbol(child, symbol.name.as_str(), same_package).ok_or_else(|| {
+                resolve_imported_symbol(child, symbol.name.as_str(), same_module).ok_or_else(|| {
                     format!(
                         "import '{}' has no public symbol '{}'",
                         import.path, symbol.name
@@ -494,7 +494,7 @@ pub(crate) fn collect_module_order(
     out.push(root.to_path_buf());
 }
 
-fn exported_symbols(module: &LoadedModule, same_package: bool) -> Vec<ImportSymbol> {
+fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbol> {
     let decls = collect_top_level_decls(&module.program);
     let mut out = Vec::new();
     for (name, decl) in decls.functions {
@@ -517,7 +517,7 @@ fn exported_symbols(module: &LoadedModule, same_package: bool) -> Vec<ImportSymb
         });
     }
     for (name, info) in decls.types {
-        if info.visibility != Visibility::Hidden || same_package {
+        if info.visibility != Visibility::Hidden || same_module {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -526,7 +526,7 @@ fn exported_symbols(module: &LoadedModule, same_package: bool) -> Vec<ImportSymb
         }
     }
     for (name, info) in decls.objects {
-        if info.visibility != Visibility::Hidden || same_package {
+        if info.visibility != Visibility::Hidden || same_module {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -540,18 +540,18 @@ fn exported_symbols(module: &LoadedModule, same_package: bool) -> Vec<ImportSymb
 fn exported_object_members(
     module: &LoadedModule,
     object_name: &str,
-    same_package: bool,
+    same_module: bool,
 ) -> Vec<ImportSymbol> {
     let decls = collect_top_level_decls(&module.program);
     let Some(info) = decls.objects.get(object_name) else {
         return Vec::new();
     };
-    if info.visibility == Visibility::Hidden && !same_package {
+    if info.visibility == Visibility::Hidden && !same_module {
         return Vec::new();
     }
     let mut out = Vec::new();
     for (name, method) in &info.methods {
-        if method.visibility != Visibility::Hidden || same_package {
+        if method.visibility != Visibility::Hidden || same_module {
             out.push(ImportSymbol {
                 name: name.clone(),
                 alias: None,
@@ -565,7 +565,7 @@ fn exported_object_members(
 fn resolve_imported_symbol(
     module: &LoadedModule,
     name: &str,
-    same_package: bool,
+    same_module: bool,
 ) -> Option<ImportedSymbol> {
     let decls = collect_top_level_decls(&module.program);
     if let Some(decl) = decls.functions.get(name) {
@@ -589,7 +589,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(info) = decls.types.get(name) {
-        if info.visibility != Visibility::Hidden || same_package {
+        if info.visibility != Visibility::Hidden || same_module {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -603,7 +603,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(info) = decls.objects.get(name) {
-        if info.visibility != Visibility::Hidden || same_package {
+        if info.visibility != Visibility::Hidden || same_module {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -619,15 +619,15 @@ fn resolve_imported_object_member(
     module: &LoadedModule,
     object_name: &str,
     member_name: &str,
-    same_package: bool,
+    same_module: bool,
 ) -> Option<ImportedSymbol> {
     let decls = collect_top_level_decls(&module.program);
     let info = decls.objects.get(object_name)?;
-    if info.visibility == Visibility::Hidden && !same_package {
+    if info.visibility == Visibility::Hidden && !same_module {
         return None;
     }
     let method = info.methods.get(member_name)?;
-    if method.visibility == Visibility::Hidden && !same_package {
+    if method.visibility == Visibility::Hidden && !same_module {
         return None;
     }
     Some(ImportedSymbol {

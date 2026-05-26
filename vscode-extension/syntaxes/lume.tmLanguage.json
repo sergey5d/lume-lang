@@ -98,7 +98,7 @@
         },
         {
           "name": "keyword.declaration.lume",
-          "match": "\\b(?:def|class|record|enum|interface|object|impl|import|package|with|hidden|public|case|var)\\b"
+          "match": "\\b(?:def|class|record|enum|interface|object|impl|import|module|with|hidden|public|case|var)\\b"
         }
       ]
     },

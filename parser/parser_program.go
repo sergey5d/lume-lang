@@ -4,14 +4,14 @@ import "fmt"
 
 func (p *Parser) parseProgram() (*Program, error) {
 	program := &Program{}
-	if p.match(TokenPackage) {
+	if p.match(TokenModule) {
 		keyword := p.previous()
-		name, span, err := p.parseModulePath("expected package name")
+		name, span, err := p.parseModulePath("expected module name")
 		if err != nil {
 			return nil, err
 		}
-		program.PackageName = name
-		program.PackageSpan = mergeSpans(tokenSpan(keyword), span)
+		program.ModuleName = name
+		program.ModuleSpan = mergeSpans(tokenSpan(keyword), span)
 	}
 	for p.match(TokenImport) {
 		keyword := p.previous()
@@ -27,8 +27,8 @@ func (p *Parser) parseProgram() (*Program, error) {
 			return nil, err
 		}
 		switch p.peek().Type {
-		case TokenPackage:
-			return nil, fmt.Errorf("'package' must appear before declarations")
+		case TokenModule:
+			return nil, fmt.Errorf("'module' must appear before declarations")
 		case TokenImport:
 			return nil, fmt.Errorf("'import' must appear before declarations")
 		case TokenDef:
@@ -179,8 +179,8 @@ func (p *Parser) parseProgram() (*Program, error) {
 
 func (p *Parser) programSpan(program *Program) (Span, bool) {
 	var spans []Span
-	if program.PackageName != "" {
-		spans = append(spans, program.PackageSpan)
+	if program.ModuleName != "" {
+		spans = append(spans, program.ModuleSpan)
 	}
 	for _, imp := range program.Imports {
 		spans = append(spans, imp.Span)

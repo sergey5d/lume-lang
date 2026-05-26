@@ -230,9 +230,9 @@ func (r *Resolver) installDirectImports(mod *module.LoadedModule) {
 // `util.SomeType` or `math.add` without flattening them into local scope.
 func moduleImportInfo(mod *module.LoadedModule) map[string]importInfo {
 	out := map[string]importInfo{}
-	currentPackage := mod.Program.PackageName
+	currentModule := mod.Program.ModuleName
 	for alias, imported := range mod.Imports {
-		samePackage := currentPackage != "" && imported.Program.PackageName == currentPackage
+		sameModule := currentModule != "" && imported.Program.ModuleName == currentModule
 		info := importInfo{
 			functions:  map[string]parser.Span{},
 			globals:    map[string]parser.Span{},
@@ -258,7 +258,7 @@ func moduleImportInfo(mod *module.LoadedModule) map[string]importInfo {
 			}
 		}
 		for _, class := range imported.Program.Classes {
-			if class.Private && !samePackage {
+			if class.Private && !sameModule {
 				continue
 			}
 			if class.Object {
@@ -268,7 +268,7 @@ func moduleImportInfo(mod *module.LoadedModule) map[string]importInfo {
 			}
 		}
 		for _, iface := range imported.Program.Interfaces {
-			if iface.Private && !samePackage {
+			if iface.Private && !sameModule {
 				continue
 			}
 			info.interfaces[iface.Name] = iface.Span

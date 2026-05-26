@@ -2,14 +2,14 @@ use crate::source::Span;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Program {
-    pub package: Option<PackageDecl>,
+    pub module: Option<ModuleDecl>,
     pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
     pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PackageDecl {
+pub struct ModuleDecl {
     pub name: String,
     pub span: Span,
 }

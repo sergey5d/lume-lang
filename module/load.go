@@ -95,8 +95,8 @@ func load(path string, cache map[string]*LoadedModule, loading map[string]bool) 
 			if _, ok := mod.SymbolImports[alias]; ok {
 				return nil, fmt.Errorf("module import alias '%s' conflicts with imported symbol", alias)
 			}
-			if child.Program.PackageName != "" && child.Program.PackageName != alias {
-				return nil, fmt.Errorf("import %q expected package '%s', got '%s'", imp.Path, alias, child.Program.PackageName)
+			if child.Program.ModuleName != "" && child.Program.ModuleName != alias {
+				return nil, fmt.Errorf("import %q expected module '%s', got '%s'", imp.Path, alias, child.Program.ModuleName)
 			}
 			mod.Imports[alias] = child
 			mod.ImportPaths[alias] = imp.Path
@@ -105,21 +105,21 @@ func load(path string, cache map[string]*LoadedModule, loading map[string]bool) 
 		symbols := imp.Symbols
 		if imp.ObjectName != "" {
 			if imp.Wildcard {
-				symbols = exportedObjectMembers(child, imp.ObjectName, program.PackageName)
+				symbols = exportedObjectMembers(child, imp.ObjectName, program.ModuleName)
 			}
 		} else if imp.Wildcard {
-			symbols = exportedSymbols(child, program.PackageName)
+			symbols = exportedSymbols(child, program.ModuleName)
 		}
-		samePackage := program.PackageName != "" && child.Program.PackageName == program.PackageName
+		sameModule := program.ModuleName != "" && child.Program.ModuleName == program.ModuleName
 		for _, symbol := range symbols {
 			var (
 				resolved ImportedSymbol
 				ok       bool
 			)
 			if imp.ObjectName != "" {
-				resolved, ok = resolveImportedObjectMember(child, imp.ObjectName, symbol.Name, samePackage)
+				resolved, ok = resolveImportedObjectMember(child, imp.ObjectName, symbol.Name, sameModule)
 			} else {
-				resolved, ok = resolveImportedSymbol(child, symbol.Name, samePackage)
+				resolved, ok = resolveImportedSymbol(child, symbol.Name, sameModule)
 			}
 			if !ok {
 				if imp.ObjectName != "" {
@@ -145,8 +145,8 @@ func load(path string, cache map[string]*LoadedModule, loading map[string]bool) 
 	return mod, nil
 }
 
-func exportedSymbols(mod *LoadedModule, currentPackage string) []parser.ImportSymbol {
-	samePackage := currentPackage != "" && mod.SourceProgram.PackageName == currentPackage
+func exportedSymbols(mod *LoadedModule, currentModule string) []parser.ImportSymbol {
+	sameModule := currentModule != "" && mod.SourceProgram.ModuleName == currentModule
 	out := []parser.ImportSymbol{}
 	for _, fn := range mod.SourceProgram.Functions {
 		if !fn.Public {
@@ -167,13 +167,13 @@ func exportedSymbols(mod *LoadedModule, currentPackage string) []parser.ImportSy
 		}
 	}
 	for _, decl := range mod.SourceProgram.Classes {
-		if decl.Private && !samePackage {
+		if decl.Private && !sameModule {
 			continue
 		}
 		out = append(out, parser.ImportSymbol{Name: decl.Name})
 	}
 	for _, decl := range mod.SourceProgram.Interfaces {
-		if decl.Private && !samePackage {
+		if decl.Private && !sameModule {
 			continue
 		}
 		out = append(out, parser.ImportSymbol{Name: decl.Name})
@@ -181,19 +181,19 @@ func exportedSymbols(mod *LoadedModule, currentPackage string) []parser.ImportSy
 	return out
 }
 
-func exportedObjectMembers(mod *LoadedModule, objectName string, currentPackage string) []parser.ImportSymbol {
-	samePackage := currentPackage != "" && mod.SourceProgram.PackageName == currentPackage
+func exportedObjectMembers(mod *LoadedModule, objectName string, currentModule string) []parser.ImportSymbol {
+	sameModule := currentModule != "" && mod.SourceProgram.ModuleName == currentModule
 	for _, decl := range mod.SourceProgram.Classes {
 		if !decl.Object || decl.Name != objectName {
 			continue
 		}
-		if decl.Private && !samePackage {
+		if decl.Private && !sameModule {
 			return nil
 		}
 		out := []parser.ImportSymbol{}
 		seen := map[string]bool{}
 		for _, method := range decl.Methods {
-			if method.Private && !samePackage {
+			if method.Private && !sameModule {
 				continue
 			}
 			if seen[method.Name] {
@@ -337,8 +337,8 @@ func mergePrelude(program *parser.Program, prelude []*parser.Program) *parser.Pr
 		return program
 	}
 	merged := &parser.Program{
-		PackageName: program.PackageName,
-		PackageSpan: program.PackageSpan,
+		ModuleName:  program.ModuleName,
+		ModuleSpan:  program.ModuleSpan,
 		Imports:     append([]parser.ImportDecl(nil), program.Imports...),
 		Functions:   []*parser.FunctionDecl{},
 		Interfaces:  []*parser.InterfaceDecl{},

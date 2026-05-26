@@ -14,8 +14,8 @@ type Span struct {
 
 // Program is the root parser AST node for a source file.
 type Program struct {
-	PackageName string           `json:"packageName,omitempty"`
-	PackageSpan Span             `json:"packageSpan,omitempty"`
+	ModuleName  string           `json:"moduleName,omitempty"`
+	ModuleSpan  Span             `json:"moduleSpan,omitempty"`
 	Imports     []ImportDecl     `json:"imports,omitempty"`
 	Functions   []*FunctionDecl  `json:"functions"`
 	Interfaces  []*InterfaceDecl `json:"interfaces,omitempty"`

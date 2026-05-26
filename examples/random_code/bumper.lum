@@ -1,4 +1,4 @@
-package bumper
+module bumper
 
 class Counter {
     hidden var count Int

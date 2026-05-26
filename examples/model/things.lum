@@ -1,6 +1,6 @@
 # IGNORE
 
-package things
+module things
 
 interface Named {
     def label() Str

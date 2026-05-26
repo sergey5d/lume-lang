@@ -2,7 +2,7 @@
 # hello, Ada
 # hello!
 
-package app
+module app
 
 import model/pubdemo
 import model/pubdemo/{prefix}

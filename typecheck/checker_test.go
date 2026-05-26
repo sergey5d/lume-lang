@@ -1067,8 +1067,8 @@ def run() Int {
 
 func TestAnalyzeModuleAllowsPrivateClassWithinSamePackage(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "app.lum"), `
-package app
+writeModuleFile(t, filepath.Join(dir, "app.lum"), `
+module app
 
 hidden class Hidden {
 }
@@ -1077,8 +1077,8 @@ impl Hidden {
 	def value() Int = 7
 }
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
-package app
+writeModuleFile(t, filepath.Join(dir, "main.lum"), `
+module app
 
 import app
 
@@ -1100,8 +1100,8 @@ def run() Int {
 
 func TestAnalyzeModuleRejectsPrivateClassAcrossPackages(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
-package lib
+writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
+module lib
 
 hidden class Hidden {
 }
@@ -1110,8 +1110,8 @@ impl Hidden {
 	def value() Int = 7
 }
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
-package app
+writeModuleFile(t, filepath.Join(dir, "main.lum"), `
+module app
 
 import lib
 
@@ -1143,13 +1143,13 @@ def run() Int {
 
 func TestAnalyzeModuleRejectsPrivateFunctionWithinSamePackage(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "app.lum"), `
-package app
+writeModuleFile(t, filepath.Join(dir, "app.lum"), `
+module app
 
 hidden def localValue() Int = 7
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
-package app
+writeModuleFile(t, filepath.Join(dir, "main.lum"), `
+module app
 
 import app
 
@@ -1180,13 +1180,13 @@ def run() Int {
 
 func TestAnalyzeModuleRejectsPrivateFunctionAcrossPackages(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
-package lib
+writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
+module lib
 
 hidden def localValue() Int = 7
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
-package app
+writeModuleFile(t, filepath.Join(dir, "main.lum"), `
+module app
 
 import lib
 
@@ -1217,13 +1217,13 @@ def run() Int {
 
 func TestAnalyzeModuleAllowsPublicFunctionAcrossPackages(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
-package lib
+writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
+module lib
 
 public def exportedValue() Int = 7
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
-package app
+writeModuleFile(t, filepath.Join(dir, "main.lum"), `
+module app
 
 import lib
 
@@ -1244,13 +1244,13 @@ def run() Int {
 
 func TestAnalyzeModuleAllowsPublicBindingAcrossPackages(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
-package lib
+writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
+module lib
 
 public answer Int = 7
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
-package app
+writeModuleFile(t, filepath.Join(dir, "main.lum"), `
+module app
 
 import lib
 import lib/{answer as direct}
@@ -1286,8 +1286,8 @@ public answer = 7
 
 func TestAnalyzeModuleExtendedImports(t *testing.T) {
 	dir := t.TempDir()
-	writeModuleFile(t, filepath.Join(dir, "model", "things.lum"), `
-package things
+writeModuleFile(t, filepath.Join(dir, "model", "things.lum"), `
+module things
 
 interface Named {
 	def label() Str
@@ -1313,8 +1313,8 @@ object C {
 	def printLn(value Int) Int = value + 100
 }
 `)
-	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
-package app
+writeModuleFile(t, filepath.Join(dir, "main.lum"), `
+module app
 
 import model/things
 import model/things/A

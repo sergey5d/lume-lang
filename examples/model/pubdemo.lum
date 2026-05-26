@@ -1,5 +1,5 @@
 # SKIP
-package pubdemo
+module pubdemo
 
 public prefix Str = "hello"
 

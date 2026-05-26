@@ -42,8 +42,8 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let start_span = self.current_span();
 
-        let package = if self.match_keyword(Keyword::Package) {
-            self.parse_package_decl()
+        let module = if self.match_keyword(Keyword::Module) {
+            self.parse_module_decl()
         } else {
             None
         };
@@ -83,7 +83,7 @@ impl<'a> Parser<'a> {
         };
 
         let program = Program {
-            package,
+            module,
             imports,
             items,
             span: Some(start_span.cover(end_span)),
@@ -95,11 +95,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_package_decl(&mut self) -> Option<PackageDecl> {
+    fn parse_module_decl(&mut self) -> Option<ModuleDecl> {
         let start = self.previous_span();
         let name = self.parse_path_string()?;
         let end = self.last_non_newline_span(start);
-        Some(PackageDecl {
+        Some(ModuleDecl {
             name,
             span: start.cover(end),
         })

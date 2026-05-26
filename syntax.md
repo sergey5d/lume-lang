@@ -98,28 +98,28 @@ OS.stderr.println("oops")
 Supported import forms:
 
 ```txt
-import package/sub
-import package/sub/*
-import package/sub/A
-import package/sub/A as B
-import package/sub/{A, B as D, C}
+import module/sub
+import module/sub/*
+import module/sub/A
+import module/sub/A as B
+import module/sub/{A, B as D, C}
 ```
 
 Meaning:
 
-- `import package/sub`
-  qualified access through the package name, for example `sub.A`
-- `import package/sub/*`
+- `import module/sub`
+  qualified access through the module name, for example `sub.A`
+- `import module/sub/*`
   import all public symbols unqualified
-- `import package/sub/A`
+- `import module/sub/A`
   import one symbol unqualified
-- `import package/sub/A as B`
+- `import module/sub/A as B`
   import one symbol with a local alias
-- `import package/sub/{A, B as D, C}`
+- `import module/sub/{A, B as D, C}`
   import a selected symbol set
-- `import package/sub/Object/*`
+- `import module/sub/Object/*`
   import all visible object methods unqualified
-- `import package/sub/Object/{printLn as printN, print}`
+- `import module/sub/Object/{printLn as printN, print}`
   import selected visible object methods from an object
 
 Built-in `OS` methods are imported implicitly in every file, so `print(...)`, `println(...)`, `printf(...)`, and `panic(...)` work without writing `import OS/*`. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
@@ -152,10 +152,10 @@ Supported targets currently include:
 
 Annotations on `impl` blocks themselves are not supported; annotate the methods inside the block instead.
 
-Package declaration:
+Module declaration:
 
 ```txt
-package app
+module app
 ```
 
 Top-level forms:

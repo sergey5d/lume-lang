@@ -70,7 +70,7 @@ impl<'a> Lowerer<'a> {
         Self {
             source,
             diagnostics: Vec::new(),
-            program: ir::Program::new(source.package.as_ref().map(|pkg| pkg.name.clone())),
+            program: ir::Program::new(source.module.as_ref().map(|module| module.name.clone())),
             type_ids: HashMap::new(),
             case_fields: HashMap::new(),
             function_ids: HashMap::new(),

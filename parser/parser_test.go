@@ -851,9 +851,9 @@ def run(value Any) Bool {
 	}
 }
 
-func TestParsePackageAndImports(t *testing.T) {
+func TestParseModuleAndImports(t *testing.T) {
 	src := `
-	package app
+	module app
 	import util
 	import model/user
 	
@@ -866,8 +866,8 @@ func TestParsePackageAndImports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse returned error: %v", err)
 	}
-	if program.PackageName != "app" {
-		t.Fatalf("expected package app, got %q", program.PackageName)
+	if program.ModuleName != "app" {
+		t.Fatalf("expected module app, got %q", program.ModuleName)
 	}
 	if len(program.Imports) != 2 {
 		t.Fatalf("expected 2 imports, got %d", len(program.Imports))
@@ -896,7 +896,7 @@ func TestParseExtendedImportForms(t *testing.T) {
 		t.Fatalf("expected 7 imports, got %d", len(program.Imports))
 	}
 	if program.Imports[0].Path != "model/things" || program.Imports[0].Wildcard || len(program.Imports[0].Symbols) != 0 {
-		t.Fatalf("unexpected package import %#v", program.Imports[0])
+		t.Fatalf("unexpected module import %#v", program.Imports[0])
 	}
 	if !program.Imports[1].Wildcard || program.Imports[1].Path != "model/things" {
 		t.Fatalf("unexpected wildcard import %#v", program.Imports[1])

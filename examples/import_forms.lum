@@ -7,7 +7,7 @@
 # 110
 # 0
 
-package app
+module app
 
 import model/things
 import model/things/A

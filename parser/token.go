@@ -19,7 +19,7 @@ const (
 	TokenDef       TokenType = "DEF"
 	TokenImpl      TokenType = "IMPL"
 	TokenOperator  TokenType = "OPERATOR"
-	TokenPackage   TokenType = "PACKAGE"
+	TokenModule    TokenType = "MODULE"
 	TokenImport    TokenType = "IMPORT"
 	TokenAs        TokenType = "AS"
 	TokenInterface TokenType = "INTERFACE"
@@ -103,7 +103,7 @@ var keywords = map[string]TokenType{
 	"def":       TokenDef,
 	"impl":      TokenImpl,
 	"operator":  TokenOperator,
-	"package":   TokenPackage,
+	"module":    TokenModule,
 	"import":    TokenImport,
 	"as":        TokenAs,
 	"interface": TokenInterface,
