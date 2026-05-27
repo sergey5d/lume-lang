@@ -56,8 +56,7 @@ def main() Unit {
     person Person = Person(record("Ben", 12))
 
     pointRecord = record {
-        x = 3
-        y = 4
+        x = 3, y = 4
     }
     point MutablePoint = MutablePoint(pointRecord)
 
@@ -73,8 +72,7 @@ def main() Unit {
     })
 
     profile3 MixedProfile = MixedProfile {
-        name = "Liam"
-        age = 8
+        name = "Liam", age = 8
     }
 
     OS.println("record", user.name, user.age)
