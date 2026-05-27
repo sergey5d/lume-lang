@@ -144,6 +144,9 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_all(mut self) -> LexResult {
+        // The lexer is a single forward cursor over pre-decoded chars. Each
+        // branch either consumes simple trivia directly or hands control to a
+        // token-specific scanner that advances the same shared cursor.
         while let Some(ch) = self.peek() {
             match ch {
                 ' ' | '\t' | '\r' => {
@@ -186,29 +189,36 @@ impl<'a> Lexer<'a> {
         let start = self.mark();
         if self.peek_n(0) == Some('"') && self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"')
         {
-            self.bump();
-            self.bump();
-            self.bump();
-            while let Some(ch) = self.peek() {
-                if ch == '"' && self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') {
-                    self.bump();
-                    self.bump();
-                    self.bump();
-                    self.push_token(TokenKind::String, start, self.mark());
-                    return;
-                }
-                self.bump();
-            }
+            self.lex_multiline_string(start);
+        } else {
+            self.lex_single_line_string(start);
+        }
+    }
 
-            self.error(
-                "unterminated_string",
-                "unterminated multiline string literal",
-                start,
-                self.mark(),
-            );
-            return;
+    fn lex_multiline_string(&mut self, start: Mark) {
+        self.bump();
+        self.bump();
+        self.bump();
+        while let Some(ch) = self.peek() {
+            if ch == '"' && self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') {
+                self.bump();
+                self.bump();
+                self.bump();
+                self.push_token(TokenKind::String, start, self.mark());
+                return;
+            }
+            self.bump();
         }
 
+        self.error(
+            "unterminated_string",
+            "unterminated multiline string literal",
+            start,
+            self.mark(),
+        );
+    }
+
+    fn lex_single_line_string(&mut self, start: Mark) {
         self.bump();
 
         let mut escaped = false;
@@ -241,22 +251,20 @@ impl<'a> Lexer<'a> {
         while matches!(self.peek(), Some('0'..='9')) {
             self.bump();
         }
-        let kind = if self.peek() == Some('.')
-            && self.peek_n(1) != Some('.')
-            && !matches!(self.peek_n(1), Some('A'..='Z' | 'a'..='z' | '_'))
-        {
-            self.bump();
-            while matches!(self.peek(), Some('0'..='9')) {
+        let kind = if self.peek() == Some('.') {
+            let next = self.peek_n(1);
+            if next.is_some_and(|ch| ch.is_ascii_digit())
+                || (next != Some('.')
+                    && !matches!(next, Some('A'..='Z' | 'a'..='z' | '_')))
+            {
                 self.bump();
+                while matches!(self.peek(), Some('0'..='9')) {
+                    self.bump();
+                }
+                TokenKind::Float
+            } else {
+                TokenKind::Integer
             }
-            TokenKind::Float
-        } else if self.peek() == Some('.') && self.peek_n(1).is_some_and(|ch| ch.is_ascii_digit())
-        {
-            self.bump();
-            while matches!(self.peek(), Some('0'..='9')) {
-                self.bump();
-            }
-            TokenKind::Float
         } else {
             TokenKind::Integer
         };
@@ -406,8 +414,15 @@ impl<'a> Lexer<'a> {
     }
 
     fn bump(&mut self) -> Option<char> {
+        // bump consumes exactly one decoded char and keeps all cursor views in
+        // sync:
+        // - `index` walks the `chars` vector
+        // - `byte_index` stays aligned to the original UTF-8 source
+        // - `line` / `column` track human-facing span positions
         let ch = self.peek()?;
         self.index += 1;
+        // After stepping past the current char, the next byte position is
+        // either the next char's starting offset or the end of the file.
         self.byte_index = if let Some(next) = self.byte_offsets.get(self.index) {
             *next
         } else {
@@ -427,6 +442,8 @@ impl<'a> Lexer<'a> {
     }
 
     fn mark(&self) -> Mark {
+        // mark snapshots the current cursor so token/error spans can be built
+        // later without recomputing byte or line/column positions.
         Mark {
             byte: self.byte_index,
             pos: self.position(),
