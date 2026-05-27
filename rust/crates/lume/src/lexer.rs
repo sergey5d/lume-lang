@@ -246,21 +246,26 @@ impl<'a> Lexer<'a> {
         );
     }
 
-    fn lex_number(&mut self) {
-        let start = self.mark();
+    #[inline]
+    fn bump_ascii_digits(&mut self) {
         while matches!(self.peek(), Some('0'..='9')) {
             self.bump();
         }
+    }
+
+    fn lex_number(&mut self) {
+        let start = self.mark();
+        self.bump_ascii_digits();
+
         let kind = if self.peek() == Some('.') {
             let next = self.peek_n(1);
-            if next.is_some_and(|ch| ch.is_ascii_digit())
+
+            if matches!(next, Some('0'..='9'))
                 || (next != Some('.')
                     && !matches!(next, Some('A'..='Z' | 'a'..='z' | '_')))
             {
                 self.bump();
-                while matches!(self.peek(), Some('0'..='9')) {
-                    self.bump();
-                }
+                self.bump_ascii_digits();
                 TokenKind::Float
             } else {
                 TokenKind::Integer
