@@ -2625,6 +2625,34 @@ def run(left Option[Int], right Option[Int]) Unit {
 	}
 }
 
+func TestParseIfLetConditionChain(t *testing.T) {
+	src := `
+def run(left Option[Int], right Result[Int, Str]) Unit {
+	if let Some(a) = left && let Ok(b) = right && b == 5 {
+		OS.println(a + b)
+	}
+}
+`
+
+	program, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	ifStmt := program.Functions[0].Body.Statements[0].(*IfStmt)
+	if len(ifStmt.ConditionClauses) != 3 {
+		t.Fatalf("expected 3 condition clauses, got %d", len(ifStmt.ConditionClauses))
+	}
+	if ifStmt.Pattern != nil || ifStmt.PatternValue != nil || len(ifStmt.PatternClauses) > 0 {
+		t.Fatalf("expected legacy if-let fields to be empty for chained if let")
+	}
+	if ifStmt.ConditionClauses[0].Pattern == nil || ifStmt.ConditionClauses[0].Value == nil {
+		t.Fatalf("expected first clause to be refutable")
+	}
+	if ifStmt.ConditionClauses[2].Condition == nil {
+		t.Fatalf("expected final clause to be boolean")
+	}
+}
+
 func TestParseIfPatternRequiresLet(t *testing.T) {
 	src := `
 def run(value Option[Int]) Unit {

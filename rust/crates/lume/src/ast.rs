@@ -320,8 +320,16 @@ pub struct AssignmentStmt {
 
 /// An `if` statement, including `if let` pattern bindings.
 #[derive(Debug, Clone, PartialEq)]
+pub enum IfConditionClause {
+    Let(RefutableClause),
+    Expr(Expr),
+}
+
+/// An `if` statement, including `if let` pattern bindings.
+#[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
     pub condition: Option<Expr>,
+    pub condition_clauses: Vec<IfConditionClause>,
     pub pattern: Option<Pattern>,
     pub pattern_value: Option<Expr>,
     pub pattern_clauses: Vec<RefutableClause>,

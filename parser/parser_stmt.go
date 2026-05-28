@@ -256,7 +256,7 @@ func (p *Parser) parseLetStmt() (Statement, error) {
 	}, nil
 }
 
-func (p *Parser) parseRefutableClause(owner string) (RefutableClause, error) {
+func (p *Parser) parseRefutableClauseUntil(owner string, stopTypes ...TokenType) (RefutableClause, error) {
 	pattern, err := p.parsePattern()
 	if err != nil {
 		return RefutableClause{}, err
@@ -267,7 +267,7 @@ func (p *Parser) parseRefutableClause(owner string) (RefutableClause, error) {
 	if err := p.requireSameLineExpressionStart(p.previous()); err != nil {
 		return RefutableClause{}, err
 	}
-	value, err := p.parseInlineExpression(TokenRBrace)
+	value, err := p.parseInlineExpression(stopTypes...)
 	if err != nil {
 		return RefutableClause{}, err
 	}
@@ -276,6 +276,10 @@ func (p *Parser) parseRefutableClause(owner string) (RefutableClause, error) {
 		Value:   value,
 		Span:    mergeSpans(patternSpan(pattern), exprSpan(value)),
 	}, nil
+}
+
+func (p *Parser) parseRefutableClause(owner string) (RefutableClause, error) {
+	return p.parseRefutableClauseUntil(owner, TokenRBrace)
 }
 
 func (p *Parser) parseRefutableClauseBlock(owner string) ([]RefutableClause, Span, error) {
@@ -299,6 +303,50 @@ func (p *Parser) parseRefutableClauseBlock(owner string) ([]RefutableClause, Spa
 		return nil, Span{}, err
 	}
 	return clauses, mergeSpans(tokenSpan(open), tokenSpan(close)), nil
+}
+
+func ifConditionClauseFromRefutable(clause RefutableClause) IfConditionClause {
+	return IfConditionClause{
+		Pattern: clause.Pattern,
+		Value:   clause.Value,
+		Span:    clause.Span,
+	}
+}
+
+func (p *Parser) parseIfConditionClauses(initial []IfConditionClause) ([]IfConditionClause, error) {
+	clauses := append([]IfConditionClause{}, initial...)
+	for p.match(TokenAndAnd) {
+		if err := p.requireSameLineExpressionStart(p.previous()); err != nil {
+			return nil, err
+		}
+		if p.match(TokenLet) {
+			if p.check(TokenLBrace) {
+				grouped, _, err := p.parseRefutableClauseBlock("if let")
+				if err != nil {
+					return nil, err
+				}
+				for _, clause := range grouped {
+					clauses = append(clauses, ifConditionClauseFromRefutable(clause))
+				}
+				continue
+			}
+			clause, err := p.parseRefutableClauseUntil("if let", TokenAndAnd, TokenLBrace, TokenThen)
+			if err != nil {
+				return nil, err
+			}
+			clauses = append(clauses, ifConditionClauseFromRefutable(clause))
+			continue
+		}
+		condition, err := p.parseExpressionUntil(TokenAndAnd, TokenLBrace, TokenThen)
+		if err != nil {
+			return nil, err
+		}
+		clauses = append(clauses, IfConditionClause{
+			Condition: condition,
+			Span:      exprSpan(condition),
+		})
+	}
+	return clauses, nil
 }
 
 func (p *Parser) parseBindingStmtWithStart(start Token, firstIsName bool) (Statement, error) {
@@ -642,7 +690,18 @@ func (p *Parser) parseIfStmtAfterStart(start Token) (Statement, error) {
 			if err != nil {
 				return nil, err
 			}
-			stmt.PatternClauses = clauses
+			if p.check(TokenAndAnd) {
+				initial := make([]IfConditionClause, 0, len(clauses))
+				for _, clause := range clauses {
+					initial = append(initial, ifConditionClauseFromRefutable(clause))
+				}
+				stmt.ConditionClauses, err = p.parseIfConditionClauses(initial)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				stmt.PatternClauses = clauses
+			}
 		} else {
 			pattern, err := p.parsePattern()
 			if err != nil {
@@ -654,12 +713,23 @@ func (p *Parser) parseIfStmtAfterStart(start Token) (Statement, error) {
 			if err := p.requireSameLineExpressionStart(p.previous()); err != nil {
 				return nil, err
 			}
-			value, err := p.parseExpressionUntil(TokenLBrace, TokenThen)
+			value, err := p.parseExpressionUntil(TokenAndAnd, TokenLBrace, TokenThen)
 			if err != nil {
 				return nil, err
 			}
-			stmt.Pattern = pattern
-			stmt.PatternValue = value
+			if p.check(TokenAndAnd) {
+				stmt.ConditionClauses, err = p.parseIfConditionClauses([]IfConditionClause{{
+					Pattern: pattern,
+					Value:   value,
+					Span:    mergeSpans(patternSpan(pattern), exprSpan(value)),
+				}})
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				stmt.Pattern = pattern
+				stmt.PatternValue = value
+			}
 		}
 	} else {
 		save := p.pos

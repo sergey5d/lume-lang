@@ -151,6 +151,11 @@ func stmtHasPlaceholder(stmt Statement) bool {
 		if HasPlaceholderExpr(s.Condition) || HasPlaceholderExpr(s.PatternValue) || HasPlaceholderExpr(s.BindingValue) || blockHasPlaceholder(s.Then) || blockHasPlaceholder(s.Else) {
 			return true
 		}
+		for _, clause := range s.ConditionClauses {
+			if HasPlaceholderExpr(clause.Value) || HasPlaceholderExpr(clause.Condition) {
+				return true
+			}
+		}
 		for _, clause := range s.PatternClauses {
 			if HasPlaceholderExpr(clause.Value) {
 				return true
@@ -377,6 +382,15 @@ func replacePlaceholderStmt(stmt Statement, param string) Statement {
 		if s.ElseIf != nil {
 			elseIf = replacePlaceholderStmt(s.ElseIf, param).(*IfStmt)
 		}
+		conditionClauses := make([]IfConditionClause, len(s.ConditionClauses))
+		for i, clause := range s.ConditionClauses {
+			conditionClauses[i] = IfConditionClause{
+				Pattern:   clause.Pattern,
+				Value:     replacePlaceholderExpr(clause.Value, param),
+				Condition: replacePlaceholderExpr(clause.Condition, param),
+				Span:      clause.Span,
+			}
+		}
 		patternClauses := make([]RefutableClause, len(s.PatternClauses))
 		for i, clause := range s.PatternClauses {
 			patternClauses[i] = RefutableClause{
@@ -386,16 +400,17 @@ func replacePlaceholderStmt(stmt Statement, param string) Statement {
 			}
 		}
 		return &IfStmt{
-			Condition:      replacePlaceholderExpr(s.Condition, param),
-			Pattern:        s.Pattern,
-			PatternValue:   replacePlaceholderExpr(s.PatternValue, param),
-			PatternClauses: patternClauses,
-			Bindings:       append([]Binding(nil), s.Bindings...),
-			BindingValue:   replacePlaceholderExpr(s.BindingValue, param),
-			Then:           replacePlaceholderBlock(s.Then, param),
-			ElseIf:         elseIf,
-			Else:           replacePlaceholderBlock(s.Else, param),
-			Span:           s.Span,
+			Condition:        replacePlaceholderExpr(s.Condition, param),
+			ConditionClauses: conditionClauses,
+			Pattern:          s.Pattern,
+			PatternValue:     replacePlaceholderExpr(s.PatternValue, param),
+			PatternClauses:   patternClauses,
+			Bindings:         append([]Binding(nil), s.Bindings...),
+			BindingValue:     replacePlaceholderExpr(s.BindingValue, param),
+			Then:             replacePlaceholderBlock(s.Then, param),
+			ElseIf:           elseIf,
+			Else:             replacePlaceholderBlock(s.Else, param),
+			Span:             s.Span,
 		}
 	case *MatchStmt:
 		cases := make([]MatchCase, len(s.Cases))

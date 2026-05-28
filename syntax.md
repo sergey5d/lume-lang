@@ -859,6 +859,17 @@ if let {
 }
 ```
 
+And `if let` conditions can be chained with `&&` so later clauses can use
+earlier bindings:
+
+```txt
+if let Some(left) = maybeLeft && let Ok(right) = compute() && right > left {
+    OS.println(left + right)
+}
+```
+
+Only `&&` joins are supported in this form.
+
 ## `for`
 
 Simple loop:

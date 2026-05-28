@@ -1154,6 +1154,10 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_if_stmt(&mut self, stmt: &ast::IfStmt) {
+        if !stmt.condition_clauses.is_empty() {
+            self.lower_if_condition_clauses(stmt, &stmt.condition_clauses);
+            return;
+        }
         if !stmt.pattern_clauses.is_empty() {
             self.lower_if_pattern_clauses(stmt, &stmt.pattern_clauses);
             return;
@@ -1188,6 +1192,37 @@ impl<'a> FunctionLowerer<'a> {
 
         self.current_block = Some(then_block);
         self.lower_block_statements(&stmt.then_block);
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        self.current_block = Some(else_block);
+        if let Some(branch) = &stmt.else_branch {
+            self.lower_else_branch(branch);
+        }
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        let join_used = self.block_has_predecessor(join_block);
+        self.current_block = if join_used { Some(join_block) } else { None };
+    }
+
+    fn lower_if_condition_clauses(
+        &mut self,
+        stmt: &ast::IfStmt,
+        clauses: &[ast::IfConditionClause],
+    ) {
+        let then_block = self.add_block();
+        let else_block = self.add_block();
+        let join_block = self.add_block();
+
+        self.push_scope();
+        self.lower_if_condition_clause_chain(clauses, then_block, else_block);
+
+        self.current_block = Some(then_block);
+        self.lower_block_statements(&stmt.then_block);
+        self.pop_scope();
         if self.current_block.is_some() {
             self.terminate(ir::Terminator::goto(join_block));
         }
@@ -1354,6 +1389,54 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
+    fn lower_if_condition_clause_chain(
+        &mut self,
+        clauses: &[ast::IfConditionClause],
+        success_target: ir::BlockId,
+        failure_target: ir::BlockId,
+    ) {
+        for (index, clause) in clauses.iter().enumerate() {
+            let success_block = if index + 1 == clauses.len() {
+                success_target
+            } else {
+                self.add_block()
+            };
+
+            match clause {
+                ast::IfConditionClause::Let(clause) => {
+                    let scrutinee = self.lower_expr(&clause.value);
+                    let plan = self.lower_pattern_plan(scrutinee, &clause.pattern);
+                    self.terminate(ir::Terminator {
+                        span: Some(clause.span),
+                        kind: ir::TerminatorKind::Branch {
+                            condition: plan.condition,
+                            then_block: success_block,
+                            else_block: failure_target,
+                        },
+                    });
+                    self.current_block = Some(success_block);
+                    self.apply_pending_bindings(plan.bindings);
+                }
+                ast::IfConditionClause::Expr(condition) => {
+                    let cond = self.lower_expr(condition);
+                    self.terminate(ir::Terminator {
+                        span: Some(condition.span()),
+                        kind: ir::TerminatorKind::Branch {
+                            condition: cond,
+                            then_block: success_block,
+                            else_block: failure_target,
+                        },
+                    });
+                    self.current_block = Some(success_block);
+                }
+            }
+
+            if index + 1 == clauses.len() {
+                break;
+            }
+        }
+    }
+
     fn lower_if_unwrap_stmt(&mut self, stmt: &ast::IfStmt, value: &Expr) {
         let source = self.lower_expr(value);
         let source_local = self.add_temp(ir::Type::Unknown);
@@ -1426,7 +1509,8 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_if_stmt_tail_value(&mut self, stmt: &ast::IfStmt) -> Option<ir::Operand> {
         let condition = stmt.condition.clone()?;
-        if !stmt.pattern_clauses.is_empty()
+        if !stmt.condition_clauses.is_empty()
+            || !stmt.pattern_clauses.is_empty()
             || !stmt.bindings.is_empty()
             || stmt.binding_value.is_some()
         {
@@ -3428,7 +3512,8 @@ fn lower_if_stmt_else_expr(branch: &ElseBranch) -> Option<ElseExprBranch> {
         ElseBranch::Block(block) => Some(ElseExprBranch::Block(block.clone())),
         ElseBranch::If(stmt) => {
             let condition = stmt.condition.clone()?;
-            if !stmt.pattern_clauses.is_empty()
+            if !stmt.condition_clauses.is_empty()
+                || !stmt.pattern_clauses.is_empty()
                 || stmt.pattern.is_some()
                 || stmt.pattern_value.is_some()
                 || !stmt.bindings.is_empty()
@@ -3768,6 +3853,22 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
                 .condition
                 .as_ref()
                 .map(|condition| rewrite_placeholder_expr(condition, name)),
+            condition_clauses: stmt
+                .condition_clauses
+                .iter()
+                .map(|clause| match clause {
+                    ast::IfConditionClause::Let(clause) => {
+                        ast::IfConditionClause::Let(ast::RefutableClause {
+                            pattern: clause.pattern.clone(),
+                            value: rewrite_placeholder_expr(&clause.value, name),
+                            span: clause.span,
+                        })
+                    }
+                    ast::IfConditionClause::Expr(condition) => {
+                        ast::IfConditionClause::Expr(rewrite_placeholder_expr(condition, name))
+                    }
+                })
+                .collect(),
             pattern: stmt.pattern.clone(),
             pattern_value: stmt
                 .pattern_value
@@ -3942,6 +4043,10 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
             stmt.condition
                 .as_ref()
                 .is_some_and(contains_placeholder_expr)
+                || stmt.condition_clauses.iter().any(|clause| match clause {
+                    ast::IfConditionClause::Let(clause) => contains_placeholder_expr(&clause.value),
+                    ast::IfConditionClause::Expr(condition) => contains_placeholder_expr(condition),
+                })
                 || stmt
                     .pattern_clauses
                     .iter()

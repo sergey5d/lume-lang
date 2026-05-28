@@ -603,7 +603,19 @@ func (r *Resolver) resolveStatement(stmt parser.Statement) {
 		r.resolveExpr(s.Value)
 		r.resolveMatchPattern(s.Pattern)
 	case *parser.IfStmt:
-		if len(s.PatternClauses) > 0 {
+		if len(s.ConditionClauses) > 0 {
+			r.pushScope()
+			for _, clause := range s.ConditionClauses {
+				if clause.Value != nil {
+					r.resolveExpr(clause.Value)
+					r.resolveMatchPattern(clause.Pattern)
+					continue
+				}
+				r.resolveExpr(clause.Condition)
+			}
+			r.resolveBlockStatements(s.Then.Statements)
+			r.popScope()
+		} else if len(s.PatternClauses) > 0 {
 			r.pushScope()
 			for _, clause := range s.PatternClauses {
 				r.resolveExpr(clause.Value)

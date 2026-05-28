@@ -793,7 +793,18 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 		}
 		return nil, nil, nil
 	case *parser.IfStmt:
-		if len(s.PatternClauses) > 0 {
+		if len(s.ConditionClauses) > 0 {
+			thenEnv, matchedAll, err := in.execIfConditionClauses(s.ConditionClauses, local)
+			if err != nil {
+				if signal, ok := trySignalToReturnSignal(err); ok {
+					return nil, signal, nil
+				}
+				return nil, nil, err
+			}
+			if matchedAll {
+				return in.execBlock(s.Then, thenEnv, self)
+			}
+		} else if len(s.PatternClauses) > 0 {
 			thenEnv := newEnv(local)
 			matchedAll := true
 			for _, clause := range s.PatternClauses {
@@ -985,6 +996,28 @@ func (in *Interpreter) execSingleLetElseBinding(pattern parser.Pattern, valueExp
 
 func (in *Interpreter) execRefutableClause(clause parser.RefutableClause, local *env) (bool, error) {
 	return in.execSingleLetElseBinding(clause.Pattern, clause.Value, local)
+}
+
+func (in *Interpreter) execIfConditionClauses(clauses []parser.IfConditionClause, local *env) (*env, bool, error) {
+	thenEnv := newEnv(local)
+	for _, clause := range clauses {
+		if clause.Value != nil {
+			ok, err := in.execSingleLetElseBinding(clause.Pattern, clause.Value, thenEnv)
+			if err != nil || !ok {
+				return thenEnv, ok, err
+			}
+			continue
+		}
+		cond, err := in.evalExpr(clause.Condition, thenEnv)
+		if err != nil {
+			return thenEnv, false, err
+		}
+		truthy, err := asBool(cond, exprSpan(clause.Condition))
+		if err != nil || !truthy {
+			return thenEnv, truthy, err
+		}
+	}
+	return thenEnv, true, nil
 }
 
 type matchedBinding struct {
@@ -1488,7 +1521,15 @@ func (in *Interpreter) execUnwrapBinding(bindings []parser.Binding, expr parser.
 }
 
 func (in *Interpreter) evalIfStmtValue(s *parser.IfStmt, local *env, self *instance, message string) (Value, any, error) {
-	if s.PatternValue != nil {
+	if len(s.ConditionClauses) > 0 {
+		thenEnv, matchedAll, err := in.execIfConditionClauses(s.ConditionClauses, local)
+		if err != nil {
+			return nil, nil, err
+		}
+		if matchedAll {
+			return in.evalBlockValue(s.Then, thenEnv, self, message)
+		}
+	} else if s.PatternValue != nil {
 		value, err := in.evalExpr(s.PatternValue, local)
 		if err != nil {
 			return nil, nil, err

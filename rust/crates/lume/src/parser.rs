@@ -981,24 +981,48 @@ impl<'a> Parser<'a> {
 
     fn parse_if_stmt(&mut self) -> Option<IfStmt> {
         let start = self.consume_keyword(Keyword::If, "expected 'if'")?;
-        let (condition, pattern, pattern_value, pattern_clauses, bindings, binding_value) =
-            if self.match_keyword(Keyword::Let) {
-                if self.at(TokenKind::LBrace) {
-                    let (clauses, _) = self.parse_refutable_clause_block("if let")?;
-                    (None, None, None, clauses, Vec::new(), None)
+        let (
+            condition,
+            condition_clauses,
+            pattern,
+            pattern_value,
+            pattern_clauses,
+            bindings,
+            binding_value,
+        ) = if self.match_keyword(Keyword::Let) {
+            if self.at(TokenKind::LBrace) {
+                let (clauses, _) = self.parse_refutable_clause_block("if let")?;
+                if self.at(TokenKind::AndAnd) {
+                    let initial = clauses.into_iter().map(IfConditionClause::Let).collect();
+                    let clauses = self.parse_if_condition_clauses(initial)?;
+                    (None, clauses, None, None, Vec::new(), Vec::new(), None)
                 } else {
-                    let pattern = self.parse_pattern()?;
-                    self.consume(TokenKind::Eq, "expected '=' after if pattern")?;
-                    if self.at(TokenKind::Newline) {
-                        self.error_at_current(
-                            "expected_expression",
-                            "expected expression on same line after \"=\"",
-                        );
-                        return None;
-                    }
-                    let value = self.parse_expr_without_trailing_block_call()?;
+                    (None, Vec::new(), None, None, clauses, Vec::new(), None)
+                }
+            } else {
+                let pattern = self.parse_pattern()?;
+                self.consume(TokenKind::Eq, "expected '=' after if pattern")?;
+                if self.at(TokenKind::Newline) {
+                    self.error_at_current(
+                        "expected_expression",
+                        "expected expression on same line after \"=\"",
+                    );
+                    return None;
+                }
+                let value = self.parse_if_condition_expr()?;
+                if self.at(TokenKind::AndAnd) {
+                    let clauses = self.parse_if_condition_clauses(vec![IfConditionClause::Let(
+                        RefutableClause {
+                            span: pattern.span().cover(value.span()),
+                            pattern,
+                            value,
+                        },
+                    )])?;
+                    (None, clauses, None, None, Vec::new(), Vec::new(), None)
+                } else {
                     (
                         None,
+                        Vec::new(),
                         Some(pattern),
                         Some(value),
                         Vec::new(),
@@ -1006,22 +1030,24 @@ impl<'a> Parser<'a> {
                         None,
                     )
                 }
-            } else if self.pattern_followed_by_eq(self.index) {
-                self.error_at_current(
-                    "unexpected_token",
-                    "pattern matches in 'if' require 'let'; use 'if let Pattern = value { ... }'",
-                );
-                return None;
-            } else {
-                (
-                    Some(self.parse_expr_without_trailing_block_call()?),
-                    None,
-                    None,
-                    Vec::new(),
-                    Vec::new(),
-                    None,
-                )
-            };
+            }
+        } else if self.pattern_followed_by_eq(self.index) {
+            self.error_at_current(
+                "unexpected_token",
+                "pattern matches in 'if' require 'let'; use 'if let Pattern = value { ... }'",
+            );
+            return None;
+        } else {
+            (
+                Some(self.parse_expr_without_trailing_block_call()?),
+                Vec::new(),
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+                None,
+            )
+        };
         let then_block = self.parse_then_stmt_body_block("if")?;
         let else_branch = if self.match_keyword(Keyword::Else) {
             if self.at(TokenKind::Newline) {
@@ -1050,6 +1076,7 @@ impl<'a> Parser<'a> {
             .unwrap_or(then_block.span);
         Some(IfStmt {
             condition,
+            condition_clauses,
             pattern,
             pattern_value,
             pattern_clauses,
@@ -1077,6 +1104,33 @@ impl<'a> Parser<'a> {
             return None;
         }
         let value = self.parse_expr_without_trailing_block_call()?;
+        let span = pattern.span().cover(value.span());
+        Some(RefutableClause {
+            pattern,
+            value,
+            span,
+        })
+    }
+
+    fn parse_if_condition_refutable_clause(
+        &mut self,
+        owner: &'static str,
+    ) -> Option<RefutableClause> {
+        let pattern = self.parse_pattern()?;
+        let eq_message = match owner {
+            "if let" => "expected '=' after if pattern",
+            "let" => "expected '=' after let pattern",
+            _ => "expected '=' after pattern",
+        };
+        self.consume(TokenKind::Eq, eq_message)?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"=\"",
+            );
+            return None;
+        }
+        let value = self.parse_if_condition_expr()?;
         let span = pattern.span().cover(value.span());
         Some(RefutableClause {
             pattern,
@@ -1115,6 +1169,73 @@ impl<'a> Parser<'a> {
         };
         let close = self.consume(TokenKind::RBrace, close_message)?;
         Some((clauses, open.cover(close)))
+    }
+
+    fn parse_if_condition_clauses(
+        &mut self,
+        mut clauses: Vec<IfConditionClause>,
+    ) -> Option<Vec<IfConditionClause>> {
+        while self.match_token(TokenKind::AndAnd) {
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "expected_expression",
+                    "expected expression on same line after \"&&\"",
+                );
+                return None;
+            }
+            if self.match_keyword(Keyword::Let) {
+                if self.at(TokenKind::LBrace) {
+                    let (grouped, _) = self.parse_refutable_clause_block("if let")?;
+                    clauses.extend(grouped.into_iter().map(IfConditionClause::Let));
+                    continue;
+                }
+                clauses.push(IfConditionClause::Let(
+                    self.parse_if_condition_refutable_clause("if let")?,
+                ));
+                continue;
+            }
+            clauses.push(IfConditionClause::Expr(self.parse_if_condition_expr()?));
+        }
+        Some(clauses)
+    }
+
+    fn parse_if_condition_expr(&mut self) -> Option<Expr> {
+        let end = self.scan_if_condition_expr_end(self.index);
+        if end == self.index {
+            self.error_at_current("expected_expression", "expected expression");
+            return None;
+        }
+
+        let mut owned = self.tokens[self.index..end].to_vec();
+        let eof_span = owned
+            .last()
+            .map(|token| token.span)
+            .unwrap_or_else(|| self.current_span());
+        owned.push(Token {
+            kind: TokenKind::Eof,
+            lexeme: String::new(),
+            span: eof_span,
+        });
+
+        let mut parser = Parser {
+            tokens: &owned,
+            index: 0,
+            diagnostics: Vec::new(),
+            allow_trailing_block_call: false,
+        };
+        let expr = parser.parse_expr()?;
+        if !parser.at(TokenKind::Eof) {
+            parser.error_at_current(
+                "unexpected_token",
+                format!(
+                    "expected end of expression, got {}",
+                    parser.current_token_string()
+                ),
+            );
+        }
+        self.diagnostics.extend(parser.diagnostics);
+        self.index = end;
+        Some(expr)
     }
 
     fn parse_while_stmt(&mut self) -> Option<WhileStmt> {
@@ -2990,6 +3111,51 @@ impl<'a> Parser<'a> {
         i
     }
 
+    fn scan_if_condition_expr_end(&self, start: usize) -> usize {
+        let mut i = start;
+        let mut paren_depth = 0isize;
+        let mut brace_depth = 0isize;
+        let mut bracket_depth = 0isize;
+        while let Some(token) = self.tokens.get(i) {
+            match token.kind {
+                TokenKind::LParen => paren_depth += 1,
+                TokenKind::RParen => {
+                    if paren_depth == 0 {
+                        break;
+                    }
+                    paren_depth -= 1;
+                }
+                TokenKind::LBrace => {
+                    if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 {
+                        break;
+                    }
+                    brace_depth += 1;
+                }
+                TokenKind::RBrace => {
+                    if brace_depth == 0 {
+                        break;
+                    }
+                    brace_depth -= 1;
+                }
+                TokenKind::LBracket => bracket_depth += 1,
+                TokenKind::RBracket => {
+                    if bracket_depth == 0 {
+                        break;
+                    }
+                    bracket_depth -= 1;
+                }
+                TokenKind::AndAnd | TokenKind::Keyword(Keyword::Then) | TokenKind::Newline
+                    if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 =>
+                {
+                    break;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        i
+    }
+
     fn is_placeholder_identifier(&self) -> bool {
         self.at(TokenKind::Identifier) && self.current().lexeme == "_"
     }
@@ -3058,6 +3224,10 @@ impl<'a> Parser<'a> {
 
     fn next_significant_token_string(&self) -> String {
         self.format_token_like(self.next_significant_token())
+    }
+
+    fn current_token_string(&self) -> String {
+        self.format_token_like(self.current())
     }
 
     fn format_token_like(&self, token: &Token) -> String {

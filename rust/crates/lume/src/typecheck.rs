@@ -8,8 +8,9 @@ use crate::{
     Diagnostic,
     ast::{
         AssignOp, AssignmentStmt, BinaryOp, Block, CallableBody, ElseBranch, ElseExprBranch, Expr,
-        ForBinding, FunctionDecl, IfStmt, ImplBlock, Item, LambdaBody, MatchCase, MatchCaseBody,
-        MethodDecl, Pattern, Program, Stmt, TypeDecl, TypeKind, TypeMember, TypeRef, Visibility,
+        ForBinding, FunctionDecl, IfConditionClause, IfStmt, ImplBlock, Item, LambdaBody,
+        MatchCase, MatchCaseBody, MethodDecl, Pattern, Program, Stmt, TypeDecl, TypeKind,
+        TypeMember, TypeRef, Visibility,
     },
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, collect_module_order,
@@ -871,7 +872,33 @@ impl<'a> Checker<'a> {
     }
 
     fn check_if_stmt_value(&mut self, stmt: &IfStmt, expected: &Ty) -> Ty {
-        if !stmt.pattern_clauses.is_empty() {
+        if !stmt.condition_clauses.is_empty() {
+            self.push_scope();
+            for clause in &stmt.condition_clauses {
+                match clause {
+                    IfConditionClause::Let(clause) => {
+                        let value_ty = self.check_expr(&clause.value);
+                        self.bind_pattern(&clause.pattern, &value_ty);
+                    }
+                    IfConditionClause::Expr(condition) => {
+                        let condition_ty = self.check_expr(condition);
+                        self.require_bool(
+                            &condition_ty,
+                            condition.span(),
+                            "if condition must be Bool",
+                        );
+                    }
+                }
+            }
+            let then_ty = self.check_block_against(&stmt.then_block, expected);
+            self.pop_scope();
+            let else_ty = stmt
+                .else_branch
+                .as_ref()
+                .map(|branch| self.check_else_branch_value(branch, expected))
+                .unwrap_or_else(Ty::unit);
+            return join_types(&then_ty, &else_ty);
+        } else if !stmt.pattern_clauses.is_empty() {
             self.push_scope();
             for clause in &stmt.pattern_clauses {
                 let value_ty = self.check_expr(&clause.value);
@@ -1151,6 +1178,31 @@ impl<'a> Checker<'a> {
     }
 
     fn check_if_stmt(&mut self, stmt: &IfStmt) {
+        if !stmt.condition_clauses.is_empty() {
+            self.push_scope();
+            for clause in &stmt.condition_clauses {
+                match clause {
+                    IfConditionClause::Let(clause) => {
+                        let value_ty = self.check_expr(&clause.value);
+                        self.bind_pattern(&clause.pattern, &value_ty);
+                    }
+                    IfConditionClause::Expr(condition) => {
+                        let condition_ty = self.check_expr(condition);
+                        self.require_bool(
+                            &condition_ty,
+                            condition.span(),
+                            "if condition must be Bool",
+                        );
+                    }
+                }
+            }
+            self.check_block(&stmt.then_block);
+            self.pop_scope();
+            if let Some(branch) = &stmt.else_branch {
+                self.check_else_branch(branch);
+            }
+            return;
+        }
         if !stmt.pattern_clauses.is_empty() {
             self.push_scope();
             for clause in &stmt.pattern_clauses {

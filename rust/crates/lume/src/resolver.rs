@@ -8,10 +8,10 @@ use crate::{
     Diagnostic,
     ast::{
         Annotation, AssignOp, AssignmentStmt, Binding, Block, CallableBody, ElseBranch,
-        ElseExprBranch, Expr, ExprStmt, ForBinding, ForStmt, FunctionDecl, IfStmt, ImplBlock,
-        ImportSymbol, LambdaBody, LetElseStmt, MatchCase, MatchCaseBody, MethodDecl, Pattern,
-        Program, RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef,
-        UnwrapBlockStmt, UnwrapStmt, Visibility, WhileStmt,
+        ElseExprBranch, Expr, ExprStmt, ForBinding, ForStmt, FunctionDecl, IfConditionClause,
+        IfStmt, ImplBlock, ImportSymbol, LambdaBody, LetElseStmt, MatchCase, MatchCaseBody,
+        MethodDecl, Pattern, Program, RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember,
+        TypeParam, TypeRef, UnwrapBlockStmt, UnwrapStmt, Visibility, WhileStmt,
     },
     lexer::lex,
     parser::parse_program,
@@ -1327,7 +1327,22 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_if_stmt(&mut self, stmt: &IfStmt) {
-        if !stmt.pattern_clauses.is_empty() {
+        if !stmt.condition_clauses.is_empty() {
+            self.push_scope();
+            for clause in &stmt.condition_clauses {
+                match clause {
+                    IfConditionClause::Let(clause) => {
+                        self.resolve_expr(&clause.value);
+                        self.resolve_pattern(&clause.pattern);
+                    }
+                    IfConditionClause::Expr(condition) => self.resolve_expr(condition),
+                }
+            }
+            for statement in &stmt.then_block.statements {
+                self.resolve_stmt(statement);
+            }
+            self.pop_scope();
+        } else if !stmt.pattern_clauses.is_empty() {
             self.push_scope();
             for clause in &stmt.pattern_clauses {
                 self.resolve_expr(&clause.value);

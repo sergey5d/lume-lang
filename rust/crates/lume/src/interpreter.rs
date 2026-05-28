@@ -363,6 +363,17 @@ fn rewrite_if_stmt_for_runtime(stmt: &mut ast::IfStmt, module: &LoadedModule, gr
     if let Some(condition) = &mut stmt.condition {
         rewrite_expr_for_runtime(condition, module, graph);
     }
+    for clause in &mut stmt.condition_clauses {
+        match clause {
+            ast::IfConditionClause::Let(clause) => {
+                rewrite_pattern_for_runtime(&mut clause.pattern, module);
+                rewrite_expr_for_runtime(&mut clause.value, module, graph);
+            }
+            ast::IfConditionClause::Expr(condition) => {
+                rewrite_expr_for_runtime(condition, module, graph);
+            }
+        }
+    }
     for clause in &mut stmt.pattern_clauses {
         rewrite_pattern_for_runtime(&mut clause.pattern, module);
         rewrite_expr_for_runtime(&mut clause.value, module, graph);

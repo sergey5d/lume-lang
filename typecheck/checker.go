@@ -1468,7 +1468,20 @@ func (c *Checker) checkStmt(stmt parser.Statement) {
 			c.checkAssignmentTarget(s.Targets[i], s.Span)
 		}
 	case *parser.IfStmt:
-		if len(s.PatternClauses) > 0 {
+		if len(s.ConditionClauses) > 0 {
+			c.pushScope()
+			for _, clause := range s.ConditionClauses {
+				if clause.Value != nil {
+					valueType := c.checkExpr(clause.Value)
+					c.checkMatchPattern(clause.Pattern, valueType)
+					continue
+				}
+				condType := c.checkExpr(clause.Condition)
+				c.requireAssignable(condType, builtin("Bool"), exprSpan(clause.Condition), "invalid_condition_type", "if condition must be Bool")
+			}
+			c.checkBlockStatements(s.Then.Statements, false)
+			c.popScope()
+		} else if len(s.PatternClauses) > 0 {
 			c.pushScope()
 			for _, clause := range s.PatternClauses {
 				valueType := c.checkExpr(clause.Value)
@@ -2319,7 +2332,20 @@ func (c *Checker) checkStmtResultWithExpected(stmt parser.Statement, expected *T
 
 func (c *Checker) checkIfStmtResult(s *parser.IfStmt, code, message string) *Type {
 	var thenType *Type
-	if len(s.PatternClauses) > 0 {
+	if len(s.ConditionClauses) > 0 {
+		c.pushScope()
+		for _, clause := range s.ConditionClauses {
+			if clause.Value != nil {
+				valueType := c.checkExpr(clause.Value)
+				c.checkMatchPattern(clause.Pattern, valueType)
+				continue
+			}
+			condType := c.checkExpr(clause.Condition)
+			c.requireAssignable(condType, builtin("Bool"), exprSpan(clause.Condition), "invalid_condition_type", "if condition must be Bool")
+		}
+		thenType = c.checkBlockResult(s.Then, code, message)
+		c.popScope()
+	} else if len(s.PatternClauses) > 0 {
 		c.pushScope()
 		for _, clause := range s.PatternClauses {
 			valueType := c.checkExpr(clause.Value)
