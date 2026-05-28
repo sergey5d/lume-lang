@@ -32,11 +32,13 @@ const (
 	TokenPrivate   TokenType = "PRIVATE"
 	TokenPub       TokenType = "PUB"
 	TokenVar       TokenType = "VAR"
+	TokenLet       TokenType = "LET"
 	TokenIf        TokenType = "IF"
 	TokenThen      TokenType = "THEN"
 	TokenPartial   TokenType = "PARTIAL"
 	TokenMatch     TokenType = "MATCH"
 	TokenIs        TokenType = "IS"
+	TokenTry       TokenType = "TRY"
 	TokenElse      TokenType = "ELSE"
 	TokenWhile     TokenType = "WHILE"
 	TokenFor       TokenType = "FOR"
@@ -116,11 +118,13 @@ var keywords = map[string]TokenType{
 	"hidden":      TokenPrivate,
 	"public":       TokenPub,
 	"var":       TokenVar,
+	"let":       TokenLet,
 	"if":        TokenIf,
 	"then":      TokenThen,
 	"partial":   TokenPartial,
 	"match":     TokenMatch,
 	"is":        TokenIs,
+	"try":       TokenTry,
 	"else":      TokenElse,
 	"while":     TokenWhile,
 	"for":       TokenFor,

@@ -1,6 +1,9 @@
 package parser
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const sampleProgram = `
 def doSomeWork(a Int, b Int) Bool {
@@ -2514,7 +2517,7 @@ def classify(a Int) Bool {
 func TestParseIfOptionBinding(t *testing.T) {
 	src := `
 def run(value Option[Int]) Unit {
-	if item <- value {
+	if let Some(item) = value {
 		OS.println(item)
 	}
 }
@@ -2530,21 +2533,30 @@ def run(value Option[Int]) Unit {
 	if !ok {
 		t.Fatalf("expected first statement to be if, got %T", fn.Body.Statements[0])
 	}
-	if len(ifStmt.Bindings) != 1 || ifStmt.Bindings[0].Name != "item" {
-		t.Fatalf("expected binding name 'item', got %#v", ifStmt.Bindings)
+	constructor, ok := ifStmt.Pattern.(*ConstructorPattern)
+	if !ok {
+		t.Fatalf("expected constructor pattern, got %T", ifStmt.Pattern)
 	}
-	if ifStmt.BindingValue == nil {
-		t.Fatalf("expected binding value to be populated")
+	if len(constructor.Path) != 1 || constructor.Path[0] != "Some" {
+		t.Fatalf("expected Some(...) pattern, got %#v", constructor.Path)
+	}
+	binding, ok := constructor.Args[0].(*BindingPattern)
+	if !ok || binding.Name != "item" {
+		t.Fatalf("expected binding name 'item', got %#v", constructor.Args)
+	}
+	if ifStmt.PatternValue == nil {
+		t.Fatalf("expected pattern value to be populated")
 	}
 	if ifStmt.Condition != nil {
-		t.Fatalf("expected boolean condition to be empty for option-binding if")
+		t.Fatalf("expected boolean condition to be empty for pattern if")
 	}
 }
 
 func TestParseIfOptionDestructuring(t *testing.T) {
 	src := `
 def run(value Option[(Int, Str, Bool)]) Unit {
-	if _, name Str, _ <- value {
+	if let Some(item) = value {
+		_, name, _ = item
 		OS.println(name)
 	}
 }
@@ -2555,14 +2567,37 @@ def run(value Option[(Int, Str, Bool)]) Unit {
 		t.Fatalf("Parse returned error: %v", err)
 	}
 	ifStmt := program.Functions[0].Body.Statements[0].(*IfStmt)
-	if len(ifStmt.Bindings) != 3 {
-		t.Fatalf("expected 3 bindings, got %#v", ifStmt.Bindings)
+	constructor, ok := ifStmt.Pattern.(*ConstructorPattern)
+	if !ok {
+		t.Fatalf("expected constructor pattern, got %T", ifStmt.Pattern)
 	}
-	if ifStmt.Bindings[0].Name != "_" || ifStmt.Bindings[1].Name != "name" || ifStmt.Bindings[2].Name != "_" {
-		t.Fatalf("unexpected bindings %#v", ifStmt.Bindings)
+	binding, ok := constructor.Args[0].(*BindingPattern)
+	if !ok || binding.Name != "item" {
+		t.Fatalf("expected binding name 'item', got %#v", constructor.Args)
 	}
-	if ifStmt.Bindings[1].Type == nil || ifStmt.Bindings[1].Type.Name != "Str" {
-		t.Fatalf("expected explicit Str binding type, got %#v", ifStmt.Bindings[1].Type)
+	if len(ifStmt.Then.Statements) == 0 {
+		t.Fatalf("expected if body statements")
+	}
+	if _, ok := ifStmt.Then.Statements[0].(*ValStmt); !ok {
+		t.Fatalf("expected first if-body statement to destructure item, got %T", ifStmt.Then.Statements[0])
+	}
+}
+
+func TestParseIfPatternRequiresLet(t *testing.T) {
+	src := `
+def run(value Option[Int]) Unit {
+	if Some(item) = value {
+		OS.println(item)
+	}
+}
+`
+
+	_, err := Parse(src)
+	if err == nil {
+		t.Fatalf("expected parse error, got nil")
+	}
+	if !strings.Contains(err.Error(), "require 'let'") {
+		t.Fatalf("expected let-specific parse error, got %v", err)
 	}
 }
 

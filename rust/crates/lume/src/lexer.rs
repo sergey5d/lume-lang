@@ -20,6 +20,7 @@ pub enum Keyword {
     Import,
     Interface,
     Is,
+    Let,
     Match,
     Object,
     Module,
@@ -29,6 +30,7 @@ pub enum Keyword {
     Return,
     Then,
     True,
+    Try,
     Unwrap,
     Var,
     While,
@@ -261,8 +263,7 @@ impl<'a> Lexer<'a> {
             let next = self.peek_n(1);
 
             if matches!(next, Some('0'..='9'))
-                || (next != Some('.')
-                    && !matches!(next, Some('A'..='Z' | 'a'..='z' | '_')))
+                || (next != Some('.') && !matches!(next, Some('A'..='Z' | 'a'..='z' | '_')))
             {
                 self.bump();
                 self.bump_ascii_digits();
@@ -298,6 +299,7 @@ impl<'a> Lexer<'a> {
             "import" => TokenKind::Keyword(Keyword::Import),
             "interface" => TokenKind::Keyword(Keyword::Interface),
             "is" => TokenKind::Keyword(Keyword::Is),
+            "let" => TokenKind::Keyword(Keyword::Let),
             "match" => TokenKind::Keyword(Keyword::Match),
             "object" => TokenKind::Keyword(Keyword::Object),
             "module" => TokenKind::Keyword(Keyword::Module),
@@ -307,6 +309,7 @@ impl<'a> Lexer<'a> {
             "return" => TokenKind::Keyword(Keyword::Return),
             "then" => TokenKind::Keyword(Keyword::Then),
             "true" => TokenKind::Keyword(Keyword::True),
+            "try" => TokenKind::Keyword(Keyword::Try),
             "unwrap" => TokenKind::Keyword(Keyword::Unwrap),
             "var" => TokenKind::Keyword(Keyword::Var),
             "while" => TokenKind::Keyword(Keyword::While),

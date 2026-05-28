@@ -11,7 +11,7 @@ use crate::{
     diagnostic::Diagnostic,
     ir,
     lower::lower_program,
-    resolver::{load_module_graph, LoadedModule, LocatedDiagnostic, ModuleGraph},
+    resolver::{LoadedModule, LocatedDiagnostic, ModuleGraph, load_module_graph},
     source::{LineColumn, Span},
     typecheck::check_path,
 };
@@ -55,7 +55,10 @@ pub fn run_program_entry(program: &ir::Program, requested_entry: Option<&str>) -
     }
 }
 
-pub fn run_path(path: impl AsRef<Path>, requested_entry: Option<&str>) -> Result<PathRunResult, String> {
+pub fn run_path(
+    path: impl AsRef<Path>,
+    requested_entry: Option<&str>,
+) -> Result<PathRunResult, String> {
     let path = path.as_ref();
     let checked = check_path(path)?;
     if !checked.diagnostics.is_empty() {
@@ -89,7 +92,9 @@ pub fn run_path(path: impl AsRef<Path>, requested_entry: Option<&str>) -> Result
         });
     }
 
-    let lowered_program = lowered.program.expect("ir program after successful lowering");
+    let lowered_program = lowered
+        .program
+        .expect("ir program after successful lowering");
     let run = run_program_entry(&lowered_program, requested_entry);
     Ok(PathRunResult {
         diagnostics: run
@@ -122,7 +127,9 @@ fn merged_runtime_program(graph: &ModuleGraph, root: &PathBuf) -> Result<ast::Pr
         span: root_module.program.span,
     };
 
-    merged.items.extend(prepare_runtime_module(root_module, graph, true).items);
+    merged
+        .items
+        .extend(prepare_runtime_module(root_module, graph, true).items);
     for path in order {
         if &path == root {
             continue;
@@ -130,7 +137,9 @@ fn merged_runtime_program(graph: &ModuleGraph, root: &PathBuf) -> Result<ast::Pr
         let Some(module) = graph.modules.get(&path) else {
             continue;
         };
-        merged.items.extend(prepare_runtime_module(module, graph, false).items);
+        merged
+            .items
+            .extend(prepare_runtime_module(module, graph, false).items);
     }
 
     Ok(merged)
@@ -163,9 +172,9 @@ fn prepare_runtime_module(
     rewrite_program_for_runtime(&mut program, module, graph);
     program.imports.clear();
     if !is_root {
-        program.items.retain(|item| {
-            !matches!(item, ast::Item::Function(function) if function.name == "main")
-        });
+        program.items.retain(
+            |item| !matches!(item, ast::Item::Function(function) if function.name == "main"),
+        );
     }
     program
 }
@@ -180,11 +189,7 @@ fn rewrite_program_for_runtime(
     }
 }
 
-fn rewrite_item_for_runtime(
-    item: &mut ast::Item,
-    module: &LoadedModule,
-    graph: &ModuleGraph,
-) {
+fn rewrite_item_for_runtime(item: &mut ast::Item, module: &LoadedModule, graph: &ModuleGraph) {
     match item {
         ast::Item::Function(function) => rewrite_function_for_runtime(function, module, graph),
         ast::Item::Type(decl) => rewrite_type_decl_for_runtime(decl, module, graph),
@@ -282,21 +287,13 @@ fn rewrite_callable_body_for_runtime(
     }
 }
 
-fn rewrite_block_for_runtime(
-    block: &mut ast::Block,
-    module: &LoadedModule,
-    graph: &ModuleGraph,
-) {
+fn rewrite_block_for_runtime(block: &mut ast::Block, module: &LoadedModule, graph: &ModuleGraph) {
     for stmt in &mut block.statements {
         rewrite_stmt_for_runtime(stmt, module, graph);
     }
 }
 
-fn rewrite_stmt_for_runtime(
-    stmt: &mut ast::Stmt,
-    module: &LoadedModule,
-    graph: &ModuleGraph,
-) {
+fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: &ModuleGraph) {
     match stmt {
         ast::Stmt::Binding(binding) => {
             for local in &mut binding.bindings {
@@ -315,6 +312,11 @@ fn rewrite_stmt_for_runtime(
             for value in &mut assign.values {
                 rewrite_expr_for_runtime(value, module, graph);
             }
+        }
+        ast::Stmt::LetElse(stmt) => {
+            rewrite_pattern_for_runtime(&mut stmt.pattern, module);
+            rewrite_expr_for_runtime(&mut stmt.value, module, graph);
+            rewrite_block_for_runtime(&mut stmt.else_block, module, graph);
         }
         ast::Stmt::If(stmt) => rewrite_if_stmt_for_runtime(stmt, module, graph),
         ast::Stmt::Match(stmt) => {
@@ -353,13 +355,15 @@ fn rewrite_stmt_for_runtime(
     }
 }
 
-fn rewrite_if_stmt_for_runtime(
-    stmt: &mut ast::IfStmt,
-    module: &LoadedModule,
-    graph: &ModuleGraph,
-) {
+fn rewrite_if_stmt_for_runtime(stmt: &mut ast::IfStmt, module: &LoadedModule, graph: &ModuleGraph) {
     if let Some(condition) = &mut stmt.condition {
         rewrite_expr_for_runtime(condition, module, graph);
+    }
+    if let Some(pattern) = &mut stmt.pattern {
+        rewrite_pattern_for_runtime(pattern, module);
+    }
+    if let Some(value) = &mut stmt.pattern_value {
+        rewrite_expr_for_runtime(value, module, graph);
     }
     for binding in &mut stmt.bindings {
         if let Some(ty) = &mut binding.ty {
@@ -457,11 +461,7 @@ fn rewrite_pattern_for_runtime(pattern: &mut ast::Pattern, module: &LoadedModule
     }
 }
 
-fn rewrite_expr_for_runtime(
-    expr: &mut ast::Expr,
-    module: &LoadedModule,
-    graph: &ModuleGraph,
-) {
+fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: &ModuleGraph) {
     match expr {
         ast::Expr::Identifier { name, span } => {
             if let Some(path) = rewritten_imported_symbol_path(module, name) {
@@ -503,11 +503,15 @@ fn rewrite_expr_for_runtime(
                 *expr = expr_from_path(path, *span);
             }
         }
-        ast::Expr::Index { receiver, index, .. } => {
+        ast::Expr::Index {
+            receiver, index, ..
+        } => {
             rewrite_expr_for_runtime(receiver, module, graph);
             rewrite_expr_for_runtime(index, module, graph);
         }
-        ast::Expr::RecordUpdate { receiver, updates, .. } => {
+        ast::Expr::RecordUpdate {
+            receiver, updates, ..
+        } => {
             rewrite_expr_for_runtime(receiver, module, graph);
             for update in updates {
                 rewrite_expr_for_runtime(&mut update.value, module, graph);
@@ -534,6 +538,7 @@ fn rewrite_expr_for_runtime(
             }
         }
         ast::Expr::Unary { expr: inner, .. } => rewrite_expr_for_runtime(inner, module, graph),
+        ast::Expr::Try { value, .. } => rewrite_expr_for_runtime(value, module, graph),
         ast::Expr::Binary { left, right, .. } => {
             rewrite_expr_for_runtime(left, module, graph);
             rewrite_expr_for_runtime(right, module, graph);
@@ -553,11 +558,7 @@ fn rewrite_expr_for_runtime(
             rewrite_else_expr_branch_for_runtime(else_branch, module, graph);
         }
         ast::Expr::Block { body, .. } => rewrite_block_for_runtime(body, module, graph),
-        ast::Expr::Match {
-            value,
-            cases,
-            ..
-        } => {
+        ast::Expr::Match { value, cases, .. } => {
             rewrite_expr_for_runtime(value, module, graph);
             for case in cases {
                 rewrite_match_case_for_runtime(case, module, graph);
@@ -660,10 +661,7 @@ fn rewritten_path_segments(module: &LoadedModule, path: &[String]) -> Option<Vec
 }
 
 fn rewritten_imported_symbol_path(module: &LoadedModule, name: &str) -> Option<Vec<String>> {
-    module
-        .symbol_imports
-        .get(name)
-        .map(imported_symbol_path)
+    module.symbol_imports.get(name).map(imported_symbol_path)
 }
 
 fn imported_symbol_path(symbol: &crate::resolver::ImportedSymbol) -> Vec<String> {
@@ -829,15 +827,29 @@ impl Value {
             Value::String(value) => value.clone(),
             Value::Tuple(items) => format!(
                 "({})",
-                items.iter().map(Value::render).collect::<Vec<_>>().join(",")
+                items
+                    .iter()
+                    .map(Value::render)
+                    .collect::<Vec<_>>()
+                    .join(",")
             ),
             Value::List(items) => format!(
                 "[{}]",
-                items.borrow().iter().map(Value::render).collect::<Vec<_>>().join(",")
+                items
+                    .borrow()
+                    .iter()
+                    .map(Value::render)
+                    .collect::<Vec<_>>()
+                    .join(",")
             ),
             Value::Set(items) => format!(
                 "Set({})",
-                items.borrow().iter().map(Value::render).collect::<Vec<_>>().join(",")
+                items
+                    .borrow()
+                    .iter()
+                    .map(Value::render)
+                    .collect::<Vec<_>>()
+                    .join(",")
             ),
             Value::Map(entries) => format!(
                 "Map({})",
@@ -986,7 +998,12 @@ impl<'a> Interpreter<'a> {
             .functions
             .iter()
             .find(|function| function.name == "main")
-            .or_else(|| self.program.functions.iter().find(|function| function.name == "run"))
+            .or_else(|| {
+                self.program
+                    .functions
+                    .iter()
+                    .find(|function| function.name == "run")
+            })
             .map(|function| function.id)
             .ok_or_else(|| {
                 self.runtime_error(
@@ -1101,10 +1118,9 @@ impl<'a> Interpreter<'a> {
 
         let mut block_id = function.entry;
         loop {
-            let block = function
-                .block(block_id)
-                .cloned()
-                .ok_or_else(|| self.runtime_error(span, format!("unknown block id {}", block_id.0)))?;
+            let block = function.block(block_id).cloned().ok_or_else(|| {
+                self.runtime_error(span, format!("unknown block id {}", block_id.0))
+            })?;
             for statement in block.statements {
                 self.exec_statement(&mut frame, statement)?;
             }
@@ -1116,11 +1132,10 @@ impl<'a> Interpreter<'a> {
                     then_block,
                     else_block,
                 } => {
-                    if self.eval_operand(&frame, &condition, block.terminator.span)?.as_bool(
-                        self,
-                        block.terminator.span,
-                        "branch condition",
-                    )? {
+                    if self
+                        .eval_operand(&frame, &condition, block.terminator.span)?
+                        .as_bool(self, block.terminator.span, "branch condition")?
+                    {
                         block_id = then_block;
                     } else {
                         block_id = else_block;
@@ -1169,7 +1184,11 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn exec_statement(&mut self, frame: &mut Frame, statement: ir::Statement) -> Result<(), Diagnostic> {
+    fn exec_statement(
+        &mut self,
+        frame: &mut Frame,
+        statement: ir::Statement,
+    ) -> Result<(), Diagnostic> {
         match statement.kind {
             ir::StatementKind::Assign { target, value } => {
                 let value = self.eval_rvalue(&value, Some(frame), statement.span)?;
@@ -1234,9 +1253,11 @@ impl<'a> Interpreter<'a> {
                                 Ok(Value::Bool(false))
                             } else {
                                 let right = self.eval_operand_ref(frame, right, span)?;
-                                Ok(Value::Bool(
-                                    right.as_bool(self, span, "right side of &&")?,
-                                ))
+                                Ok(Value::Bool(right.as_bool(
+                                    self,
+                                    span,
+                                    "right side of &&",
+                                )?))
                             }
                         }
                         ir::BinaryOp::Or => {
@@ -1244,9 +1265,11 @@ impl<'a> Interpreter<'a> {
                                 Ok(Value::Bool(true))
                             } else {
                                 let right = self.eval_operand_ref(frame, right, span)?;
-                                Ok(Value::Bool(
-                                    right.as_bool(self, span, "right side of ||")?,
-                                ))
+                                Ok(Value::Bool(right.as_bool(
+                                    self,
+                                    span,
+                                    "right side of ||",
+                                )?))
                             }
                         }
                         _ => unreachable!(),
@@ -1319,15 +1342,15 @@ impl<'a> Interpreter<'a> {
                 let operand = self.eval_operand_ref(frame, operand, span)?;
                 Ok(Value::Bool(self.value_matches_type(&operand, ty)))
             }
-            ir::RValue::Closure { function, captures } => Ok(Value::Closure(Rc::new(
-                ClosureValue {
+            ir::RValue::Closure { function, captures } => {
+                Ok(Value::Closure(Rc::new(ClosureValue {
                     function: *function,
                     captures: captures
                         .iter()
                         .map(|capture| self.eval_operand_ref(frame, capture, span))
                         .collect::<Result<Vec<_>, _>>()?,
-                },
-            ))),
+                })))
+            }
         }
     }
 
@@ -1347,7 +1370,9 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match operand {
-            ir::Operand::Copy(place) | ir::Operand::Move(place) => self.read_place(frame, place, span),
+            ir::Operand::Copy(place) | ir::Operand::Move(place) => {
+                self.read_place(frame, place, span)
+            }
             ir::Operand::Const(constant) => Ok(self.constant_value(constant)),
         }
     }
@@ -1528,7 +1553,10 @@ impl<'a> Interpreter<'a> {
             if len < 0 {
                 return Err(self.runtime_error(span, "Array.ofLength length must be non-negative"));
             }
-            return Ok(Value::List(Rc::new(RefCell::new(vec![Value::Unit; len as usize]))));
+            return Ok(Value::List(Rc::new(RefCell::new(vec![
+                Value::Unit;
+                len as usize
+            ]))));
         }
 
         if path.len() == 2 {
@@ -1639,10 +1667,7 @@ impl<'a> Interpreter<'a> {
         if let Some(value) = self.lookup_runtime_value(None, name) {
             return self.invoke_value(value, args, span);
         }
-        Err(self.runtime_error(
-            span,
-            format!("unknown callable '{}'", name),
-        ))
+        Err(self.runtime_error(span, format!("unknown callable '{}'", name)))
     }
 
     fn construct_named_path(
@@ -1695,28 +1720,26 @@ impl<'a> Interpreter<'a> {
                 } else {
                     -1
                 };
-                Some(Value::Iterator(Rc::new(RefCell::new(IteratorState::Range {
-                    current: start,
-                    end,
-                    step,
-                }))))
+                Some(Value::Iterator(Rc::new(RefCell::new(
+                    IteratorState::Range {
+                        current: start,
+                        end,
+                        step,
+                    },
+                ))))
             }
             "List" | "Array" => Some(Value::List(Rc::new(RefCell::new(args.to_vec())))),
-            "Set" => Some(Value::Set(Rc::new(RefCell::new(unique_values(args.to_vec()))))),
+            "Set" => Some(Value::Set(Rc::new(RefCell::new(unique_values(
+                args.to_vec(),
+            ))))),
             "Map" => {
                 let mut entries = Vec::new();
                 for arg in args {
                     let Value::Tuple(items) = arg else {
-                        return Err(self.runtime_error(
-                            span,
-                            "Map expects tuple pair arguments",
-                        ));
+                        return Err(self.runtime_error(span, "Map expects tuple pair arguments"));
                     };
                     if items.len() != 2 {
-                        return Err(self.runtime_error(
-                            span,
-                            "Map expects tuple pair arguments",
-                        ));
+                        return Err(self.runtime_error(span, "Map expects tuple pair arguments"));
                     }
                     map_put_entry(&mut entries, items[0].clone(), items[1].clone());
                 }
@@ -1884,8 +1907,9 @@ impl<'a> Interpreter<'a> {
                     .iter()
                     .map(|field| self.eval_operand_ref(frame, &field.value, span))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.construct_named_type(name, args, span)?
-                    .ok_or_else(|| self.runtime_error(span, format!("cannot construct type '{name}'")))
+                self.construct_named_type(name, args, span)?.ok_or_else(|| {
+                    self.runtime_error(span, format!("cannot construct type '{name}'"))
+                })
             }
             ir::Type::Record(field_types) => {
                 let mut out = Vec::new();
@@ -1944,10 +1968,9 @@ impl<'a> Interpreter<'a> {
                     if let Some((_, slot)) = next.iter_mut().find(|(field, _)| *field == name) {
                         *slot = value;
                     } else {
-                        return Err(self.runtime_error(
-                            span,
-                            format!("record has no field '{}'", name),
-                        ));
+                        return Err(
+                            self.runtime_error(span, format!("record has no field '{}'", name))
+                        );
                     }
                 }
                 Ok(Value::Record(Rc::new(RefCell::new(next))))
@@ -1971,10 +1994,9 @@ impl<'a> Interpreter<'a> {
                     fields: next,
                 }))))
             }
-            other => Err(self.runtime_error(
-                span,
-                format!("cannot update fields on {}", other.render()),
-            )),
+            other => {
+                Err(self.runtime_error(span, format!("cannot update fields on {}", other.render())))
+            }
         }
     }
 
@@ -1996,10 +2018,7 @@ impl<'a> Interpreter<'a> {
             })
             .collect::<Vec<_>>();
         if matches.is_empty() {
-            return Err(self.runtime_error(
-                span,
-                format!("unknown enum case '{}'", case_name),
-            ));
+            return Err(self.runtime_error(span, format!("unknown enum case '{}'", case_name)));
         }
         if matches.len() > 1 {
             return Err(self.runtime_error(
@@ -2151,10 +2170,7 @@ impl<'a> Interpreter<'a> {
                 let message = self.render_panic_message(&args, span);
                 Err(self.runtime_error(span, message))
             }
-            _ => Err(self.runtime_error(
-                span,
-                format!("unknown OS method '{}'", method),
-            )),
+            _ => Err(self.runtime_error(span, format!("unknown OS method '{}'", method))),
         }
     }
 
@@ -2175,7 +2191,8 @@ impl<'a> Interpreter<'a> {
             Value::String(value) => value.clone(),
             other => other.render(),
         };
-        let text = format_printf(&format, &args[1..]).map_err(|message| self.runtime_error(span, message))?;
+        let text = format_printf(&format, &args[1..])
+            .map_err(|message| self.runtime_error(span, message))?;
         self.output.push_str(&text);
         Ok(Value::Unit)
     }
@@ -2298,15 +2315,23 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match &receiver {
-            Value::List(items) => return self.invoke_list_method(receiver.clone(), items, method, args, span),
-            Value::Set(items) => return self.invoke_set_method(receiver.clone(), items, method, args, span),
-            Value::Map(entries) => return self.invoke_map_method(receiver.clone(), entries, method, args, span),
-            Value::String(_) => return self.invoke_string_method(receiver.clone(), method, args, span),
+            Value::List(items) => {
+                return self.invoke_list_method(receiver.clone(), items, method, args, span);
+            }
+            Value::Set(items) => {
+                return self.invoke_set_method(receiver.clone(), items, method, args, span);
+            }
+            Value::Map(entries) => {
+                return self.invoke_map_method(receiver.clone(), entries, method, args, span);
+            }
+            Value::String(_) => {
+                return self.invoke_string_method(receiver.clone(), method, args, span);
+            }
             Value::Variant(variant) => {
-                return self.invoke_variant_method(receiver.clone(), variant, method, args, span)
+                return self.invoke_variant_method(receiver.clone(), variant, method, args, span);
             }
             Value::Iterator(iterator) => {
-                return self.invoke_iterator_method(receiver.clone(), iterator, method, args, span)
+                return self.invoke_iterator_method(receiver.clone(), iterator, method, args, span);
             }
             Value::Record(fields) => {
                 if let Some(value) = lookup_named_field(&fields.borrow(), method) {
@@ -2336,7 +2361,11 @@ impl<'a> Interpreter<'a> {
 
         Err(self.runtime_error(
             span,
-            format!("method '{}' is not available on {}", method, receiver.render()),
+            format!(
+                "method '{}' is not available on {}",
+                method,
+                receiver.render()
+            ),
         ))
     }
 
@@ -2635,7 +2664,10 @@ impl<'a> Interpreter<'a> {
                     return Err(self.runtime_error(span, "Array.contains expects 1 argument"));
                 };
                 Ok(Value::Bool(
-                    items.borrow().iter().any(|value| values_equal(value, needle)),
+                    items
+                        .borrow()
+                        .iter()
+                        .any(|value| values_equal(value, needle)),
                 ))
             }
             "find" => {
@@ -2665,15 +2697,14 @@ impl<'a> Interpreter<'a> {
                 if !args.is_empty() {
                     return Err(self.runtime_error(span, "List.iterator expects 0 arguments"));
                 }
-                Ok(Value::Iterator(Rc::new(RefCell::new(IteratorState::List {
-                    items: items.clone(),
-                    index: 0,
-                }))))
+                Ok(Value::Iterator(Rc::new(RefCell::new(
+                    IteratorState::List {
+                        items: items.clone(),
+                        index: 0,
+                    },
+                ))))
             }
-            _ => Err(self.runtime_error(
-                span,
-                format!("unsupported List method '{}'", method),
-            )),
+            _ => Err(self.runtime_error(span, format!("unsupported List method '{}'", method))),
         }
     }
 
@@ -2716,10 +2747,12 @@ impl<'a> Interpreter<'a> {
                 if !args.is_empty() {
                     return Err(self.runtime_error(span, "Set.iterator expects 0 arguments"));
                 }
-                Ok(Value::Iterator(Rc::new(RefCell::new(IteratorState::List {
-                    items: Rc::new(RefCell::new(items.borrow().clone())),
-                    index: 0,
-                }))))
+                Ok(Value::Iterator(Rc::new(RefCell::new(
+                    IteratorState::List {
+                        items: Rc::new(RefCell::new(items.borrow().clone())),
+                        index: 0,
+                    },
+                ))))
             }
             "map" => {
                 let [callback] = args.as_slice() else {
@@ -2834,7 +2867,10 @@ impl<'a> Interpreter<'a> {
                     return Err(self.runtime_error(span, "Set.contains expects 1 argument"));
                 };
                 Ok(Value::Bool(
-                    items.borrow().iter().any(|value| values_equal(value, needle)),
+                    items
+                        .borrow()
+                        .iter()
+                        .any(|value| values_equal(value, needle)),
                 ))
             }
             "size" => {
@@ -2843,10 +2879,7 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Value::Int(items.borrow().len() as i64))
             }
-            _ => Err(self.runtime_error(
-                span,
-                format!("unsupported Set method '{}'", method),
-            )),
+            _ => Err(self.runtime_error(span, format!("unsupported Set method '{}'", method))),
         }
     }
 
@@ -2880,16 +2913,18 @@ impl<'a> Interpreter<'a> {
                 if !args.is_empty() {
                     return Err(self.runtime_error(span, "Map.iterator expects 0 arguments"));
                 }
-                Ok(Value::Iterator(Rc::new(RefCell::new(IteratorState::List {
-                    items: Rc::new(RefCell::new(
-                        entries
-                            .borrow()
-                            .iter()
-                            .map(|(key, value)| Value::Tuple(vec![key.clone(), value.clone()]))
-                            .collect(),
-                    )),
-                    index: 0,
-                }))))
+                Ok(Value::Iterator(Rc::new(RefCell::new(
+                    IteratorState::List {
+                        items: Rc::new(RefCell::new(
+                            entries
+                                .borrow()
+                                .iter()
+                                .map(|(key, value)| Value::Tuple(vec![key.clone(), value.clone()]))
+                                .collect(),
+                        )),
+                        index: 0,
+                    },
+                ))))
             }
             "map" => {
                 let [callback] = args.as_slice() else {
@@ -2959,7 +2994,10 @@ impl<'a> Interpreter<'a> {
                     return Err(self.runtime_error(span, "Map.reduce expects 1 argument"));
                 };
                 let pairs = entries.borrow().clone();
-                let Some(((mut left_key, mut left_value), rest)) = pairs.split_first().map(|(first, rest)| ((first.0.clone(), first.1.clone()), rest)) else {
+                let Some(((mut left_key, mut left_value), rest)) = pairs
+                    .split_first()
+                    .map(|(first, rest)| ((first.0.clone(), first.1.clone()), rest))
+                else {
                     return Ok(Value::option_none());
                 };
                 for (right_key, right_value) in rest {
@@ -2974,16 +3012,12 @@ impl<'a> Interpreter<'a> {
                         span,
                     )?;
                     let Value::Tuple(items) = reduced else {
-                        return Err(self.runtime_error(
-                            span,
-                            "Map.reduce callback must return a pair tuple",
-                        ));
+                        return Err(self
+                            .runtime_error(span, "Map.reduce callback must return a pair tuple"));
                     };
                     if items.len() != 2 {
-                        return Err(self.runtime_error(
-                            span,
-                            "Map.reduce callback must return a pair tuple",
-                        ));
+                        return Err(self
+                            .runtime_error(span, "Map.reduce callback must return a pair tuple"));
                     }
                     left_key = items[0].clone();
                     left_value = items[1].clone();
@@ -3058,10 +3092,7 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Value::Int(entries.borrow().len() as i64))
             }
-            _ => Err(self.runtime_error(
-                span,
-                format!("unsupported Map method '{}'", method),
-            )),
+            _ => Err(self.runtime_error(span, format!("unsupported Map method '{}'", method))),
         }
     }
 
@@ -3096,10 +3127,7 @@ impl<'a> Interpreter<'a> {
                         .collect(),
                 ))))
             }
-            _ => Err(self.runtime_error(
-                span,
-                format!("unsupported Str method '{}'", method),
-            )),
+            _ => Err(self.runtime_error(span, format!("unsupported Str method '{}'", method))),
         }
     }
 
@@ -3168,15 +3196,16 @@ impl<'a> Interpreter<'a> {
                     } else {
                         Vec::new()
                     };
-                    Ok(Value::Iterator(Rc::new(RefCell::new(IteratorState::List {
-                        items: Rc::new(RefCell::new(values)),
-                        index: 0,
-                    }))))
+                    Ok(Value::Iterator(Rc::new(RefCell::new(
+                        IteratorState::List {
+                            items: Rc::new(RefCell::new(values)),
+                            index: 0,
+                        },
+                    ))))
                 }
-                _ => Err(self.runtime_error(
-                    span,
-                    format!("unsupported Option method '{}'", method),
-                )),
+                _ => {
+                    Err(self.runtime_error(span, format!("unsupported Option method '{}'", method)))
+                }
             },
             "Result" => match method {
                 "isOk" => Ok(Value::Bool(variant.case_name == "Ok")),
@@ -3220,10 +3249,9 @@ impl<'a> Interpreter<'a> {
                         Ok(args[0].clone())
                     }
                 }
-                _ => Err(self.runtime_error(
-                    span,
-                    format!("unsupported Result method '{}'", method),
-                )),
+                _ => {
+                    Err(self.runtime_error(span, format!("unsupported Result method '{}'", method)))
+                }
             },
             "Either" => match method {
                 "isLeft" => Ok(Value::Bool(variant.case_name == "Left")),
@@ -3267,10 +3295,9 @@ impl<'a> Interpreter<'a> {
                         Ok(args[0].clone())
                     }
                 }
-                _ => Err(self.runtime_error(
-                    span,
-                    format!("unsupported Either method '{}'", method),
-                )),
+                _ => {
+                    Err(self.runtime_error(span, format!("unsupported Either method '{}'", method)))
+                }
             },
             _ => self.invoke_user_variant_method(receiver, method, args, span),
         }
@@ -3291,8 +3318,7 @@ impl<'a> Interpreter<'a> {
             crate::ast::TypeKind::Enum,
             method,
             &args,
-        )
-        {
+        ) {
             return self.call_function(function, Some(receiver), None, args, span);
         }
         Err(self.runtime_error(
@@ -3340,7 +3366,9 @@ impl<'a> Interpreter<'a> {
             }
             "zipWithIndex" => {
                 if !args.is_empty() {
-                    return Err(self.runtime_error(span, "Iterator.zipWithIndex expects 0 arguments"));
+                    return Err(
+                        self.runtime_error(span, "Iterator.zipWithIndex expects 0 arguments")
+                    );
                 }
                 let out = iterator_values(iterator)
                     .into_iter()
@@ -3349,10 +3377,7 @@ impl<'a> Interpreter<'a> {
                     .collect();
                 Ok(Value::List(Rc::new(RefCell::new(out))))
             }
-            _ => Err(self.runtime_error(
-                span,
-                format!("unsupported Iterator method '{}'", method),
-            )),
+            _ => Err(self.runtime_error(span, format!("unsupported Iterator method '{}'", method))),
         }
     }
 
@@ -3387,11 +3412,7 @@ impl<'a> Interpreter<'a> {
             .map(|function| function.id)
     }
 
-    fn lookup_type_by_kind(
-        &self,
-        name: &str,
-        kind: crate::ast::TypeKind,
-    ) -> Option<&ir::TypeDef> {
+    fn lookup_type_by_kind(&self, name: &str, kind: crate::ast::TypeKind) -> Option<&ir::TypeDef> {
         self.program
             .types
             .iter()
@@ -3458,7 +3479,8 @@ impl<'a> Interpreter<'a> {
             .program
             .types
             .iter()
-            .find(|ty| ty.name == owner && ty.kind == kind) else {
+            .find(|ty| ty.name == owner && ty.kind == kind)
+        else {
             return;
         };
         out.extend(ty.methods.iter().copied().filter(|id| {
@@ -3531,12 +3553,7 @@ impl<'a> Interpreter<'a> {
         best
     }
 
-    fn get_member(
-        &self,
-        base: Value,
-        name: &str,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
+    fn get_member(&self, base: Value, name: &str, span: Option<Span>) -> Result<Value, Diagnostic> {
         match base {
             Value::Object(object) => {
                 if matches!(name, "stdout" | "stderr") && object.borrow().type_name == "OS" {
@@ -3550,9 +3567,8 @@ impl<'a> Interpreter<'a> {
                     )
                 })
             }
-            Value::Record(fields) => lookup_named_field(&fields.borrow(), name).ok_or_else(|| {
-                self.runtime_error(span, format!("record has no field '{}'", name))
-            }),
+            Value::Record(fields) => lookup_named_field(&fields.borrow(), name)
+                .ok_or_else(|| self.runtime_error(span, format!("record has no field '{}'", name))),
             Value::Variant(variant) => lookup_named_field(&variant.fields, name).ok_or_else(|| {
                 self.runtime_error(
                     span,
@@ -3562,9 +3578,8 @@ impl<'a> Interpreter<'a> {
                     ),
                 )
             }),
-            Value::Tuple(items) => tuple_member(&items, name).ok_or_else(|| {
-                self.runtime_error(span, format!("tuple has no member '{}'", name))
-            }),
+            Value::Tuple(items) => tuple_member(&items, name)
+                .ok_or_else(|| self.runtime_error(span, format!("tuple has no member '{}'", name))),
             _ => Err(self.runtime_error(
                 span,
                 format!("cannot access field '{}' on {}", name, base.render()),
@@ -3585,7 +3600,9 @@ impl<'a> Interpreter<'a> {
                     self.runtime_error(span, format!("object field '{}' does not exist", name))
                 }),
             Value::Record(fields) => set_named_field(&mut fields.borrow_mut(), name, value)
-                .ok_or_else(|| self.runtime_error(span, format!("record field '{}' does not exist", name))),
+                .ok_or_else(|| {
+                    self.runtime_error(span, format!("record field '{}' does not exist", name))
+                }),
             _ => Err(self.runtime_error(
                 span,
                 format!("cannot assign field '{}' on {}", name, base.render()),
@@ -3611,20 +3628,20 @@ impl<'a> Interpreter<'a> {
         match base {
             Value::List(items) => {
                 let items = items.borrow();
-                let index = normalize_index(items.len(), index)
-                    .ok_or_else(|| self.runtime_error(span, format!("list index {} out of bounds", index)))?;
-                items
-                .get(index)
-                .cloned()
-                .ok_or_else(|| self.runtime_error(span, format!("list index {} out of bounds", index)))
+                let index = normalize_index(items.len(), index).ok_or_else(|| {
+                    self.runtime_error(span, format!("list index {} out of bounds", index))
+                })?;
+                items.get(index).cloned().ok_or_else(|| {
+                    self.runtime_error(span, format!("list index {} out of bounds", index))
+                })
             }
             Value::Tuple(items) => {
-                let index = normalize_index(items.len(), index)
-                    .ok_or_else(|| self.runtime_error(span, format!("tuple index {} out of bounds", index)))?;
-                items
-                    .get(index)
-                    .cloned()
-                    .ok_or_else(|| self.runtime_error(span, format!("tuple index {} out of bounds", index)))
+                let index = normalize_index(items.len(), index).ok_or_else(|| {
+                    self.runtime_error(span, format!("tuple index {} out of bounds", index))
+                })?;
+                items.get(index).cloned().ok_or_else(|| {
+                    self.runtime_error(span, format!("tuple index {} out of bounds", index))
+                })
             }
             other => self.invoke_method(other, "[]", vec![Value::Int(index)], span),
         }
@@ -3645,18 +3662,18 @@ impl<'a> Interpreter<'a> {
         match base {
             Value::List(items) => {
                 let mut items = items.borrow_mut();
-                let index = normalize_index(items.len(), index)
-                    .ok_or_else(|| self.runtime_error(span, format!("list index {} out of bounds", index)))?;
+                let index = normalize_index(items.len(), index).ok_or_else(|| {
+                    self.runtime_error(span, format!("list index {} out of bounds", index))
+                })?;
                 let Some(slot) = items.get_mut(index) else {
-                    return Err(self.runtime_error(span, format!("list index {} out of bounds", index)));
+                    return Err(
+                        self.runtime_error(span, format!("list index {} out of bounds", index))
+                    );
                 };
                 *slot = value;
                 Ok(())
             }
-            _ => Err(self.runtime_error(
-                span,
-                format!("cannot assign index on {}", base.render()),
-            )),
+            _ => Err(self.runtime_error(span, format!("cannot assign index on {}", base.render()))),
         }
     }
 
@@ -3689,20 +3706,40 @@ impl<'a> Interpreter<'a> {
                 (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs + rhs)),
                 (Value::Int(lhs), Value::Float(rhs)) => Ok(Value::Float(*lhs as f64 + rhs)),
                 (Value::Float(lhs), Value::Int(rhs)) => Ok(Value::Float(lhs + *rhs as f64)),
-                (Value::String(_), _) | (_, Value::String(_)) => {
-                    Ok(Value::String(format!("{}{}", left.render(), right.render())))
-                }
+                (Value::String(_), _) | (_, Value::String(_)) => Ok(Value::String(format!(
+                    "{}{}",
+                    left.render(),
+                    right.render()
+                ))),
                 _ => self.invoke_method(left, "+", vec![right], span),
             },
-            ir::BinaryOp::Sub => numeric_binary_or_method(left, right, span, "-", |lhs, rhs| lhs - rhs, |lhs, rhs| {
-                lhs - rhs
-            }, self),
-            ir::BinaryOp::Mul => numeric_binary_or_method(left, right, span, "*", |lhs, rhs| lhs * rhs, |lhs, rhs| {
-                lhs * rhs
-            }, self),
-            ir::BinaryOp::Div => numeric_binary_or_method(left, right, span, "/", |lhs, rhs| lhs / rhs, |lhs, rhs| {
-                lhs / rhs
-            }, self),
+            ir::BinaryOp::Sub => numeric_binary_or_method(
+                left,
+                right,
+                span,
+                "-",
+                |lhs, rhs| lhs - rhs,
+                |lhs, rhs| lhs - rhs,
+                self,
+            ),
+            ir::BinaryOp::Mul => numeric_binary_or_method(
+                left,
+                right,
+                span,
+                "*",
+                |lhs, rhs| lhs * rhs,
+                |lhs, rhs| lhs * rhs,
+                self,
+            ),
+            ir::BinaryOp::Div => numeric_binary_or_method(
+                left,
+                right,
+                span,
+                "/",
+                |lhs, rhs| lhs / rhs,
+                |lhs, rhs| lhs / rhs,
+                self,
+            ),
             ir::BinaryOp::Mod => match (left, right) {
                 (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs % rhs)),
                 (left, right) => self.invoke_method(left, "%", vec![right], span),
@@ -3712,7 +3749,9 @@ impl<'a> Interpreter<'a> {
             ir::BinaryOp::Less => compare_binary(left, right, span, |lhs, rhs| lhs < rhs, self),
             ir::BinaryOp::LessEq => compare_binary(left, right, span, |lhs, rhs| lhs <= rhs, self),
             ir::BinaryOp::Greater => compare_binary(left, right, span, |lhs, rhs| lhs > rhs, self),
-            ir::BinaryOp::GreaterEq => compare_binary(left, right, span, |lhs, rhs| lhs >= rhs, self),
+            ir::BinaryOp::GreaterEq => {
+                compare_binary(left, right, span, |lhs, rhs| lhs >= rhs, self)
+            }
             ir::BinaryOp::And => Ok(Value::Bool(
                 left.as_bool(self, span, "left side of &&")?
                     && right.as_bool(self, span, "right side of &&")?,
@@ -3749,8 +3788,12 @@ impl<'a> Interpreter<'a> {
 
     fn switch_matches(&self, value: &Value, arm: &ir::SwitchValue) -> bool {
         match arm {
-            ir::SwitchValue::Bool(expected) => matches!(value, Value::Bool(actual) if actual == expected),
-            ir::SwitchValue::Int(expected) => matches!(value, Value::Int(actual) if actual == expected),
+            ir::SwitchValue::Bool(expected) => {
+                matches!(value, Value::Bool(actual) if actual == expected)
+            }
+            ir::SwitchValue::Int(expected) => {
+                matches!(value, Value::Int(actual) if actual == expected)
+            }
             ir::SwitchValue::String(expected) => {
                 matches!(value, Value::String(actual) if actual == expected)
             }
@@ -3811,8 +3854,8 @@ impl<'a> Interpreter<'a> {
     fn coerce_value_to_type(&self, value: Value, ty: &ir::Type) -> Value {
         match ty {
             ir::Type::Record(fields) => match value {
-                Value::Tuple(items) if items.len() == fields.len() => Value::Record(Rc::new(
-                    RefCell::new(
+                Value::Tuple(items) if items.len() == fields.len() => {
+                    Value::Record(Rc::new(RefCell::new(
                         fields
                             .iter()
                             .zip(items)
@@ -3823,8 +3866,8 @@ impl<'a> Interpreter<'a> {
                                 )
                             })
                             .collect(),
-                    ),
-                )),
+                    )))
+                }
                 Value::Record(record) => {
                     let values = record.borrow();
                     if fields
@@ -3974,7 +4017,9 @@ fn lookup_named_field(fields: &[(String, Value)], name: &str) -> Option<Value> {
 }
 
 fn set_named_field(fields: &mut [(String, Value)], name: &str, value: Value) -> Option<()> {
-    let field = fields.iter_mut().find(|(field_name, _)| field_name == name)?;
+    let field = fields
+        .iter_mut()
+        .find(|(field_name, _)| field_name == name)?;
     field.1 = value;
     Some(())
 }
@@ -4019,7 +4064,10 @@ fn unique_values(items: Vec<Value>) -> Vec<Value> {
 }
 
 fn map_put_entry(entries: &mut Vec<(Value, Value)>, key: Value, value: Value) {
-    if let Some((_, slot)) = entries.iter_mut().find(|(existing, _)| values_equal(existing, &key)) {
+    if let Some((_, slot)) = entries
+        .iter_mut()
+        .find(|(existing, _)| values_equal(existing, &key))
+    {
         *slot = value;
     } else {
         entries.push((key, value));
@@ -4040,7 +4088,11 @@ fn iterator_values(iterator: &Rc<RefCell<IteratorState>>) -> Vec<Value> {
                 out.push(value);
             }
             IteratorState::Range { current, end, step } => {
-                let done = if *step >= 0 { *current >= *end } else { *current <= *end };
+                let done = if *step >= 0 {
+                    *current >= *end
+                } else {
+                    *current <= *end
+                };
                 if done {
                     break;
                 }
@@ -4115,20 +4167,29 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         (Value::List(lhs), Value::List(rhs)) => {
             let lhs = lhs.borrow();
             let rhs = rhs.borrow();
-            lhs.len() == rhs.len() && lhs.iter().zip(rhs.iter()).all(|(lhs, rhs)| values_equal(lhs, rhs))
+            lhs.len() == rhs.len()
+                && lhs
+                    .iter()
+                    .zip(rhs.iter())
+                    .all(|(lhs, rhs)| values_equal(lhs, rhs))
         }
         (Value::Set(lhs), Value::Set(rhs)) => {
             let lhs = lhs.borrow();
             let rhs = rhs.borrow();
-            lhs.len() == rhs.len() && lhs.iter().zip(rhs.iter()).all(|(lhs, rhs)| values_equal(lhs, rhs))
+            lhs.len() == rhs.len()
+                && lhs
+                    .iter()
+                    .zip(rhs.iter())
+                    .all(|(lhs, rhs)| values_equal(lhs, rhs))
         }
         (Value::Map(lhs), Value::Map(rhs)) => {
             let lhs = lhs.borrow();
             let rhs = rhs.borrow();
             lhs.len() == rhs.len()
-                && lhs.iter().zip(rhs.iter()).all(|((lk, lv), (rk, rv))| {
-                    values_equal(lk, rk) && values_equal(lv, rv)
-                })
+                && lhs
+                    .iter()
+                    .zip(rhs.iter())
+                    .all(|((lk, lv), (rk, rv))| values_equal(lk, rk) && values_equal(lv, rv))
         }
         (Value::Record(lhs), Value::Record(rhs)) => {
             let lhs = lhs.borrow();
@@ -4175,7 +4236,10 @@ fn numeric_binary_or_method(
 ) -> Result<Value, Diagnostic> {
     match (left.clone(), right.clone()) {
         (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(int_op(lhs, rhs))),
-        (lhs, rhs) if matches!(lhs, Value::Float(_) | Value::Int(_)) && matches!(rhs, Value::Float(_) | Value::Int(_)) => {
+        (lhs, rhs)
+            if matches!(lhs, Value::Float(_) | Value::Int(_))
+                && matches!(rhs, Value::Float(_) | Value::Int(_)) =>
+        {
             Ok(Value::Float(float_op(
                 lhs.as_number(in_, span, "numeric binary operator")?,
                 rhs.as_number(in_, span, "numeric binary operator")?,
@@ -4425,7 +4489,12 @@ enum FloatVerb {
     General,
 }
 
-fn render_float_like(value: &Value, verb: FloatVerb, precision: Option<usize>, force_sign: bool) -> String {
+fn render_float_like(
+    value: &Value,
+    verb: FloatVerb,
+    precision: Option<usize>,
+    force_sign: bool,
+) -> String {
     let Some(number) = value_as_f64(value) else {
         return value.render();
     };
@@ -4452,7 +4521,11 @@ fn apply_printf_width(mut rendered: String, spec: PrintfSpec) -> String {
         return rendered;
     }
 
-    let pad_char = if spec.zero_pad && !spec.left_align { '0' } else { ' ' };
+    let pad_char = if spec.zero_pad && !spec.left_align {
+        '0'
+    } else {
+        ' '
+    };
     let pad: String = std::iter::repeat_n(pad_char, width - rendered_len).collect();
 
     if spec.left_align {
@@ -4604,10 +4677,14 @@ mod tests {
             return None;
         }
 
-        let Some(message_start) = trimmed.find(" error[").map(|index| index + " error[".len()) else {
+        let Some(message_start) = trimmed.find(" error[").map(|index| index + " error[".len())
+        else {
             return None;
         };
-        let Some(after_code) = trimmed[message_start..].find("] ").map(|index| message_start + index + 2) else {
+        let Some(after_code) = trimmed[message_start..]
+            .find("] ")
+            .map(|index| message_start + index + 2)
+        else {
             return None;
         };
         let rest = &trimmed[after_code..];
@@ -4949,7 +5026,11 @@ $name
                 continue;
             }
 
-            let relative = path.strip_prefix(&root).unwrap_or(&path).display().to_string();
+            let relative = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
             if let Some(expected) = expected_failure {
                 if !include_failures {
                     continue;
@@ -5274,7 +5355,7 @@ $name
             r#"
             def main() Int {
                 values = [7]
-                if value <- values.get(0) {
+                if let Some(value) = values.get(0) {
                     OS.println("binding " + value)
                 } else {
                     OS.println("binding none")

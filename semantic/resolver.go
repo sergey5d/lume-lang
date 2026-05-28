@@ -591,8 +591,18 @@ func (r *Resolver) resolveStatement(stmt parser.Statement) {
 				r.defineMutable(binding.Name, binding.Span, false, "duplicate_binding", "duplicate binding '"+binding.Name+"'")
 			}
 		}
+	case *parser.LetElseStmt:
+		r.resolveExpr(s.Value)
+		r.resolveBlock(s.Fallback)
+		r.resolveMatchPattern(s.Pattern)
 	case *parser.IfStmt:
-		if s.BindingValue != nil {
+		if s.PatternValue != nil {
+			r.resolveExpr(s.PatternValue)
+			r.pushScope()
+			r.resolveMatchPattern(s.Pattern)
+			r.resolveBlockStatements(s.Then.Statements)
+			r.popScope()
+		} else if s.BindingValue != nil {
 			r.resolveExpr(s.BindingValue)
 			r.pushScope()
 			for _, binding := range s.Bindings {
@@ -811,6 +821,8 @@ func (r *Resolver) resolveExpr(expr parser.Expr) {
 		r.resolveExpr(e.Right)
 	case *parser.GroupExpr:
 		r.resolveExpr(e.Inner)
+	case *parser.TryExpr:
+		r.resolveExpr(e.Value)
 	}
 }
 

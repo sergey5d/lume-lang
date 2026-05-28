@@ -35,7 +35,8 @@ object RowOrdering with Ordering[(Int, Int, Str)] {
 
 def syntax1(rows List[(Int, Int, Str)]) Unit {
     var lastX = 0
-    if _, initialY, _ <- rows.get(0) {
+    if let Some(firstRow) = rows.get(0) {
+        _, initialY Int, _ = firstRow
         var lastY = initialY
         for x Int, y Int, char Str <- rows {
             for lineStep <- Range(y, lastY) {
@@ -50,14 +51,14 @@ def syntax1(rows List[(Int, Int, Str)]) Unit {
             lastX := x + 1
             lastY := y
         }
-
         OS.println()
     }
 }
 
 def syntax2(rows List[(Int, Int, Str)]) Unit {
     var lastX = 0
-    if _, initialY Int, _ <- rows.get(0) {
+    if let Some(firstRow) = rows.get(0) {
+        _, initialY Int, _ = firstRow
         var lastY = initialY
         for x, y, char <- rows {
             for lineStep <- Range(y, lastY) {
@@ -72,7 +73,6 @@ def syntax2(rows List[(Int, Int, Str)]) Unit {
             lastX := x + 1
             lastY := y
         }
-
         OS.println()
     }
 }
@@ -80,7 +80,7 @@ def syntax2(rows List[(Int, Int, Str)]) Unit {
 def syntax3(rows List[(Int, Int, Str)]) Unit {
     var lastX = 0
 
-    if first <- rows.get(0) {
+    if let Some(first) = rows.get(0) {
         _, initialY Int, _ = first
         var lastY = initialY
         for row <- rows {
@@ -97,7 +97,6 @@ def syntax3(rows List[(Int, Int, Str)]) Unit {
             lastX := x + 1
             lastY := y
         }
-
         OS.println()
     }
 }

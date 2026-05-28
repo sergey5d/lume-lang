@@ -48,6 +48,8 @@ func (p *Parser) parseStatement() (Statement, error) {
 		return p.parseLocalFunctionStmt()
 	case TokenVar:
 		return p.parseVarBindingStmt()
+	case TokenLet:
+		return p.parseLetStmt()
 	case TokenReturn:
 		return p.parseReturnStmt()
 	case TokenBreak:
@@ -135,6 +137,59 @@ func (p *Parser) parseVarBindingStmt() (Statement, error) {
 		}
 	}
 	return stmt, nil
+}
+
+func (p *Parser) parseLetStmt() (Statement, error) {
+	if _, err := p.consume(TokenLet, "expected 'let'"); err != nil {
+		return nil, err
+	}
+
+	save := p.pos
+	if (p.check(TokenIdentifier) && !p.checkNext(TokenLParen) && !p.checkNext(TokenDot)) || p.check(TokenUnder) {
+		var start Token
+		var err error
+		if p.check(TokenIdentifier) {
+			start, err = p.consume(TokenIdentifier, "expected binding name after 'let'")
+		} else {
+			start, err = p.consume(TokenUnder, "expected binding name after 'let'")
+		}
+		if err != nil {
+			return nil, err
+		}
+		if stmt, err := p.parseBindingStmtWithStart(start, true); err == nil {
+			return stmt, nil
+		}
+		p.pos = save
+	}
+
+	pattern, err := p.parsePattern()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.consume(TokenAssign, "expected '=' after let pattern"); err != nil {
+		return nil, err
+	}
+	if err := p.requireSameLineExpressionStart(p.previous()); err != nil {
+		return nil, err
+	}
+	value, err := p.parseInlineExpression(TokenElse)
+	if err != nil {
+		return nil, err
+	}
+	if !p.match(TokenElse) {
+		return nil, fmt.Errorf("expected 'else' after let pattern")
+	}
+	elseToken := p.previous()
+	fallback, err := p.parseBlockOrInlineStmtBody(elseToken, "let else")
+	if err != nil {
+		return nil, err
+	}
+	return &LetElseStmt{
+		Pattern:  pattern,
+		Value:    value,
+		Fallback: fallback,
+		Span:     mergeSpans(patternSpan(pattern), fallback.Span),
+	}, nil
 }
 
 func (p *Parser) parseBindingStmtWithStart(start Token, firstIsName bool) (Statement, error) {
@@ -469,22 +524,12 @@ func (p *Parser) parseIfStmt() (Statement, error) {
 
 func (p *Parser) parseIfStmtAfterStart(start Token) (Statement, error) {
 	stmt := &IfStmt{}
-	if (p.check(TokenIdentifier) || p.check(TokenUnder)) && p.bindingListFollowedByArrow(p.pos) {
-		var name Token
-		var err error
-		if p.check(TokenIdentifier) {
-			name, err = p.consume(TokenIdentifier, "expected binding name after 'if'")
-		} else {
-			name, err = p.consume(TokenUnder, "expected binding name after 'if'")
-		}
+	if p.match(TokenLet) {
+		pattern, err := p.parsePattern()
 		if err != nil {
 			return nil, err
 		}
-		bindings, err := p.parseBindingsWithStart(name, true)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := p.consume(TokenLeftArrow, "expected '<-' after if binding"); err != nil {
+		if _, err := p.consume(TokenAssign, "expected '=' after if pattern"); err != nil {
 			return nil, err
 		}
 		if err := p.requireSameLineExpressionStart(p.previous()); err != nil {
@@ -494,9 +539,15 @@ func (p *Parser) parseIfStmtAfterStart(start Token) (Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		stmt.Bindings = bindings
-		stmt.BindingValue = value
+		stmt.Pattern = pattern
+		stmt.PatternValue = value
 	} else {
+		save := p.pos
+		if pattern, err := p.parsePattern(); err == nil && p.check(TokenAssign) {
+			_ = pattern
+			return nil, fmt.Errorf("pattern matches in 'if' require 'let'; use 'if let Pattern = value { ... }'")
+		}
+		p.pos = save
 		condition, err := p.parseExpressionUntil(TokenLBrace, TokenThen)
 		if err != nil {
 			return nil, err

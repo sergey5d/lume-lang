@@ -266,6 +266,16 @@ type GuardBlockStmt struct {
 
 func (*GuardBlockStmt) statementNode() {}
 
+// LetElseStmt matches a value against a pattern and implicitly returns from the current callable on failure.
+type LetElseStmt struct {
+	Pattern  Pattern    `json:"pattern"`
+	Value    Expr       `json:"value"`
+	Fallback *BlockStmt `json:"fallback"`
+	Span     Span       `json:"span"`
+}
+
+func (*LetElseStmt) statementNode() {}
+
 // AssignmentStmt writes a value to an existing assignment target.
 type AssignmentStmt struct {
 	Target   Expr   `json:"target"`
@@ -289,6 +299,8 @@ func (*MultiAssignmentStmt) statementNode() {}
 // IfStmt represents an if / else-if / else chain.
 type IfStmt struct {
 	Condition    Expr       `json:"condition,omitempty"`
+	Pattern      Pattern    `json:"pattern,omitempty"`
+	PatternValue Expr       `json:"patternValue,omitempty"`
 	Bindings     []Binding  `json:"bindings,omitempty"`
 	BindingValue Expr       `json:"bindingValue,omitempty"`
 	Then         *BlockStmt `json:"then"`
@@ -639,3 +651,11 @@ type GroupExpr struct {
 }
 
 func (*GroupExpr) exprNode() {}
+
+// TryExpr unwraps a success value or implicitly returns the failure from the current callable.
+type TryExpr struct {
+	Value Expr `json:"value"`
+	Span  Span `json:"span"`
+}
+
+func (*TryExpr) exprNode() {}

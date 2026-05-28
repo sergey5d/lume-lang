@@ -124,7 +124,36 @@ type returnSignal struct {
 	value Value
 }
 
+type trySignal struct {
+	value Value
+}
+
+func (t trySignal) Error() string {
+	return "try short-circuit"
+}
+
 type breakSignal struct{}
+
+func signalToTryError(signal any) error {
+	if ret, ok := signal.(returnSignal); ok {
+		return trySignal{value: ret.value}
+	}
+	return nil
+}
+
+func signalToExprError(signal any, span parser.Span, message string) error {
+	if err := signalToTryError(signal); err != nil {
+		return err
+	}
+	return RuntimeError{Message: message, Span: span}
+}
+
+func trySignalToReturnSignal(err error) (any, bool) {
+	if signal, ok := err.(trySignal); ok {
+		return returnSignal{value: signal.value}, true
+	}
+	return nil, false
+}
 
 func (t *nativeTuple) String() string {
 	parts := make([]string, len(t.items))
@@ -620,6 +649,9 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 	case *parser.ValStmt:
 		values, err := in.bindingValues(s.Bindings, s.Values, local, s.Span)
 		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
 			return nil, nil, err
 		}
 		for i, binding := range s.Bindings {
@@ -643,12 +675,18 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 	case *parser.AssignmentStmt:
 		value, err := in.evalExpr(s.Value, local)
 		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
 			return nil, nil, err
 		}
 		return nil, nil, in.assign(s.Target, s.Operator, value, local)
 	case *parser.MultiAssignmentStmt:
 		values, err := in.assignmentValues(len(s.Targets), s.Values, local, s.Span)
 		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
 			return nil, nil, err
 		}
 		for i, target := range s.Targets {
@@ -660,6 +698,9 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 	case *parser.UnwrapStmt:
 		ok, sourceValue, err := in.execUnwrapBinding(s.Bindings, s.Value, s.Span, local)
 		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
 			return nil, nil, err
 		}
 		if !ok {
@@ -670,6 +711,9 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 		for _, clause := range s.Clauses {
 			ok, sourceValue, err := in.execUnwrapBinding(clause.Bindings, clause.Value, clause.Span, local)
 			if err != nil {
+				if signal, ok := trySignalToReturnSignal(err); ok {
+					return nil, signal, nil
+				}
 				return nil, nil, err
 			}
 			if !ok {
@@ -680,6 +724,9 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 	case *parser.GuardStmt:
 		ok, _, err := in.execUnwrapBinding(s.Bindings, s.Value, s.Span, local)
 		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
 			return nil, nil, err
 		}
 		if !ok {
@@ -695,6 +742,9 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 		for _, clause := range s.Clauses {
 			ok, _, err := in.execUnwrapBinding(clause.Bindings, clause.Value, clause.Span, local)
 			if err != nil {
+				if signal, ok := trySignalToReturnSignal(err); ok {
+					return nil, signal, nil
+				}
 				return nil, nil, err
 			}
 			if !ok {
@@ -706,10 +756,61 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 			}
 		}
 		return nil, nil, nil
+	case *parser.LetElseStmt:
+		value, err := in.evalExpr(s.Value, local)
+		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
+			return nil, nil, err
+		}
+		bindings, ok, err := in.matchPattern(s.Pattern, value, local)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok {
+			value, signal, err := in.evalBlockValue(s.Fallback, local, self, "let else block must end with a value-producing statement")
+			if err != nil || signal != nil {
+				return nil, signal, err
+			}
+			return nil, returnSignal{value: value}, nil
+		}
+		for _, binding := range bindings {
+			if binding.name == "_" {
+				continue
+			}
+			local.define(binding.name, binding.value, false)
+		}
+		return nil, nil, nil
 	case *parser.IfStmt:
-		if s.BindingValue != nil {
+		if s.PatternValue != nil {
+			value, err := in.evalExpr(s.PatternValue, local)
+			if err != nil {
+				if signal, ok := trySignalToReturnSignal(err); ok {
+					return nil, signal, nil
+				}
+				return nil, nil, err
+			}
+			bindings, ok, err := in.matchPattern(s.Pattern, value, local)
+			if err != nil {
+				return nil, nil, err
+			}
+			if ok {
+				thenEnv := newEnv(local)
+				for _, binding := range bindings {
+					if binding.name == "_" {
+						continue
+					}
+					thenEnv.define(binding.name, binding.value, false)
+				}
+				return in.execBlock(s.Then, thenEnv, self)
+			}
+		} else if s.BindingValue != nil {
 			optionValue, err := in.evalExpr(s.BindingValue, local)
 			if err != nil {
+				if signal, ok := trySignalToReturnSignal(err); ok {
+					return nil, signal, nil
+				}
 				return nil, nil, err
 			}
 			set, value, err := in.optionBindingValue(optionValue, local, exprSpan(s.BindingValue))
@@ -733,6 +834,9 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 		} else {
 			cond, err := in.evalExpr(s.Condition, local)
 			if err != nil {
+				if signal, ok := trySignalToReturnSignal(err); ok {
+					return nil, signal, nil
+				}
 				return nil, nil, err
 			}
 			truthy, err := asBool(cond, exprSpan(s.Condition))
@@ -753,6 +857,9 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 	case *parser.MatchStmt:
 		value, err := in.evalExpr(s.Value, local)
 		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
 			return nil, nil, err
 		}
 		for _, matchCase := range s.Cases {
@@ -770,6 +877,9 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 			if matchCase.Guard != nil {
 				guardValue, err := in.evalExpr(matchCase.Guard, caseEnv)
 				if err != nil {
+					if signal, ok := trySignalToReturnSignal(err); ok {
+						return nil, signal, nil
+					}
 					return nil, nil, err
 				}
 				truthy, err := asBool(guardValue, exprSpan(matchCase.Guard))
@@ -785,6 +895,11 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 			}
 			if matchCase.Expr != nil {
 				value, err := in.evalExpr(matchCase.Expr, caseEnv)
+				if err != nil {
+					if signal, ok := trySignalToReturnSignal(err); ok {
+						return nil, signal, nil
+					}
+				}
 				return value, nil, err
 			}
 			return nil, nil, nil
@@ -800,6 +915,9 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 	case *parser.ReturnStmt:
 		value, err := in.evalExpr(s.Value, local)
 		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
 			return nil, nil, err
 		}
 		return nil, returnSignal{value: value}, nil
@@ -807,6 +925,11 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 		return nil, breakSignal{}, nil
 	case *parser.ExprStmt:
 		value, err := in.evalExpr(s.Expr, local)
+		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
+		}
 		return value, nil, err
 	default:
 		return nil, nil, RuntimeError{Message: "unsupported statement", Span: stmtSpan(stmt)}
@@ -1103,6 +1226,9 @@ func (in *Interpreter) execFor(stmt *parser.ForStmt, local *env, self *instance)
 			return signal, nil
 		})
 		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
 			return nil, nil, err
 		}
 		switch signal.(type) {
@@ -1119,6 +1245,9 @@ func (in *Interpreter) execFor(stmt *parser.ForStmt, local *env, self *instance)
 		return signal, err
 	})
 	if err != nil {
+		if signal, ok := trySignalToReturnSignal(err); ok {
+			return nil, signal, nil
+		}
 		return nil, nil, err
 	}
 	switch signal.(type) {
@@ -1133,6 +1262,9 @@ func (in *Interpreter) execWhile(stmt *parser.WhileStmt, local *env, self *insta
 	for {
 		condValue, err := in.evalExpr(stmt.Condition, local)
 		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
 			return nil, nil, err
 		}
 		cond, ok := condValue.(bool)
@@ -1144,6 +1276,9 @@ func (in *Interpreter) execWhile(stmt *parser.WhileStmt, local *env, self *insta
 		}
 		_, signal, err := in.execBlock(stmt.Body, local, self)
 		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
 			return nil, nil, err
 		}
 		switch signal.(type) {
@@ -1247,6 +1382,11 @@ func (in *Interpreter) evalStmtValue(stmt parser.Statement, local *env, self *in
 	switch s := stmt.(type) {
 	case *parser.ExprStmt:
 		value, err := in.evalExpr(s.Expr, local)
+		if err != nil {
+			if signal, ok := trySignalToReturnSignal(err); ok {
+				return nil, signal, nil
+			}
+		}
 		return value, nil, err
 	case *parser.IfStmt:
 		return in.evalIfStmtValue(s, local, self, message)
@@ -1297,7 +1437,26 @@ func (in *Interpreter) execUnwrapBinding(bindings []parser.Binding, expr parser.
 }
 
 func (in *Interpreter) evalIfStmtValue(s *parser.IfStmt, local *env, self *instance, message string) (Value, any, error) {
-	if s.BindingValue != nil {
+	if s.PatternValue != nil {
+		value, err := in.evalExpr(s.PatternValue, local)
+		if err != nil {
+			return nil, nil, err
+		}
+		bindings, ok, err := in.matchPattern(s.Pattern, value, local)
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
+			thenEnv := newEnv(local)
+			for _, binding := range bindings {
+				if binding.name == "_" {
+					continue
+				}
+				thenEnv.define(binding.name, binding.value, false)
+			}
+			return in.evalBlockValue(s.Then, thenEnv, self, message)
+		}
+	} else if s.BindingValue != nil {
 		optionValue, err := in.evalExpr(s.BindingValue, local)
 		if err != nil {
 			return nil, nil, err
@@ -1362,6 +1521,9 @@ func (in *Interpreter) evalMatchStmtValue(s *parser.MatchStmt, local *env, self 
 		if matchCase.Guard != nil {
 			guardValue, err := in.evalExpr(matchCase.Guard, caseEnv)
 			if err != nil {
+				if signal, ok := trySignalToReturnSignal(err); ok {
+					return nil, signal, nil
+				}
 				return nil, nil, err
 			}
 			truthy, err := asBool(guardValue, exprSpan(matchCase.Guard))
@@ -1375,6 +1537,9 @@ func (in *Interpreter) evalMatchStmtValue(s *parser.MatchStmt, local *env, self 
 		if matchCase.Body != nil {
 			value, signal, err := in.evalBlockValue(matchCase.Body, caseEnv, self, message)
 			if err != nil {
+				if signal, ok := trySignalToReturnSignal(err); ok {
+					return nil, signal, nil
+				}
 				return nil, nil, err
 			}
 			if !s.Partial {
@@ -1389,6 +1554,9 @@ func (in *Interpreter) evalMatchStmtValue(s *parser.MatchStmt, local *env, self 
 		if matchCase.Expr != nil {
 			value, err := in.evalExpr(matchCase.Expr, caseEnv)
 			if err != nil {
+				if signal, ok := trySignalToReturnSignal(err); ok {
+					return nil, signal, nil
+				}
 				return nil, nil, err
 			}
 			if !s.Partial {
@@ -1620,7 +1788,7 @@ func (in *Interpreter) evalExpr(expr parser.Expr, local *env) (Value, error) {
 				return nil, err
 			}
 			if signal != nil {
-				return nil, RuntimeError{Message: "unexpected control flow in if expression", Span: e.Span}
+				return nil, signalToExprError(signal, e.Span, "unexpected control flow in if expression")
 			}
 			return value, nil
 		}
@@ -1629,7 +1797,7 @@ func (in *Interpreter) evalExpr(expr parser.Expr, local *env) (Value, error) {
 			return nil, err
 		}
 		if signal != nil {
-			return nil, RuntimeError{Message: "unexpected control flow in if expression", Span: e.Span}
+			return nil, signalToExprError(signal, e.Span, "unexpected control flow in if expression")
 		}
 		return value, nil
 	case *parser.BlockExpr:
@@ -1638,7 +1806,7 @@ func (in *Interpreter) evalExpr(expr parser.Expr, local *env) (Value, error) {
 			return nil, err
 		}
 		if signal != nil {
-			return nil, RuntimeError{Message: "unexpected control flow in block expression", Span: e.Span}
+			return nil, signalToExprError(signal, e.Span, "unexpected control flow in block expression")
 		}
 		return value, nil
 	case *parser.MatchExpr:
@@ -1677,7 +1845,7 @@ func (in *Interpreter) evalExpr(expr parser.Expr, local *env) (Value, error) {
 					return nil, err
 				}
 				if signal != nil {
-					return nil, RuntimeError{Message: "unexpected control flow in match expression", Span: e.Span}
+					return nil, signalToExprError(signal, e.Span, "unexpected control flow in match expression")
 				}
 				if e.Partial {
 					return in.constructStdlibOption(value, true, local, e.Span)
@@ -1716,8 +1884,21 @@ func (in *Interpreter) evalExpr(expr parser.Expr, local *env) (Value, error) {
 		case nil, breakSignal:
 			return &nativeList{items: yielded}, nil
 		default:
-			return nil, RuntimeError{Message: "unexpected control flow in yield expression", Span: e.Span}
+			return nil, signalToExprError(signal, e.Span, "unexpected control flow in yield expression")
 		}
+	case *parser.TryExpr:
+		sourceValue, err := in.evalExpr(e.Value, local)
+		if err != nil {
+			return nil, err
+		}
+		ok, unwrapped, err := in.unwrappableBindingValue(sourceValue, local, exprSpan(e.Value))
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, trySignal{value: sourceValue}
+		}
+		return unwrapped, nil
 	case *parser.GroupExpr:
 		return in.evalExpr(e.Inner, local)
 	case *parser.UnaryExpr:

@@ -759,22 +759,25 @@ if value > 0 {
 }
 ```
 
-Option binding form:
+Pattern-test form:
 
 ```txt
-if item <- maybeValue {
+if let Some(item) = maybeValue {
     OS.println(item)
 }
 ```
 
-Destructuring also works in `if <-`:
+When the payload needs more destructuring, prefer doing that on the next line inside the branch:
 
 ```txt
-if x, y <- maybePair {
+if let Some(pair) = maybePair {
+    x, y = pair
     OS.println(x)
     OS.println(y)
 }
 ```
+
+Direct nested payload destructuring in the `if let` pattern itself is still a possible future extension.
 
 Expression form:
 
@@ -786,58 +789,45 @@ result = if value > 0 {
 }
 ```
 
-`if` uses brace-delimited branches only. `else` does not require `:`.
+Brace-delimited branches are the preferred `if` form. `else` does not require `:`.
 
-## `unwrap`
+## `let ... else` and `try`
 
-Single-binding unwrap:
+Preferred refutable binding form:
 
 ```txt
-unwrap item <- maybeValue else {
-    Err("missing")
+let Some(item) = maybeValue else {
+    return Err("missing")
 }
 ```
 
-Single-line fallback:
-
-```txt
-unwrap item <- maybeValue else Err("missing")
-```
+`let ... else` is statement-oriented:
+- the pattern is matched against the right-hand value
+- if the match succeeds, bindings remain visible after the statement
+- if the match fails, the `else` block is evaluated and implicitly returns from the current callable
 
 Propagation form:
 
 ```txt
-unwrap item <- maybeValue
+item = try maybeValue
 ```
 
-Multi-binding fallback:
+`try` unwraps the success side of:
+- `Option[T]`
+- `Result[T, E]`
+- `Either[L, R]`
+
+and returns early with the original failure value when the source is empty / error / left.
+
+Multiple dependent unwraps are written as sequential `let ... else` or `try` statements:
 
 ```txt
-unwrap {
-    left <- maybeLeft
-    right <- maybeRight
-} else {
-    Err("missing")
+left = try maybeLeft
+
+let Some(right) = maybeRight else {
+    return Err("missing")
 }
 ```
-
-Multi-binding unwrap propagation:
-
-```txt
-unwrap {
-    left <- maybeLeft
-    right <- maybeRight
-}
-```
-
-Rules:
-
-- `unwrap` is available on unwrap bindings
-- single-binding `unwrap item <- value`, `unwrap item <- value else { ... }`, and `unwrap item <- value else expr` are supported
-- block `unwrap { ... }` runs unwrap bindings in order and returns early on the first failure
-- block `unwrap { ... } else { ... }` runs unwrap bindings in order
-- if any unwrap binding fails, the fallback block is evaluated and its final value is implicitly returned from the current callable
-- successful bindings from the block form remain visible after the unwrap statement
 
 ## `for`
 
@@ -1110,7 +1100,7 @@ Newline continuation:
   - `<-`
 - Body-introducing forms are intentionally looser:
   - `def ... =` may start its body on the next line
-  - inline-body introducers such as `then`, `else`, `yield`, and `unwrap ... else` may take a same-line body without braces
+  - inline-body introducers such as `else` and `yield` may take a same-line body without braces
   - if that body moves to the next line, a `{ ... }` block is required
 - So this is invalid:
 

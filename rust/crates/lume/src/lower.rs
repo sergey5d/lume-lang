@@ -103,7 +103,11 @@ impl<'a> Lowerer<'a> {
                     }
                     let mut ty = ir::TypeDef::new(decl.kind, decl.name.clone());
                     ty.visibility = decl.visibility;
-                    ty.type_params = decl.type_params.iter().map(|param| param.name.clone()).collect();
+                    ty.type_params = decl
+                        .type_params
+                        .iter()
+                        .map(|param| param.name.clone())
+                        .collect();
                     ty.with_bounds = decl.with_bounds.iter().map(lower_type_ref).collect();
                     ty.span = Some(decl.span);
                     let id = self.program.add_type(ty);
@@ -113,7 +117,16 @@ impl<'a> Lowerer<'a> {
                     if self.function_ids.contains_key(&function.name) {
                         continue;
                     }
-                    let id = self.declare_function(&function.name, function.visibility, &function.type_params, function.return_type.as_ref(), ir::FunctionKind::TopLevel, &function.params, None, function.span);
+                    let id = self.declare_function(
+                        &function.name,
+                        function.visibility,
+                        &function.type_params,
+                        function.return_type.as_ref(),
+                        ir::FunctionKind::TopLevel,
+                        &function.params,
+                        None,
+                        function.span,
+                    );
                     self.function_ids.insert(function.name.clone(), id);
                     self.function_work.push(FunctionWork {
                         id,
@@ -127,7 +140,11 @@ impl<'a> Lowerer<'a> {
                         }
                         let mut global = ir::Global::new(
                             local.name.clone(),
-                            local.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown),
+                            local
+                                .ty
+                                .as_ref()
+                                .map(lower_type_ref)
+                                .unwrap_or(ir::Type::Unknown),
                         );
                         global.visibility = binding.visibility;
                         global.mutable = local.mutable;
@@ -168,7 +185,11 @@ impl<'a> Lowerer<'a> {
         for member in &decl.members {
             match member {
                 TypeMember::Field(field) => {
-                    let ty = field.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
+                    let ty = field
+                        .ty
+                        .as_ref()
+                        .map(lower_type_ref)
+                        .unwrap_or(ir::Type::Unknown);
                     fields.push(ir::Field {
                         visibility: field.visibility,
                         mutable: field.mutable,
@@ -183,17 +204,22 @@ impl<'a> Lowerer<'a> {
                     });
                 }
                 TypeMember::Method(method) => {
-                    let (id, this_local) = self.declare_method_function(type_id, &decl.name, method);
+                    let (id, this_local) =
+                        self.declare_method_function(type_id, &decl.name, method);
                     methods_to_attach.push(id);
-            self.method_work.push(MethodWork {
-                id,
-                decl: method.clone(),
-                fields: implicit_fields.clone(),
-                this_local,
-            });
+                    self.method_work.push(MethodWork {
+                        id,
+                        decl: method.clone(),
+                        fields: implicit_fields.clone(),
+                        this_local,
+                    });
                 }
                 TypeMember::Case(case) => {
-                    let field_names = case.fields.iter().map(|field| field.name.clone()).collect::<Vec<_>>();
+                    let field_names = case
+                        .fields
+                        .iter()
+                        .map(|field| field.name.clone())
+                        .collect::<Vec<_>>();
                     self.case_fields
                         .insert(format!("{}.{}", decl.name, case.name), field_names);
                     let case_fields = case
@@ -203,8 +229,14 @@ impl<'a> Lowerer<'a> {
                             visibility: field.visibility,
                             mutable: field.mutable,
                             name: field.name.clone(),
-                            ty: field.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown),
-                            initializer: lower_field_initializer_constant(field.initializer.as_ref()),
+                            ty: field
+                                .ty
+                                .as_ref()
+                                .map(lower_type_ref)
+                                .unwrap_or(ir::Type::Unknown),
+                            initializer: lower_field_initializer_constant(
+                                field.initializer.as_ref(),
+                            ),
                             span: Some(field.span),
                         })
                         .collect();
@@ -299,7 +331,11 @@ impl<'a> Lowerer<'a> {
         for param in params {
             function.add_param(
                 param.name.clone(),
-                param.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown),
+                param
+                    .ty
+                    .as_ref()
+                    .map(lower_type_ref)
+                    .unwrap_or(ir::Type::Unknown),
             );
         }
         self.program.add_function(function)
@@ -426,7 +462,8 @@ impl<'a> Lowerer<'a> {
     }
 
     fn add_error(&mut self, code: &'static str, message: impl Into<String>, span: Span) {
-        self.diagnostics.push(Diagnostic::error(code, message, span));
+        self.diagnostics
+            .push(Diagnostic::error(code, message, span));
     }
 }
 
@@ -664,11 +701,13 @@ impl<'a> FunctionLowerer<'a> {
         }
         match stmt {
             Stmt::Binding(binding) => {
-                let destructure_single_value = binding.bindings.len() > 1 && binding.values.len() == 1;
-                let source_value = destructure_single_value
-                    .then(|| self.lower_expr(&binding.values[0]));
-                let destructure_fields = destructure_single_value
-                    .then(|| self.destructure_field_names(&binding.values[0], binding.bindings.len()));
+                let destructure_single_value =
+                    binding.bindings.len() > 1 && binding.values.len() == 1;
+                let source_value =
+                    destructure_single_value.then(|| self.lower_expr(&binding.values[0]));
+                let destructure_fields = destructure_single_value.then(|| {
+                    self.destructure_field_names(&binding.values[0], binding.bindings.len())
+                });
                 for (index, local) in binding.bindings.iter().enumerate() {
                     if local.name == "_" {
                         if let Some(value) = if destructure_single_value {
@@ -697,9 +736,17 @@ impl<'a> FunctionLowerer<'a> {
                         }
                         continue;
                     }
-                    let ty = local.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
-                    let local_id =
-                        self.add_local(local.name.clone(), ty, local.mutable, ir::LocalKind::Binding);
+                    let ty = local
+                        .ty
+                        .as_ref()
+                        .map(lower_type_ref)
+                        .unwrap_or(ir::Type::Unknown);
+                    let local_id = self.add_local(
+                        local.name.clone(),
+                        ty,
+                        local.mutable,
+                        ir::LocalKind::Binding,
+                    );
                     self.current_scope().insert(local.name.clone(), local_id);
                     if let Some(value) = if destructure_single_value {
                         source_value.clone().map(|base| {
@@ -729,7 +776,9 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             Stmt::Assignment(assignment) => {
-                for (target_expr, value_expr) in assignment.targets.iter().zip(assignment.values.iter()) {
+                for (target_expr, value_expr) in
+                    assignment.targets.iter().zip(assignment.values.iter())
+                {
                     let Some(target) = self.lower_place(target_expr) else {
                         continue;
                     };
@@ -756,6 +805,7 @@ impl<'a> FunctionLowerer<'a> {
                     });
                 }
             }
+            Stmt::LetElse(stmt) => self.lower_let_else_stmt(stmt),
             Stmt::If(stmt) => self.lower_if_stmt(stmt),
             Stmt::While(stmt) => self.lower_while_stmt(stmt),
             Stmt::For(stmt) => self.lower_for_stmt(stmt),
@@ -798,7 +848,8 @@ impl<'a> FunctionLowerer<'a> {
                 .params
                 .iter()
                 .map(|param| {
-                    param.ty
+                    param
+                        .ty
                         .as_ref()
                         .map(lower_type_ref)
                         .unwrap_or(ir::Type::Unknown)
@@ -841,7 +892,8 @@ impl<'a> FunctionLowerer<'a> {
         for param in &function.params {
             nested.add_param(
                 param.name.clone(),
-                param.ty
+                param
+                    .ty
                     .as_ref()
                     .map(lower_type_ref)
                     .unwrap_or(ir::Type::Unknown),
@@ -882,14 +934,19 @@ impl<'a> FunctionLowerer<'a> {
         body: &ast::LambdaBody,
         span: Span,
     ) -> ir::RValue {
-        let nested_name = format!("lambda${}${}", self.function_id.0, self.function().blocks.len());
+        let nested_name = format!(
+            "lambda${}${}",
+            self.function_id.0,
+            self.function().blocks.len()
+        );
         let mut nested =
             ir::Function::new(nested_name, ir::FunctionKind::Lambda, ir::Type::Unknown);
         nested.span = Some(span);
         for param in params {
             nested.add_param(
                 param.name.clone(),
-                param.ty
+                param
+                    .ty
                     .as_ref()
                     .map(lower_type_ref)
                     .unwrap_or(ir::Type::Unknown),
@@ -972,7 +1029,8 @@ impl<'a> FunctionLowerer<'a> {
         for param in params {
             nested.add_param(
                 param.name.clone(),
-                param.ty
+                param
+                    .ty
                     .as_ref()
                     .map(lower_type_ref)
                     .unwrap_or(ir::Type::Unknown),
@@ -1022,7 +1080,8 @@ impl<'a> FunctionLowerer<'a> {
                         .params
                         .iter()
                         .map(|param| {
-                            param.ty
+                            param
+                                .ty
                                 .as_ref()
                                 .map(lower_type_ref)
                                 .unwrap_or(ir::Type::Unknown)
@@ -1053,7 +1112,10 @@ impl<'a> FunctionLowerer<'a> {
         ir::RValue::Record(fields)
     }
 
-    fn visible_capture_sources(&self, excluded_name: Option<&str>) -> HashMap<String, CaptureSource> {
+    fn visible_capture_sources(
+        &self,
+        excluded_name: Option<&str>,
+    ) -> HashMap<String, CaptureSource> {
         let mut sources = HashMap::new();
         for scope in &self.scopes {
             for (name, local) in scope {
@@ -1076,20 +1138,26 @@ impl<'a> FunctionLowerer<'a> {
             }
         }
         if let Some(this_local) = self.this_local {
-            sources.entry("this".to_string()).or_insert_with(|| CaptureSource {
-                operand: ir::Operand::Copy(Box::new(ir::Place::Local(this_local))),
-                ty: self
-                    .function()
-                    .locals
-                    .get(this_local.0)
-                    .map(|local| local.ty.clone())
-                    .unwrap_or(ir::Type::Unknown),
-            });
+            sources
+                .entry("this".to_string())
+                .or_insert_with(|| CaptureSource {
+                    operand: ir::Operand::Copy(Box::new(ir::Place::Local(this_local))),
+                    ty: self
+                        .function()
+                        .locals
+                        .get(this_local.0)
+                        .map(|local| local.ty.clone())
+                        .unwrap_or(ir::Type::Unknown),
+                });
         }
         sources
     }
 
     fn lower_if_stmt(&mut self, stmt: &ast::IfStmt) {
+        if let (Some(pattern), Some(value)) = (&stmt.pattern, &stmt.pattern_value) {
+            self.lower_if_pattern_stmt(stmt, pattern, value);
+            return;
+        }
         if let Some(value) = &stmt.binding_value {
             self.lower_if_unwrap_stmt(stmt, value);
             return;
@@ -1130,6 +1198,76 @@ impl<'a> FunctionLowerer<'a> {
 
         let join_used = self.block_has_predecessor(join_block);
         self.current_block = if join_used { Some(join_block) } else { None };
+    }
+
+    fn lower_if_pattern_stmt(&mut self, stmt: &ast::IfStmt, pattern: &Pattern, value: &Expr) {
+        let scrutinee = self.lower_expr(value);
+        let plan = self.lower_pattern_plan(scrutinee, pattern);
+        let then_block = self.add_block();
+        let else_block = self.add_block();
+        let join_block = self.add_block();
+
+        self.terminate(ir::Terminator {
+            span: Some(stmt.span),
+            kind: ir::TerminatorKind::Branch {
+                condition: plan.condition,
+                then_block,
+                else_block,
+            },
+        });
+
+        self.current_block = Some(then_block);
+        self.push_scope();
+        self.apply_pending_bindings(plan.bindings);
+        self.lower_block_statements(&stmt.then_block);
+        self.pop_scope();
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        self.current_block = Some(else_block);
+        if let Some(branch) = &stmt.else_branch {
+            self.lower_else_branch(branch);
+        }
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        let join_used = self.block_has_predecessor(join_block);
+        self.current_block = if join_used { Some(join_block) } else { None };
+    }
+
+    fn lower_let_else_stmt(&mut self, stmt: &ast::LetElseStmt) {
+        let scrutinee = self.lower_expr(&stmt.value);
+        let plan = self.lower_pattern_plan(scrutinee, &stmt.pattern);
+        let success_block = self.add_block();
+        let failure_block = self.add_block();
+        let continue_block = self.add_block();
+
+        self.terminate(ir::Terminator {
+            span: Some(stmt.span),
+            kind: ir::TerminatorKind::Branch {
+                condition: plan.condition,
+                then_block: success_block,
+                else_block: failure_block,
+            },
+        });
+
+        self.current_block = Some(success_block);
+        self.apply_pending_bindings(plan.bindings);
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(continue_block));
+        }
+
+        self.current_block = Some(failure_block);
+        let value = self
+            .lower_block_value(&stmt.else_block)
+            .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::ret(Some(value)));
+        }
+
+        self.current_block = Some(continue_block);
     }
 
     fn lower_if_unwrap_stmt(&mut self, stmt: &ast::IfStmt, value: &Expr) {
@@ -1261,7 +1399,11 @@ impl<'a> FunctionLowerer<'a> {
             self.current_block = Some(exit_block);
             return;
         }
-        self.lower_for_bindings(&stmt.bindings, &|this| this.lower_block_statements(&stmt.body), stmt.span);
+        self.lower_for_bindings(
+            &stmt.bindings,
+            &|this| this.lower_block_statements(&stmt.body),
+            stmt.span,
+        );
     }
 
     fn lower_for_yield_expr(
@@ -1312,7 +1454,9 @@ impl<'a> FunctionLowerer<'a> {
         self.lower_for_bindings(
             bindings,
             &|this| {
-                let yielded = this.lower_block_value(yield_body).unwrap_or(ir::Operand::Const(ir::Constant::Unit));
+                let yielded = this
+                    .lower_block_value(yield_body)
+                    .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
                 this.push_statement(ir::Statement {
                     span: Some(span),
                     kind: ir::StatementKind::Assign {
@@ -1350,9 +1494,17 @@ impl<'a> FunctionLowerer<'a> {
                 if binding.name == "_" {
                     continue;
                 }
-                let ty = binding.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
-                let local_id =
-                    self.add_local(binding.name.clone(), ty, binding.mutable, ir::LocalKind::Binding);
+                let ty = binding
+                    .ty
+                    .as_ref()
+                    .map(lower_type_ref)
+                    .unwrap_or(ir::Type::Unknown);
+                let local_id = self.add_local(
+                    binding.name.clone(),
+                    ty,
+                    binding.mutable,
+                    ir::LocalKind::Binding,
+                );
                 self.current_scope().insert(binding.name.clone(), local_id);
                 if let Some(value) = first.values.get(index) {
                     let operand = self.lower_expr(value);
@@ -1459,9 +1611,17 @@ impl<'a> FunctionLowerer<'a> {
         if binding.name == "_" {
             return;
         }
-        let ty = binding.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
-        let local_id =
-            self.add_local(binding.name.clone(), ty, binding.mutable, ir::LocalKind::Binding);
+        let ty = binding
+            .ty
+            .as_ref()
+            .map(lower_type_ref)
+            .unwrap_or(ir::Type::Unknown);
+        let local_id = self.add_local(
+            binding.name.clone(),
+            ty,
+            binding.mutable,
+            ir::LocalKind::Binding,
+        );
         self.current_scope().insert(binding.name.clone(), local_id);
         self.push_statement(ir::Statement {
             span: Some(binding.span),
@@ -1622,7 +1782,11 @@ impl<'a> FunctionLowerer<'a> {
         if binding.name == "_" {
             return;
         }
-        let ty = binding.ty.as_ref().map(lower_type_ref).unwrap_or(ir::Type::Unknown);
+        let ty = binding
+            .ty
+            .as_ref()
+            .map(lower_type_ref)
+            .unwrap_or(ir::Type::Unknown);
         let local_id = self.add_local(binding.name.clone(), ty, false, ir::LocalKind::Binding);
         self.current_scope().insert(binding.name.clone(), local_id);
         self.push_statement(ir::Statement {
@@ -1888,7 +2052,10 @@ impl<'a> FunctionLowerer<'a> {
                 } else {
                     Vec::new()
                 };
-                PatternPlan { condition, bindings }
+                PatternPlan {
+                    condition,
+                    bindings,
+                }
             }
             Pattern::Tuple { elements, span } => {
                 let mut conditions = Vec::new();
@@ -1921,22 +2088,26 @@ impl<'a> FunctionLowerer<'a> {
                     return PatternPlan::always_false();
                 };
                 let base_condition = match &kind {
-                    ConstructorPatternKind::EnumCase { case_name, .. } => self.emit_temp_from_rvalue(
-                        ir::RValue::Call {
-                            callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantIs(case_name.clone())),
-                            args: vec![scrutinee.clone()],
-                        },
-                        ir::Type::Bool,
-                        Some(*span),
-                    ),
-                    ConstructorPatternKind::TypeDestructure { ty, .. } => self.emit_temp_from_rvalue(
-                        ir::RValue::TypeTest {
-                            operand: scrutinee.clone(),
-                            ty: ty.clone(),
-                        },
-                        ir::Type::Bool,
-                        Some(*span),
-                    ),
+                    ConstructorPatternKind::EnumCase { case_name, .. } => self
+                        .emit_temp_from_rvalue(
+                            ir::RValue::Call {
+                                callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantIs(
+                                    case_name.clone(),
+                                )),
+                                args: vec![scrutinee.clone()],
+                            },
+                            ir::Type::Bool,
+                            Some(*span),
+                        ),
+                    ConstructorPatternKind::TypeDestructure { ty, .. } => self
+                        .emit_temp_from_rvalue(
+                            ir::RValue::TypeTest {
+                                operand: scrutinee.clone(),
+                                ty: ty.clone(),
+                            },
+                            ir::Type::Bool,
+                            Some(*span),
+                        ),
                 };
                 let mut conditions = vec![base_condition];
                 let mut bindings = Vec::new();
@@ -2002,7 +2173,10 @@ impl<'a> FunctionLowerer<'a> {
                     return Some(Vec::new());
                 }
             }
-            if matches!(case_name.as_str(), "None" | "Some" | "Ok" | "Err" | "Left" | "Right") {
+            if matches!(
+                case_name.as_str(),
+                "None" | "Some" | "Ok" | "Err" | "Left" | "Right"
+            ) {
                 return Some(Vec::new());
             }
         }
@@ -2056,15 +2230,11 @@ impl<'a> FunctionLowerer<'a> {
             [_, name] => name,
             _ => return None,
         };
-        let ty = self
-            .program
-            .types
-            .iter()
-            .find(|ty| {
-                ty.name == *type_name
-                    && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
-                    && ty.fields.len() == arity
-            })?;
+        let ty = self.program.types.iter().find(|ty| {
+            ty.name == *type_name
+                && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+                && ty.fields.len() == arity
+        })?;
         Some((
             ir::Type::named(type_name.clone()),
             ty.fields.iter().map(|field| field.name.clone()).collect(),
@@ -2073,8 +2243,12 @@ impl<'a> FunctionLowerer<'a> {
 
     fn apply_pending_bindings(&mut self, bindings: Vec<PendingBinding>) {
         for binding in bindings {
-            let local_id =
-                self.add_local(binding.name.clone(), binding.ty, false, ir::LocalKind::Binding);
+            let local_id = self.add_local(
+                binding.name.clone(),
+                binding.ty,
+                false,
+                ir::LocalKind::Binding,
+            );
             self.current_scope().insert(binding.name.clone(), local_id);
             let value = match binding.source {
                 PendingBindingSource::Operand(value) => ir::RValue::Use(value),
@@ -2188,6 +2362,7 @@ impl<'a> FunctionLowerer<'a> {
                 else_branch,
                 span,
             } => self.lower_if_expr(condition, then_block, else_branch, *span),
+            Expr::Try { value, span } => self.lower_try_expr(value, *span),
             Expr::Block { body, .. } => self.lower_block_expr(body),
             Expr::Match {
                 partial,
@@ -2236,6 +2411,69 @@ impl<'a> FunctionLowerer<'a> {
             },
         });
         ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
+    }
+
+    fn lower_try_expr(&mut self, value: &Expr, span: Span) -> ir::Operand {
+        let source = self.lower_expr(value);
+        let source_local = self.add_temp(ir::Type::Unknown);
+        self.push_statement(ir::Statement {
+            span: Some(value.span()),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(source_local),
+                value: ir::RValue::Use(source),
+            },
+        });
+
+        let success_block = self.add_block();
+        let failure_block = self.add_block();
+        let join_block = self.add_block();
+        let result = self.add_temp(ir::Type::Unknown);
+
+        let present = self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapPresent),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+            },
+            ir::Type::Bool,
+            Some(span),
+        );
+        self.terminate(ir::Terminator {
+            span: Some(span),
+            kind: ir::TerminatorKind::Branch {
+                condition: present,
+                then_block: success_block,
+                else_block: failure_block,
+            },
+        });
+
+        self.current_block = Some(success_block);
+        let inner = self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapValue),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+            },
+            ir::Type::Unknown,
+            Some(span),
+        );
+        self.push_statement(ir::Statement {
+            span: Some(span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(result),
+                value: ir::RValue::Use(inner),
+            },
+        });
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        self.current_block = Some(failure_block);
+        self.terminate(ir::Terminator::ret(Some(ir::Operand::Copy(Box::new(
+            ir::Place::Local(source_local),
+        )))));
+
+        let join_used = self.block_has_predecessor(join_block);
+        self.current_block = if join_used { Some(join_block) } else { None };
+        ir::Operand::Copy(Box::new(ir::Place::Local(result)))
     }
 
     fn lower_logical_expr(
@@ -2400,10 +2638,7 @@ impl<'a> FunctionLowerer<'a> {
                 operand: self.lower_expr(expr),
             }),
             Expr::Binary {
-                left,
-                op,
-                right,
-                ..
+                left, op, right, ..
             } => Some(self.lower_binary_rvalue(left, *op, right)),
             Expr::Call { callee, args, .. } => Some(ir::RValue::Call {
                 callee: self.lower_callee(callee),
@@ -2417,7 +2652,9 @@ impl<'a> FunctionLowerer<'a> {
                 base: self.lower_expr(receiver),
                 name: name.clone(),
             }),
-            Expr::Index { receiver, index, .. } => Some(ir::RValue::Index {
+            Expr::Index {
+                receiver, index, ..
+            } => Some(ir::RValue::Index {
                 base: self.lower_expr(receiver),
                 index: self.lower_expr(index),
             }),
@@ -2425,14 +2662,14 @@ impl<'a> FunctionLowerer<'a> {
                 operand: self.lower_expr(left),
                 ty: lower_type_ref(target),
             }),
-            Expr::Lambda { params, body, span } => Some(self.lower_lambda_rvalue(params, body, *span)),
+            Expr::Lambda { params, body, span } => {
+                Some(self.lower_lambda_rvalue(params, body, *span))
+            }
             Expr::AnonymousInterface { methods, .. } => {
                 Some(self.lower_anonymous_interface_rvalue(methods))
             }
             Expr::RecordUpdate {
-                receiver,
-                updates,
-                ..
+                receiver, updates, ..
             } => Some(ir::RValue::RecordUpdate {
                 base: self.lower_expr(receiver),
                 updates: updates
@@ -2448,12 +2685,7 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn lower_binary_rvalue(
-        &mut self,
-        left: &Expr,
-        op: AstBinaryOp,
-        right: &Expr,
-    ) -> ir::RValue {
+    fn lower_binary_rvalue(&mut self, left: &Expr, op: AstBinaryOp, right: &Expr) -> ir::RValue {
         match op {
             AstBinaryOp::Colon => {
                 ir::RValue::Tuple(vec![self.lower_expr(left), self.lower_expr(right)])
@@ -2543,23 +2775,20 @@ impl<'a> FunctionLowerer<'a> {
             .unwrap_or_else(|| args.iter().collect())
     }
 
-    fn call_param_names(
-        &self,
-        callee: &Expr,
-        args: &[ast::CallArg],
-    ) -> Option<Vec<String>> {
+    fn call_param_names(&self, callee: &Expr, args: &[ast::CallArg]) -> Option<Vec<String>> {
         if let Some(path) = expr_path(callee) {
             if path.len() == 1 {
                 let name = &path[0];
                 if let Some(id) = self.functions.get(name).copied() {
                     return self.function_param_names(id);
                 }
-                if let Some(type_def) = self
-                    .program
-                    .types
-                    .iter()
-                    .find(|ty| ty.name == *name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record | ast::TypeKind::Object))
-                {
+                if let Some(type_def) = self.program.types.iter().find(|ty| {
+                    ty.name == *name
+                        && matches!(
+                            ty.kind,
+                            ast::TypeKind::Class | ast::TypeKind::Record | ast::TypeKind::Object
+                        )
+                }) {
                     if let Some(params) = self.constructor_param_names(type_def, args) {
                         return Some(params);
                     }
@@ -2567,7 +2796,9 @@ impl<'a> FunctionLowerer<'a> {
                 for ty in &self.program.types {
                     if ty.kind == ast::TypeKind::Enum {
                         if let Some(case) = ty.enum_cases.iter().find(|case| case.name == *name) {
-                            return Some(case.fields.iter().map(|field| field.name.clone()).collect());
+                            return Some(
+                                case.fields.iter().map(|field| field.name.clone()).collect(),
+                            );
                         }
                     }
                 }
@@ -2576,8 +2807,12 @@ impl<'a> FunctionLowerer<'a> {
                 let member = &path[1];
                 if let Some(type_def) = self.program.types.iter().find(|ty| ty.name == *owner) {
                     if type_def.kind == ast::TypeKind::Enum {
-                        if let Some(case) = type_def.enum_cases.iter().find(|case| case.name == *member) {
-                            return Some(case.fields.iter().map(|field| field.name.clone()).collect());
+                        if let Some(case) =
+                            type_def.enum_cases.iter().find(|case| case.name == *member)
+                        {
+                            return Some(
+                                case.fields.iter().map(|field| field.name.clone()).collect(),
+                            );
                         }
                     }
                     if let Some(params) = self.method_param_names(member, args, Some(owner)) {
@@ -2654,7 +2889,10 @@ impl<'a> FunctionLowerer<'a> {
         match expr {
             Expr::Identifier { name, span } => self.lookup_place(name).or_else(|| {
                 self.invariant(
-                    format!("assignment target '{}' should resolve before lowering", name),
+                    format!(
+                        "assignment target '{}' should resolve before lowering",
+                        name
+                    ),
                     *span,
                 );
                 None
@@ -2663,13 +2901,18 @@ impl<'a> FunctionLowerer<'a> {
                 base: Box::new(self.lower_expr(receiver)),
                 name: name.clone(),
             }),
-            Expr::Index { receiver, index, .. } => Some(ir::Place::Index {
+            Expr::Index {
+                receiver, index, ..
+            } => Some(ir::Place::Index {
                 base: Box::new(self.lower_expr(receiver)),
                 index: Box::new(self.lower_expr(index)),
             }),
             Expr::Group { inner, .. } => self.lower_place(inner),
             _ => {
-                self.invariant("assignment target should be validated before lowering", expr.span());
+                self.invariant(
+                    "assignment target should be validated before lowering",
+                    expr.span(),
+                );
                 None
             }
         }
@@ -2744,18 +2987,21 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn block_has_predecessor(&self, target: ir::BlockId) -> bool {
-        self.function().blocks.iter().any(|block| match &block.terminator.kind {
-            ir::TerminatorKind::Goto(dest) => *dest == target,
-            ir::TerminatorKind::Branch {
-                then_block,
-                else_block,
-                ..
-            } => *then_block == target || *else_block == target,
-            ir::TerminatorKind::Switch { arms, default, .. } => {
-                *default == target || arms.iter().any(|arm| arm.target == target)
-            }
-            _ => false,
-        })
+        self.function()
+            .blocks
+            .iter()
+            .any(|block| match &block.terminator.kind {
+                ir::TerminatorKind::Goto(dest) => *dest == target,
+                ir::TerminatorKind::Branch {
+                    then_block,
+                    else_block,
+                    ..
+                } => *then_block == target || *else_block == target,
+                ir::TerminatorKind::Switch { arms, default, .. } => {
+                    *default == target || arms.iter().any(|arm| arm.target == target)
+                }
+                _ => false,
+            })
     }
 
     fn current_scope(&mut self) -> &mut HashMap<String, ir::LocalId> {
@@ -2786,7 +3032,8 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn add_error(&mut self, code: &'static str, message: impl Into<String>, span: Span) {
-        self.diagnostics.push(Diagnostic::error(code, message, span));
+        self.diagnostics
+            .push(Diagnostic::error(code, message, span));
     }
 }
 
@@ -2843,9 +3090,12 @@ fn lower_type_ref(reference: &TypeRef) -> ir::Type {
             name: name.clone(),
             args: args.iter().map(lower_type_ref).collect(),
         },
-        TypeRef::Tuple { fields, .. } => {
-            ir::Type::Tuple(fields.iter().map(|field| lower_type_ref(&field.ty)).collect())
-        }
+        TypeRef::Tuple { fields, .. } => ir::Type::Tuple(
+            fields
+                .iter()
+                .map(|field| lower_type_ref(&field.ty))
+                .collect(),
+        ),
         TypeRef::Record { fields, .. } => ir::Type::Record(
             fields
                 .iter()
@@ -2908,7 +3158,8 @@ fn is_named_runtime_value_path(program: &ir::Program, path: &[String]) -> bool {
     }
 
     path.len() == 1
-        && (builtin_zero_arg_value_name(&path[0]) || unique_bare_enum_case_value_exists(program, &path[0]))
+        && (builtin_zero_arg_value_name(&path[0])
+            || unique_bare_enum_case_value_exists(program, &path[0]))
 }
 
 fn is_named_runtime_callee_path(program: &ir::Program, path: &[String]) -> bool {
@@ -2933,7 +3184,17 @@ fn declared_type_exists(program: &ir::Program, name: &str) -> bool {
 fn builtin_callable_root_name(name: &str) -> bool {
     matches!(
         name,
-        "OS" | "Range" | "List" | "Array" | "Set" | "Map" | "Some" | "None" | "Ok" | "Err" | "Left" | "Right"
+        "OS" | "Range"
+            | "List"
+            | "Array"
+            | "Set"
+            | "Map"
+            | "Some"
+            | "None"
+            | "Ok"
+            | "Err"
+            | "Left"
+            | "Right"
     )
 }
 
@@ -2957,7 +3218,11 @@ fn explicit_enum_case_exists(program: &ir::Program, type_name: &str, case_name: 
         .any(|case| case.name == case_name)
 }
 
-fn explicit_enum_case_value_exists(program: &ir::Program, type_name: &str, case_name: &str) -> bool {
+fn explicit_enum_case_value_exists(
+    program: &ir::Program,
+    type_name: &str,
+    case_name: &str,
+) -> bool {
     program
         .types
         .iter()
@@ -3003,17 +3268,23 @@ fn contains_placeholder_expr(expr: &Expr) -> bool {
                 || args.iter().any(|arg| contains_placeholder_expr(&arg.value))
         }
         Expr::Member { receiver, .. } => contains_placeholder_expr(receiver),
-        Expr::Index { receiver, index, .. } => {
-            contains_placeholder_expr(receiver) || contains_placeholder_expr(index)
-        }
-        Expr::RecordUpdate { receiver, updates, .. } => {
+        Expr::Index {
+            receiver, index, ..
+        } => contains_placeholder_expr(receiver) || contains_placeholder_expr(index),
+        Expr::RecordUpdate {
+            receiver, updates, ..
+        } => {
             contains_placeholder_expr(receiver)
-                || updates.iter().any(|update| contains_placeholder_expr(&update.value))
+                || updates
+                    .iter()
+                    .any(|update| contains_placeholder_expr(&update.value))
         }
-        Expr::RecordLiteral { fields, .. } => fields.iter().any(|field| contains_placeholder_expr(&field.value)),
-        Expr::AnonymousInterface { methods, .. } => methods.iter().any(|method| {
-            body_contains_placeholder(&method.body)
-        }),
+        Expr::RecordLiteral { fields, .. } => fields
+            .iter()
+            .any(|field| contains_placeholder_expr(&field.value)),
+        Expr::AnonymousInterface { methods, .. } => methods
+            .iter()
+            .any(|method| body_contains_placeholder(&method.body)),
         Expr::Unary { expr, .. } => contains_placeholder_expr(expr),
         Expr::Binary { left, right, .. } => {
             contains_placeholder_expr(left) || contains_placeholder_expr(right)
@@ -3053,6 +3324,7 @@ fn contains_placeholder_expr(expr: &Expr) -> bool {
                     || binding.values.iter().any(contains_placeholder_expr)
             }) || block_contains_placeholder(yield_body)
         }
+        Expr::Try { value, .. } => contains_placeholder_expr(value),
         Expr::Lambda { .. } => false,
         Expr::Group { inner, .. } => contains_placeholder_expr(inner),
         Expr::Identifier { .. }
@@ -3069,7 +3341,11 @@ fn lower_if_stmt_else_expr(branch: &ElseBranch) -> Option<ElseExprBranch> {
         ElseBranch::Block(block) => Some(ElseExprBranch::Block(block.clone())),
         ElseBranch::If(stmt) => {
             let condition = stmt.condition.clone()?;
-            if !stmt.bindings.is_empty() || stmt.binding_value.is_some() {
+            if stmt.pattern.is_some()
+                || stmt.pattern_value.is_some()
+                || !stmt.bindings.is_empty()
+                || stmt.binding_value.is_some()
+            {
                 return None;
             }
             let else_branch = lower_if_stmt_else_expr(stmt.else_branch.as_ref()?)?;
@@ -3200,7 +3476,11 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
                 .collect(),
             span: *span,
         },
-        Expr::RecordLiteral { fields, values, span } => Expr::RecordLiteral {
+        Expr::RecordLiteral {
+            fields,
+            values,
+            span,
+        } => Expr::RecordLiteral {
             fields: fields
                 .iter()
                 .map(|field| ast::CallArg {
@@ -3230,7 +3510,10 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
                     type_params: method.type_params.clone(),
                     params: method.params.clone(),
                     return_type: method.return_type.clone(),
-                    body: method.body.as_ref().map(|body| rewrite_callable_body(body, name)),
+                    body: method
+                        .body
+                        .as_ref()
+                        .map(|body| rewrite_callable_body(body, name)),
                     span: method.span,
                 })
                 .collect(),
@@ -3289,12 +3572,17 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
                 .iter()
                 .map(|case| ast::MatchCase {
                     pattern: case.pattern.clone(),
-                    guard: case.guard.as_ref().map(|guard| rewrite_placeholder_expr(guard, name)),
+                    guard: case
+                        .guard
+                        .as_ref()
+                        .map(|guard| rewrite_placeholder_expr(guard, name)),
                     body: match &case.body {
                         MatchCaseBody::Expr(expr) => {
                             MatchCaseBody::Expr(rewrite_placeholder_expr(expr, name))
                         }
-                        MatchCaseBody::Block(block) => MatchCaseBody::Block(rewrite_block(block, name)),
+                        MatchCaseBody::Block(block) => {
+                            MatchCaseBody::Block(rewrite_block(block, name))
+                        }
                     },
                     span: case.span,
                 })
@@ -3323,6 +3611,10 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
                 })
                 .collect(),
             yield_body: rewrite_block(yield_body, name),
+            span: *span,
+        },
+        Expr::Try { value, span } => Expr::Try {
+            value: Box::new(rewrite_placeholder_expr(value, name)),
             span: *span,
         },
         Expr::Lambda { .. } => expr.clone(),
@@ -3388,6 +3680,11 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
                 .condition
                 .as_ref()
                 .map(|condition| rewrite_placeholder_expr(condition, name)),
+            pattern: stmt.pattern.clone(),
+            pattern_value: stmt
+                .pattern_value
+                .as_ref()
+                .map(|value| rewrite_placeholder_expr(value, name)),
             bindings: stmt.bindings.clone(),
             binding_value: stmt
                 .binding_value
@@ -3395,12 +3692,20 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
                 .map(|value| rewrite_placeholder_expr(value, name)),
             then_block: rewrite_block(&stmt.then_block, name),
             else_branch: stmt.else_branch.as_ref().map(|branch| match branch {
-                ElseBranch::If(stmt) => ElseBranch::If(Box::new(match rewrite_stmt(&Stmt::If((**stmt).clone()), name) {
-                    Stmt::If(stmt) => stmt,
-                    _ => unreachable!(),
-                })),
+                ElseBranch::If(stmt) => ElseBranch::If(Box::new(
+                    match rewrite_stmt(&Stmt::If((**stmt).clone()), name) {
+                        Stmt::If(stmt) => stmt,
+                        _ => unreachable!(),
+                    },
+                )),
                 ElseBranch::Block(block) => ElseBranch::Block(rewrite_block(block, name)),
             }),
+            span: stmt.span,
+        }),
+        Stmt::LetElse(stmt) => Stmt::LetElse(ast::LetElseStmt {
+            pattern: stmt.pattern.clone(),
+            value: rewrite_placeholder_expr(&stmt.value, name),
+            else_block: rewrite_block(&stmt.else_block, name),
             span: stmt.span,
         }),
         Stmt::Match(stmt) => Stmt::Match(ast::MatchStmt {
@@ -3450,7 +3755,10 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
         Stmt::Unwrap(stmt) => Stmt::Unwrap(ast::UnwrapStmt {
             bindings: stmt.bindings.clone(),
             value: rewrite_placeholder_expr(&stmt.value, name),
-            else_block: stmt.else_block.as_ref().map(|block| rewrite_block(block, name)),
+            else_block: stmt
+                .else_block
+                .as_ref()
+                .map(|block| rewrite_block(block, name)),
             span: stmt.span,
         }),
         Stmt::UnwrapBlock(stmt) => Stmt::UnwrapBlock(ast::UnwrapBlockStmt {
@@ -3460,11 +3768,17 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
                 .map(|clause| ast::UnwrapStmt {
                     bindings: clause.bindings.clone(),
                     value: rewrite_placeholder_expr(&clause.value, name),
-                    else_block: clause.else_block.as_ref().map(|block| rewrite_block(block, name)),
+                    else_block: clause
+                        .else_block
+                        .as_ref()
+                        .map(|block| rewrite_block(block, name)),
                     span: clause.span,
                 })
                 .collect(),
-            else_block: stmt.else_block.as_ref().map(|block| rewrite_block(block, name)),
+            else_block: stmt
+                .else_block
+                .as_ref()
+                .map(|block| rewrite_block(block, name)),
             span: stmt.span,
         }),
         Stmt::LocalFunction(function) => Stmt::LocalFunction(ast::FunctionDecl {
@@ -3490,7 +3804,9 @@ fn rewrite_match_cases(cases: &[ast::MatchCase], name: &str) -> Vec<ast::MatchCa
                 .as_ref()
                 .map(|guard| rewrite_placeholder_expr(guard, name)),
             body: match &case.body {
-                MatchCaseBody::Expr(expr) => MatchCaseBody::Expr(rewrite_placeholder_expr(expr, name)),
+                MatchCaseBody::Expr(expr) => {
+                    MatchCaseBody::Expr(rewrite_placeholder_expr(expr, name))
+                }
                 MatchCaseBody::Block(block) => MatchCaseBody::Block(rewrite_block(block, name)),
             },
             span: case.span,
@@ -3521,14 +3837,26 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
                 .as_ref()
                 .is_some_and(contains_placeholder_expr)
                 || stmt
+                    .pattern_value
+                    .as_ref()
+                    .is_some_and(contains_placeholder_expr)
+                || stmt
                     .binding_value
                     .as_ref()
                     .is_some_and(contains_placeholder_expr)
                 || block_contains_placeholder(&stmt.then_block)
-                || stmt.else_branch.as_ref().is_some_and(|branch| match branch {
-                    ElseBranch::If(stmt) => stmt_contains_placeholder(&Stmt::If((**stmt).clone())),
-                    ElseBranch::Block(block) => block_contains_placeholder(block),
-                })
+                || stmt
+                    .else_branch
+                    .as_ref()
+                    .is_some_and(|branch| match branch {
+                        ElseBranch::If(stmt) => {
+                            stmt_contains_placeholder(&Stmt::If((**stmt).clone()))
+                        }
+                        ElseBranch::Block(block) => block_contains_placeholder(block),
+                    })
+        }
+        Stmt::LetElse(stmt) => {
+            contains_placeholder_expr(&stmt.value) || block_contains_placeholder(&stmt.else_block)
         }
         Stmt::Match(stmt) => {
             contains_placeholder_expr(&stmt.value)
@@ -3549,10 +3877,7 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
                     || binding.values.iter().any(contains_placeholder_expr)
             }) || block_contains_placeholder(&stmt.body)
         }
-        Stmt::Return(stmt) => stmt
-            .value
-            .as_ref()
-            .is_some_and(contains_placeholder_expr),
+        Stmt::Return(stmt) => stmt.value.as_ref().is_some_and(contains_placeholder_expr),
         Stmt::Break(_) => false,
         Stmt::Expr(stmt) => contains_placeholder_expr(&stmt.expr),
         Stmt::Unwrap(stmt) => {
@@ -3574,7 +3899,6 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
         Stmt::LocalFunction(function) => body_contains_placeholder(&Some(function.body.clone())),
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -3638,10 +3962,11 @@ mod tests {
         let ir = lowered.program.expect("ir program");
         let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
         assert!(main.blocks.len() >= 6, "{:#?}", main.blocks);
-        assert!(main.blocks.iter().any(|block| matches!(
-            block.terminator.kind,
-            ir::TerminatorKind::Branch { .. }
-        )));
+        assert!(
+            main.blocks
+                .iter()
+                .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. }))
+        );
     }
 
     #[test]
@@ -3692,33 +4017,38 @@ mod tests {
         let ir = lowered.program.expect("ir program");
         let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
         assert!(main.blocks.len() >= 8, "{:#?}", main.blocks);
-        assert!(main.blocks.iter().any(|block| matches!(
-            block.terminator.kind,
-            ir::TerminatorKind::Branch { .. }
-        )));
+        assert!(
+            main.blocks
+                .iter()
+                .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. }))
+        );
         assert!(main.blocks.iter().any(|block| {
-            block.statements.iter().any(|stmt| matches!(
-                stmt.kind,
-                ir::StatementKind::Assign {
-                    value: ir::RValue::Call {
-                        callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapPresent),
+            block.statements.iter().any(|stmt| {
+                matches!(
+                    stmt.kind,
+                    ir::StatementKind::Assign {
+                        value: ir::RValue::Call {
+                            callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapPresent),
+                            ..
+                        },
                         ..
-                    },
-                    ..
-                }
-            ))
+                    }
+                )
+            })
         }));
         assert!(main.blocks.iter().any(|block| {
-            block.statements.iter().any(|stmt| matches!(
-                stmt.kind,
-                ir::StatementKind::Assign {
-                    value: ir::RValue::Call {
-                        callee: ir::Callee::Intrinsic(ir::Intrinsic::IterHasNext),
+            block.statements.iter().any(|stmt| {
+                matches!(
+                    stmt.kind,
+                    ir::StatementKind::Assign {
+                        value: ir::RValue::Call {
+                            callee: ir::Callee::Intrinsic(ir::Intrinsic::IterHasNext),
+                            ..
+                        },
                         ..
-                    },
-                    ..
-                }
-            ))
+                    }
+                )
+            })
         }));
     }
 
@@ -3755,22 +4085,26 @@ mod tests {
         );
         let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
         assert!(main.blocks.iter().any(|block| {
-            block.statements.iter().any(|stmt| matches!(
-                stmt.kind,
-                ir::StatementKind::Assign {
-                    value: ir::RValue::Closure { .. },
-                    ..
-                }
-            ))
+            block.statements.iter().any(|stmt| {
+                matches!(
+                    stmt.kind,
+                    ir::StatementKind::Assign {
+                        value: ir::RValue::Closure { .. },
+                        ..
+                    }
+                )
+            })
         }));
         assert!(main.blocks.iter().any(|block| {
-            block.statements.iter().any(|stmt| matches!(
-                stmt.kind,
-                ir::StatementKind::Assign {
-                    value: ir::RValue::RecordUpdate { .. },
-                    ..
-                }
-            ))
+            block.statements.iter().any(|stmt| {
+                matches!(
+                    stmt.kind,
+                    ir::StatementKind::Assign {
+                        value: ir::RValue::RecordUpdate { .. },
+                        ..
+                    }
+                )
+            })
         }));
     }
 
@@ -3790,13 +4124,15 @@ mod tests {
         let ir = lowered.program.expect("ir program");
         let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
         assert!(main.blocks.iter().any(|block| {
-            block.statements.iter().any(|stmt| matches!(
-                stmt.kind,
-                ir::StatementKind::Assign {
-                    value: ir::RValue::Tuple(_),
-                    ..
-                }
-            ))
+            block.statements.iter().any(|stmt| {
+                matches!(
+                    stmt.kind,
+                    ir::StatementKind::Assign {
+                        value: ir::RValue::Tuple(_),
+                        ..
+                    }
+                )
+            })
         }));
     }
 
@@ -3831,10 +4167,11 @@ mod tests {
         for block in &main.blocks {
             for stmt in &block.statements {
                 if let ir::StatementKind::Assign {
-                    value: ir::RValue::Call {
-                        callee: ir::Callee::Method { method, .. },
-                        ..
-                    },
+                    value:
+                        ir::RValue::Call {
+                            callee: ir::Callee::Method { method, .. },
+                            ..
+                        },
                     ..
                 } = &stmt.kind
                 {

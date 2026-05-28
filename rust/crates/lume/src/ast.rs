@@ -241,6 +241,7 @@ pub enum Stmt {
     Match(MatchStmt),
     While(WhileStmt),
     For(ForStmt),
+    LetElse(LetElseStmt),
     Return(ReturnStmt),
     Break(BreakStmt),
     Expr(ExprStmt),
@@ -258,6 +259,7 @@ impl Stmt {
             Stmt::Match(stmt) => stmt.span,
             Stmt::While(stmt) => stmt.span,
             Stmt::For(stmt) => stmt.span,
+            Stmt::LetElse(stmt) => stmt.span,
             Stmt::Return(stmt) => stmt.span,
             Stmt::Break(stmt) => stmt.span,
             Stmt::Expr(stmt) => stmt.span,
@@ -311,6 +313,8 @@ pub struct AssignmentStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
     pub condition: Option<Expr>,
+    pub pattern: Option<Pattern>,
+    pub pattern_value: Option<Expr>,
     pub bindings: Vec<Binding>,
     pub binding_value: Option<Expr>,
     pub then_block: Block,
@@ -363,6 +367,16 @@ pub struct WhileStmt {
 pub struct ForStmt {
     pub bindings: Vec<ForBinding>,
     pub body: Block,
+    pub span: Span,
+}
+
+/// A `let PATTERN = expr else { ... }` statement that returns from the
+/// current callable on match failure.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LetElseStmt {
+    pub pattern: Pattern,
+    pub value: Expr,
+    pub else_block: Block,
     pub span: Span,
 }
 
@@ -522,6 +536,10 @@ pub enum Expr {
         methods: Vec<MethodDecl>,
         span: Span,
     },
+    Try {
+        value: Box<Expr>,
+        span: Span,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,
@@ -588,6 +606,7 @@ impl Expr {
             | Expr::RecordUpdate { span, .. }
             | Expr::RecordLiteral { span, .. }
             | Expr::AnonymousInterface { span, .. }
+            | Expr::Try { span, .. }
             | Expr::Unary { span, .. }
             | Expr::Binary { span, .. }
             | Expr::Is { span, .. }

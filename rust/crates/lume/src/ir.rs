@@ -249,7 +249,12 @@ impl Function {
     }
 
     pub fn add_temp(&mut self, ty: Type) -> LocalId {
-        self.add_local(format!("tmp{}", self.locals.len()), ty, true, LocalKind::Temp)
+        self.add_local(
+            format!("tmp{}", self.locals.len()),
+            ty,
+            true,
+            LocalKind::Temp,
+        )
     }
 
     pub fn add_block(&mut self) -> BlockId {
@@ -423,8 +428,14 @@ pub enum SwitchValue {
 pub enum Place {
     Local(LocalId),
     Global(GlobalId),
-    Field { base: Box<Operand>, name: String },
-    Index { base: Box<Operand>, index: Box<Operand> },
+    Field {
+        base: Box<Operand>,
+        name: String,
+    },
+    Index {
+        base: Box<Operand>,
+        index: Box<Operand>,
+    },
 }
 
 /// A by-value or by-reference input to lowered statements and rvalues.

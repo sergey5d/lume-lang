@@ -1,0 +1,9 @@
+# FAIL:
+# pattern matches in 'if' require 'let'; use 'if let Pattern = value { ... }'
+
+def main() Unit {
+    value Option[Int] = Some(1)
+    if Some(item) = value {
+        OS.println(item)
+    }
+}

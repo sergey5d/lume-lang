@@ -189,13 +189,24 @@ Current leaning:
 ### Single-Line Body Syntax
 
 The shorthand body rules are now intentionally narrow:
-- `if ... then ...` and `else if ... then ...` are the single-line conditional forms
+- new code should prefer brace-delimited `if`
 - `for` is block-only
 - `match` and `partial` are block-only
-- `else expr`, `yield expr`, and `unwrap ... else expr` are valid same-line forms
+- `else expr` and `yield expr` are valid same-line forms
 - if a shorthand body moves to the next line, a `{ ... }` block is required
 
 This keeps the surface compact without turning newlines into implicit structure.
+
+### Refutable Binding
+
+The preferred unwrap surface is now split into two forms:
+- `if let PATTERN = value { ... }` for testing and binding
+- `let PATTERN = value else { ... }` for extraction with an explicit failure path
+- `value = try source` for propagation from `Option`, `Result`, and `Either`
+
+TODO:
+- consider direct nested payload destructuring inside `if let`, for example `if let Some((_, initialY, _)) = rows.get(0) { ... }`
+- for now, prefer `if let Some(row) = rows.get(0) { ... }` and destructure `row` on the next line inside the branch
 
 ### Lambda Surface
 

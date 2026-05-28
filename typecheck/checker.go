@@ -1390,6 +1390,14 @@ func (c *Checker) checkStmt(stmt parser.Statement) {
 		for _, clause := range s.Clauses {
 			c.checkUnwrapBindings(clause.Bindings, clause.Value, clause.Span, false, nil, "invalid_unwrap", "unwrap binding")
 		}
+	case *parser.LetElseStmt:
+		if len(c.returnTypes) == 0 {
+			c.addDiagnostic("invalid_let_else", "let-else used outside callable body", s.Span)
+			return
+		}
+		valueType := c.checkExpr(s.Value)
+		c.checkGuardFallbackBlock(s.Fallback, c.returnTypes[len(c.returnTypes)-1])
+		c.checkMatchPattern(s.Pattern, valueType)
 	case *parser.LocalFunctionStmt:
 		sig := Signature{Parameters: make([]*Type, len(s.Function.Parameters)), ReturnType: fromTypeRef(s.Function.ReturnType, c), Variadic: len(s.Function.Parameters) > 0 && s.Function.Parameters[len(s.Function.Parameters)-1].Variadic}
 		for i, param := range s.Function.Parameters {
@@ -1453,7 +1461,13 @@ func (c *Checker) checkStmt(stmt parser.Statement) {
 			c.checkAssignmentTarget(s.Targets[i], s.Span)
 		}
 	case *parser.IfStmt:
-		if s.BindingValue != nil {
+		if s.PatternValue != nil {
+			valueType := c.checkExpr(s.PatternValue)
+			c.pushScope()
+			c.checkMatchPattern(s.Pattern, valueType)
+			c.checkBlockStatements(s.Then.Statements, false)
+			c.popScope()
+		} else if s.BindingValue != nil {
 			optionType := c.checkExpr(s.BindingValue)
 			elemType := c.optionElementType(optionType)
 			if isUnknown(elemType) {
@@ -2502,6 +2516,23 @@ func (c *Checker) checkExprWithExpected(expr parser.Expr, expected *Type) *Type 
 		result = &Type{Kind: TypeTuple, Name: "Tuple", Args: elements}
 	case *parser.GroupExpr:
 		result = c.checkExpr(e.Inner)
+	case *parser.TryExpr:
+		if len(c.returnTypes) == 0 {
+			c.addDiagnostic("invalid_try", "try used outside callable body", e.Span)
+			result = unknownType
+			break
+		}
+		sourceType := c.checkExpr(e.Value)
+		successType, ok := c.unwrappableSuccessType(sourceType)
+		if !ok {
+			c.addDiagnostic("invalid_try", "try requires Option[T], Result[T, E], or Either[L, R]", e.Span)
+			result = unknownType
+			break
+		}
+		if !c.shortCircuitCompatible(sourceType, c.returnTypes[len(c.returnTypes)-1]) {
+			c.addDiagnostic("invalid_try", "try requires function return type compatible with "+sourceType.String(), e.Span)
+		}
+		result = successType
 	case *parser.BlockExpr:
 		result = c.checkBlockResult(e.Body, "invalid_block_expression", "block expression must end with an expression")
 	case *parser.UnaryExpr:

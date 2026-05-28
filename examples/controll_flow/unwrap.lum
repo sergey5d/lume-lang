@@ -8,31 +8,34 @@
 # sumFail sum-missing
 
 def plusOne(value Option[Int]) Result[Int, Str] {
-    unwrap item <- value else Err("missing")
+    let Some(item) = value else {
+        return Err("missing")
+    }
     Ok(item + 1)
 }
 
 def plusThree(value Option[Int]) Option[Int] {
-    unwrap item <- value
+    item = try value
     Some(item + 3)
 }
 
 def pairwise(left Option[Int], right Option[Str]) { count Int, label Str } = {
-    unwrap count <- left else {
-        record { count = 0, label = "no-left" }
+    let Some(count) = left else {
+        return record { count = 0, label = "no-left" }
     }
-    unwrap label <- right else {
-        record { count = count, label = "no-right" }
+    let Some(label) = right else {
+        return record { count = count, label = "no-right" }
     }
+
     record(count, label)
 }
 
 def sumBoth(left Option[Int], right Option[Int]) Result[Int, Str] {
-    unwrap {
-        a <- left
-        b <- right
-    } else {
-        Err("sum-missing")
+    let Some(a) = left else {
+        return Err("sum-missing")
+    }
+    let Some(b) = right else {
+        return Err("sum-missing")
     }
     Ok(a + b)
 }

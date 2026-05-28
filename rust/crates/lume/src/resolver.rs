@@ -9,7 +9,7 @@ use crate::{
     ast::{
         Annotation, AssignOp, AssignmentStmt, Binding, Block, CallableBody, ElseBranch,
         ElseExprBranch, Expr, ExprStmt, ForBinding, ForStmt, FunctionDecl, IfStmt, ImplBlock,
-        ImportSymbol, LambdaBody, MatchCase, MatchCaseBody, MethodDecl, Pattern,
+        ImportSymbol, LambdaBody, LetElseStmt, MatchCase, MatchCaseBody, MethodDecl, Pattern,
         Program, RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef,
         UnwrapBlockStmt, UnwrapStmt, Visibility, WhileStmt,
     },
@@ -81,15 +81,12 @@ pub fn resolve_path(path: impl AsRef<Path>) -> Result<ResolveResult, String> {
             &ambient,
         );
         resolver.resolve();
-        diagnostics.extend(
-            resolver
-                .into_diagnostics()
-                .into_iter()
-                .map(|diagnostic| LocatedDiagnostic {
-                    path: module.display_path.clone(),
-                    diagnostic,
-                }),
-        );
+        diagnostics.extend(resolver.into_diagnostics().into_iter().map(|diagnostic| {
+            LocatedDiagnostic {
+                path: module.display_path.clone(),
+                diagnostic,
+            }
+        }));
     }
 
     Ok(ResolveResult { diagnostics })
@@ -143,15 +140,7 @@ impl AmbientRegistry {
     fn with_builtin_values() -> Self {
         let mut registry = AmbientRegistry::default();
         for value in [
-            "List",
-            "Map",
-            "Set",
-            "Array",
-            "Range",
-            "print",
-            "println",
-            "printf",
-            "panic",
+            "List", "Map", "Set", "Array", "Range", "print", "println", "printf", "panic",
         ] {
             registry.values.insert(value.to_string());
         }
@@ -260,8 +249,7 @@ pub(crate) fn load_module(
     graph: &mut ModuleGraph,
     loading: &mut HashSet<PathBuf>,
 ) -> Result<PathBuf, String> {
-    let abs = fs::canonicalize(path)
-        .map_err(|err| format!("resolve {}: {err}", path.display()))?;
+    let abs = fs::canonicalize(path).map_err(|err| format!("resolve {}: {err}", path.display()))?;
     if graph.modules.contains_key(&abs) {
         return Ok(abs);
     }
@@ -349,20 +337,27 @@ pub(crate) fn load_module(
 
         for symbol in symbols {
             let resolved = if let Some(object_name) = import.object_name.as_deref() {
-                resolve_imported_object_member(child, object_name, symbol.name.as_str(), same_module)
-                    .ok_or_else(|| {
-                        format!(
-                            "import '{}' has no visible member '{}' on object '{}'",
-                            import.path, symbol.name, object_name
-                        )
-                    })?
-            } else {
-                resolve_imported_symbol(child, symbol.name.as_str(), same_module).ok_or_else(|| {
+                resolve_imported_object_member(
+                    child,
+                    object_name,
+                    symbol.name.as_str(),
+                    same_module,
+                )
+                .ok_or_else(|| {
                     format!(
-                        "import '{}' has no public symbol '{}'",
-                        import.path, symbol.name
+                        "import '{}' has no visible member '{}' on object '{}'",
+                        import.path, symbol.name, object_name
                     )
                 })?
+            } else {
+                resolve_imported_symbol(child, symbol.name.as_str(), same_module).ok_or_else(
+                    || {
+                        format!(
+                            "import '{}' has no public symbol '{}'",
+                            import.path, symbol.name
+                        )
+                    },
+                )?
             };
 
             let local_name = symbol.alias.clone().unwrap_or(symbol.name.clone());
@@ -390,8 +385,7 @@ pub(crate) fn load_module(
 }
 
 pub(crate) fn parse_program_from_path(path: &Path) -> Result<Program, String> {
-    let text = fs::read_to_string(path)
-        .map_err(|err| format!("read {}: {err}", path.display()))?;
+    let text = fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
     let file = SourceFile::new(path.display().to_string(), text);
     let lexed = lex(&file);
     if !lexed.diagnostics.is_empty() {
@@ -439,8 +433,7 @@ fn module_alias(path: &str) -> String {
 }
 
 pub(crate) fn read_directives(path: &Path) -> Result<FileDirectives, String> {
-    let text = fs::read_to_string(path)
-        .map_err(|err| format!("read {}: {err}", path.display()))?;
+    let text = fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
     let mut directives = FileDirectives::default();
     for line in text.lines() {
         let line = line.trim();
@@ -459,18 +452,24 @@ pub(crate) fn read_directives(path: &Path) -> Result<FileDirectives, String> {
 }
 
 pub(crate) fn find_stdlib_dir(start: &Path) -> Result<PathBuf, String> {
-    let mut dir = fs::canonicalize(start)
-        .map_err(|err| format!("resolve {}: {err}", start.display()))?;
+    let mut dir =
+        fs::canonicalize(start).map_err(|err| format!("resolve {}: {err}", start.display()))?;
     loop {
         let candidate = dir.join("stdlib");
         if candidate.is_dir() {
             return Ok(candidate);
         }
         let Some(parent) = dir.parent() else {
-            return Err(format!("could not find stdlib directory from {}", start.display()));
+            return Err(format!(
+                "could not find stdlib directory from {}",
+                start.display()
+            ));
         };
         if parent == dir {
-            return Err(format!("could not find stdlib directory from {}", start.display()));
+            return Err(format!(
+                "could not find stdlib directory from {}",
+                start.display()
+            ));
         }
         dir = parent.to_path_buf();
     }
@@ -818,8 +817,7 @@ impl<'a> Resolver<'a> {
                             if decl.kind == TypeKind::Enum {
                                 for member in &decl.members {
                                     if let TypeMember::Case(case) = member {
-                                        self.enum_case_values
-                                            .insert(case.name.clone(), case.span);
+                                        self.enum_case_values.insert(case.name.clone(), case.span);
                                     }
                                 }
                             }
@@ -853,7 +851,11 @@ impl<'a> Resolver<'a> {
                         (decl.visibility == Visibility::Public).then_some((name, decl.span))
                     })
                     .collect(),
-                globals: decls.globals.into_iter().map(|(name, sym)| (name, sym.span)).collect(),
+                globals: decls
+                    .globals
+                    .into_iter()
+                    .map(|(name, sym)| (name, sym.span))
+                    .collect(),
                 types: decls.types,
                 objects: decls.objects,
             };
@@ -874,7 +876,10 @@ impl<'a> Resolver<'a> {
                             .and_then(|info| info.methods.get(&symbol.original_name))
                             .map(|decl| decl.span)
                     } else {
-                        decls.functions.get(&symbol.original_name).map(|decl| decl.span)
+                        decls
+                            .functions
+                            .get(&symbol.original_name)
+                            .map(|decl| decl.span)
                     };
                     if let Some(span) = span {
                         self.imported_functions.insert(local_name.clone(), span);
@@ -892,7 +897,8 @@ impl<'a> Resolver<'a> {
                 }
                 ImportedKind::Object => {
                     if let Some(info) = decls.objects.get(&symbol.original_name) {
-                        self.imported_objects.insert(local_name.clone(), info.clone());
+                        self.imported_objects
+                            .insert(local_name.clone(), info.clone());
                     }
                 }
             }
@@ -1032,20 +1038,20 @@ impl<'a> Resolver<'a> {
             match member {
                 TypeMember::Method(method) => self.resolve_method(method),
                 TypeMember::Case(case) => {
-                if !case.fields.is_empty() {
-                    self.push_scope();
-                    for field in &case.fields {
-                        self.define_value(
-                            field.name.as_str(),
-                            field.span,
-                            field.mutable,
-                            "duplicate_binding",
-                            format!("duplicate binding '{}'", field.name),
-                            true,
-                        );
+                    if !case.fields.is_empty() {
+                        self.push_scope();
+                        for field in &case.fields {
+                            self.define_value(
+                                field.name.as_str(),
+                                field.span,
+                                field.mutable,
+                                "duplicate_binding",
+                                format!("duplicate binding '{}'", field.name),
+                                true,
+                            );
+                        }
+                        self.pop_scope();
                     }
-                    self.pop_scope();
-                }
                 }
                 TypeMember::Field(_) => {}
             }
@@ -1090,12 +1096,7 @@ impl<'a> Resolver<'a> {
     fn install_impl_target_type_params(&mut self, target: &TypeRef) {
         if let TypeRef::Named { args, .. } = target {
             for arg in args {
-                if let TypeRef::Named {
-                    name,
-                    args,
-                    span,
-                } = arg
-                {
+                if let TypeRef::Named { name, args, span } = arg {
                     if args.is_empty() {
                         self.current_type_scope().insert(name.clone(), *span);
                     }
@@ -1123,7 +1124,11 @@ impl<'a> Resolver<'a> {
                         );
                     }
                 } else if !self.objects.contains_key(name) {
-                    self.add_error("undefined_type", format!("undefined type '{}'", name), *span);
+                    self.add_error(
+                        "undefined_type",
+                        format!("undefined type '{}'", name),
+                        *span,
+                    );
                 }
             }
             other => self.resolve_type_ref(Some(other)),
@@ -1245,6 +1250,7 @@ impl<'a> Resolver<'a> {
                 self.loop_depth -= 1;
                 self.pop_scope();
             }
+            Stmt::LetElse(stmt) => self.resolve_let_else(stmt),
             Stmt::Return(return_stmt) => {
                 if let Some(value) = &return_stmt.value {
                     self.resolve_expr(value);
@@ -1321,7 +1327,17 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_if_stmt(&mut self, stmt: &IfStmt) {
-        if let Some(value) = &stmt.binding_value {
+        if let Some(value) = &stmt.pattern_value {
+            self.resolve_expr(value);
+            self.push_scope();
+            if let Some(pattern) = &stmt.pattern {
+                self.resolve_pattern(pattern);
+            }
+            for statement in &stmt.then_block.statements {
+                self.resolve_stmt(statement);
+            }
+            self.pop_scope();
+        } else if let Some(value) = &stmt.binding_value {
             self.resolve_expr(value);
             self.push_scope();
             for binding in &stmt.bindings {
@@ -1338,6 +1354,12 @@ impl<'a> Resolver<'a> {
         if let Some(else_branch) = &stmt.else_branch {
             self.resolve_else_branch(else_branch);
         }
+    }
+
+    fn resolve_let_else(&mut self, stmt: &LetElseStmt) {
+        self.resolve_expr(&stmt.value);
+        self.resolve_block(&stmt.else_block);
+        self.resolve_pattern(&stmt.pattern);
     }
 
     fn resolve_else_branch(&mut self, branch: &ElseBranch) {
@@ -1401,7 +1423,11 @@ impl<'a> Resolver<'a> {
                         // operator-shape validation stays a later typecheck concern.
                     }
                 } else {
-                    self.add_error("undefined_name", format!("undefined name '{}'", name), *span);
+                    self.add_error(
+                        "undefined_name",
+                        format!("undefined name '{}'", name),
+                        *span,
+                    );
                 }
             }
             Expr::Member { receiver, .. } => self.resolve_expr(receiver),
@@ -1425,7 +1451,11 @@ impl<'a> Resolver<'a> {
         match expr {
             Expr::Identifier { name, span } => {
                 if !self.is_name_defined(name) {
-                    self.add_error("undefined_name", format!("undefined name '{}'", name), *span);
+                    self.add_error(
+                        "undefined_name",
+                        format!("undefined name '{}'", name),
+                        *span,
+                    );
                 }
             }
             Expr::Placeholder { .. }
@@ -1451,7 +1481,11 @@ impl<'a> Resolver<'a> {
                     self.resolve_expr(&arg.value);
                 }
             }
-            Expr::Member { receiver, name, span } => {
+            Expr::Member {
+                receiver,
+                name,
+                span,
+            } => {
                 if let Some(result) = self.resolve_module_member_chain(expr) {
                     if let Err(message) = result {
                         self.add_error(
@@ -1511,6 +1545,7 @@ impl<'a> Resolver<'a> {
                     self.resolve_method(method);
                 }
             }
+            Expr::Try { value, .. } => self.resolve_expr(value),
             Expr::Unary { expr, .. } => self.resolve_expr(expr),
             Expr::Binary { left, right, .. } => {
                 self.resolve_expr(left);
@@ -1718,7 +1753,11 @@ impl<'a> Resolver<'a> {
                     }
                     return;
                 }
-                self.add_error("undefined_type", format!("undefined type '{}'", name), *span);
+                self.add_error(
+                    "undefined_type",
+                    format!("undefined type '{}'", name),
+                    *span,
+                );
             }
         }
     }
@@ -1788,7 +1827,8 @@ impl<'a> Resolver<'a> {
             );
             return;
         }
-        self.current_type_scope().insert(param.name.clone(), param.span);
+        self.current_type_scope()
+            .insert(param.name.clone(), param.span);
     }
 
     // define_value centralizes duplicate and outer-shadow checks so the many
@@ -1805,12 +1845,19 @@ impl<'a> Resolver<'a> {
         if name == "_" {
             return;
         }
-        let current_previous = self.scopes.last().and_then(|scope| scope.get(name)).copied();
+        let current_previous = self
+            .scopes
+            .last()
+            .and_then(|scope| scope.get(name))
+            .copied();
         if let Some(previous) = current_previous {
             if code == "duplicate_binding" {
                 self.add_duplicate(
                     "shadowing_binding",
-                    format!("binding '{}' shadows an existing variable; use a different name", name),
+                    format!(
+                        "binding '{}' shadows an existing variable; use a different name",
+                        name
+                    ),
                     span,
                     previous.span,
                 );
@@ -1823,7 +1870,10 @@ impl<'a> Resolver<'a> {
             if let Some(previous) = self.lookup_outer(name) {
                 self.add_duplicate(
                     "shadowing_binding",
-                    format!("binding '{}' shadows an existing variable; use a different name", name),
+                    format!(
+                        "binding '{}' shadows an existing variable; use a different name",
+                        name
+                    ),
                     span,
                     previous.span,
                 );
@@ -1924,7 +1974,8 @@ impl<'a> Resolver<'a> {
         message: impl Into<String>,
         span: crate::source::Span,
     ) {
-        self.diagnostics.push(Diagnostic::error(code, message, span));
+        self.diagnostics
+            .push(Diagnostic::error(code, message, span));
     }
 
     fn add_duplicate(
@@ -1934,7 +1985,8 @@ impl<'a> Resolver<'a> {
         span: crate::source::Span,
         previous: crate::source::Span,
     ) {
-        self.diagnostics.push(Diagnostic::error(code, message, span));
+        self.diagnostics
+            .push(Diagnostic::error(code, message, span));
         self.diagnostics.push(Diagnostic::error(
             code,
             "previous declaration here",
@@ -1961,7 +2013,10 @@ impl<'a> Resolver<'a> {
                 {
                     None
                 } else {
-                    Some(format!("module '{}' has no visible member '{}'", module, member))
+                    Some(format!(
+                        "module '{}' has no visible member '{}'",
+                        module, member
+                    ))
                 }
             }
             [module, object_name, member] => {
@@ -2021,8 +2076,8 @@ fn arity_label(arity: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{path::{Path, PathBuf}};
     use crate::source::SourceFile;
+    use std::path::{Path, PathBuf};
 
     fn workspace_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2055,8 +2110,7 @@ def main() Int {
             result
                 .diagnostics
                 .iter()
-                .any(|diag| diag.code == "undefined_name"
-                    && diag.message.contains("missing")),
+                .any(|diag| diag.code == "undefined_name" && diag.message.contains("missing")),
             "{:#?}",
             result.diagnostics
         );
@@ -2064,7 +2118,8 @@ def main() Int {
 
     #[test]
     fn resolves_import_forms_example() {
-        let result = resolve_path(workspace_root().join("examples/import_forms.lum")).expect("resolve");
+        let result =
+            resolve_path(workspace_root().join("examples/import_forms.lum")).expect("resolve");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 

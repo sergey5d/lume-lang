@@ -135,8 +135,8 @@ impl<'a> Parser<'a> {
                         span = span.cover(symbols_span);
                     }
                     TokenKind::Identifier => {
-                        let (name, name_span) =
-                            self.expect_identifier("expected import symbol, '*', or '{' after '/'")?;
+                        let (name, name_span) = self
+                            .expect_identifier("expected import symbol, '*', or '{' after '/'")?;
                         if self.match_token(TokenKind::Slash) {
                             import.path = segments.join("/");
                             import.object_name = Some(name);
@@ -469,12 +469,11 @@ impl<'a> Parser<'a> {
             }
             match self.current_kind() {
                 TokenKind::Keyword(Keyword::Def) => {
-                    let method =
-                        self.parse_method_decl(
-                            member_annotations,
-                            member_visibility,
-                            kind == TypeKind::Interface,
-                        )?;
+                    let method = self.parse_method_decl(
+                        member_annotations,
+                        member_visibility,
+                        kind == TypeKind::Interface,
+                    )?;
                     members.push(TypeMember::Method(method));
                 }
                 _ => {
@@ -689,6 +688,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt(false).map(Stmt::Match),
             TokenKind::Keyword(Keyword::Partial) => self.parse_match_stmt(true).map(Stmt::Match),
             TokenKind::Keyword(Keyword::Unwrap) => self.parse_unwrap_stmt(),
+            TokenKind::Keyword(Keyword::Let) => self.parse_let_stmt(),
             TokenKind::Keyword(Keyword::Var) => {
                 let stmt = self.parse_binding_stmt_after_var()?;
                 Some(Stmt::Binding(stmt))
@@ -739,6 +739,64 @@ impl<'a> Parser<'a> {
             values,
             span: start.cover(end),
         })
+    }
+
+    fn parse_let_stmt(&mut self) -> Option<Stmt> {
+        let start = self.consume_keyword(Keyword::Let, "expected 'let'")?;
+
+        let checkpoint = self.checkpoint();
+        if self.is_binding_start()
+            && !(self.at(TokenKind::Identifier)
+                && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::Dot)))
+        {
+            if let Some(bindings) = self.parse_binding_list(false) {
+                if self.match_token(TokenKind::Eq) {
+                    if self.at(TokenKind::Newline) {
+                        self.error_at_current(
+                            "expected_expression",
+                            "expected expression on same line after \"=\"",
+                        );
+                        return None;
+                    }
+                    let values = self.parse_expr_list()?;
+                    if self.match_keyword(Keyword::Else) {
+                        self.error_at_current(
+                            "unexpected_token",
+                            "plain 'let name = value' bindings do not support 'else'; use a refutable pattern like 'let Some(name) = value else { ... }'",
+                        );
+                        return None;
+                    }
+                    let end = values.last().map(Expr::span).unwrap_or(start);
+                    return Some(Stmt::Binding(BindingStmt {
+                        visibility: Visibility::Default,
+                        bindings,
+                        values,
+                        span: start.cover(end),
+                    }));
+                }
+            }
+        }
+        self.restore(checkpoint);
+
+        let pattern = self.parse_pattern()?;
+        self.consume(TokenKind::Eq, "expected '=' after let pattern")?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"=\"",
+            );
+            return None;
+        }
+        let value = self.parse_expr()?;
+        self.consume_keyword(Keyword::Else, "expected 'else' after let pattern")?;
+        let else_block = self.parse_block_or_inline_stmt_body("let else")?;
+        let end = else_block.span;
+        Some(Stmt::LetElse(LetElseStmt {
+            pattern,
+            value,
+            else_block,
+            span: start.cover(end),
+        }))
     }
 
     fn try_parse_binding_stmt(&mut self) -> Option<BindingStmt> {
@@ -856,22 +914,30 @@ impl<'a> Parser<'a> {
 
     fn parse_if_stmt(&mut self) -> Option<IfStmt> {
         let start = self.consume_keyword(Keyword::If, "expected 'if'")?;
-        let (condition, bindings, binding_value) =
-            if self.is_binding_start() && self.binding_list_followed_by_left_arrow(self.index) {
-                let bindings = self.parse_binding_list(false)?;
-                self.consume(TokenKind::LeftArrow, "expected '<-' after if binding")?;
+        let (condition, pattern, pattern_value, bindings, binding_value) =
+            if self.match_keyword(Keyword::Let) {
+                let pattern = self.parse_pattern()?;
+                self.consume(TokenKind::Eq, "expected '=' after if pattern")?;
                 if self.at(TokenKind::Newline) {
                     self.error_at_current(
                         "expected_expression",
-                        "expected expression on same line after \"<-\"",
+                        "expected expression on same line after \"=\"",
                     );
                     return None;
                 }
                 let value = self.parse_expr_without_trailing_block_call()?;
-                (None, bindings, Some(value))
+                (None, Some(pattern), Some(value), Vec::new(), None)
+            } else if self.pattern_followed_by_eq(self.index) {
+                self.error_at_current(
+                    "unexpected_token",
+                    "pattern matches in 'if' require 'let'; use 'if let Pattern = value { ... }'",
+                );
+                return None;
             } else {
                 (
                     Some(self.parse_expr_without_trailing_block_call()?),
+                    None,
+                    None,
                     Vec::new(),
                     None,
                 )
@@ -904,6 +970,8 @@ impl<'a> Parser<'a> {
             .unwrap_or(then_block.span);
         Some(IfStmt {
             condition,
+            pattern,
+            pattern_value,
             bindings,
             binding_value,
             then_block,
@@ -1024,10 +1092,7 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let end = else_block
-            .as_ref()
-            .map(|block| block.span)
-            .unwrap_or(close);
+        let end = else_block.as_ref().map(|block| block.span).unwrap_or(close);
         Some(UnwrapBlockStmt {
             clauses,
             else_block,
@@ -1121,7 +1186,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 if depth == 0
                     && self.binding_type_starts_on_same_line(start)
-                    && matches!(self.current_kind(), TokenKind::Identifier | TokenKind::LBrace)
+                    && matches!(
+                        self.current_kind(),
+                        TokenKind::Identifier | TokenKind::LBrace
+                    )
                 {
                     let target = self.parse_type_ref()?;
                     return Some(Pattern::Type {
@@ -1206,7 +1274,10 @@ impl<'a> Parser<'a> {
                 let (name, start) = self.expect_identifier("expected match pattern")?;
                 if depth == 0
                     && self.binding_type_starts_on_same_line(start)
-                    && matches!(self.current_kind(), TokenKind::Identifier | TokenKind::LBrace)
+                    && matches!(
+                        self.current_kind(),
+                        TokenKind::Identifier | TokenKind::LBrace
+                    )
                 {
                     let target = self.parse_type_ref()?;
                     return Some(Pattern::Type {
@@ -1655,7 +1726,10 @@ impl<'a> Parser<'a> {
         while self.match_keyword(Keyword::With) {
             interfaces.push(self.parse_type_ref()?);
         }
-        self.consume(TokenKind::LBrace, "expected '{' after anonymous interface list")?;
+        self.consume(
+            TokenKind::LBrace,
+            "expected '{' after anonymous interface list",
+        )?;
         self.skip_newlines();
         let mut methods = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
@@ -1668,7 +1742,10 @@ impl<'a> Parser<'a> {
             methods.push(self.parse_method_decl(annotations, visibility, false)?);
             self.skip_newlines();
         }
-        let end = self.consume(TokenKind::RBrace, "expected '}' after anonymous interface body")?;
+        let end = self.consume(
+            TokenKind::RBrace,
+            "expected '}' after anonymous interface body",
+        )?;
         Some(Expr::AnonymousInterface {
             interfaces,
             methods,
@@ -1717,9 +1794,7 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::Newline) {
             self.error_at_current(
                 "unexpected_token",
-                format!(
-                    "{owner} then-body must stay on the same line unless it uses '{{ ... }}'"
-                ),
+                format!("{owner} then-body must stay on the same line unless it uses '{{ ... }}'"),
             );
             return None;
         }
@@ -1738,7 +1813,10 @@ impl<'a> Parser<'a> {
             return None;
         }
         if self.at(TokenKind::Eof) {
-            self.error_at_current("expected_statement", format!("expected statement after {owner}"));
+            self.error_at_current(
+                "expected_statement",
+                format!("expected statement after {owner}"),
+            );
             return None;
         }
         let stmt = self.parse_stmt()?;
@@ -1767,9 +1845,7 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::Newline) {
             self.error_at_current(
                 "unexpected_token",
-                format!(
-                    "{owner} then-body must stay on the same line unless it uses '{{ ... }}'"
-                ),
+                format!("{owner} then-body must stay on the same line unless it uses '{{ ... }}'"),
             );
             return None;
         }
@@ -1961,6 +2037,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_unary_expr(&mut self) -> Option<Expr> {
+        if self.match_keyword(Keyword::Try) {
+            let start = self.previous_span();
+            let value = self.parse_unary_expr()?;
+            let span = start.cover(value.span());
+            return Some(Expr::Try {
+                value: Box::new(value),
+                span,
+            });
+        }
         if self.match_token(TokenKind::Bang) {
             let start = self.previous_span();
             let expr = self.parse_unary_expr()?;
@@ -2680,7 +2765,10 @@ impl<'a> Parser<'a> {
                 }
                 if !matches!(
                     token.kind,
-                    TokenKind::Identifier | TokenKind::LParen | TokenKind::LBrace | TokenKind::LBracket
+                    TokenKind::Identifier
+                        | TokenKind::LParen
+                        | TokenKind::LBrace
+                        | TokenKind::LBracket
                 ) {
                     break;
                 }
@@ -2695,6 +2783,19 @@ impl<'a> Parser<'a> {
                 _ => return false,
             }
         }
+    }
+
+    fn pattern_followed_by_eq(&self, start: usize) -> bool {
+        let mut parser = Parser {
+            tokens: self.tokens,
+            index: start,
+            diagnostics: Vec::new(),
+            allow_trailing_block_call: self.allow_trailing_block_call,
+        };
+        if parser.parse_pattern().is_none() {
+            return false;
+        }
+        parser.at(TokenKind::Eq)
     }
 
     fn scan_potential_type_ref(&self, start: usize) -> bool {
@@ -2967,7 +3068,10 @@ impl<'a> Parser<'a> {
 }
 
 fn starts_lower(value: &str) -> bool {
-    value.chars().next().is_some_and(|ch| ch.is_ascii_lowercase())
+    value
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_lowercase())
 }
 
 #[derive(Debug, Clone)]
@@ -3201,7 +3305,10 @@ impl LambdaBody {
 mod tests {
     use super::*;
     use crate::{lexer::lex, source::SourceFile};
-    use std::{fs, path::{Path, PathBuf}};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
 
     fn parse(src: &str) -> ParseResult {
         let file = SourceFile::new("test.lum", src);
@@ -3418,7 +3525,11 @@ $name
         let mut failures = Vec::new();
         for path in files {
             let text = fs::read_to_string(&path).expect("source text");
-            if text.lines().next().is_some_and(|line| line.trim() == "# SKIP") {
+            if text
+                .lines()
+                .next()
+                .is_some_and(|line| line.trim() == "# SKIP")
+            {
                 continue;
             }
             let file = SourceFile::new(path.display().to_string(), text);

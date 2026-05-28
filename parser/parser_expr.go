@@ -158,6 +158,12 @@ func (p *Parser) parsePrefix() (Expr, error) {
 
 	token := p.advance()
 	switch token.Type {
+	case TokenTry:
+		right, err := p.parseExpression(unaryPrecedence())
+		if err != nil {
+			return nil, err
+		}
+		return &TryExpr{Value: right, Span: mergeSpans(tokenSpan(token), exprSpan(right))}, nil
 	case TokenBang, TokenMinus, TokenTilde:
 		right, err := p.parseExpression(unaryPrecedence())
 		if err != nil {

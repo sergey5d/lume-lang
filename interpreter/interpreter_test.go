@@ -61,13 +61,13 @@ def run(input Int) Int {
 
 func TestModulePublicFunctionAndBinding(t *testing.T) {
 	dir := t.TempDir()
-writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
+	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
 module lib
 
 public def exportedValue() Int = 7
 public answer Int = 5
 `)
-writeModuleFile(t, filepath.Join(dir, "main.lum"), `
+	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
 module app
 
 import lib
@@ -94,7 +94,7 @@ def run() Int {
 
 func TestModuleObjectMethodImports(t *testing.T) {
 	dir := t.TempDir()
-writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
+	writeModuleFile(t, filepath.Join(dir, "lib.lum"), `
 module lib
 
 object Tools {
@@ -102,7 +102,7 @@ object Tools {
 	def twice(value Int) Int = value * 2
 }
 `)
-writeModuleFile(t, filepath.Join(dir, "main.lum"), `
+	writeModuleFile(t, filepath.Join(dir, "main.lum"), `
 module app
 
 import lib/Tools/*
@@ -2290,10 +2290,10 @@ def run() Int {
 	found Option[Int] = Some(5)
 	missing Option[Int] = None()
 	var total Int = 0
-	if item <- found {
+	if let Some(item) = found {
 		total := total + item
 	}
-	if item <- missing {
+	if let Some(item) = missing {
 		total := total + item
 	}
 	return total
@@ -2314,7 +2314,8 @@ func TestIfOptionDestructuring(t *testing.T) {
 	src := `
 def run() Str {
 	found Option[(Int, Str, Bool)] = Some((1, "ok", true))
-	if _, name Str, _ <- found {
+	if let Some(item) = found {
+		_, name, _ = item
 		return name
 	}
 	return "missing"
