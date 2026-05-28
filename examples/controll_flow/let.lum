@@ -6,6 +6,7 @@
 # pair 5-no-right
 # sum 9
 # sumFail sum-missing
+# prefix 6
 
 def plusOne(value Option[Int]) Result[Int, Str] {
     let Some(item) = value else {
@@ -38,6 +39,15 @@ def sumBoth(left Option[Int], right Option[Int]) Result[Int, Str] {
     Ok(a + b)
 }
 
+def sumPrefix(values List[Option[Int]]) Int {
+    var total Int = 0
+    for value <- values {
+        let Some(item) = value else break
+        total := total + item
+    }
+    total
+}
+
 def main() Unit {
     some = plusOne(Some(5))
     none = plusOne(None())
@@ -46,6 +56,7 @@ def main() Unit {
     pair = pairwise(Some(5), None())
     sum = sumBoth(Some(4), Some(5))
     sumFail = sumBoth(Some(4), None())
+    prefix = sumPrefix([Some(1), Some(2), Some(3), None(), Some(100)])
 
     OS.println("some ${some.getOr(0)}")
     OS.println("none ${none.getError()}")
@@ -54,4 +65,5 @@ def main() Unit {
     OS.println("pair ${pair.count}-${pair.label}")
     OS.println("sum ${sum.getOr(0)}")
     OS.println("sumFail ${sumFail.getError()}")
+    OS.println("prefix ${prefix}")
 }

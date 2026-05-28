@@ -2260,6 +2260,10 @@ func (c *Checker) checkGuardFallbackBlock(block *parser.BlockStmt, expected *Typ
 		c.checkStmt(ret)
 		return
 	}
+	if brk, ok := last.(*parser.BreakStmt); ok {
+		c.checkStmt(brk)
+		return
+	}
 	valueType := c.checkStmtResultWithExpected(last, expected, "invalid_unwrap", "unwrap else block must end with a value-producing statement")
 	if !isUnknown(expected) && !isUnknown(valueType) {
 		c.requireAssignable(valueType, expected, stmtSpan(last), "invalid_unwrap", "unwrap else block value must be assignable to "+expected.String())

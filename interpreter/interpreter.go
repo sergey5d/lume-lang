@@ -1483,6 +1483,8 @@ func (in *Interpreter) evalStmtValue(stmt parser.Statement, local *env, self *in
 			return in.execFor(s, local, self)
 		}
 		return nil, nil, RuntimeError{Message: message, Span: stmtSpan(stmt)}
+	case *parser.BreakStmt:
+		return in.execStmt(s, local, self)
 	case *parser.ReturnStmt:
 		value, signal, err := in.execStmt(s, local, self)
 		return value, signal, err
