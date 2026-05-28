@@ -289,6 +289,15 @@ pub struct Binding {
     pub span: Span,
 }
 
+/// One `PATTERN = value` clause inside grouped `let { ... } else ...` or
+/// `if let { ... } { ... }` syntax.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RefutableClause {
+    pub pattern: Pattern,
+    pub value: Expr,
+    pub span: Span,
+}
+
 /// Supported assignment operators after parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssignOp {
@@ -309,12 +318,13 @@ pub struct AssignmentStmt {
     pub span: Span,
 }
 
-/// An `if` statement, including unwrap-style conditional bindings.
+/// An `if` statement, including `if let` pattern bindings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
     pub condition: Option<Expr>,
     pub pattern: Option<Pattern>,
     pub pattern_value: Option<Expr>,
+    pub pattern_clauses: Vec<RefutableClause>,
     pub bindings: Vec<Binding>,
     pub binding_value: Option<Expr>,
     pub then_block: Block,
@@ -370,10 +380,12 @@ pub struct ForStmt {
     pub span: Span,
 }
 
-/// A `let PATTERN = expr else { ... }` statement that returns from the
-/// current callable on match failure.
+/// A `let PATTERN = expr else { ... }` statement, or a grouped
+/// `let { ... } else { ... }`, that returns from the current callable on match
+/// failure.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LetElseStmt {
+    pub clauses: Vec<RefutableClause>,
     pub pattern: Pattern,
     pub value: Expr,
     pub else_block: Block,

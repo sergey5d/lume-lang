@@ -201,12 +201,15 @@ This keeps the surface compact without turning newlines into implicit structure.
 
 The preferred unwrap surface is now split into two forms:
 - `if let PATTERN = value { ... }` for testing and binding
+- `if let { PATTERN = value ... } { ... }` for multiple sequential refutable bindings in one condition
 - `let PATTERN = value else { ... }` for extraction with an explicit failure path
+- `let { PATTERN = value ... } else { ... }` for multiple sequential refutable bindings sharing one fallback
 - `value = try source` for propagation from `Option`, `Result`, and `Either`
 
 TODO:
 - consider direct nested payload destructuring inside `if let`, for example `if let Some((_, initialY, _)) = rows.get(0) { ... }`
 - for now, prefer `if let Some(row) = rows.get(0) { ... }` and destructure `row` on the next line inside the branch
+- consider a future chained condition form like `if let Some(a) = left && let Ok(b) = right && ready { ... }`, but only with `&&` joins
 
 ### Lambda Surface
 

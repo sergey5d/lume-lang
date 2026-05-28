@@ -143,8 +143,29 @@ func (p *Parser) parseVarBindingStmt() (Statement, error) {
 }
 
 func (p *Parser) parseLetStmt() (Statement, error) {
-	if _, err := p.consume(TokenLet, "expected 'let'"); err != nil {
+	start, err := p.consume(TokenLet, "expected 'let'")
+	if err != nil {
 		return nil, err
+	}
+
+	if p.check(TokenLBrace) {
+		clauses, span, err := p.parseRefutableClauseBlock("let")
+		if err != nil {
+			return nil, err
+		}
+		if !p.match(TokenElse) {
+			return nil, fmt.Errorf("expected 'else' after let clause block")
+		}
+		elseToken := p.previous()
+		fallback, err := p.parseBlockOrInlineStmtBody(elseToken, "let else")
+		if err != nil {
+			return nil, err
+		}
+		return &LetElseStmt{
+			Clauses:  clauses,
+			Fallback: fallback,
+			Span:     mergeSpans(tokenSpan(start), mergeSpans(span, fallback.Span)),
+		}, nil
 	}
 
 	if p.match(TokenLParen) {
@@ -233,6 +254,51 @@ func (p *Parser) parseLetStmt() (Statement, error) {
 		Fallback: fallback,
 		Span:     mergeSpans(patternSpan(pattern), fallback.Span),
 	}, nil
+}
+
+func (p *Parser) parseRefutableClause(owner string) (RefutableClause, error) {
+	pattern, err := p.parsePattern()
+	if err != nil {
+		return RefutableClause{}, err
+	}
+	if _, err := p.consume(TokenAssign, "expected '=' after "+owner+" pattern"); err != nil {
+		return RefutableClause{}, err
+	}
+	if err := p.requireSameLineExpressionStart(p.previous()); err != nil {
+		return RefutableClause{}, err
+	}
+	value, err := p.parseInlineExpression(TokenRBrace)
+	if err != nil {
+		return RefutableClause{}, err
+	}
+	return RefutableClause{
+		Pattern: pattern,
+		Value:   value,
+		Span:    mergeSpans(patternSpan(pattern), exprSpan(value)),
+	}, nil
+}
+
+func (p *Parser) parseRefutableClauseBlock(owner string) ([]RefutableClause, Span, error) {
+	open, err := p.consume(TokenLBrace, "expected '{' after "+owner)
+	if err != nil {
+		return nil, Span{}, err
+	}
+	var clauses []RefutableClause
+	for !p.check(TokenRBrace) && !p.isAtEnd() {
+		clause, err := p.parseRefutableClause(owner)
+		if err != nil {
+			return nil, Span{}, err
+		}
+		clauses = append(clauses, clause)
+	}
+	if len(clauses) == 0 {
+		return nil, Span{}, fmt.Errorf("%s clause block must contain at least one 'PATTERN = value' clause", owner)
+	}
+	close, err := p.consume(TokenRBrace, "expected '}' after "+owner+" clause block")
+	if err != nil {
+		return nil, Span{}, err
+	}
+	return clauses, mergeSpans(tokenSpan(open), tokenSpan(close)), nil
 }
 
 func (p *Parser) parseBindingStmtWithStart(start Token, firstIsName bool) (Statement, error) {
@@ -571,22 +637,30 @@ func (p *Parser) parseIfStmt() (Statement, error) {
 func (p *Parser) parseIfStmtAfterStart(start Token) (Statement, error) {
 	stmt := &IfStmt{}
 	if p.match(TokenLet) {
-		pattern, err := p.parsePattern()
-		if err != nil {
-			return nil, err
+		if p.check(TokenLBrace) {
+			clauses, _, err := p.parseRefutableClauseBlock("if let")
+			if err != nil {
+				return nil, err
+			}
+			stmt.PatternClauses = clauses
+		} else {
+			pattern, err := p.parsePattern()
+			if err != nil {
+				return nil, err
+			}
+			if _, err := p.consume(TokenAssign, "expected '=' after if pattern"); err != nil {
+				return nil, err
+			}
+			if err := p.requireSameLineExpressionStart(p.previous()); err != nil {
+				return nil, err
+			}
+			value, err := p.parseExpressionUntil(TokenLBrace, TokenThen)
+			if err != nil {
+				return nil, err
+			}
+			stmt.Pattern = pattern
+			stmt.PatternValue = value
 		}
-		if _, err := p.consume(TokenAssign, "expected '=' after if pattern"); err != nil {
-			return nil, err
-		}
-		if err := p.requireSameLineExpressionStart(p.previous()); err != nil {
-			return nil, err
-		}
-		value, err := p.parseExpressionUntil(TokenLBrace, TokenThen)
-		if err != nil {
-			return nil, err
-		}
-		stmt.Pattern = pattern
-		stmt.PatternValue = value
 	} else {
 		save := p.pos
 		if pattern, err := p.parsePattern(); err == nil && p.check(TokenAssign) {

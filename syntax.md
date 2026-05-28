@@ -801,6 +801,17 @@ let Some(item) = maybeValue else {
 }
 ```
 
+Grouped refutable bindings share one fallback:
+
+```txt
+let {
+    Some(left) = maybeLeft
+    Some(right) = maybeRight
+} else {
+    return Err("missing")
+}
+```
+
 `let ... else` is statement-oriented:
 - the pattern is matched against the right-hand value
 - if the match succeeds, bindings remain visible after the statement
@@ -819,13 +830,32 @@ item = try maybeValue
 
 and returns early with the original failure value when the source is empty / error / left.
 
-Multiple dependent unwraps are written as sequential `let ... else` or `try` statements:
+Multiple dependent unwraps can be written as sequential `let ... else` / `try`
+statements or as a grouped `let` block:
 
 ```txt
 left = try maybeLeft
 
 let Some(right) = maybeRight else {
     return Err("missing")
+}
+
+let {
+    Some(left) = maybeLeft
+    Some(right) = maybeRight
+} else {
+    return Err("missing")
+}
+```
+
+`if let` also supports a grouped form:
+
+```txt
+if let {
+    Some(left) = maybeLeft
+    Some(right) = maybeRight
+} {
+    OS.println(left + right)
 }
 ```
 

@@ -14,14 +14,14 @@ type Span struct {
 
 // Program is the root parser AST node for a source file.
 type Program struct {
-	ModuleName  string           `json:"moduleName,omitempty"`
-	ModuleSpan  Span             `json:"moduleSpan,omitempty"`
-	Imports     []ImportDecl     `json:"imports,omitempty"`
-	Functions   []*FunctionDecl  `json:"functions"`
-	Interfaces  []*InterfaceDecl `json:"interfaces,omitempty"`
-	Classes     []*ClassDecl     `json:"classes,omitempty"`
-	Statements  []Statement      `json:"statements,omitempty"`
-	Span        Span             `json:"span"`
+	ModuleName string           `json:"moduleName,omitempty"`
+	ModuleSpan Span             `json:"moduleSpan,omitempty"`
+	Imports    []ImportDecl     `json:"imports,omitempty"`
+	Functions  []*FunctionDecl  `json:"functions"`
+	Interfaces []*InterfaceDecl `json:"interfaces,omitempty"`
+	Classes    []*ClassDecl     `json:"classes,omitempty"`
+	Statements []Statement      `json:"statements,omitempty"`
+	Span       Span             `json:"span"`
 }
 
 // ImportDecl describes a single imported module path.
@@ -109,7 +109,7 @@ type InterfaceMethod struct {
 
 // ClassDecl describes a class declaration, its fields, and its methods.
 type ClassDecl struct {
-	Annotations    []Annotation      `json:"annotations,omitempty"`
+	Annotations    []Annotation    `json:"annotations,omitempty"`
 	Name           string          `json:"name"`
 	Private        bool            `json:"private,omitempty"`
 	Object         bool            `json:"object,omitempty"`
@@ -143,13 +143,13 @@ type EnumCaseAssignment struct {
 // FieldDecl describes a class field declaration.
 type FieldDecl struct {
 	Annotations []Annotation `json:"annotations,omitempty"`
-	Name        string   `json:"name"`
-	Type        *TypeRef `json:"type"`
-	Initializer Expr     `json:"initializer,omitempty"`
-	Mutable     bool     `json:"mutable,omitempty"`
-	Deferred    bool     `json:"deferred,omitempty"`
-	Private     bool     `json:"private,omitempty"`
-	Span        Span     `json:"span"`
+	Name        string       `json:"name"`
+	Type        *TypeRef     `json:"type"`
+	Initializer Expr         `json:"initializer,omitempty"`
+	Mutable     bool         `json:"mutable,omitempty"`
+	Deferred    bool         `json:"deferred,omitempty"`
+	Private     bool         `json:"private,omitempty"`
+	Span        Span         `json:"span"`
 }
 
 // MethodDecl describes a class method or constructor declaration.
@@ -266,12 +266,22 @@ type GuardBlockStmt struct {
 
 func (*GuardBlockStmt) statementNode() {}
 
-// LetElseStmt matches a value against a pattern and implicitly returns from the current callable on failure.
+// RefutableClause is one refutable `PATTERN = value` clause inside a grouped
+// `let { ... } else ...` or `if let { ... } { ... }` form.
+type RefutableClause struct {
+	Pattern Pattern `json:"pattern"`
+	Value   Expr    `json:"value"`
+	Span    Span    `json:"span"`
+}
+
+// LetElseStmt matches one or more values against refutable patterns and
+// implicitly returns from the current callable on failure.
 type LetElseStmt struct {
-	Pattern  Pattern    `json:"pattern"`
-	Value    Expr       `json:"value"`
-	Fallback *BlockStmt `json:"fallback"`
-	Span     Span       `json:"span"`
+	Pattern  Pattern           `json:"pattern,omitempty"`
+	Value    Expr              `json:"value,omitempty"`
+	Clauses  []RefutableClause `json:"clauses,omitempty"`
+	Fallback *BlockStmt        `json:"fallback"`
+	Span     Span              `json:"span"`
 }
 
 func (*LetElseStmt) statementNode() {}
@@ -296,17 +306,19 @@ type MultiAssignmentStmt struct {
 
 func (*MultiAssignmentStmt) statementNode() {}
 
-// IfStmt represents an if / else-if / else chain.
+// IfStmt represents an if / else-if / else chain, including `if let`
+// pattern bindings.
 type IfStmt struct {
-	Condition    Expr       `json:"condition,omitempty"`
-	Pattern      Pattern    `json:"pattern,omitempty"`
-	PatternValue Expr       `json:"patternValue,omitempty"`
-	Bindings     []Binding  `json:"bindings,omitempty"`
-	BindingValue Expr       `json:"bindingValue,omitempty"`
-	Then         *BlockStmt `json:"then"`
-	ElseIf       *IfStmt    `json:"elseIf,omitempty"`
-	Else         *BlockStmt `json:"else,omitempty"`
-	Span         Span       `json:"span"`
+	Condition      Expr              `json:"condition,omitempty"`
+	Pattern        Pattern           `json:"pattern,omitempty"`
+	PatternValue   Expr              `json:"patternValue,omitempty"`
+	PatternClauses []RefutableClause `json:"patternClauses,omitempty"`
+	Bindings       []Binding         `json:"bindings,omitempty"`
+	BindingValue   Expr              `json:"bindingValue,omitempty"`
+	Then           *BlockStmt        `json:"then"`
+	ElseIf         *IfStmt           `json:"elseIf,omitempty"`
+	Else           *BlockStmt        `json:"else,omitempty"`
+	Span           Span              `json:"span"`
 }
 
 func (*IfStmt) statementNode() {}

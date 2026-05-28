@@ -2600,6 +2600,31 @@ def run(value Option[(Int, Str, Bool)]) Unit {
 	}
 }
 
+func TestParseIfLetClauseBlock(t *testing.T) {
+	src := `
+def run(left Option[Int], right Option[Int]) Unit {
+	if let {
+		Some(a) = left
+		Some(b) = right
+	} {
+		OS.println(a + b)
+	}
+}
+`
+
+	program, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	ifStmt := program.Functions[0].Body.Statements[0].(*IfStmt)
+	if len(ifStmt.PatternClauses) != 2 {
+		t.Fatalf("expected 2 pattern clauses, got %d", len(ifStmt.PatternClauses))
+	}
+	if ifStmt.Pattern != nil || ifStmt.PatternValue != nil {
+		t.Fatalf("expected single-pattern fields to be empty for grouped if let")
+	}
+}
+
 func TestParseIfPatternRequiresLet(t *testing.T) {
 	src := `
 def run(value Option[Int]) Unit {
@@ -2615,6 +2640,35 @@ def run(value Option[Int]) Unit {
 	}
 	if !strings.Contains(err.Error(), "require 'let'") {
 		t.Fatalf("expected let-specific parse error, got %v", err)
+	}
+}
+
+func TestParseLetClauseBlock(t *testing.T) {
+	src := `
+def run(left Option[Int], right Option[Int]) Int {
+	let {
+		Some(a) = left
+		Some(b) = right
+	} else {
+		return 0
+	}
+	return a + b
+}
+`
+
+	program, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	stmt, ok := program.Functions[0].Body.Statements[0].(*LetElseStmt)
+	if !ok {
+		t.Fatalf("expected first statement to be let-else, got %T", program.Functions[0].Body.Statements[0])
+	}
+	if len(stmt.Clauses) != 2 {
+		t.Fatalf("expected 2 let clauses, got %d", len(stmt.Clauses))
+	}
+	if stmt.Pattern != nil || stmt.Value != nil {
+		t.Fatalf("expected single-pattern fields to be empty for grouped let")
 	}
 }
 

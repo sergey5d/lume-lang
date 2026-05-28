@@ -1395,8 +1395,15 @@ func (c *Checker) checkStmt(stmt parser.Statement) {
 			c.addDiagnostic("invalid_let_else", "let-else used outside callable body", s.Span)
 			return
 		}
-		valueType := c.checkExpr(s.Value)
 		c.checkGuardFallbackBlock(s.Fallback, c.returnTypes[len(c.returnTypes)-1])
+		if len(s.Clauses) > 0 {
+			for _, clause := range s.Clauses {
+				valueType := c.checkExpr(clause.Value)
+				c.checkMatchPattern(clause.Pattern, valueType)
+			}
+			return
+		}
+		valueType := c.checkExpr(s.Value)
 		c.checkMatchPattern(s.Pattern, valueType)
 	case *parser.LocalFunctionStmt:
 		sig := Signature{Parameters: make([]*Type, len(s.Function.Parameters)), ReturnType: fromTypeRef(s.Function.ReturnType, c), Variadic: len(s.Function.Parameters) > 0 && s.Function.Parameters[len(s.Function.Parameters)-1].Variadic}
@@ -1461,7 +1468,15 @@ func (c *Checker) checkStmt(stmt parser.Statement) {
 			c.checkAssignmentTarget(s.Targets[i], s.Span)
 		}
 	case *parser.IfStmt:
-		if s.PatternValue != nil {
+		if len(s.PatternClauses) > 0 {
+			c.pushScope()
+			for _, clause := range s.PatternClauses {
+				valueType := c.checkExpr(clause.Value)
+				c.checkMatchPattern(clause.Pattern, valueType)
+			}
+			c.checkBlockStatements(s.Then.Statements, false)
+			c.popScope()
+		} else if s.PatternValue != nil {
 			valueType := c.checkExpr(s.PatternValue)
 			c.pushScope()
 			c.checkMatchPattern(s.Pattern, valueType)
@@ -2304,7 +2319,15 @@ func (c *Checker) checkStmtResultWithExpected(stmt parser.Statement, expected *T
 
 func (c *Checker) checkIfStmtResult(s *parser.IfStmt, code, message string) *Type {
 	var thenType *Type
-	if s.BindingValue != nil {
+	if len(s.PatternClauses) > 0 {
+		c.pushScope()
+		for _, clause := range s.PatternClauses {
+			valueType := c.checkExpr(clause.Value)
+			c.checkMatchPattern(clause.Pattern, valueType)
+		}
+		thenType = c.checkBlockResult(s.Then, code, message)
+		c.popScope()
+	} else if s.BindingValue != nil {
 		optionType := c.checkExpr(s.BindingValue)
 		elemType := c.optionElementType(optionType)
 		if isUnknown(elemType) {

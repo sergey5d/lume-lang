@@ -871,6 +871,21 @@ impl<'a> Checker<'a> {
     }
 
     fn check_if_stmt_value(&mut self, stmt: &IfStmt, expected: &Ty) -> Ty {
+        if !stmt.pattern_clauses.is_empty() {
+            self.push_scope();
+            for clause in &stmt.pattern_clauses {
+                let value_ty = self.check_expr(&clause.value);
+                self.bind_pattern(&clause.pattern, &value_ty);
+            }
+            let then_ty = self.check_block_against(&stmt.then_block, expected);
+            self.pop_scope();
+            let else_ty = stmt
+                .else_branch
+                .as_ref()
+                .map(|branch| self.check_else_branch_value(branch, expected))
+                .unwrap_or_else(Ty::unit);
+            return join_types(&then_ty, &else_ty);
+        }
         if let Some(value) = &stmt.pattern_value {
             let value_ty = self.check_expr(value);
             self.push_scope();
@@ -1136,7 +1151,15 @@ impl<'a> Checker<'a> {
     }
 
     fn check_if_stmt(&mut self, stmt: &IfStmt) {
-        if let Some(value) = &stmt.pattern_value {
+        if !stmt.pattern_clauses.is_empty() {
+            self.push_scope();
+            for clause in &stmt.pattern_clauses {
+                let value_ty = self.check_expr(&clause.value);
+                self.bind_pattern(&clause.pattern, &value_ty);
+            }
+            self.check_block(&stmt.then_block);
+            self.pop_scope();
+        } else if let Some(value) = &stmt.pattern_value {
             let value_ty = self.check_expr(value);
             self.push_scope();
             if let Some(pattern) = &stmt.pattern {
@@ -1176,8 +1199,15 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let value_ty = self.check_expr(&stmt.value);
         self.check_block_against(&stmt.else_block, &self.current_return.clone());
+        if !stmt.clauses.is_empty() {
+            for clause in &stmt.clauses {
+                let value_ty = self.check_expr(&clause.value);
+                self.bind_pattern(&clause.pattern, &value_ty);
+            }
+            return;
+        }
+        let value_ty = self.check_expr(&stmt.value);
         self.bind_pattern(&stmt.pattern, &value_ty);
     }
 

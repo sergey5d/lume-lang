@@ -592,11 +592,26 @@ func (r *Resolver) resolveStatement(stmt parser.Statement) {
 			}
 		}
 	case *parser.LetElseStmt:
-		r.resolveExpr(s.Value)
 		r.resolveBlock(s.Fallback)
+		if len(s.Clauses) > 0 {
+			for _, clause := range s.Clauses {
+				r.resolveExpr(clause.Value)
+				r.resolveMatchPattern(clause.Pattern)
+			}
+			return
+		}
+		r.resolveExpr(s.Value)
 		r.resolveMatchPattern(s.Pattern)
 	case *parser.IfStmt:
-		if s.PatternValue != nil {
+		if len(s.PatternClauses) > 0 {
+			r.pushScope()
+			for _, clause := range s.PatternClauses {
+				r.resolveExpr(clause.Value)
+				r.resolveMatchPattern(clause.Pattern)
+			}
+			r.resolveBlockStatements(s.Then.Statements)
+			r.popScope()
+		} else if s.PatternValue != nil {
 			r.resolveExpr(s.PatternValue)
 			r.pushScope()
 			r.resolveMatchPattern(s.Pattern)

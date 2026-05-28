@@ -148,8 +148,13 @@ func stmtHasPlaceholder(stmt Statement) bool {
 			}
 		}
 	case *IfStmt:
-		if HasPlaceholderExpr(s.Condition) || HasPlaceholderExpr(s.BindingValue) || blockHasPlaceholder(s.Then) || blockHasPlaceholder(s.Else) {
+		if HasPlaceholderExpr(s.Condition) || HasPlaceholderExpr(s.PatternValue) || HasPlaceholderExpr(s.BindingValue) || blockHasPlaceholder(s.Then) || blockHasPlaceholder(s.Else) {
 			return true
+		}
+		for _, clause := range s.PatternClauses {
+			if HasPlaceholderExpr(clause.Value) {
+				return true
+			}
 		}
 		if s.ElseIf != nil {
 			return stmtHasPlaceholder(s.ElseIf)
@@ -372,14 +377,25 @@ func replacePlaceholderStmt(stmt Statement, param string) Statement {
 		if s.ElseIf != nil {
 			elseIf = replacePlaceholderStmt(s.ElseIf, param).(*IfStmt)
 		}
+		patternClauses := make([]RefutableClause, len(s.PatternClauses))
+		for i, clause := range s.PatternClauses {
+			patternClauses[i] = RefutableClause{
+				Pattern: clause.Pattern,
+				Value:   replacePlaceholderExpr(clause.Value, param),
+				Span:    clause.Span,
+			}
+		}
 		return &IfStmt{
-			Condition:    replacePlaceholderExpr(s.Condition, param),
-			Bindings:     append([]Binding(nil), s.Bindings...),
-			BindingValue: replacePlaceholderExpr(s.BindingValue, param),
-			Then:         replacePlaceholderBlock(s.Then, param),
-			ElseIf:       elseIf,
-			Else:         replacePlaceholderBlock(s.Else, param),
-			Span:         s.Span,
+			Condition:      replacePlaceholderExpr(s.Condition, param),
+			Pattern:        s.Pattern,
+			PatternValue:   replacePlaceholderExpr(s.PatternValue, param),
+			PatternClauses: patternClauses,
+			Bindings:       append([]Binding(nil), s.Bindings...),
+			BindingValue:   replacePlaceholderExpr(s.BindingValue, param),
+			Then:           replacePlaceholderBlock(s.Then, param),
+			ElseIf:         elseIf,
+			Else:           replacePlaceholderBlock(s.Else, param),
+			Span:           s.Span,
 		}
 	case *MatchStmt:
 		cases := make([]MatchCase, len(s.Cases))

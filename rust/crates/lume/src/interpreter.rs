@@ -314,6 +314,10 @@ fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: 
             }
         }
         ast::Stmt::LetElse(stmt) => {
+            for clause in &mut stmt.clauses {
+                rewrite_pattern_for_runtime(&mut clause.pattern, module);
+                rewrite_expr_for_runtime(&mut clause.value, module, graph);
+            }
             rewrite_pattern_for_runtime(&mut stmt.pattern, module);
             rewrite_expr_for_runtime(&mut stmt.value, module, graph);
             rewrite_block_for_runtime(&mut stmt.else_block, module, graph);
@@ -358,6 +362,10 @@ fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: 
 fn rewrite_if_stmt_for_runtime(stmt: &mut ast::IfStmt, module: &LoadedModule, graph: &ModuleGraph) {
     if let Some(condition) = &mut stmt.condition {
         rewrite_expr_for_runtime(condition, module, graph);
+    }
+    for clause in &mut stmt.pattern_clauses {
+        rewrite_pattern_for_runtime(&mut clause.pattern, module);
+        rewrite_expr_for_runtime(&mut clause.value, module, graph);
     }
     if let Some(pattern) = &mut stmt.pattern {
         rewrite_pattern_for_runtime(pattern, module);

@@ -1,0 +1,30 @@
+# EXPECT:
+# grouped let 8
+# grouped let fail 9
+# grouped if 15
+
+def groupedLet(value Option[Int]) Int {
+    let {
+        Some(a) = value
+        Some(b) = Some(a + 4)
+    } else {
+        return 9
+    }
+    return a + b
+}
+
+def groupedIf(value Option[Int]) Int {
+    if let {
+        Some(a) = value
+        Some(b) = Some(a + 7)
+    } {
+        return a + b
+    }
+    return 0
+}
+
+def main() Unit {
+    OS.println("grouped let ${groupedLet(Some(2))}")
+    OS.println("grouped let fail ${groupedLet(None())}")
+    OS.println("grouped if ${groupedIf(Some(4))}")
+}

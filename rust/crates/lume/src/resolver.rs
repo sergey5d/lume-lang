@@ -1327,7 +1327,17 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_if_stmt(&mut self, stmt: &IfStmt) {
-        if let Some(value) = &stmt.pattern_value {
+        if !stmt.pattern_clauses.is_empty() {
+            self.push_scope();
+            for clause in &stmt.pattern_clauses {
+                self.resolve_expr(&clause.value);
+                self.resolve_pattern(&clause.pattern);
+            }
+            for statement in &stmt.then_block.statements {
+                self.resolve_stmt(statement);
+            }
+            self.pop_scope();
+        } else if let Some(value) = &stmt.pattern_value {
             self.resolve_expr(value);
             self.push_scope();
             if let Some(pattern) = &stmt.pattern {
@@ -1357,8 +1367,15 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_let_else(&mut self, stmt: &LetElseStmt) {
-        self.resolve_expr(&stmt.value);
         self.resolve_block(&stmt.else_block);
+        if !stmt.clauses.is_empty() {
+            for clause in &stmt.clauses {
+                self.resolve_expr(&clause.value);
+                self.resolve_pattern(&clause.pattern);
+            }
+            return;
+        }
+        self.resolve_expr(&stmt.value);
         self.resolve_pattern(&stmt.pattern);
     }
 

@@ -757,33 +757,62 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 		}
 		return nil, nil, nil
 	case *parser.LetElseStmt:
-		value, err := in.evalExpr(s.Value, local)
+		fallbackEnv := cloneEnvShallow(local)
+		if len(s.Clauses) > 0 {
+			for _, clause := range s.Clauses {
+				ok, err := in.execRefutableClause(clause, local)
+				if err != nil {
+					if signal, ok := trySignalToReturnSignal(err); ok {
+						return nil, signal, nil
+					}
+					return nil, nil, err
+				}
+				if !ok {
+					value, signal, err := in.evalBlockValue(s.Fallback, fallbackEnv, self, "let else block must end with a value-producing statement")
+					if err != nil || signal != nil {
+						return nil, signal, err
+					}
+					return nil, returnSignal{value: value}, nil
+				}
+			}
+			return nil, nil, nil
+		}
+		ok, err := in.execSingleLetElseBinding(s.Pattern, s.Value, local)
 		if err != nil {
 			if signal, ok := trySignalToReturnSignal(err); ok {
 				return nil, signal, nil
 			}
 			return nil, nil, err
 		}
-		bindings, ok, err := in.matchPattern(s.Pattern, value, local)
-		if err != nil {
-			return nil, nil, err
-		}
 		if !ok {
-			value, signal, err := in.evalBlockValue(s.Fallback, local, self, "let else block must end with a value-producing statement")
+			value, signal, err := in.evalBlockValue(s.Fallback, fallbackEnv, self, "let else block must end with a value-producing statement")
 			if err != nil || signal != nil {
 				return nil, signal, err
 			}
 			return nil, returnSignal{value: value}, nil
 		}
-		for _, binding := range bindings {
-			if binding.name == "_" {
-				continue
-			}
-			local.define(binding.name, binding.value, false)
-		}
 		return nil, nil, nil
 	case *parser.IfStmt:
-		if s.PatternValue != nil {
+		if len(s.PatternClauses) > 0 {
+			thenEnv := newEnv(local)
+			matchedAll := true
+			for _, clause := range s.PatternClauses {
+				ok, err := in.execRefutableClause(clause, thenEnv)
+				if err != nil {
+					if signal, ok := trySignalToReturnSignal(err); ok {
+						return nil, signal, nil
+					}
+					return nil, nil, err
+				}
+				if !ok {
+					matchedAll = false
+					break
+				}
+			}
+			if matchedAll {
+				return in.execBlock(s.Then, thenEnv, self)
+			}
+		} else if s.PatternValue != nil {
 			value, err := in.evalExpr(s.PatternValue, local)
 			if err != nil {
 				if signal, ok := trySignalToReturnSignal(err); ok {
@@ -934,6 +963,28 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 	default:
 		return nil, nil, RuntimeError{Message: "unsupported statement", Span: stmtSpan(stmt)}
 	}
+}
+
+func (in *Interpreter) execSingleLetElseBinding(pattern parser.Pattern, valueExpr parser.Expr, local *env) (bool, error) {
+	value, err := in.evalExpr(valueExpr, local)
+	if err != nil {
+		return false, err
+	}
+	bindings, ok, err := in.matchPattern(pattern, value, local)
+	if err != nil || !ok {
+		return ok, err
+	}
+	for _, binding := range bindings {
+		if binding.name == "_" {
+			continue
+		}
+		local.define(binding.name, binding.value, false)
+	}
+	return true, nil
+}
+
+func (in *Interpreter) execRefutableClause(clause parser.RefutableClause, local *env) (bool, error) {
+	return in.execSingleLetElseBinding(clause.Pattern, clause.Value, local)
 }
 
 type matchedBinding struct {

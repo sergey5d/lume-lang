@@ -751,6 +751,20 @@ impl<'a> Parser<'a> {
     fn parse_let_stmt(&mut self) -> Option<Stmt> {
         let start = self.consume_keyword(Keyword::Let, "expected 'let'")?;
 
+        if self.at(TokenKind::LBrace) {
+            let (clauses, clauses_end) = self.parse_refutable_clause_block("let")?;
+            self.consume_keyword(Keyword::Else, "expected 'else' after let clause block")?;
+            let else_block = self.parse_block_or_inline_stmt_body("let else")?;
+            let end = else_block.span;
+            return Some(Stmt::LetElse(LetElseStmt {
+                clauses,
+                pattern: Pattern::Wildcard { span: clauses_end },
+                value: Expr::Unit { span: clauses_end },
+                else_block,
+                span: start.cover(end),
+            }));
+        }
+
         if self.match_token(TokenKind::LParen) {
             let bindings = self.parse_binding_list(false)?;
             self.consume(
@@ -837,6 +851,7 @@ impl<'a> Parser<'a> {
         let else_block = self.parse_block_or_inline_stmt_body("let else")?;
         let end = else_block.span;
         Some(Stmt::LetElse(LetElseStmt {
+            clauses: Vec::new(),
             pattern,
             value,
             else_block,
@@ -966,19 +981,31 @@ impl<'a> Parser<'a> {
 
     fn parse_if_stmt(&mut self) -> Option<IfStmt> {
         let start = self.consume_keyword(Keyword::If, "expected 'if'")?;
-        let (condition, pattern, pattern_value, bindings, binding_value) =
+        let (condition, pattern, pattern_value, pattern_clauses, bindings, binding_value) =
             if self.match_keyword(Keyword::Let) {
-                let pattern = self.parse_pattern()?;
-                self.consume(TokenKind::Eq, "expected '=' after if pattern")?;
-                if self.at(TokenKind::Newline) {
-                    self.error_at_current(
-                        "expected_expression",
-                        "expected expression on same line after \"=\"",
-                    );
-                    return None;
+                if self.at(TokenKind::LBrace) {
+                    let (clauses, _) = self.parse_refutable_clause_block("if let")?;
+                    (None, None, None, clauses, Vec::new(), None)
+                } else {
+                    let pattern = self.parse_pattern()?;
+                    self.consume(TokenKind::Eq, "expected '=' after if pattern")?;
+                    if self.at(TokenKind::Newline) {
+                        self.error_at_current(
+                            "expected_expression",
+                            "expected expression on same line after \"=\"",
+                        );
+                        return None;
+                    }
+                    let value = self.parse_expr_without_trailing_block_call()?;
+                    (
+                        None,
+                        Some(pattern),
+                        Some(value),
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                    )
                 }
-                let value = self.parse_expr_without_trailing_block_call()?;
-                (None, Some(pattern), Some(value), Vec::new(), None)
             } else if self.pattern_followed_by_eq(self.index) {
                 self.error_at_current(
                     "unexpected_token",
@@ -990,6 +1017,7 @@ impl<'a> Parser<'a> {
                     Some(self.parse_expr_without_trailing_block_call()?),
                     None,
                     None,
+                    Vec::new(),
                     Vec::new(),
                     None,
                 )
@@ -1024,12 +1052,69 @@ impl<'a> Parser<'a> {
             condition,
             pattern,
             pattern_value,
+            pattern_clauses,
             bindings,
             binding_value,
             then_block,
             else_branch,
             span: start.cover(end),
         })
+    }
+
+    fn parse_refutable_clause(&mut self, owner: &'static str) -> Option<RefutableClause> {
+        let pattern = self.parse_pattern()?;
+        let eq_message = match owner {
+            "if let" => "expected '=' after if pattern",
+            "let" => "expected '=' after let pattern",
+            _ => "expected '=' after pattern",
+        };
+        self.consume(TokenKind::Eq, eq_message)?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"=\"",
+            );
+            return None;
+        }
+        let value = self.parse_expr_without_trailing_block_call()?;
+        let span = pattern.span().cover(value.span());
+        Some(RefutableClause {
+            pattern,
+            value,
+            span,
+        })
+    }
+
+    fn parse_refutable_clause_block(
+        &mut self,
+        owner: &'static str,
+    ) -> Option<(Vec<RefutableClause>, Span)> {
+        let open_message = match owner {
+            "if let" => "expected '{' after if let",
+            "let" => "expected '{' after let",
+            _ => "expected '{' before clause block",
+        };
+        let open = self.consume(TokenKind::LBrace, open_message)?;
+        self.skip_newlines();
+        let mut clauses = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            clauses.push(self.parse_refutable_clause(owner)?);
+            self.skip_newlines();
+        }
+        if clauses.is_empty() {
+            self.error_at_current(
+                "unexpected_token",
+                format!("{owner} clause block must contain at least one 'PATTERN = value' clause"),
+            );
+            return None;
+        }
+        let close_message = match owner {
+            "if let" => "expected '}' after if let clause block",
+            "let" => "expected '}' after let clause block",
+            _ => "expected '}' after clause block",
+        };
+        let close = self.consume(TokenKind::RBrace, close_message)?;
+        Some((clauses, open.cover(close)))
     }
 
     fn parse_while_stmt(&mut self) -> Option<WhileStmt> {
