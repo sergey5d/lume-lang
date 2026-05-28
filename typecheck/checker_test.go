@@ -556,8 +556,8 @@ def run() Int {
 	a (Int, Int) = (1, 2)
 	b (Int, Int) = a
 	c = a
-	left Int, right Int = c
-	otherLeft Int, otherRight Int = b
+	let (left Int, right Int) = c
+	let (otherLeft Int, otherRight Int) = b
 	return left + right + otherLeft + otherRight
 }
 `
@@ -849,8 +849,8 @@ class Box {
 }
 
 def run() Int {
-	a Int, b Str = Pair(5, "x")
-	c Int, d Str = Box(7, "y")
+	let (a Int, b Str) = Pair(5, "x")
+	let (c Int, d Str) = Box(7, "y")
 	return a + c
 }
 `
@@ -870,7 +870,7 @@ record Triple {
 }
 
 def run() Int {
-	a Int, _, c Str = Triple(1, "drop", "keep")
+	let (a Int, _, c Str) = Triple(1, "drop", "keep")
 	return a
 }
 `
@@ -889,7 +889,7 @@ class Box {
 }
 
 def run() Int {
-	a Int, b Str = Box(7)
+	let (a Int, b Str) = Box(7)
 	return a
 }
 `
@@ -2087,10 +2087,10 @@ def run() Int {
 	unwrap indexedPair <- indexed.get(2) else {
 		0
 	}
-	firstLeft Int, firstRight Str = firstPair
-	indexedValue Int, indexedPos Int = indexedPair
-	arrayLeft Int, arrayRight Str = valuePairs[1]
-	arrayIndexedValue Int, arrayIndexedPos Int = valueIndexed[2]
+	let (firstLeft Int, firstRight Str) = firstPair
+	let (indexedValue Int, indexedPos Int) = indexedPair
+	let (arrayLeft Int, arrayRight Str) = valuePairs[1]
+	let (arrayIndexedValue Int, arrayIndexedPos Int) = valueIndexed[2]
 	var total Int = 0
 
 	for left Int, right Str <- pairs {
@@ -2186,7 +2186,7 @@ def run() Int {
 	unwrap reducedPair <- mapReduced else {
 		0
 	}
-	reducedKey Str, reducedValue Int = reducedPair
+	let (reducedKey Str, reducedValue Int) = reducedPair
 	if expanded.contains(12) && setHasBig && setAllPositive && mapHasB && mapAllSmall {
 		if reducedKey == "b" {
 			return total + mapped.get(0).getOr(0) + mappedValues["b"].getOr(0) + expandedValues.get(3).getOr(0) + doubled.size() + filtered.size() + setTotal + setReduced.getOr(0) + filteredMap.size() + mapTotal + reducedValue
@@ -2746,7 +2746,7 @@ func TestAnalyzeIfOptionDestructuring(t *testing.T) {
 	src := `
 def run(value Option[(Int, Str, Bool)]) Str {
 	if let Some(item) = value {
-		_, name, _ = item
+		let (_, name, _) = item
 		return name
 	}
 	return "missing"

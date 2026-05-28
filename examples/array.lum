@@ -32,8 +32,8 @@ def main() Unit {
     pairs = values.zip(labels)
     indexed = values.zipWithIndex()
 
-    zippedValue, zippedLabel = pairs[1]
-    indexedValue, indexedPos = indexed[2]
+    let (zippedValue, zippedLabel) = pairs[1]
+    let (indexedValue, indexedPos) = indexed[2]
 
     assigned = Array.ofLength(2)
     assigned[0] := 9

@@ -51,8 +51,8 @@ def main() Unit {
     unwrap head <- items.head() else ()
     unwrap removed <- items.remove(1) else ()
 
-    zipValue, zipLabel = zippedPair
-    indexedValue, indexedPos = indexedPair
+    let (zipValue, zipLabel) = zippedPair
+    let (indexedValue, indexedPos) = indexedPair
 
     OS.println("mapped " + mapped.get(0).getOr(0) + " " + mapped.get(3).getOr(0))
     OS.println("expanded " + expanded.get(0).getOr(0) + " " + expanded.get(7).getOr(0))

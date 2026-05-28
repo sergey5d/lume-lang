@@ -125,8 +125,8 @@ values = Array(1, 2, 3)
 values[1] := values[0] + 4
 
 pair (value Int, size Int) = (1, 2)
-renamed (left Int, right Int) = pair
-total Int = pair.value + renamed.left
+let (left Int, right Int) = pair
+total Int = pair.value + left
 ```
 
 ## Tuple Rules
@@ -136,7 +136,7 @@ The current tuple model is structural by element type and order:
 - unnamed tuple types use `(Int, Str)`
 - named tuple types use `(value Int, label Str)`
 - tuple literals use `(1, "ok")`
-- tuples can be destructured into multiple bindings
+- tuples can be destructured with `let (...) = value`
 
 Tuple names are preserved on the current typed view of a value:
 

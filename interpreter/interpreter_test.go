@@ -379,10 +379,10 @@ def run() Int {
 	unwrap indexedPair <- indexed.get(2) else {
 		0
 	}
-	firstLeft, firstRight = firstPair
-	indexedValue, indexedPos = indexedPair
-	arrayLeft, arrayRight = valuePairs[1]
-	arrayIndexedValue, arrayIndexedPos = valueIndexed[2]
+	let (firstLeft, firstRight) = firstPair
+	let (indexedValue, indexedPos) = indexedPair
+	let (arrayLeft, arrayRight) = valuePairs[1]
+	let (arrayIndexedValue, arrayIndexedPos) = valueIndexed[2]
 	var total = 0
 
 	for left, right <- pairs {
@@ -1080,8 +1080,8 @@ def run() Int {
 	a (Int, Int) = (1, 2)
 	b (Int, Int) = a
 	c = a
-	left Int, right Int = c
-	otherLeft Int, otherRight Int = b
+	let (left Int, right Int) = c
+	let (otherLeft Int, otherRight Int) = b
 	left + right + otherLeft + otherRight
 }
 `
@@ -1122,7 +1122,7 @@ impl Counter {
 
 def run() Int {
 	counter = Counter()
-	left Int, right Int = counter.pair()
+	let (left Int, right Int) = counter.pair()
 	return left + right
 }
 `
@@ -1461,7 +1461,7 @@ def run() Int {
 	unwrap reducedPair <- mapReduced else {
 		0
 	}
-	reducedKey, reducedValue = reducedPair
+	let (reducedKey, reducedValue) = reducedPair
 	if expanded.contains(12) && setHasBig && setAllPositive && mapHasB && mapAllSmall {
 		if reducedKey == "b" {
 			return total * 1000000 + mapped.get(0).getOr(0) * 100000 + mappedValues["b"].getOr(0) * 10000 + expandedValues.get(3).getOr(0) * 1000 + doubled.size() * 100 + filtered.size() * 10 + setTotal + setReduced.getOr(0) + filteredMap.size() + mapTotal + reducedValue
@@ -1962,8 +1962,8 @@ class Box {
 }
 
 def run() Int {
-	a Int, b Str = Pair(5, "x")
-	c Int, d Str = Box(7, "y")
+	let (a Int, b Str) = Pair(5, "x")
+	let (c Int, d Str) = Box(7, "y")
 	return a + c
 }
 `
@@ -1987,7 +1987,7 @@ record Triple {
 }
 
 def run() Str {
-	a Int, _, c Str = Triple(1, "drop", "keep")
+	let (a Int, _, c Str) = Triple(1, "drop", "keep")
 	return c
 }
 `
@@ -2315,7 +2315,7 @@ func TestIfOptionDestructuring(t *testing.T) {
 def run() Str {
 	found Option[(Int, Str, Bool)] = Some((1, "ok", true))
 	if let Some(item) = found {
-		_, name, _ = item
+		let (_, name, _) = item
 		return name
 	}
 	return "missing"

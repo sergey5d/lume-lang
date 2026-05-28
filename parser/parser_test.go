@@ -1746,7 +1746,7 @@ public answer Int = 42
 func TestParseDestructuringSkipBinding(t *testing.T) {
 	src := `
 def run() Int {
-	a Int, _, c Str = (1, 2, "x")
+	let (a Int, _, c Str) = (1, 2, "x")
 	return a
 }
 `
@@ -1761,6 +1761,23 @@ def run() Int {
 	}
 	if len(stmt.Bindings) != 3 || stmt.Bindings[1].Name != "_" {
 		t.Fatalf("expected skip binding in middle, got %#v", stmt.Bindings)
+	}
+}
+
+func TestParseImplicitDestructuringRequiresLet(t *testing.T) {
+	src := `
+def run() Unit {
+	pair = (1, "x")
+	left, right = pair
+}
+`
+
+	_, err := Parse(src)
+	if err == nil {
+		t.Fatalf("expected parse error, got nil")
+	}
+	if !strings.Contains(err.Error(), "destructuring bindings require 'let (...) = value'") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -2556,7 +2573,7 @@ func TestParseIfOptionDestructuring(t *testing.T) {
 	src := `
 def run(value Option[(Int, Str, Bool)]) Unit {
 	if let Some(item) = value {
-		_, name, _ = item
+		let (_, name, _) = item
 		OS.println(name)
 	}
 }

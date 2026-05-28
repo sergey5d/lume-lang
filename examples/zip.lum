@@ -24,9 +24,9 @@ def main() Unit {
 
     unwrap indexedPair <- listIndexed.get(2) else ()
 
-    firstLeft, firstRight = firstPair
-    secondLeft, secondRight = secondPair
-    indexedValue, indexedPos = indexedPair
+    let (firstLeft, firstRight) = firstPair
+    let (secondLeft, secondRight) = secondPair
+    let (indexedValue, indexedPos) = indexedPair
 
     OS.println("list zip", firstLeft, firstRight)
     OS.println("list zip", secondLeft, secondRight)
@@ -42,8 +42,8 @@ def main() Unit {
     arrayPairs = values.zip(other)
     arrayIndexed = values.zipWithIndex()
 
-    arrayLeft, arrayRight = arrayPairs[1]
-    arrayIndexedValue, arrayIndexedPos = arrayIndexed[2]
+    let (arrayLeft, arrayRight) = arrayPairs[1]
+    let (arrayIndexedValue, arrayIndexedPos) = arrayIndexed[2]
 
     OS.println("array zip", arrayLeft, arrayRight)
     OS.println("array zipWithIndex", arrayIndexedValue, arrayIndexedPos)
@@ -57,8 +57,8 @@ def main() Unit {
     unwrap rangeIndexedPair <- rangeIndexed.get(1) else {
         ()
     }
-    rangeLeft, rangeRight = rangePair
-    rangeIndexedValue, rangeIndexedPos = rangeIndexedPair
+    let (rangeLeft, rangeRight) = rangePair
+    let (rangeIndexedValue, rangeIndexedPos) = rangeIndexedPair
 
     OS.println("range zip", rangeLeft, rangeRight)
     OS.println("range zipWithIndex", rangeIndexedValue, rangeIndexedPos)

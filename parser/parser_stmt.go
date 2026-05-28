@@ -120,6 +120,9 @@ func (p *Parser) parseVarBindingStmt() (Statement, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(bindings) > 1 && len(values) == 1 {
+		return nil, fmt.Errorf("destructuring bindings require 'let (...) = value'")
+	}
 	for i := range bindings {
 		if i >= len(values) || values[i] == nil {
 			return nil, fmt.Errorf("mutable declarations must initialize with '='; deferred '?' initializers are not supported")
@@ -142,6 +145,46 @@ func (p *Parser) parseVarBindingStmt() (Statement, error) {
 func (p *Parser) parseLetStmt() (Statement, error) {
 	if _, err := p.consume(TokenLet, "expected 'let'"); err != nil {
 		return nil, err
+	}
+
+	if p.match(TokenLParen) {
+		var start Token
+		var err error
+		if p.check(TokenIdentifier) {
+			start, err = p.consume(TokenIdentifier, "expected binding name after '('")
+		} else {
+			start, err = p.consume(TokenUnder, "expected binding name after '('")
+		}
+		if err != nil {
+			return nil, err
+		}
+		bindings, err := p.parseBindingsWithStart(start, true)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.consume(TokenRParen, "expected ')' after destructuring bindings"); err != nil {
+			return nil, err
+		}
+		operator, err := p.consume(TokenAssign, "expected '=' after destructuring bindings")
+		if err != nil {
+			return nil, err
+		}
+		values, err := p.parseBindingInitializers(len(bindings), operator)
+		if err != nil {
+			return nil, err
+		}
+		if len(values) != 1 || values[0] == nil {
+			return nil, fmt.Errorf("destructuring bindings require a single initializer expression")
+		}
+		value := wrapThunkExpr(nil, values[0])
+		stmt := &ValStmt{Bindings: bindings, Values: []Expr{value}}
+		stmt.Span = mergeSpans(tokenSpan(start), exprSpan(value))
+		for _, binding := range bindings {
+			if binding.Name != "_" {
+				p.declare(binding.Name)
+			}
+		}
+		return stmt, nil
 	}
 
 	save := p.pos
@@ -224,6 +267,9 @@ func (p *Parser) parseBindingStmtWithStart(start Token, firstIsName bool) (State
 	values, err := p.parseBindingInitializers(len(bindings), p.previous())
 	if err != nil {
 		return nil, err
+	}
+	if len(bindings) > 1 && len(values) == 1 {
+		return nil, fmt.Errorf("destructuring bindings require 'let (...) = value'")
 	}
 	for i := range bindings {
 		if i < len(values) && values[i] != nil {

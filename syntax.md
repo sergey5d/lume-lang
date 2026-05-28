@@ -771,7 +771,7 @@ When the payload needs more destructuring, prefer doing that on the next line in
 
 ```txt
 if let Some(pair) = maybePair {
-    x, y = pair
+    let (x, y) = pair
     OS.println(x)
     OS.println(y)
 }
@@ -990,25 +990,25 @@ Current notes:
 Tuple destructuring:
 
 ```txt
-left Int, right Str = (5, "hello")
+let (left Int, right Str) = (5, "hello")
 ```
 
 Record destructuring:
 
 ```txt
-value Int, label Str = Amount(7, "world")
+let (value Int, label Str) = Amount(7, "world")
 ```
 
 Class destructuring:
 
 ```txt
-left Int, right Str = Box(9, "boxed")
+let (left Int, right Str) = Box(9, "boxed")
 ```
 
 Skip pattern:
 
 ```txt
-left Int, _, right Str = (1, "drop", "keep")
+let (left Int, _, right Str) = (1, "drop", "keep")
 ```
 
 Classes with private fields are not destructurable.

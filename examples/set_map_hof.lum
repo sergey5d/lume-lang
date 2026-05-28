@@ -68,7 +68,7 @@ def main() {
 
     unwrap reducedPair <- reducedPairOpt else ()
 
-    reducedKey, reducedValue = reducedPair
+    let (reducedKey, reducedValue) = reducedPair
     OS.println("mapReduce " + reducedKey + " " + reducedValue)
 
     mapHasB = values.exists((key, value) -> key == "b")

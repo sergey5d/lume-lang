@@ -732,6 +732,13 @@ impl<'a> Parser<'a> {
             return None;
         }
         let values = self.parse_expr_list()?;
+        if bindings.len() > 1 && values.len() == 1 {
+            self.error_at_current(
+                "unexpected_token",
+                "destructuring bindings require 'let (...) = value'",
+            );
+            return None;
+        }
         let end = values.last().map(Expr::span).unwrap_or(start);
         Some(BindingStmt {
             visibility: Visibility::Default,
@@ -743,6 +750,37 @@ impl<'a> Parser<'a> {
 
     fn parse_let_stmt(&mut self) -> Option<Stmt> {
         let start = self.consume_keyword(Keyword::Let, "expected 'let'")?;
+
+        if self.match_token(TokenKind::LParen) {
+            let bindings = self.parse_binding_list(false)?;
+            self.consume(
+                TokenKind::RParen,
+                "expected ')' after destructuring bindings",
+            )?;
+            self.consume(TokenKind::Eq, "expected '=' after destructuring bindings")?;
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "expected_expression",
+                    "expected expression on same line after \"=\"",
+                );
+                return None;
+            }
+            let values = self.parse_expr_list()?;
+            if values.len() != 1 {
+                self.error_at_current(
+                    "unexpected_token",
+                    "destructuring bindings require a single initializer expression",
+                );
+                return None;
+            }
+            let end = values.last().map(Expr::span).unwrap_or(start);
+            return Some(Stmt::Binding(BindingStmt {
+                visibility: Visibility::Default,
+                bindings,
+                values,
+                span: start.cover(end),
+            }));
+        }
 
         let checkpoint = self.checkpoint();
         if self.is_binding_start()
@@ -763,6 +801,13 @@ impl<'a> Parser<'a> {
                         self.error_at_current(
                             "unexpected_token",
                             "plain 'let name = value' bindings do not support 'else'; use a refutable pattern like 'let Some(name) = value else { ... }'",
+                        );
+                        return None;
+                    }
+                    if bindings.len() > 1 && values.len() == 1 {
+                        self.error_at_current(
+                            "unexpected_token",
+                            "destructuring bindings require 'let (...) = value'",
                         );
                         return None;
                     }
@@ -822,6 +867,13 @@ impl<'a> Parser<'a> {
         let Some(values) = self.parse_expr_list() else {
             return None;
         };
+        if bindings.len() > 1 && values.len() == 1 {
+            self.error_at_current(
+                "unexpected_token",
+                "destructuring bindings require 'let (...) = value'",
+            );
+            return None;
+        }
         let start = bindings[0].span;
         let end = values.last().map(Expr::span).unwrap_or(start);
         Some(BindingStmt {

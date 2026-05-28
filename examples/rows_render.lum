@@ -14,8 +14,8 @@
 
 object RowOrdering with Ordering[(Int, Int, Str)] {
     def compare(left (Int, Int, Str), right (Int, Int, Str)) Int {
-        leftX Int, leftY Int, _ = left
-        rightX Int, rightY Int, _ = right
+        let (leftX Int, leftY Int, _) = left
+        let (rightX Int, rightY Int, _) = right
 
         if leftY > rightY {
             return -1
@@ -36,7 +36,7 @@ object RowOrdering with Ordering[(Int, Int, Str)] {
 def syntax1(rows List[(Int, Int, Str)]) Unit {
     var lastX = 0
     if let Some(firstRow) = rows.get(0) {
-        _, initialY Int, _ = firstRow
+        let (_, initialY Int, _) = firstRow
         var lastY = initialY
         for x Int, y Int, char Str <- rows {
             for lineStep <- Range(y, lastY) {
@@ -58,7 +58,7 @@ def syntax1(rows List[(Int, Int, Str)]) Unit {
 def syntax2(rows List[(Int, Int, Str)]) Unit {
     var lastX = 0
     if let Some(firstRow) = rows.get(0) {
-        _, initialY Int, _ = firstRow
+        let (_, initialY Int, _) = firstRow
         var lastY = initialY
         for x, y, char <- rows {
             for lineStep <- Range(y, lastY) {
@@ -81,10 +81,10 @@ def syntax3(rows List[(Int, Int, Str)]) Unit {
     var lastX = 0
 
     if let Some(first) = rows.get(0) {
-        _, initialY Int, _ = first
+        let (_, initialY Int, _) = first
         var lastY = initialY
         for row <- rows {
-            x, y, char Str = row
+            let (x, y, char Str) = row
             for lineStep <- Range(y, lastY) {
                 OS.println()
             }
