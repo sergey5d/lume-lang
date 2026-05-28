@@ -3007,42 +3007,6 @@ impl<'a> Parser<'a> {
         self.current_span().start_pos.line == name_span.end_pos.line
     }
 
-    fn binding_list_followed_by_left_arrow(&self, start: usize) -> bool {
-        let mut i = start;
-        loop {
-            let Some(token) = self.tokens.get(i) else {
-                return false;
-            };
-            if token.kind != TokenKind::Identifier {
-                return false;
-            }
-            i += 1;
-            while let Some(token) = self.tokens.get(i) {
-                if token.span.start_pos.line != self.tokens[i - 1].span.end_pos.line {
-                    break;
-                }
-                if !matches!(
-                    token.kind,
-                    TokenKind::Identifier
-                        | TokenKind::LParen
-                        | TokenKind::LBrace
-                        | TokenKind::LBracket
-                ) {
-                    break;
-                }
-                if !self.scan_potential_type_ref(i) {
-                    break;
-                }
-                i = self.scan_type_ref_end(i);
-            }
-            match self.tokens.get(i).map(|token| token.kind) {
-                Some(TokenKind::LeftArrow) => return true,
-                Some(TokenKind::Comma) => i += 1,
-                _ => return false,
-            }
-        }
-    }
-
     fn pattern_followed_by_eq(&self, start: usize) -> bool {
         let mut parser = Parser {
             tokens: self.tokens,
@@ -3054,61 +3018,6 @@ impl<'a> Parser<'a> {
             return false;
         }
         parser.at(TokenKind::Eq)
-    }
-
-    fn scan_potential_type_ref(&self, start: usize) -> bool {
-        self.tokens.get(start).is_some_and(|token| {
-            matches!(
-                token.kind,
-                TokenKind::Identifier | TokenKind::LParen | TokenKind::LBrace
-            )
-        })
-    }
-
-    fn scan_type_ref_end(&self, start: usize) -> usize {
-        let mut i = start;
-        let mut paren_depth = 0isize;
-        let mut brace_depth = 0isize;
-        let mut bracket_depth = 0isize;
-        while let Some(token) = self.tokens.get(i) {
-            match token.kind {
-                TokenKind::LParen => paren_depth += 1,
-                TokenKind::RParen => {
-                    if paren_depth == 0 {
-                        break;
-                    }
-                    paren_depth -= 1;
-                }
-                TokenKind::LBrace => brace_depth += 1,
-                TokenKind::RBrace => {
-                    if brace_depth == 0 {
-                        break;
-                    }
-                    brace_depth -= 1;
-                }
-                TokenKind::LBracket => bracket_depth += 1,
-                TokenKind::RBracket => {
-                    if bracket_depth == 0 {
-                        break;
-                    }
-                    bracket_depth -= 1;
-                }
-                TokenKind::Arrow
-                | TokenKind::Comma
-                | TokenKind::LeftArrow
-                | TokenKind::Eq
-                | TokenKind::FatArrow
-                | TokenKind::Keyword(Keyword::Then)
-                | TokenKind::Keyword(Keyword::Else)
-                    if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 =>
-                {
-                    break;
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        i
     }
 
     fn scan_if_condition_expr_end(&self, start: usize) -> usize {
