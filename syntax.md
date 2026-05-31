@@ -302,7 +302,7 @@ user = record { name = "Ada", age = 10 }
 Positional anonymous record construction is also allowed when the target shape is already known:
 
 ```txt
-user { name Str, age Int } = record("Ada", 10)
+user { name Str, age Int } = record { "Ada", 10 }
 ```
 
 Multiline anonymous record literal:
@@ -342,10 +342,10 @@ Positional construction also works for shaped parameters and shaped return value
 
 ```txt
 def makeUser() { name Str, age Int } = {
-    return record("Ada", 10)
+    return record { "Ada", 10 }
 }
 
-describe(record("Cara", 14))
+describe(record { "Cara", 14 })
 ```
 
 Named records/classes can be built from an anonymous record only through an explicit type call:
@@ -385,6 +385,7 @@ Anonymous record shapes are structural:
 - missing fields are rejected
 - defaults are not part of the shape syntax
 - construction uses `record { ... }`; plain `{ ... }` remains a block expression
+- `record { value1, value2 }` is positional and requires an anonymous record shape from context
 - `record(...)` is allowed only when an anonymous record shape is known from context
 - inside `record { ... }`, fields may be separated by commas, newlines, or a mix of both
 

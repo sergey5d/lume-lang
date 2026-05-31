@@ -62,13 +62,14 @@ func (p *Parser) parseExpressionWithOptions(minPrec int, allowRecordUpdate bool)
 			left = p.appendTrailingCallArg(left, lambda)
 			continue
 		}
-		if p.isBareAnonymousRecordCallArgStart() {
+		if p.check(TokenLBrace) {
+			checkpoint := p.pos
 			record, err := p.parseAnonymousRecordExpr(p.advance())
-			if err != nil {
-				return nil, err
+			if err == nil {
+				left = p.appendTrailingCallArg(left, record)
+				continue
 			}
-			left = p.appendTrailingCallArg(left, record)
-			continue
+			p.pos = checkpoint
 		}
 		if p.match(TokenDot) {
 			name, err := p.consume(TokenIdentifier, "expected member name after '.'")
@@ -249,10 +250,23 @@ func (p *Parser) isAnonymousInterfaceExprStart() bool {
 	if !p.check(TokenLBrace) {
 		return false
 	}
-	if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Type == TokenIdentifier && p.tokens[p.pos+2].Type == TokenAssign {
+	lookahead := p.pos + 1
+	if lookahead >= len(p.tokens) {
 		return false
 	}
-	return true
+	if lookahead+1 < len(p.tokens) {
+		next := p.tokens[lookahead]
+		after := p.tokens[lookahead+1]
+		if next.Type == TokenIdentifier && (after.Type == TokenAssign || after.Type == TokenComma || after.Type == TokenRBrace || after.Line > next.Line) {
+			return false
+		}
+	}
+	switch p.tokens[lookahead].Type {
+	case TokenAt, TokenPrivate, TokenDef, TokenImpl:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) parseAnonymousRecordExpr(start Token) (Expr, error) {
@@ -260,44 +274,87 @@ func (p *Parser) parseAnonymousRecordExpr(start Token) (Expr, error) {
 		if start.Type != TokenLBrace {
 			p.advance()
 		}
-		var fields []CallArg
+		type recordEntry struct {
+			named bool
+			name  string
+			value Expr
+			span  Span
+		}
+		var entries []recordEntry
 		if p.check(TokenRBrace) {
 			return nil, fmt.Errorf("anonymous record literal must declare at least one field at %d:%d", start.Line, start.Column)
 		}
 		for {
-			name, err := p.consume(TokenIdentifier, "expected record field name")
-			if err != nil {
-				return nil, err
+			var entry recordEntry
+			if p.check(TokenIdentifier) && p.checkNext(TokenAssign) {
+				name, err := p.consume(TokenIdentifier, "expected record field name")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := p.consume(TokenAssign, "expected '=' after record field name"); err != nil {
+					return nil, err
+				}
+				value, err := p.parseExpressionWithOptions(0, true)
+				if err != nil {
+					return nil, err
+				}
+				entry = recordEntry{
+					named: true,
+					name:  name.Lexeme,
+					value: value,
+					span:  mergeSpans(tokenSpan(name), exprSpan(value)),
+				}
+			} else {
+				value, err := p.parseExpressionWithOptions(0, true)
+				if err != nil {
+					return nil, err
+				}
+				entry = recordEntry{
+					value: value,
+					span:  exprSpan(value),
+				}
 			}
-			if _, err := p.consume(TokenAssign, "expected '=' after record field name"); err != nil {
-				return nil, err
-			}
-			value, err := p.parseExpressionWithOptions(0, true)
-			if err != nil {
-				return nil, err
-			}
-			fields = append(fields, CallArg{
-				Name:  name.Lexeme,
-				Value: value,
-				Span:  mergeSpans(tokenSpan(name), exprSpan(value)),
-			})
+			entries = append(entries, entry)
 			if p.match(TokenComma) {
 				continue
 			}
 			if p.check(TokenRBrace) {
 				break
 			}
-			if p.check(TokenIdentifier) && exprSpan(value).End.Line < p.peek().Line {
+			if entry.span.End.Line < p.peek().Line {
 				continue
 			}
-			return nil, fmt.Errorf("expected ',' or newline between record fields, got %s", p.peek().String())
+			return nil, fmt.Errorf("expected ',' or newline between record entries, got %s", p.peek().String())
 		}
 		end, err := p.consume(TokenRBrace, "expected '}' after anonymous record literal")
 		if err != nil {
 			return nil, err
 		}
+		hasNamed := false
+		for _, entry := range entries {
+			if entry.named {
+				hasNamed = true
+				break
+			}
+		}
+		var fields []CallArg
+		var values []Expr
+		if hasNamed {
+			for _, entry := range entries {
+				if entry.named {
+					fields = append(fields, CallArg{Name: entry.name, Value: entry.value, Span: entry.span})
+					continue
+				}
+				return nil, fmt.Errorf("cannot mix named and positional record fields")
+			}
+		} else {
+			for _, entry := range entries {
+				values = append(values, entry.value)
+			}
+		}
 		return &AnonymousRecordExpr{
 			Fields: fields,
+			Values: values,
 			Span:   mergeSpans(tokenSpan(start), tokenSpan(end)),
 		}, nil
 	}
@@ -834,10 +891,14 @@ func (p *Parser) isBareAnonymousRecordCallArgStart() bool {
 	if !p.check(TokenLBrace) {
 		return false
 	}
+	if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Type != TokenIdentifier {
+		return false
+	}
 	if p.pos+2 >= len(p.tokens) {
 		return false
 	}
-	return p.tokens[p.pos+1].Type == TokenIdentifier && p.tokens[p.pos+2].Type == TokenAssign
+	next := p.tokens[p.pos+2]
+	return next.Type == TokenAssign || next.Type == TokenComma || next.Type == TokenRBrace || next.Line > p.tokens[p.pos+1].Line
 }
 
 func (p *Parser) parseRecordUpdateArgs() ([]CallArg, Token, error) {

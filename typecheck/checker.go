@@ -3353,14 +3353,14 @@ func (c *Checker) checkAnonymousRecordExpr(expr *parser.AnonymousRecordExpr, exp
 			for _, value := range expr.Values {
 				c.checkExpr(value)
 			}
-			c.addDiagnostic("invalid_record_literal", "positional record(...) requires an expected anonymous record shape", expr.Span)
+			c.addDiagnostic("invalid_record_literal", "positional record literal requires an expected anonymous record shape", expr.Span)
 			return unknownType
 		}
 		if len(expr.Values) != len(expected.Fields) {
 			for _, value := range expr.Values {
 				c.checkExpr(value)
 			}
-			c.addDiagnostic("invalid_record_literal", fmt.Sprintf("record(...) expects %d values for shape %s, got %d", len(expected.Fields), expected.String(), len(expr.Values)), expr.Span)
+			c.addDiagnostic("invalid_record_literal", fmt.Sprintf("positional record literal expects %d values for shape %s, got %d", len(expected.Fields), expected.String(), len(expr.Values)), expr.Span)
 			return expected
 		}
 		fields := make([]RecordField, len(expected.Fields))

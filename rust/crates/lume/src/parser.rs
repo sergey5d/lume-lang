@@ -1907,27 +1907,67 @@ impl<'a> Parser<'a> {
     }
 
     fn finish_brace_record_literal_expr(&mut self, start: Span) -> Option<Expr> {
-        let mut fields = Vec::new();
+        #[derive(Clone)]
+        struct RecordEntry {
+            name: Option<String>,
+            value: Expr,
+            span: Span,
+        }
+
+        let mut entries = Vec::new();
         self.skip_newlines();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let (name, name_span) = self.expect_identifier("expected record field name")?;
-            self.consume(TokenKind::Eq, "expected '=' after record field name")?;
-            let value = self.parse_expr()?;
-            fields.push(CallArg {
-                name: Some(name),
-                span: name_span.cover(value.span()),
-                value,
-            });
+            let entry = if self.at(TokenKind::Identifier) && self.at_next(TokenKind::Eq) {
+                let (name, name_span) = self.expect_identifier("expected record field name")?;
+                self.consume(TokenKind::Eq, "expected '=' after record field name")?;
+                let value = self.parse_expr()?;
+                RecordEntry {
+                    name: Some(name),
+                    span: name_span.cover(value.span()),
+                    value,
+                }
+            } else {
+                let value = self.parse_expr()?;
+                RecordEntry {
+                    name: None,
+                    span: value.span(),
+                    value,
+                }
+            };
+            entries.push(entry.clone());
             self.skip_newlines();
-            if !self.match_token(TokenKind::Comma) && self.at(TokenKind::Identifier) {
+            if self.match_token(TokenKind::Comma) {
+                self.skip_newlines();
                 continue;
             }
-            self.skip_newlines();
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after record literal")?;
+        let has_named = entries.iter().any(|entry| entry.name.is_some());
+        let mut fields = Vec::new();
+        let mut values = Vec::new();
+        if has_named {
+            for entry in entries {
+                if let Some(name) = entry.name {
+                    fields.push(CallArg {
+                        name: Some(name),
+                        value: entry.value,
+                        span: entry.span,
+                    });
+                    continue;
+                }
+                self.diagnostics.push(Diagnostic::error(
+                    "unexpected_token",
+                    "cannot mix named and positional record fields",
+                    entry.span,
+                ));
+                return None;
+            }
+        } else {
+            values = entries.into_iter().map(|entry| entry.value).collect();
+        }
         Some(Expr::RecordLiteral {
             fields,
-            values: Vec::new(),
+            values,
             span: start.cover(end),
         })
     }
@@ -2387,10 +2427,30 @@ impl<'a> Parser<'a> {
             if self.allow_trailing_block_call && self.at(TokenKind::LBrace) {
                 let start = expr.span();
                 let checkpoint = self.checkpoint();
-                let arg = if let Some(record) = self.parse_brace_record_literal_expr() {
-                    record
+                let mut lambda_probe = self.checkpoint();
+                lambda_probe.index += 1;
+                while self
+                    .tokens
+                    .get(lambda_probe.index)
+                    .is_some_and(|token| token.kind == TokenKind::Newline)
+                {
+                    lambda_probe.index += 1;
+                }
+                self.restore(lambda_probe);
+                let prefers_block = self.try_parse_lambda_expr().is_some();
+                self.restore(checkpoint);
+                let arg = if !prefers_block {
+                    if let Some(record) = self.parse_brace_record_literal_expr() {
+                        record
+                    } else {
+                        self.restore(checkpoint);
+                        let block = self.parse_block()?;
+                        Expr::Block {
+                            span: block.span,
+                            body: block,
+                        }
+                    }
                 } else {
-                    self.restore(checkpoint);
                     let block = self.parse_block()?;
                     Expr::Block {
                         span: block.span,
@@ -2555,10 +2615,16 @@ impl<'a> Parser<'a> {
         self.tokens
             .get(lookahead)
             .is_some_and(|token| token.kind == TokenKind::Identifier)
-            && self
+            && (self
                 .tokens
                 .get(lookahead + 1)
                 .is_some_and(|token| token.kind == TokenKind::Eq)
+                || self.tokens.get(lookahead + 1).is_some_and(|token| {
+                    token.kind == TokenKind::Comma || token.kind == TokenKind::RBrace
+                })
+                || self.tokens.get(lookahead + 1).is_some_and(|token| {
+                    token.span.start_pos.line > self.tokens[lookahead].span.start_pos.line
+                }))
     }
 
     fn parse_list_literal(&mut self) -> Option<Expr> {
@@ -3537,6 +3603,26 @@ mod tests {
         parse_program(&lexed.tokens)
     }
 
+    fn parse_expr_only(src: &str) -> Expr {
+        let file = SourceFile::new("test.lum", src);
+        let lexed = lex(&file);
+        assert!(
+            lexed.diagnostics.is_empty(),
+            "lexer diagnostics: {:#?}",
+            lexed.diagnostics
+        );
+        let mut parser = Parser::new(&lexed.tokens);
+        let expr = parser.parse_expr().expect("expression");
+        parser.skip_newlines();
+        assert!(parser.at(TokenKind::Eof), "unexpected trailing tokens");
+        assert!(
+            parser.diagnostics.is_empty(),
+            "parser diagnostics: {:#?}",
+            parser.diagnostics
+        );
+        expr
+    }
+
     fn workspace_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
@@ -3612,6 +3698,39 @@ impl Counter {
         assert_eq!(program.items.len(), 2);
         assert!(matches!(program.items[0], Item::Type(_)));
         assert!(matches!(program.items[1], Item::Impl(_)));
+    }
+
+    #[test]
+    fn parses_record_literal_forms() {
+        match parse_expr_only("record { name, age }") {
+            Expr::RecordLiteral { fields, values, .. } => {
+                assert!(fields.is_empty());
+                assert_eq!(values.len(), 2);
+            }
+            other => panic!("expected record literal, got {other:#?}"),
+        }
+
+        match parse_expr_only(r#"record { 1, "x" }"#) {
+            Expr::RecordLiteral { fields, values, .. } => {
+                assert!(fields.is_empty());
+                assert_eq!(values.len(), 2);
+            }
+            other => panic!("expected record literal, got {other:#?}"),
+        }
+
+        match parse_expr_only("Person { name, age }") {
+            Expr::Call { args, .. } => {
+                assert_eq!(args.len(), 1);
+                match &args[0].value {
+                    Expr::RecordLiteral { fields, values, .. } => {
+                        assert!(fields.is_empty());
+                        assert_eq!(values.len(), 2);
+                    }
+                    other => panic!("expected record literal call arg, got {other:#?}"),
+                }
+            }
+            other => panic!("expected call, got {other:#?}"),
+        }
     }
 
     #[test]

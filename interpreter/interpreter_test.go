@@ -1857,17 +1857,22 @@ def run() Bool {
 		age = 10
 		city = "NYC"
 	}
+	name = "Cara"
+	age = 14
 	narrow { name Str, age Int } = full
-	positional { name Str, age Int } = record("Ben", 12)
+	positional { name Str, age Int } = record { "Ben", 12 }
+	contextual { name Str, age Int } = record { name, age }
 	counter { count Int, next Int } = makeCounter(5)
 	mixed = record { a = 5, c = 7,
 		b = 8
 	}
 	return describe(full) == 10 &&
-		describe(record("Cara", 14)) == 14 &&
+		describe(record { "Cara", 14 }) == 14 &&
 		narrow.name == "Ana" &&
 		positional.name == "Ben" &&
 		positional.age == 12 &&
+		contextual.name == "Cara" &&
+		contextual.age == 14 &&
 		counter.next == 6 &&
 		counter.count == 5 &&
 		full.city == "NYC" &&

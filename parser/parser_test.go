@@ -1971,6 +1971,18 @@ def run(user { name Str, age Int }) Int {
 		t.Fatalf("unexpected mixed record fields %#v", mixed.Fields)
 	}
 
+	identPositionalExpr, err := ParseExpr(`record { name, age }`)
+	if err != nil {
+		t.Fatalf("ParseExpr returned error for identifier positional record literal: %v", err)
+	}
+	identPositional, ok := identPositionalExpr.(*AnonymousRecordExpr)
+	if !ok {
+		t.Fatalf("expected identifier positional literal to be AnonymousRecordExpr, got %#v", identPositionalExpr)
+	}
+	if len(identPositional.Values) != 2 || len(identPositional.Fields) != 0 {
+		t.Fatalf("unexpected identifier positional record literal %#v", identPositional)
+	}
+
 	positionalExpr, err := ParseExpr(`record(1, "x")`)
 	if err != nil {
 		t.Fatalf("ParseExpr returned error for positional record literal: %v", err)
@@ -1981,6 +1993,42 @@ def run(user { name Str, age Int }) Int {
 	}
 	if len(positional.Values) != 2 || len(positional.Fields) != 0 {
 		t.Fatalf("unexpected positional record literal %#v", positional)
+	}
+
+	bracePositionalExpr, err := ParseExpr(`record { 1, "x" }`)
+	if err != nil {
+		t.Fatalf("ParseExpr returned error for brace positional record literal: %v", err)
+	}
+	bracePositional, ok := bracePositionalExpr.(*AnonymousRecordExpr)
+	if !ok {
+		t.Fatalf("expected brace positional literal to be AnonymousRecordExpr, got %#v", bracePositionalExpr)
+	}
+	if len(bracePositional.Values) != 2 || len(bracePositional.Fields) != 0 {
+		t.Fatalf("unexpected brace positional record literal %#v", bracePositional)
+	}
+
+	trailingProgram, err := Parse(`
+def run() Int {
+	name = "Ada"
+	age = 10
+	person = Person { name, age }
+	return 0
+}
+`)
+	if err != nil {
+		t.Fatalf("Parse returned error for trailing brace record call sugar: %v", err)
+	}
+	personBinding, ok := trailingProgram.Functions[0].Body.Statements[2].(*ValStmt)
+	if !ok {
+		t.Fatalf("expected trailing brace record call binding, got %#v", trailingProgram.Functions[0].Body.Statements[2])
+	}
+	call, ok := personBinding.Values[0].(*CallExpr)
+	if !ok || len(call.Args) != 1 {
+		t.Fatalf("expected trailing brace record call to be CallExpr, got %#v", personBinding.Values[0])
+	}
+	recordArg, ok := call.Args[0].Value.(*AnonymousRecordExpr)
+	if !ok || len(recordArg.Values) != 2 || len(recordArg.Fields) != 0 {
+		t.Fatalf("unexpected trailing brace record call arg %#v", call.Args[0].Value)
 	}
 }
 

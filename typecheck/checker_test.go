@@ -763,7 +763,7 @@ def describe(user { name Str, age Int }) Int {
 }
 
 def makeCounter(base Int) { count Int, next Int } = {
-	return record(base, base + 1)
+	return record { base, base + 1 }
 }
 
 def run() Int {
@@ -772,12 +772,15 @@ def run() Int {
 		age = 10
 		city = "NYC"
 	}
+	name = "Cara"
+	age = 14
 	narrow { name Str, age Int } = full
-	positional { name Str, age Int } = record("Ben", 12)
+	positional { name Str, age Int } = record { "Ben", 12 }
+	contextual { name Str, age Int } = record { name, age }
 	counter { count Int, next Int } = makeCounter(5)
 	describe(full)
-	describe(record("Cara", 14))
-	return full.age + narrow.age + positional.age + counter.next
+	describe(record { "Cara", 14 })
+	return full.age + narrow.age + positional.age + contextual.age + counter.next
 }
 `
 

@@ -2152,7 +2152,7 @@ func (in *Interpreter) evalExpr(expr parser.Expr, local *env) (Value, error) {
 		return &instance{class: record.class, fields: copyFields}, nil
 	case *parser.AnonymousRecordExpr:
 		if len(e.Values) > 0 {
-			return nil, RuntimeError{Message: "positional record(...) requires a known anonymous record shape", Span: e.Span}
+			return nil, RuntimeError{Message: "positional record literal requires a known anonymous record shape", Span: e.Span}
 		}
 		fields := make(map[string]Value, len(e.Fields))
 		order := make([]string, 0, len(e.Fields))
@@ -4299,7 +4299,7 @@ func (in *Interpreter) bindingValues(bindings []parser.Binding, values []parser.
 func (in *Interpreter) evalExprWithTypeRef(expr parser.Expr, expected *parser.TypeRef, local *env) (Value, error) {
 	if record, ok := expr.(*parser.AnonymousRecordExpr); ok && len(record.Values) > 0 && expected != nil && len(expected.RecordFields) > 0 {
 		if len(record.Values) != len(expected.RecordFields) {
-			return nil, RuntimeError{Message: fmt.Sprintf("record(...) expects %d values, got %d", len(expected.RecordFields), len(record.Values)), Span: record.Span}
+			return nil, RuntimeError{Message: fmt.Sprintf("positional record literal expects %d values, got %d", len(expected.RecordFields), len(record.Values)), Span: record.Span}
 		}
 		fields := make(map[string]Value, len(expected.RecordFields))
 		order := make([]string, len(expected.RecordFields))
