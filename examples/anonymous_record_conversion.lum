@@ -53,7 +53,7 @@ def main() Unit {
     }
     user User = User(userRecord)
 
-    person Person = Person(record("Ben", 12))
+    person Person = Person(record { "Ben", 12 })
 
     pointRecord = record {
         x = 3, y = 4

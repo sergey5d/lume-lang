@@ -1983,16 +1983,8 @@ def run(user { name Str, age Int }) Int {
 		t.Fatalf("unexpected identifier positional record literal %#v", identPositional)
 	}
 
-	positionalExpr, err := ParseExpr(`record(1, "x")`)
-	if err != nil {
-		t.Fatalf("ParseExpr returned error for positional record literal: %v", err)
-	}
-	positional, ok := positionalExpr.(*AnonymousRecordExpr)
-	if !ok {
-		t.Fatalf("expected positional literal to be AnonymousRecordExpr, got %#v", positionalExpr)
-	}
-	if len(positional.Values) != 2 || len(positional.Fields) != 0 {
-		t.Fatalf("unexpected positional record literal %#v", positional)
+	if _, err := ParseExpr(`record(1, "x")`); err == nil {
+		t.Fatalf("expected record(...) to be rejected")
 	}
 
 	bracePositionalExpr, err := ParseExpr(`record { 1, "x" }`)

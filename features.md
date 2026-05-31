@@ -258,10 +258,9 @@ Open questions:
 - whether anonymous record -> class/record should be contextual-only based on the expected type
 - how strict constructor matching should be
 - whether anonymous record -> tuple should exist at all
-- anonymous records now prefer brace construction for both explicit named fields and contextual positional values
+- anonymous records use brace construction for both explicit named fields and contextual positional values
   - `record { count = count, label = label }`
   - positional brace construction like `record { 1, "x" }` is also allowed when a target anonymous-record shape is known from context
-  - `record(...)` still exists for compatibility, but the brace forms are the clearer long-term surface
 - whether explicit tuple projection should use a builtin like `tuple(instance)`
 
 ### Record Binding From String Templates

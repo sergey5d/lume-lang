@@ -1,0 +1,6 @@
+# FAIL:
+# anonymous record literals use 'record { ... }'; 'record(...)' is not supported
+
+def main() Unit {
+    _ = record(1, "x")
+}

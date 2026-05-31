@@ -79,7 +79,7 @@ for i <- Range(0, 10) {
 
 Current issue:
 
-- `record("Ada", 10)` depends on contextual shape
+- historical positional anonymous records like `record("Ada", 10)` depended on contextual shape
 - it is short, but it adds hidden rules
 - it makes anonymous record construction less obvious
 
@@ -218,7 +218,7 @@ These features reduce characters but increase hidden rules:
 - contextual `match { ... }` lambda sugar
 - contextual `partial { ... }` lambda sugar
 - placeholder lambdas like `_ + 1`
-- shape-driven positional `record(...)`
+- historical shape-driven positional `record(...)`
 - tuple-as-range in `for`
 
 These should be treated with caution.
@@ -243,7 +243,7 @@ If only five changes are made, the best candidates seem to be:
 
 1. remove `apply` as a language calling rule
 2. remove tuple-range magic from `for`
-3. remove positional anonymous `record(...)`
+3. remove positional anonymous `record(...)` (done)
 4. pick one `if` expression form and remove `then`
 5. unify method placement across all type declarations
 

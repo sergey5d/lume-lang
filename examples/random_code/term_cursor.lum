@@ -195,7 +195,7 @@ def toBeOrNotToBe2() Unit {
             c.advance()
             loc := c.get()
         }
-        record(begin, counter, docId)
+        record { begin, counter, docId }
     }
 
     def alignDocs(doc1 Int, doc2 Int) {

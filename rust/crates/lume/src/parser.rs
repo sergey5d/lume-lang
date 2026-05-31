@@ -1888,17 +1888,11 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenKind::LBrace) {
             return self.finish_brace_record_literal_expr(start);
         }
-        self.consume(TokenKind::LParen, "expected '{' or '(' after 'record'")?;
-        let mut values = Vec::new();
-        if !self.at(TokenKind::RParen) {
-            values = self.parse_expr_list()?;
-        }
-        let end = self.consume(TokenKind::RParen, "expected ')' after record literal")?;
-        Some(Expr::RecordLiteral {
-            fields: Vec::new(),
-            values,
-            span: start.cover(end),
-        })
+        self.error_at_current(
+            "unexpected_token",
+            "anonymous record literals use 'record { ... }'; 'record(...)' is not supported",
+        );
+        None
     }
 
     fn parse_brace_record_literal_expr(&mut self) -> Option<Expr> {
@@ -3731,6 +3725,23 @@ impl Counter {
             }
             other => panic!("expected call, got {other:#?}"),
         }
+
+        let file = SourceFile::new("test.lum", r#"def run() Unit = record(1, "x")"#);
+        let lexed = lex(&file);
+        assert!(
+            lexed.diagnostics.is_empty(),
+            "lexer diagnostics: {:#?}",
+            lexed.diagnostics
+        );
+        let result = parse_program(&lexed.tokens);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("'record(...)' is not supported")),
+            "expected record(...) rejection, got diagnostics: {:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

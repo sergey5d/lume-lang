@@ -821,7 +821,7 @@ def run() Int {
 		age = 10
 	}
 	user User = User(userRecord)
-	person Person = Person(record("Ben", 12))
+	person Person = Person(record { "Ben", 12 })
 	team Team = Team(record {
 		name = "Core"
 		owner = Person(record {

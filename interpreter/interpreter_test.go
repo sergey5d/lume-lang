@@ -1928,7 +1928,7 @@ def run() Bool {
 		age = 10
 	}
 	user User = User(userRecord)
-	person Person = Person(record("Ben", 12))
+	person Person = Person(record { "Ben", 12 })
 	team = makeTeam(Person(record {
 		name = "Cy"
 		age = 7

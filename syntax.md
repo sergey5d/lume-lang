@@ -357,7 +357,7 @@ userRecord = record {
 }
 
 user User = User(userRecord)
-person Person = Person(record("Ben", 12, "NYC"))
+person Person = Person(record { "Ben", 12, "NYC" })
 profile MixedProfile = MixedProfile {
     name = "Liam"
     age = 8
@@ -386,7 +386,6 @@ Anonymous record shapes are structural:
 - defaults are not part of the shape syntax
 - construction uses `record { ... }`; plain `{ ... }` remains a block expression
 - `record { value1, value2 }` is positional and requires an anonymous record shape from context
-- `record(...)` is allowed only when an anonymous record shape is known from context
 - inside `record { ... }`, fields may be separated by commas, newlines, or a mix of both
 
 ## Functions and Methods

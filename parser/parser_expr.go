@@ -358,33 +358,7 @@ func (p *Parser) parseAnonymousRecordExpr(start Token) (Expr, error) {
 			Span:   mergeSpans(tokenSpan(start), tokenSpan(end)),
 		}, nil
 	}
-	if _, err := p.consume(TokenLParen, "expected '{' or '(' after 'record'"); err != nil {
-		return nil, err
-	}
-	var values []Expr
-	if !p.check(TokenRParen) {
-		for {
-			value, err := p.parseExpressionUntil(TokenComma, TokenRParen)
-			if err != nil {
-				return nil, err
-			}
-			values = append(values, value)
-			if !p.match(TokenComma) {
-				break
-			}
-		}
-	}
-	end, err := p.consume(TokenRParen, "expected ')' after positional anonymous record literal")
-	if err != nil {
-		return nil, err
-	}
-	if len(values) == 0 {
-		return nil, fmt.Errorf("anonymous record literal must declare at least one value at %d:%d", start.Line, start.Column)
-	}
-	return &AnonymousRecordExpr{
-		Values: values,
-		Span:   mergeSpans(tokenSpan(start), tokenSpan(end)),
-	}, nil
+	return nil, fmt.Errorf("anonymous record literals use 'record { ... }'; 'record(...)' is not supported")
 }
 
 func (p *Parser) parseAnonymousInterfaceExpr() (Expr, error) {
