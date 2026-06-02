@@ -5,6 +5,7 @@ pub mod ir;
 pub mod lexer;
 pub mod lower;
 pub mod parser;
+pub mod runtime;
 pub mod resolver;
 pub mod source;
 pub mod typecheck;

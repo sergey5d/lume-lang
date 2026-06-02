@@ -11,6 +11,7 @@ use crate::{
     diagnostic::Diagnostic,
     ir,
     lower::lower_program,
+    runtime,
     resolver::{LoadedModule, LocatedDiagnostic, ModuleGraph, load_module_graph},
     source::{LineColumn, Span},
     typecheck::check_path,
@@ -732,8 +733,7 @@ enum Value {
     Set(Rc<RefCell<Vec<Value>>>),
     Map(Rc<RefCell<Vec<(Value, Value)>>>),
     Record(Rc<RefCell<Vec<(String, Value)>>>),
-    Object(Rc<RefCell<ObjectValue>>),
-    Variant(Rc<VariantValue>),
+    Aggregate(Rc<RefCell<AggregateValue>>),
     Iterator(Rc<RefCell<IteratorState>>),
     Closure(Rc<ClosureValue>),
 }
@@ -784,51 +784,57 @@ impl Value {
     }
 
     fn option_none() -> Self {
-        Self::Variant(Rc::new(VariantValue {
-            enum_name: "Option".to_string(),
-            case_name: "None".to_string(),
-            fields: Vec::new(),
-        }))
+        Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
+            "Option",
+            "None",
+            Vec::new(),
+            Vec::new(),
+        ))))
     }
 
     fn option_some(value: Value) -> Self {
-        Self::Variant(Rc::new(VariantValue {
-            enum_name: "Option".to_string(),
-            case_name: "Some".to_string(),
-            fields: vec![("value".to_string(), value)],
-        }))
+        Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
+            "Option",
+            "Some",
+            vec!["value".to_string()],
+            vec![value],
+        ))))
     }
 
     fn result_ok(value: Value) -> Self {
-        Self::Variant(Rc::new(VariantValue {
-            enum_name: "Result".to_string(),
-            case_name: "Ok".to_string(),
-            fields: vec![("value".to_string(), value)],
-        }))
+        Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
+            "Result",
+            "Ok",
+            vec!["value".to_string()],
+            vec![value],
+        ))))
     }
 
     fn result_err(error: Value) -> Self {
-        Self::Variant(Rc::new(VariantValue {
-            enum_name: "Result".to_string(),
-            case_name: "Err".to_string(),
-            fields: vec![("error".to_string(), error)],
-        }))
+        Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
+            "Result",
+            "Err",
+            vec!["error".to_string()],
+            vec![error],
+        ))))
     }
 
     fn either_left(value: Value) -> Self {
-        Self::Variant(Rc::new(VariantValue {
-            enum_name: "Either".to_string(),
-            case_name: "Left".to_string(),
-            fields: vec![("value".to_string(), value)],
-        }))
+        Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
+            "Either",
+            "Left",
+            vec!["value".to_string()],
+            vec![value],
+        ))))
     }
 
     fn either_right(value: Value) -> Self {
-        Self::Variant(Rc::new(VariantValue {
-            enum_name: "Either".to_string(),
-            case_name: "Right".to_string(),
-            fields: vec![("value".to_string(), value)],
-        }))
+        Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
+            "Either",
+            "Right",
+            vec!["value".to_string()],
+            vec![value],
+        ))))
     }
 
     fn render(&self) -> String {
@@ -890,33 +896,32 @@ impl Value {
                         .join(",")
                 )
             }
-            Value::Object(object) => {
-                let object = object.borrow();
-                format!(
-                    "{}{{{}}}",
-                    object.type_name,
-                    object
-                        .fields
+            Value::Aggregate(aggregate) => {
+                let aggregate = aggregate.borrow();
+                if let Some(case_name) = &aggregate.case_name {
+                    if aggregate.fields.is_empty() {
+                        case_name.clone()
+                    } else {
+                        format!(
+                            "{}({})",
+                            case_name,
+                            aggregate
+                                .fields
+                                .iter()
+                                .map(Value::render)
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        )
+                    }
+                } else {
+                    let fields = aggregate
+                        .field_names
                         .iter()
+                        .zip(aggregate.fields.iter())
                         .map(|(name, value)| format!("{name}={}", value.render()))
                         .collect::<Vec<_>>()
-                        .join(",")
-                )
-            }
-            Value::Variant(variant) => {
-                if variant.fields.is_empty() {
-                    variant.case_name.clone()
-                } else {
-                    format!(
-                        "{}({})",
-                        variant.case_name,
-                        variant
-                            .fields
-                            .iter()
-                            .map(|(_, value)| value.render())
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    )
+                        .join(",");
+                    format!("{}{{{fields}}}", aggregate.type_name)
                 }
             }
             Value::Iterator(_) => "<iterator>".to_string(),
@@ -932,17 +937,33 @@ impl fmt::Debug for Value {
 }
 
 #[derive(Debug, Clone)]
-struct ObjectValue {
+struct AggregateValue {
+    runtime_type_id: Option<runtime::RuntimeTypeId>,
     type_name: String,
     kind: crate::ast::TypeKind,
-    fields: Vec<(String, Value)>,
+    case_id: Option<runtime::RuntimeEnumCaseId>,
+    case_name: Option<String>,
+    field_names: Vec<String>,
+    fields: Vec<Value>,
 }
 
-#[derive(Debug, Clone)]
-struct VariantValue {
-    enum_name: String,
-    case_name: String,
-    fields: Vec<(String, Value)>,
+impl AggregateValue {
+    fn builtin_variant(
+        enum_name: &str,
+        case_name: &str,
+        field_names: Vec<String>,
+        fields: Vec<Value>,
+    ) -> Self {
+        Self {
+            runtime_type_id: None,
+            type_name: enum_name.to_string(),
+            kind: crate::ast::TypeKind::Enum,
+            case_id: None,
+            case_name: Some(case_name.to_string()),
+            field_names,
+            fields,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -972,6 +993,7 @@ struct Frame {
 
 struct Interpreter<'a> {
     program: &'a ir::Program,
+    runtime: runtime::RuntimeProgram,
     globals: Vec<Value>,
     globals_ready: bool,
     object_singletons: Vec<Option<Value>>,
@@ -980,8 +1002,10 @@ struct Interpreter<'a> {
 
 impl<'a> Interpreter<'a> {
     fn new(program: &'a ir::Program) -> Self {
+        let runtime = runtime::RuntimeProgram::from_ir(program);
         Self {
             program,
+            runtime,
             globals: program
                 .globals
                 .iter()
@@ -1181,12 +1205,16 @@ impl<'a> Interpreter<'a> {
                         .transpose()?
                         .unwrap_or(Value::Unit);
                     if function.name == "init" {
-                        if let (Some(Value::Object(receiver)), Value::Object(result)) =
+                        if let (Some(Value::Aggregate(receiver)), Value::Aggregate(result)) =
                             (frame.locals.first().cloned(), returned.clone())
                         {
                             let result = result.borrow();
-                            if receiver.borrow().type_name == result.type_name {
-                                receiver.borrow_mut().fields = result.fields.clone();
+                            let mut receiver = receiver.borrow_mut();
+                            if receiver.type_name == result.type_name
+                                && receiver.case_name == result.case_name
+                            {
+                                receiver.fields = result.fields.clone();
+                                receiver.field_names = result.field_names.clone();
                                 return Ok(Value::Unit);
                             }
                         }
@@ -1524,11 +1552,11 @@ impl<'a> Interpreter<'a> {
                 args,
                 span,
             ),
-            Value::Object(object) => {
-                let object = object.borrow();
+            Value::Aggregate(aggregate) => {
+                let aggregate = aggregate.borrow();
                 Err(self.runtime_error(
                     span,
-                    format!("value '{}' is not directly callable", object.type_name),
+                    format!("value '{}' is not directly callable", aggregate.type_name),
                 ))
             }
             _ => Err(self.runtime_error(span, "indirect callable values are not implemented yet")),
@@ -1825,13 +1853,18 @@ impl<'a> Interpreter<'a> {
             return Ok(None);
         };
 
-        let object = Value::Object(Rc::new(RefCell::new(ObjectValue {
+        let runtime_type_id = self.runtime.type_id_for_ir_id(ty.id);
+        let object = Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
+            runtime_type_id,
             type_name: type_name.to_string(),
             kind: ty.kind,
+            case_id: None,
+            case_name: None,
+            field_names: ty.fields.iter().map(|field| field.name.clone()).collect(),
             fields: ty
                 .fields
                 .iter()
-                .map(|field| (field.name.clone(), self.field_default_value(field)))
+                .map(|field| self.field_default_value(field))
                 .collect(),
         })));
 
@@ -1852,15 +1885,15 @@ impl<'a> Interpreter<'a> {
         }
 
         {
-            let mut fields = match &object {
-                Value::Object(object) => object.borrow_mut(),
+            let mut aggregate = match &object {
+                Value::Aggregate(object) => object.borrow_mut(),
                 _ => unreachable!(),
             };
             if args.len() == 1 {
                 match &args[0] {
-                    Value::Tuple(items) if items.len() <= fields.fields.len() => {
+                    Value::Tuple(items) if items.len() <= aggregate.fields.len() => {
                         for (index, value) in items.iter().cloned().enumerate() {
-                            fields.fields[index].1 =
+                            aggregate.fields[index] =
                                 self.coerce_value_to_type(value, &ty.fields[index].ty);
                         }
                         return Ok(Some(object.clone()));
@@ -1876,16 +1909,16 @@ impl<'a> Interpreter<'a> {
                                 let value = lookup_named_field(&values, &field.name)
                                     .expect("named constructor field")
                                     .clone();
-                                fields.fields[index].1 =
+                                aggregate.fields[index] =
                                     self.coerce_value_to_type(value, &field.ty);
                             }
                             return Ok(Some(object.clone()));
                         }
-                        if values.len() <= fields.fields.len() {
+                        if values.len() <= aggregate.fields.len() {
                             for (index, ((_, value), field)) in
                                 values.iter().zip(&ty.fields).enumerate()
                             {
-                                fields.fields[index].1 =
+                                aggregate.fields[index] =
                                     self.coerce_value_to_type(value.clone(), &field.ty);
                             }
                             return Ok(Some(object.clone()));
@@ -1894,19 +1927,19 @@ impl<'a> Interpreter<'a> {
                     _ => {}
                 }
             }
-            if args.len() > fields.fields.len() {
+            if args.len() > aggregate.fields.len() {
                 return Err(self.runtime_error(
                     span,
                     format!(
                         "constructor '{}' accepts at most {} positional fields, got {}",
                         type_name,
-                        fields.fields.len(),
+                        aggregate.fields.len(),
                         args.len()
                     ),
                 ));
             }
             for (index, value) in args.into_iter().enumerate() {
-                fields.fields[index].1 = value;
+                aggregate.fields[index] = value;
             }
         }
 
@@ -1967,11 +2000,22 @@ impl<'a> Interpreter<'a> {
                 ))
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?;
-        Ok(Value::Variant(Rc::new(VariantValue {
-            enum_name: enum_name.to_string(),
-            case_name: case_name.to_string(),
-            fields: values,
-        })))
+        let runtime_type_id = self
+            .runtime
+            .type_id_by_name_kind(enum_name, crate::ast::TypeKind::Enum);
+        let case_id = runtime_type_id
+            .and_then(|type_id| self.runtime.enum_case_by_name(type_id, case_name))
+            .map(|case| case.id);
+        let (field_names, fields): (Vec<_>, Vec<_>) = values.into_iter().unzip();
+        Ok(Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
+            runtime_type_id,
+            type_name: enum_name.to_string(),
+            kind: crate::ast::TypeKind::Enum,
+            case_id,
+            case_name: Some(case_name.to_string()),
+            field_names,
+            fields,
+        }))))
     }
 
     fn record_update_value(
@@ -1994,12 +2038,12 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Value::Record(Rc::new(RefCell::new(next))))
             }
-            Value::Object(object) => {
+            Value::Aggregate(object) if object.borrow().case_name.is_none() => {
                 let object = object.borrow();
                 let mut next = object.fields.clone();
                 for (name, value) in updates {
-                    if let Some((_, slot)) = next.iter_mut().find(|(field, _)| *field == name) {
-                        *slot = value;
+                    if let Some(index) = object.field_names.iter().position(|field| field == &name) {
+                        next[index] = value;
                     } else {
                         return Err(self.runtime_error(
                             span,
@@ -2007,9 +2051,13 @@ impl<'a> Interpreter<'a> {
                         ));
                     }
                 }
-                Ok(Value::Object(Rc::new(RefCell::new(ObjectValue {
+                Ok(Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
+                    runtime_type_id: object.runtime_type_id,
                     type_name: object.type_name.clone(),
                     kind: object.kind,
+                    case_id: object.case_id,
+                    case_name: object.case_name.clone(),
+                    field_names: object.field_names.clone(),
                     fields: next,
                 }))))
             }
@@ -2052,20 +2100,25 @@ impl<'a> Interpreter<'a> {
             .find(|case| case.name == case_name)
             .expect("matched case");
         if args.is_empty() && case.fields.iter().all(|field| field.initializer.is_some()) {
-            return Ok(Value::Variant(Rc::new(VariantValue {
-                enum_name: ty.name.clone(),
-                case_name: case_name.to_string(),
+            return Ok(Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
+                runtime_type_id: self.runtime.type_id_for_ir_id(ty.id),
+                type_name: ty.name.clone(),
+                kind: crate::ast::TypeKind::Enum,
+                case_id: self
+                    .runtime
+                    .type_id_for_ir_id(ty.id)
+                    .and_then(|type_id| self.runtime.enum_case_by_name(type_id, case_name))
+                    .map(|case| case.id),
+                case_name: Some(case_name.to_string()),
+                field_names: case.fields.iter().map(|field| field.name.clone()).collect(),
                 fields: case
                     .fields
                     .iter()
                     .map(|field| {
-                        (
-                            field.name.clone(),
-                            self.constant_value(field.initializer.as_ref().expect("initializer")),
-                        )
+                        self.constant_value(field.initializer.as_ref().expect("initializer"))
                     })
                     .collect(),
-            })));
+            }))));
         }
         let required = case
             .fields
@@ -2085,6 +2138,7 @@ impl<'a> Interpreter<'a> {
                 ),
             ));
         }
+        let mut field_names = Vec::with_capacity(case.fields.len());
         let mut values = Vec::with_capacity(case.fields.len());
         let mut supplied = args.into_iter().peekable();
         for (index, field) in case.fields.iter().enumerate() {
@@ -2098,13 +2152,22 @@ impl<'a> Interpreter<'a> {
             } else {
                 self.constant_value(field.initializer.as_ref().expect("initializer"))
             };
-            values.push((field.name.clone(), value));
+            field_names.push(field.name.clone());
+            values.push(value);
         }
-        Ok(Value::Variant(Rc::new(VariantValue {
-            enum_name: ty.name.clone(),
-            case_name: case_name.to_string(),
+        Ok(Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
+            runtime_type_id: self.runtime.type_id_for_ir_id(ty.id),
+            type_name: ty.name.clone(),
+            kind: crate::ast::TypeKind::Enum,
+            case_id: self
+                .runtime
+                .type_id_for_ir_id(ty.id)
+                .and_then(|type_id| self.runtime.enum_case_by_name(type_id, case_name))
+                .map(|case| case.id),
+            case_name: Some(case_name.to_string()),
+            field_names,
             fields: values,
-        })))
+        }))))
     }
 
     fn invoke_intrinsic(
@@ -2163,7 +2226,8 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Value::Bool(matches!(
                     &args[0],
-                    Value::Variant(variant) if variant.case_name == *case_name
+                    Value::Aggregate(variant)
+                        if variant.borrow().case_name.as_deref() == Some(case_name.as_str())
                 )))
             }
             ir::Intrinsic::VariantField(field_name) => {
@@ -2302,10 +2366,10 @@ impl<'a> Interpreter<'a> {
 
     fn unwrappable_present(&self, value: &Value) -> bool {
         match value {
-            Value::Variant(variant) => match variant.enum_name.as_str() {
-                "Option" => variant.case_name == "Some",
-                "Result" => variant.case_name == "Ok",
-                "Either" => variant.case_name == "Right",
+            Value::Aggregate(aggregate) => match aggregate.borrow().type_name.as_str() {
+                "Option" => aggregate.borrow().case_name.as_deref() == Some("Some"),
+                "Result" => aggregate.borrow().case_name.as_deref() == Some("Ok"),
+                "Either" => aggregate.borrow().case_name.as_deref() == Some("Right"),
                 _ => false,
             },
             _ => false,
@@ -2314,10 +2378,11 @@ impl<'a> Interpreter<'a> {
 
     fn unwrappable_value(&self, value: &Value, span: Option<Span>) -> Result<Value, Diagnostic> {
         match value {
-            Value::Variant(variant) if self.unwrappable_present(value) => variant
+            Value::Aggregate(aggregate) if self.unwrappable_present(value) => aggregate
+                .borrow()
                 .fields
                 .first()
-                .map(|(_, value)| value.clone())
+                .cloned()
                 .ok_or_else(|| self.runtime_error(span, "unwrappable value has no payload")),
             _ => Err(self.runtime_error(
                 span,
@@ -2346,8 +2411,8 @@ impl<'a> Interpreter<'a> {
             Value::String(_) => {
                 return self.invoke_string_method(receiver.clone(), method, args, span);
             }
-            Value::Variant(variant) => {
-                return self.invoke_variant_method(receiver.clone(), variant, method, args, span);
+            Value::Aggregate(aggregate) if aggregate.borrow().case_name.is_some() => {
+                return self.invoke_variant_method(receiver.clone(), aggregate, method, args, span);
             }
             Value::Iterator(iterator) => {
                 return self.invoke_iterator_method(receiver.clone(), iterator, method, args, span);
@@ -2357,13 +2422,13 @@ impl<'a> Interpreter<'a> {
                     return self.invoke_value(value, args, span);
                 }
             }
-            Value::Object(object) => {
+            Value::Aggregate(aggregate) => {
                 let (type_name, kind, field_fallback) = {
-                    let object = object.borrow();
+                    let aggregate = aggregate.borrow();
                     (
-                        object.type_name.clone(),
-                        object.kind,
-                        lookup_named_field(&object.fields, method),
+                        aggregate.type_name.clone(),
+                        aggregate.kind,
+                        aggregate_named_field(&aggregate, method),
                     )
                 };
                 if let Some(function) =
@@ -3153,23 +3218,31 @@ impl<'a> Interpreter<'a> {
     fn invoke_variant_method(
         &mut self,
         receiver: Value,
-        variant: &Rc<VariantValue>,
+        aggregate: &Rc<RefCell<AggregateValue>>,
         method: &str,
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
-        match variant.enum_name.as_str() {
+        let (enum_name, case_name, first_field) = {
+            let aggregate = aggregate.borrow();
+            (
+                aggregate.type_name.clone(),
+                aggregate.case_name.clone().unwrap_or_default(),
+                aggregate.fields.first().cloned(),
+            )
+        };
+        match enum_name.as_str() {
             "Option" => match method {
-                "isSet" => Ok(Value::Bool(variant.case_name == "Some")),
-                "isEmpty" => Ok(Value::Bool(variant.case_name != "Some")),
+                "isSet" => Ok(Value::Bool(case_name == "Some")),
+                "isEmpty" => Ok(Value::Bool(case_name != "Some")),
                 "map" => {
                     let [callback] = args.as_slice() else {
                         return Err(self.runtime_error(span, "Option.map expects 1 argument"));
                     };
-                    if variant.case_name == "Some" {
+                    if case_name == "Some" {
                         let mapped = self.invoke_value(
                             callback.clone(),
-                            vec![variant.fields[0].1.clone()],
+                            vec![first_field.expect("Option.Some payload")],
                             span,
                         )?;
                         Ok(Value::option_some(mapped))
@@ -3181,17 +3254,17 @@ impl<'a> Interpreter<'a> {
                     if !args.is_empty() {
                         return Err(self.runtime_error(span, "Option.expect expects 0 arguments"));
                     }
-                    if variant.case_name != "Some" {
+                    if case_name != "Some" {
                         return Err(self.runtime_error(span, "Option has no value"));
                     }
-                    Ok(variant.fields[0].1.clone())
+                    Ok(first_field.expect("Option.Some payload"))
                 }
                 "getOr" => {
                     if args.len() != 1 {
                         return Err(self.runtime_error(span, "Option.getOr expects 1 argument"));
                     }
-                    if variant.case_name == "Some" {
-                        Ok(variant.fields[0].1.clone())
+                    if case_name == "Some" {
+                        Ok(first_field.expect("Option.Some payload"))
                     } else {
                         Ok(args[0].clone())
                     }
@@ -3200,8 +3273,8 @@ impl<'a> Interpreter<'a> {
                     if args.len() != 1 {
                         return Err(self.runtime_error(span, "Option.getOrElse expects 1 argument"));
                     }
-                    if variant.case_name == "Some" {
-                        Ok(variant.fields[0].1.clone())
+                    if case_name == "Some" {
+                        Ok(first_field.expect("Option.Some payload"))
                     } else {
                         Ok(args[0].clone())
                     }
@@ -3210,8 +3283,8 @@ impl<'a> Interpreter<'a> {
                     if !args.is_empty() {
                         return Err(self.runtime_error(span, "Option.iterator expects 0 arguments"));
                     }
-                    let values = if variant.case_name == "Some" {
-                        vec![variant.fields[0].1.clone()]
+                    let values = if case_name == "Some" {
+                        vec![first_field.expect("Option.Some payload")]
                     } else {
                         Vec::new()
                     };
@@ -3227,16 +3300,16 @@ impl<'a> Interpreter<'a> {
                 }
             },
             "Result" => match method {
-                "isOk" => Ok(Value::Bool(variant.case_name == "Ok")),
-                "isErr" => Ok(Value::Bool(variant.case_name != "Ok")),
+                "isOk" => Ok(Value::Bool(case_name == "Ok")),
+                "isErr" => Ok(Value::Bool(case_name != "Ok")),
                 "map" => {
                     let [callback] = args.as_slice() else {
                         return Err(self.runtime_error(span, "Result.map expects 1 argument"));
                     };
-                    if variant.case_name == "Ok" {
+                    if case_name == "Ok" {
                         let mapped = self.invoke_value(
                             callback.clone(),
-                            vec![variant.fields[0].1.clone()],
+                            vec![first_field.expect("Result.Ok payload")],
                             span,
                         )?;
                         Ok(Value::result_ok(mapped))
@@ -3245,15 +3318,15 @@ impl<'a> Interpreter<'a> {
                     }
                 }
                 "expect" => {
-                    if variant.case_name == "Ok" {
-                        Ok(variant.fields[0].1.clone())
+                    if case_name == "Ok" {
+                        Ok(first_field.expect("Result.Ok payload"))
                     } else {
                         Err(self.runtime_error(span, "Result has no success value"))
                     }
                 }
                 "getError" => {
-                    if variant.case_name == "Err" {
-                        Ok(variant.fields[0].1.clone())
+                    if case_name == "Err" {
+                        Ok(first_field.expect("Result.Err payload"))
                     } else {
                         Err(self.runtime_error(span, "Result has no error value"))
                     }
@@ -3262,8 +3335,8 @@ impl<'a> Interpreter<'a> {
                     if args.len() != 1 {
                         return Err(self.runtime_error(span, "Result.getOr expects 1 argument"));
                     }
-                    if variant.case_name == "Ok" {
-                        Ok(variant.fields[0].1.clone())
+                    if case_name == "Ok" {
+                        Ok(first_field.expect("Result.Ok payload"))
                     } else {
                         Ok(args[0].clone())
                     }
@@ -3273,16 +3346,16 @@ impl<'a> Interpreter<'a> {
                 }
             },
             "Either" => match method {
-                "isLeft" => Ok(Value::Bool(variant.case_name == "Left")),
-                "isRight" => Ok(Value::Bool(variant.case_name == "Right")),
+                "isLeft" => Ok(Value::Bool(case_name == "Left")),
+                "isRight" => Ok(Value::Bool(case_name == "Right")),
                 "map" => {
                     let [callback] = args.as_slice() else {
                         return Err(self.runtime_error(span, "Either.map expects 1 argument"));
                     };
-                    if variant.case_name == "Right" {
+                    if case_name == "Right" {
                         let mapped = self.invoke_value(
                             callback.clone(),
-                            vec![variant.fields[0].1.clone()],
+                            vec![first_field.expect("Either.Right payload")],
                             span,
                         )?;
                         Ok(Value::either_right(mapped))
@@ -3291,15 +3364,15 @@ impl<'a> Interpreter<'a> {
                     }
                 }
                 "expectLeft" => {
-                    if variant.case_name == "Left" {
-                        Ok(variant.fields[0].1.clone())
+                    if case_name == "Left" {
+                        Ok(first_field.expect("Either.Left payload"))
                     } else {
                         Err(self.runtime_error(span, "Either has no left value"))
                     }
                 }
                 "expectRight" => {
-                    if variant.case_name == "Right" {
-                        Ok(variant.fields[0].1.clone())
+                    if case_name == "Right" {
+                        Ok(first_field.expect("Either.Right payload"))
                     } else {
                         Err(self.runtime_error(span, "Either has no right value"))
                     }
@@ -3308,8 +3381,8 @@ impl<'a> Interpreter<'a> {
                     if args.len() != 1 {
                         return Err(self.runtime_error(span, "Either.getOr expects 1 argument"));
                     }
-                    if variant.case_name == "Right" {
-                        Ok(variant.fields[0].1.clone())
+                    if case_name == "Right" {
+                        Ok(first_field.expect("Either.Right payload"))
                     } else {
                         Ok(args[0].clone())
                     }
@@ -3329,11 +3402,18 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
-        let Value::Variant(variant) = &receiver else {
+        let Value::Aggregate(variant) = &receiver else {
             unreachable!();
         };
+        let (type_name, case_name) = {
+            let variant = variant.borrow();
+            (
+                variant.type_name.clone(),
+                variant.case_name.clone().unwrap_or_else(|| "<unknown>".to_string()),
+            )
+        };
         if let Some(function) = self.find_method_overload_for_kind(
-            &variant.enum_name,
+            &type_name,
             crate::ast::TypeKind::Enum,
             method,
             &args,
@@ -3344,7 +3424,7 @@ impl<'a> Interpreter<'a> {
             span,
             format!(
                 "method '{}' is not available on variant '{}.{}'",
-                method, variant.enum_name, variant.case_name
+                method, type_name, case_name
             ),
         ))
     }
@@ -3431,11 +3511,12 @@ impl<'a> Interpreter<'a> {
             .map(|function| function.id)
     }
 
-    fn lookup_type_by_kind(&self, name: &str, kind: crate::ast::TypeKind) -> Option<&ir::TypeDef> {
-        self.program
-            .types
-            .iter()
-            .find(|ty| ty.name == name && ty.kind == kind)
+    fn lookup_type_by_kind(
+        &self,
+        name: &str,
+        kind: crate::ast::TypeKind,
+    ) -> Option<&runtime::RuntimeType> {
+        self.runtime.type_by_name_kind(name, kind)
     }
 
     fn lookup_object_singleton(
@@ -3452,14 +3533,25 @@ impl<'a> Interpreter<'a> {
         if let Some(existing) = &self.object_singletons[ty.id.0] {
             return Ok(Some(existing.clone()));
         }
-        let value = Value::Object(Rc::new(RefCell::new(ObjectValue {
+        let field_values = ty
+            .ir_type_id
+            .and_then(|ir_type_id| self.program.types.get(ir_type_id.0))
+            .map(|ir_type| {
+                ir_type
+                    .fields
+                    .iter()
+                    .map(|field| self.field_default_value(field))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| vec![Value::Unit; ty.fields.len()]);
+        let value = Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
+            runtime_type_id: Some(ty.id),
             type_name: ty.name.clone(),
             kind: ty.kind,
-            fields: ty
-                .fields
-                .iter()
-                .map(|field| (field.name.clone(), self.field_default_value(field)))
-                .collect(),
+            case_id: None,
+            case_name: None,
+            field_names: ty.fields.iter().map(|field| field.name.clone()).collect(),
+            fields: field_values,
         })));
         if let Some(init) =
             self.find_method_overload_for_kind(&ty.name, crate::ast::TypeKind::Object, "init", &[])
@@ -3494,26 +3586,17 @@ impl<'a> Interpreter<'a> {
         if !visited.insert((owner.to_string(), kind)) {
             return;
         }
-        let Some(ty) = self
-            .program
-            .types
-            .iter()
-            .find(|ty| ty.name == owner && ty.kind == kind)
-        else {
+        let Some(ty) = self.lookup_type_by_kind(owner, kind) else {
             return;
         };
-        out.extend(ty.methods.iter().copied().filter(|id| {
-            self.program
-                .function(*id)
-                .is_some_and(|function| function.name == method)
-        }));
+        out.extend(self.runtime.methods_named(ty.id, method));
         for bound in &ty.with_bounds {
-            let ir::Type::Named { name, .. } = bound else {
+            let Some(bound_ty) = self.runtime.type_by_id(*bound) else {
                 continue;
             };
             self.collect_methods_for_kind_inner(
-                name,
-                crate::ast::TypeKind::Interface,
+                &bound_ty.name,
+                bound_ty.kind,
                 method,
                 visited,
                 out,
@@ -3574,29 +3657,30 @@ impl<'a> Interpreter<'a> {
 
     fn get_member(&self, base: Value, name: &str, span: Option<Span>) -> Result<Value, Diagnostic> {
         match base {
-            Value::Object(object) => {
-                if matches!(name, "stdout" | "stderr") && object.borrow().type_name == "OS" {
-                    return Ok(Value::Object(object.clone()));
+            Value::Aggregate(aggregate) => {
+                if matches!(name, "stdout" | "stderr")
+                    && aggregate.borrow().type_name == "OS"
+                    && aggregate.borrow().case_name.is_none()
+                {
+                    return Ok(Value::Aggregate(aggregate.clone()));
                 }
-                let object = object.borrow();
-                lookup_named_field(&object.fields, name).ok_or_else(|| {
+                let aggregate = aggregate.borrow();
+                aggregate_named_field(&aggregate, name).ok_or_else(|| {
                     self.runtime_error(
                         span,
-                        format!("object '{}' has no field '{}'", object.type_name, name),
+                        if let Some(case_name) = &aggregate.case_name {
+                            format!(
+                                "variant '{}.{}' has no field '{}'",
+                                aggregate.type_name, case_name, name
+                            )
+                        } else {
+                            format!("object '{}' has no field '{}'", aggregate.type_name, name)
+                        },
                     )
                 })
             }
             Value::Record(fields) => lookup_named_field(&fields.borrow(), name)
                 .ok_or_else(|| self.runtime_error(span, format!("record has no field '{}'", name))),
-            Value::Variant(variant) => lookup_named_field(&variant.fields, name).ok_or_else(|| {
-                self.runtime_error(
-                    span,
-                    format!(
-                        "variant '{}.{}' has no field '{}'",
-                        variant.enum_name, variant.case_name, name
-                    ),
-                )
-            }),
             Value::Tuple(items) => tuple_member(&items, name)
                 .ok_or_else(|| self.runtime_error(span, format!("tuple has no member '{}'", name))),
             _ => Err(self.runtime_error(
@@ -3614,10 +3698,18 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<(), Diagnostic> {
         match base {
-            Value::Object(object) => set_named_field(&mut object.borrow_mut().fields, name, value)
-                .ok_or_else(|| {
-                    self.runtime_error(span, format!("object field '{}' does not exist", name))
-                }),
+            Value::Aggregate(object) if object.borrow().case_name.is_none() => {
+                let mut object = object.borrow_mut();
+                if let Some(index) = object.field_names.iter().position(|field| field == name) {
+                    object.fields[index] = value;
+                    Ok(())
+                } else {
+                    Err(self.runtime_error(
+                        span,
+                        format!("object field '{}' does not exist", name),
+                    ))
+                }
+            }
             Value::Record(fields) => set_named_field(&mut fields.borrow_mut(), name, value)
                 .ok_or_else(|| {
                     self.runtime_error(span, format!("record field '{}' does not exist", name))
@@ -3817,7 +3909,11 @@ impl<'a> Interpreter<'a> {
                 matches!(value, Value::String(actual) if actual == expected)
             }
             ir::SwitchValue::EnumCase(expected) => {
-                matches!(value, Value::Variant(variant) if variant.case_name == *expected)
+                matches!(
+                    value,
+                    Value::Aggregate(aggregate)
+                        if aggregate.borrow().case_name.as_deref() == Some(expected.as_str())
+                )
             }
         }
     }
@@ -3836,11 +3932,14 @@ impl<'a> Interpreter<'a> {
                 Value::Set(_) => name == "Set",
                 Value::Map(_) => name == "Map",
                 Value::Iterator(_) => name == "Iterator" || name == "IntRange",
-                Value::Object(object) => {
-                    let object = object.borrow();
-                    self.object_matches_named_type(&object.type_name, object.kind, name)
+                Value::Aggregate(aggregate) => {
+                    let aggregate = aggregate.borrow();
+                    if aggregate.kind == crate::ast::TypeKind::Enum {
+                        aggregate.type_name == *name
+                    } else {
+                        self.object_matches_named_type(&aggregate.type_name, aggregate.kind, name)
+                    }
                 }
-                Value::Variant(variant) => variant.enum_name == *name,
                 Value::String(_) => name == "Str",
                 Value::Int(_) => name == "Int" || name == "Int64",
                 Value::Float(_) => name == "Float" || name == "Float64",
@@ -3958,16 +4057,11 @@ impl<'a> Interpreter<'a> {
             return false;
         };
         ty.with_bounds.iter().any(|bound| {
-            let ir::Type::Named { name, .. } = bound else {
+            let Some(bound_ty) = self.runtime.type_by_id(*bound) else {
                 return false;
             };
-            name == expected
-                || self.type_satisfies_named(
-                    name,
-                    crate::ast::TypeKind::Interface,
-                    expected,
-                    visited,
-                )
+            bound_ty.name == expected
+                || self.type_satisfies_named(&bound_ty.name, bound_ty.kind, expected, visited)
         })
     }
 
@@ -4058,10 +4152,17 @@ fn normalize_index(len: usize, index: i64) -> Option<usize> {
     }
 }
 
+fn aggregate_named_field(aggregate: &AggregateValue, name: &str) -> Option<Value> {
+    aggregate
+        .field_names
+        .iter()
+        .position(|field_name| field_name == name)
+        .and_then(|index| aggregate.fields.get(index).cloned())
+}
+
 fn pattern_field_value(value: &Value, name: &str) -> Option<Value> {
     match value {
-        Value::Variant(variant) => lookup_named_field(&variant.fields, name),
-        Value::Object(object) => lookup_named_field(&object.borrow().fields, name),
+        Value::Aggregate(aggregate) => aggregate_named_field(&aggregate.borrow(), name),
         Value::Record(fields) => lookup_named_field(&fields.borrow(), name),
         Value::Tuple(items) => tuple_member(items, name),
         _ => None,
@@ -4219,26 +4320,17 @@ fn values_equal(left: &Value, right: &Value) -> bool {
                     .zip(rhs.iter())
                     .all(|((ln, lv), (rn, rv))| ln == rn && values_equal(lv, rv))
         }
-        (Value::Object(lhs), Value::Object(rhs)) => {
+        (Value::Aggregate(lhs), Value::Aggregate(rhs)) => {
             let lhs = lhs.borrow();
             let rhs = rhs.borrow();
             lhs.type_name == rhs.type_name
-                && lhs.fields.len() == rhs.fields.len()
-                && lhs
-                    .fields
-                    .iter()
-                    .zip(rhs.fields.iter())
-                    .all(|((ln, lv), (rn, rv))| ln == rn && values_equal(lv, rv))
-        }
-        (Value::Variant(lhs), Value::Variant(rhs)) => {
-            lhs.enum_name == rhs.enum_name
                 && lhs.case_name == rhs.case_name
                 && lhs.fields.len() == rhs.fields.len()
                 && lhs
                     .fields
                     .iter()
                     .zip(rhs.fields.iter())
-                    .all(|((ln, lv), (rn, rv))| ln == rn && values_equal(lv, rv))
+                    .all(|(lv, rv)| values_equal(lv, rv))
         }
         _ => false,
     }
