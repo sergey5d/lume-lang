@@ -787,6 +787,14 @@ impl Value {
         Self::List(Rc::new(RefCell::new(items)))
     }
 
+    pub(crate) fn set(items: Vec<Value>) -> Self {
+        Self::Set(Rc::new(RefCell::new(items)))
+    }
+
+    pub(crate) fn map(entries: Vec<(Value, Value)>) -> Self {
+        Self::Map(Rc::new(RefCell::new(entries)))
+    }
+
     pub(crate) fn iterator_from_values(items: Vec<Value>) -> Self {
         Self::Iterator(Rc::new(RefCell::new(IteratorState::List {
             items: Rc::new(RefCell::new(items)),
@@ -1464,6 +1472,15 @@ impl<'a> Interpreter<'a> {
 
     fn runtime_type_id_for_value(&self, value: &Value) -> Option<runtime::RuntimeTypeId> {
         match value {
+            Value::List(_) => self
+                .runtime
+                .type_id_by_name_kind("List", crate::ast::TypeKind::Class),
+            Value::Set(_) => self
+                .runtime
+                .type_id_by_name_kind("Set", crate::ast::TypeKind::Class),
+            Value::Map(_) => self
+                .runtime
+                .type_id_by_name_kind("Map", crate::ast::TypeKind::Class),
             Value::String(_) => self
                 .runtime
                 .type_id_by_name_kind("Str", crate::ast::TypeKind::Class),
@@ -2438,7 +2455,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn invoke_method(
+    pub(crate) fn invoke_method(
         &mut self,
         receiver: Value,
         method: &str,
@@ -2452,20 +2469,8 @@ impl<'a> Interpreter<'a> {
         }
 
         match &receiver {
-            Value::List(items) => {
-                return self.invoke_list_method(receiver.clone(), items, method, args, span);
-            }
-            Value::Set(items) => {
-                return self.invoke_set_method(receiver.clone(), items, method, args, span);
-            }
-            Value::Map(entries) => {
-                return self.invoke_map_method(receiver.clone(), entries, method, args, span);
-            }
-            Value::String(_) => {
-                return self.invoke_string_method(receiver.clone(), method, args, span);
-            }
             Value::Aggregate(aggregate) if aggregate.borrow().case_name.is_some() => {
-                return self.invoke_variant_method(receiver.clone(), aggregate, method, args, span);
+                return self.invoke_user_variant_method(receiver, method, args, span);
             }
             Value::Iterator(iterator) => {
                 return self.invoke_iterator_method(receiver.clone(), iterator, method, args, span);
@@ -2504,948 +2509,6 @@ impl<'a> Interpreter<'a> {
                 receiver.render()
             ),
         ))
-    }
-
-    fn invoke_list_method(
-        &mut self,
-        receiver: Value,
-        items: &Rc<RefCell<Vec<Value>>>,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
-        match method {
-            ":+" => {
-                let [value] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "operator :+ expects 1 argument"));
-                };
-                let mut next = items.borrow().clone();
-                next.push(value.clone());
-                Ok(Value::List(Rc::new(RefCell::new(next))))
-            }
-            "++" => {
-                let [other] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "operator ++ expects 1 argument"));
-                };
-                let rhs = iterable_values(other.clone(), span, self)?;
-                let mut next = items.borrow().clone();
-                next.extend(rhs);
-                Ok(Value::List(Rc::new(RefCell::new(next))))
-            }
-            "append" => {
-                if args.len() != 1 {
-                    return Err(self.runtime_error(span, "List.append expects 1 argument"));
-                }
-                items.borrow_mut().push(args[0].clone());
-                Ok(receiver)
-            }
-            "map" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "List.map expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                let mut out = Vec::with_capacity(values.len());
-                for value in values {
-                    out.push(self.invoke_value(callback.clone(), vec![value], span)?);
-                }
-                Ok(Value::List(Rc::new(RefCell::new(out))))
-            }
-            "flatMap" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "List.flatMap expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                let mut out = Vec::new();
-                for value in values {
-                    let mapped = self.invoke_value(callback.clone(), vec![value], span)?;
-                    out.extend(iterable_values(mapped, span, self)?);
-                }
-                Ok(Value::List(Rc::new(RefCell::new(out))))
-            }
-            "filter" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "List.filter expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                let mut out = Vec::new();
-                for value in values {
-                    if self
-                        .invoke_value(callback.clone(), vec![value.clone()], span)?
-                        .as_bool(self, span, "List.filter predicate")?
-                    {
-                        out.push(value);
-                    }
-                }
-                Ok(Value::List(Rc::new(RefCell::new(out))))
-            }
-            "fold" => {
-                if args.len() != 2 {
-                    return Err(self.runtime_error(span, "List.fold expects 2 arguments"));
-                }
-                let mut acc = args[0].clone();
-                let callback = args[1].clone();
-                let values = items.borrow().clone();
-                for value in values {
-                    acc = self.invoke_value(callback.clone(), vec![acc, value], span)?;
-                }
-                Ok(acc)
-            }
-            "reduce" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "List.reduce expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                let Some((first, rest)) = values.split_first() else {
-                    return Ok(Value::option_none());
-                };
-                let mut acc = first.clone();
-                for value in rest {
-                    acc = self.invoke_value(callback.clone(), vec![acc, value.clone()], span)?;
-                }
-                Ok(Value::option_some(acc))
-            }
-            "exists" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "List.exists expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                for value in values {
-                    if self
-                        .invoke_value(callback.clone(), vec![value], span)?
-                        .as_bool(self, span, "List.exists predicate")?
-                    {
-                        return Ok(Value::Bool(true));
-                    }
-                }
-                Ok(Value::Bool(false))
-            }
-            "forEach" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "List.forEach expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                for value in values {
-                    let _ = self.invoke_value(callback.clone(), vec![value], span)?;
-                }
-                Ok(Value::Unit)
-            }
-            "forAll" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "List.forAll expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                for value in values {
-                    if !self
-                        .invoke_value(callback.clone(), vec![value], span)?
-                        .as_bool(self, span, "List.forAll predicate")?
-                    {
-                        return Ok(Value::Bool(false));
-                    }
-                }
-                Ok(Value::Bool(true))
-            }
-            "sort" => {
-                let [ordering] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "List.sort expects 1 argument"));
-                };
-                let mut values = items.borrow().clone();
-                let len = values.len();
-                for i in 0..len {
-                    for j in (i + 1)..len {
-                        let cmp = self.invoke_method(
-                            ordering.clone(),
-                            "compare",
-                            vec![values[i].clone(), values[j].clone()],
-                            span,
-                        )?;
-                        if cmp.as_int(self, span, "Ordering.compare result")? > 0 {
-                            values.swap(i, j);
-                        }
-                    }
-                }
-                *items.borrow_mut() = values;
-                Ok(receiver)
-            }
-            "zip" => {
-                let [other] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "List.zip expects 1 argument"));
-                };
-                let lhs = items.borrow().clone();
-                let rhs = iterable_values(other.clone(), span, self)?;
-                let out = lhs
-                    .into_iter()
-                    .zip(rhs)
-                    .map(|(left, right)| Value::Tuple(vec![left, right]))
-                    .collect();
-                Ok(Value::List(Rc::new(RefCell::new(out))))
-            }
-            "zipWithIndex" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "List.zipWithIndex expects 0 arguments"));
-                }
-                let out = items
-                    .borrow()
-                    .iter()
-                    .cloned()
-                    .enumerate()
-                    .map(|(index, value)| Value::Tuple(vec![value, Value::Int(index as i64)]))
-                    .collect();
-                Ok(Value::List(Rc::new(RefCell::new(out))))
-            }
-            "size" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "List.size expects 0 arguments"));
-                }
-                Ok(Value::Int(items.borrow().len() as i64))
-            }
-            "isEmpty" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "List.isEmpty expects 0 arguments"));
-                }
-                Ok(Value::Bool(items.borrow().is_empty()))
-            }
-            "get" => {
-                if args.len() != 1 {
-                    return Err(self.runtime_error(span, "List.get expects 1 argument"));
-                }
-                let index = args[0].as_int(self, span, "List.get index")?;
-                let value = items.borrow().get(index as usize).cloned();
-                Ok(value.map_or_else(Value::option_none, Value::option_some))
-            }
-            "remove" => {
-                if args.len() != 1 {
-                    return Err(self.runtime_error(span, "List.remove expects 1 argument"));
-                }
-                let index = args[0].as_int(self, span, "List.remove index")?;
-                let mut items = items.borrow_mut();
-                if index < 0 || index as usize >= items.len() {
-                    return Ok(Value::option_none());
-                }
-                Ok(Value::option_some(items.remove(index as usize)))
-            }
-            "removeLast" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "List.removeLast expects 0 arguments"));
-                }
-                Ok(items
-                    .borrow_mut()
-                    .pop()
-                    .map_or_else(Value::option_none, Value::option_some))
-            }
-            "head" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "List.head expects 0 arguments"));
-                }
-                Ok(items
-                    .borrow()
-                    .first()
-                    .cloned()
-                    .map_or_else(Value::option_none, Value::option_some))
-            }
-            "tail" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "List.tail expects 0 arguments"));
-                }
-                let values = items.borrow();
-                let tail = if values.len() <= 1 {
-                    Vec::new()
-                } else {
-                    values[1..].to_vec()
-                };
-                Ok(Value::List(Rc::new(RefCell::new(tail))))
-            }
-            "first" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "Array.first expects 0 arguments"));
-                }
-                Ok(items
-                    .borrow()
-                    .first()
-                    .cloned()
-                    .map_or_else(Value::option_none, Value::option_some))
-            }
-            "last" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "Array.last expects 0 arguments"));
-                }
-                Ok(items
-                    .borrow()
-                    .last()
-                    .cloned()
-                    .map_or_else(Value::option_none, Value::option_some))
-            }
-            "clone" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "Array.clone expects 0 arguments"));
-                }
-                Ok(Value::List(Rc::new(RefCell::new(items.borrow().clone()))))
-            }
-            "count" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Array.count expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                let mut count = 0i64;
-                for value in values {
-                    if self
-                        .invoke_value(callback.clone(), vec![value], span)?
-                        .as_bool(self, span, "Array.count predicate")?
-                    {
-                        count += 1;
-                    }
-                }
-                Ok(Value::Int(count))
-            }
-            "contains" => {
-                let [needle] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Array.contains expects 1 argument"));
-                };
-                Ok(Value::Bool(
-                    items
-                        .borrow()
-                        .iter()
-                        .any(|value| values_equal(value, needle)),
-                ))
-            }
-            "find" => {
-                let [needle] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Array.find expects 1 argument"));
-                };
-                Ok(items
-                    .borrow()
-                    .iter()
-                    .find(|value| values_equal(value, needle))
-                    .cloned()
-                    .map_or_else(Value::option_none, Value::option_some))
-            }
-            "indexOf" => {
-                let [needle] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Array.indexOf expects 1 argument"));
-                };
-                let index = items
-                    .borrow()
-                    .iter()
-                    .position(|value| values_equal(value, needle))
-                    .map(|index| index as i64)
-                    .unwrap_or(-1);
-                Ok(Value::Int(index))
-            }
-            "iterator" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "List.iterator expects 0 arguments"));
-                }
-                Ok(Value::Iterator(Rc::new(RefCell::new(
-                    IteratorState::List {
-                        items: items.clone(),
-                        index: 0,
-                    },
-                ))))
-            }
-            _ => Err(self.runtime_error(span, format!("unsupported List method '{}'", method))),
-        }
-    }
-
-    fn invoke_set_method(
-        &mut self,
-        receiver: Value,
-        items: &Rc<RefCell<Vec<Value>>>,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
-        match method {
-            ":+" => {
-                let [value] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "operator :+ expects 1 argument"));
-                };
-                let mut next = items.borrow().clone();
-                push_unique(&mut next, value.clone());
-                Ok(Value::Set(Rc::new(RefCell::new(next))))
-            }
-            "++" => {
-                let [other] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "operator ++ expects 1 argument"));
-                };
-                let rhs = iterable_values(other.clone(), span, self)?;
-                let mut next = items.borrow().clone();
-                for value in rhs {
-                    push_unique(&mut next, value);
-                }
-                Ok(Value::Set(Rc::new(RefCell::new(next))))
-            }
-            "add" => {
-                let [value] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Set.add expects 1 argument"));
-                };
-                push_unique(&mut items.borrow_mut(), value.clone());
-                Ok(receiver)
-            }
-            "iterator" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "Set.iterator expects 0 arguments"));
-                }
-                Ok(Value::Iterator(Rc::new(RefCell::new(
-                    IteratorState::List {
-                        items: Rc::new(RefCell::new(items.borrow().clone())),
-                        index: 0,
-                    },
-                ))))
-            }
-            "map" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Set.map expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                let mut out = Vec::new();
-                for value in values {
-                    let mapped = self.invoke_value(callback.clone(), vec![value], span)?;
-                    push_unique(&mut out, mapped);
-                }
-                Ok(Value::Set(Rc::new(RefCell::new(out))))
-            }
-            "flatMap" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Set.flatMap expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                let mut out = Vec::new();
-                for value in values {
-                    let mapped = self.invoke_value(callback.clone(), vec![value], span)?;
-                    for item in iterable_values(mapped, span, self)? {
-                        push_unique(&mut out, item);
-                    }
-                }
-                Ok(Value::Set(Rc::new(RefCell::new(out))))
-            }
-            "filter" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Set.filter expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                let mut out = Vec::new();
-                for value in values {
-                    if self
-                        .invoke_value(callback.clone(), vec![value.clone()], span)?
-                        .as_bool(self, span, "Set.filter predicate")?
-                    {
-                        push_unique(&mut out, value);
-                    }
-                }
-                Ok(Value::Set(Rc::new(RefCell::new(out))))
-            }
-            "fold" => {
-                if args.len() != 2 {
-                    return Err(self.runtime_error(span, "Set.fold expects 2 arguments"));
-                }
-                let mut acc = args[0].clone();
-                let callback = args[1].clone();
-                let values = items.borrow().clone();
-                for value in values {
-                    acc = self.invoke_value(callback.clone(), vec![acc, value], span)?;
-                }
-                Ok(acc)
-            }
-            "reduce" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Set.reduce expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                let Some((first, rest)) = values.split_first() else {
-                    return Ok(Value::option_none());
-                };
-                let mut acc = first.clone();
-                for value in rest {
-                    acc = self.invoke_value(callback.clone(), vec![acc, value.clone()], span)?;
-                }
-                Ok(Value::option_some(acc))
-            }
-            "exists" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Set.exists expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                for value in values {
-                    if self
-                        .invoke_value(callback.clone(), vec![value], span)?
-                        .as_bool(self, span, "Set.exists predicate")?
-                    {
-                        return Ok(Value::Bool(true));
-                    }
-                }
-                Ok(Value::Bool(false))
-            }
-            "forAll" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Set.forAll expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                for value in values {
-                    if !self
-                        .invoke_value(callback.clone(), vec![value], span)?
-                        .as_bool(self, span, "Set.forAll predicate")?
-                    {
-                        return Ok(Value::Bool(false));
-                    }
-                }
-                Ok(Value::Bool(true))
-            }
-            "forEach" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Set.forEach expects 1 argument"));
-                };
-                let values = items.borrow().clone();
-                for value in values {
-                    let _ = self.invoke_value(callback.clone(), vec![value], span)?;
-                }
-                Ok(Value::Unit)
-            }
-            "contains" => {
-                let [needle] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Set.contains expects 1 argument"));
-                };
-                Ok(Value::Bool(
-                    items
-                        .borrow()
-                        .iter()
-                        .any(|value| values_equal(value, needle)),
-                ))
-            }
-            "size" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "Set.size expects 0 arguments"));
-                }
-                Ok(Value::Int(items.borrow().len() as i64))
-            }
-            _ => Err(self.runtime_error(span, format!("unsupported Set method '{}'", method))),
-        }
-    }
-
-    fn invoke_map_method(
-        &mut self,
-        receiver: Value,
-        entries: &Rc<RefCell<Vec<(Value, Value)>>>,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
-        match method {
-            "++" => {
-                let [other] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "operator ++ expects 1 argument"));
-                };
-                let mut next = entries.borrow().clone();
-                for (key, value) in iterable_map_entries(other.clone(), span, self)? {
-                    map_put_entry(&mut next, key, value);
-                }
-                Ok(Value::Map(Rc::new(RefCell::new(next))))
-            }
-            "put" => {
-                if args.len() != 2 {
-                    return Err(self.runtime_error(span, "Map.put expects 2 arguments"));
-                }
-                map_put_entry(&mut entries.borrow_mut(), args[0].clone(), args[1].clone());
-                Ok(receiver)
-            }
-            "iterator" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "Map.iterator expects 0 arguments"));
-                }
-                Ok(Value::Iterator(Rc::new(RefCell::new(
-                    IteratorState::List {
-                        items: Rc::new(RefCell::new(
-                            entries
-                                .borrow()
-                                .iter()
-                                .map(|(key, value)| Value::Tuple(vec![key.clone(), value.clone()]))
-                                .collect(),
-                        )),
-                        index: 0,
-                    },
-                ))))
-            }
-            "map" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Map.map expects 1 argument"));
-                };
-                let pairs = entries.borrow().clone();
-                let mut out = Vec::with_capacity(pairs.len());
-                for (key, value) in pairs {
-                    out.push(self.invoke_value(callback.clone(), vec![key, value], span)?);
-                }
-                Ok(Value::List(Rc::new(RefCell::new(out))))
-            }
-            "mapValues" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Map.mapValues expects 1 argument"));
-                };
-                let pairs = entries.borrow().clone();
-                let mut out = Vec::with_capacity(pairs.len());
-                for (key, value) in pairs {
-                    let next = self.invoke_value(callback.clone(), vec![value], span)?;
-                    out.push((key, next));
-                }
-                Ok(Value::Map(Rc::new(RefCell::new(out))))
-            }
-            "flatMap" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Map.flatMap expects 1 argument"));
-                };
-                let pairs = entries.borrow().clone();
-                let mut out = Vec::new();
-                for (key, value) in pairs {
-                    let mapped = self.invoke_value(callback.clone(), vec![key, value], span)?;
-                    out.extend(iterable_values(mapped, span, self)?);
-                }
-                Ok(Value::List(Rc::new(RefCell::new(out))))
-            }
-            "filter" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Map.filter expects 1 argument"));
-                };
-                let pairs = entries.borrow().clone();
-                let mut out = Vec::new();
-                for (key, value) in pairs {
-                    if self
-                        .invoke_value(callback.clone(), vec![key.clone(), value.clone()], span)?
-                        .as_bool(self, span, "Map.filter predicate")?
-                    {
-                        out.push((key, value));
-                    }
-                }
-                Ok(Value::Map(Rc::new(RefCell::new(out))))
-            }
-            "fold" => {
-                if args.len() != 2 {
-                    return Err(self.runtime_error(span, "Map.fold expects 2 arguments"));
-                }
-                let mut acc = args[0].clone();
-                let callback = args[1].clone();
-                let pairs = entries.borrow().clone();
-                for (key, value) in pairs {
-                    acc = self.invoke_value(callback.clone(), vec![acc, key, value], span)?;
-                }
-                Ok(acc)
-            }
-            "reduce" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Map.reduce expects 1 argument"));
-                };
-                let pairs = entries.borrow().clone();
-                let Some(((mut left_key, mut left_value), rest)) = pairs
-                    .split_first()
-                    .map(|(first, rest)| ((first.0.clone(), first.1.clone()), rest))
-                else {
-                    return Ok(Value::option_none());
-                };
-                for (right_key, right_value) in rest {
-                    let reduced = self.invoke_value(
-                        callback.clone(),
-                        vec![
-                            left_key.clone(),
-                            left_value.clone(),
-                            right_key.clone(),
-                            right_value.clone(),
-                        ],
-                        span,
-                    )?;
-                    let Value::Tuple(items) = reduced else {
-                        return Err(self
-                            .runtime_error(span, "Map.reduce callback must return a pair tuple"));
-                    };
-                    if items.len() != 2 {
-                        return Err(self
-                            .runtime_error(span, "Map.reduce callback must return a pair tuple"));
-                    }
-                    left_key = items[0].clone();
-                    left_value = items[1].clone();
-                }
-                Ok(Value::option_some(Value::Tuple(vec![left_key, left_value])))
-            }
-            "exists" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Map.exists expects 1 argument"));
-                };
-                let pairs = entries.borrow().clone();
-                for (key, value) in pairs {
-                    if self
-                        .invoke_value(callback.clone(), vec![key, value], span)?
-                        .as_bool(self, span, "Map.exists predicate")?
-                    {
-                        return Ok(Value::Bool(true));
-                    }
-                }
-                Ok(Value::Bool(false))
-            }
-            "forAll" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Map.forAll expects 1 argument"));
-                };
-                let pairs = entries.borrow().clone();
-                for (key, value) in pairs {
-                    if !self
-                        .invoke_value(callback.clone(), vec![key, value], span)?
-                        .as_bool(self, span, "Map.forAll predicate")?
-                    {
-                        return Ok(Value::Bool(false));
-                    }
-                }
-                Ok(Value::Bool(true))
-            }
-            "forEach" => {
-                let [callback] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Map.forEach expects 1 argument"));
-                };
-                let pairs = entries.borrow().clone();
-                for (key, value) in pairs {
-                    let _ = self.invoke_value(callback.clone(), vec![key, value], span)?;
-                }
-                Ok(Value::Unit)
-            }
-            "get" => {
-                let [needle] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Map.get expects 1 argument"));
-                };
-                let found = entries
-                    .borrow()
-                    .iter()
-                    .find(|(key, _)| values_equal(key, needle))
-                    .map(|(_, value)| value.clone());
-                Ok(found.map_or_else(Value::option_none, Value::option_some))
-            }
-            "contains" => {
-                let [needle] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Map.contains expects 1 argument"));
-                };
-                Ok(Value::Bool(
-                    entries
-                        .borrow()
-                        .iter()
-                        .any(|(key, _)| values_equal(key, needle)),
-                ))
-            }
-            "size" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "Map.size expects 0 arguments"));
-                }
-                Ok(Value::Int(entries.borrow().len() as i64))
-            }
-            _ => Err(self.runtime_error(span, format!("unsupported Map method '{}'", method))),
-        }
-    }
-
-    fn invoke_string_method(
-        &mut self,
-        receiver: Value,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
-        let Value::String(text) = receiver else {
-            unreachable!();
-        };
-        match method {
-            "size" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "Str.size expects 0 arguments"));
-                }
-                Ok(Value::Int(text.chars().count() as i64))
-            }
-            "split" => {
-                let [separator] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Str.split expects 1 argument"));
-                };
-                let separator = match separator {
-                    Value::String(value) => value.clone(),
-                    _ => return Err(self.runtime_error(span, "Str.split separator must be Str")),
-                };
-                Ok(Value::List(Rc::new(RefCell::new(
-                    text.split(&separator)
-                        .map(|part| Value::String(part.to_string()))
-                        .collect(),
-                ))))
-            }
-            _ => Err(self.runtime_error(span, format!("unsupported Str method '{}'", method))),
-        }
-    }
-
-    fn invoke_variant_method(
-        &mut self,
-        receiver: Value,
-        aggregate: &Rc<RefCell<AggregateValue>>,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
-        let (enum_name, case_name, first_field) = {
-            let aggregate = aggregate.borrow();
-            (
-                aggregate.type_name.clone(),
-                aggregate.case_name.clone().unwrap_or_default(),
-                aggregate.fields.first().cloned(),
-            )
-        };
-        match enum_name.as_str() {
-            "Option" => match method {
-                "isSet" => Ok(Value::Bool(case_name == "Some")),
-                "isEmpty" => Ok(Value::Bool(case_name != "Some")),
-                "map" => {
-                    let [callback] = args.as_slice() else {
-                        return Err(self.runtime_error(span, "Option.map expects 1 argument"));
-                    };
-                    if case_name == "Some" {
-                        let mapped = self.invoke_value(
-                            callback.clone(),
-                            vec![first_field.expect("Option.Some payload")],
-                            span,
-                        )?;
-                        Ok(Value::option_some(mapped))
-                    } else {
-                        Ok(Value::option_none())
-                    }
-                }
-                "expect" => {
-                    if !args.is_empty() {
-                        return Err(self.runtime_error(span, "Option.expect expects 0 arguments"));
-                    }
-                    if case_name != "Some" {
-                        return Err(self.runtime_error(span, "Option has no value"));
-                    }
-                    Ok(first_field.expect("Option.Some payload"))
-                }
-                "getOr" => {
-                    if args.len() != 1 {
-                        return Err(self.runtime_error(span, "Option.getOr expects 1 argument"));
-                    }
-                    if case_name == "Some" {
-                        Ok(first_field.expect("Option.Some payload"))
-                    } else {
-                        Ok(args[0].clone())
-                    }
-                }
-                "getOrElse" => {
-                    if args.len() != 1 {
-                        return Err(self.runtime_error(span, "Option.getOrElse expects 1 argument"));
-                    }
-                    if case_name == "Some" {
-                        Ok(first_field.expect("Option.Some payload"))
-                    } else {
-                        Ok(args[0].clone())
-                    }
-                }
-                "iterator" => {
-                    if !args.is_empty() {
-                        return Err(self.runtime_error(span, "Option.iterator expects 0 arguments"));
-                    }
-                    let values = if case_name == "Some" {
-                        vec![first_field.expect("Option.Some payload")]
-                    } else {
-                        Vec::new()
-                    };
-                    Ok(Value::Iterator(Rc::new(RefCell::new(
-                        IteratorState::List {
-                            items: Rc::new(RefCell::new(values)),
-                            index: 0,
-                        },
-                    ))))
-                }
-                _ => {
-                    Err(self.runtime_error(span, format!("unsupported Option method '{}'", method)))
-                }
-            },
-            "Result" => match method {
-                "isOk" => Ok(Value::Bool(case_name == "Ok")),
-                "isErr" => Ok(Value::Bool(case_name != "Ok")),
-                "map" => {
-                    let [callback] = args.as_slice() else {
-                        return Err(self.runtime_error(span, "Result.map expects 1 argument"));
-                    };
-                    if case_name == "Ok" {
-                        let mapped = self.invoke_value(
-                            callback.clone(),
-                            vec![first_field.expect("Result.Ok payload")],
-                            span,
-                        )?;
-                        Ok(Value::result_ok(mapped))
-                    } else {
-                        Ok(receiver)
-                    }
-                }
-                "expect" => {
-                    if case_name == "Ok" {
-                        Ok(first_field.expect("Result.Ok payload"))
-                    } else {
-                        Err(self.runtime_error(span, "Result has no success value"))
-                    }
-                }
-                "getError" => {
-                    if case_name == "Err" {
-                        Ok(first_field.expect("Result.Err payload"))
-                    } else {
-                        Err(self.runtime_error(span, "Result has no error value"))
-                    }
-                }
-                "getOr" => {
-                    if args.len() != 1 {
-                        return Err(self.runtime_error(span, "Result.getOr expects 1 argument"));
-                    }
-                    if case_name == "Ok" {
-                        Ok(first_field.expect("Result.Ok payload"))
-                    } else {
-                        Ok(args[0].clone())
-                    }
-                }
-                _ => {
-                    Err(self.runtime_error(span, format!("unsupported Result method '{}'", method)))
-                }
-            },
-            "Either" => match method {
-                "isLeft" => Ok(Value::Bool(case_name == "Left")),
-                "isRight" => Ok(Value::Bool(case_name == "Right")),
-                "map" => {
-                    let [callback] = args.as_slice() else {
-                        return Err(self.runtime_error(span, "Either.map expects 1 argument"));
-                    };
-                    if case_name == "Right" {
-                        let mapped = self.invoke_value(
-                            callback.clone(),
-                            vec![first_field.expect("Either.Right payload")],
-                            span,
-                        )?;
-                        Ok(Value::either_right(mapped))
-                    } else {
-                        Ok(receiver)
-                    }
-                }
-                "expectLeft" => {
-                    if case_name == "Left" {
-                        Ok(first_field.expect("Either.Left payload"))
-                    } else {
-                        Err(self.runtime_error(span, "Either has no left value"))
-                    }
-                }
-                "expectRight" => {
-                    if case_name == "Right" {
-                        Ok(first_field.expect("Either.Right payload"))
-                    } else {
-                        Err(self.runtime_error(span, "Either has no right value"))
-                    }
-                }
-                "getOr" => {
-                    if args.len() != 1 {
-                        return Err(self.runtime_error(span, "Either.getOr expects 1 argument"));
-                    }
-                    if case_name == "Right" {
-                        Ok(first_field.expect("Either.Right payload"))
-                    } else {
-                        Ok(args[0].clone())
-                    }
-                }
-                _ => {
-                    Err(self.runtime_error(span, format!("unsupported Either method '{}'", method)))
-                }
-            },
-            _ => self.invoke_user_variant_method(receiver, method, args, span),
-        }
     }
 
     fn invoke_user_variant_method(
@@ -4122,7 +3185,7 @@ impl<'a> Interpreter<'a> {
 }
 
 impl Value {
-    fn as_bool(
+    pub(crate) fn as_bool(
         &self,
         in_: &Interpreter<'_>,
         span: Option<Span>,
@@ -4137,7 +3200,7 @@ impl Value {
         }
     }
 
-    fn as_int(
+    pub(crate) fn as_int(
         &self,
         in_: &Interpreter<'_>,
         span: Option<Span>,
@@ -4152,7 +3215,7 @@ impl Value {
         }
     }
 
-    fn as_number(
+    pub(crate) fn as_number(
         &self,
         in_: &Interpreter<'_>,
         span: Option<Span>,
@@ -4216,13 +3279,13 @@ fn pattern_field_value(value: &Value, name: &str) -> Option<Value> {
     }
 }
 
-fn push_unique(items: &mut Vec<Value>, value: Value) {
+pub(crate) fn push_unique(items: &mut Vec<Value>, value: Value) {
     if !items.iter().any(|existing| values_equal(existing, &value)) {
         items.push(value);
     }
 }
 
-fn unique_values(items: Vec<Value>) -> Vec<Value> {
+pub(crate) fn unique_values(items: Vec<Value>) -> Vec<Value> {
     let mut out = Vec::new();
     for value in items {
         push_unique(&mut out, value);
@@ -4230,7 +3293,7 @@ fn unique_values(items: Vec<Value>) -> Vec<Value> {
     out
 }
 
-fn map_put_entry(entries: &mut Vec<(Value, Value)>, key: Value, value: Value) {
+pub(crate) fn map_put_entry(entries: &mut Vec<(Value, Value)>, key: Value, value: Value) {
     if let Some((_, slot)) = entries
         .iter_mut()
         .find(|(existing, _)| values_equal(existing, &key))
@@ -4272,7 +3335,7 @@ fn iterator_values(iterator: &Rc<RefCell<IteratorState>>) -> Vec<Value> {
     out
 }
 
-fn iterable_values(
+pub(crate) fn iterable_values(
     value: Value,
     span: Option<Span>,
     in_: &Interpreter<'_>,
@@ -4293,7 +3356,7 @@ fn iterable_values(
     }
 }
 
-fn iterable_map_entries(
+pub(crate) fn iterable_map_entries(
     value: Value,
     span: Option<Span>,
     in_: &Interpreter<'_>,
@@ -4321,7 +3384,7 @@ fn iterable_map_entries(
     }
 }
 
-fn values_equal(left: &Value, right: &Value) -> bool {
+pub(crate) fn values_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Unit, Value::Unit) => true,
         (Value::Bool(lhs), Value::Bool(rhs)) => lhs == rhs,
