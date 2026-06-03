@@ -4,9 +4,8 @@ use crate::{
     interpreter::{Interpreter, Value},
 };
 
-use crate::runtime::{
-    RuntimeMethod, RuntimeMethodSlot, RuntimeMethodTarget, RuntimeType, RuntimeTypeId,
-};
+use super::builtin_method;
+use crate::runtime::{RuntimeType, RuntimeTypeId};
 
 pub(super) fn define() -> RuntimeType {
     RuntimeType {
@@ -16,18 +15,8 @@ pub(super) fn define() -> RuntimeType {
         name: "Str".to_string(),
         fields: Vec::new(),
         methods: vec![
-            RuntimeMethod {
-                slot: RuntimeMethodSlot(0),
-                name: "size".to_string(),
-                target: RuntimeMethodTarget::Builtin(str_size),
-                params: Vec::new(),
-            },
-            RuntimeMethod {
-                slot: RuntimeMethodSlot(1),
-                name: "split".to_string(),
-                target: RuntimeMethodTarget::Builtin(str_split),
-                params: vec![crate::ir::Type::Str],
-            },
+            builtin_method(0, "size", Vec::new(), str_size),
+            builtin_method(1, "split", vec![crate::ir::Type::Str], str_split),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),

@@ -5,9 +5,9 @@ use crate::{
     ir,
 };
 
+use super::builtin_method;
 use crate::runtime::{
-    RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeMethod,
-    RuntimeMethodSlot, RuntimeMethodTarget, RuntimeType, RuntimeTypeId,
+    RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeType, RuntimeTypeId,
 };
 
 pub(super) fn define() -> RuntimeType {
@@ -18,51 +18,21 @@ pub(super) fn define() -> RuntimeType {
         name: "Option".to_string(),
         fields: Vec::new(),
         methods: vec![
-            RuntimeMethod {
-                slot: RuntimeMethodSlot(0),
-                name: "isSet".to_string(),
-                target: RuntimeMethodTarget::Builtin(option_is_set),
-                params: Vec::new(),
-            },
-            RuntimeMethod {
-                slot: RuntimeMethodSlot(1),
-                name: "isEmpty".to_string(),
-                target: RuntimeMethodTarget::Builtin(option_is_empty),
-                params: Vec::new(),
-            },
-            RuntimeMethod {
-                slot: RuntimeMethodSlot(2),
-                name: "map".to_string(),
-                target: RuntimeMethodTarget::Builtin(option_map),
-                params: vec![ir::Type::Function {
+            builtin_method(0, "isSet", Vec::new(), option_is_set),
+            builtin_method(1, "isEmpty", Vec::new(), option_is_empty),
+            builtin_method(
+                2,
+                "map",
+                vec![ir::Type::Function {
                     params: Vec::new(),
                     ret: Box::new(ir::Type::Unknown),
                 }],
-            },
-            RuntimeMethod {
-                slot: RuntimeMethodSlot(3),
-                name: "expect".to_string(),
-                target: RuntimeMethodTarget::Builtin(option_expect),
-                params: Vec::new(),
-            },
-            RuntimeMethod {
-                slot: RuntimeMethodSlot(4),
-                name: "getOr".to_string(),
-                target: RuntimeMethodTarget::Builtin(option_get_or),
-                params: vec![ir::Type::Unknown],
-            },
-            RuntimeMethod {
-                slot: RuntimeMethodSlot(5),
-                name: "getOrElse".to_string(),
-                target: RuntimeMethodTarget::Builtin(option_get_or_else),
-                params: vec![ir::Type::Unknown],
-            },
-            RuntimeMethod {
-                slot: RuntimeMethodSlot(6),
-                name: "iterator".to_string(),
-                target: RuntimeMethodTarget::Builtin(option_iterator),
-                params: Vec::new(),
-            },
+                option_map,
+            ),
+            builtin_method(3, "expect", Vec::new(), option_expect),
+            builtin_method(4, "getOr", vec![ir::Type::Unknown], option_get_or),
+            builtin_method(5, "getOrElse", vec![ir::Type::Unknown], option_get_or_else),
+            builtin_method(6, "iterator", Vec::new(), option_iterator),
         ],
         enum_cases: vec![
             RuntimeEnumCase {

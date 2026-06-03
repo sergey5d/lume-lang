@@ -7,9 +7,8 @@ use crate::{
     ir,
 };
 
-use crate::runtime::{
-    RuntimeMethod, RuntimeMethodSlot, RuntimeMethodTarget, RuntimeType, RuntimeTypeId,
-};
+use super::builtin_method;
+use crate::runtime::{RuntimeType, RuntimeTypeId};
 
 pub(super) fn define() -> RuntimeType {
     RuntimeType {
@@ -19,25 +18,25 @@ pub(super) fn define() -> RuntimeType {
         name: "Set".to_string(),
         fields: Vec::new(),
         methods: vec![
-            m(0, ":+", vec![ir::Type::Unknown], set_plus),
-            m(1, "++", vec![ir::Type::Unknown], set_concat),
-            m(2, "add", vec![ir::Type::Unknown], set_add),
-            m(3, "iterator", Vec::new(), set_iterator),
-            m(4, "map", vec![function_unknown()], set_map),
-            m(5, "flatMap", vec![function_unknown()], set_flat_map),
-            m(6, "filter", vec![function_unknown()], set_filter),
-            m(
+            builtin_method(0, ":+", vec![ir::Type::Unknown], set_plus),
+            builtin_method(1, "++", vec![ir::Type::Unknown], set_concat),
+            builtin_method(2, "add", vec![ir::Type::Unknown], set_add),
+            builtin_method(3, "iterator", Vec::new(), set_iterator),
+            builtin_method(4, "map", vec![function_unknown()], set_map),
+            builtin_method(5, "flatMap", vec![function_unknown()], set_flat_map),
+            builtin_method(6, "filter", vec![function_unknown()], set_filter),
+            builtin_method(
                 7,
                 "fold",
                 vec![ir::Type::Unknown, function_unknown()],
                 set_fold,
             ),
-            m(8, "reduce", vec![function_unknown()], set_reduce),
-            m(9, "exists", vec![function_unknown()], set_exists),
-            m(10, "forAll", vec![function_unknown()], set_for_all),
-            m(11, "forEach", vec![function_unknown()], set_for_each),
-            m(12, "contains", vec![ir::Type::Unknown], set_contains),
-            m(13, "size", Vec::new(), set_size),
+            builtin_method(8, "reduce", vec![function_unknown()], set_reduce),
+            builtin_method(9, "exists", vec![function_unknown()], set_exists),
+            builtin_method(10, "forAll", vec![function_unknown()], set_for_all),
+            builtin_method(11, "forEach", vec![function_unknown()], set_for_each),
+            builtin_method(12, "contains", vec![ir::Type::Unknown], set_contains),
+            builtin_method(13, "size", Vec::new(), set_size),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -48,25 +47,6 @@ fn function_unknown() -> ir::Type {
     ir::Type::Function {
         params: Vec::new(),
         ret: Box::new(ir::Type::Unknown),
-    }
-}
-
-fn m(
-    slot: usize,
-    name: &str,
-    params: Vec<ir::Type>,
-    target: for<'a> fn(
-        &mut Interpreter<'a>,
-        Value,
-        Vec<Value>,
-        Option<Span>,
-    ) -> Result<Value, Diagnostic>,
-) -> RuntimeMethod {
-    RuntimeMethod {
-        slot: RuntimeMethodSlot(slot),
-        name: name.to_string(),
-        target: RuntimeMethodTarget::Builtin(target),
-        params,
     }
 }
 

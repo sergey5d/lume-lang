@@ -5,9 +5,9 @@ use crate::{
     ir,
 };
 
+use super::builtin_method;
 use crate::runtime::{
-    RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeMethod,
-    RuntimeMethodSlot, RuntimeMethodTarget, RuntimeType, RuntimeTypeId,
+    RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeType, RuntimeTypeId,
 };
 
 pub(super) fn define() -> RuntimeType {
@@ -63,25 +63,6 @@ pub(super) fn define() -> RuntimeType {
 
 const LEFT_CASE: RuntimeEnumCaseId = RuntimeEnumCaseId(0);
 const RIGHT_CASE: RuntimeEnumCaseId = RuntimeEnumCaseId(1);
-
-fn builtin_method(
-    slot: usize,
-    name: &str,
-    params: Vec<ir::Type>,
-    target: for<'a> fn(
-        &mut Interpreter<'a>,
-        Value,
-        Vec<Value>,
-        Option<Span>,
-    ) -> Result<Value, Diagnostic>,
-) -> RuntimeMethod {
-    RuntimeMethod {
-        slot: RuntimeMethodSlot(slot),
-        name: name.to_string(),
-        target: RuntimeMethodTarget::Builtin(target),
-        params,
-    }
-}
 
 fn either_case(receiver: &Value) -> (RuntimeEnumCaseId, Option<Value>) {
     let (_, case_id, fields) = receiver

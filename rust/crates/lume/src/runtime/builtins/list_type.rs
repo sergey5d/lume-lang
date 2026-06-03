@@ -7,9 +7,8 @@ use crate::{
     ir,
 };
 
-use crate::runtime::{
-    RuntimeMethod, RuntimeMethodSlot, RuntimeMethodTarget, RuntimeType, RuntimeTypeId,
-};
+use super::builtin_method;
+use crate::runtime::{RuntimeType, RuntimeTypeId};
 
 pub(super) fn define() -> RuntimeType {
     RuntimeType {
@@ -19,40 +18,40 @@ pub(super) fn define() -> RuntimeType {
         name: "List".to_string(),
         fields: Vec::new(),
         methods: vec![
-            m(0, ":+", vec![ir::Type::Unknown], list_append_copy),
-            m(1, "++", vec![ir::Type::Unknown], list_concat),
-            m(2, "append", vec![ir::Type::Unknown], list_append_mut),
-            m(3, "map", vec![function_unknown()], list_map),
-            m(4, "flatMap", vec![function_unknown()], list_flat_map),
-            m(5, "filter", vec![function_unknown()], list_filter),
-            m(
+            builtin_method(0, ":+", vec![ir::Type::Unknown], list_append_copy),
+            builtin_method(1, "++", vec![ir::Type::Unknown], list_concat),
+            builtin_method(2, "append", vec![ir::Type::Unknown], list_append_mut),
+            builtin_method(3, "map", vec![function_unknown()], list_map),
+            builtin_method(4, "flatMap", vec![function_unknown()], list_flat_map),
+            builtin_method(5, "filter", vec![function_unknown()], list_filter),
+            builtin_method(
                 6,
                 "fold",
                 vec![ir::Type::Unknown, function_unknown()],
                 list_fold,
             ),
-            m(7, "reduce", vec![function_unknown()], list_reduce),
-            m(8, "exists", vec![function_unknown()], list_exists),
-            m(9, "forEach", vec![function_unknown()], list_for_each),
-            m(10, "forAll", vec![function_unknown()], list_for_all),
-            m(11, "sort", vec![ir::Type::Unknown], list_sort),
-            m(12, "zip", vec![ir::Type::Unknown], list_zip),
-            m(13, "zipWithIndex", Vec::new(), list_zip_with_index),
-            m(14, "size", Vec::new(), list_size),
-            m(15, "isEmpty", Vec::new(), list_is_empty),
-            m(16, "get", vec![ir::Type::Int], list_get),
-            m(17, "remove", vec![ir::Type::Int], list_remove),
-            m(18, "removeLast", Vec::new(), list_remove_last),
-            m(19, "head", Vec::new(), list_head),
-            m(20, "tail", Vec::new(), list_tail),
-            m(21, "first", Vec::new(), list_first),
-            m(22, "last", Vec::new(), list_last),
-            m(23, "clone", Vec::new(), list_clone),
-            m(24, "count", vec![function_unknown()], list_count),
-            m(25, "contains", vec![ir::Type::Unknown], list_contains),
-            m(26, "find", vec![ir::Type::Unknown], list_find),
-            m(27, "indexOf", vec![ir::Type::Unknown], list_index_of),
-            m(28, "iterator", Vec::new(), list_iterator),
+            builtin_method(7, "reduce", vec![function_unknown()], list_reduce),
+            builtin_method(8, "exists", vec![function_unknown()], list_exists),
+            builtin_method(9, "forEach", vec![function_unknown()], list_for_each),
+            builtin_method(10, "forAll", vec![function_unknown()], list_for_all),
+            builtin_method(11, "sort", vec![ir::Type::Unknown], list_sort),
+            builtin_method(12, "zip", vec![ir::Type::Unknown], list_zip),
+            builtin_method(13, "zipWithIndex", Vec::new(), list_zip_with_index),
+            builtin_method(14, "size", Vec::new(), list_size),
+            builtin_method(15, "isEmpty", Vec::new(), list_is_empty),
+            builtin_method(16, "get", vec![ir::Type::Int], list_get),
+            builtin_method(17, "remove", vec![ir::Type::Int], list_remove),
+            builtin_method(18, "removeLast", Vec::new(), list_remove_last),
+            builtin_method(19, "head", Vec::new(), list_head),
+            builtin_method(20, "tail", Vec::new(), list_tail),
+            builtin_method(21, "first", Vec::new(), list_first),
+            builtin_method(22, "last", Vec::new(), list_last),
+            builtin_method(23, "clone", Vec::new(), list_clone),
+            builtin_method(24, "count", vec![function_unknown()], list_count),
+            builtin_method(25, "contains", vec![ir::Type::Unknown], list_contains),
+            builtin_method(26, "find", vec![ir::Type::Unknown], list_find),
+            builtin_method(27, "indexOf", vec![ir::Type::Unknown], list_index_of),
+            builtin_method(28, "iterator", Vec::new(), list_iterator),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -63,25 +62,6 @@ fn function_unknown() -> ir::Type {
     ir::Type::Function {
         params: Vec::new(),
         ret: Box::new(ir::Type::Unknown),
-    }
-}
-
-fn m(
-    slot: usize,
-    name: &str,
-    params: Vec<ir::Type>,
-    target: for<'a> fn(
-        &mut Interpreter<'a>,
-        Value,
-        Vec<Value>,
-        Option<Span>,
-    ) -> Result<Value, Diagnostic>,
-) -> RuntimeMethod {
-    RuntimeMethod {
-        slot: RuntimeMethodSlot(slot),
-        name: name.to_string(),
-        target: RuntimeMethodTarget::Builtin(target),
-        params,
     }
 }
 

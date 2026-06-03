@@ -9,9 +9,8 @@ use crate::{
     ir,
 };
 
-use crate::runtime::{
-    RuntimeMethod, RuntimeMethodSlot, RuntimeMethodTarget, RuntimeType, RuntimeTypeId,
-};
+use super::builtin_method;
+use crate::runtime::{RuntimeType, RuntimeTypeId};
 
 pub(super) fn define() -> RuntimeType {
     RuntimeType {
@@ -21,31 +20,31 @@ pub(super) fn define() -> RuntimeType {
         name: "Map".to_string(),
         fields: Vec::new(),
         methods: vec![
-            m(0, "++", vec![ir::Type::Unknown], map_concat),
-            m(
+            builtin_method(0, "++", vec![ir::Type::Unknown], map_concat),
+            builtin_method(
                 1,
                 "put",
                 vec![ir::Type::Unknown, ir::Type::Unknown],
                 map_put,
             ),
-            m(2, "iterator", Vec::new(), map_iterator),
-            m(3, "map", vec![function_unknown()], map_map),
-            m(4, "mapValues", vec![function_unknown()], map_map_values),
-            m(5, "flatMap", vec![function_unknown()], map_flat_map),
-            m(6, "filter", vec![function_unknown()], map_filter),
-            m(
+            builtin_method(2, "iterator", Vec::new(), map_iterator),
+            builtin_method(3, "map", vec![function_unknown()], map_map),
+            builtin_method(4, "mapValues", vec![function_unknown()], map_map_values),
+            builtin_method(5, "flatMap", vec![function_unknown()], map_flat_map),
+            builtin_method(6, "filter", vec![function_unknown()], map_filter),
+            builtin_method(
                 7,
                 "fold",
                 vec![ir::Type::Unknown, function_unknown()],
                 map_fold,
             ),
-            m(8, "reduce", vec![function_unknown()], map_reduce),
-            m(9, "exists", vec![function_unknown()], map_exists),
-            m(10, "forAll", vec![function_unknown()], map_for_all),
-            m(11, "forEach", vec![function_unknown()], map_for_each),
-            m(12, "get", vec![ir::Type::Unknown], map_get),
-            m(13, "contains", vec![ir::Type::Unknown], map_contains),
-            m(14, "size", Vec::new(), map_size),
+            builtin_method(8, "reduce", vec![function_unknown()], map_reduce),
+            builtin_method(9, "exists", vec![function_unknown()], map_exists),
+            builtin_method(10, "forAll", vec![function_unknown()], map_for_all),
+            builtin_method(11, "forEach", vec![function_unknown()], map_for_each),
+            builtin_method(12, "get", vec![ir::Type::Unknown], map_get),
+            builtin_method(13, "contains", vec![ir::Type::Unknown], map_contains),
+            builtin_method(14, "size", Vec::new(), map_size),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -56,25 +55,6 @@ fn function_unknown() -> ir::Type {
     ir::Type::Function {
         params: Vec::new(),
         ret: Box::new(ir::Type::Unknown),
-    }
-}
-
-fn m(
-    slot: usize,
-    name: &str,
-    params: Vec<ir::Type>,
-    target: for<'a> fn(
-        &mut Interpreter<'a>,
-        Value,
-        Vec<Value>,
-        Option<Span>,
-    ) -> Result<Value, Diagnostic>,
-) -> RuntimeMethod {
-    RuntimeMethod {
-        slot: RuntimeMethodSlot(slot),
-        name: name.to_string(),
-        target: RuntimeMethodTarget::Builtin(target),
-        params,
     }
 }
 

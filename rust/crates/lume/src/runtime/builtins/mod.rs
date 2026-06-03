@@ -6,7 +6,31 @@ mod result_type;
 mod set_type;
 mod str_type;
 
+use crate::{
+    Diagnostic, Span,
+    interpreter::{Interpreter, Value},
+    ir,
+};
+
 use super::{RuntimeType, RuntimeTypeId};
+use crate::runtime::{RuntimeMethod, RuntimeMethodSlot, RuntimeMethodTarget};
+
+pub(super) type BuiltinMethodFn =
+    for<'a> fn(&mut Interpreter<'a>, Value, Vec<Value>, Option<Span>) -> Result<Value, Diagnostic>;
+
+pub(super) fn builtin_method(
+    slot: usize,
+    name: &str,
+    params: Vec<ir::Type>,
+    target: BuiltinMethodFn,
+) -> RuntimeMethod {
+    RuntimeMethod {
+        slot: RuntimeMethodSlot(slot),
+        name: name.to_string(),
+        target: RuntimeMethodTarget::Builtin(target),
+        params,
+    }
+}
 
 /// Returns builtin runtime types with placeholder ids.
 ///
