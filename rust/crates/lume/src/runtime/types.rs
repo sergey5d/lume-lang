@@ -65,111 +65,164 @@ pub struct RuntimeProgram {
     by_ir_type: Vec<RuntimeTypeId>,
 }
 
+/// Stable lookup indexes built before we materialize runtime type metadata.
+///
+/// The runtime keeps both "by name/kind" and "by IR type id" views so the
+/// interpreter can move between symbolic lookups and dense ids cheaply.
+#[derive(Debug)]
+struct RuntimeIndexes {
+    by_name_kind: HashMap<(String, TypeKind), RuntimeTypeId>,
+    by_ir_type: Vec<RuntimeTypeId>,
+}
+
 impl RuntimeProgram {
     pub fn from_ir(program: &ir::Program) -> Self {
-        let mut types = Vec::with_capacity(program.types.len());
+        // First assign stable runtime ids for every lowered type so later passes
+        // can refer to types densely instead of rediscovering them by name.
+        let indexes = Self::build_indexes(program);
+
+        // Then convert each IR type definition into the compact runtime shape
+        // the interpreter uses on its hot path.
+        let mut types = program
+            .types
+            .iter()
+            .map(|ir_ty| {
+                let runtime_id = indexes
+                    .by_ir_type
+                    .get(ir_ty.id.0)
+                    .copied()
+                    .unwrap_or(RuntimeTypeId(usize::MAX));
+                Self::build_runtime_type(program, ir_ty, runtime_id)
+            })
+            .collect::<Vec<_>>();
+
+        // Finally resolve interface/with-bound metadata once all runtime ids are
+        // known, so aggregate instances can answer type-relationship questions
+        // without rescanning the IR graph.
+        Self::populate_with_bounds(&mut types, program, &indexes.by_name_kind);
+
+        Self {
+            types,
+            by_name_kind: indexes.by_name_kind,
+            by_ir_type: indexes.by_ir_type,
+        }
+    }
+
+    fn build_indexes(program: &ir::Program) -> RuntimeIndexes {
         let mut by_name_kind = HashMap::with_capacity(program.types.len());
         let mut by_ir_type = vec![RuntimeTypeId(usize::MAX); program.types.len()];
 
         for ir_ty in &program.types {
-            let runtime_id = RuntimeTypeId(types.len());
+            let runtime_id = RuntimeTypeId(by_name_kind.len());
             by_name_kind.insert((ir_ty.name.clone(), ir_ty.kind), runtime_id);
             if ir_ty.id.0 < by_ir_type.len() {
                 by_ir_type[ir_ty.id.0] = runtime_id;
             }
-
-            let fields = ir_ty
-                .fields
-                .iter()
-                .enumerate()
-                .map(|(index, field)| RuntimeField {
-                    slot: RuntimeFieldSlot(index),
-                    name: field.name.clone(),
-                    ty: field.ty.clone(),
-                    mutable: field.mutable,
-                })
-                .collect();
-
-            let methods = ir_ty
-                .methods
-                .iter()
-                .enumerate()
-                .filter_map(|(index, function_id)| {
-                    let function = program.function(*function_id)?;
-                    let params = function
-                        .params
-                        .iter()
-                        .filter_map(|local_id| function.locals.get(local_id.0))
-                        .map(|local| local.ty.clone())
-                        .collect();
-                    Some(RuntimeMethod {
-                        slot: RuntimeMethodSlot(index),
-                        name: function.name.clone(),
-                        function: *function_id,
-                        params,
-                    })
-                })
-                .collect();
-
-            let enum_cases = ir_ty
-                .enum_cases
-                .iter()
-                .enumerate()
-                .map(|(index, case)| RuntimeEnumCase {
-                    id: RuntimeEnumCaseId(index),
-                    name: case.name.clone(),
-                    fields: case
-                        .fields
-                        .iter()
-                        .enumerate()
-                        .map(|(field_index, field)| RuntimeField {
-                            slot: RuntimeFieldSlot(field_index),
-                            name: field.name.clone(),
-                            ty: field.ty.clone(),
-                            mutable: field.mutable,
-                        })
-                        .collect(),
-                })
-                .collect();
-
-            types.push(RuntimeType {
-                id: runtime_id,
-                ir_type_id: Some(ir_ty.id),
-                kind: ir_ty.kind,
-                name: ir_ty.name.clone(),
-                fields,
-                methods,
-                enum_cases,
-                with_bounds: Vec::new(),
-            });
         }
 
-        for (index, ir_ty) in program.types.iter().enumerate() {
-            let mut bounds = Vec::new();
-            for bound in &ir_ty.with_bounds {
-                let ir::Type::Named { name, .. } = bound else {
-                    continue;
-                };
-                if let Some(interface_id) = by_name_kind
-                    .get(&(name.clone(), TypeKind::Interface))
-                    .copied()
-                    .or_else(|| {
-                        by_name_kind
-                            .iter()
-                            .find_map(|((bound_name, _), id)| (bound_name == name).then_some(*id))
-                    })
-                {
-                    bounds.push(interface_id);
-                }
-            }
-            types[index].with_bounds = bounds;
-        }
-
-        Self {
-            types,
+        RuntimeIndexes {
             by_name_kind,
             by_ir_type,
         }
+    }
+
+    fn build_runtime_type(
+        program: &ir::Program,
+        ir_ty: &ir::TypeDef,
+        runtime_id: RuntimeTypeId,
+    ) -> RuntimeType {
+        RuntimeType {
+            id: runtime_id,
+            ir_type_id: Some(ir_ty.id),
+            kind: ir_ty.kind,
+            name: ir_ty.name.clone(),
+            fields: Self::build_fields(&ir_ty.fields),
+            methods: Self::build_methods(program, &ir_ty.methods),
+            enum_cases: Self::build_enum_cases(&ir_ty.enum_cases),
+            with_bounds: Vec::new(),
+        }
+    }
+
+    fn build_fields(fields: &[ir::Field]) -> Vec<RuntimeField> {
+        fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| RuntimeField {
+                slot: RuntimeFieldSlot(index),
+                name: field.name.clone(),
+                ty: field.ty.clone(),
+                mutable: field.mutable,
+            })
+            .collect()
+    }
+
+    fn build_methods(
+        program: &ir::Program,
+        methods: &[ir::FunctionId],
+    ) -> Vec<RuntimeMethod> {
+        methods
+            .iter()
+            .enumerate()
+            .filter_map(|(index, function_id)| {
+                let function = program.function(*function_id)?;
+                let params = function
+                    .params
+                    .iter()
+                    .filter_map(|local_id| function.locals.get(local_id.0))
+                    .map(|local| local.ty.clone())
+                    .collect();
+                Some(RuntimeMethod {
+                    slot: RuntimeMethodSlot(index),
+                    name: function.name.clone(),
+                    function: *function_id,
+                    params,
+                })
+            })
+            .collect()
+    }
+
+    fn build_enum_cases(cases: &[ir::EnumCase]) -> Vec<RuntimeEnumCase> {
+        cases
+            .iter()
+            .enumerate()
+            .map(|(index, case)| RuntimeEnumCase {
+                id: RuntimeEnumCaseId(index),
+                name: case.name.clone(),
+                fields: Self::build_fields(&case.fields),
+            })
+            .collect()
+    }
+
+    fn populate_with_bounds(
+        types: &mut [RuntimeType],
+        program: &ir::Program,
+        by_name_kind: &HashMap<(String, TypeKind), RuntimeTypeId>,
+    ) {
+        for (index, ir_ty) in program.types.iter().enumerate() {
+            types[index].with_bounds = ir_ty
+                .with_bounds
+                .iter()
+                .filter_map(|bound| Self::resolve_bound_type_id(bound, by_name_kind))
+                .collect();
+        }
+    }
+
+    fn resolve_bound_type_id(
+        bound: &ir::Type,
+        by_name_kind: &HashMap<(String, TypeKind), RuntimeTypeId>,
+    ) -> Option<RuntimeTypeId> {
+        let ir::Type::Named { name, .. } = bound else {
+            return None;
+        };
+
+        by_name_kind
+            .get(&(name.clone(), TypeKind::Interface))
+            .copied()
+            .or_else(|| {
+                by_name_kind
+                    .iter()
+                    .find_map(|((bound_name, _), id)| (bound_name == name).then_some(*id))
+            })
     }
 
     pub fn type_by_id(&self, id: RuntimeTypeId) -> Option<&RuntimeType> {
