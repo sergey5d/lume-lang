@@ -722,7 +722,7 @@ fn expr_path_ast(expr: &ast::Expr) -> Option<Vec<String>> {
 }
 
 #[derive(Clone)]
-enum Value {
+pub(crate) enum Value {
     Unit,
     Bool(bool),
     Int(i64),
@@ -783,7 +783,18 @@ impl Value {
         }
     }
 
-    fn option_none() -> Self {
+    pub(crate) fn list(items: Vec<Value>) -> Self {
+        Self::List(Rc::new(RefCell::new(items)))
+    }
+
+    pub(crate) fn iterator_from_values(items: Vec<Value>) -> Self {
+        Self::Iterator(Rc::new(RefCell::new(IteratorState::List {
+            items: Rc::new(RefCell::new(items)),
+            index: 0,
+        })))
+    }
+
+    pub(crate) fn option_none() -> Self {
         Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
             "Option",
             "None",
@@ -792,7 +803,7 @@ impl Value {
         ))))
     }
 
-    fn option_some(value: Value) -> Self {
+    pub(crate) fn option_some(value: Value) -> Self {
         Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
             "Option",
             "Some",
@@ -801,7 +812,7 @@ impl Value {
         ))))
     }
 
-    fn result_ok(value: Value) -> Self {
+    pub(crate) fn result_ok(value: Value) -> Self {
         Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
             "Result",
             "Ok",
@@ -810,7 +821,7 @@ impl Value {
         ))))
     }
 
-    fn result_err(error: Value) -> Self {
+    pub(crate) fn result_err(error: Value) -> Self {
         Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
             "Result",
             "Err",
@@ -819,7 +830,7 @@ impl Value {
         ))))
     }
 
-    fn either_left(value: Value) -> Self {
+    pub(crate) fn either_left(value: Value) -> Self {
         Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
             "Either",
             "Left",
@@ -828,13 +839,21 @@ impl Value {
         ))))
     }
 
-    fn either_right(value: Value) -> Self {
+    pub(crate) fn either_right(value: Value) -> Self {
         Self::Aggregate(Rc::new(RefCell::new(AggregateValue::builtin_variant(
             "Either",
             "Right",
             vec!["value".to_string()],
             vec![value],
         ))))
+    }
+
+    pub(crate) fn variant_case_name_and_fields(&self) -> Option<(String, Vec<Value>)> {
+        let Value::Aggregate(aggregate) = self else {
+            return None;
+        };
+        let aggregate = aggregate.borrow();
+        Some((aggregate.case_name.clone()?, aggregate.fields.clone()))
     }
 
     fn render(&self) -> String {
@@ -937,7 +956,7 @@ impl fmt::Debug for Value {
 }
 
 #[derive(Debug, Clone)]
-struct AggregateValue {
+pub(crate) struct AggregateValue {
     runtime_type_id: Option<runtime::RuntimeTypeId>,
     type_name: String,
     kind: crate::ast::TypeKind,
@@ -967,13 +986,13 @@ impl AggregateValue {
 }
 
 #[derive(Debug, Clone)]
-struct ClosureValue {
+pub(crate) struct ClosureValue {
     function: ir::FunctionId,
     captures: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]
-enum IteratorState {
+pub(crate) enum IteratorState {
     List {
         items: Rc<RefCell<Vec<Value>>>,
         index: usize,
@@ -991,7 +1010,7 @@ struct Frame {
     locals: Vec<Value>,
 }
 
-struct Interpreter<'a> {
+pub(crate) struct Interpreter<'a> {
     program: &'a ir::Program,
     runtime: runtime::RuntimeProgram,
     globals: Vec<Value>,
@@ -1443,6 +1462,54 @@ impl<'a> Interpreter<'a> {
             .unwrap_or_else(|| Value::default_for_type(&field.ty))
     }
 
+    fn runtime_type_id_for_value(&self, value: &Value) -> Option<runtime::RuntimeTypeId> {
+        match value {
+            Value::String(_) => self
+                .runtime
+                .type_id_by_name_kind("Str", crate::ast::TypeKind::Class),
+            Value::Aggregate(aggregate) => {
+                let aggregate = aggregate.borrow();
+                aggregate.runtime_type_id.or_else(|| {
+                    self.runtime
+                        .type_id_by_name_kind(&aggregate.type_name, aggregate.kind)
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn try_invoke_runtime_method(
+        &mut self,
+        receiver: Value,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+        let Some(type_id) = self.runtime_type_id_for_value(&receiver) else {
+            return Ok(None);
+        };
+        let Some(runtime_ty) = self.runtime.type_by_id(type_id) else {
+            return Ok(None);
+        };
+        if runtime_ty.ir_type_id.is_some() {
+            return Ok(None);
+        }
+        let Some(runtime_method) = runtime_ty.methods.iter().find(|candidate| candidate.name == method)
+        else {
+            return Ok(None);
+        };
+
+        let value = match runtime_method.target {
+            runtime::RuntimeMethodTarget::Ir(function) => {
+                self.call_function(function, Some(receiver), None, args, span)?
+            }
+            runtime::RuntimeMethodTarget::Builtin(handler) => {
+                handler(self, receiver, args, span)?
+            }
+        };
+        Ok(Some(value))
+    }
+
     fn read_place(
         &mut self,
         frame: Option<&Frame>,
@@ -1539,7 +1606,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn invoke_value(
+    pub(crate) fn invoke_value(
         &mut self,
         callee: Value,
         args: Vec<Value>,
@@ -2378,6 +2445,12 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
+        if let Some(value) =
+            self.try_invoke_runtime_method(receiver.clone(), method, args.clone(), span)?
+        {
+            return Ok(value);
+        }
+
         match &receiver {
             Value::List(items) => {
                 return self.invoke_list_method(receiver.clone(), items, method, args, span);
@@ -4039,7 +4112,7 @@ impl<'a> Interpreter<'a> {
         })
     }
 
-    fn runtime_error(&self, span: Option<Span>, message: impl Into<String>) -> Diagnostic {
+    pub(crate) fn runtime_error(&self, span: Option<Span>, message: impl Into<String>) -> Diagnostic {
         Diagnostic::error(
             "runtime_error",
             message.into(),

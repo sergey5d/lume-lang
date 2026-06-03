@@ -6,16 +6,19 @@
 //! so the interpreter does not have to rediscover type structure through
 //! repeated scans of the IR tables.
 
+mod builtins;
 mod types;
 
 pub use types::{
-    RuntimeEnumCase, 
-    RuntimeEnumCaseId, 
-    RuntimeField, 
-    RuntimeFieldSlot, 
+    RuntimeEnumCase,
+    RuntimeEnumCaseId,
+    RuntimeField,
+    RuntimeFieldSlot,
     RuntimeMethod,
-    RuntimeMethodSlot, 
-    RuntimeProgram, 
-    RuntimeType, 
+    RuntimeMethodSlot,
+    RuntimeProgram,
+    RuntimeType,
     RuntimeTypeId,
 };
+
+pub(crate) use types::RuntimeMethodTarget;

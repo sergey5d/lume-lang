@@ -2,6 +2,13 @@ use std::collections::HashMap;
 
 use crate::{ast::TypeKind, ir};
 
+type BuiltinMethodFn = for<'a> fn(
+    &mut crate::interpreter::Interpreter<'a>,
+    crate::interpreter::Value,
+    Vec<crate::interpreter::Value>,
+    Option<crate::source::Span>,
+) -> Result<crate::interpreter::Value, crate::Diagnostic>;
+
 /// Stable id for one runtime-visible type metadata entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RuntimeTypeId(pub usize);
@@ -33,8 +40,25 @@ pub struct RuntimeField {
 pub struct RuntimeMethod {
     pub slot: RuntimeMethodSlot,
     pub name: String,
-    pub function: ir::FunctionId,
+    pub(crate) target: RuntimeMethodTarget,
     pub params: Vec<ir::Type>,
+}
+
+/// A runtime method can either jump into lowered IR or invoke a builtin host
+/// implementation registered by the runtime.
+#[derive(Clone, Copy)]
+pub(crate) enum RuntimeMethodTarget {
+    Ir(ir::FunctionId),
+    Builtin(BuiltinMethodFn),
+}
+
+impl std::fmt::Debug for RuntimeMethodTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ir(function) => f.debug_tuple("Ir").field(function).finish(),
+            Self::Builtin(_) => f.write_str("Builtin(<fn>)"),
+        }
+    }
 }
 
 /// Runtime enum-case metadata with a fixed payload layout.
@@ -78,13 +102,21 @@ struct RuntimeIndexes {
 
 impl RuntimeProgram {
     pub fn from_ir(program: &ir::Program) -> Self {
+        let mut types = super::builtins::builtin_types();
+        super::builtins::assign_type_ids(&mut types, 0);
+        let mut by_name_kind = HashMap::with_capacity(program.types.len() + types.len());
+        for ty in &types {
+            by_name_kind.insert((ty.name.clone(), ty.kind), ty.id);
+        }
+
         // First assign stable runtime ids for every lowered type so later passes
         // can refer to types densely instead of rediscovering them by name.
-        let indexes = Self::build_indexes(program);
+        let indexes = Self::build_indexes(program, types.len());
+        by_name_kind.extend(indexes.by_name_kind.clone());
 
         // Then convert each IR type definition into the compact runtime shape
         // the interpreter uses on its hot path.
-        let mut types = program
+        types.extend(program
             .types
             .iter()
             .map(|ir_ty| {
@@ -95,26 +127,26 @@ impl RuntimeProgram {
                     .unwrap_or(RuntimeTypeId(usize::MAX));
                 Self::build_runtime_type(program, ir_ty, runtime_id)
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>());
 
         // Finally resolve interface/with-bound metadata once all runtime ids are
         // known, so aggregate instances can answer type-relationship questions
         // without rescanning the IR graph.
-        Self::populate_with_bounds(&mut types, program, &indexes.by_name_kind);
+        Self::populate_with_bounds(&mut types, program, &indexes.by_ir_type, &by_name_kind);
 
         Self {
             types,
-            by_name_kind: indexes.by_name_kind,
+            by_name_kind,
             by_ir_type: indexes.by_ir_type,
         }
     }
 
-    fn build_indexes(program: &ir::Program) -> RuntimeIndexes {
+    fn build_indexes(program: &ir::Program, start_index: usize) -> RuntimeIndexes {
         let mut by_name_kind = HashMap::with_capacity(program.types.len());
         let mut by_ir_type = vec![RuntimeTypeId(usize::MAX); program.types.len()];
 
-        for ir_ty in &program.types {
-            let runtime_id = RuntimeTypeId(by_name_kind.len());
+        for (index, ir_ty) in program.types.iter().enumerate() {
+            let runtime_id = RuntimeTypeId(start_index + index);
             by_name_kind.insert((ir_ty.name.clone(), ir_ty.kind), runtime_id);
             if ir_ty.id.0 < by_ir_type.len() {
                 by_ir_type[ir_ty.id.0] = runtime_id;
@@ -176,7 +208,7 @@ impl RuntimeProgram {
                 Some(RuntimeMethod {
                     slot: RuntimeMethodSlot(index),
                     name: function.name.clone(),
-                    function: *function_id,
+                    target: RuntimeMethodTarget::Ir(*function_id),
                     params,
                 })
             })
@@ -198,10 +230,14 @@ impl RuntimeProgram {
     fn populate_with_bounds(
         types: &mut [RuntimeType],
         program: &ir::Program,
+        by_ir_type: &[RuntimeTypeId],
         by_name_kind: &HashMap<(String, TypeKind), RuntimeTypeId>,
     ) {
-        for (index, ir_ty) in program.types.iter().enumerate() {
-            types[index].with_bounds = ir_ty
+        for ir_ty in &program.types {
+            let Some(runtime_id) = by_ir_type.get(ir_ty.id.0).copied() else {
+                continue;
+            };
+            types[runtime_id.0].with_bounds = ir_ty
                 .with_bounds
                 .iter()
                 .filter_map(|bound| Self::resolve_bound_type_id(bound, by_name_kind))
@@ -295,7 +331,10 @@ impl RuntimeProgram {
                 ty.methods
                     .iter()
                     .filter(|method| method.name == name)
-                    .map(|method| method.function)
+                    .filter_map(|method| match method.target {
+                        RuntimeMethodTarget::Ir(function) => Some(function),
+                        RuntimeMethodTarget::Builtin(_) => None,
+                    })
                     .collect()
             })
             .unwrap_or_default()
