@@ -25,6 +25,7 @@ pub struct RuntimeField {
     pub name: String,
     pub ty: ir::Type,
     pub mutable: bool,
+    pub initializer: Option<ir::Constant>,
 }
 
 /// Runtime method metadata. Overloads occupy distinct slots.
@@ -152,6 +153,7 @@ impl RuntimeProgram {
                 name: field.name.clone(),
                 ty: field.ty.clone(),
                 mutable: field.mutable,
+                initializer: field.initializer.clone(),
             })
             .collect()
     }

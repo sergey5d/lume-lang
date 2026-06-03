@@ -1003,6 +1003,7 @@ struct Interpreter<'a> {
 impl<'a> Interpreter<'a> {
     fn new(program: &'a ir::Program) -> Self {
         let runtime = runtime::RuntimeProgram::from_ir(program);
+        let object_singleton_count = runtime.types.len();
         Self {
             program,
             runtime,
@@ -1012,7 +1013,7 @@ impl<'a> Interpreter<'a> {
                 .map(|global| Value::default_for_type(&global.ty))
                 .collect(),
             globals_ready: false,
-            object_singletons: vec![None; program.types.len()],
+            object_singletons: vec![None; object_singleton_count],
             output: String::new(),
         }
     }
@@ -1434,7 +1435,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn field_default_value(&self, field: &ir::Field) -> Value {
+    fn runtime_field_default_value(&self, field: &runtime::RuntimeField) -> Value {
         field
             .initializer
             .as_ref()
@@ -1840,7 +1841,7 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Option<Value>, Diagnostic> {
         let Some(ty) = self
-            .program
+            .runtime
             .types
             .iter()
             .find(|ty| {
@@ -1853,9 +1854,8 @@ impl<'a> Interpreter<'a> {
             return Ok(None);
         };
 
-        let runtime_type_id = self.runtime.type_id_for_ir_id(ty.id);
         let object = Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
-            runtime_type_id,
+            runtime_type_id: Some(ty.id),
             type_name: type_name.to_string(),
             kind: ty.kind,
             case_id: None,
@@ -1864,21 +1864,11 @@ impl<'a> Interpreter<'a> {
             fields: ty
                 .fields
                 .iter()
-                .map(|field| self.field_default_value(field))
+                .map(|field| self.runtime_field_default_value(field))
                 .collect(),
         })));
 
-        if let Some(init) = self
-            .find_method_overload_for_kind(type_name, crate::ast::TypeKind::Class, "init", &args)
-            .or_else(|| {
-                self.find_method_overload_for_kind(
-                    type_name,
-                    crate::ast::TypeKind::Record,
-                    "init",
-                    &args,
-                )
-            })
-        {
+        if let Some(init) = self.find_method_overload_for_kind(type_name, ty.kind, "init", &args) {
             let receiver = object.clone();
             let _ = self.call_function(init, Some(receiver), None, args, span)?;
             return Ok(Some(object));
@@ -2075,7 +2065,7 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         let mut matches = self
-            .program
+            .runtime
             .types
             .iter()
             .filter(|ty| {
@@ -2101,22 +2091,16 @@ impl<'a> Interpreter<'a> {
             .expect("matched case");
         if args.is_empty() && case.fields.iter().all(|field| field.initializer.is_some()) {
             return Ok(Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
-                runtime_type_id: self.runtime.type_id_for_ir_id(ty.id),
+                runtime_type_id: Some(ty.id),
                 type_name: ty.name.clone(),
                 kind: crate::ast::TypeKind::Enum,
-                case_id: self
-                    .runtime
-                    .type_id_for_ir_id(ty.id)
-                    .and_then(|type_id| self.runtime.enum_case_by_name(type_id, case_name))
-                    .map(|case| case.id),
+                case_id: Some(case.id),
                 case_name: Some(case_name.to_string()),
                 field_names: case.fields.iter().map(|field| field.name.clone()).collect(),
                 fields: case
                     .fields
                     .iter()
-                    .map(|field| {
-                        self.constant_value(field.initializer.as_ref().expect("initializer"))
-                    })
+                    .map(|field| self.runtime_field_default_value(field))
                     .collect(),
             }))));
         }
@@ -2150,20 +2134,16 @@ impl<'a> Interpreter<'a> {
             let value = if field.initializer.is_none() || supplied_remaining > required_remaining {
                 supplied.next().expect("enum case arg")
             } else {
-                self.constant_value(field.initializer.as_ref().expect("initializer"))
+                self.runtime_field_default_value(field)
             };
             field_names.push(field.name.clone());
             values.push(value);
         }
         Ok(Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
-            runtime_type_id: self.runtime.type_id_for_ir_id(ty.id),
+            runtime_type_id: Some(ty.id),
             type_name: ty.name.clone(),
             kind: crate::ast::TypeKind::Enum,
-            case_id: self
-                .runtime
-                .type_id_for_ir_id(ty.id)
-                .and_then(|type_id| self.runtime.enum_case_by_name(type_id, case_name))
-                .map(|case| case.id),
+            case_id: Some(case.id),
             case_name: Some(case_name.to_string()),
             field_names,
             fields: values,
@@ -3534,16 +3514,10 @@ impl<'a> Interpreter<'a> {
             return Ok(Some(existing.clone()));
         }
         let field_values = ty
-            .ir_type_id
-            .and_then(|ir_type_id| self.program.types.get(ir_type_id.0))
-            .map(|ir_type| {
-                ir_type
-                    .fields
-                    .iter()
-                    .map(|field| self.field_default_value(field))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_else(|| vec![Value::Unit; ty.fields.len()]);
+            .fields
+            .iter()
+            .map(|field| self.runtime_field_default_value(field))
+            .collect::<Vec<_>>();
         let value = Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
             runtime_type_id: Some(ty.id),
             type_name: ty.name.clone(),
