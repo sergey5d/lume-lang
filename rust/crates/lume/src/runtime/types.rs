@@ -116,18 +116,20 @@ impl RuntimeProgram {
 
         // Then convert each IR type definition into the compact runtime shape
         // the interpreter uses on its hot path.
-        types.extend(program
-            .types
-            .iter()
-            .map(|ir_ty| {
-                let runtime_id = indexes
-                    .by_ir_type
-                    .get(ir_ty.id.0)
-                    .copied()
-                    .unwrap_or(RuntimeTypeId(usize::MAX));
-                Self::build_runtime_type(program, ir_ty, runtime_id)
-            })
-            .collect::<Vec<_>>());
+        types.extend(
+            program
+                .types
+                .iter()
+                .map(|ir_ty| {
+                    let runtime_id = indexes
+                        .by_ir_type
+                        .get(ir_ty.id.0)
+                        .copied()
+                        .unwrap_or(RuntimeTypeId(usize::MAX));
+                    Self::build_runtime_type(program, ir_ty, runtime_id)
+                })
+                .collect::<Vec<_>>(),
+        );
 
         // Finally resolve interface/with-bound metadata once all runtime ids are
         // known, so aggregate instances can answer type-relationship questions
@@ -190,10 +192,7 @@ impl RuntimeProgram {
             .collect()
     }
 
-    fn build_methods(
-        program: &ir::Program,
-        methods: &[ir::FunctionId],
-    ) -> Vec<RuntimeMethod> {
+    fn build_methods(program: &ir::Program, methods: &[ir::FunctionId]) -> Vec<RuntimeMethod> {
         methods
             .iter()
             .enumerate()

@@ -1,8 +1,8 @@
 use crate::{
+    Diagnostic, Span,
     ast::TypeKind,
     interpreter::{Interpreter, Value},
     ir,
-    Diagnostic, Span,
 };
 
 use crate::runtime::{
@@ -86,9 +86,14 @@ pub(super) fn define() -> RuntimeType {
     }
 }
 
-fn option_case(receiver: &Value) -> (String, Option<Value>) {
-    let (case_name, fields) = receiver.variant_case_name_and_fields().expect("Option variant");
-    (case_name, fields.into_iter().next())
+const NONE_CASE: RuntimeEnumCaseId = RuntimeEnumCaseId(0);
+const SOME_CASE: RuntimeEnumCaseId = RuntimeEnumCaseId(1);
+
+fn option_case(receiver: &Value) -> (RuntimeEnumCaseId, Option<Value>) {
+    let (_, case_id, fields) = receiver
+        .variant_case_ids_and_fields()
+        .expect("Option variant");
+    (case_id, fields.into_iter().next())
 }
 
 fn option_is_set(
@@ -98,8 +103,8 @@ fn option_is_set(
     _span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     debug_assert!(args.is_empty());
-    let (case_name, _) = option_case(&receiver);
-    Ok(Value::Bool(case_name == "Some"))
+    let (case_id, _) = option_case(&receiver);
+    Ok(Value::Bool(case_id == SOME_CASE))
 }
 
 fn option_is_empty(
@@ -109,8 +114,8 @@ fn option_is_empty(
     _span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     debug_assert!(args.is_empty());
-    let (case_name, _) = option_case(&receiver);
-    Ok(Value::Bool(case_name != "Some"))
+    let (case_id, _) = option_case(&receiver);
+    Ok(Value::Bool(case_id == NONE_CASE))
 }
 
 fn option_map(
@@ -122,16 +127,16 @@ fn option_map(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Option.map expects 1 argument"));
     };
-    let (case_name, first_field) = option_case(&receiver);
-    if case_name == "Some" {
+    let (case_id, first_field) = option_case(&receiver);
+    if case_id == SOME_CASE {
         let mapped = interpreter.invoke_value(
             callback.clone(),
             vec![first_field.expect("Option.Some payload")],
             span,
         )?;
-        Ok(Value::option_some(mapped))
+        Ok(interpreter.option_some(mapped))
     } else {
-        Ok(Value::option_none())
+        Ok(interpreter.option_none())
     }
 }
 
@@ -144,8 +149,8 @@ fn option_expect(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "Option.expect expects 0 arguments"));
     }
-    let (case_name, first_field) = option_case(&receiver);
-    if case_name != "Some" {
+    let (case_id, first_field) = option_case(&receiver);
+    if case_id != SOME_CASE {
         return Err(interpreter.runtime_error(span, "Option has no value"));
     }
     Ok(first_field.expect("Option.Some payload"))
@@ -160,8 +165,8 @@ fn option_get_or(
     if args.len() != 1 {
         return Err(interpreter.runtime_error(span, "Option.getOr expects 1 argument"));
     }
-    let (case_name, first_field) = option_case(&receiver);
-    if case_name == "Some" {
+    let (case_id, first_field) = option_case(&receiver);
+    if case_id == SOME_CASE {
         Ok(first_field.expect("Option.Some payload"))
     } else {
         Ok(args[0].clone())
@@ -177,8 +182,8 @@ fn option_get_or_else(
     if args.len() != 1 {
         return Err(interpreter.runtime_error(span, "Option.getOrElse expects 1 argument"));
     }
-    let (case_name, first_field) = option_case(&receiver);
-    if case_name == "Some" {
+    let (case_id, first_field) = option_case(&receiver);
+    if case_id == SOME_CASE {
         Ok(first_field.expect("Option.Some payload"))
     } else {
         Ok(args[0].clone())
@@ -194,8 +199,8 @@ fn option_iterator(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "Option.iterator expects 0 arguments"));
     }
-    let (case_name, first_field) = option_case(&receiver);
-    let values = if case_name == "Some" {
+    let (case_id, first_field) = option_case(&receiver);
+    let values = if case_id == SOME_CASE {
         vec![first_field.expect("Option.Some payload")]
     } else {
         Vec::new()

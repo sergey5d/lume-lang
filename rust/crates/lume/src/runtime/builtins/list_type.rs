@@ -1,10 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    ast::TypeKind,
-    interpreter::{iterable_values, values_equal, Interpreter, Value},
-    ir,
     Diagnostic, Span,
+    ast::TypeKind,
+    interpreter::{Interpreter, Value, iterable_values, values_equal},
+    ir,
 };
 
 use crate::runtime::{
@@ -25,7 +25,12 @@ pub(super) fn define() -> RuntimeType {
             m(3, "map", vec![function_unknown()], list_map),
             m(4, "flatMap", vec![function_unknown()], list_flat_map),
             m(5, "filter", vec![function_unknown()], list_filter),
-            m(6, "fold", vec![ir::Type::Unknown, function_unknown()], list_fold),
+            m(
+                6,
+                "fold",
+                vec![ir::Type::Unknown, function_unknown()],
+                list_fold,
+            ),
             m(7, "reduce", vec![function_unknown()], list_reduce),
             m(8, "exists", vec![function_unknown()], list_exists),
             m(9, "forEach", vec![function_unknown()], list_for_each),
@@ -217,13 +222,13 @@ fn list_reduce(
     };
     let values = list_items(&receiver).borrow().clone();
     let Some((first, rest)) = values.split_first() else {
-        return Ok(Value::option_none());
+        return Ok(interpreter.option_none());
     };
     let mut acc = first.clone();
     for value in rest {
         acc = interpreter.invoke_value(callback.clone(), vec![acc, value.clone()], span)?;
     }
-    Ok(Value::option_some(acc))
+    Ok(interpreter.option_some(acc))
 }
 
 fn list_exists(
@@ -343,7 +348,8 @@ fn list_zip_with_index(
     }
     let items = list_items(&receiver);
     Ok(Value::list(
-        items.borrow()
+        items
+            .borrow()
             .iter()
             .cloned()
             .enumerate()
@@ -387,7 +393,10 @@ fn list_get(
     }
     let index = args[0].as_int(interpreter, span, "List.get index")?;
     let value = list_items(&receiver).borrow().get(index as usize).cloned();
-    Ok(value.map_or_else(Value::option_none, Value::option_some))
+    Ok(match value {
+        Some(value) => interpreter.option_some(value),
+        None => interpreter.option_none(),
+    })
 }
 
 fn list_remove(
@@ -403,9 +412,9 @@ fn list_remove(
     let items = list_items(&receiver);
     let mut items = items.borrow_mut();
     if index < 0 || index as usize >= items.len() {
-        return Ok(Value::option_none());
+        return Ok(interpreter.option_none());
     }
-    Ok(Value::option_some(items.remove(index as usize)))
+    Ok(interpreter.option_some(items.remove(index as usize)))
 }
 
 fn list_remove_last(
@@ -417,10 +426,11 @@ fn list_remove_last(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "List.removeLast expects 0 arguments"));
     }
-    Ok(list_items(&receiver)
-        .borrow_mut()
-        .pop()
-        .map_or_else(Value::option_none, Value::option_some))
+    let value = list_items(&receiver).borrow_mut().pop();
+    Ok(match value {
+        Some(value) => interpreter.option_some(value),
+        None => interpreter.option_none(),
+    })
 }
 
 fn list_head(
@@ -432,11 +442,11 @@ fn list_head(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "List.head expects 0 arguments"));
     }
-    Ok(list_items(&receiver)
-        .borrow()
-        .first()
-        .cloned()
-        .map_or_else(Value::option_none, Value::option_some))
+    let value = list_items(&receiver).borrow().first().cloned();
+    Ok(match value {
+        Some(value) => interpreter.option_some(value),
+        None => interpreter.option_none(),
+    })
 }
 
 fn list_tail(
@@ -467,11 +477,11 @@ fn list_first(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "Array.first expects 0 arguments"));
     }
-    Ok(list_items(&receiver)
-        .borrow()
-        .first()
-        .cloned()
-        .map_or_else(Value::option_none, Value::option_some))
+    let value = list_items(&receiver).borrow().first().cloned();
+    Ok(match value {
+        Some(value) => interpreter.option_some(value),
+        None => interpreter.option_none(),
+    })
 }
 
 fn list_last(
@@ -483,11 +493,11 @@ fn list_last(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "Array.last expects 0 arguments"));
     }
-    Ok(list_items(&receiver)
-        .borrow()
-        .last()
-        .cloned()
-        .map_or_else(Value::option_none, Value::option_some))
+    let value = list_items(&receiver).borrow().last().cloned();
+    Ok(match value {
+        Some(value) => interpreter.option_some(value),
+        None => interpreter.option_none(),
+    })
 }
 
 fn list_clone(
@@ -550,12 +560,15 @@ fn list_find(
     let [needle] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Array.find expects 1 argument"));
     };
-    Ok(list_items(&receiver)
+    let value = list_items(&receiver)
         .borrow()
         .iter()
         .find(|value| values_equal(value, needle))
-        .cloned()
-        .map_or_else(Value::option_none, Value::option_some))
+        .cloned();
+    Ok(match value {
+        Some(value) => interpreter.option_some(value),
+        None => interpreter.option_none(),
+    })
 }
 
 fn list_index_of(
@@ -585,5 +598,7 @@ fn list_iterator(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "List.iterator expects 0 arguments"));
     }
-    Ok(Value::iterator_from_values(list_items(&receiver).borrow().clone()))
+    Ok(Value::iterator_from_values(
+        list_items(&receiver).borrow().clone(),
+    ))
 }

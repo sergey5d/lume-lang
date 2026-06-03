@@ -1,10 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    ast::TypeKind,
-    interpreter::{iterable_values, push_unique, values_equal, Interpreter, Value},
-    ir,
     Diagnostic, Span,
+    ast::TypeKind,
+    interpreter::{Interpreter, Value, iterable_values, push_unique, values_equal},
+    ir,
 };
 
 use crate::runtime::{
@@ -26,7 +26,12 @@ pub(super) fn define() -> RuntimeType {
             m(4, "map", vec![function_unknown()], set_map),
             m(5, "flatMap", vec![function_unknown()], set_flat_map),
             m(6, "filter", vec![function_unknown()], set_filter),
-            m(7, "fold", vec![ir::Type::Unknown, function_unknown()], set_fold),
+            m(
+                7,
+                "fold",
+                vec![ir::Type::Unknown, function_unknown()],
+                set_fold,
+            ),
             m(8, "reduce", vec![function_unknown()], set_reduce),
             m(9, "exists", vec![function_unknown()], set_exists),
             m(10, "forAll", vec![function_unknown()], set_for_all),
@@ -127,7 +132,9 @@ fn set_iterator(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "Set.iterator expects 0 arguments"));
     }
-    Ok(Value::iterator_from_values(set_items(&receiver).borrow().clone()))
+    Ok(Value::iterator_from_values(
+        set_items(&receiver).borrow().clone(),
+    ))
 }
 
 fn set_map(
@@ -219,13 +226,13 @@ fn set_reduce(
     };
     let values = set_items(&receiver).borrow().clone();
     let Some((first, rest)) = values.split_first() else {
-        return Ok(Value::option_none());
+        return Ok(interpreter.option_none());
     };
     let mut acc = first.clone();
     for value in rest {
         acc = interpreter.invoke_value(callback.clone(), vec![acc, value.clone()], span)?;
     }
-    Ok(Value::option_some(acc))
+    Ok(interpreter.option_some(acc))
 }
 
 fn set_exists(

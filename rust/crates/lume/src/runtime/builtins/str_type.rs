@@ -1,4 +1,8 @@
-use crate::{ast::TypeKind, interpreter::{Interpreter, Value}, Diagnostic, Span};
+use crate::{
+    Diagnostic, Span,
+    ast::TypeKind,
+    interpreter::{Interpreter, Value},
+};
 
 use crate::runtime::{
     RuntimeMethod, RuntimeMethodSlot, RuntimeMethodTarget, RuntimeType, RuntimeTypeId,

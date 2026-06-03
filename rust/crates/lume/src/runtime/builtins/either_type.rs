@@ -1,8 +1,8 @@
 use crate::{
+    Diagnostic, Span,
     ast::TypeKind,
     interpreter::{Interpreter, Value},
     ir,
-    Diagnostic, Span,
 };
 
 use crate::runtime::{
@@ -61,6 +61,9 @@ pub(super) fn define() -> RuntimeType {
     }
 }
 
+const LEFT_CASE: RuntimeEnumCaseId = RuntimeEnumCaseId(0);
+const RIGHT_CASE: RuntimeEnumCaseId = RuntimeEnumCaseId(1);
+
 fn builtin_method(
     slot: usize,
     name: &str,
@@ -80,9 +83,11 @@ fn builtin_method(
     }
 }
 
-fn either_case(receiver: &Value) -> (String, Option<Value>) {
-    let (case_name, fields) = receiver.variant_case_name_and_fields().expect("Either variant");
-    (case_name, fields.into_iter().next())
+fn either_case(receiver: &Value) -> (RuntimeEnumCaseId, Option<Value>) {
+    let (_, case_id, fields) = receiver
+        .variant_case_ids_and_fields()
+        .expect("Either variant");
+    (case_id, fields.into_iter().next())
 }
 
 fn either_is_left(
@@ -91,8 +96,8 @@ fn either_is_left(
     _args: Vec<Value>,
     _span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let (case_name, _) = either_case(&receiver);
-    Ok(Value::Bool(case_name == "Left"))
+    let (case_id, _) = either_case(&receiver);
+    Ok(Value::Bool(case_id == LEFT_CASE))
 }
 
 fn either_is_right(
@@ -101,8 +106,8 @@ fn either_is_right(
     _args: Vec<Value>,
     _span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let (case_name, _) = either_case(&receiver);
-    Ok(Value::Bool(case_name == "Right"))
+    let (case_id, _) = either_case(&receiver);
+    Ok(Value::Bool(case_id == RIGHT_CASE))
 }
 
 fn either_map(
@@ -114,14 +119,14 @@ fn either_map(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Either.map expects 1 argument"));
     };
-    let (case_name, first_field) = either_case(&receiver);
-    if case_name == "Right" {
+    let (case_id, first_field) = either_case(&receiver);
+    if case_id == RIGHT_CASE {
         let mapped = interpreter.invoke_value(
             callback.clone(),
             vec![first_field.expect("Either.Right payload")],
             span,
         )?;
-        Ok(Value::either_right(mapped))
+        Ok(interpreter.either_right(mapped))
     } else {
         Ok(receiver)
     }
@@ -133,8 +138,8 @@ fn either_expect_left(
     _args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let (case_name, first_field) = either_case(&receiver);
-    if case_name == "Left" {
+    let (case_id, first_field) = either_case(&receiver);
+    if case_id == LEFT_CASE {
         Ok(first_field.expect("Either.Left payload"))
     } else {
         Err(interpreter.runtime_error(span, "Either has no left value"))
@@ -147,8 +152,8 @@ fn either_expect_right(
     _args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let (case_name, first_field) = either_case(&receiver);
-    if case_name == "Right" {
+    let (case_id, first_field) = either_case(&receiver);
+    if case_id == RIGHT_CASE {
         Ok(first_field.expect("Either.Right payload"))
     } else {
         Err(interpreter.runtime_error(span, "Either has no right value"))
@@ -164,8 +169,8 @@ fn either_get_or(
     if args.len() != 1 {
         return Err(interpreter.runtime_error(span, "Either.getOr expects 1 argument"));
     }
-    let (case_name, first_field) = either_case(&receiver);
-    if case_name == "Right" {
+    let (case_id, first_field) = either_case(&receiver);
+    if case_id == RIGHT_CASE {
         Ok(first_field.expect("Either.Right payload"))
     } else {
         Ok(args[0].clone())

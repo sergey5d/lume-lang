@@ -1,8 +1,8 @@
 use crate::{
+    Diagnostic, Span,
     ast::TypeKind,
     interpreter::{Interpreter, Value},
     ir,
-    Diagnostic, Span,
 };
 
 use crate::runtime::{
@@ -61,6 +61,9 @@ pub(super) fn define() -> RuntimeType {
     }
 }
 
+const OK_CASE: RuntimeEnumCaseId = RuntimeEnumCaseId(0);
+const ERR_CASE: RuntimeEnumCaseId = RuntimeEnumCaseId(1);
+
 fn builtin_method(
     slot: usize,
     name: &str,
@@ -80,9 +83,11 @@ fn builtin_method(
     }
 }
 
-fn result_case(receiver: &Value) -> (String, Option<Value>) {
-    let (case_name, fields) = receiver.variant_case_name_and_fields().expect("Result variant");
-    (case_name, fields.into_iter().next())
+fn result_case(receiver: &Value) -> (RuntimeEnumCaseId, Option<Value>) {
+    let (_, case_id, fields) = receiver
+        .variant_case_ids_and_fields()
+        .expect("Result variant");
+    (case_id, fields.into_iter().next())
 }
 
 fn result_is_ok(
@@ -91,8 +96,8 @@ fn result_is_ok(
     _args: Vec<Value>,
     _span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let (case_name, _) = result_case(&receiver);
-    Ok(Value::Bool(case_name == "Ok"))
+    let (case_id, _) = result_case(&receiver);
+    Ok(Value::Bool(case_id == OK_CASE))
 }
 
 fn result_is_err(
@@ -101,8 +106,8 @@ fn result_is_err(
     _args: Vec<Value>,
     _span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let (case_name, _) = result_case(&receiver);
-    Ok(Value::Bool(case_name != "Ok"))
+    let (case_id, _) = result_case(&receiver);
+    Ok(Value::Bool(case_id == ERR_CASE))
 }
 
 fn result_map(
@@ -114,14 +119,14 @@ fn result_map(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Result.map expects 1 argument"));
     };
-    let (case_name, first_field) = result_case(&receiver);
-    if case_name == "Ok" {
+    let (case_id, first_field) = result_case(&receiver);
+    if case_id == OK_CASE {
         let mapped = interpreter.invoke_value(
             callback.clone(),
             vec![first_field.expect("Result.Ok payload")],
             span,
         )?;
-        Ok(Value::result_ok(mapped))
+        Ok(interpreter.result_ok(mapped))
     } else {
         Ok(receiver)
     }
@@ -133,8 +138,8 @@ fn result_expect(
     _args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let (case_name, first_field) = result_case(&receiver);
-    if case_name == "Ok" {
+    let (case_id, first_field) = result_case(&receiver);
+    if case_id == OK_CASE {
         Ok(first_field.expect("Result.Ok payload"))
     } else {
         Err(interpreter.runtime_error(span, "Result has no success value"))
@@ -147,8 +152,8 @@ fn result_get_error(
     _args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let (case_name, first_field) = result_case(&receiver);
-    if case_name == "Err" {
+    let (case_id, first_field) = result_case(&receiver);
+    if case_id == ERR_CASE {
         Ok(first_field.expect("Result.Err payload"))
     } else {
         Err(interpreter.runtime_error(span, "Result has no error value"))
@@ -164,8 +169,8 @@ fn result_get_or(
     if args.len() != 1 {
         return Err(interpreter.runtime_error(span, "Result.getOr expects 1 argument"));
     }
-    let (case_name, first_field) = result_case(&receiver);
-    if case_name == "Ok" {
+    let (case_id, first_field) = result_case(&receiver);
+    if case_id == OK_CASE {
         Ok(first_field.expect("Result.Ok payload"))
     } else {
         Ok(args[0].clone())

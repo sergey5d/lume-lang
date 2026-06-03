@@ -1,12 +1,12 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
+    Diagnostic, Span,
     ast::TypeKind,
     interpreter::{
-        iterable_map_entries, iterable_values, map_put_entry, values_equal, Interpreter, Value,
+        Interpreter, Value, iterable_map_entries, iterable_values, map_put_entry, values_equal,
     },
     ir,
-    Diagnostic, Span,
 };
 
 use crate::runtime::{
@@ -22,13 +22,23 @@ pub(super) fn define() -> RuntimeType {
         fields: Vec::new(),
         methods: vec![
             m(0, "++", vec![ir::Type::Unknown], map_concat),
-            m(1, "put", vec![ir::Type::Unknown, ir::Type::Unknown], map_put),
+            m(
+                1,
+                "put",
+                vec![ir::Type::Unknown, ir::Type::Unknown],
+                map_put,
+            ),
             m(2, "iterator", Vec::new(), map_iterator),
             m(3, "map", vec![function_unknown()], map_map),
             m(4, "mapValues", vec![function_unknown()], map_map_values),
             m(5, "flatMap", vec![function_unknown()], map_flat_map),
             m(6, "filter", vec![function_unknown()], map_filter),
-            m(7, "fold", vec![ir::Type::Unknown, function_unknown()], map_fold),
+            m(
+                7,
+                "fold",
+                vec![ir::Type::Unknown, function_unknown()],
+                map_fold,
+            ),
             m(8, "reduce", vec![function_unknown()], map_reduce),
             m(9, "exists", vec![function_unknown()], map_exists),
             m(10, "forAll", vec![function_unknown()], map_for_all),
@@ -234,7 +244,7 @@ fn map_reduce(
         .split_first()
         .map(|(first, rest)| ((first.0.clone(), first.1.clone()), rest))
     else {
-        return Ok(Value::option_none());
+        return Ok(interpreter.option_none());
     };
     for (right_key, right_value) in rest {
         let reduced = interpreter.invoke_value(
@@ -248,8 +258,9 @@ fn map_reduce(
             span,
         )?;
         let Value::Tuple(items) = reduced else {
-            return Err(interpreter
-                .runtime_error(span, "Map.reduce callback must return a pair tuple"));
+            return Err(
+                interpreter.runtime_error(span, "Map.reduce callback must return a pair tuple")
+            );
         };
         if items.len() != 2 {
             return Err(
@@ -259,7 +270,7 @@ fn map_reduce(
         left_key = items[0].clone();
         left_value = items[1].clone();
     }
-    Ok(Value::option_some(Value::Tuple(vec![left_key, left_value])))
+    Ok(interpreter.option_some(Value::Tuple(vec![left_key, left_value])))
 }
 
 fn map_exists(
@@ -334,7 +345,10 @@ fn map_get(
         .iter()
         .find(|(key, _)| values_equal(key, needle))
         .map(|(_, value)| value.clone());
-    Ok(found.map_or_else(Value::option_none, Value::option_some))
+    Ok(match found {
+        Some(value) => interpreter.option_some(value),
+        None => interpreter.option_none(),
+    })
 }
 
 fn map_contains(
