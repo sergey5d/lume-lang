@@ -19,6 +19,7 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(1, "split", vec![crate::ir::Type::Str], str_split),
         ],
         enum_cases: Vec::new(),
+        unwrap: None,
         with_bounds: Vec::new(),
     }
 }

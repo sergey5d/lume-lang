@@ -39,6 +39,7 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(13, "size", Vec::new(), set_size),
         ],
         enum_cases: Vec::new(),
+        unwrap: None,
         with_bounds: Vec::new(),
     }
 }

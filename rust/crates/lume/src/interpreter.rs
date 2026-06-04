@@ -2425,27 +2425,35 @@ impl<'a> Interpreter<'a> {
         let Some((type_id, case_id, _)) = value.variant_case_ids_and_fields() else {
             return false;
         };
-        match self.runtime.type_by_id(type_id).map(|ty| ty.name.as_str()) {
-            Some("Option") => case_id == runtime::RuntimeEnumCaseId(1),
-            Some("Result") => case_id == runtime::RuntimeEnumCaseId(0),
-            Some("Either") => case_id == runtime::RuntimeEnumCaseId(1),
-            _ => false,
-        }
+        self.runtime
+            .type_by_id(type_id)
+            .and_then(|ty| ty.unwrap)
+            .is_some_and(|spec| case_id == spec.success_case)
     }
 
     fn unwrappable_value(&self, value: &Value, span: Option<Span>) -> Result<Value, Diagnostic> {
-        match value {
-            Value::Aggregate(aggregate) if self.unwrappable_present(value) => aggregate
-                .borrow()
-                .fields
-                .first()
-                .cloned()
-                .ok_or_else(|| self.runtime_error(span, "unwrappable value has no payload")),
-            _ => Err(self.runtime_error(
+        let Some((type_id, case_id, fields)) = value.variant_case_ids_and_fields() else {
+            return Err(self.runtime_error(
                 span,
                 "attempted to unwrap a value without a success payload",
-            )),
+            ));
+        };
+        let Some(spec) = self.runtime.type_by_id(type_id).and_then(|ty| ty.unwrap) else {
+            return Err(self.runtime_error(
+                span,
+                "attempted to unwrap a value without a success payload",
+            ));
+        };
+        if case_id != spec.success_case {
+            return Err(self.runtime_error(
+                span,
+                "attempted to unwrap a value without a success payload",
+            ));
         }
+        fields
+            .get(spec.payload_field.0)
+            .cloned()
+            .ok_or_else(|| self.runtime_error(span, "unwrappable value has no payload"))
     }
 
     pub(crate) fn invoke_method(
