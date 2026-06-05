@@ -8,7 +8,6 @@ use crate::{
 use super::builtin_method;
 use crate::runtime::{
     RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeType, RuntimeTypeId,
-    RuntimeUnwrap,
 };
 
 pub(super) fn define() -> RuntimeType {
@@ -34,6 +33,8 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(4, "getOr", vec![ir::Type::Unknown], option_get_or),
             builtin_method(5, "getOrElse", vec![ir::Type::Unknown], option_get_or_else),
             builtin_method(6, "iterator", Vec::new(), option_iterator),
+            builtin_method(7, "isSuccess", Vec::new(), option_is_set),
+            builtin_method(8, "unwrap", Vec::new(), option_expect),
         ],
         enum_cases: vec![
             RuntimeEnumCase {
@@ -53,10 +54,6 @@ pub(super) fn define() -> RuntimeType {
                 }],
             },
         ],
-        unwrap: Some(RuntimeUnwrap {
-            success_case: SOME_CASE,
-            payload_field: RuntimeFieldSlot(0),
-        }),
         with_bounds: Vec::new(),
     }
 }

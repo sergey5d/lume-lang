@@ -54,7 +54,6 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(28, "iterator", Vec::new(), list_iterator),
         ],
         enum_cases: Vec::new(),
-        unwrap: None,
         with_bounds: Vec::new(),
     }
 }

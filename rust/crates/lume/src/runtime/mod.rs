@@ -11,7 +11,7 @@ mod types;
 
 pub use types::{
     RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeMethod,
-    RuntimeMethodSlot, RuntimeProgram, RuntimeType, RuntimeTypeId, RuntimeUnwrap,
+    RuntimeMethodSlot, RuntimeProgram, RuntimeType, RuntimeTypeId,
 };
 
 pub(crate) use types::RuntimeMethodTarget;

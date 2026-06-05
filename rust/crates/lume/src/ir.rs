@@ -477,8 +477,6 @@ pub enum Intrinsic {
     IterHasNext,
     IterNext,
     ListAppend,
-    UnwrapPresent,
-    UnwrapValue,
     VariantIs(String),
     VariantField(String),
 }

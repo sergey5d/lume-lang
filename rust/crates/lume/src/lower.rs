@@ -1454,8 +1454,11 @@ impl<'a> FunctionLowerer<'a> {
 
         let present = self.emit_temp_from_rvalue(
             ir::RValue::Call {
-                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapPresent),
-                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+                callee: ir::Callee::Method {
+                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
+                    method: "isSuccess".to_string(),
+                },
+                args: Vec::new(),
             },
             ir::Type::Bool,
             Some(stmt.span),
@@ -1472,8 +1475,11 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = Some(then_block);
         let inner = self.emit_temp_from_rvalue(
             ir::RValue::Call {
-                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapValue),
-                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+                callee: ir::Callee::Method {
+                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
+                    method: "unwrap".to_string(),
+                },
+                args: Vec::new(),
             },
             ir::Type::Unknown,
             Some(stmt.span),
@@ -1870,8 +1876,11 @@ impl<'a> FunctionLowerer<'a> {
 
         let present = self.emit_temp_from_rvalue(
             ir::RValue::Call {
-                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapPresent),
-                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+                callee: ir::Callee::Method {
+                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
+                    method: "isSuccess".to_string(),
+                },
+                args: Vec::new(),
             },
             ir::Type::Bool,
             Some(stmt.span),
@@ -1888,8 +1897,11 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = Some(success_block);
         let inner = self.emit_temp_from_rvalue(
             ir::RValue::Call {
-                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapValue),
-                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+                callee: ir::Callee::Method {
+                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
+                    method: "unwrap".to_string(),
+                },
+                args: Vec::new(),
             },
             ir::Type::Unknown,
             Some(stmt.span),
@@ -2602,8 +2614,11 @@ impl<'a> FunctionLowerer<'a> {
 
         let present = self.emit_temp_from_rvalue(
             ir::RValue::Call {
-                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapPresent),
-                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+                callee: ir::Callee::Method {
+                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
+                    method: "isSuccess".to_string(),
+                },
+                args: Vec::new(),
             },
             ir::Type::Bool,
             Some(span),
@@ -2620,8 +2635,11 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = Some(success_block);
         let inner = self.emit_temp_from_rvalue(
             ir::RValue::Call {
-                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapValue),
-                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+                callee: ir::Callee::Method {
+                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
+                    method: "unwrap".to_string(),
+                },
+                args: Vec::new(),
             },
             ir::Type::Unknown,
             Some(span),
@@ -4242,17 +4260,16 @@ mod tests {
                 .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. }))
         );
         assert!(main.blocks.iter().any(|block| {
-            block.statements.iter().any(|stmt| {
-                matches!(
-                    stmt.kind,
-                    ir::StatementKind::Assign {
-                        value: ir::RValue::Call {
-                            callee: ir::Callee::Intrinsic(ir::Intrinsic::UnwrapPresent),
+            block.statements.iter().any(|stmt| match &stmt.kind {
+                ir::StatementKind::Assign {
+                    value:
+                        ir::RValue::Call {
+                            callee: ir::Callee::Method { method, .. },
                             ..
                         },
-                        ..
-                    }
-                )
+                    ..
+                } => method == "isSuccess",
+                _ => false,
             })
         }));
         assert!(main.blocks.iter().any(|block| {

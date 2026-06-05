@@ -69,14 +69,6 @@ pub struct RuntimeEnumCase {
     pub fields: Vec<RuntimeField>,
 }
 
-/// Runtime metadata for container-like values that can be unwrapped by control
-/// flow syntax such as `try` and `let ... else`.
-#[derive(Debug, Clone, Copy)]
-pub struct RuntimeUnwrap {
-    pub success_case: RuntimeEnumCaseId,
-    pub payload_field: RuntimeFieldSlot,
-}
-
 /// Runtime type metadata used by the interpreter hot path.
 #[derive(Debug, Clone)]
 pub struct RuntimeType {
@@ -87,7 +79,6 @@ pub struct RuntimeType {
     pub fields: Vec<RuntimeField>,
     pub methods: Vec<RuntimeMethod>,
     pub enum_cases: Vec<RuntimeEnumCase>,
-    pub unwrap: Option<RuntimeUnwrap>,
     pub with_bounds: Vec<RuntimeTypeId>,
 }
 
@@ -183,7 +174,6 @@ impl RuntimeProgram {
             fields: Self::build_fields(&ir_ty.fields),
             methods: Self::build_methods(program, &ir_ty.methods),
             enum_cases: Self::build_enum_cases(&ir_ty.enum_cases),
-            unwrap: None,
             with_bounds: Vec::new(),
         }
     }

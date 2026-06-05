@@ -2265,18 +2265,6 @@ impl<'a> Interpreter<'a> {
                 }
                 self.list_append(args[0].clone(), args[1].clone(), span)
             }
-            ir::Intrinsic::UnwrapPresent => {
-                if args.len() != 1 {
-                    return Err(self.runtime_error(span, "UnwrapPresent expects 1 argument"));
-                }
-                Ok(Value::Bool(self.unwrappable_present(&args[0])))
-            }
-            ir::Intrinsic::UnwrapValue => {
-                if args.len() != 1 {
-                    return Err(self.runtime_error(span, "UnwrapValue expects 1 argument"));
-                }
-                self.unwrappable_value(&args[0], span)
-            }
             ir::Intrinsic::VariantIs(case_name) => {
                 if args.len() != 1 {
                     return Err(self.runtime_error(span, "VariantIs expects 1 argument"));
@@ -2419,41 +2407,6 @@ impl<'a> Interpreter<'a> {
             }
             _ => Err(self.runtime_error(span, "ListAppend expects a List receiver")),
         }
-    }
-
-    fn unwrappable_present(&self, value: &Value) -> bool {
-        let Some((type_id, case_id, _)) = value.variant_case_ids_and_fields() else {
-            return false;
-        };
-        self.runtime
-            .type_by_id(type_id)
-            .and_then(|ty| ty.unwrap)
-            .is_some_and(|spec| case_id == spec.success_case)
-    }
-
-    fn unwrappable_value(&self, value: &Value, span: Option<Span>) -> Result<Value, Diagnostic> {
-        let Some((type_id, case_id, fields)) = value.variant_case_ids_and_fields() else {
-            return Err(self.runtime_error(
-                span,
-                "attempted to unwrap a value without a success payload",
-            ));
-        };
-        let Some(spec) = self.runtime.type_by_id(type_id).and_then(|ty| ty.unwrap) else {
-            return Err(self.runtime_error(
-                span,
-                "attempted to unwrap a value without a success payload",
-            ));
-        };
-        if case_id != spec.success_case {
-            return Err(self.runtime_error(
-                span,
-                "attempted to unwrap a value without a success payload",
-            ));
-        }
-        fields
-            .get(spec.payload_field.0)
-            .cloned()
-            .ok_or_else(|| self.runtime_error(span, "unwrappable value has no payload"))
     }
 
     pub(crate) fn invoke_method(
