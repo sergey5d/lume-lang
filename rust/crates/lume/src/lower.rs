@@ -4231,12 +4231,12 @@ mod tests {
     }
 
     #[test]
-    fn lowers_match_unwrap_and_for_forms() {
+    fn lowers_match_try_and_for_forms() {
         let program = parse_inline(
             r#"
             def main() Int {
                 total Int = 0
-                unwrap item <- Some(3)
+                item = try Some(3)
                 total = match item {
                     case 1 => 10
                     case _ => 20

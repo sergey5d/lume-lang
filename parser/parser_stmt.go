@@ -461,11 +461,7 @@ func (p *Parser) parseUnwrapStmt() (Statement, error) {
 			Span:     mergeSpans(tokenSpan(start), fallback.Span),
 		}, nil
 	}
-	return &UnwrapStmt{
-		Bindings: bindings,
-		Value:    value,
-		Span:     mergeSpans(tokenSpan(start), exprSpan(value)),
-	}, nil
+	return nil, fmt.Errorf("bare 'unwrap x <- y' syntax was removed; use 'value = try source' for propagation or add 'else' for an explicit fallback")
 }
 
 func (p *Parser) isUnwrapStmtStart() bool {
@@ -524,8 +520,7 @@ func (p *Parser) parseUnwrapBlockStmt(start Token) (Statement, error) {
 		span = mergeSpans(span, mergeSpans(tokenSpan(open), tokenSpan(close)))
 		return &GuardBlockStmt{Clauses: clauses, Fallback: fallback, Span: span}, nil
 	}
-	span := mergeSpans(tokenSpan(start), mergeSpans(tokenSpan(open), tokenSpan(close)))
-	return &UnwrapBlockStmt{Clauses: clauses, Span: span}, nil
+	return nil, fmt.Errorf("bare 'unwrap { ... }' syntax was removed; add 'else' or use 'let { PATTERN = value ... } else { ... }'")
 }
 
 func (p *Parser) parseBindingsWithStart(start Token, firstIsName bool) ([]Binding, error) {

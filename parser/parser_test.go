@@ -2740,7 +2740,7 @@ def run(left Option[Int], right Option[Int]) Int {
 	}
 }
 
-func TestParseUnwrapStmt(t *testing.T) {
+func TestParseBareUnwrapStmtRemoved(t *testing.T) {
 	src := `
 def run(value Result[Int, Str]) Result[Int, Str] {
 	unwrap item <- value
@@ -2748,21 +2748,10 @@ def run(value Result[Int, Str]) Result[Int, Str] {
 }
 `
 
-	program, err := Parse(src)
-	if err != nil {
-		t.Fatalf("Parse returned error: %v", err)
-	}
-
-	fn := program.Functions[0]
-	stmt, ok := fn.Body.Statements[0].(*UnwrapStmt)
-	if !ok {
-		t.Fatalf("expected first statement to be unwrap, got %T", fn.Body.Statements[0])
-	}
-	if len(stmt.Bindings) != 1 || stmt.Bindings[0].Name != "item" {
-		t.Fatalf("unexpected bindings %#v", stmt.Bindings)
-	}
-	if _, ok := stmt.Value.(*Identifier); !ok {
-		t.Fatalf("expected identifier unwrap source, got %T", stmt.Value)
+	if _, err := Parse(src); err == nil {
+		t.Fatalf("expected parse error for removed bare unwrap syntax")
+	} else if !strings.Contains(err.Error(), "removed") {
+		t.Fatalf("expected removed-syntax error, got %v", err)
 	}
 }
 
@@ -2817,7 +2806,7 @@ def run(b Option[Int], d Option[Int]) Result[Int, Str] {
 	}
 }
 
-func TestParseUnwrapBlockStmt(t *testing.T) {
+func TestParseBareUnwrapBlockRemoved(t *testing.T) {
 	src := `
 def run(b Option[Int], d Option[Int]) Option[Int] {
 	unwrap {
@@ -2828,18 +2817,10 @@ def run(b Option[Int], d Option[Int]) Option[Int] {
 }
 `
 
-	program, err := Parse(src)
-	if err != nil {
-		t.Fatalf("Parse returned error: %v", err)
-	}
-
-	fn := program.Functions[0]
-	stmt, ok := fn.Body.Statements[0].(*UnwrapBlockStmt)
-	if !ok {
-		t.Fatalf("expected first statement to be unwrap block, got %T", fn.Body.Statements[0])
-	}
-	if len(stmt.Clauses) != 2 {
-		t.Fatalf("expected 2 unwrap clauses, got %d", len(stmt.Clauses))
+	if _, err := Parse(src); err == nil {
+		t.Fatalf("expected parse error for removed bare unwrap block syntax")
+	} else if !strings.Contains(err.Error(), "removed") {
+		t.Fatalf("expected removed-syntax error, got %v", err)
 	}
 }
 

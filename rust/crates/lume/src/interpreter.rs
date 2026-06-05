@@ -4088,7 +4088,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_match_for_yield_and_unwrap() {
+    fn runs_match_for_yield_and_try() {
         let program = lower_inline(
             r#"
             def main() Int {
@@ -4096,7 +4096,7 @@ mod tests {
                     item + 1
                 }
 
-                unwrap count <- Some(items.size())
+                count = try Some(items.size())
 
                 total Int = 0
                 for item <- items {

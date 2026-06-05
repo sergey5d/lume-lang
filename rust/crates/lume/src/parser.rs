@@ -1300,11 +1300,14 @@ impl<'a> Parser<'a> {
             return None;
         }
         let value = self.parse_expr()?;
-        let else_block = if self.match_keyword(Keyword::Else) {
-            Some(self.parse_block_or_inline_stmt_body("unwrap else")?)
-        } else {
-            None
-        };
+        if !self.match_keyword(Keyword::Else) {
+            self.error_at_current(
+                "unsupported_syntax",
+                "bare 'unwrap x <- y' syntax was removed; use 'value = try source' for propagation or add 'else' for an explicit fallback",
+            );
+            return None;
+        }
+        let else_block = Some(self.parse_block_or_inline_stmt_body("unwrap else")?);
         let end = else_block
             .as_ref()
             .map(|block| block.span)
@@ -1345,11 +1348,14 @@ impl<'a> Parser<'a> {
             self.skip_newlines();
         }
         let close = self.consume(TokenKind::RBrace, "expected '}' after unwrap block")?;
-        let else_block = if self.match_keyword(Keyword::Else) {
-            Some(self.parse_block_or_inline_stmt_body("unwrap else")?)
-        } else {
-            None
-        };
+        if !self.match_keyword(Keyword::Else) {
+            self.error_at_current(
+                "unsupported_syntax",
+                "bare 'unwrap { ... }' syntax was removed; add 'else' or use 'let { PATTERN = value ... } else { ... }'",
+            );
+            return None;
+        }
+        let else_block = Some(self.parse_block_or_inline_stmt_body("unwrap else")?);
         let end = else_block.as_ref().map(|block| block.span).unwrap_or(close);
         Some(UnwrapBlockStmt {
             clauses,

@@ -2762,26 +2762,26 @@ def run(value Option[(Int, Str, Bool)]) Str {
 	}
 }
 
-func TestAnalyzeUnwrapStmtOptionResultEither(t *testing.T) {
+func TestAnalyzeTryExprOptionResultEither(t *testing.T) {
 	src := `
 def plusOneOption(value Option[Int]) Option[Int] {
-	unwrap item <- value
+	item = try value
 	return Some(item + 1)
 }
 
 def plusOneResult(value Result[Int, Str]) Result[Int, Str] {
-	unwrap item <- value
+	item = try value
 	return Ok(item + 1)
 }
 
 def plusOneEither(value Either[Str, Int]) Either[Str, Int] {
-	unwrap item <- value
+	item = try value
 	return Right(item + 1)
 }
 
 def twoEithers(value Either[Str, Int], value2 Either[Str, Str]) Either[Str, Int] {
-	unwrap item <- value
-	unwrap size <- value2.map((s Str) -> s.size())
+	item = try value
+	size = try value2.map((s Str) -> s.size())
 	return Right(item + size)
 }
 `
@@ -2792,10 +2792,10 @@ def twoEithers(value Either[Str, Int], value2 Either[Str, Str]) Either[Str, Int]
 	}
 }
 
-func TestAnalyzeUnwrapStmtRejectsIncompatibleReturn(t *testing.T) {
+func TestAnalyzeTryExprRejectsIncompatibleReturn(t *testing.T) {
 	src := `
 def run(value Result[Int, Str]) Option[Int] {
-	unwrap item <- value
+	item = try value
 	return Some(item)
 }
 `
@@ -2804,7 +2804,7 @@ def run(value Result[Int, Str]) Option[Int] {
 	if len(result.Diagnostics) == 0 {
 		t.Fatalf("expected diagnostics, got none")
 	}
-	if result.Diagnostics[0].Code != "invalid_unwrap" {
+	if result.Diagnostics[0].Code != "invalid_try" {
 		t.Fatalf("unexpected diagnostic %#v", result.Diagnostics[0])
 	}
 }
@@ -2863,12 +2863,14 @@ def run(left Option[Int], right Option[Int]) Result[Int, Str] {
 	}
 }
 
-func TestAnalyzeUnwrapBlockStmt(t *testing.T) {
+func TestAnalyzeLetElseBlockStmt(t *testing.T) {
 	src := `
 def run(left Option[Int], right Option[Int]) Option[Int] {
-	unwrap {
-		a <- left
-		b <- right
+	let {
+		Some(a) = left
+		Some(b) = right
+	} else {
+		None()
 	}
 	return Some(a + b)
 }
@@ -3057,10 +3059,10 @@ def run() Bool {
 	}
 }
 
-func TestAnalyzeUnwrapStmtRejectsNonUnwrappable(t *testing.T) {
+func TestAnalyzeTryExprRejectsNonUnwrappable(t *testing.T) {
 	src := `
 def run(value Int) Option[Int] {
-	unwrap item <- value
+	item = try value
 	return Some(item)
 }
 `
@@ -3069,7 +3071,7 @@ def run(value Int) Option[Int] {
 	if len(result.Diagnostics) == 0 {
 		t.Fatalf("expected diagnostics, got none")
 	}
-	if result.Diagnostics[0].Code != "invalid_unwrap" {
+	if result.Diagnostics[0].Code != "invalid_try" {
 		t.Fatalf("unexpected diagnostic %#v", result.Diagnostics[0])
 	}
 }

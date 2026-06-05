@@ -2337,26 +2337,26 @@ def run() Str {
 	}
 }
 
-func TestUnwrapStmtOptionResultEither(t *testing.T) {
+func TestTryExprOptionResultEither(t *testing.T) {
 	src := `
 def plusOneOption(value Option[Int]) Option[Int] {
-	unwrap item <- value
+	item = try value
 	return Some(item + 1)
 }
 
 def plusOneResult(value Result[Int, Str]) Result[Int, Str] {
-	unwrap item <- value
+	item = try value
 	return Ok(item + 1)
 }
 
 def plusOneEither(value Either[Str, Int]) Either[Str, Int] {
-	unwrap item <- value
+	item = try value
 	return Right(item + 1)
 }
 
 def twoEithers(value Either[Str, Int], value2 Either[Str, Str]) Either[Str, Int] {
-	unwrap item <- value
-	unwrap size <- value2.map((s Str) -> s.size())
+	item = try value
+	size = try value2.map((s Str) -> s.size())
 	return Right(item + size)
 }
 
@@ -2464,20 +2464,24 @@ def run() Str {
 	}
 }
 
-func TestUnwrapBlockStmt(t *testing.T) {
+func TestLetElseBlockStmt(t *testing.T) {
 	src := `
 def runSome(left Option[Int], right Option[Int]) Option[Int] {
-	unwrap {
-		a <- left
-		b <- right
+	let {
+		Some(a) = left
+		Some(b) = right
+	} else {
+		None()
 	}
 	return Some(a + b)
 }
 
 def runNone(left Option[Int], right Option[Int]) Option[Int] {
-	unwrap {
-		a <- left
-		b <- right
+	let {
+		Some(a) = left
+		Some(b) = right
+	} else {
+		None()
 	}
 	return Some(a + b)
 }

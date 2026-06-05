@@ -5,7 +5,7 @@
 # plusOneMissing true
 
 def plusOne(entries Map[Str, Int], key Str) Option[Int] {
-    unwrap value <- entries[key]
+    value = try entries[key]
     Some(value + 1)
 }
 

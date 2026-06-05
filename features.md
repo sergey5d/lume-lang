@@ -95,10 +95,10 @@ Still open:
 
 ### 9. Result / Either Style Error Values
 
-`Option`, `Result`, `Either`, and `unwrap`-based short-circuit extraction now exist.
+`Option`, `Result`, `Either`, and `try`-based short-circuit propagation now exist.
 
 Still open:
-- whether unwrap-style propagation should stay hardcoded to these builtins or later grow a broader protocol
+- whether `try`-style propagation should stay hardcoded to these builtins or later grow a broader protocol
 
 One possible follow-up is a Rust-style propagation form that:
 - extracts the success value from `Ok`
