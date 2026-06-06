@@ -2,7 +2,9 @@
 
 ## Goal
 
-Split [rust/crates/lume/src/parser.rs](/Users/sergeyd/Projects/a-lang/rust/crates/lume/src/parser.rs) into smaller, focused modules without changing parser behavior or the public parsing entry points.
+Split the former `rust/crates/lume/src/parser.rs` into the current [rust/crates/lume/src/parser/](/Users/sergeyd/Projects/a-lang/rust/crates/lume/src/parser) module tree without changing parser behavior or the public parsing entry points.
+
+Status: complete.
 
 The current file is a good fit for a mechanical split because it already has strong internal regions:
 
@@ -250,7 +252,6 @@ String literal and interpolation helpers.
 Move:
 
 - `parse_string_expr`
-- `starts_lower`
 - `is_multiline_string`
 - `string_has_interpolation`
 - `decode_string_contents`
@@ -258,6 +259,10 @@ Move:
 - `parse_interpolated_string_parts`
 - `find_interpolated_expr_end`
 - `parse_embedded_expr`
+
+Note:
+
+- `starts_lower` ended up living in `items.rs`, because it is only used by import-segment parsing.
 
 ### `parser/tests.rs`
 
@@ -353,9 +358,9 @@ That gives:
 
 ### 2. Keep helper visibility private
 
-Do not make parser internals `pub` just to satisfy module boundaries.
+Keep parser internals scoped to the `parser` module tree.
 
-Because the modules are siblings under `parser`, inherent methods remain available through `self`.
+In practice, sibling module extraction requires `pub(super)` on moved helper methods so they remain callable across `items.rs` / `stmt.rs` / `expr.rs` / `types.rs` / `pattern.rs`, without exposing them outside `parser`.
 
 ### 3. Prefer moving complete clusters
 
@@ -430,14 +435,14 @@ Mitigation:
 
 The migration is done when:
 
-- [ ] `parser.rs` becomes `parser/mod.rs`
-- [ ] the parser compiles as a directory module
-- [ ] all current parser tests pass
-- [ ] Rust crate tests pass:
+- [x] `parser.rs` becomes `parser/mod.rs`
+- [x] the parser compiles as a directory module
+- [x] all current parser tests pass
+- [x] Rust crate tests pass:
   - `cargo test --manifest-path rust/Cargo.toml -p lume`
-- [ ] example parity still passes:
+- [x] example parity still passes:
   - `./run_samples.sh rust`
-- [ ] there are no behavior or diagnostic regressions beyond intentional file/module moves
+- [x] there are no behavior or diagnostic regressions beyond intentional file/module moves
 
 ## Suggested First PR
 
@@ -464,6 +469,10 @@ This gives immediate structure without touching the most fragile grammar code fi
 2. extract `stmt.rs`
 3. extract `expr.rs`
 4. do final cleanup of imports and module ordering
+
+Result:
+
+- completed
 
 ## Optional Follow-Up Cleanup
 
