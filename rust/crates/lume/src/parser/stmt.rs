@@ -1,0 +1,653 @@
+use super::*;
+
+impl<'a> Parser<'a> {
+    pub(super) fn parse_block(&mut self) -> Option<Block> {
+        let start = self.consume(TokenKind::LBrace, "expected '{'")?;
+        self.skip_newlines();
+        let mut statements = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            if let Some(stmt) = self.parse_stmt() {
+                statements.push(stmt);
+            } else {
+                self.synchronize_stmt();
+            }
+            self.skip_newlines();
+        }
+        let end = self.consume(TokenKind::RBrace, "expected '}' after block")?;
+        Some(Block {
+            statements,
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_stmt(&mut self) -> Option<Stmt> {
+        self.skip_newlines();
+        match self.current_kind() {
+            TokenKind::Keyword(Keyword::Def) => {
+                let function = self.parse_function_decl(Vec::new(), Visibility::Default)?;
+                Some(Stmt::LocalFunction(function))
+            }
+            TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt(false).map(Stmt::Match),
+            TokenKind::Keyword(Keyword::Partial) => self.parse_match_stmt(true).map(Stmt::Match),
+            TokenKind::Keyword(Keyword::Unwrap) => self.parse_unwrap_stmt(),
+            TokenKind::Keyword(Keyword::Let) => self.parse_let_stmt(),
+            TokenKind::Keyword(Keyword::Var) => {
+                let stmt = self.parse_binding_stmt_after_var()?;
+                Some(Stmt::Binding(stmt))
+            }
+            TokenKind::Keyword(Keyword::If) => self.parse_if_stmt().map(Stmt::If),
+            TokenKind::Keyword(Keyword::While) => self.parse_while_stmt().map(Stmt::While),
+            TokenKind::Keyword(Keyword::For) => {
+                if self.is_for_yield_start() {
+                    let expr = self.parse_expr()?;
+                    let span = expr.span();
+                    Some(Stmt::Expr(ExprStmt { expr, span }))
+                } else {
+                    self.parse_for_stmt().map(Stmt::For)
+                }
+            }
+            TokenKind::Keyword(Keyword::Return) => self.parse_return_stmt().map(Stmt::Return),
+            TokenKind::Keyword(Keyword::Break) => self.parse_break_stmt().map(Stmt::Break),
+            _ => {
+                if let Some(binding) = self.try_parse_binding_stmt() {
+                    return Some(Stmt::Binding(binding));
+                }
+                if let Some(assignment) = self.try_parse_assignment_stmt() {
+                    return Some(Stmt::Assignment(assignment));
+                }
+                let expr = self.parse_expr()?;
+                let span = expr.span();
+                Some(Stmt::Expr(ExprStmt { expr, span }))
+            }
+        }
+    }
+
+    pub(super) fn parse_binding_stmt_after_var(&mut self) -> Option<BindingStmt> {
+        let start = self.consume_keyword(Keyword::Var, "expected 'var'")?;
+        let bindings = self.parse_binding_list(true)?;
+        self.consume(TokenKind::Eq, "expected '=' after bindings")?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"=\"",
+            );
+            return None;
+        }
+        let values = self.parse_expr_list()?;
+        if bindings.len() > 1 && values.len() == 1 {
+            self.error_at_current(
+                "unexpected_token",
+                "destructuring bindings require 'let (...) = value'",
+            );
+            return None;
+        }
+        let end = values.last().map(Expr::span).unwrap_or(start);
+        Some(BindingStmt {
+            visibility: Visibility::Default,
+            bindings,
+            values,
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_let_stmt(&mut self) -> Option<Stmt> {
+        let start = self.consume_keyword(Keyword::Let, "expected 'let'")?;
+
+        if self.at(TokenKind::LBrace) {
+            let (clauses, clauses_end) = self.parse_refutable_clause_block("let")?;
+            self.consume_keyword(Keyword::Else, "expected 'else' after let clause block")?;
+            let else_block = self.parse_block_or_inline_stmt_body("let else")?;
+            let end = else_block.span;
+            return Some(Stmt::LetElse(LetElseStmt {
+                clauses,
+                pattern: Pattern::Wildcard { span: clauses_end },
+                value: Expr::Unit { span: clauses_end },
+                else_block,
+                span: start.cover(end),
+            }));
+        }
+
+        if self.match_token(TokenKind::LParen) {
+            let bindings = self.parse_binding_list(false)?;
+            self.consume(
+                TokenKind::RParen,
+                "expected ')' after destructuring bindings",
+            )?;
+            self.consume(TokenKind::Eq, "expected '=' after destructuring bindings")?;
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "expected_expression",
+                    "expected expression on same line after \"=\"",
+                );
+                return None;
+            }
+            let values = self.parse_expr_list()?;
+            if values.len() != 1 {
+                self.error_at_current(
+                    "unexpected_token",
+                    "destructuring bindings require a single initializer expression",
+                );
+                return None;
+            }
+            let end = values.last().map(Expr::span).unwrap_or(start);
+            return Some(Stmt::Binding(BindingStmt {
+                visibility: Visibility::Default,
+                bindings,
+                values,
+                span: start.cover(end),
+            }));
+        }
+
+        let checkpoint = self.checkpoint();
+        if self.is_binding_start()
+            && !(self.at(TokenKind::Identifier)
+                && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::Dot)))
+        {
+            if let Some(bindings) = self.parse_binding_list(false) {
+                if self.match_token(TokenKind::Eq) {
+                    if self.at(TokenKind::Newline) {
+                        self.error_at_current(
+                            "expected_expression",
+                            "expected expression on same line after \"=\"",
+                        );
+                        return None;
+                    }
+                    let values = self.parse_expr_list()?;
+                    if self.match_keyword(Keyword::Else) {
+                        self.error_at_current(
+                            "unexpected_token",
+                            "plain 'let name = value' bindings do not support 'else'; use a refutable pattern like 'let Some(name) = value else { ... }'",
+                        );
+                        return None;
+                    }
+                    if bindings.len() > 1 && values.len() == 1 {
+                        self.error_at_current(
+                            "unexpected_token",
+                            "destructuring bindings require 'let (...) = value'",
+                        );
+                        return None;
+                    }
+                    let end = values.last().map(Expr::span).unwrap_or(start);
+                    return Some(Stmt::Binding(BindingStmt {
+                        visibility: Visibility::Default,
+                        bindings,
+                        values,
+                        span: start.cover(end),
+                    }));
+                }
+            }
+        }
+        self.restore(checkpoint);
+
+        let pattern = self.parse_pattern()?;
+        self.consume(TokenKind::Eq, "expected '=' after let pattern")?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"=\"",
+            );
+            return None;
+        }
+        let value = self.parse_expr()?;
+        self.consume_keyword(Keyword::Else, "expected 'else' after let pattern")?;
+        let else_block = self.parse_block_or_inline_stmt_body("let else")?;
+        let end = else_block.span;
+        Some(Stmt::LetElse(LetElseStmt {
+            clauses: Vec::new(),
+            pattern,
+            value,
+            else_block,
+            span: start.cover(end),
+        }))
+    }
+
+    pub(super) fn try_parse_binding_stmt(&mut self) -> Option<BindingStmt> {
+        if !self.is_binding_start() {
+            return None;
+        }
+        let checkpoint = self.checkpoint();
+        let Some(bindings) = self.parse_binding_list(false) else {
+            self.restore(checkpoint);
+            return None;
+        };
+        if !self.match_token(TokenKind::Eq) {
+            self.restore(checkpoint);
+            return None;
+        }
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"=\"",
+            );
+            return None;
+        }
+        let Some(values) = self.parse_expr_list() else {
+            return None;
+        };
+        if bindings.len() > 1 && values.len() == 1 {
+            self.error_at_current(
+                "unexpected_token",
+                "destructuring bindings require 'let (...) = value'",
+            );
+            return None;
+        }
+        let start = bindings[0].span;
+        let end = values.last().map(Expr::span).unwrap_or(start);
+        Some(BindingStmt {
+            visibility: Visibility::Default,
+            bindings,
+            values,
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_binding(&mut self, mutable: bool) -> Option<Binding> {
+        let (name, start) = self.expect_binding_name("expected binding name")?;
+        let ty = if self.binding_type_starts_on_same_line(start) && self.can_start_type_ref() {
+            Some(self.parse_type_ref()?)
+        } else {
+            None
+        };
+        let span = ty.as_ref().map(TypeRef::span).unwrap_or(start);
+        Some(Binding {
+            name,
+            ty,
+            mutable,
+            deferred: false,
+            span: start.cover(span),
+        })
+    }
+
+    pub(super) fn parse_binding_list(&mut self, mutable: bool) -> Option<Vec<Binding>> {
+        let mut bindings = vec![self.parse_binding(mutable)?];
+        while self.match_token(TokenKind::Comma) {
+            bindings.push(self.parse_binding(mutable)?);
+        }
+        Some(bindings)
+    }
+
+    pub(super) fn is_binding_start(&self) -> bool {
+        self.at(TokenKind::Identifier)
+    }
+
+    pub(super) fn try_parse_assignment_stmt(&mut self) -> Option<AssignmentStmt> {
+        let checkpoint = self.checkpoint();
+        let Some(targets) = self.parse_expr_list() else {
+            self.restore(checkpoint);
+            return None;
+        };
+        let operator =
+            if self.match_token(TokenKind::Eq) || self.match_token(TokenKind::ColonAssign) {
+                AssignOp::Reassign
+            } else if self.match_token(TokenKind::PlusEq) {
+                AssignOp::AddAssign
+            } else if self.match_token(TokenKind::MinusEq) {
+                AssignOp::SubAssign
+            } else if self.match_token(TokenKind::StarEq) {
+                AssignOp::MulAssign
+            } else if self.match_token(TokenKind::SlashEq) {
+                AssignOp::DivAssign
+            } else {
+                self.restore(checkpoint);
+                return None;
+            };
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                format!(
+                    "expected expression on same line after \"{}\"",
+                    self.tokens[self.index.saturating_sub(1)].lexeme
+                ),
+            );
+            return None;
+        }
+        let Some(values) = self.parse_expr_list() else {
+            self.restore(checkpoint);
+            return None;
+        };
+        let start = targets
+            .first()
+            .map(Expr::span)
+            .unwrap_or(self.previous_span());
+        let end = values
+            .last()
+            .map(Expr::span)
+            .unwrap_or(self.previous_span());
+        Some(AssignmentStmt {
+            targets,
+            operator,
+            values,
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_if_stmt(&mut self) -> Option<IfStmt> {
+        let start = self.consume_keyword(Keyword::If, "expected 'if'")?;
+        let (
+            condition,
+            condition_clauses,
+            pattern,
+            pattern_value,
+            pattern_clauses,
+            bindings,
+            binding_value,
+        ) = if self.match_keyword(Keyword::Let) {
+            if self.at(TokenKind::LBrace) {
+                let (clauses, _) = self.parse_refutable_clause_block("if let")?;
+                if self.at(TokenKind::AndAnd) {
+                    let initial = clauses.into_iter().map(IfConditionClause::Let).collect();
+                    let clauses = self.parse_if_condition_clauses(initial)?;
+                    (None, clauses, None, None, Vec::new(), Vec::new(), None)
+                } else {
+                    (None, Vec::new(), None, None, clauses, Vec::new(), None)
+                }
+            } else {
+                let pattern = self.parse_pattern()?;
+                self.consume(TokenKind::Eq, "expected '=' after if pattern")?;
+                if self.at(TokenKind::Newline) {
+                    self.error_at_current(
+                        "expected_expression",
+                        "expected expression on same line after \"=\"",
+                    );
+                    return None;
+                }
+                let value = self.parse_if_condition_expr()?;
+                if self.at(TokenKind::AndAnd) {
+                    let clauses = self.parse_if_condition_clauses(vec![IfConditionClause::Let(
+                        RefutableClause {
+                            span: pattern.span().cover(value.span()),
+                            pattern,
+                            value,
+                        },
+                    )])?;
+                    (None, clauses, None, None, Vec::new(), Vec::new(), None)
+                } else {
+                    (
+                        None,
+                        Vec::new(),
+                        Some(pattern),
+                        Some(value),
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                    )
+                }
+            }
+        } else if self.pattern_followed_by_eq(self.index) {
+            self.error_at_current(
+                "unexpected_token",
+                "pattern matches in 'if' require 'let'; use 'if let Pattern = value { ... }'",
+            );
+            return None;
+        } else {
+            (
+                Some(self.parse_expr_without_trailing_block_call()?),
+                Vec::new(),
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+                None,
+            )
+        };
+        let then_block = self.parse_then_stmt_body_block("if")?;
+        let else_branch = if self.match_keyword(Keyword::Else) {
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "unexpected_token",
+                    "else body must stay on the same line unless it uses '{ ... }'",
+                );
+                return None;
+            }
+            if self.at_keyword(Keyword::If) {
+                Some(ElseBranch::If(Box::new(self.parse_if_stmt()?)))
+            } else {
+                Some(ElseBranch::Block(
+                    self.parse_block_or_inline_stmt_body("else")?,
+                ))
+            }
+        } else {
+            None
+        };
+        let end = else_branch
+            .as_ref()
+            .map(|branch| match branch {
+                ElseBranch::If(if_stmt) => if_stmt.span,
+                ElseBranch::Block(block) => block.span,
+            })
+            .unwrap_or(then_block.span);
+        Some(IfStmt {
+            condition,
+            condition_clauses,
+            pattern,
+            pattern_value,
+            pattern_clauses,
+            bindings,
+            binding_value,
+            then_block,
+            else_branch,
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_while_stmt(&mut self) -> Option<WhileStmt> {
+        let start = self.consume_keyword(Keyword::While, "expected 'while'")?;
+        let condition = self.parse_expr_without_trailing_block_call()?;
+        let body = self.parse_block()?;
+        Some(WhileStmt {
+            condition,
+            body: body.clone(),
+            span: start.cover(body.span),
+        })
+    }
+
+    pub(super) fn parse_for_stmt(&mut self) -> Option<ForStmt> {
+        let start = self.consume_keyword(Keyword::For, "expected 'for'")?;
+        let bindings = self.parse_binding_list(false)?;
+        self.consume(TokenKind::LeftArrow, "expected '<-' in for loop")?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"<-\"",
+            );
+            return None;
+        }
+        let iterable = self.parse_expr_without_trailing_block_call()?;
+        if !self.at(TokenKind::LBrace) {
+            self.error_at_current(
+                "unexpected_token",
+                "for requires a '{ ... }' block body; one-line for forms are not supported",
+            );
+            return None;
+        }
+        let body = self.parse_block()?;
+        Some(ForStmt {
+            bindings: vec![ForBinding {
+                span: bindings
+                    .first()
+                    .map(|binding| binding.span)
+                    .unwrap_or(start)
+                    .cover(iterable.span()),
+                bindings,
+                iterable: Some(iterable),
+                values: Vec::new(),
+            }],
+            body: body.clone(),
+            span: start.cover(body.span),
+        })
+    }
+
+    pub(super) fn parse_unwrap_stmt(&mut self) -> Option<Stmt> {
+        let start = self.consume_keyword(Keyword::Unwrap, "expected 'unwrap'")?;
+        if self.match_token(TokenKind::LBrace) {
+            return self.parse_unwrap_block_stmt(start).map(Stmt::UnwrapBlock);
+        }
+        let bindings = self.parse_binding_list(false)?;
+        self.consume(TokenKind::LeftArrow, "expected '<-' after unwrap bindings")?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"<-\"",
+            );
+            return None;
+        }
+        let value = self.parse_expr()?;
+        if !self.match_keyword(Keyword::Else) {
+            self.error_at_current(
+                "unsupported_syntax",
+                "bare 'unwrap x <- y' syntax was removed; use 'value = try source' for propagation or add 'else' for an explicit fallback",
+            );
+            return None;
+        }
+        let else_block = Some(self.parse_block_or_inline_stmt_body("unwrap else")?);
+        let end = else_block
+            .as_ref()
+            .map(|block| block.span)
+            .unwrap_or_else(|| value.span());
+        Some(Stmt::Unwrap(UnwrapStmt {
+            bindings,
+            value,
+            else_block,
+            span: start.cover(end),
+        }))
+    }
+
+    pub(super) fn parse_unwrap_block_stmt(&mut self, start: Span) -> Option<UnwrapBlockStmt> {
+        self.skip_newlines();
+        let mut clauses = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            let bindings = self.parse_binding_list(false)?;
+            self.consume(TokenKind::LeftArrow, "expected '<-' in unwrap block")?;
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "expected_expression",
+                    "expected expression on same line after \"<-\"",
+                );
+                return None;
+            }
+            let value = self.parse_expr()?;
+            let span = bindings
+                .first()
+                .map(|binding| binding.span)
+                .unwrap_or(value.span())
+                .cover(value.span());
+            clauses.push(UnwrapStmt {
+                bindings,
+                value,
+                else_block: None,
+                span,
+            });
+            self.skip_newlines();
+        }
+        let close = self.consume(TokenKind::RBrace, "expected '}' after unwrap block")?;
+        if !self.match_keyword(Keyword::Else) {
+            self.error_at_current(
+                "unsupported_syntax",
+                "bare 'unwrap { ... }' syntax was removed; add 'else' or use 'let { PATTERN = value ... } else { ... }'",
+            );
+            return None;
+        }
+        let else_block = Some(self.parse_block_or_inline_stmt_body("unwrap else")?);
+        let end = else_block.as_ref().map(|block| block.span).unwrap_or(close);
+        Some(UnwrapBlockStmt {
+            clauses,
+            else_block,
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_match_stmt(&mut self, partial: bool) -> Option<MatchStmt> {
+        let start = if partial {
+            self.consume_keyword(Keyword::Partial, "expected 'partial'")?
+        } else {
+            self.consume_keyword(Keyword::Match, "expected 'match'")?
+        };
+        let value = if self.at(TokenKind::LBrace) {
+            Expr::Placeholder { span: start }
+        } else {
+            self.parse_expr_without_trailing_block_call()?
+        };
+        let (cases, end) = self.parse_match_cases()?;
+        Some(MatchStmt {
+            partial,
+            value,
+            cases,
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_match_cases(&mut self) -> Option<(Vec<MatchCase>, Span)> {
+        if !self.at(TokenKind::LBrace) {
+            self.error_at_current(
+                "unexpected_token",
+                format!(
+                    "expected end of expression, got {}",
+                    self.next_significant_token_string()
+                ),
+            );
+            return None;
+        }
+        self.consume(TokenKind::LBrace, "expected '{' after match value")?;
+        self.skip_newlines();
+        let mut cases = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            if !self.at_keyword(Keyword::Case) {
+                self.error_at_current(
+                    "unexpected_token",
+                    format!(
+                        "expected 'case' before match pattern, got {}",
+                        self.next_significant_token_string()
+                    ),
+                );
+                return None;
+            }
+            self.consume_keyword(Keyword::Case, "expected 'case' before match pattern")?;
+            let pattern = self.parse_pattern()?;
+            let guard = if self.match_keyword(Keyword::If) {
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
+            self.consume(TokenKind::FatArrow, "expected '=>' after match pattern")?;
+            let body = if self.at(TokenKind::LBrace) {
+                MatchCaseBody::Block(self.parse_block()?)
+            } else {
+                MatchCaseBody::Expr(self.parse_expr()?)
+            };
+            let end = match &body {
+                MatchCaseBody::Block(block) => block.span,
+                MatchCaseBody::Expr(expr) => expr.span(),
+            };
+            cases.push(MatchCase {
+                pattern: pattern.clone(),
+                guard,
+                body,
+                span: pattern.span().cover(end),
+            });
+            self.skip_newlines();
+        }
+        let end = self.consume(TokenKind::RBrace, "expected '}' after match cases")?;
+        Some((cases, end))
+    }
+
+    pub(super) fn parse_return_stmt(&mut self) -> Option<ReturnStmt> {
+        let start = self.consume_keyword(Keyword::Return, "expected 'return'")?;
+        if self.at(TokenKind::Newline) || self.at(TokenKind::RBrace) || self.at(TokenKind::Eof) {
+            return Some(ReturnStmt {
+                value: None,
+                span: start,
+            });
+        }
+        let value = self.parse_expr()?;
+        let end = value.span();
+        Some(ReturnStmt {
+            value: Some(value),
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_break_stmt(&mut self) -> Option<BreakStmt> {
+        let span = self.consume_keyword(Keyword::Break, "expected 'break'")?;
+        Some(BreakStmt { span })
+    }
+}
