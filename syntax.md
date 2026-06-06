@@ -661,7 +661,7 @@ Enum cases are data-only:
 - cases may declare payload fields
 - cases may assign shared enum fields
 - cases may not declare methods
-- `impl Enum.Case { ... }` is not supported
+- there is no `impl Enum.Case { ... }` form
 
 Behavior for enums belongs on the enum itself, either inline or in `impl Enum { ... }` blocks, and case-specific behavior should be expressed with `match`.
 

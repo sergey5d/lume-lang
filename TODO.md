@@ -52,18 +52,6 @@ fun { x, y ->
 
   - Main question: whether this reads as a natural extension of the current lambda syntax, or adds too much overlap with block expressions and existing `fun(x -> ...)` / `fun((x, y) -> ...)` call forms.
 
-- Settle anonymous-record conversion rules.
-  - Current intended rules:
-    - class/record -> anonymous record is allowed implicitly
-    - tuple -> anonymous record is not allowed
-    - anonymous record -> class/record should be allowed when generated constructor-calling code can be formed
-      - either a matching constructor exists
-      - or the target class has only public fields, with any private fields already initialized
-  - Open questions:
-    - whether anonymous record -> class/record should be contextual-only based on expected type
-    - whether constructor matching should be exact by field names only, or also allow constructor parameter reordering by name
-    - how much of this should happen purely in typechecking vs lowered/generated code
-
 - Keep tuple conversion separate from anonymous-record conversion.
   - Current intended rule:
     - class/record -> tuple is not implicit

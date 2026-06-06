@@ -15,10 +15,11 @@ This file captures the main language gaps and near-term design directions.
 
 Still missing:
 - generic type-aware type patterns at runtime
-- guards
-- nested patterns
 - unreachable-case detection
-- a final decision on statement-vs-expression totality semantics
+
+Current matching split:
+- `match` is the exhaustive / total form
+- `partial` is the partial form and returns `Option[...]`
 
 ## Important Next Tier
 
@@ -99,11 +100,6 @@ Still open:
 
 Still open:
 - whether `try`-style propagation should stay hardcoded to these builtins or later grow a broader protocol
-
-One possible follow-up is a Rust-style propagation form that:
-- extracts the success value from `Ok`
-- returns early on `Err`
-- possibly allows error conversion through a protocol or conversion rule
 
 Important design constraint:
 - expressing "same container family, different success type" is hard without higher-kinded types
@@ -298,38 +294,7 @@ Open questions:
 
 ### Match Totality / Partial Match Behavior
 
-`match` now exists, but the language still needs a clear rule for what happens when no case matches.
-
-Open options under discussion:
-
-1. Keep exhaustive `match` expressions
-   Shape:
-   - `match value { ... }` returns `T`
-   - missing cases are a compile error
-   Good fit:
-   - safest long-term design
-   - strongest enum / `Option` ergonomics
-   - needs exhaustiveness checking
-
-2. Add `partial` as the partial form
-   Possible shapes:
-   - `match value { ... }` returns `T`
-   - `partial value { ... }` returns `Option[T]`
-   Good fit:
-   - explicit
-   - very compact
-   - keeps plain `match` as the total form
-
-3. Add `partial` as the partial form
-   Possible shapes:
-   - `match value { ... }` returns `T`
-   - `partial value { ... }` returns `Option[T]`
-   Good fit:
-   - explicit
-   - keyword-only
-   - keeps plain `match` as the total form
-
-Current leaning:
+This is now settled:
 - avoid runtime "no match" exceptions as a normal language outcome
 - keep `match` as the exhaustive / total form
 - partial matching now uses `partial`
