@@ -7,8 +7,8 @@ func (p *Parser) parseLambdaIdentifier() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if p.check(TokenIdentifier) && p.simpleTypeRefFollowedBy(TokenArrow) {
-		typeRef, err := p.parseNamedTypeRef()
+	if (p.check(TokenIdentifier) || p.check(TokenLBracket)) && p.simpleTypeRefFollowedBy(TokenArrow) {
+		typeRef, err := p.parsePrimaryTypeRef()
 		if err != nil {
 			return nil, err
 		}
@@ -80,7 +80,7 @@ func (p *Parser) parseBraceLambdaExpr() (Expr, error) {
 		return nil, err
 	}
 	var (
-		params []LambdaParameter
+		params  []LambdaParameter
 		endSpan Span
 	)
 	switch {
@@ -89,8 +89,8 @@ func (p *Parser) parseBraceLambdaExpr() (Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		if p.check(TokenIdentifier) && p.simpleTypeRefFollowedBy(TokenArrow) {
-			typeRef, err := p.parseNamedTypeRef()
+		if (p.check(TokenIdentifier) || p.check(TokenLBracket)) && p.simpleTypeRefFollowedBy(TokenArrow) {
+			typeRef, err := p.parsePrimaryTypeRef()
 			if err != nil {
 				return nil, err
 			}
@@ -148,7 +148,7 @@ func (p *Parser) parseLambdaParams() ([]LambdaParameter, error) {
 				return nil, err
 			}
 			lambdaParam := param
-			if (p.check(TokenIdentifier) || p.check(TokenLParen) || p.check(TokenLBrace)) && (p.typeRefFollowedBy(TokenComma) || p.typeRefFollowedBy(TokenRParen)) {
+			if (p.check(TokenIdentifier) || p.check(TokenLParen) || p.check(TokenLBrace) || p.check(TokenLBracket)) && (p.typeRefFollowedBy(TokenComma) || p.typeRefFollowedBy(TokenRParen)) {
 				typeRef, err := p.parseTypeRef()
 				if err != nil {
 					return nil, err
@@ -176,7 +176,7 @@ func (p *Parser) isLambdaIdentifierStart() bool {
 		return true
 	}
 	if p.check(TokenIdentifier) {
-		return p.checkNext(TokenIdentifier) && p.simpleTypeRefFollowedByAt(p.pos+1, TokenArrow)
+		return (p.checkNext(TokenIdentifier) || p.checkNext(TokenLBracket)) && p.simpleTypeRefFollowedByAt(p.pos+1, TokenArrow)
 	}
 	return false
 }

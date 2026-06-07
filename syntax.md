@@ -20,8 +20,13 @@ Built-in generic/container types:
 - `Array[T]`
 - `Map[K, V]`
 - `Set[T]`
-- `List[T]`
+- `List[T]` or `[T]`
 - `Unit`
+
+List shorthand can be nested, for example:
+
+- `[[Int]]`
+- `[[[(Str, Int)]]]`
 
 Common stdlib/prelude types:
 - `Option[T]`

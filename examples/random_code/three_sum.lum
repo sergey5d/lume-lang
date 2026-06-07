@@ -42,7 +42,7 @@ object Solution {
         while j < nums.size() {
             complement = -nums[idx] - nums[j]
             if seen.contains(complement) {
-                res.append(List(nums[idx], complement, nums[j]))
+                res.append([nums[idx], complement, nums[j]])
                 j += 1
                 while j < nums.size() && nums[j - 1] == nums[j] {
                     j += 1

@@ -214,6 +214,94 @@ fn parses_lambda_expression() {
 }
 
 #[test]
+fn parses_list_type_ref_shorthand() {
+    let result = parse(
+        r#"
+class Store[T] {
+    values [T]
+    matrix [[T]]
+}
+
+def wrap(input Map[Str, [Int]]) [[[(Str, Int)]]] {
+    cache Map[Str, [Int]] = input
+    return []
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+    let program = result.program.expect("program");
+    let store = match &program.items[0] {
+        Item::Type(ty) => ty,
+        other => panic!("expected type declaration, got {other:#?}"),
+    };
+    match &store.members[0] {
+        TypeMember::Field(field) => match field.ty.as_ref().expect("field type") {
+            TypeRef::Named { name, args, .. } => {
+                assert_eq!(name, "List");
+                assert_eq!(args.len(), 1);
+                assert!(matches!(&args[0], TypeRef::Named { name, .. } if name == "T"));
+            }
+            other => panic!("expected List[T], got {other:#?}"),
+        },
+        other => panic!("expected field, got {other:#?}"),
+    }
+    match &store.members[1] {
+        TypeMember::Field(field) => match field.ty.as_ref().expect("field type") {
+            TypeRef::Named { name, args, .. } => {
+                assert_eq!(name, "List");
+                assert!(
+                    matches!(&args[0], TypeRef::Named { name, args, .. } if name == "List" && matches!(&args[0], TypeRef::Named { name, .. } if name == "T"))
+                );
+            }
+            other => panic!("expected nested list shorthand, got {other:#?}"),
+        },
+        other => panic!("expected field, got {other:#?}"),
+    }
+
+    let function = match &program.items[1] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match function.params[0].ty.as_ref().expect("parameter type") {
+        TypeRef::Named { name, args, .. } => {
+            assert_eq!(name, "Map");
+            assert!(matches!(&args[0], TypeRef::Named { name, .. } if name == "Str"));
+            assert!(
+                matches!(&args[1], TypeRef::Named { name, args, .. } if name == "List" && matches!(&args[0], TypeRef::Named { name, .. } if name == "Int"))
+            );
+        }
+        other => panic!("expected Map[Str, List[Int]], got {other:#?}"),
+    }
+    match function.return_type.as_ref().expect("return type") {
+        TypeRef::Named { name, args, .. } => {
+            assert_eq!(name, "List");
+            let level2 = &args[0];
+            let level3 = match level2 {
+                TypeRef::Named { name, args, .. } => {
+                    assert_eq!(name, "List");
+                    &args[0]
+                }
+                other => panic!("expected second list layer, got {other:#?}"),
+            };
+            match level3 {
+                TypeRef::Named { name, args, .. } => {
+                    assert_eq!(name, "List");
+                    match &args[0] {
+                        TypeRef::Tuple { fields, .. } => assert_eq!(fields.len(), 2),
+                        other => {
+                            panic!("expected tuple payload inside nested lists, got {other:#?}")
+                        }
+                    }
+                }
+                other => panic!("expected third list layer, got {other:#?}"),
+            }
+        }
+        other => panic!("expected nested list shorthand return type, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_single_param_typed_lambda_without_parens() {
     let result = parse(
         r#"

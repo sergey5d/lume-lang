@@ -2276,6 +2276,7 @@ def vars() Bool {
 	b = Set(1).map(key -> key.show())
 	c = Map(1 : 2).map((key Int, value Int) -> key + value)
 	d = Set(1).map(key Int -> key.show())
+	e = List(List(1)).map(items [Int] -> items.size())
 	return 1 == 1
 }
 `
@@ -2337,6 +2338,19 @@ def vars() Bool {
 	}
 	if len(fourthLambda.Parameters) != 1 || fourthLambda.Parameters[0].Name != "key" || fourthLambda.Parameters[0].Type == nil || fourthLambda.Parameters[0].Type.Name != "Int" {
 		t.Fatalf("unexpected typed single-parameter lambda: %#v", fourthLambda.Parameters)
+	}
+
+	fifth := fn.Body.Statements[4].(*ValStmt)
+	fifthCall, ok := fifth.Values[0].(*CallExpr)
+	if !ok {
+		t.Fatalf("expected fifth binding value to be call expression, got %T", fifth.Values[0])
+	}
+	fifthLambda, ok := fifthCall.Args[0].Value.(*LambdaExpr)
+	if !ok {
+		t.Fatalf("expected list-shorthand lambda, got %T", fifthCall.Args[0])
+	}
+	if len(fifthLambda.Parameters) != 1 || fifthLambda.Parameters[0].Type == nil || fifthLambda.Parameters[0].Type.Name != "List" || len(fifthLambda.Parameters[0].Type.Arguments) != 1 || fifthLambda.Parameters[0].Type.Arguments[0].Name != "Int" {
+		t.Fatalf("unexpected list-shorthand lambda parameter: %#v", fifthLambda.Parameters)
 	}
 }
 
@@ -2478,15 +2492,17 @@ interface Pairer[K, V] {
 
 class Store[T] {
 	values List[T]
+	matrix [[T]]
 }
 
 impl Store[T] {
-	def init(values List[T]) {
+	def init(values [T]) {
 	}
 }
 
-def wrap(input Map[Str, List[Int]]) List[Map[Str, Int]] {
-	cache Map[Str, List[Int]] = input
+def wrap(input Map[Str, [Int]]) [Map[Str, Int]] {
+	cache Map[Str, [Int]] = input
+	triple [[[(Str, Int)]]] = []
 	return [cache]
 }
 `
@@ -2498,6 +2514,10 @@ def wrap(input Map[Str, List[Int]]) List[Map[Str, Int]] {
 
 	assertTypeRef(t, program.Interfaces[0].Methods[0].ReturnType, "Map", "K", "V")
 	assertTypeRef(t, program.Classes[0].Fields[0].Type, "List", "T")
+	assertTypeRef(t, program.Classes[0].Fields[1].Type, "List", "List")
+	if inner := program.Classes[0].Fields[1].Type.Arguments[0]; inner.Name != "List" || len(inner.Arguments) != 1 || inner.Arguments[0].Name != "T" {
+		t.Fatalf("expected nested list shorthand to normalize to List[List[T]], got %#v", program.Classes[0].Fields[1].Type)
+	}
 	assertTypeRef(t, program.Functions[0].Parameters[0].Type, "Map", "Str", "List")
 	if len(program.Functions[0].Parameters[0].Type.Arguments[1].Arguments) != 1 || program.Functions[0].Parameters[0].Type.Arguments[1].Arguments[0].Name != "Int" {
 		t.Fatalf("expected nested generic type argument, got %#v", program.Functions[0].Parameters[0].Type)
@@ -2505,6 +2525,16 @@ def wrap(input Map[Str, List[Int]]) List[Map[Str, Int]] {
 	assertTypeRef(t, program.Functions[0].ReturnType, "List", "Map")
 	if len(program.Functions[0].ReturnType.Arguments[0].Arguments) != 2 {
 		t.Fatalf("expected nested return type arguments, got %#v", program.Functions[0].ReturnType)
+	}
+	tripleType := program.Functions[0].Body.Statements[1].(*ValStmt).Bindings[0].Type
+	assertTypeRef(t, tripleType, "List", "List")
+	level2 := tripleType.Arguments[0]
+	level3 := level2.Arguments[0]
+	if level2.Name != "List" || level3.Name != "List" {
+		t.Fatalf("expected [[[...]]] to produce three nested List refs, got %#v", tripleType)
+	}
+	if len(level3.Arguments) != 1 || level3.Arguments[0].Name != "Tuple" || len(level3.Arguments[0].TupleElements) != 2 {
+		t.Fatalf("expected innermost shorthand payload to stay as tuple type, got %#v", tripleType)
 	}
 }
 

@@ -113,6 +113,16 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_primary_type_ref(&mut self) -> Option<TypeRef> {
         self.skip_newlines();
+        if self.match_token(TokenKind::LBracket) {
+            let start = self.previous_span();
+            let inner = self.parse_type_ref()?;
+            let end = self.consume(TokenKind::RBracket, "expected ']' after list type")?;
+            return Some(TypeRef::Named {
+                name: "List".to_string(),
+                args: vec![inner],
+                span: start.cover(end),
+            });
+        }
         if self.match_token(TokenKind::LBrace) {
             let start = self.previous_span();
             self.skip_newlines();
@@ -209,7 +219,7 @@ impl<'a> Parser<'a> {
     pub(super) fn can_start_type_ref(&self) -> bool {
         matches!(
             self.current_kind(),
-            TokenKind::Identifier | TokenKind::LParen | TokenKind::LBrace
+            TokenKind::Identifier | TokenKind::LParen | TokenKind::LBrace | TokenKind::LBracket
         )
     }
 

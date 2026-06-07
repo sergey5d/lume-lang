@@ -3,17 +3,7 @@ package parser
 import "fmt"
 
 func (p *Parser) parseTypeRef() (*TypeRef, error) {
-	if p.check(TokenLParen) {
-		return p.parseParenTypeRef()
-	}
-	if p.check(TokenLBrace) {
-		return p.parseRecordTypeRef()
-	}
-	return p.parseArrowTypeRef()
-}
-
-func (p *Parser) parseArrowTypeRef() (*TypeRef, error) {
-	left, err := p.parseNamedTypeRef()
+	left, err := p.parsePrimaryTypeRef()
 	if err != nil {
 		return nil, err
 	}
@@ -29,6 +19,19 @@ func (p *Parser) parseArrowTypeRef() (*TypeRef, error) {
 		}, nil
 	}
 	return left, nil
+}
+
+func (p *Parser) parsePrimaryTypeRef() (*TypeRef, error) {
+	if p.check(TokenLParen) {
+		return p.parseParenTypeRef()
+	}
+	if p.check(TokenLBrace) {
+		return p.parseRecordTypeRef()
+	}
+	if p.check(TokenLBracket) {
+		return p.parseListTypeRef()
+	}
+	return p.parseNamedTypeRef()
 }
 
 func (p *Parser) parseNamedTypeRef() (*TypeRef, error) {
@@ -55,6 +58,26 @@ func (p *Parser) parseNamedTypeRef() (*TypeRef, error) {
 		ref.Span = mergeSpans(ref.Span, tokenSpan(end))
 	}
 	return ref, nil
+}
+
+func (p *Parser) parseListTypeRef() (*TypeRef, error) {
+	start, err := p.consume(TokenLBracket, "expected '[' before list type")
+	if err != nil {
+		return nil, err
+	}
+	element, err := p.parseTypeRef()
+	if err != nil {
+		return nil, err
+	}
+	end, err := p.consume(TokenRBracket, "expected ']' after list type")
+	if err != nil {
+		return nil, err
+	}
+	return &TypeRef{
+		Name:      "List",
+		Arguments: []*TypeRef{element},
+		Span:      mergeSpans(tokenSpan(start), tokenSpan(end)),
+	}, nil
 }
 
 func (p *Parser) parseParenTypeRef() (*TypeRef, error) {
@@ -165,6 +188,19 @@ func (p *Parser) scanTypeRef(start int) (int, bool) {
 	if start >= len(p.tokens) {
 		return start, false
 	}
+	if p.tokens[start].Type == TokenLBracket {
+		i := start + 1
+		var ok bool
+		i, ok = p.scanTypeRef(i)
+		if !ok || i >= len(p.tokens) || p.tokens[i].Type != TokenRBracket {
+			return start, false
+		}
+		i++
+		if i < len(p.tokens) && p.tokens[i].Type == TokenArrow {
+			return p.scanTypeRef(i + 1)
+		}
+		return i, true
+	}
 	if p.tokens[start].Type == TokenLBrace {
 		i := start + 1
 		if i >= len(p.tokens) || p.tokens[i].Type == TokenRBrace {
@@ -252,7 +288,19 @@ func (p *Parser) scanTypeRef(start int) (int, bool) {
 }
 
 func (p *Parser) scanSimpleTypeRef(start int) (int, bool) {
-	if start >= len(p.tokens) || p.tokens[start].Type != TokenIdentifier {
+	if start >= len(p.tokens) {
+		return start, false
+	}
+	if p.tokens[start].Type == TokenLBracket {
+		i := start + 1
+		var ok bool
+		i, ok = p.scanTypeRef(i)
+		if !ok || i >= len(p.tokens) || p.tokens[i].Type != TokenRBracket {
+			return start, false
+		}
+		return i + 1, true
+	}
+	if p.tokens[start].Type != TokenIdentifier {
 		return start, false
 	}
 	i := start + 1
