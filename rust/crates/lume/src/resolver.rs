@@ -11,7 +11,7 @@ use crate::{
         ElseExprBranch, Expr, ExprStmt, ForBinding, ForStmt, FunctionDecl, IfConditionClause,
         IfStmt, ImplBlock, ImportSymbol, LambdaBody, LetElseStmt, MatchCase, MatchCaseBody,
         MethodDecl, Pattern, Program, RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember,
-        TypeParam, TypeRef, UnwrapBlockStmt, UnwrapStmt, Visibility, WhileStmt,
+        TypeParam, TypeRef, Visibility, WhileStmt,
     },
     lexer::lex,
     parser::parse_program,
@@ -1266,8 +1266,6 @@ impl<'a> Resolver<'a> {
                 }
             }
             Stmt::Expr(ExprStmt { expr, .. }) => self.resolve_expr(expr),
-            Stmt::Unwrap(stmt) => self.resolve_unwrap(stmt),
-            Stmt::UnwrapBlock(stmt) => self.resolve_unwrap_block(stmt),
             Stmt::LocalFunction(function) => {
                 self.define_value(
                     function.name.as_str(),
@@ -1304,26 +1302,6 @@ impl<'a> Resolver<'a> {
         self.resolve_callable_body(&function.body);
         self.pop_scope();
         self.pop_type_scope();
-    }
-
-    fn resolve_unwrap(&mut self, stmt: &UnwrapStmt) {
-        self.resolve_expr(&stmt.value);
-        if let Some(else_block) = &stmt.else_block {
-            self.resolve_block(else_block);
-        }
-        for binding in &stmt.bindings {
-            self.resolve_type_ref(binding.ty.as_ref());
-            self.define_binding(binding, "duplicate_binding");
-        }
-    }
-
-    fn resolve_unwrap_block(&mut self, stmt: &UnwrapBlockStmt) {
-        if let Some(else_block) = &stmt.else_block {
-            self.resolve_block(else_block);
-        }
-        for clause in &stmt.clauses {
-            self.resolve_unwrap(clause);
-        }
     }
 
     fn resolve_if_stmt(&mut self, stmt: &IfStmt) {

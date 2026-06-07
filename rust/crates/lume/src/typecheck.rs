@@ -1123,44 +1123,6 @@ impl<'a> Checker<'a> {
                 Ty::unit()
             }
             Stmt::Expr(expr_stmt) => self.check_expr(&expr_stmt.expr),
-            Stmt::Unwrap(stmt) => {
-                let value_ty = self.check_expr(&stmt.value);
-                let inner = self.unwrap_inner_type(&value_ty);
-                let slot_types = self.destructure_slots(&inner, stmt.bindings.len());
-                for (index, binding) in stmt.bindings.iter().enumerate() {
-                    let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
-                    let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
-                    let ty = explicit.clone().unwrap_or_else(|| inferred.clone());
-                    if let Some(expected) = explicit {
-                        self.require_assignable(
-                            &inferred,
-                            &expected,
-                            binding.span,
-                            "invalid_binding_type",
-                            format!(
-                                "cannot unwrap '{}' into binding '{}' of type '{}'",
-                                inferred.describe(),
-                                binding.name,
-                                expected.describe()
-                            ),
-                        );
-                    }
-                    self.define_local(&binding.name, ty, false);
-                }
-                if let Some(else_block) = &stmt.else_block {
-                    self.check_block(else_block);
-                }
-                Ty::unit()
-            }
-            Stmt::UnwrapBlock(block) => {
-                for clause in &block.clauses {
-                    self.check_stmt(&Stmt::Unwrap(clause.clone()));
-                }
-                if let Some(else_block) = &block.else_block {
-                    self.check_block(else_block);
-                }
-                Ty::unit()
-            }
             Stmt::LocalFunction(function) => {
                 let sig = function_sig_from_function(function, &[]);
                 self.define_local(
@@ -4063,22 +4025,6 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
                     .is_some_and(contains_placeholder_expr)
                     || binding.values.iter().any(contains_placeholder_expr)
             }) || stmt.body.statements.iter().any(stmt_contains_placeholder)
-        }
-        Stmt::Unwrap(stmt) => {
-            contains_placeholder_expr(&stmt.value)
-                || stmt
-                    .else_block
-                    .as_ref()
-                    .is_some_and(|block| block.statements.iter().any(stmt_contains_placeholder))
-        }
-        Stmt::UnwrapBlock(stmt) => {
-            stmt.clauses
-                .iter()
-                .any(|clause| contains_placeholder_expr(&clause.value))
-                || stmt
-                    .else_block
-                    .as_ref()
-                    .is_some_and(|block| block.statements.iter().any(stmt_contains_placeholder))
         }
         Stmt::Match(stmt) => {
             contains_placeholder_expr(&stmt.value)

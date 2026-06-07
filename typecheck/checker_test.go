@@ -2084,10 +2084,10 @@ def run() Int {
 	valuePairs Array[(Int, Str)] = values.zip(other)
 	valueIndexed Array[(Int, Int)] = values.zipWithIndex()
 
-	unwrap firstPair <- pairs.get(0) else {
+	let Some(firstPair) = pairs.get(0) else {
 		0
 	}
-	unwrap indexedPair <- indexed.get(2) else {
+	let Some(indexedPair) = indexed.get(2) else {
 		0
 	}
 	let (firstLeft Int, firstRight Str) = firstPair
@@ -2186,7 +2186,7 @@ def run() Int {
 		total += value
 	}
 
-	unwrap reducedPair <- mapReduced else {
+	let Some(reducedPair) = mapReduced else {
 		0
 	}
 	let (reducedKey Str, reducedValue Int) = reducedPair
@@ -2362,7 +2362,7 @@ func TestAnalyzeOptionConstructorsAndMethods(t *testing.T) {
 def run() Int {
 	found Option[Int] = Some(5)
 	missing Option[Int] = None()
-	unwrap value <- found else return missing.getOr(7)
+	let Some(value) = found else return missing.getOr(7)
 	return value
 }
 `
@@ -2809,10 +2809,10 @@ def run(value Result[Int, Str]) Option[Int] {
 	}
 }
 
-func TestAnalyzeGuardStmt(t *testing.T) {
+func TestAnalyzeLetElseStmt(t *testing.T) {
 	src := `
 def run(value Option[Int]) Result[Int, Str] {
-	unwrap item <- value else {
+	let Some(item) = value else {
 		Err("missing")
 	}
 	return Ok(item + 1)
@@ -2825,10 +2825,10 @@ def run(value Option[Int]) Result[Int, Str] {
 	}
 }
 
-func TestAnalyzeGuardStmtRejectsWrongGuardType(t *testing.T) {
+func TestAnalyzeLetElseStmtRejectsWrongElseType(t *testing.T) {
 	src := `
 def run(value Option[Int]) Result[Int, Str] {
-	unwrap item <- value else {
+	let Some(item) = value else {
 		Some(0)
 	}
 	return Ok(item + 1)
@@ -2839,17 +2839,17 @@ def run(value Option[Int]) Result[Int, Str] {
 	if len(result.Diagnostics) == 0 {
 		t.Fatalf("expected diagnostics, got none")
 	}
-	if result.Diagnostics[0].Code != "invalid_unwrap" {
+	if result.Diagnostics[0].Code != "invalid_let_else" {
 		t.Fatalf("unexpected diagnostic %#v", result.Diagnostics[0])
 	}
 }
 
-func TestAnalyzeGuardBlockStmt(t *testing.T) {
+func TestAnalyzeLetElseClauseBlockStmt(t *testing.T) {
 	src := `
 def run(left Option[Int], right Option[Int]) Result[Int, Str] {
-	unwrap {
-		a <- left
-		b <- right
+	let {
+		Some(a) = left
+		Some(b) = right
 	} else {
 		Err("missing")
 	}
@@ -2882,11 +2882,11 @@ def run(left Option[Int], right Option[Int]) Option[Int] {
 	}
 }
 
-func TestAnalyzeGuardBlockStmtRejectsWrongElseType(t *testing.T) {
+func TestAnalyzeLetElseClauseBlockStmtRejectsWrongElseType(t *testing.T) {
 	src := `
 def run(left Option[Int]) Result[Int, Str] {
-	unwrap {
-		a <- left
+	let {
+		Some(a) = left
 	} else {
 		Some(0)
 	}
@@ -2898,7 +2898,7 @@ def run(left Option[Int]) Result[Int, Str] {
 	if len(result.Diagnostics) == 0 {
 		t.Fatalf("expected diagnostics, got none")
 	}
-	if result.Diagnostics[0].Code != "invalid_unwrap" {
+	if result.Diagnostics[0].Code != "invalid_let_else" {
 		t.Fatalf("unexpected diagnostic %#v", result.Diagnostics[0])
 	}
 }
@@ -2975,10 +2975,10 @@ def run() Bool {
 	partialMapped = options.map(partial {
 	case SomeX(x) => x + 1
 	})
-	unwrap firstPartial <- partialMapped.get(0) else {
+	let Some(firstPartial) = partialMapped.get(0) else {
 		false
 	}
-	unwrap secondPartial <- partialMapped.get(1) else {
+	let Some(secondPartial) = partialMapped.get(1) else {
 		false
 	}
 	return ifMapped.get(1).getOr(0) == 10 &&

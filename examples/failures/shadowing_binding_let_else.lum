@@ -3,6 +3,6 @@
 
 def main() Int {
     item = 1
-    unwrap item <- Some(2) else return item
+    let Some(item) = Some(2) else return item
     item
 }

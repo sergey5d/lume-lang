@@ -2740,7 +2740,7 @@ def run(left Option[Int], right Option[Int]) Int {
 	}
 }
 
-func TestParseBareUnwrapStmtRemoved(t *testing.T) {
+func TestParseRemovedUnwrapStmtRejected(t *testing.T) {
 	src := `
 def run(value Result[Int, Str]) Result[Int, Str] {
 	unwrap item <- value
@@ -2749,64 +2749,11 @@ def run(value Result[Int, Str]) Result[Int, Str] {
 `
 
 	if _, err := Parse(src); err == nil {
-		t.Fatalf("expected parse error for removed bare unwrap syntax")
-	} else if !strings.Contains(err.Error(), "removed") {
-		t.Fatalf("expected removed-syntax error, got %v", err)
+		t.Fatalf("expected parse error for removed unwrap syntax")
 	}
 }
 
-func TestParseGuardStmt(t *testing.T) {
-	src := `
-def run(value Option[Int]) Result[Int, Str] {
-	unwrap item <- value else Err("missing")
-	return Ok(item + 1)
-}
-`
-
-	program, err := Parse(src)
-	if err != nil {
-		t.Fatalf("Parse returned error: %v", err)
-	}
-
-	fn := program.Functions[0]
-	stmt, ok := fn.Body.Statements[0].(*GuardStmt)
-	if !ok {
-		t.Fatalf("expected first statement to be unwrap-with-else, got %T", fn.Body.Statements[0])
-	}
-	if stmt.Fallback == nil || len(stmt.Fallback.Statements) != 1 {
-		t.Fatalf("expected fallback block on unwrap statement")
-	}
-}
-
-func TestParseUnwrapBlockElseStmt(t *testing.T) {
-	src := `
-def run(b Option[Int], d Option[Int]) Result[Int, Str] {
-	unwrap {
-		a <- b
-		c <- d
-	} else {
-		Err("missing")
-	}
-	return Ok(a + c)
-}
-`
-
-	program, err := Parse(src)
-	if err != nil {
-		t.Fatalf("Parse returned error: %v", err)
-	}
-
-	fn := program.Functions[0]
-	stmt, ok := fn.Body.Statements[0].(*GuardBlockStmt)
-	if !ok {
-		t.Fatalf("expected first statement to be unwrap-else block, got %T", fn.Body.Statements[0])
-	}
-	if len(stmt.Clauses) != 2 {
-		t.Fatalf("expected 2 unwrap clauses, got %d", len(stmt.Clauses))
-	}
-}
-
-func TestParseBareUnwrapBlockRemoved(t *testing.T) {
+func TestParseRemovedUnwrapBlockRejected(t *testing.T) {
 	src := `
 def run(b Option[Int], d Option[Int]) Option[Int] {
 	unwrap {
@@ -2818,9 +2765,7 @@ def run(b Option[Int], d Option[Int]) Option[Int] {
 `
 
 	if _, err := Parse(src); err == nil {
-		t.Fatalf("expected parse error for removed bare unwrap block syntax")
-	} else if !strings.Contains(err.Error(), "removed") {
-		t.Fatalf("expected removed-syntax error, got %v", err)
+		t.Fatalf("expected parse error for removed unwrap block syntax")
 	}
 }
 

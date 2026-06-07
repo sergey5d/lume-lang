@@ -29,7 +29,6 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt(false).map(Stmt::Match),
             TokenKind::Keyword(Keyword::Partial) => self.parse_match_stmt(true).map(Stmt::Match),
-            TokenKind::Keyword(Keyword::Unwrap) => self.parse_unwrap_stmt(),
             TokenKind::Keyword(Keyword::Let) => self.parse_let_stmt(),
             TokenKind::Keyword(Keyword::Var) => {
                 let stmt = self.parse_binding_stmt_after_var()?;
@@ -474,85 +473,6 @@ impl<'a> Parser<'a> {
             }],
             body: body.clone(),
             span: start.cover(body.span),
-        })
-    }
-
-    pub(super) fn parse_unwrap_stmt(&mut self) -> Option<Stmt> {
-        let start = self.consume_keyword(Keyword::Unwrap, "expected 'unwrap'")?;
-        if self.match_token(TokenKind::LBrace) {
-            return self.parse_unwrap_block_stmt(start).map(Stmt::UnwrapBlock);
-        }
-        let bindings = self.parse_binding_list(false)?;
-        self.consume(TokenKind::LeftArrow, "expected '<-' after unwrap bindings")?;
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                "expected expression on same line after \"<-\"",
-            );
-            return None;
-        }
-        let value = self.parse_expr()?;
-        if !self.match_keyword(Keyword::Else) {
-            self.error_at_current(
-                "unsupported_syntax",
-                "bare 'unwrap x <- y' syntax was removed; use 'value = try source' for propagation or add 'else' for an explicit fallback",
-            );
-            return None;
-        }
-        let else_block = Some(self.parse_block_or_inline_stmt_body("unwrap else")?);
-        let end = else_block
-            .as_ref()
-            .map(|block| block.span)
-            .unwrap_or_else(|| value.span());
-        Some(Stmt::Unwrap(UnwrapStmt {
-            bindings,
-            value,
-            else_block,
-            span: start.cover(end),
-        }))
-    }
-
-    pub(super) fn parse_unwrap_block_stmt(&mut self, start: Span) -> Option<UnwrapBlockStmt> {
-        self.skip_newlines();
-        let mut clauses = Vec::new();
-        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let bindings = self.parse_binding_list(false)?;
-            self.consume(TokenKind::LeftArrow, "expected '<-' in unwrap block")?;
-            if self.at(TokenKind::Newline) {
-                self.error_at_current(
-                    "expected_expression",
-                    "expected expression on same line after \"<-\"",
-                );
-                return None;
-            }
-            let value = self.parse_expr()?;
-            let span = bindings
-                .first()
-                .map(|binding| binding.span)
-                .unwrap_or(value.span())
-                .cover(value.span());
-            clauses.push(UnwrapStmt {
-                bindings,
-                value,
-                else_block: None,
-                span,
-            });
-            self.skip_newlines();
-        }
-        let close = self.consume(TokenKind::RBrace, "expected '}' after unwrap block")?;
-        if !self.match_keyword(Keyword::Else) {
-            self.error_at_current(
-                "unsupported_syntax",
-                "bare 'unwrap { ... }' syntax was removed; add 'else' or use 'let { PATTERN = value ... } else { ... }'",
-            );
-            return None;
-        }
-        let else_block = Some(self.parse_block_or_inline_stmt_body("unwrap else")?);
-        let end = else_block.as_ref().map(|block| block.span).unwrap_or(close);
-        Some(UnwrapBlockStmt {
-            clauses,
-            else_block,
-            span: start.cover(end),
         })
     }
 

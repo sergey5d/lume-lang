@@ -195,7 +195,7 @@ This keeps the surface compact without turning newlines into implicit structure.
 
 ### Refutable Binding
 
-The preferred unwrap surface is now split into two forms:
+The preferred refutable-binding surface is now split into these forms:
 - `if let PATTERN = value { ... }` for testing and binding
 - `if let { PATTERN = value ... } { ... }` for multiple sequential refutable bindings in one condition
 - `if let PATTERN = value && let OTHER = next && ready { ... }` for mixed refutable and boolean checks in one condition

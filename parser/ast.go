@@ -230,42 +230,6 @@ type Binding struct {
 
 func (*ValStmt) statementNode() {}
 
-// UnwrapStmt extracts a success value from an unwrappable value or returns early on failure.
-type UnwrapStmt struct {
-	Bindings []Binding `json:"bindings"`
-	Value    Expr      `json:"value"`
-	Span     Span      `json:"span"`
-}
-
-func (*UnwrapStmt) statementNode() {}
-
-// UnwrapBlockStmt evaluates a sequence of unwrap bindings and returns early on the first failure.
-type UnwrapBlockStmt struct {
-	Clauses []*UnwrapStmt `json:"clauses"`
-	Span    Span          `json:"span"`
-}
-
-func (*UnwrapBlockStmt) statementNode() {}
-
-// GuardStmt extracts a success value from an unwrappable value or evaluates a fallback block on failure.
-type GuardStmt struct {
-	Bindings []Binding  `json:"bindings"`
-	Value    Expr       `json:"value"`
-	Fallback *BlockStmt `json:"fallback"`
-	Span     Span       `json:"span"`
-}
-
-func (*GuardStmt) statementNode() {}
-
-// GuardBlockStmt evaluates a sequence of unwrap bindings and runs a fallback block if any binding fails.
-type GuardBlockStmt struct {
-	Clauses  []*UnwrapStmt `json:"clauses"`
-	Fallback *BlockStmt    `json:"fallback"`
-	Span     Span          `json:"span"`
-}
-
-func (*GuardBlockStmt) statementNode() {}
-
 // RefutableClause is one refutable `PATTERN = value` clause inside a grouped
 // `let { ... } else ...` or `if let { ... } { ... }` form.
 type RefutableClause struct {

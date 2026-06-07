@@ -131,18 +131,18 @@ def run() Int {
 	}
 }
 
-func TestAnalyzeShadowingUnwrapBinding(t *testing.T) {
+func TestAnalyzeShadowingLetElseBinding(t *testing.T) {
 	src := `
 def run() Int {
 	item = 1
-	unwrap item <- Some(2) else return item
+	let Some(item) = Some(2) else return item
 	return item
 }
 `
 
 	diagnostics := Analyze(parseProgram(t, src))
 	if len(diagnostics) != 2 {
-		t.Fatalf("expected 2 diagnostics for shadowing unwrap binding, got %#v", diagnostics)
+		t.Fatalf("expected 2 diagnostics for shadowing let-else binding, got %#v", diagnostics)
 	}
 	if diagnostics[0].Code != "shadowing_binding" {
 		t.Fatalf("unexpected first diagnostic %#v", diagnostics[0])

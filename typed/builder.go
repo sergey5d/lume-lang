@@ -50,10 +50,6 @@ func Build(program *parser.Program, info typecheck.Result) (*Program, error) {
 	stmts := &stmtBuilder{
 		bindings:         &bindingStmtBuilder{ctx: ctx, exprs: exprs, types: typeRefs},
 		localFunctions:   &localFunctionStmtBuilder{ctx: ctx, blocks: blocks, types: typeRefs},
-		unwraps:          &unwrapStmtBuilder{ctx: ctx, exprs: exprs, types: typeRefs},
-		unwrapBlocks:     &unwrapBlockStmtBuilder{ctx: ctx, exprs: exprs, types: typeRefs},
-		guards:           &guardStmtBuilder{ctx: ctx, exprs: exprs, blocks: blocks, types: typeRefs},
-		guardBlocks:      &guardBlockStmtBuilder{ctx: ctx, exprs: exprs, blocks: blocks, types: typeRefs},
 		assignments:      &assignmentStmtBuilder{exprs: exprs},
 		multiAssignments: &multiAssignmentStmtBuilder{exprs: exprs},
 		ifs:              &ifStmtBuilder{ctx: ctx, exprs: exprs, blocks: blocks, types: typeRefs},

@@ -836,8 +836,6 @@ impl<'a> FunctionLowerer<'a> {
                 });
             }
             Stmt::Match(stmt) => self.lower_match_stmt(stmt),
-            Stmt::Unwrap(stmt) => self.lower_unwrap_stmt(stmt, None),
-            Stmt::UnwrapBlock(stmt) => self.lower_unwrap_block(stmt),
             Stmt::LocalFunction(function) => self.lower_local_function_stmt(function),
         }
     }
@@ -1172,7 +1170,7 @@ impl<'a> FunctionLowerer<'a> {
         }
         let Some(condition) = stmt.condition.as_ref() else {
             self.invariant(
-                "if statement should have a condition or unwrap binding before lowering",
+                "if statement should have a condition or binding before lowering",
                 stmt.span,
             );
             return;
@@ -1818,126 +1816,6 @@ impl<'a> FunctionLowerer<'a> {
             }
         }
         (0..count).map(|index| format!("_{}", index + 1)).collect()
-    }
-
-    fn lower_unwrap_block(&mut self, stmt: &ast::UnwrapBlockStmt) {
-        let failure_value = self.add_temp(ir::Type::Unknown);
-        let fallback_block = self.add_block();
-        let continue_block = self.add_block();
-
-        for clause in &stmt.clauses {
-            self.lower_unwrap_stmt(clause, Some((failure_value, fallback_block)));
-            if self.current_block.is_none() {
-                break;
-            }
-        }
-
-        if self.current_block.is_some() {
-            self.terminate(ir::Terminator::goto(continue_block));
-        }
-
-        self.current_block = Some(fallback_block);
-        if let Some(else_block) = &stmt.else_block {
-            let value = self
-                .lower_block_value(else_block)
-                .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
-            self.terminate(ir::Terminator::ret(Some(value)));
-        } else {
-            self.terminate(ir::Terminator::ret(Some(ir::Operand::Copy(Box::new(
-                ir::Place::Local(failure_value),
-            )))));
-        }
-
-        self.current_block = Some(continue_block);
-    }
-
-    fn lower_unwrap_stmt(
-        &mut self,
-        stmt: &ast::UnwrapStmt,
-        shared_fallback: Option<(ir::LocalId, ir::BlockId)>,
-    ) {
-        let source = self.lower_expr(&stmt.value);
-        let source_local = self.add_temp(ir::Type::Unknown);
-        self.push_statement(ir::Statement {
-            span: Some(stmt.value.span()),
-            kind: ir::StatementKind::Assign {
-                target: ir::Place::Local(source_local),
-                value: ir::RValue::Use(source),
-            },
-        });
-
-        let success_block = self.add_block();
-        let failure_block = if let Some((_, target)) = shared_fallback {
-            target
-        } else {
-            self.add_block()
-        };
-        let continue_block = self.add_block();
-
-        let present = self.emit_temp_from_rvalue(
-            ir::RValue::Call {
-                callee: ir::Callee::Method {
-                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
-                    method: "isSuccess".to_string(),
-                },
-                args: Vec::new(),
-            },
-            ir::Type::Bool,
-            Some(stmt.span),
-        );
-        self.terminate(ir::Terminator {
-            span: Some(stmt.span),
-            kind: ir::TerminatorKind::Branch {
-                condition: present,
-                then_block: success_block,
-                else_block: failure_block,
-            },
-        });
-
-        self.current_block = Some(success_block);
-        let inner = self.emit_temp_from_rvalue(
-            ir::RValue::Call {
-                callee: ir::Callee::Method {
-                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
-                    method: "unwrap".to_string(),
-                },
-                args: Vec::new(),
-            },
-            ir::Type::Unknown,
-            Some(stmt.span),
-        );
-        self.bind_unwrap_values(&stmt.bindings, inner);
-        if self.current_block.is_some() {
-            self.terminate(ir::Terminator::goto(continue_block));
-        }
-
-        if let Some((failure_local, fallback_target)) = shared_fallback {
-            self.current_block = Some(failure_block);
-            self.push_statement(ir::Statement {
-                span: Some(stmt.span),
-                kind: ir::StatementKind::Assign {
-                    target: ir::Place::Local(failure_local),
-                    value: ir::RValue::Use(ir::Operand::Copy(Box::new(ir::Place::Local(
-                        source_local,
-                    )))),
-                },
-            });
-            self.terminate(ir::Terminator::goto(fallback_target));
-        } else {
-            self.current_block = Some(failure_block);
-            if let Some(else_block) = &stmt.else_block {
-                let value = self
-                    .lower_block_value(else_block)
-                    .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
-                self.terminate(ir::Terminator::ret(Some(value)));
-            } else {
-                self.terminate(ir::Terminator::ret(Some(ir::Operand::Copy(Box::new(
-                    ir::Place::Local(source_local),
-                )))));
-            }
-        }
-
-        self.current_block = Some(continue_block);
     }
 
     fn bind_unwrap_values(&mut self, bindings: &[ast::Binding], item: ir::Operand) {
@@ -3977,35 +3855,6 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
             expr: rewrite_placeholder_expr(&stmt.expr, name),
             span: stmt.span,
         }),
-        Stmt::Unwrap(stmt) => Stmt::Unwrap(ast::UnwrapStmt {
-            bindings: stmt.bindings.clone(),
-            value: rewrite_placeholder_expr(&stmt.value, name),
-            else_block: stmt
-                .else_block
-                .as_ref()
-                .map(|block| rewrite_block(block, name)),
-            span: stmt.span,
-        }),
-        Stmt::UnwrapBlock(stmt) => Stmt::UnwrapBlock(ast::UnwrapBlockStmt {
-            clauses: stmt
-                .clauses
-                .iter()
-                .map(|clause| ast::UnwrapStmt {
-                    bindings: clause.bindings.clone(),
-                    value: rewrite_placeholder_expr(&clause.value, name),
-                    else_block: clause
-                        .else_block
-                        .as_ref()
-                        .map(|block| rewrite_block(block, name)),
-                    span: clause.span,
-                })
-                .collect(),
-            else_block: stmt
-                .else_block
-                .as_ref()
-                .map(|block| rewrite_block(block, name)),
-            span: stmt.span,
-        }),
         Stmt::LocalFunction(function) => Stmt::LocalFunction(ast::FunctionDecl {
             annotations: function.annotations.clone(),
             visibility: function.visibility,
@@ -4116,22 +3965,6 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
                 .any(|clause| contains_placeholder_expr(&clause.value))
                 || contains_placeholder_expr(&stmt.value)
                 || block_contains_placeholder(&stmt.else_block)
-        }
-        Stmt::Unwrap(stmt) => {
-            contains_placeholder_expr(&stmt.value)
-                || stmt
-                    .else_block
-                    .as_ref()
-                    .is_some_and(block_contains_placeholder)
-        }
-        Stmt::UnwrapBlock(stmt) => {
-            stmt.clauses
-                .iter()
-                .any(|clause| contains_placeholder_expr(&clause.value))
-                || stmt
-                    .else_block
-                    .as_ref()
-                    .is_some_and(block_contains_placeholder)
         }
         Stmt::LocalFunction(function) => body_contains_placeholder(&Some(function.body.clone())),
     }

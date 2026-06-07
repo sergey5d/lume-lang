@@ -46,10 +46,10 @@ def main() Unit {
     indexed = items.zipWithIndex()
     tailItems = items.tail()
 
-    unwrap zippedPair <- zipped.get(1) else ()
-    unwrap indexedPair <- indexed.get(3) else ()
-    unwrap head <- items.head() else ()
-    unwrap removed <- items.remove(1) else ()
+    let Some(zippedPair) = zipped.get(1) else ()
+    let Some(indexedPair) = indexed.get(3) else ()
+    let Some(head) = items.head() else ()
+    let Some(removed) = items.remove(1) else ()
 
     let (zipValue, zipLabel) = zippedPair
     let (indexedValue, indexedPos) = indexedPair

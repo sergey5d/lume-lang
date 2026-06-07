@@ -22,9 +22,9 @@ def main() Unit {
         }
     )
 
-    unwrap first <- extracted.get(0) else ()
-    unwrap second <- extracted.get(1) else ()
-    unwrap third <- extracted.get(2) else ()
+    let Some(first) = extracted.get(0) else ()
+    let Some(second) = extracted.get(1) else ()
+    let Some(third) = extracted.get(2) else ()
 
     OS.println("first " + first.getOr(0))
     OS.println("second " + second.isEmpty())

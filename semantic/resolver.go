@@ -549,48 +549,6 @@ func (r *Resolver) resolveStatement(stmt parser.Statement) {
 		for _, value := range s.Values {
 			r.resolveExpr(value)
 		}
-	case *parser.UnwrapStmt:
-		r.resolveExpr(s.Value)
-		for _, binding := range s.Bindings {
-			r.resolveTypeRef(binding.Type)
-			if binding.Name == "_" {
-				continue
-			}
-			r.defineMutable(binding.Name, binding.Span, false, "duplicate_binding", "duplicate binding '"+binding.Name+"'")
-		}
-	case *parser.UnwrapBlockStmt:
-		for _, clause := range s.Clauses {
-			r.resolveExpr(clause.Value)
-			for _, binding := range clause.Bindings {
-				r.resolveTypeRef(binding.Type)
-				if binding.Name == "_" {
-					continue
-				}
-				r.defineMutable(binding.Name, binding.Span, false, "duplicate_binding", "duplicate binding '"+binding.Name+"'")
-			}
-		}
-	case *parser.GuardStmt:
-		r.resolveExpr(s.Value)
-		for _, binding := range s.Bindings {
-			r.resolveTypeRef(binding.Type)
-			if binding.Name == "_" {
-				continue
-			}
-			r.defineMutable(binding.Name, binding.Span, false, "duplicate_binding", "duplicate binding '"+binding.Name+"'")
-		}
-		r.resolveBlock(s.Fallback)
-	case *parser.GuardBlockStmt:
-		r.resolveBlock(s.Fallback)
-		for _, clause := range s.Clauses {
-			r.resolveExpr(clause.Value)
-			for _, binding := range clause.Bindings {
-				r.resolveTypeRef(binding.Type)
-				if binding.Name == "_" {
-					continue
-				}
-				r.defineMutable(binding.Name, binding.Span, false, "duplicate_binding", "duplicate binding '"+binding.Name+"'")
-			}
-		}
 	case *parser.LetElseStmt:
 		r.resolveBlock(s.Fallback)
 		if len(s.Clauses) > 0 {

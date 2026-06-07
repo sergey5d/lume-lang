@@ -245,8 +245,6 @@ pub enum Stmt {
     Return(ReturnStmt),
     Break(BreakStmt),
     Expr(ExprStmt),
-    Unwrap(UnwrapStmt),
-    UnwrapBlock(UnwrapBlockStmt),
     LocalFunction(FunctionDecl),
 }
 
@@ -263,8 +261,6 @@ impl Stmt {
             Stmt::Return(stmt) => stmt.span,
             Stmt::Break(stmt) => stmt.span,
             Stmt::Expr(stmt) => stmt.span,
-            Stmt::Unwrap(stmt) => stmt.span,
-            Stmt::UnwrapBlock(stmt) => stmt.span,
             Stmt::LocalFunction(function) => function.span,
         }
     }
@@ -279,7 +275,7 @@ pub struct BindingStmt {
     pub span: Span,
 }
 
-/// A single binding introduced by a binding statement or loop/unwrap form.
+/// A single binding introduced by a binding statement or loop form.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Binding {
     pub name: String,
@@ -426,23 +422,6 @@ pub struct BreakStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExprStmt {
     pub expr: Expr,
-    pub span: Span,
-}
-
-/// A single `unwrap` statement with an optional `else` block.
-#[derive(Debug, Clone, PartialEq)]
-pub struct UnwrapStmt {
-    pub bindings: Vec<Binding>,
-    pub value: Expr,
-    pub else_block: Option<Block>,
-    pub span: Span,
-}
-
-/// A chained `unwrap { ... } else { ... }` statement form.
-#[derive(Debug, Clone, PartialEq)]
-pub struct UnwrapBlockStmt {
-    pub clauses: Vec<UnwrapStmt>,
-    pub else_block: Option<Block>,
     pub span: Span,
 }
 

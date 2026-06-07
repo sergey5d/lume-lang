@@ -373,10 +373,10 @@ def run() Int {
 	valuePairs = values.zip(other)
 	valueIndexed = values.zipWithIndex()
 
-	unwrap firstPair <- pairs.get(0) else {
+	let Some(firstPair) = pairs.get(0) else {
 		0
 	}
-	unwrap indexedPair <- indexed.get(2) else {
+	let Some(indexedPair) = indexed.get(2) else {
 		0
 	}
 	let (firstLeft, firstRight) = firstPair
@@ -1458,7 +1458,7 @@ def run() Int {
 		total += value
 	}
 
-	unwrap reducedPair <- mapReduced else {
+	let Some(reducedPair) = mapReduced else {
 		0
 	}
 	let (reducedKey, reducedValue) = reducedPair
@@ -1503,7 +1503,7 @@ func TestOptionRuntime(t *testing.T) {
 def run() Int {
 	found = Some(5)
 	missing = None()
-	unwrap value <- found else return 0
+	let Some(value) = found else return 0
 	return value + missing.getOr(2)
 }
 `
@@ -2204,9 +2204,9 @@ def run() Int {
 		next
 	}
 
-	unwrap first <- items.get(0) else return 0
-	unwrap second <- items.get(1) else return 0
-	unwrap third <- items.get(2) else return 0
+	let Some(first) = items.get(0) else return 0
+	let Some(second) = items.get(1) else return 0
+	let Some(third) = items.get(2) else return 0
 	return first + second + third
 }
 `
@@ -2272,9 +2272,9 @@ def run() Int {
 		total
 	}
 
-	unwrap first <- items.get(0) else return 0
-	unwrap second <- items.get(1) else return 0
-	unwrap third <- items.get(2) else return 0
+	let Some(first) = items.get(0) else return 0
+	let Some(second) = items.get(1) else return 0
+	let Some(third) = items.get(2) else return 0
 	return first + second + third
 }
 `
@@ -2386,17 +2386,17 @@ def run() Str {
 	}
 }
 
-func TestGuardStmt(t *testing.T) {
+func TestLetElseStmt(t *testing.T) {
 	src := `
 def runSome(value Option[Int]) Result[Int, Str] {
-	unwrap item <- value else {
+	let Some(item) = value else {
 		Err("missing")
 	}
 	return Ok(item + 1)
 }
 
 def runNone(value Option[Int]) Result[Int, Str] {
-	unwrap item <- value else {
+	let Some(item) = value else {
 		Err("missing")
 	}
 	return Ok(item + 1)
@@ -2422,12 +2422,12 @@ def run() Str {
 	}
 }
 
-func TestGuardBlockStmt(t *testing.T) {
+func TestLetElseClauseBlockStmt(t *testing.T) {
 	src := `
 def runSome(left Option[Int], right Option[Int]) Result[Int, Str] {
-	unwrap {
-		a <- left
-		b <- right
+	let {
+		Some(a) = left
+		Some(b) = right
 	} else {
 		Err("missing")
 	}
@@ -2435,9 +2435,9 @@ def runSome(left Option[Int], right Option[Int]) Result[Int, Str] {
 }
 
 def runNone(left Option[Int], right Option[Int]) Result[Int, Str] {
-	unwrap {
-		a <- left
-		b <- right
+	let {
+		Some(a) = left
+		Some(b) = right
 	} else {
 		Err("missing")
 	}
@@ -2585,10 +2585,10 @@ def run() Str {
 	partialMapped = options.map(partial {
 	case SomeX(x) => x + 1
 	})
-	unwrap firstPartial <- partialMapped.get(0) else {
+	let Some(firstPartial) = partialMapped.get(0) else {
 		""
 	}
-	unwrap secondPartial <- partialMapped.get(1) else {
+	let Some(secondPartial) = partialMapped.get(1) else {
 		""
 	}
 	return "${ifMapped.get(0).getOr(0)}-${ifMapped.get(1).getOr(0)}-${matchMapped.get(2).getOr(0)}-${firstPartial.getOr(0)}-${secondPartial.isEmpty()}"

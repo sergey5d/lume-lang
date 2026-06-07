@@ -56,9 +56,6 @@ func (p *Parser) parseStatement() (Statement, error) {
 		token := p.advance()
 		return &BreakStmt{Span: tokenSpan(token)}, nil
 	default:
-		if p.isUnwrapStmtStart() {
-			return p.parseUnwrapStmt()
-		}
 		if p.isBareBindingStart() {
 			return p.parseBareBindingStmt()
 		}
@@ -356,28 +353,13 @@ func (p *Parser) parseBindingStmtWithStart(start Token, firstIsName bool) (State
 	}
 
 	operator := p.peek().Type
-	if operator != TokenAssign && operator != TokenColonAssign && operator != TokenLeftArrow {
-		return nil, fmt.Errorf("expected '=', ':=', or '<-' after bindings, got %s", p.peek().String())
+	if operator != TokenAssign && operator != TokenColonAssign {
+		return nil, fmt.Errorf("expected '=' or ':=' after bindings, got %s", p.peek().String())
 	}
 	if operator == TokenColonAssign {
 		return nil, fmt.Errorf("cannot use ':=' in a declaration; use 'var' with '=' for mutable bindings")
 	}
 	p.advance()
-	if operator == TokenLeftArrow {
-		if p.unwrapBlockDepth == 0 {
-			return nil, fmt.Errorf("unwrap binding requires 'unwrap', 'if', or 'for' context")
-		}
-		if err := p.requireSameLineExpressionStart(p.previous()); err != nil {
-			return nil, err
-		}
-		value, err := p.parseInlineExpression(TokenElse)
-		if err != nil {
-			return nil, err
-		}
-		stmt := &UnwrapStmt{Bindings: bindings, Value: value}
-		stmt.Span = mergeSpans(tokenSpan(start), exprSpan(value))
-		return stmt, nil
-	}
 	values, err := p.parseBindingInitializers(len(bindings), p.previous())
 	if err != nil {
 		return nil, err
@@ -412,115 +394,6 @@ func (p *Parser) parseBindingStmtWithStart(start Token, firstIsName bool) (State
 		}
 	}
 	return stmt, nil
-}
-
-func (p *Parser) parseUnwrapStmt() (Statement, error) {
-	start, err := p.consume(TokenIdentifier, "expected 'unwrap'")
-	if err != nil {
-		return nil, err
-	}
-	if start.Lexeme != "unwrap" {
-		return nil, fmt.Errorf("expected 'unwrap'")
-	}
-	if p.check(TokenLBrace) {
-		return p.parseUnwrapBlockStmt(start)
-	}
-	var name Token
-	if p.check(TokenIdentifier) {
-		name, err = p.consume(TokenIdentifier, "expected binding name after 'unwrap'")
-	} else {
-		name, err = p.consume(TokenUnder, "expected binding name after 'unwrap'")
-	}
-	if err != nil {
-		return nil, err
-	}
-	bindings, err := p.parseBindingsWithStart(name, true)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := p.consume(TokenLeftArrow, "expected '<-' after unwrap bindings"); err != nil {
-		return nil, err
-	}
-	if err := p.requireSameLineExpressionStart(p.previous()); err != nil {
-		return nil, err
-	}
-	value, err := p.parseInlineExpression(TokenElse)
-	if err != nil {
-		return nil, err
-	}
-	if p.match(TokenElse) {
-		elseToken := p.previous()
-		fallback, err := p.parseBlockOrInlineStmtBody(elseToken, "unwrap else")
-		if err != nil {
-			return nil, err
-		}
-		return &GuardStmt{
-			Bindings: bindings,
-			Value:    value,
-			Fallback: fallback,
-			Span:     mergeSpans(tokenSpan(start), fallback.Span),
-		}, nil
-	}
-	return nil, fmt.Errorf("bare 'unwrap x <- y' syntax was removed; use 'value = try source' for propagation or add 'else' for an explicit fallback")
-}
-
-func (p *Parser) isUnwrapStmtStart() bool {
-	if !p.check(TokenIdentifier) || p.peek().Lexeme != "unwrap" {
-		return false
-	}
-	if p.pos+1 >= len(p.tokens) {
-		return false
-	}
-	next := p.tokens[p.pos+1]
-	if next.Type == TokenLBrace || next.Type == TokenIdentifier || next.Type == TokenUnder {
-		return true
-	}
-	return false
-}
-
-func (p *Parser) parseUnwrapBlockStmt(start Token) (Statement, error) {
-	open, err := p.consume(TokenLBrace, "expected '{' after 'unwrap'")
-	if err != nil {
-		return nil, err
-	}
-	p.unwrapBlockDepth++
-	defer func() { p.unwrapBlockDepth-- }()
-	var clauses []*UnwrapStmt
-	var declared []string
-	for !p.check(TokenRBrace) && !p.isAtEnd() {
-		stmt, err := p.parseStatement()
-		if err != nil {
-			return nil, err
-		}
-		clause, ok := stmt.(*UnwrapStmt)
-		if !ok {
-			return nil, fmt.Errorf("unwrap body supports only '<-' unwrap bindings, got %T", stmt)
-		}
-		clauses = append(clauses, clause)
-		for _, binding := range clause.Bindings {
-			if binding.Name != "_" {
-				declared = append(declared, binding.Name)
-			}
-		}
-	}
-	close, err := p.consume(TokenRBrace, "expected '}' after unwrap body")
-	if err != nil {
-		return nil, err
-	}
-	for _, name := range declared {
-		p.declare(name)
-	}
-	if p.match(TokenElse) {
-		elseToken := p.previous()
-		fallback, err := p.parseBlockOrInlineStmtBody(elseToken, "unwrap else")
-		if err != nil {
-			return nil, err
-		}
-		span := mergeSpans(tokenSpan(start), fallback.Span)
-		span = mergeSpans(span, mergeSpans(tokenSpan(open), tokenSpan(close)))
-		return &GuardBlockStmt{Clauses: clauses, Fallback: fallback, Span: span}, nil
-	}
-	return nil, fmt.Errorf("bare 'unwrap { ... }' syntax was removed; add 'else' or use 'let { PATTERN = value ... } else { ... }'")
 }
 
 func (p *Parser) parseBindingsWithStart(start Token, firstIsName bool) ([]Binding, error) {
@@ -1364,7 +1237,7 @@ func (p *Parser) inlineBodyParser(stopTypes ...TokenType) (*Parser, int, error) 
 	})
 	scopes := make([]map[string]struct{}, len(p.scopes))
 	copy(scopes, p.scopes)
-	return &Parser{tokens: inlineTokens, scopes: scopes, multilineExprDepth: p.multilineExprDepth, unwrapBlockDepth: p.unwrapBlockDepth}, end, nil
+	return &Parser{tokens: inlineTokens, scopes: scopes, multilineExprDepth: p.multilineExprDepth}, end, nil
 }
 
 func (p *Parser) subparserUntil(stopTypes ...TokenType) (*Parser, int, error) {
@@ -1422,7 +1295,7 @@ func (p *Parser) subparserUntil(stopTypes ...TokenType) (*Parser, int, error) {
 	})
 	scopes := make([]map[string]struct{}, len(p.scopes))
 	copy(scopes, p.scopes)
-	return &Parser{tokens: inlineTokens, scopes: scopes, multilineExprDepth: p.multilineExprDepth, unwrapBlockDepth: p.unwrapBlockDepth}, end, nil
+	return &Parser{tokens: inlineTokens, scopes: scopes, multilineExprDepth: p.multilineExprDepth}, end, nil
 }
 
 func (p *Parser) parseForClause() (ForBinding, error) {

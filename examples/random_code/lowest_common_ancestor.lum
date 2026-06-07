@@ -21,7 +21,7 @@ def find(
     foundQNode Option[TreeNode]
 ) { foundP Option[TreeNode], foundQ Option[TreeNode], ancestor Option[TreeNode] } = {
 
-    unwrap current <- node else {
+    let Some(current) = node else {
         record { foundP = foundPNode, foundQ = foundQNode, ancestor = None() }
     }
 
@@ -80,9 +80,9 @@ def main() Unit {
     result = find(Some(root), 5, 1, None(), None())
     missing = lowestCommonAncestor(root, 10, 42)
 
-    unwrap ancestor <- result.ancestor else OS.panic("missing ancestor")
-    unwrap foundP <- result.foundP else OS.panic("missing foundP")
-    unwrap foundQ <- result.foundQ else OS.panic("missing foundQ")
+    let Some(ancestor) = result.ancestor else OS.panic("missing ancestor")
+    let Some(foundP) = result.foundP else OS.panic("missing foundP")
+    let Some(foundQ) = result.foundQ else OS.panic("missing foundQ")
     OS.println("lca ${ancestor.val}")
     OS.println("found p ${foundP.val}")
     OS.println("found q ${foundQ.val}")

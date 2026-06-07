@@ -695,67 +695,6 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 			}
 		}
 		return nil, nil, nil
-	case *parser.UnwrapStmt:
-		ok, sourceValue, err := in.execUnwrapBinding(s.Bindings, s.Value, s.Span, local)
-		if err != nil {
-			if signal, ok := trySignalToReturnSignal(err); ok {
-				return nil, signal, nil
-			}
-			return nil, nil, err
-		}
-		if !ok {
-			return nil, returnSignal{value: sourceValue}, nil
-		}
-		return nil, nil, nil
-	case *parser.UnwrapBlockStmt:
-		for _, clause := range s.Clauses {
-			ok, sourceValue, err := in.execUnwrapBinding(clause.Bindings, clause.Value, clause.Span, local)
-			if err != nil {
-				if signal, ok := trySignalToReturnSignal(err); ok {
-					return nil, signal, nil
-				}
-				return nil, nil, err
-			}
-			if !ok {
-				return nil, returnSignal{value: sourceValue}, nil
-			}
-		}
-		return nil, nil, nil
-	case *parser.GuardStmt:
-		ok, _, err := in.execUnwrapBinding(s.Bindings, s.Value, s.Span, local)
-		if err != nil {
-			if signal, ok := trySignalToReturnSignal(err); ok {
-				return nil, signal, nil
-			}
-			return nil, nil, err
-		}
-		if !ok {
-			value, signal, err := in.evalBlockValue(s.Fallback, local, self, "unwrap else block must end with a value-producing statement")
-			if err != nil || signal != nil {
-				return nil, signal, err
-			}
-			return nil, returnSignal{value: value}, nil
-		}
-		return nil, nil, nil
-	case *parser.GuardBlockStmt:
-		fallbackEnv := cloneEnvShallow(local)
-		for _, clause := range s.Clauses {
-			ok, _, err := in.execUnwrapBinding(clause.Bindings, clause.Value, clause.Span, local)
-			if err != nil {
-				if signal, ok := trySignalToReturnSignal(err); ok {
-					return nil, signal, nil
-				}
-				return nil, nil, err
-			}
-			if !ok {
-				value, signal, err := in.evalBlockValue(s.Fallback, fallbackEnv, self, "unwrap else block must end with a value-producing statement")
-				if err != nil || signal != nil {
-					return nil, signal, err
-				}
-				return nil, returnSignal{value: value}, nil
-			}
-		}
-		return nil, nil, nil
 	case *parser.LetElseStmt:
 		fallbackEnv := cloneEnvShallow(local)
 		if len(s.Clauses) > 0 {
@@ -1241,7 +1180,7 @@ func (in *Interpreter) unwrappableBindingValue(sourceValue Value, local *env, sp
 			return true, unwrapped, nil
 		}
 		if value.class.Name != "Result" && value.class.Name != "Either" {
-			return false, nil, RuntimeError{Message: "unwrap binding requires Option[T], Result[T, E], or Either[L, R]", Span: span}
+			return false, nil, RuntimeError{Message: "success binding requires Option[T], Result[T, E], or Either[L, R]", Span: span}
 		}
 		if value.class.Name == "Either" {
 			isRightValue, err := in.invokeMethod(value, "isRight", nil, local, span)
@@ -1278,7 +1217,7 @@ func (in *Interpreter) unwrappableBindingValue(sourceValue Value, local *env, sp
 		}
 		return true, unwrapped, nil
 	default:
-		return false, nil, RuntimeError{Message: "unwrap binding requires Option[T], Result[T, E], or Either[L, R]", Span: span}
+		return false, nil, RuntimeError{Message: "success binding requires Option[T], Result[T, E], or Either[L, R]", Span: span}
 	}
 }
 
@@ -1491,35 +1430,6 @@ func (in *Interpreter) evalStmtValue(stmt parser.Statement, local *env, self *in
 	default:
 		return nil, nil, RuntimeError{Message: message, Span: stmtSpan(stmt)}
 	}
-}
-
-func (in *Interpreter) execUnwrapBinding(bindings []parser.Binding, expr parser.Expr, span parser.Span, local *env) (bool, Value, error) {
-	sourceValue, err := in.evalExpr(expr, local)
-	if err != nil {
-		return false, nil, err
-	}
-	ok, unwrapped, err := in.unwrappableBindingValue(sourceValue, local, exprSpan(expr))
-	if err != nil {
-		return false, nil, err
-	}
-	if !ok {
-		return false, sourceValue, nil
-	}
-	values, err := in.destructureBoundValue(bindings, unwrapped, span)
-	if err != nil {
-		return false, nil, err
-	}
-	for i, binding := range bindings {
-		if binding.Name == "_" {
-			continue
-		}
-		var value Value
-		if i < len(values) {
-			value = in.coerceValueForBinding(binding.Type, values[i])
-		}
-		local.define(binding.Name, value, false)
-	}
-	return true, nil, nil
 }
 
 func (in *Interpreter) evalIfStmtValue(s *parser.IfStmt, local *env, self *instance, message string) (Value, any, error) {

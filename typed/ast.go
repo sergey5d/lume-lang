@@ -187,46 +187,6 @@ type BindingStmt struct {
 func (*BindingStmt) stmtNode()              {}
 func (s *BindingStmt) GetSpan() parser.Span { return s.Span }
 
-// UnwrapStmt is a typed short-circuit extraction statement.
-type UnwrapStmt struct {
-	Bindings []BindingDecl
-	Value    Expr
-	Span     parser.Span
-}
-
-func (*UnwrapStmt) stmtNode()              {}
-func (s *UnwrapStmt) GetSpan() parser.Span { return s.Span }
-
-// UnwrapBlockStmt is a typed block unwrap with sequential short-circuit clauses.
-type UnwrapBlockStmt struct {
-	Clauses []*UnwrapStmt
-	Span    parser.Span
-}
-
-func (*UnwrapBlockStmt) stmtNode()              {}
-func (s *UnwrapBlockStmt) GetSpan() parser.Span { return s.Span }
-
-// GuardStmt is a typed guarded unwrap statement with a fallback block.
-type GuardStmt struct {
-	Bindings []BindingDecl
-	Value    Expr
-	Fallback *BlockStmt
-	Span     parser.Span
-}
-
-func (*GuardStmt) stmtNode()              {}
-func (s *GuardStmt) GetSpan() parser.Span { return s.Span }
-
-// GuardBlockStmt is a typed block guard with sequential unwrap clauses and a fallback block.
-type GuardBlockStmt struct {
-	Clauses  []*UnwrapStmt
-	Fallback *BlockStmt
-	Span     parser.Span
-}
-
-func (*GuardBlockStmt) stmtNode()              {}
-func (s *GuardBlockStmt) GetSpan() parser.Span { return s.Span }
-
 // AssignmentStmt is a typed write to an assignment target.
 type AssignmentStmt struct {
 	Target   Expr
@@ -522,8 +482,8 @@ type MatchCase struct {
 type MatchExpr struct {
 	baseExpr
 	Partial bool
-	Value Expr
-	Cases []MatchCase
+	Value   Expr
+	Cases   []MatchCase
 }
 
 func (*MatchExpr) exprNode() {}

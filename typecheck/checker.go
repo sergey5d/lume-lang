@@ -1354,48 +1354,12 @@ func (c *Checker) checkStmt(stmt parser.Statement) {
 				c.define(bindingDecl.Name, declType, bindingDecl.Mutable)
 			}
 		}
-	case *parser.UnwrapStmt:
-		if len(c.returnTypes) == 0 {
-			c.addDiagnostic("invalid_unwrap", "unwrap binding used outside callable body", s.Span)
-			return
-		}
-		c.checkUnwrapBindings(s.Bindings, s.Value, s.Span, true, c.returnTypes[len(c.returnTypes)-1], "invalid_unwrap", "unwrap binding")
-	case *parser.UnwrapBlockStmt:
-		if len(c.returnTypes) == 0 {
-			c.addDiagnostic("invalid_unwrap", "unwrap used outside callable body", s.Span)
-			return
-		}
-		if len(s.Clauses) == 0 {
-			c.addDiagnostic("invalid_unwrap", "unwrap block must contain at least one '<-' binding", s.Span)
-		}
-		for _, clause := range s.Clauses {
-			c.checkUnwrapBindings(clause.Bindings, clause.Value, clause.Span, true, c.returnTypes[len(c.returnTypes)-1], "invalid_unwrap", "unwrap binding")
-		}
-	case *parser.GuardStmt:
-		if len(c.returnTypes) == 0 {
-			c.addDiagnostic("invalid_unwrap", "unwrap used outside callable body", s.Span)
-			return
-		}
-		c.checkUnwrapBindings(s.Bindings, s.Value, s.Span, false, nil, "invalid_unwrap", "unwrap binding")
-		c.checkGuardFallbackBlock(s.Fallback, c.returnTypes[len(c.returnTypes)-1])
-	case *parser.GuardBlockStmt:
-		if len(c.returnTypes) == 0 {
-			c.addDiagnostic("invalid_unwrap", "unwrap used outside callable body", s.Span)
-			return
-		}
-		c.checkGuardFallbackBlock(s.Fallback, c.returnTypes[len(c.returnTypes)-1])
-		if len(s.Clauses) == 0 {
-			c.addDiagnostic("invalid_unwrap", "unwrap block must contain at least one '<-' binding", s.Span)
-		}
-		for _, clause := range s.Clauses {
-			c.checkUnwrapBindings(clause.Bindings, clause.Value, clause.Span, false, nil, "invalid_unwrap", "unwrap binding")
-		}
 	case *parser.LetElseStmt:
 		if len(c.returnTypes) == 0 {
 			c.addDiagnostic("invalid_let_else", "let-else used outside callable body", s.Span)
 			return
 		}
-		c.checkGuardFallbackBlock(s.Fallback, c.returnTypes[len(c.returnTypes)-1])
+		c.checkLetElseFallbackBlock(s.Fallback, c.returnTypes[len(c.returnTypes)-1])
 		if len(s.Clauses) > 0 {
 			for _, clause := range s.Clauses {
 				valueType := c.checkExpr(clause.Value)
@@ -2247,9 +2211,9 @@ func (c *Checker) checkBlockResult(block *parser.BlockStmt, code, message string
 	return c.checkStmtResult(last, code, message)
 }
 
-func (c *Checker) checkGuardFallbackBlock(block *parser.BlockStmt, expected *Type) {
+func (c *Checker) checkLetElseFallbackBlock(block *parser.BlockStmt, expected *Type) {
 	if block == nil || len(block.Statements) == 0 {
-		c.addDiagnostic("invalid_unwrap", "unwrap else block must return a value", blockSpan(block))
+		c.addDiagnostic("invalid_let_else", "let else block must return a value", blockSpan(block))
 		return
 	}
 	for i := 0; i < len(block.Statements)-1; i++ {
@@ -2264,40 +2228,9 @@ func (c *Checker) checkGuardFallbackBlock(block *parser.BlockStmt, expected *Typ
 		c.checkStmt(brk)
 		return
 	}
-	valueType := c.checkStmtResultWithExpected(last, expected, "invalid_unwrap", "unwrap else block must end with a value-producing statement")
+	valueType := c.checkStmtResultWithExpected(last, expected, "invalid_let_else", "let else block must end with a value-producing statement")
 	if !isUnknown(expected) && !isUnknown(valueType) {
-		c.requireAssignable(valueType, expected, stmtSpan(last), "invalid_unwrap", "unwrap else block value must be assignable to "+expected.String())
-	}
-}
-
-func (c *Checker) checkUnwrapBindings(bindings []parser.Binding, value parser.Expr, span parser.Span, requireShortCircuit bool, returnType *Type, code, label string) {
-	sourceType := c.checkExpr(value)
-	successType, ok := c.unwrappableSuccessType(sourceType)
-	if !ok {
-		c.addDiagnostic(code, label+" requires Option[T], Result[T, E], or Either[L, R]", exprSpan(value))
-		successType = unknownType
-	}
-	if requireShortCircuit && returnType != nil && !c.shortCircuitCompatible(sourceType, returnType) {
-		c.addDiagnostic(code, label+" requires function return type compatible with "+sourceType.String(), span)
-	}
-	bindingTypes := []*Type{successType}
-	if len(bindings) > 1 {
-		bindingTypes = c.destructureValueTypes(len(bindings), successType, span, "invalid_binding_count", label)
-	}
-	for i, bindingDecl := range bindings {
-		if bindingDecl.Name == "_" {
-			continue
-		}
-		bindingType := unknownType
-		if i < len(bindingTypes) && bindingTypes[i] != nil {
-			bindingType = bindingTypes[i]
-		}
-		if bindingDecl.Type != nil {
-			declType := c.resolveDeclaredType(bindingDecl.Type)
-			c.requireAssignable(bindingType, declType, bindingDecl.Span, "type_mismatch", "cannot assign "+bindingType.String()+" to "+declType.String())
-			bindingType = declType
-		}
-		c.define(bindingDecl.Name, bindingType, false)
+		c.requireAssignable(valueType, expected, stmtSpan(last), "invalid_let_else", "let else block value must be assignable to "+expected.String())
 	}
 }
 

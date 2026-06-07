@@ -347,15 +347,6 @@ fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: 
         }
         ast::Stmt::Break(_) => {}
         ast::Stmt::Expr(stmt) => rewrite_expr_for_runtime(&mut stmt.expr, module, graph),
-        ast::Stmt::Unwrap(stmt) => rewrite_unwrap_stmt_for_runtime(stmt, module, graph),
-        ast::Stmt::UnwrapBlock(stmt) => {
-            for clause in &mut stmt.clauses {
-                rewrite_unwrap_stmt_for_runtime(clause, module, graph);
-            }
-            if let Some(block) = &mut stmt.else_block {
-                rewrite_block_for_runtime(block, module, graph);
-            }
-        }
         ast::Stmt::LocalFunction(function) => rewrite_function_for_runtime(function, module, graph),
     }
 }
@@ -396,22 +387,6 @@ fn rewrite_if_stmt_for_runtime(stmt: &mut ast::IfStmt, module: &LoadedModule, gr
     rewrite_block_for_runtime(&mut stmt.then_block, module, graph);
     if let Some(branch) = &mut stmt.else_branch {
         rewrite_else_branch_for_runtime(branch, module, graph);
-    }
-}
-
-fn rewrite_unwrap_stmt_for_runtime(
-    stmt: &mut ast::UnwrapStmt,
-    module: &LoadedModule,
-    graph: &ModuleGraph,
-) {
-    for binding in &mut stmt.bindings {
-        if let Some(ty) = &mut binding.ty {
-            rewrite_type_ref_for_runtime(ty, module);
-        }
-    }
-    rewrite_expr_for_runtime(&mut stmt.value, module, graph);
-    if let Some(block) = &mut stmt.else_block {
-        rewrite_block_for_runtime(block, module, graph);
     }
 }
 
@@ -4433,8 +4408,8 @@ $name
                 OS.println(match pair {
                     case PairBox(left, right) => left + right
                 })
-                unwrap first <- partialMapped.get(0) else ()
-                unwrap second <- partialMapped.get(1) else ()
+                let Some(first) = partialMapped.get(0) else ()
+                let Some(second) = partialMapped.get(1) else ()
                 OS.println(first.getOr(0))
                 OS.println(second.isEmpty())
             }
