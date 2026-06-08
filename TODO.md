@@ -33,12 +33,6 @@ enum MyConstant {
 
 ## Syntax Follow-Ups
 
-- Add `continue`.
-  - Main questions:
-    - whether `continue` should be valid in both `for` and `while`
-    - whether `continue` inside `for ... yield` should be allowed at all
-    - what the parser/runtime diagnostics should say when used outside a loop
-
 - Consider block-style trailing lambda syntax for call sites that take a function parameter.
   - Example target shape:
 

@@ -47,6 +47,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Keyword(Keyword::Return) => self.parse_return_stmt().map(Stmt::Return),
             TokenKind::Keyword(Keyword::Break) => self.parse_break_stmt().map(Stmt::Break),
+            TokenKind::Keyword(Keyword::Continue) => self.parse_continue_stmt().map(Stmt::Continue),
             _ => {
                 if let Some(binding) = self.try_parse_binding_stmt() {
                     return Some(Stmt::Binding(binding));
@@ -569,5 +570,10 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_break_stmt(&mut self) -> Option<BreakStmt> {
         let span = self.consume_keyword(Keyword::Break, "expected 'break'")?;
         Some(BreakStmt { span })
+    }
+
+    pub(super) fn parse_continue_stmt(&mut self) -> Option<ContinueStmt> {
+        let span = self.consume_keyword(Keyword::Continue, "expected 'continue'")?;
+        Some(ContinueStmt { span })
     }
 }

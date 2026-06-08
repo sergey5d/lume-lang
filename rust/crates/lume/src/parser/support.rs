@@ -317,6 +317,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Partial) => "PARTIAL",
             TokenKind::Keyword(Keyword::For) => "FOR",
             TokenKind::Keyword(Keyword::Yield) => "YIELD",
+            TokenKind::Keyword(Keyword::Continue) => "CONTINUE",
             TokenKind::Keyword(Keyword::Def) => "DEF",
             TokenKind::Keyword(Keyword::Class) => "CLASS",
             TokenKind::Keyword(Keyword::Record) => "RECORD",

@@ -57,6 +57,7 @@ func Build(program *parser.Program, info typecheck.Result) (*Program, error) {
 		fors:             &forStmtBuilder{ctx: ctx, exprs: exprs, blocks: blocks, types: typeRefs},
 		returns:          &returnStmtBuilder{exprs: exprs},
 		breaks:           &breakStmtBuilder{},
+		continues:        &continueStmtBuilder{},
 		exprs:            &exprStmtBuilder{exprs: exprs},
 	}
 	blocks.stmts = stmts

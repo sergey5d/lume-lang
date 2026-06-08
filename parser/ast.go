@@ -359,6 +359,13 @@ type BreakStmt struct {
 
 func (*BreakStmt) statementNode() {}
 
+// ContinueStmt skips to the next iteration of the nearest loop.
+type ContinueStmt struct {
+	Span Span `json:"span"`
+}
+
+func (*ContinueStmt) statementNode() {}
+
 // ExprStmt wraps an expression used as a statement.
 type ExprStmt struct {
 	Expr Expr `json:"expr"`

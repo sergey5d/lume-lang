@@ -7,6 +7,7 @@ use crate::{
 pub enum Keyword {
     As,
     Break,
+    Continue,
     Case,
     Class,
     Def,
@@ -285,6 +286,7 @@ impl<'a> Lexer<'a> {
         let kind = match lexeme.as_str() {
             "as" => TokenKind::Keyword(Keyword::As),
             "break" => TokenKind::Keyword(Keyword::Break),
+            "continue" => TokenKind::Keyword(Keyword::Continue),
             "case" => TokenKind::Keyword(Keyword::Case),
             "class" => TokenKind::Keyword(Keyword::Class),
             "def" => TokenKind::Keyword(Keyword::Def),

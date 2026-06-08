@@ -1112,6 +1112,16 @@ impl<'a> Checker<'a> {
                 }
                 Ty::unit()
             }
+            Stmt::Continue(continue_stmt) => {
+                if self.loop_depth == 0 {
+                    self.add_error(
+                        "invalid_continue",
+                        "continue used outside of a loop",
+                        continue_stmt.span,
+                    );
+                }
+                Ty::unit()
+            }
             Stmt::Expr(expr_stmt) => self.check_expr(&expr_stmt.expr),
             Stmt::LocalFunction(function) => {
                 let sig = function_sig_from_function(function, &[]);
@@ -4034,6 +4044,7 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
             .as_ref()
             .is_some_and(|expr| contains_placeholder_expr(expr)),
         Stmt::Break(_) => false,
+        Stmt::Continue(_) => false,
     }
 }
 

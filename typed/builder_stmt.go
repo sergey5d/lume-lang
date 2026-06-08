@@ -17,6 +17,7 @@ type stmtBuilder struct {
 	fors             Builder[*parser.ForStmt, Stmt]
 	returns          Builder[*parser.ReturnStmt, Stmt]
 	breaks           Builder[*parser.BreakStmt, Stmt]
+	continues        Builder[*parser.ContinueStmt, Stmt]
 	exprs            Builder[*parser.ExprStmt, Stmt]
 }
 
@@ -41,6 +42,8 @@ func (b *stmtBuilder) Build(stmt parser.Statement) (Stmt, error) {
 		return b.returns.Build(s)
 	case *parser.BreakStmt:
 		return b.breaks.Build(s)
+	case *parser.ContinueStmt:
+		return b.continues.Build(s)
 	case *parser.ExprStmt:
 		return b.exprs.Build(s)
 	default:

@@ -481,6 +481,7 @@ struct FunctionLowerer<'a> {
     closure_captures: Vec<ir::Operand>,
     this_local: Option<ir::LocalId>,
     loop_exits: Vec<ir::BlockId>,
+    loop_continues: Vec<ir::BlockId>,
     current_block: Option<ir::BlockId>,
 }
 
@@ -564,6 +565,7 @@ impl<'a> FunctionLowerer<'a> {
             closure_captures: Vec::new(),
             this_local: None,
             loop_exits: Vec::new(),
+            loop_continues: Vec::new(),
             current_block: Some(entry),
         };
         if let Some(first) = this.function().locals.first() {
@@ -824,6 +826,16 @@ impl<'a> FunctionLowerer<'a> {
                     });
                 } else {
                     self.invariant("break should be rejected before lowering", stmt.span);
+                }
+            }
+            Stmt::Continue(stmt) => {
+                if let Some(target) = self.loop_continues.last().copied() {
+                    self.terminate(ir::Terminator {
+                        span: Some(stmt.span),
+                        kind: ir::TerminatorKind::Goto(target),
+                    });
+                } else {
+                    self.invariant("continue should be rejected before lowering", stmt.span);
                 }
             }
             Stmt::Expr(expr) => {
@@ -1549,12 +1561,14 @@ impl<'a> FunctionLowerer<'a> {
         });
 
         self.loop_exits.push(exit_block);
+        self.loop_continues.push(cond_block);
         self.current_block = Some(body_block);
         self.lower_block_statements(&stmt.body);
         if self.current_block.is_some() {
             self.terminate(ir::Terminator::goto(cond_block));
         }
         self.loop_exits.pop();
+        self.loop_continues.pop();
 
         self.current_block = Some(exit_block);
     }
@@ -1565,12 +1579,14 @@ impl<'a> FunctionLowerer<'a> {
             let exit_block = self.add_block();
             self.terminate(ir::Terminator::goto(body_block));
             self.loop_exits.push(exit_block);
+            self.loop_continues.push(body_block);
             self.current_block = Some(body_block);
             self.lower_block_statements(&stmt.body);
             if self.current_block.is_some() {
                 self.terminate(ir::Terminator::goto(body_block));
             }
             self.loop_exits.pop();
+            self.loop_continues.pop();
             self.current_block = Some(exit_block);
             return;
         }
@@ -1601,6 +1617,7 @@ impl<'a> FunctionLowerer<'a> {
             let exit_block = self.add_block();
             self.terminate(ir::Terminator::goto(body_block));
             self.loop_exits.push(exit_block);
+            self.loop_continues.push(body_block);
             self.current_block = Some(body_block);
             let yielded = self
                 .lower_block_value(yield_body)
@@ -1622,6 +1639,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.terminate(ir::Terminator::goto(body_block));
             }
             self.loop_exits.pop();
+            self.loop_continues.pop();
             self.current_block = Some(exit_block);
             return ir::Operand::Copy(Box::new(ir::Place::Local(result)));
         }
@@ -1741,6 +1759,7 @@ impl<'a> FunctionLowerer<'a> {
         });
 
         self.loop_exits.push(exit_block);
+        self.loop_continues.push(cond_block);
         self.current_block = Some(body_block);
         self.push_scope();
         let item = self.emit_temp_from_rvalue(
@@ -1758,6 +1777,7 @@ impl<'a> FunctionLowerer<'a> {
             self.terminate(ir::Terminator::goto(cond_block));
         }
         self.loop_exits.pop();
+        self.loop_continues.pop();
         self.current_block = Some(exit_block);
     }
 
@@ -3851,6 +3871,7 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
             span: stmt.span,
         }),
         Stmt::Break(stmt) => Stmt::Break(stmt.clone()),
+        Stmt::Continue(stmt) => Stmt::Continue(stmt.clone()),
         Stmt::Expr(stmt) => Stmt::Expr(ast::ExprStmt {
             expr: rewrite_placeholder_expr(&stmt.expr, name),
             span: stmt.span,
@@ -3958,6 +3979,7 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
         }
         Stmt::Return(stmt) => stmt.value.as_ref().is_some_and(contains_placeholder_expr),
         Stmt::Break(_) => false,
+        Stmt::Continue(_) => false,
         Stmt::Expr(stmt) => contains_placeholder_expr(&stmt.expr),
         Stmt::LetElse(stmt) => {
             stmt.clauses

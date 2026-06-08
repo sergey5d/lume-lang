@@ -1265,6 +1265,15 @@ impl<'a> Resolver<'a> {
                     );
                 }
             }
+            Stmt::Continue(continue_stmt) => {
+                if self.loop_depth == 0 {
+                    self.add_error(
+                        "invalid_continue",
+                        "continue used outside of a loop",
+                        continue_stmt.span,
+                    );
+                }
+            }
             Stmt::Expr(ExprStmt { expr, .. }) => self.resolve_expr(expr),
             Stmt::LocalFunction(function) => {
                 self.define_value(

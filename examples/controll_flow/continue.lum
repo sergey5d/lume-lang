@@ -1,0 +1,43 @@
+# EXPECT:
+# while 1
+# while 3
+# for 10
+# for 30
+# yielded 2
+# yielded 6
+# 0
+
+def main() Int {
+    var current Int = 0
+
+    while current < 4 {
+        current += 1
+        if current == 2 {
+            continue
+        }
+        if current == 4 {
+            break
+        }
+        OS.println("while " + current)
+    }
+
+    for item <- [10, 20, 30] {
+        if item == 20 {
+            continue
+        }
+        OS.println("for " + item)
+    }
+
+    doubled = for item <- [1, 2, 3] yield {
+        if item == 2 {
+            continue
+        }
+        item * 2
+    }
+
+    for value <- doubled {
+        OS.println("yielded " + value)
+    }
+
+    0
+}

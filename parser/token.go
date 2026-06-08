@@ -45,6 +45,7 @@ const (
 	TokenYield     TokenType = "YIELD"
 	TokenReturn    TokenType = "RETURN"
 	TokenBreak     TokenType = "BREAK"
+	TokenContinue  TokenType = "CONTINUE"
 
 	TokenLParen   TokenType = "("
 	TokenRParen   TokenType = ")"
@@ -115,8 +116,8 @@ var keywords = map[string]TokenType{
 	"enum":      TokenEnum,
 	"case":      TokenCase,
 	"with":      TokenWith,
-	"hidden":      TokenPrivate,
-	"public":       TokenPub,
+	"hidden":    TokenPrivate,
+	"public":    TokenPub,
 	"var":       TokenVar,
 	"let":       TokenLet,
 	"if":        TokenIf,
@@ -131,6 +132,7 @@ var keywords = map[string]TokenType{
 	"yield":     TokenYield,
 	"return":    TokenReturn,
 	"break":     TokenBreak,
+	"continue":  TokenContinue,
 	"true":      TokenBool,
 	"false":     TokenBool,
 }

@@ -55,6 +55,9 @@ func (p *Parser) parseStatement() (Statement, error) {
 	case TokenBreak:
 		token := p.advance()
 		return &BreakStmt{Span: tokenSpan(token)}, nil
+	case TokenContinue:
+		token := p.advance()
+		return &ContinueStmt{Span: tokenSpan(token)}, nil
 	default:
 		if p.isBareBindingStart() {
 			return p.parseBareBindingStmt()

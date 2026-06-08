@@ -31,6 +31,8 @@ func (l *Lowerer) lowerStmt(stmt typed.Stmt) ([]Stmt, error) {
 		return l.lowerReturnStmt(s)
 	case *typed.BreakStmt:
 		return l.lowerBreakStmt(s)
+	case *typed.ContinueStmt:
+		return l.lowerContinueStmt(s)
 	case *typed.ExprStmt:
 		return l.lowerExprStmt(s)
 	default:
@@ -106,6 +108,10 @@ func (l *Lowerer) lowerReturnStmt(stmt *typed.ReturnStmt) ([]Stmt, error) {
 
 func (l *Lowerer) lowerBreakStmt(_ *typed.BreakStmt) ([]Stmt, error) {
 	return []Stmt{&Break{}}, nil
+}
+
+func (l *Lowerer) lowerContinueStmt(_ *typed.ContinueStmt) ([]Stmt, error) {
+	return []Stmt{&Continue{}}, nil
 }
 
 func (l *Lowerer) lowerExprStmt(stmt *typed.ExprStmt) ([]Stmt, error) {

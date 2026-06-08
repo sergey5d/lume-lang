@@ -269,6 +269,14 @@ type BreakStmt struct {
 func (*BreakStmt) stmtNode()              {}
 func (s *BreakStmt) GetSpan() parser.Span { return s.Span }
 
+// ContinueStmt skips to the next iteration of the nearest loop in the typed tree.
+type ContinueStmt struct {
+	Span parser.Span
+}
+
+func (*ContinueStmt) stmtNode()              {}
+func (s *ContinueStmt) GetSpan() parser.Span { return s.Span }
+
 // ExprStmt wraps a typed expression used for side effects.
 type ExprStmt struct {
 	Expr Expr

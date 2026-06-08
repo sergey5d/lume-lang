@@ -244,6 +244,7 @@ pub enum Stmt {
     LetElse(LetElseStmt),
     Return(ReturnStmt),
     Break(BreakStmt),
+    Continue(ContinueStmt),
     Expr(ExprStmt),
     LocalFunction(FunctionDecl),
 }
@@ -260,6 +261,7 @@ impl Stmt {
             Stmt::LetElse(stmt) => stmt.span,
             Stmt::Return(stmt) => stmt.span,
             Stmt::Break(stmt) => stmt.span,
+            Stmt::Continue(stmt) => stmt.span,
             Stmt::Expr(stmt) => stmt.span,
             Stmt::LocalFunction(function) => function.span,
         }
@@ -415,6 +417,12 @@ pub struct ReturnStmt {
 /// A `break` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BreakStmt {
+    pub span: Span,
+}
+
+/// A `continue` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContinueStmt {
     pub span: Span,
 }
 

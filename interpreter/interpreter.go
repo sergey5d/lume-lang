@@ -133,6 +133,7 @@ func (t trySignal) Error() string {
 }
 
 type breakSignal struct{}
+type continueSignal struct{}
 
 func signalToTryError(signal any) error {
 	if ret, ok := signal.(returnSignal); ok {
@@ -902,6 +903,8 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 		return nil, returnSignal{value: value}, nil
 	case *parser.BreakStmt:
 		return nil, breakSignal{}, nil
+	case *parser.ContinueStmt:
+		return nil, continueSignal{}, nil
 	case *parser.ExprStmt:
 		value, err := in.evalExpr(s.Expr, local)
 		if err != nil {
@@ -1259,6 +1262,8 @@ func (in *Interpreter) execFor(stmt *parser.ForStmt, local *env, self *instance)
 			return &nativeList{items: yielded}, nil, nil
 		case breakSignal:
 			return &nativeList{items: yielded}, nil, nil
+		case continueSignal:
+			return &nativeList{items: yielded}, nil, nil
 		default:
 			return nil, signal, nil
 		}
@@ -1274,7 +1279,7 @@ func (in *Interpreter) execFor(stmt *parser.ForStmt, local *env, self *instance)
 		return nil, nil, err
 	}
 	switch signal.(type) {
-	case nil, breakSignal:
+	case nil, breakSignal, continueSignal:
 		return nil, nil, nil
 	default:
 		return nil, signal, nil
@@ -1306,6 +1311,8 @@ func (in *Interpreter) execWhile(stmt *parser.WhileStmt, local *env, self *insta
 		}
 		switch signal.(type) {
 		case nil:
+		case continueSignal:
+			continue
 		case breakSignal:
 			return nil, nil, nil
 		default:
@@ -1363,6 +1370,8 @@ func (in *Interpreter) execForBindings(bindings []parser.ForBinding, index int, 
 		}
 		switch signal.(type) {
 		case nil:
+		case continueSignal:
+			continue
 		case breakSignal:
 			return breakSignal{}, nil
 		default:
@@ -1423,6 +1432,8 @@ func (in *Interpreter) evalStmtValue(stmt parser.Statement, local *env, self *in
 		}
 		return nil, nil, RuntimeError{Message: message, Span: stmtSpan(stmt)}
 	case *parser.BreakStmt:
+		return in.execStmt(s, local, self)
+	case *parser.ContinueStmt:
 		return in.execStmt(s, local, self)
 	case *parser.ReturnStmt:
 		value, signal, err := in.execStmt(s, local, self)
@@ -4520,6 +4531,8 @@ func stmtSpan(stmt parser.Statement) parser.Span {
 	case *parser.ReturnStmt:
 		return s.Span
 	case *parser.BreakStmt:
+		return s.Span
+	case *parser.ContinueStmt:
 		return s.Span
 	case *parser.ExprStmt:
 		return s.Span

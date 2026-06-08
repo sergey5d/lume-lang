@@ -137,6 +137,8 @@ func stmtSpan(stmt Statement) Span {
 		return s.Span
 	case *BreakStmt:
 		return s.Span
+	case *ContinueStmt:
+		return s.Span
 	case *ExprStmt:
 		return s.Span
 	default:

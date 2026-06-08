@@ -346,6 +346,7 @@ fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: 
             }
         }
         ast::Stmt::Break(_) => {}
+        ast::Stmt::Continue(_) => {}
         ast::Stmt::Expr(stmt) => rewrite_expr_for_runtime(&mut stmt.expr, module, graph),
         ast::Stmt::LocalFunction(function) => rewrite_function_for_runtime(function, module, graph),
     }

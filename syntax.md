@@ -738,6 +738,7 @@ Main statement forms:
 - `while`
 - `return`
 - `break`
+- `continue`
 - expression statement
 
 Pure expression statements with no effect are rejected.
@@ -928,6 +929,10 @@ items = for item <- [1, 2, 3] yield item * 2
 
 `for` clauses in the block form may also include local `=` and `:=` bindings.
 
+`continue` is valid in `while`, `for`, and `for ... yield`.
+Inside `for ... yield`, it skips the current iteration without producing a
+value.
+
 Condition-controlled loops use `while`:
 
 ```txt
@@ -943,6 +948,17 @@ while true {
     if done {
         break
     }
+}
+```
+
+Skipping to the next iteration:
+
+```txt
+for item <- [1, 2, 3] {
+    if item == 2 {
+        continue
+    }
+    OS.println(item)
 }
 ```
 

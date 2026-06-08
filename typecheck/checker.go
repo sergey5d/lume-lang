@@ -86,6 +86,7 @@ type Checker struct {
 	importedInterfaces     map[string]interfaceInfo
 	importedInterfaceNames map[string]string
 	returnTypes            []*Type
+	loopDepth              int
 	exprTypes              map[parser.Expr]*Type
 	currentClass           *parser.ClassDecl
 	currentMethod          *parser.MethodDecl
@@ -1515,21 +1516,25 @@ func (c *Checker) checkStmt(stmt parser.Statement) {
 		c.pushScope()
 		condType := c.checkExpr(s.Condition)
 		c.requireAssignable(condType, builtin("Bool"), exprSpan(s.Condition), "invalid_condition_type", "while condition must be Bool")
+		c.loopDepth++
 		if s.Body != nil {
 			c.checkBlockStatements(s.Body.Statements, false)
 		}
+		c.loopDepth--
 		c.popScope()
 	case *parser.ForStmt:
 		c.pushScope()
 		for _, binding := range s.Bindings {
 			c.checkForClause(binding)
 		}
+		c.loopDepth++
 		if s.Body != nil {
 			c.checkBlockStatements(s.Body.Statements, false)
 		}
 		if s.YieldBody != nil {
 			c.checkBlockStatements(s.YieldBody.Statements, true)
 		}
+		c.loopDepth--
 		c.popScope()
 	case *parser.ReturnStmt:
 		if len(c.returnTypes) == 0 {
@@ -1549,6 +1554,14 @@ func (c *Checker) checkStmt(stmt parser.Statement) {
 		}
 		if !isUnknown(expected) {
 			c.requireAssignable(valueType, expected, s.Span, "invalid_return_type", "cannot return "+valueType.String()+" from function returning "+expected.String())
+		}
+	case *parser.BreakStmt:
+		if c.loopDepth == 0 {
+			c.addDiagnostic("invalid_break", "break used outside of a loop", s.Span)
+		}
+	case *parser.ContinueStmt:
+		if c.loopDepth == 0 {
+			c.addDiagnostic("invalid_continue", "continue used outside of a loop", s.Span)
 		}
 	case *parser.ExprStmt:
 		before := len(c.diagnostics)
@@ -2219,6 +2232,10 @@ func (c *Checker) checkLetElseFallbackBlock(block *parser.BlockStmt, expected *T
 		c.checkStmt(brk)
 		return
 	}
+	if cont, ok := last.(*parser.ContinueStmt); ok {
+		c.checkStmt(cont)
+		return
+	}
 	valueType := c.checkStmtResultWithExpected(last, expected, "invalid_let_else", "let else block must end with a value-producing statement")
 	if !isUnknown(expected) && !isUnknown(valueType) {
 		c.requireAssignable(valueType, expected, stmtSpan(last), "invalid_let_else", "let else block value must be assignable to "+expected.String())
@@ -2384,7 +2401,9 @@ func (c *Checker) checkForStmtResult(s *parser.ForStmt, code, message string) *T
 	for _, binding := range s.Bindings {
 		c.checkForClause(binding)
 	}
+	c.loopDepth++
 	yieldType := c.checkBlockResult(s.YieldBody, code, message)
+	c.loopDepth--
 	c.popScope()
 	return &Type{Kind: TypeInterface, Name: "List", Args: []*Type{yieldType}}
 }
@@ -2612,7 +2631,9 @@ func (c *Checker) checkExprWithExpected(expr parser.Expr, expected *Type) *Type 
 		for _, binding := range e.Bindings {
 			c.checkForClause(binding)
 		}
+		c.loopDepth++
 		yieldType := c.checkBlockResult(e.YieldBody, "invalid_yield_expression", "yield body must end with an expression")
+		c.loopDepth--
 		c.popScope()
 		result = &Type{Kind: TypeInterface, Name: "List", Args: []*Type{yieldType}}
 	case *parser.LambdaExpr:
@@ -6295,6 +6316,8 @@ func stmtSpan(stmt parser.Statement) parser.Span {
 	case *parser.ReturnStmt:
 		return s.Span
 	case *parser.BreakStmt:
+		return s.Span
+	case *parser.ContinueStmt:
 		return s.Span
 	case *parser.ExprStmt:
 		return s.Span

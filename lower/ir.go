@@ -121,6 +121,10 @@ type Break struct{}
 
 func (*Break) stmtNode() {}
 
+type Continue struct{}
+
+func (*Continue) stmtNode() {}
+
 type ExprStmt struct {
 	Expr Expr
 }
