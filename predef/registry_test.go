@@ -58,8 +58,8 @@ func TestLoadRegistry(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Tuple2 descriptor to be loaded")
 	}
-	if tuple2.Kind != KindRecord {
-		t.Fatalf("expected Tuple2 to be a record, got %s", tuple2.Kind)
+	if tuple2.Kind != KindClass {
+		t.Fatalf("expected Tuple2 to be a class, got %s", tuple2.Kind)
 	}
 	if len(tuple2.Fields) != 2 {
 		t.Fatalf("expected Tuple2 to expose 2 fields, got %#v", tuple2.Fields)

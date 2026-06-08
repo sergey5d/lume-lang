@@ -1,7 +1,7 @@
 # EXPECT:
 # list
 # class
-# record
+# class
 # interface
 # named Zoe
 # 0
@@ -18,7 +18,7 @@ impl Worker {
     def label() Str = name
 }
 
-record Amount {
+class Amount {
     count Int
     label Str
 }
@@ -37,7 +37,7 @@ def describeClass(value Worker) {
 
 def describeRecord(value Amount) {
     match value {
-        case _ Amount => OS.println("record")
+        case _ Amount => OS.println("class")
     }
 }
 

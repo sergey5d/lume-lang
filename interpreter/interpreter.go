@@ -2039,13 +2039,11 @@ func (in *Interpreter) evalExpr(expr parser.Expr, local *env) (Value, error) {
 		}
 		record, ok := receiver.(*instance)
 		if !ok || record.class.Object || record.class.Enum {
-			return nil, RuntimeError{Message: "update requires a record or class value", Span: e.Span}
+			return nil, RuntimeError{Message: "update requires a class or anonymous record value", Span: e.Span}
 		}
-		if !record.class.Record {
-			for _, field := range record.class.Fields {
-				if field.Private {
-					return nil, RuntimeError{Message: "class update requires a class without private fields", Span: e.Span}
-				}
+		for _, field := range record.class.Fields {
+			if field.Private {
+				return nil, RuntimeError{Message: "class update requires a class without private fields", Span: e.Span}
 			}
 		}
 		copyFields := make(map[string]Value, len(record.fields))
@@ -2208,7 +2206,7 @@ func (in *Interpreter) evalCall(call *parser.CallExpr, local *env) (Value, error
 		if len(ordered) == 1 {
 			if record, ok := ordered[0].(*nativeRecord); ok {
 				if !fn.module.recordMatchesVisibleClassShape(class, record) {
-					return nil, RuntimeError{Message: "class/record '" + class.Name + "' requires an anonymous record with exactly matching field names and types", Span: call.Span}
+					return nil, RuntimeError{Message: "class '" + class.Name + "' requires an anonymous record with exactly matching field names and types", Span: call.Span}
 				}
 				return fn.module.construct(class, ordered, local)
 			}
@@ -2705,7 +2703,7 @@ func (in *Interpreter) evalMember(receiver Value, expr *parser.MemberExpr) (Valu
 		}
 		return nil, RuntimeError{Message: "unknown member '" + expr.Name + "'", Span: expr.Span}
 	default:
-		return nil, RuntimeError{Message: "member access expects class or record instance", Span: expr.Span}
+		return nil, RuntimeError{Message: "member access expects class or anonymous record instance", Span: expr.Span}
 	}
 }
 

@@ -923,11 +923,11 @@ func TestParseExtendedImportForms(t *testing.T) {
 
 func TestParseAnnotations(t *testing.T) {
 	src := `
-record Tag {
+class Tag {
 	name Str
 }
 
-record Route {
+class Route {
 	path Str
 }
 
@@ -1494,7 +1494,7 @@ solidWork = SolidWork(1, false)
 	}
 }
 
-func TestParseRecordDecl(t *testing.T) {
+func TestParseNamedRecordDeclRejected(t *testing.T) {
 	src := `
 record Amount {
 	amount Int
@@ -1506,15 +1506,10 @@ impl Amount {
 }
 `
 
-	program, err := Parse(src)
-	if err != nil {
-		t.Fatalf("Parse returned error: %v", err)
-	}
-	if len(program.Classes) != 1 {
-		t.Fatalf("expected 1 aggregate decl, got %d", len(program.Classes))
-	}
-	if !program.Classes[0].Record {
-		t.Fatalf("expected declaration to be marked as record")
+	if _, err := Parse(src); err == nil {
+		t.Fatalf("expected named record declaration to be rejected")
+	} else if !strings.Contains(err.Error(), "named 'record' declarations were removed; use 'class'") {
+		t.Fatalf("unexpected parse error: %v", err)
 	}
 }
 
@@ -1856,7 +1851,7 @@ interface Hopper {
 
 func TestParseRecordUpdateExpr(t *testing.T) {
 	src := `
-record Amount {
+class Amount {
 	amount Int
 	description Str
 }

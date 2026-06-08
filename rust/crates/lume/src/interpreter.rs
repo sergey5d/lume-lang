@@ -4377,7 +4377,7 @@ $name
     fn runs_match_patterns_for_records_classes_and_partial_enums() {
         let program = lower_inline(
             r#"
-            record Amount {
+            class Amount {
                 count Int
                 label Str
             }
@@ -4425,7 +4425,7 @@ $name
     fn runs_global_record_updates_through_synthetic_initializer() {
         let program = lower_inline(
             r#"
-            record Amount {
+            class Amount {
                 amount Int
                 description Str
                 count Int
@@ -4469,7 +4469,7 @@ $name
                 size Int
             }
 
-            record Amount {
+            class Amount {
                 count Int
                 label Str
             }

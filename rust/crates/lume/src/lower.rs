@@ -4125,7 +4125,7 @@ mod tests {
     fn lowers_local_functions_lambdas_record_updates_and_placeholders() {
         let program = parse_inline(
             r#"
-            record Amount {
+            class Amount {
                 amount Int
                 description Str
             }

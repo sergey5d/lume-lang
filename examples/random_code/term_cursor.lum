@@ -24,7 +24,7 @@
 # document: 7
 # 0
 
-record Location {
+class Location {
     docId Int
     position Int
 }

@@ -1,11 +1,11 @@
 # EXPECT:
 # ok
 
-record Tag {
+class Tag {
     name Str
 }
 
-record Route {
+class Route {
     path Str
 }
 

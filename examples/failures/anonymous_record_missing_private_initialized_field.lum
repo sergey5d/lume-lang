@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# no_matching_overload at .*: class/record 'MixedProfile' requires an anonymous record with exactly matching field names and types
+# no_matching_overload at .*: class 'MixedProfile' requires an anonymous record with exactly matching field names and types
 
 class MixedProfile {
     name Str

@@ -131,12 +131,12 @@ Built-in `OS` methods are imported implicitly in every file, so `print(...)`, `p
 
 ## Top-Level Declarations
 
-Annotations use `@` followed by a normal constructor call, typically for a record type. They are parsed and attached to declarations and members as metadata.
+Annotations use `@` followed by a normal constructor call, typically for a class type. They are parsed and attached to declarations and members as metadata.
 
 Examples:
 
 ```txt
-record Route {
+class Route {
     path Str
 }
 
@@ -149,7 +149,7 @@ def health2() Str = "ok"
 
 Supported targets currently include:
 
-- top-level `def`, `class`, `object`, `record`, `enum`, `interface`
+- top-level `def`, `class`, `object`, `enum`, `interface`
 - fields
 - methods
 - interface methods
@@ -169,7 +169,6 @@ Top-level forms:
 - `interface`
 - `class`
 - `object`
-- `record`
 - `enum`
 - `public def`
 - `public name Type = expr`
@@ -177,7 +176,6 @@ Top-level forms:
 - `hidden interface`
 - `hidden class`
 - `hidden object`
-- `hidden record`
 - `hidden enum`
 
 Examples:
@@ -197,7 +195,7 @@ object Counter {
     var count Int = 0
 }
 
-record Amount {
+class Amount {
     value Int
     label Str
 }
@@ -353,7 +351,7 @@ def makeUser() { name Str, age Int } = {
 describe(record { "Cara", 14 })
 ```
 
-Named records/classes can be built from an anonymous record only through an explicit type call:
+Named classes can be built from an anonymous record only through an explicit type call:
 
 ```txt
 userRecord = record {
@@ -371,7 +369,7 @@ profile MixedProfile = MixedProfile {
 
 Rules for this conversion:
 - it applies only when the single argument is an anonymous record value
-- the anonymous record shape must match the visible construction shape of the target class/record
+- the anonymous record shape must match the visible construction shape of the target class
 - field names and field types must match exactly
 - public fields without initializers are required
 - public fields with initializers are optional and may be provided or omitted
@@ -379,7 +377,7 @@ Rules for this conversion:
 - private fields without initializers block this conversion entirely
 - mutable vs immutable field differences do not matter for shape matching
 - explicit constructors are ignored for this conversion path
-- named record/class values do not structurally convert to other named record/class values
+- named class values do not structurally convert to other named class values
 - nested inner conversions must still be explicit, for example `owner = Person(record { ... })`
 - `Type { ... }` is allowed as sugar for passing a single anonymous record argument
 - `Type({ ... })` is not supported; plain `{ ... }` inside call parentheses is treated as a block, not as an anonymous record literal
@@ -560,7 +558,7 @@ Rules:
 - value-producing tail forms currently include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
 
-## Classes, Objects, Records, Interfaces, Enums
+## Classes, Objects, Interfaces, Enums
 
 Class:
 
@@ -574,7 +572,7 @@ impl Box[T] {
 }
 ```
 
-When a class, record, or object implements an interface method inside an `impl Type { ... }` block, it uses ordinary `def`.
+When a class or object implements an interface method inside an `impl Type { ... }` block, it uses ordinary `def`.
 
 Object:
 
@@ -584,10 +582,10 @@ object MathBox {
 }
 ```
 
-Records:
+Another class example:
 
 ```txt
-record Amount with Named {
+class Amount with Named {
     value Int
     label Str
 }
@@ -1011,7 +1009,7 @@ Supported pattern families:
 - literal/value patterns: `1`, `"hello"`, `true`
 - tuple patterns: `(x, y)`
 - enum constructor patterns: `SomeX(x)`
-- class/record extractor patterns: `PairBox(left, right)`
+- class extractor patterns: `PairBox(left, right)`
 - type patterns: `item Worker`, `_ Other`
 
 Type patterns use erased outer-type matching at runtime. For generic declared types, match on the outer name only:
@@ -1183,7 +1181,7 @@ Supported today:
 - `public` on top-level immutable bindings
 - `hidden` on top-level `def`
 - `hidden` on top-level `interface`
-- `hidden` on top-level `class` / `object` / `record` / `enum`
+- `hidden` on top-level `class` / `object` / `enum`
 - `hidden` on fields
 - `hidden` on methods
 

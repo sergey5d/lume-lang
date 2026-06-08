@@ -769,16 +769,6 @@ impl<'a> Checker<'a> {
     }
 
     fn check_method(&mut self, method: &MethodDecl, owner: &TypeSig) {
-        if owner.kind == TypeKind::Record && method.name == "init" {
-            self.add_error(
-                "invalid_record_method",
-                format!(
-                    "record '{}': records cannot declare constructors",
-                    owner.name
-                ),
-                method.span,
-            );
-        }
         let previous_return = self.current_return.clone();
         let previous_owner = self.current_owner.clone();
         let previous_method = self.current_method.clone();
@@ -1538,7 +1528,7 @@ impl<'a> Checker<'a> {
                     _ => {
                         self.add_error(
                             "invalid_record_update",
-                            "update requires a record or class value",
+                            "update requires a class or anonymous record value",
                             *span,
                         );
                     }
@@ -2973,7 +2963,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "class/record '{}' cannot be built from an anonymous record because it has private fields without initializers",
+                    "class '{}' cannot be built from an anonymous record because it has private fields without initializers",
                     sig.name
                 ),
                 span,
@@ -2995,7 +2985,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "class/record '{}' requires an anonymous record with exactly matching field names and types",
+                    "class '{}' requires an anonymous record with exactly matching field names and types",
                     sig.name
                 ),
                 span,
@@ -3009,7 +2999,7 @@ impl<'a> Checker<'a> {
                     self.add_error(
                         "no_matching_overload",
                         format!(
-                            "class/record '{}' requires an anonymous record with exactly matching field names and types",
+                            "class '{}' requires an anonymous record with exactly matching field names and types",
                             sig.name
                         ),
                         span,
@@ -3022,7 +3012,7 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "no_matching_overload",
                     format!(
-                        "class/record '{}' requires an anonymous record with exactly matching field names and types",
+                        "class '{}' requires an anonymous record with exactly matching field names and types",
                         sig.name
                     ),
                     span,
@@ -3038,7 +3028,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "class/record '{}' requires an anonymous record with exactly matching field names and types",
+                    "class '{}' requires an anonymous record with exactly matching field names and types",
                     sig.name
                 ),
                 span,

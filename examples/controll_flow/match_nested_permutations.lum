@@ -24,7 +24,7 @@ class AppleBox {
     apple Apple
 }
 
-record Amount {
+class Amount {
     count Int
     label Str
 }
@@ -33,7 +33,7 @@ class AmountBox {
     amount Amount
 }
 
-record AppleRecord {
+class AppleRecord {
     apple Apple
 }
 
@@ -41,7 +41,7 @@ class PairHolder {
     pair (Int, Int)
 }
 
-record PairRecord {
+class PairRecord {
     pair (Int, Int)
 }
 
@@ -82,7 +82,7 @@ class FlagBox {
     value InnerFlag
 }
 
-record FlagRecord {
+class FlagRecord {
     value InnerFlag
 }
 

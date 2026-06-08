@@ -2,7 +2,7 @@
 # original 10 x
 # updated 42 x
 
-record Amount {
+class Amount {
     amount Int
     description Str
 }

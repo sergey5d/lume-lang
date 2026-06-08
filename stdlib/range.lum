@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-record IntRange with Iterable[Int] {
+class IntRange with Iterable[Int] {
     start Int
     end Int
     step Int

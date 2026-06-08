@@ -683,12 +683,6 @@ func (c *Checker) checkClass(decl *parser.ClassDecl) {
 		if decl.Object && !field.Mutable && field.Initializer == nil {
 			c.addDiagnostic("invalid_object_field", "object '"+decl.Name+"' must initialize immutable field '"+field.Name+"'", field.Span)
 		}
-		if decl.Record && field.Private {
-			c.addDiagnostic("invalid_record_field", "record '"+decl.Name+"' cannot declare private field '"+field.Name+"'", field.Span)
-		}
-		if decl.Record && field.Mutable {
-			c.addDiagnostic("invalid_record_field", "record '"+decl.Name+"' cannot declare mutable field '"+field.Name+"'", field.Span)
-		}
 		if decl.Enum && field.Private {
 			c.addDiagnostic("invalid_enum_field", "enum '"+decl.Name+"' cannot declare private field '"+field.Name+"'", field.Span)
 		}
@@ -798,9 +792,6 @@ func (c *Checker) checkMethod(method *parser.MethodDecl, owner *parser.ClassDecl
 	}
 	if owner.Object && method.Constructor {
 		c.addDiagnostic("invalid_object_method", "object '"+owner.Name+"' cannot declare constructors", method.Span)
-	}
-	if owner.Record && method.Constructor {
-		c.addDiagnostic("invalid_record_method", "record '"+owner.Name+"': records cannot declare constructors", method.Span)
 	}
 	implicitReturn := c.checkBlock(method.Body)
 	if !method.Constructor && method.ReturnType != nil && !isUnknown(implicitReturn) && !isUnitType(expectedReturn) {
@@ -2122,12 +2113,12 @@ func builtinGenericTypeArity(name string) (int, bool) {
 
 func (c *Checker) checkConstructorPattern(pattern *parser.ConstructorPattern, valueType *Type) {
 	if valueType == nil || isUnknown(valueType) || valueType.Kind != TypeClass {
-		c.addDiagnostic("invalid_match_pattern", "constructor pattern requires class, record, or enum value", pattern.Span)
+		c.addDiagnostic("invalid_match_pattern", "constructor pattern requires class or enum value", pattern.Span)
 		return
 	}
 	info, ok := c.classes[valueType.Name]
 	if !ok {
-		c.addDiagnostic("invalid_match_pattern", "constructor pattern requires class, record, or enum value", pattern.Span)
+		c.addDiagnostic("invalid_match_pattern", "constructor pattern requires class or enum value", pattern.Span)
 		return
 	}
 	if info.decl.Enum {
@@ -2173,7 +2164,7 @@ func (c *Checker) checkConstructorPattern(pattern *parser.ConstructorPattern, va
 	}
 	fieldTypes, _, ok := c.destructurableValueTypes(valueType)
 	if !ok {
-		c.addDiagnostic("invalid_match_pattern", "constructor pattern requires destructurable class or record", pattern.Span)
+		c.addDiagnostic("invalid_match_pattern", "constructor pattern requires destructurable class", pattern.Span)
 		return
 	}
 	if len(pattern.Args) != len(fieldTypes) {
@@ -3231,7 +3222,7 @@ func (c *Checker) checkRecordUpdateExpr(expr *parser.RecordUpdateExpr) *Type {
 		for _, update := range expr.Updates {
 			c.checkExpr(update.Value)
 		}
-		c.addDiagnostic("invalid_record_update", "update requires a record or class value", expr.Span)
+		c.addDiagnostic("invalid_record_update", "update requires a class or anonymous record value", expr.Span)
 		return unknownType
 	}
 	info, ok := c.classes[receiverType.Name]
@@ -3239,18 +3230,16 @@ func (c *Checker) checkRecordUpdateExpr(expr *parser.RecordUpdateExpr) *Type {
 		for _, update := range expr.Updates {
 			c.checkExpr(update.Value)
 		}
-		c.addDiagnostic("invalid_record_update", "update requires a record or class value", expr.Span)
+		c.addDiagnostic("invalid_record_update", "update requires a class or anonymous record value", expr.Span)
 		return unknownType
 	}
-	if !info.decl.Record {
-		for _, field := range info.decl.Fields {
-			if field.Private {
-				for _, update := range expr.Updates {
-					c.checkExpr(update.Value)
-				}
-				c.addDiagnostic("invalid_record_update", "class update requires a class without private fields", expr.Span)
-				return unknownType
+	for _, field := range info.decl.Fields {
+		if field.Private {
+			for _, update := range expr.Updates {
+				c.checkExpr(update.Value)
 			}
+			c.addDiagnostic("invalid_record_update", "class update requires a class without private fields", expr.Span)
+			return unknownType
 		}
 	}
 	subst := c.substForDecl(info.decl.TypeParameters, receiverType.Args)
@@ -3464,25 +3453,25 @@ func (c *Checker) checkConstructorCall(class classInfo, call *parser.CallExpr) *
 func (c *Checker) resolveRecordShapeConstruction(class classInfo, actual *Type, span parser.Span) bool {
 	required, optional, ok := classAnonymousRecordShape(class.decl, nil, c)
 	if !ok {
-		c.addDiagnostic("no_matching_overload", "class/record '"+class.decl.Name+"' cannot be built from an anonymous record because it has private fields without initializers", span)
+		c.addDiagnostic("no_matching_overload", "class '"+class.decl.Name+"' cannot be built from an anonymous record because it has private fields without initializers", span)
 		return false
 	}
 	if recordMatchesVisibleShape(actual.Fields, required, optional) {
 		return true
 	}
-	c.addDiagnostic("no_matching_overload", "class/record '"+class.decl.Name+"' requires an anonymous record with exactly matching field names and types", span)
+	c.addDiagnostic("no_matching_overload", "class '"+class.decl.Name+"' requires an anonymous record with exactly matching field names and types", span)
 	return false
 }
 
 func (c *Checker) resolvePositionalRecordShapeConstruction(class classInfo, actual *parser.AnonymousRecordExpr, span parser.Span) bool {
 	required, optional, ok := classAnonymousRecordShape(class.decl, nil, c)
 	if !ok {
-		c.addDiagnostic("no_matching_overload", "class/record '"+class.decl.Name+"' cannot be built from an anonymous record because it has private fields without initializers", span)
+		c.addDiagnostic("no_matching_overload", "class '"+class.decl.Name+"' cannot be built from an anonymous record because it has private fields without initializers", span)
 		return false
 	}
 	expected := append(append([]RecordField{}, required...), optional...)
 	if len(actual.Values) < len(required) || len(actual.Values) > len(expected) {
-		c.addDiagnostic("no_matching_overload", "class/record '"+class.decl.Name+"' requires an anonymous record with exactly matching field names and types", span)
+		c.addDiagnostic("no_matching_overload", "class '"+class.decl.Name+"' requires an anonymous record with exactly matching field names and types", span)
 		return false
 	}
 	for i, field := range expected {
@@ -3491,13 +3480,13 @@ func (c *Checker) resolvePositionalRecordShapeConstruction(class classInfo, actu
 		}
 		valueType := c.checkExprWithExpected(actual.Values[i], field.Type)
 		if !sameType(valueType, field.Type) {
-			c.addDiagnostic("no_matching_overload", "class/record '"+class.decl.Name+"' requires an anonymous record with exactly matching field names and types", span)
+			c.addDiagnostic("no_matching_overload", "class '"+class.decl.Name+"' requires an anonymous record with exactly matching field names and types", span)
 			return false
 		}
 	}
 	for i := len(actual.Values); i < len(expected); i++ {
 		if i < len(required) {
-			c.addDiagnostic("no_matching_overload", "class/record '"+class.decl.Name+"' requires an anonymous record with exactly matching field names and types", span)
+			c.addDiagnostic("no_matching_overload", "class '"+class.decl.Name+"' requires an anonymous record with exactly matching field names and types", span)
 			return false
 		}
 	}

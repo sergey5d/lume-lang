@@ -311,7 +311,7 @@ def unwrapBox(value Box[Int]) Int =
 
 func TestAnalyzeMatchRecordExtractor(t *testing.T) {
 	src := `
-record Amount {
+class Amount {
 	count Int
 	label Str
 }
@@ -695,25 +695,9 @@ def run() Int {
 	}
 }
 
-func TestAnalyzeRecordRejectsMutableFields(t *testing.T) {
-	src := `
-record Amount {
-	var amount Int = 1
-}
-`
-
-	result := Analyze(parseProgram(t, src))
-	if len(result.Diagnostics) == 0 {
-		t.Fatalf("expected diagnostics for mutable record field")
-	}
-	if result.Diagnostics[0].Code != "invalid_record_field" {
-		t.Fatalf("unexpected diagnostic %#v", result.Diagnostics[0])
-	}
-}
-
 func TestAnalyzeRecordUpdateExpr(t *testing.T) {
 	src := `
-record Amount {
+class Amount {
 	amount Int
 	description Str
 }
@@ -792,7 +776,7 @@ def run() Int {
 
 func TestAnalyzeAnonymousRecordToClassAndRecord(t *testing.T) {
 	src := `
-record User {
+class User {
 	name Str
 	age Int
 }
@@ -841,7 +825,7 @@ def run() Int {
 
 func TestAnalyzeRecordAndClassDestructuring(t *testing.T) {
 	src := `
-record Pair {
+class Pair {
 	left Int
 	right Str
 }
@@ -866,7 +850,7 @@ def run() Int {
 
 func TestAnalyzeDestructuringSkipBinding(t *testing.T) {
 	src := `
-record Triple {
+class Triple {
 	first Int
 	middle Str
 	last Str
@@ -1048,7 +1032,7 @@ def run() Int {
 
 func TestAnalyzeRecordApplyCall(t *testing.T) {
 	src := `
-record Adder {
+class Adder {
 	amount Int
 }
 

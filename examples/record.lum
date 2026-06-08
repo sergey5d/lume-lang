@@ -11,7 +11,7 @@
 # Hop-hop
 # Jump 3 steps
 
-# records are read only and do not allow mutable fields
+# plain data classes still work well with field-wise updates and destructuring
 
 interface Hopper {
     def hop() Str
@@ -21,7 +21,7 @@ interface Jumper {
     def jump(steps Int) Str
 }
 
-record Amount with Hopper, Jumper {
+class Amount with Hopper, Jumper {
     amount Int
     description Str
     count Int

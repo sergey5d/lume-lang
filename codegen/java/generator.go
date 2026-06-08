@@ -178,7 +178,7 @@ public final class OS {
 		for arity := 2; arity <= 10; arity++ {
 			name := fmt.Sprintf("Tuple%d", arity)
 			decl, ok := registry.Types[name]
-			if !ok || decl.Kind != predef.KindRecord || decl.Directives.JavaSkip {
+			if !ok || decl.Directives.JavaSkip {
 				continue
 			}
 			if src, err := tupleJavaSourceFromDescriptor(decl); err == nil {
@@ -191,8 +191,8 @@ public final class OS {
 }
 
 func tupleJavaSourceFromDescriptor(desc predef.TypeDescriptor) (string, error) {
-	if desc.Kind != predef.KindRecord {
-		return "", fmt.Errorf("%s is not a record", desc.Name)
+	if desc.Kind != predef.KindClass {
+		return "", fmt.Errorf("%s is not a class", desc.Name)
 	}
 	typeParams := make([]string, len(desc.TypeParameters))
 	for i, param := range desc.TypeParameters {

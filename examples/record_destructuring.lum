@@ -1,18 +1,18 @@
 # EXPECT:
-# record 7 world
-# record inferred 10 infer
-# record mixed 11 partial
-# record pair 22 record-pair
-# record skip only visible
-# record skip 15 kept
+# class 7 world
+# class inferred 10 infer
+# class mixed 11 partial
+# class pair 22 record-pair
+# class skip only visible
+# class skip 15 kept
 # 0
 
-record Pair {
+class Pair {
     left Int
     right Str
 }
 
-record Triple {
+class Triple {
     first Int
     middle Str
     last Str
@@ -20,22 +20,22 @@ record Triple {
 
 def main() Int {
     let (c Int, d Str) = Pair(7, "world")
-    OS.println("record", c, d)
+    OS.println("class", c, d)
 
     let (inferredRecordLeft, inferredRecordRight) = Pair(10, "infer")
-    OS.println("record inferred", inferredRecordLeft, inferredRecordRight)
+    OS.println("class inferred", inferredRecordLeft, inferredRecordRight)
 
     let (mixedRecordLeft Int, mixedRecordRight) = Pair(11, "partial")
-    OS.println("record mixed", mixedRecordLeft, mixedRecordRight)
+    OS.println("class mixed", mixedRecordLeft, mixedRecordRight)
 
     let (recordPairLeft, recordPairRight) = Pair(22, "record-pair")
-    OS.println("record pair", recordPairLeft, recordPairRight)
+    OS.println("class pair", recordPairLeft, recordPairRight)
 
     let (_, skippedOnlyRecordValue) = Pair(23, "visible")
-    OS.println("record skip only", skippedOnlyRecordValue)
+    OS.println("class skip only", skippedOnlyRecordValue)
 
     let (skippedRecordLeft Int, _, skippedRecordRight Str) = Triple(15, "drop", "kept")
-    OS.println("record skip", skippedRecordLeft, skippedRecordRight)
+    OS.println("class skip", skippedRecordLeft, skippedRecordRight)
 
     0
 }

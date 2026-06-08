@@ -2,7 +2,7 @@
 # 42-hello
 # 0
 
-record Amount {
+class Amount {
     count Int
     label Str
 }

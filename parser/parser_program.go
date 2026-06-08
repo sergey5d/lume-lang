@@ -60,12 +60,7 @@ func (p *Parser) parseProgram() (*Program, error) {
 			decl.Annotations = annotations
 			program.Classes = append(program.Classes, decl)
 		case TokenRecord:
-			decl, err := p.parseRecord()
-			if err != nil {
-				return nil, err
-			}
-			decl.Annotations = annotations
-			program.Classes = append(program.Classes, decl)
+			return nil, fmt.Errorf("named 'record' declarations were removed; use 'class'")
 		case TokenEnum:
 			decl, err := p.parseEnum()
 			if err != nil {
@@ -112,12 +107,7 @@ func (p *Parser) parseProgram() (*Program, error) {
 				decl.Annotations = annotations
 				program.Classes = append(program.Classes, decl)
 			case TokenRecord:
-				decl, err := p.parsePrivateRecord()
-				if err != nil {
-					return nil, err
-				}
-				decl.Annotations = annotations
-				program.Classes = append(program.Classes, decl)
+				return nil, fmt.Errorf("named 'record' declarations were removed; use 'class'")
 			case TokenEnum:
 				decl, err := p.parsePrivateEnum()
 				if err != nil {
@@ -128,26 +118,26 @@ func (p *Parser) parseProgram() (*Program, error) {
 			default:
 				return nil, fmt.Errorf("'hidden' is only supported for top-level declarations")
 			}
-			case TokenPub:
-				p.advance()
-				switch p.peek().Type {
-				case TokenDef:
-					fn, err := p.parsePublicFunction()
-					if err != nil {
-						return nil, err
-					}
-					fn.Annotations = annotations
-					program.Functions = append(program.Functions, fn)
-				case TokenInterface, TokenClass, TokenObject, TokenRecord, TokenEnum, TokenImpl:
-					return nil, fmt.Errorf("'public' is only supported for top-level functions and immutable bindings")
-				default:
-					if len(annotations) > 0 {
-						return nil, fmt.Errorf("annotations are only supported on top-level declarations")
-					}
-					stmt, err := p.parseStatement()
-					if err != nil {
-						return nil, err
-					}
+		case TokenPub:
+			p.advance()
+			switch p.peek().Type {
+			case TokenDef:
+				fn, err := p.parsePublicFunction()
+				if err != nil {
+					return nil, err
+				}
+				fn.Annotations = annotations
+				program.Functions = append(program.Functions, fn)
+			case TokenInterface, TokenClass, TokenObject, TokenEnum, TokenImpl:
+				return nil, fmt.Errorf("'public' is only supported for top-level functions and immutable bindings")
+			default:
+				if len(annotations) > 0 {
+					return nil, fmt.Errorf("annotations are only supported on top-level declarations")
+				}
+				stmt, err := p.parseStatement()
+				if err != nil {
+					return nil, err
+				}
 				valStmt, ok := stmt.(*ValStmt)
 				if !ok {
 					return nil, fmt.Errorf("'public' is only supported for top-level functions and immutable bindings")

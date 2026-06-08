@@ -817,7 +817,7 @@ def run() Int {
 
 func TestMatchRecordExtractor(t *testing.T) {
 	src := `
-record Amount {
+class Amount {
 	count Int
 	label Str
 }
@@ -1787,7 +1787,7 @@ def run() Str {
 
 func TestRecordUpdateExpr(t *testing.T) {
 	src := `
-record Amount {
+class Amount {
 	amount Int
 	description Str
 }
@@ -1892,7 +1892,7 @@ def run() Bool {
 
 func TestAnonymousRecordToClassAndRecord(t *testing.T) {
 	src := `
-record User {
+class User {
 	name Str
 	age Int
 }
@@ -1956,7 +1956,7 @@ def run() Bool {
 
 func TestRecordAndClassDestructuring(t *testing.T) {
 	src := `
-record Pair {
+class Pair {
 	left Int
 	right Str
 }
@@ -1985,7 +1985,7 @@ def run() Int {
 
 func TestDestructuringSkipBinding(t *testing.T) {
 	src := `
-record Triple {
+class Triple {
 	first Int
 	middle Str
 	last Str
@@ -2137,7 +2137,7 @@ def run() Int {
 
 func TestRecordApplyCall(t *testing.T) {
 	src := `
-record Adder {
+class Adder {
 	amount Int
 }
 

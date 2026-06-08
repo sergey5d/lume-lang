@@ -1,12 +1,12 @@
 # EXPECT:
-# record Ada 10
+# class Ada 10
 # public Ben 12 NYC
 # vars 3 4
 # full Nora 20 Paris
 # mixed Liam 8 5
 # mixed3 Liam 8 5
 
-record User {
+class User {
     name Str
     age Int
 }
@@ -75,7 +75,7 @@ def main() Unit {
         name = "Liam", age = 8
     }
 
-    OS.println("record", user.name, user.age)
+    OS.println("class", user.name, user.age)
     OS.println("public", person.name, person.age, person.city)
     OS.println("vars", point.x, point.y)
     OS.println("full", fullPerson.name, fullPerson.age, fullPerson.city)

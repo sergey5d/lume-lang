@@ -105,7 +105,6 @@ impl<'a> Parser<'a> {
                 Some(Item::Function(function))
             }
             TokenKind::Keyword(Keyword::Class)
-            | TokenKind::Keyword(Keyword::Record)
             | TokenKind::Keyword(Keyword::Object)
             | TokenKind::Keyword(Keyword::Interface)
             | TokenKind::Keyword(Keyword::Enum) => {
@@ -118,6 +117,13 @@ impl<'a> Parser<'a> {
                 }
                 let decl = self.parse_type_decl(annotations, visibility)?;
                 Some(Item::Type(decl))
+            }
+            TokenKind::Keyword(Keyword::Record) => {
+                self.error_at_current(
+                    "unexpected_record_decl",
+                    "named 'record' declarations were removed; use 'class'",
+                );
+                None
             }
             TokenKind::Keyword(Keyword::Impl) => {
                 if !annotations.is_empty() {
@@ -303,11 +309,6 @@ impl<'a> Parser<'a> {
                 self.advance();
                 (TypeKind::Class, span)
             }
-            TokenKind::Keyword(Keyword::Record) => {
-                let span = self.current_span();
-                self.advance();
-                (TypeKind::Record, span)
-            }
             TokenKind::Keyword(Keyword::Object) => {
                 let span = self.current_span();
                 self.advance();
@@ -326,7 +327,7 @@ impl<'a> Parser<'a> {
             _ => {
                 self.error_at_current(
                     "expected_type_decl",
-                    "expected class, record, object, interface, or enum",
+                    "expected class, object, interface, or enum",
                 );
                 return None;
             }
@@ -370,8 +371,8 @@ impl<'a> Parser<'a> {
                     TypeKind::Interface => "public is not allowed inside interfaces",
                     TypeKind::Enum => "public is not allowed on enum members",
                     TypeKind::Class => "public is not allowed on class members",
-                    TypeKind::Record => "public is not allowed on record members",
                     TypeKind::Object => "public is not allowed on object members",
+                    TypeKind::Record => unreachable!("named records are no longer parsed"),
                 };
                 self.error_at_current("unexpected_visibility", message);
                 return None;

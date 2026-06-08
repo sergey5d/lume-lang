@@ -10,7 +10,7 @@ This file captures the main language gaps and near-term design directions.
 - enum case patterns
 - tuple patterns
 - literal/value patterns
-- class/record extractor patterns
+- class extractor patterns
 - simple type patterns
 
 Still missing:
@@ -32,7 +32,7 @@ Now that `match` exists and enum exhaustiveness is checked, the biggest remainin
 
 ### 3. Derived Protocols
 
-Records should eventually support auto-derived protocols.
+Classes should eventually support auto-derived protocols when they stay value-like.
 
 Likely targets:
 - `Eq`
@@ -67,14 +67,14 @@ Construction direction:
 Operator overloading now exists and is mainly intended for compact value-oriented declared types such as:
 - numeric-like wrappers
 - vectors / matrices / geometry values
-- record/class domain values like `Money`, `Distance`, or `Duration`
+- class domain values like `Money`, `Distance`, or `Duration`
 - interface-driven abstractions that want symbolic operators over implementing types
 
 Constraint:
 - keep it same-line only; no newline-based implicit body after `:`
 
 Finalized policy:
-- operator overloading is limited to interfaces, classes, records, and enums
+- operator overloading is limited to interfaces, classes, and enums
 - objects do not participate
 - top-level functions do not participate
 
@@ -234,24 +234,23 @@ Current leaning:
 
 The language still needs a final policy for conversions between:
 - classes
-- records
 - anonymous records
 - tuples
 
 Current intended direction:
-- class/record -> anonymous record is allowed implicitly
+- class -> anonymous record is allowed implicitly
 - tuple -> anonymous record is not allowed
-- anonymous record -> class/record should be allowed when the compiler can lower it into constructor-style code
+- anonymous record -> class should be allowed when the compiler can lower it into constructor-style code
   - either a matching constructor exists
   - or the target class has only public fields, with any private fields already initialized
-- class/record -> tuple should stay explicit, if added at all
+- class -> tuple should stay explicit, if added at all
 
 Important separation:
 - value conversion is a different design area from pattern destructuring
-- allowing class/record values to convert to anonymous records does not automatically mean `match` should destructure them using anonymous-record-shaped patterns
+- allowing class values to convert to anonymous records does not automatically mean `match` should destructure them using anonymous-record-shaped patterns
 
 Open questions:
-- whether anonymous record -> class/record should be contextual-only based on the expected type
+- whether anonymous record -> class should be contextual-only based on the expected type
 - how strict constructor matching should be
 - whether anonymous record -> tuple should exist at all
 - anonymous records use brace construction for both explicit named fields and contextual positional values
