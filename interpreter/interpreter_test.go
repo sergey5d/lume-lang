@@ -1846,13 +1846,13 @@ def describe(user { name Str, age Int }) Int {
 }
 
 def makeCounter(base Int) { count Int, next Int } =
-	record {
+	class {
 		count = base
 		next = base + 1
 	}
 
 def run() Bool {
-	full = record {
+	full = class {
 		name = "Ana"
 		age = 10
 		city = "NYC"
@@ -1860,14 +1860,14 @@ def run() Bool {
 	name = "Cara"
 	age = 14
 	narrow { name Str, age Int } = full
-	positional { name Str, age Int } = record { "Ben", 12 }
-	contextual { name Str, age Int } = record { name, age }
+	positional { name Str, age Int } = class { "Ben", 12 }
+	contextual { name Str, age Int } = class { name, age }
 	counter { count Int, next Int } = makeCounter(5)
-	mixed = record { a = 5, c = 7,
+	mixed = class { a = 5, c = 7,
 		b = 8
 	}
 	return describe(full) == 10 &&
-		describe(record { "Cara", 14 }) == 14 &&
+		describe(class { "Cara", 14 }) == 14 &&
 		narrow.name == "Ana" &&
 		positional.name == "Ben" &&
 		positional.age == 12 &&
@@ -1916,20 +1916,20 @@ impl Team {
 }
 
 def makeTeam(owner Person) Team {
-	return Team(record {
+	return Team(class {
 		name = "Core"
 		owner = owner
 	})
 }
 
 def run() Bool {
-	userRecord = record {
+	userRecord = class {
 		name = "Ana"
 		age = 10
 	}
 	user User = User(userRecord)
-	person Person = Person(record { "Ben", 12 })
-	team = makeTeam(Person(record {
+	person Person = Person(class { "Ben", 12 })
+	team = makeTeam(Person(class {
 		name = "Cy"
 		age = 7
 	}))

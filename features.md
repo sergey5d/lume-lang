@@ -254,8 +254,8 @@ Open questions:
 - how strict constructor matching should be
 - whether anonymous record -> tuple should exist at all
 - anonymous records use brace construction for both explicit named fields and contextual positional values
-  - `record { count = count, label = label }`
-  - positional brace construction like `record { 1, "x" }` is also allowed when a target anonymous-record shape is known from context
+  - `class { count = count, label = label }`
+  - positional brace construction like `class { 1, "x" }` is also allowed when a target anonymous-record shape is known from context
 - whether explicit tuple projection should use a builtin like `tuple(instance)`
 
 ### Record Binding From String Templates
@@ -269,7 +269,7 @@ record1 = "$time_local-$agent"
 ```
 
 Possible meaning:
-- produce something like `record { time_local Str, agent Str }`
+- produce something like `class { time_local Str, agent Str }`
 - use the template itself as the binding/extraction surface
 
 Possible larger example:

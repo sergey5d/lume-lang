@@ -115,7 +115,7 @@ impl Counter {
 
 #[test]
 fn parses_record_literal_forms() {
-    match parse_expr_only("record { name, age }") {
+    match parse_expr_only("class { name, age }") {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(fields.is_empty());
             assert_eq!(values.len(), 2);
@@ -123,7 +123,7 @@ fn parses_record_literal_forms() {
         other => panic!("expected record literal, got {other:#?}"),
     }
 
-    match parse_expr_only(r#"record { 1, "x" }"#) {
+    match parse_expr_only(r#"class { 1, "x" }"#) {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(fields.is_empty());
             assert_eq!(values.len(), 2);
@@ -145,7 +145,7 @@ fn parses_record_literal_forms() {
         other => panic!("expected call, got {other:#?}"),
     }
 
-    let file = SourceFile::new("test.lum", r#"def run() Unit = record(1, "x")"#);
+    let file = SourceFile::new("test.lum", r#"def run() Unit = class(1, "x")"#);
     let lexed = lex(&file);
     assert!(
         lexed.diagnostics.is_empty(),
@@ -157,8 +157,8 @@ fn parses_record_literal_forms() {
         result
             .diagnostics
             .iter()
-            .any(|diag| diag.message.contains("'record(...)' is not supported")),
-        "expected record(...) rejection, got diagnostics: {:#?}",
+            .any(|diag| diag.message.contains("'class(...)' is not supported")),
+        "expected class(...) rejection, got diagnostics: {:#?}",
         result.diagnostics
     );
 }

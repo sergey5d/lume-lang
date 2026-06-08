@@ -22,7 +22,7 @@ def find(
 ) { foundP Option[TreeNode], foundQ Option[TreeNode], ancestor Option[TreeNode] } = {
 
     let Some(current) = node else {
-        record { foundP = foundPNode, foundQ = foundQNode, ancestor = None() }
+        class { foundP = foundPNode, foundQ = foundQNode, ancestor = None() }
     }
 
     var currentFoundP = foundPNode
@@ -49,10 +49,10 @@ def find(
             mergedAncestor := Some(current)
         }
 
-        return record { mergedP, mergedQ, mergedAncestor }
+        return class { mergedP, mergedQ, mergedAncestor }
     }
 
-    record { currentFoundP, currentFoundQ, None() }
+    class { currentFoundP, currentFoundQ, None() }
 }
 
 def lowestCommonAncestor(root TreeNode, valP Int, valQ Int) Option[TreeNode] =

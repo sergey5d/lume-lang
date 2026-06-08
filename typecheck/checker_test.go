@@ -747,11 +747,11 @@ def describe(user { name Str, age Int }) Int {
 }
 
 def makeCounter(base Int) { count Int, next Int } = {
-	return record { base, base + 1 }
+	return class { base, base + 1 }
 }
 
 def run() Int {
-	full = record {
+	full = class {
 		name = "Ana"
 		age = 10
 		city = "NYC"
@@ -759,11 +759,11 @@ def run() Int {
 	name = "Cara"
 	age = 14
 	narrow { name Str, age Int } = full
-	positional { name Str, age Int } = record { "Ben", 12 }
-	contextual { name Str, age Int } = record { name, age }
+	positional { name Str, age Int } = class { "Ben", 12 }
+	contextual { name Str, age Int } = class { name, age }
 	counter { count Int, next Int } = makeCounter(5)
 	describe(full)
-	describe(record { "Cara", 14 })
+	describe(class { "Cara", 14 })
 	return full.age + narrow.age + positional.age + contextual.age + counter.next
 }
 `
@@ -800,15 +800,15 @@ impl Team {
 }
 
 def run() Int {
-	userRecord = record {
+	userRecord = class {
 		name = "Ana"
 		age = 10
 	}
 	user User = User(userRecord)
-	person Person = Person(record { "Ben", 12 })
-	team Team = Team(record {
+	person Person = Person(class { "Ben", 12 })
+	team Team = Team(class {
 		name = "Core"
-		owner = Person(record {
+		owner = Person(class {
 			name = "Cy"
 			age = 7
 		})

@@ -29,16 +29,15 @@ These seem like strong parts of the current surface syntax and should probably s
 - `def`
 - `var`
 - `class`
-- `record`
 - `object`
 - `enum`
 - `interface`
 - `public`
 - `hidden`
 - `match` with mandatory `case`
-- `unwrap`
+- `let`
 - `@Annotation(...)`
-- `record { ... }`
+- `class { ... }`
 - path-style imports
 - `->` for lambdas and function types
 - string interpolation
@@ -47,7 +46,7 @@ These seem like strong parts of the current surface syntax and should probably s
 Notes:
 
 - `case` improves readability more than it adds noise
-- `record { ... }` is explicit and much clearer than trying to reuse plain `{ ... }`
+- `class { ... }` is explicit and much clearer than trying to reuse plain `{ ... }`
 - `public` / `hidden` are honest, readable visibility markers
 
 ## Trim First
@@ -79,7 +78,7 @@ for i <- Range(0, 10) {
 
 Current issue:
 
-- historical positional anonymous records like `record("Ada", 10)` depended on contextual shape
+- historical positional anonymous records like `class("Ada", 10)` depended on contextual shape
 - it is short, but it adds hidden rules
 - it makes anonymous record construction less obvious
 
@@ -90,7 +89,7 @@ Preferred direction:
 Preferred style:
 
 ```txt
-user = record {
+user = class {
     name = "Ada"
     age = 10
 }
@@ -232,8 +231,8 @@ These keywords are good noise:
 - `case`
 - `public`
 - `hidden`
-- `unwrap`
-- `record`
+- `let`
+- `class`
 
 They make programs more explicit and reduce ambiguity.
 
@@ -243,7 +242,7 @@ If only five changes are made, the best candidates seem to be:
 
 1. remove `apply` as a language calling rule
 2. remove tuple-range magic from `for`
-3. remove positional anonymous `record(...)` (done)
+3. remove positional anonymous `class(...)` (done)
 4. pick one `if` expression form and remove `then`
 5. unify method placement across all type declarations
 
@@ -252,7 +251,7 @@ If only five changes are made, the best candidates seem to be:
 Example of the kind of syntax style that seems strongest:
 
 ```txt
-public record Person {
+public class Person {
     age Int
     name Str
 
@@ -270,7 +269,7 @@ def classify(value Option[Int]) Int =
         case None => 0
     }
 
-user = record {
+user = class {
     name = "Ada"
     age = 10
 }

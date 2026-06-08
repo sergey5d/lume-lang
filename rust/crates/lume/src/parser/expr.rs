@@ -287,7 +287,7 @@ impl<'a> Parser<'a> {
         }
         self.error_at_current(
             "unexpected_token",
-            "anonymous record literals use 'record { ... }'; 'record(...)' is not supported",
+            "anonymous record literals use 'class { ... }'; 'class(...)' is not supported",
         );
         None
     }
@@ -886,7 +886,7 @@ impl<'a> Parser<'a> {
                 if self.is_bare_record_call_arg_start() {
                     self.error_at_current(
                         "unexpected_token",
-                        "bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(record { ... })'",
+                        "bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(class { ... })'",
                     );
                     return None;
                 }
@@ -959,9 +959,19 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Some(Expr::Bool { value: false, span })
             }
-            TokenKind::Keyword(Keyword::Record) => {
-                let start = self.consume_keyword(Keyword::Record, "expected 'record'")?;
+            TokenKind::Keyword(Keyword::Class) => {
+                let start = self.consume_keyword(Keyword::Class, "expected 'class'")?;
                 self.parse_record_literal_expr(start)
+            }
+            TokenKind::Keyword(Keyword::Record) => {
+                let _ = self.consume_keyword(Keyword::Record, "expected 'record'")?;
+                let message = if self.at(TokenKind::LBrace) {
+                    "anonymous record literals now use 'class { ... }'; 'record { ... }' was removed"
+                } else {
+                    "anonymous record literals use 'class { ... }'; 'record(...)' is not supported"
+                };
+                self.error_at_current("unexpected_token", message);
+                None
             }
             TokenKind::Keyword(Keyword::Match) => {
                 let start = self.consume_keyword(Keyword::Match, "expected 'match'")?;

@@ -745,10 +745,10 @@ def run(flag Bool) Int {
 func TestParseThenShorthandAllowsMultilineRecordLiteral(t *testing.T) {
 	src := `
 def run(flag Bool) { value Int } {
-	if flag then return record {
+	if flag then return class {
 		value = 1
 	}
-	return record { value = 0 }
+	return class { value = 0 }
 }
 `
 
@@ -1923,7 +1923,7 @@ def run() Str {
 func TestParseAnonymousRecordExpr(t *testing.T) {
 	src := `
 def run(user { name Str, age Int }) Int {
-	value = record {
+	value = class {
 		name = "Ana"
 		age = 10
 		city = "NYC"
@@ -1952,7 +1952,7 @@ def run(user { name Str, age Int }) Int {
 		t.Fatalf("unexpected anonymous record fields %#v", record.Fields)
 	}
 
-	mixedExpr, err := ParseExpr(`record { a = 5, c = 7,
+	mixedExpr, err := ParseExpr(`class { a = 5, c = 7,
 		b = 8
 	}`)
 	if err != nil {
@@ -1966,7 +1966,7 @@ def run(user { name Str, age Int }) Int {
 		t.Fatalf("unexpected mixed record fields %#v", mixed.Fields)
 	}
 
-	identPositionalExpr, err := ParseExpr(`record { name, age }`)
+	identPositionalExpr, err := ParseExpr(`class { name, age }`)
 	if err != nil {
 		t.Fatalf("ParseExpr returned error for identifier positional record literal: %v", err)
 	}
@@ -1978,11 +1978,11 @@ def run(user { name Str, age Int }) Int {
 		t.Fatalf("unexpected identifier positional record literal %#v", identPositional)
 	}
 
-	if _, err := ParseExpr(`record(1, "x")`); err == nil {
-		t.Fatalf("expected record(...) to be rejected")
+	if _, err := ParseExpr(`class(1, "x")`); err == nil {
+		t.Fatalf("expected class(...) to be rejected")
 	}
 
-	bracePositionalExpr, err := ParseExpr(`record { 1, "x" }`)
+	bracePositionalExpr, err := ParseExpr(`class { 1, "x" }`)
 	if err != nil {
 		t.Fatalf("ParseExpr returned error for brace positional record literal: %v", err)
 	}
@@ -2022,7 +2022,7 @@ def run() Int {
 func TestRejectBareBraceRecordCallArgInsideParens(t *testing.T) {
 	if _, err := ParseExpr(`MixedProfile({ name = "Liam", age = 8 })`); err == nil {
 		t.Fatalf("expected parse error for bare brace record argument inside call parentheses")
-	} else if got := err.Error(); got != "bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(record { ... })'" {
+	} else if got := err.Error(); got != "bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(class { ... })'" {
 		t.Fatalf("unexpected parse error: %v", err)
 	}
 }

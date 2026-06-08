@@ -299,19 +299,19 @@ updated = value with {
 Anonymous record literal:
 
 ```txt
-user = record { name = "Ada", age = 10 }
+user = class { name = "Ada", age = 10 }
 ```
 
 Positional anonymous record construction is also allowed when the target shape is already known:
 
 ```txt
-user { name Str, age Int } = record { "Ada", 10 }
+user { name Str, age Int } = class { "Ada", 10 }
 ```
 
 Multiline anonymous record literal:
 
 ```txt
-user = record {
+user = class {
     name = "Ada"
     age = 10
 }
@@ -321,7 +321,7 @@ Inferred field type from a local value:
 
 ```txt
 a = 1
-b = record {
+b = class {
     count = a
 }
 ```
@@ -329,7 +329,7 @@ b = record {
 Mixed separators are also valid:
 
 ```txt
-user = record { name = "Ada",
+user = class { name = "Ada",
     age = 10
 }
 ```
@@ -345,22 +345,22 @@ Positional construction also works for shaped parameters and shaped return value
 
 ```txt
 def makeUser() { name Str, age Int } = {
-    return record { "Ada", 10 }
+    return class { "Ada", 10 }
 }
 
-describe(record { "Cara", 14 })
+describe(class { "Cara", 14 })
 ```
 
 Named classes can be built from an anonymous record only through an explicit type call:
 
 ```txt
-userRecord = record {
+userRecord = class {
     name = "Ada"
     age = 10
 }
 
 user User = User(userRecord)
-person Person = Person(record { "Ben", 12, "NYC" })
+person Person = Person(class { "Ben", 12, "NYC" })
 profile MixedProfile = MixedProfile {
     name = "Liam"
     age = 8
@@ -378,7 +378,7 @@ Rules for this conversion:
 - mutable vs immutable field differences do not matter for shape matching
 - explicit constructors are ignored for this conversion path
 - named class values do not structurally convert to other named class values
-- nested inner conversions must still be explicit, for example `owner = Person(record { ... })`
+- nested inner conversions must still be explicit, for example `owner = Person(class { ... })`
 - `Type { ... }` is allowed as sugar for passing a single anonymous record argument
 - `Type({ ... })` is not supported; plain `{ ... }` inside call parentheses is treated as a block, not as an anonymous record literal
 
@@ -387,9 +387,9 @@ Anonymous record shapes are structural:
 - extra fields are allowed when passing a value to a narrower shape
 - missing fields are rejected
 - defaults are not part of the shape syntax
-- construction uses `record { ... }`; plain `{ ... }` remains a block expression
-- `record { value1, value2 }` is positional and requires an anonymous record shape from context
-- inside `record { ... }`, fields may be separated by commas, newlines, or a mix of both
+- construction uses `class { ... }`; plain `{ ... }` remains a block expression
+- `class { value1, value2 }` is positional and requires an anonymous record shape from context
+- inside `class { ... }`, fields may be separated by commas, newlines, or a mix of both
 
 ## Functions and Methods
 

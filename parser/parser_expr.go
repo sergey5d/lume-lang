@@ -220,8 +220,13 @@ func (p *Parser) parsePrefix() (Expr, error) {
 			return nil, err
 		}
 		return &BlockExpr{Body: block, Span: block.Span}, nil
-	case TokenRecord:
+	case TokenClass:
 		return p.parseAnonymousRecordExpr(token)
+	case TokenRecord:
+		if p.check(TokenLBrace) {
+			return nil, fmt.Errorf("anonymous record literals now use 'class { ... }'; 'record { ... }' was removed")
+		}
+		return nil, fmt.Errorf("anonymous record literals use 'class { ... }'; 'record(...)' is not supported")
 	case TokenIf:
 		return p.parseIfExprAfterStart(token)
 	case TokenPartial:
@@ -358,7 +363,7 @@ func (p *Parser) parseAnonymousRecordExpr(start Token) (Expr, error) {
 			Span:   mergeSpans(tokenSpan(start), tokenSpan(end)),
 		}, nil
 	}
-	return nil, fmt.Errorf("anonymous record literals use 'record { ... }'; 'record(...)' is not supported")
+	return nil, fmt.Errorf("anonymous record literals use 'class { ... }'; 'class(...)' is not supported")
 }
 
 func (p *Parser) parseAnonymousInterfaceExpr() (Expr, error) {
@@ -839,7 +844,7 @@ func (p *Parser) parseCallArgs() ([]CallArg, error) {
 					return nil, fmt.Errorf("positional arguments cannot follow named arguments")
 				}
 				if p.isBareAnonymousRecordCallArgStart() {
-					return nil, fmt.Errorf("bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(record { ... })'")
+					return nil, fmt.Errorf("bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(class { ... })'")
 				}
 				expr, err := p.parseExpressionWithOptions(0, true)
 				if err != nil {

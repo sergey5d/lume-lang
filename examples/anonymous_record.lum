@@ -15,41 +15,41 @@ def describe(user { name Str, age Int }) Str =
     user.name + " is " + user.age
 
 def makeCounter(base Int) { count Int, next Int } = {
-    return record { base, base + 1 }
+    return class { base, base + 1 }
 }
 
 def main() Unit {
-    full = record {
+    full = class {
         name = "Ana"
         age = 10
         city = "NYC"
     }
-    smaller = record {
+    smaller = class {
         name = "Ben"
         age = 12
     }
     a = 1
-    inferred = record {
+    inferred = class {
         count = a
     }
-    mixed = record { a = 5, c = 7,
+    mixed = class { a = 5, c = 7,
         b = 8
     }
-    mixedShape = record { name = "Ada",
+    mixedShape = class { name = "Ada",
         age = 10
     }
     narrow { name Str, age Int } = full
-    positional { name Str, age Int } = record { "Ben", 12 }
+    positional { name Str, age Int } = class { "Ben", 12 }
     name = "Cara"
     age = 14
-    contextual { name Str, age Int } = record { name, age }
+    contextual { name Str, age Int } = class { name, age }
 
     OS.println(describe(full))
     OS.println(describe(smaller))
     OS.println(inferred.count)
     OS.println(mixed.a + mixed.b + mixed.c)
     OS.println(mixedShape.name + "-" + mixedShape.age)
-    OS.println(describe(record { "Cara", 14 }))
+    OS.println(describe(class { "Cara", 14 }))
     counter = makeCounter(5)
     OS.println(counter.count + counter.next)
     OS.println(positional.name + " " + positional.age)

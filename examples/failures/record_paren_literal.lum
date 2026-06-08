@@ -1,6 +1,6 @@
 # FAIL:
-# anonymous record literals use 'record { ... }'; 'record(...)' is not supported
+# anonymous record literals use 'class { ... }'; 'class(...)' is not supported
 
 def main() Unit {
-    _ = record(1, "x")
+    _ = class(1, "x")
 }
