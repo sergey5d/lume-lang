@@ -1920,6 +1920,38 @@ impl<'a> Interpreter<'a> {
                 .collect(),
         })));
 
+        if args.len() == 1 {
+            let mut aggregate = match &object {
+                Value::Aggregate(object) => object.borrow_mut(),
+                _ => unreachable!(),
+            };
+            if let Value::Record(values) = &args[0] {
+                let values = values.borrow();
+                if ty
+                    .fields
+                    .iter()
+                    .all(|field| lookup_named_field(&values, &field.name).is_some())
+                {
+                    for (index, field) in ty.fields.iter().enumerate() {
+                        let value = lookup_named_field(&values, &field.name)
+                            .expect("named constructor field")
+                            .clone();
+                        aggregate.fields[index] = self.coerce_value_to_type(value, &field.ty);
+                    }
+                    drop(aggregate);
+                    return Ok(Some(object));
+                }
+                if values.len() <= aggregate.fields.len() {
+                    for (index, ((_, value), field)) in values.iter().zip(&ty.fields).enumerate() {
+                        aggregate.fields[index] =
+                            self.coerce_value_to_type(value.clone(), &field.ty);
+                    }
+                    drop(aggregate);
+                    return Ok(Some(object));
+                }
+            }
+        }
+
         if let Some(init) = self.find_method_overload_for_kind(type_name, ty.kind, "init", &args) {
             let receiver = object.clone();
             let _ = self.call_function(init, Some(receiver), None, args, span)?;
@@ -1939,32 +1971,6 @@ impl<'a> Interpreter<'a> {
                                 self.coerce_value_to_type(value, &ty.fields[index].ty);
                         }
                         return Ok(Some(object.clone()));
-                    }
-                    Value::Record(values) => {
-                        let values = values.borrow();
-                        if ty
-                            .fields
-                            .iter()
-                            .all(|field| lookup_named_field(&values, &field.name).is_some())
-                        {
-                            for (index, field) in ty.fields.iter().enumerate() {
-                                let value = lookup_named_field(&values, &field.name)
-                                    .expect("named constructor field")
-                                    .clone();
-                                aggregate.fields[index] =
-                                    self.coerce_value_to_type(value, &field.ty);
-                            }
-                            return Ok(Some(object.clone()));
-                        }
-                        if values.len() <= aggregate.fields.len() {
-                            for (index, ((_, value), field)) in
-                                values.iter().zip(&ty.fields).enumerate()
-                            {
-                                aggregate.fields[index] =
-                                    self.coerce_value_to_type(value.clone(), &field.ty);
-                            }
-                            return Ok(Some(object.clone()));
-                        }
                     }
                     _ => {}
                 }

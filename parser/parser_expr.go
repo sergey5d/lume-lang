@@ -286,10 +286,10 @@ func (p *Parser) parseAnonymousRecordExpr(start Token) (Expr, error) {
 			span  Span
 		}
 		var entries []recordEntry
-		if p.check(TokenRBrace) {
-			return nil, fmt.Errorf("anonymous record literal must declare at least one field at %d:%d", start.Line, start.Column)
-		}
 		for {
+			if p.check(TokenRBrace) {
+				break
+			}
 			var entry recordEntry
 			if p.check(TokenIdentifier) && p.checkNext(TokenAssign) {
 				name, err := p.consume(TokenIdentifier, "expected record field name")

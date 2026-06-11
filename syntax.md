@@ -351,25 +351,21 @@ def makeUser() { name Str, age Int } = {
 describe(class { "Cara", 14 })
 ```
 
-Named classes can be built from an anonymous record only through an explicit type call:
+Named classes use the same brace construction surface:
 
 ```txt
-userRecord = class {
-    name = "Ada"
-    age = 10
-}
-
-user User = User(userRecord)
-person Person = Person(class { "Ben", 12, "NYC" })
+user User = User { name = "Ada", age = 10 }
+person Person = Person { "Ben", 12, "NYC" }
 profile MixedProfile = MixedProfile {
     name = "Liam"
     age = 8
 }
+settings Settings = Settings {}
 ```
 
-Rules for this conversion:
-- it applies only when the single argument is an anonymous record value
-- the anonymous record shape must match the visible construction shape of the target class
+Rules for field-based class construction:
+- `Type { ... }` checks the brace payload against the visible construction shape of the target class
+- `Type {}` works when the visible construction shape has no required fields
 - field names and field types must match exactly
 - public fields without initializers are required
 - public fields with initializers are optional and may be provided or omitted
@@ -378,8 +374,7 @@ Rules for this conversion:
 - mutable vs immutable field differences do not matter for shape matching
 - explicit constructors are ignored for this conversion path
 - named class values do not structurally convert to other named class values
-- nested inner conversions must still be explicit, for example `owner = Person(class { ... })`
-- `Type { ... }` is allowed as sugar for passing a single anonymous record argument
+- nested inner constructions must still name the target class explicitly, for example `owner = Person { ... }`
 - `Type({ ... })` is not supported; plain `{ ... }` inside call parentheses is treated as a block, not as an anonymous record literal
 
 Anonymous record shapes are structural:
@@ -388,6 +383,7 @@ Anonymous record shapes are structural:
 - missing fields are rejected
 - defaults are not part of the shape syntax
 - construction uses `class { ... }`; plain `{ ... }` remains a block expression
+- named fields inside construction braces use `field = value`
 - `class { value1, value2 }` is positional and requires an anonymous record shape from context
 - inside `class { ... }`, fields may be separated by commas, newlines, or a mix of both
 

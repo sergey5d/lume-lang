@@ -1916,10 +1916,10 @@ impl Team {
 }
 
 def makeTeam(owner Person) Team {
-	return Team(class {
+	return Team {
 		name = "Core"
 		owner = owner
-	})
+	}
 }
 
 def run() Bool {
@@ -1928,11 +1928,11 @@ def run() Bool {
 		age = 10
 	}
 	user User = User(userRecord)
-	person Person = Person(class { "Ben", 12 })
-	team = makeTeam(Person(class {
+	person Person = Person { "Ben", 12 }
+	team = makeTeam(Person {
 		name = "Cy"
 		age = 7
-	}))
+	})
 	return user.name == "Ana" &&
 		user.age == 10 &&
 		person.name == "Ben" &&

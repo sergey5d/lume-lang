@@ -13,10 +13,10 @@ object A {
     var count Int = 2
 
     # explicit factory method
-    def create(sizeValue Int) B = B(size = sizeValue)
+    def create(sizeValue Int) B = B { size = sizeValue }
 
     # explicit factory method
-    def create(str Str) B = B(size = 1)
+    def create(str Str) B = B { size = 1 }
 
     def value() Int = count
 

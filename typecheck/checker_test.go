@@ -805,14 +805,14 @@ def run() Int {
 		age = 10
 	}
 	user User = User(userRecord)
-	person Person = Person(class { "Ben", 12 })
-	team Team = Team(class {
+	person Person = Person { "Ben", 12 }
+	team Team = Team {
 		name = "Core"
-		owner = Person(class {
+		owner = Person {
 			name = "Cy"
 			age = 7
-		})
-	})
+		}
+	}
 	return user.age + person.age + team.owner.age
 }
 `

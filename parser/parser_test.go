@@ -1994,6 +1994,19 @@ def run(user { name Str, age Int }) Int {
 		t.Fatalf("unexpected brace positional record literal %#v", bracePositional)
 	}
 
+	emptyCallExpr, err := ParseExpr(`Settings {}`)
+	if err != nil {
+		t.Fatalf("ParseExpr returned error for empty trailing brace record call: %v", err)
+	}
+	emptyCall, ok := emptyCallExpr.(*CallExpr)
+	if !ok || len(emptyCall.Args) != 1 {
+		t.Fatalf("expected empty trailing brace record call to be CallExpr, got %#v", emptyCallExpr)
+	}
+	emptyRecordArg, ok := emptyCall.Args[0].Value.(*AnonymousRecordExpr)
+	if !ok || len(emptyRecordArg.Fields) != 0 || len(emptyRecordArg.Values) != 0 {
+		t.Fatalf("unexpected empty trailing brace record call arg %#v", emptyCall.Args[0].Value)
+	}
+
 	trailingProgram, err := Parse(`
 def run() Int {
 	name = "Ada"

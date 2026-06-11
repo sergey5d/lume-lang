@@ -115,6 +115,16 @@ impl Counter {
 
 #[test]
 fn parses_record_literal_forms() {
+    match parse_expr_only(r#"class { name = "Ana", age = 10 }"#) {
+        Expr::RecordLiteral { fields, values, .. } => {
+            assert!(values.is_empty());
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name.as_deref(), Some("name"));
+            assert_eq!(fields[1].name.as_deref(), Some("age"));
+        }
+        other => panic!("expected named record literal, got {other:#?}"),
+    }
+
     match parse_expr_only("class { name, age }") {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(fields.is_empty());
@@ -140,6 +150,20 @@ fn parses_record_literal_forms() {
                     assert_eq!(values.len(), 2);
                 }
                 other => panic!("expected record literal call arg, got {other:#?}"),
+            }
+        }
+        other => panic!("expected call, got {other:#?}"),
+    }
+
+    match parse_expr_only("Settings {}") {
+        Expr::Call { args, .. } => {
+            assert_eq!(args.len(), 1);
+            match &args[0].value {
+                Expr::RecordLiteral { fields, values, .. } => {
+                    assert!(fields.is_empty());
+                    assert!(values.is_empty());
+                }
+                other => panic!("expected empty record literal call arg, got {other:#?}"),
             }
         }
         other => panic!("expected call, got {other:#?}"),

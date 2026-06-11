@@ -16,7 +16,7 @@ impl Person {
 }
 
 def main() Unit {
-    person = Person(name = "Ada", age = 36)
+    person = Person { name = "Ada", age = 36 }
     OS.println(person.name())
     OS.println(person.age())
 }

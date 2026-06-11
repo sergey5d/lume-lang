@@ -53,23 +53,23 @@ def main() Unit {
     }
     user User = User(userRecord)
 
-    person Person = Person(class { "Ben", 12 })
+    person Person = Person { "Ben", 12 }
 
     pointRecord = class {
         x = 3, y = 4
     }
     point MutablePoint = MutablePoint(pointRecord)
 
-    fullPerson Person = Person(class {
+    fullPerson Person = Person {
         name = "Nora"
         age = 20
         city = "Paris"
-    })
+    }
 
-    profile MixedProfile = MixedProfile(class {
+    profile MixedProfile = MixedProfile {
         name = "Liam"
         age = 8
-    })
+    }
 
     profile3 MixedProfile = MixedProfile {
         name = "Liam", age = 8

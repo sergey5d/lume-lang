@@ -52,7 +52,7 @@ impl B {
 }
 
 def main() Unit {
-    aFromFields A = A(age = 15, name = "Sammy")
+    aFromFields A = A { age = 15, name = "Sammy" }
     aFromAlt A = A(maturity = 21)
     bManual B = B(5, "Bobby")
 
