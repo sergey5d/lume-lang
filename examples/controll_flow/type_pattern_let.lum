@@ -1,0 +1,36 @@
+# EXPECT:
+# if-let binding true
+# if-let wildcard true
+# let-else binding true
+# let-else wildcard true
+# 0
+
+interface CounterPrecursor {
+}
+
+class Counter with CounterPrecursor {
+}
+
+def run(value CounterPrecursor) Int {
+    if let counter Counter = value {
+        OS.println("if-let binding " + (counter is Counter))
+    }
+
+    if let _ Counter = value {
+        OS.println("if-let wildcard true")
+    }
+
+    let counter Counter = value else {
+        return 1
+    }
+    OS.println("let-else binding " + (counter is Counter))
+
+    let _ Counter = value else {
+        return 2
+    }
+    OS.println("let-else wildcard true")
+
+    0
+}
+
+def main() Int = run(Counter())

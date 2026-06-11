@@ -208,6 +208,97 @@ def run(flag Bool) Int {
 }
 
 #[test]
+fn parses_if_type_pattern_bindings() {
+    let result = parse(
+        r#"
+class Worker {
+}
+
+def run(value Worker) Unit {
+    if let item Worker = value {
+        OS.println(item)
+    }
+    if let _ Worker = value {
+        OS.println("matched")
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[1] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => {
+            match &block.statements[0] {
+                Stmt::If(stmt) => match stmt.pattern.as_ref() {
+                    Some(Pattern::Type { name, .. }) => assert_eq!(name.as_deref(), Some("item")),
+                    other => panic!("expected first if-let type pattern, got {other:#?}"),
+                },
+                other => panic!("expected if statement, got {other:#?}"),
+            }
+            match &block.statements[1] {
+                Stmt::If(stmt) => match stmt.pattern.as_ref() {
+                    Some(Pattern::Type { name, .. }) => assert!(name.is_none()),
+                    other => panic!("expected second if-let wildcard type pattern, got {other:#?}"),
+                },
+                other => panic!("expected if statement, got {other:#?}"),
+            }
+        }
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_let_else_type_patterns() {
+    let result = parse(
+        r#"
+class Worker {
+}
+
+def run(value Worker) Int {
+    let item Worker = value else {
+        return 1
+    }
+    let _ Worker = value else {
+        return 2
+    }
+    return 0
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[1] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => {
+            match &block.statements[0] {
+                Stmt::LetElse(stmt) => match &stmt.pattern {
+                    Pattern::Type { name, .. } => assert_eq!(name.as_deref(), Some("item")),
+                    other => panic!("expected first let-else type pattern, got {other:#?}"),
+                },
+                other => panic!("expected let-else statement, got {other:#?}"),
+            }
+            match &block.statements[1] {
+                Stmt::LetElse(stmt) => match &stmt.pattern {
+                    Pattern::Type { name, .. } => assert!(name.is_none()),
+                    other => {
+                        panic!("expected second let-else wildcard type pattern, got {other:#?}")
+                    }
+                },
+                other => panic!("expected let-else statement, got {other:#?}"),
+            }
+        }
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_lambda_expression() {
     let result = parse("def make() Unit = values.map((x, y) -> x + y)\n");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);

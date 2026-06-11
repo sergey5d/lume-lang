@@ -154,26 +154,30 @@ impl<'a> Parser<'a> {
                     }
                     let values = self.parse_expr_list()?;
                     if self.match_keyword(Keyword::Else) {
-                        self.error_at_current(
-                            "unexpected_token",
-                            "plain 'let name = value' bindings do not support 'else'; use a refutable pattern like 'let Some(name) = value else { ... }'",
-                        );
-                        return None;
+                        if bindings.len() == 1 && bindings[0].ty.is_some() && values.len() == 1 {
+                        } else {
+                            self.error_at_current(
+                                "unexpected_token",
+                                "plain 'let name = value' bindings do not support 'else'; use a refutable pattern like 'let Some(name) = value else { ... }'",
+                            );
+                            return None;
+                        }
+                    } else {
+                        if bindings.len() > 1 && values.len() == 1 {
+                            self.error_at_current(
+                                "unexpected_token",
+                                "destructuring bindings require 'let (...) = value'",
+                            );
+                            return None;
+                        }
+                        let end = values.last().map(Expr::span).unwrap_or(start);
+                        return Some(Stmt::Binding(BindingStmt {
+                            visibility: Visibility::Default,
+                            bindings,
+                            values,
+                            span: start.cover(end),
+                        }));
                     }
-                    if bindings.len() > 1 && values.len() == 1 {
-                        self.error_at_current(
-                            "unexpected_token",
-                            "destructuring bindings require 'let (...) = value'",
-                        );
-                        return None;
-                    }
-                    let end = values.last().map(Expr::span).unwrap_or(start);
-                    return Some(Stmt::Binding(BindingStmt {
-                        visibility: Visibility::Default,
-                        bindings,
-                        values,
-                        span: start.cover(end),
-                    }));
                 }
             }
         }

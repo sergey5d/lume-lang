@@ -220,8 +220,23 @@ func (p *Parser) parseLetStmt() (Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		if stmt, err := p.parseBindingStmtWithStart(start, true); err == nil {
-			return stmt, nil
+		if bindings, err := p.parseBindingsWithStart(start, true); err == nil {
+			operator := p.peek().Type
+			if operator == TokenAssign {
+				p.advance()
+				values, err := p.parseBindingInitializers(len(bindings), p.previous())
+				if err == nil {
+					if p.check(TokenElse) {
+						if len(bindings) == 1 && bindings[0].Type != nil && len(values) == 1 && values[0] != nil {
+							p.pos = save
+						} else {
+							return nil, fmt.Errorf("plain 'let name = value' bindings do not support 'else'; use a refutable pattern like 'let Some(name) = value else { ... }'")
+						}
+					} else {
+						return p.finishBindingStmt(start, bindings, values)
+					}
+				}
+			}
 		}
 		p.pos = save
 	}
@@ -367,6 +382,10 @@ func (p *Parser) parseBindingStmtWithStart(start Token, firstIsName bool) (State
 	if err != nil {
 		return nil, err
 	}
+	return p.finishBindingStmt(start, bindings, values)
+}
+
+func (p *Parser) finishBindingStmt(start Token, bindings []Binding, values []Expr) (Statement, error) {
 	if len(bindings) > 1 && len(values) == 1 {
 		return nil, fmt.Errorf("destructuring bindings require 'let (...) = value'")
 	}

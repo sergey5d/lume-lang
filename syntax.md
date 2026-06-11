@@ -771,6 +771,18 @@ if let Some(item) = maybeValue {
 }
 ```
 
+Runtime type patterns also work in `if let`:
+
+```txt
+if let worker Worker = value {
+    OS.println(worker)
+}
+
+if let _ Worker = value {
+    OS.println("value is a Worker")
+}
+```
+
 When the payload needs more destructuring, prefer doing that on the next line inside the branch:
 
 ```txt
@@ -802,6 +814,18 @@ Preferred refutable binding form:
 ```txt
 let Some(item) = maybeValue else {
     return Err("missing")
+}
+```
+
+Type-pattern binding is also supported:
+
+```txt
+let worker Worker = value else {
+    return Err("wrong kind")
+}
+
+let _ Worker = value else {
+    return Err("wrong kind")
 }
 ```
 

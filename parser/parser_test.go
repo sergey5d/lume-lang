@@ -2634,6 +2634,46 @@ def run(value Option[Int]) Unit {
 	}
 }
 
+func TestParseIfTypePatternBinding(t *testing.T) {
+	src := `
+class Worker {
+}
+
+def run(value Worker) Unit {
+	if let item Worker = value {
+		OS.println(item)
+	}
+	if let _ Worker = value {
+		OS.println("matched")
+	}
+}
+`
+
+	program, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+
+	fn := program.Functions[0]
+	firstIf := fn.Body.Statements[0].(*IfStmt)
+	typePattern, ok := firstIf.Pattern.(*TypePattern)
+	if !ok {
+		t.Fatalf("expected type pattern, got %T", firstIf.Pattern)
+	}
+	if typePattern.Name != "item" {
+		t.Fatalf("expected type-pattern binding name 'item', got %q", typePattern.Name)
+	}
+
+	secondIf := fn.Body.Statements[1].(*IfStmt)
+	wildcardPattern, ok := secondIf.Pattern.(*TypePattern)
+	if !ok {
+		t.Fatalf("expected wildcard type pattern, got %T", secondIf.Pattern)
+	}
+	if wildcardPattern.Name != "_" {
+		t.Fatalf("expected wildcard type pattern name '_', got %q", wildcardPattern.Name)
+	}
+}
+
 func TestParseIfOptionDestructuring(t *testing.T) {
 	src := `
 def run(value Option[(Int, Str, Bool)]) Unit {
@@ -2687,6 +2727,53 @@ def run(left Option[Int], right Option[Int]) Unit {
 	}
 	if ifStmt.Pattern != nil || ifStmt.PatternValue != nil {
 		t.Fatalf("expected single-pattern fields to be empty for grouped if let")
+	}
+}
+
+func TestParseLetElseTypePattern(t *testing.T) {
+	src := `
+class Worker {
+}
+
+def run(value Worker) Int {
+	let item Worker = value else {
+		return 1
+	}
+	let _ Worker = value else {
+		return 2
+	}
+	return 0
+}
+`
+
+	program, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+
+	fn := program.Functions[0]
+	firstLet, ok := fn.Body.Statements[0].(*LetElseStmt)
+	if !ok {
+		t.Fatalf("expected first statement to be let-else, got %T", fn.Body.Statements[0])
+	}
+	firstPattern, ok := firstLet.Pattern.(*TypePattern)
+	if !ok {
+		t.Fatalf("expected first let-else pattern to be type pattern, got %T", firstLet.Pattern)
+	}
+	if firstPattern.Name != "item" {
+		t.Fatalf("expected first let-else binding name 'item', got %q", firstPattern.Name)
+	}
+
+	secondLet, ok := fn.Body.Statements[1].(*LetElseStmt)
+	if !ok {
+		t.Fatalf("expected second statement to be let-else, got %T", fn.Body.Statements[1])
+	}
+	secondPattern, ok := secondLet.Pattern.(*TypePattern)
+	if !ok {
+		t.Fatalf("expected second let-else pattern to be type pattern, got %T", secondLet.Pattern)
+	}
+	if secondPattern.Name != "_" {
+		t.Fatalf("expected second let-else wildcard name '_', got %q", secondPattern.Name)
 	}
 }
 
