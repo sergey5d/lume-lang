@@ -648,7 +648,7 @@ func (in *Interpreter) execBlock(block *parser.BlockStmt, parent *env, self *ins
 func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instance) (Value, any, error) {
 	switch s := stmt.(type) {
 	case *parser.ValStmt:
-		values, err := in.bindingValues(s.Bindings, s.Values, local, s.Span)
+		values, err := in.bindingValues(s.Bindings, s.Values, s.Destructure, local, s.Span)
 		if err != nil {
 			if signal, ok := trySignalToReturnSignal(err); ok {
 				return nil, signal, nil
@@ -799,7 +799,7 @@ func (in *Interpreter) execStmt(stmt parser.Statement, local *env, self *instanc
 			}
 			if set {
 				thenEnv := newEnv(local)
-				boundValues, err := in.destructureBoundValue(s.Bindings, value, s.Span)
+				boundValues, err := in.destructureBoundValue(s.Bindings, value, parser.DestructureTuple, s.Span)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -1053,7 +1053,7 @@ func (in *Interpreter) matchPattern(pattern parser.Pattern, value Value, local *
 		if len(p.Path) != 1 || p.Path[0] != instanceValue.class.Name {
 			return nil, false, nil
 		}
-		items, _, ok := destructurableValues(value)
+		items, _, ok := destructurableValues(value, parser.DestructureRecord)
 		if !ok || len(items) != len(p.Args) {
 			return nil, false, nil
 		}
@@ -1224,11 +1224,14 @@ func (in *Interpreter) unwrappableBindingValue(sourceValue Value, local *env, sp
 	}
 }
 
-func (in *Interpreter) destructureBoundValue(bindings []parser.Binding, value Value, span parser.Span) ([]Value, error) {
+func (in *Interpreter) destructureBoundValue(bindings []parser.Binding, value Value, destructure parser.DestructureKind, span parser.Span) ([]Value, error) {
 	if len(bindings) <= 1 {
 		return []Value{value}, nil
 	}
-	items, kind, ok := destructurableValues(value)
+	if destructure == parser.DestructureNone {
+		destructure = parser.DestructureTuple
+	}
+	items, kind, ok := destructurableValues(value, destructure)
 	if !ok {
 		return nil, RuntimeError{Message: fmt.Sprintf("if binding expects %d values, got 1", len(bindings)), Span: span}
 	}
@@ -1327,7 +1330,7 @@ func (in *Interpreter) execForBindings(bindings []parser.ForBinding, index int, 
 	}
 	binding := bindings[index]
 	if binding.Iterable == nil {
-		values, err := in.bindingValues(binding.Bindings, binding.Values, local, binding.Span)
+		values, err := in.bindingValues(binding.Bindings, binding.Values, parser.DestructureTuple, local, binding.Span)
 		if err != nil {
 			return nil, err
 		}
@@ -1354,7 +1357,7 @@ func (in *Interpreter) execForBindings(bindings []parser.ForBinding, index int, 
 	}
 	for _, item := range items {
 		loopEnv := newEnv(local)
-		boundValues, err := in.destructureBoundValue(binding.Bindings, item, binding.Span)
+		boundValues, err := in.destructureBoundValue(binding.Bindings, item, parser.DestructureTuple, binding.Span)
 		if err != nil {
 			return nil, err
 		}
@@ -1482,7 +1485,7 @@ func (in *Interpreter) evalIfStmtValue(s *parser.IfStmt, local *env, self *insta
 		}
 		if set {
 			thenEnv := newEnv(local)
-			boundValues, err := in.destructureBoundValue(s.Bindings, value, s.Span)
+			boundValues, err := in.destructureBoundValue(s.Bindings, value, parser.DestructureTuple, s.Span)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -2282,7 +2285,7 @@ func (in *Interpreter) callClosure(fn *closure, args []Value) (Value, error) {
 	local := newEnv(fn.env)
 	boundArgs := args
 	if fn.tupleDestructuring && len(args) == 1 && len(fn.params) > 1 {
-		items, kind, ok := destructurableValues(args[0])
+		items, kind, ok := destructurableValues(args[0], parser.DestructureTuple)
 		if !ok || len(items) != len(fn.params) {
 			count := 1
 			if ok {
@@ -4175,7 +4178,7 @@ func (in *Interpreter) instanceImplements(value *instance, target string) bool {
 	return false
 }
 
-func (in *Interpreter) bindingValues(bindings []parser.Binding, values []parser.Expr, local *env, span parser.Span) ([]Value, error) {
+func (in *Interpreter) bindingValues(bindings []parser.Binding, values []parser.Expr, destructure parser.DestructureKind, local *env, span parser.Span) ([]Value, error) {
 	if len(bindings) == 0 || len(values) == 0 {
 		return nil, nil
 	}
@@ -4203,7 +4206,10 @@ func (in *Interpreter) bindingValues(bindings []parser.Binding, values []parser.
 		if err != nil {
 			return nil, err
 		}
-		items, kind, ok := destructurableValues(value)
+		if destructure == parser.DestructureNone {
+			destructure = parser.DestructureTuple
+		}
+		items, kind, ok := destructurableValues(value, destructure)
 		if !ok {
 			return nil, RuntimeError{Message: fmt.Sprintf("binding expects %d values, got 1", len(bindings)), Span: span}
 		}
@@ -4415,7 +4421,7 @@ func (in *Interpreter) assignmentValues(targetCount int, values []parser.Expr, l
 		if err != nil {
 			return nil, err
 		}
-		items, kind, ok := destructurableValues(value)
+		items, kind, ok := destructurableValues(value, parser.DestructureTuple)
 		if !ok {
 			return nil, RuntimeError{Message: fmt.Sprintf("assignment expects %d values, got 1", targetCount), Span: span}
 		}
@@ -4427,9 +4433,27 @@ func (in *Interpreter) assignmentValues(targetCount int, values []parser.Expr, l
 	return nil, RuntimeError{Message: fmt.Sprintf("assignment expects %d values, got %d", targetCount, len(values)), Span: span}
 }
 
-func destructurableValues(value Value) ([]Value, string, bool) {
-	if tuple, ok := value.(*nativeTuple); ok {
+func destructurableValues(value Value, destructure parser.DestructureKind) ([]Value, string, bool) {
+	if destructure == parser.DestructureNone {
+		destructure = parser.DestructureTuple
+	}
+	if destructure == parser.DestructureTuple {
+		tuple, ok := value.(*nativeTuple)
+		if !ok {
+			return nil, "", false
+		}
 		return tuple.items, "tuple", true
+	}
+	if record, ok := value.(*nativeRecord); ok {
+		items := make([]Value, len(record.order))
+		for i, name := range record.order {
+			fieldValue, ok := record.fields[name]
+			if !ok {
+				return nil, "", false
+			}
+			items[i] = fieldValue
+		}
+		return items, "destructured", true
 	}
 	instanceValue, ok := value.(*instance)
 	if !ok || instanceValue.class.Enum || instanceValue.class.Object {

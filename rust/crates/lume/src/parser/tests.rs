@@ -188,6 +188,35 @@ fn parses_record_literal_forms() {
 }
 
 #[test]
+fn parses_brace_destructuring_binding() {
+    let result = parse(
+        r#"
+def run(box Box) Int {
+    let { value Int, label Str } = box
+    return value
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => match &block.statements[0] {
+                Stmt::Binding(binding) => {
+                    assert_eq!(binding.destructure, Some(DestructureKind::Record));
+                    assert_eq!(binding.bindings.len(), 2);
+                    assert_eq!(binding.bindings[0].name, "value");
+                    assert_eq!(binding.bindings[1].name, "label");
+                }
+                other => panic!("expected binding, got {other:#?}"),
+            },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_single_expression_function_body() {
     let result = parse("def zero() Int = 0\n");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);

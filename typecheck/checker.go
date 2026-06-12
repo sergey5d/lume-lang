@@ -1152,7 +1152,7 @@ func (c *Checker) checkBlock(block *parser.BlockStmt) *Type {
 	return unknownType
 }
 
-func (c *Checker) bindingValueTypes(bindings []parser.Binding, values []parser.Expr, span parser.Span) []*Type {
+func (c *Checker) bindingValueTypes(bindings []parser.Binding, values []parser.Expr, destructure parser.DestructureKind, span parser.Span) []*Type {
 	if len(bindings) == 0 || len(values) == 0 {
 		return nil
 	}
@@ -1173,7 +1173,7 @@ func (c *Checker) bindingValueTypes(bindings []parser.Binding, values []parser.E
 	}
 	if len(values) == 1 {
 		valueType := c.checkExpr(values[0])
-		return c.destructureValueTypes(len(bindings), valueType, span, "invalid_binding_count", "binding")
+		return c.destructureValueTypes(len(bindings), valueType, destructure, span, "invalid_binding_count", "binding")
 	}
 	for _, value := range values {
 		c.checkExpr(value)
@@ -1192,7 +1192,7 @@ func (c *Checker) assignmentValueTypes(targetCount int, values []parser.Expr, sp
 	}
 	if len(values) == 1 {
 		valueType := c.checkExpr(values[0])
-		return c.destructureValueTypes(targetCount, valueType, span, "invalid_assignment_count", "assignment")
+		return c.destructureValueTypes(targetCount, valueType, parser.DestructureTuple, span, "invalid_assignment_count", "assignment")
 	}
 	for _, value := range values {
 		c.checkExpr(value)
@@ -1201,12 +1201,25 @@ func (c *Checker) assignmentValueTypes(targetCount int, values []parser.Expr, sp
 	return nil
 }
 
-func (c *Checker) destructurableValueTypes(valueType *Type) ([]*Type, string, bool) {
+func (c *Checker) destructurableValueTypes(valueType *Type, destructure parser.DestructureKind) ([]*Type, string, bool) {
 	if valueType == nil || isUnknown(valueType) {
 		return nil, "", false
 	}
-	if valueType.Kind == TypeTuple {
+	if destructure == parser.DestructureNone {
+		destructure = parser.DestructureTuple
+	}
+	if destructure == parser.DestructureTuple {
+		if valueType.Kind != TypeTuple {
+			return nil, "", false
+		}
 		return valueType.Args, "tuple", true
+	}
+	if valueType.Kind == TypeRecord {
+		out := make([]*Type, len(valueType.Fields))
+		for i, field := range valueType.Fields {
+			out[i] = field.Type
+		}
+		return out, "destructured", true
 	}
 	if valueType.Kind != TypeClass {
 		return nil, "", false
@@ -1228,8 +1241,8 @@ func (c *Checker) destructurableValueTypes(valueType *Type) ([]*Type, string, bo
 	return out, "destructured", true
 }
 
-func (c *Checker) destructureValueTypes(count int, valueType *Type, span parser.Span, code string, context string) []*Type {
-	parts, kind, ok := c.destructurableValueTypes(valueType)
+func (c *Checker) destructureValueTypes(count int, valueType *Type, destructure parser.DestructureKind, span parser.Span, code string, context string) []*Type {
+	parts, kind, ok := c.destructurableValueTypes(valueType, destructure)
 	if !ok {
 		c.addDiagnostic(code, fmt.Sprintf("%s expects %d values, got 1", context, count), span)
 		return []*Type{valueType}
@@ -1298,12 +1311,12 @@ func (c *Checker) checkForClause(binding parser.ForBinding) {
 		elemType := c.forIterableElementType(iterType, binding.Iterable)
 		bindingTypes := []*Type{elemType}
 		if len(binding.Bindings) > 1 {
-			bindingTypes = c.destructureValueTypes(len(binding.Bindings), elemType, binding.Span, "invalid_binding_count", "for binding")
+			bindingTypes = c.destructureValueTypes(len(binding.Bindings), elemType, parser.DestructureTuple, binding.Span, "invalid_binding_count", "for binding")
 		}
 		c.defineForBindingParts(binding.Bindings, bindingTypes)
 		return
 	}
-	valueTypes := c.bindingValueTypes(binding.Bindings, binding.Values, binding.Span)
+	valueTypes := c.bindingValueTypes(binding.Bindings, binding.Values, parser.DestructureTuple, binding.Span)
 	c.defineForBindingParts(binding.Bindings, valueTypes)
 }
 
@@ -1318,7 +1331,7 @@ func (c *Checker) forIterableElementType(t *Type, expr parser.Expr) *Type {
 func (c *Checker) checkStmt(stmt parser.Statement) {
 	switch s := stmt.(type) {
 	case *parser.ValStmt:
-		valueTypes := c.bindingValueTypes(s.Bindings, s.Values, s.Span)
+		valueTypes := c.bindingValueTypes(s.Bindings, s.Values, s.Destructure, s.Span)
 		for i, bindingDecl := range s.Bindings {
 			if bindingDecl.Deferred {
 				c.addDiagnostic("invalid_deferred", "binding '"+bindingDecl.Name+"' cannot be initialized with '?' outside class fields", bindingDecl.Span)
@@ -1460,7 +1473,7 @@ func (c *Checker) checkStmt(stmt parser.Statement) {
 			}
 			bindingTypes := []*Type{elemType}
 			if len(s.Bindings) > 1 {
-				bindingTypes = c.destructureValueTypes(len(s.Bindings), elemType, s.Span, "invalid_binding_count", "if binding")
+				bindingTypes = c.destructureValueTypes(len(s.Bindings), elemType, parser.DestructureTuple, s.Span, "invalid_binding_count", "if binding")
 			}
 			c.pushScope()
 			for i, binding := range s.Bindings {
@@ -2175,7 +2188,7 @@ func (c *Checker) checkConstructorPattern(pattern *parser.ConstructorPattern, va
 		c.addDiagnostic("invalid_match_pattern", "constructor pattern does not match value type", pattern.Span)
 		return
 	}
-	fieldTypes, _, ok := c.destructurableValueTypes(valueType)
+	fieldTypes, _, ok := c.destructurableValueTypes(valueType, parser.DestructureRecord)
 	if !ok {
 		c.addDiagnostic("invalid_match_pattern", "constructor pattern requires destructurable class", pattern.Span)
 		return
@@ -2307,7 +2320,7 @@ func (c *Checker) checkIfStmtResult(s *parser.IfStmt, code, message string) *Typ
 		}
 		bindingTypes := []*Type{elemType}
 		if len(s.Bindings) > 1 {
-			bindingTypes = c.destructureValueTypes(len(s.Bindings), elemType, s.Span, "invalid_binding_count", "if binding")
+			bindingTypes = c.destructureValueTypes(len(s.Bindings), elemType, parser.DestructureTuple, s.Span, "invalid_binding_count", "if binding")
 		}
 		c.pushScope()
 		for i, binding := range s.Bindings {
@@ -4013,7 +4026,7 @@ func (c *Checker) checkLambdaExpr(expr *parser.LambdaExpr, expected *Type) *Type
 		expectedSig = expected.Signature
 		if len(expectedSig.Parameters) != len(expr.Parameters) {
 			if len(expectedSig.Parameters) == 1 && len(expr.Parameters) > 1 {
-				parts, _, ok := c.destructurableValueTypes(expectedSig.Parameters[0])
+				parts, _, ok := c.destructurableValueTypes(expectedSig.Parameters[0], parser.DestructureTuple)
 				if ok && len(parts) == len(expr.Parameters) {
 					destructuredTupleArg = true
 					params = append([]*Type(nil), parts...)

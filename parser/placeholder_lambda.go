@@ -364,7 +364,12 @@ func replacePlaceholderStmt(stmt Statement, param string) Statement {
 		for i, value := range s.Values {
 			values[i] = replacePlaceholderExpr(value, param)
 		}
-		return &ValStmt{Bindings: append([]Binding(nil), s.Bindings...), Values: values, Span: s.Span}
+		return &ValStmt{
+			Bindings:    append([]Binding(nil), s.Bindings...),
+			Values:      values,
+			Destructure: s.Destructure,
+			Span:        s.Span,
+		}
 	case *AssignmentStmt:
 		return &AssignmentStmt{Target: replacePlaceholderExpr(s.Target, param), Operator: s.Operator, Value: replacePlaceholderExpr(s.Value, param), Span: s.Span}
 	case *MultiAssignmentStmt:

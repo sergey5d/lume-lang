@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{
-        self, AssignOp, BinaryOp as AstBinaryOp, Block, CallableBody, ElseBranch, ElseExprBranch,
-        Expr, FunctionDecl, ImplBlock, Item, MatchCaseBody, MethodDecl, Pattern, Stmt, TypeDecl,
-        TypeMember, TypeRef,
+        self, AssignOp, BinaryOp as AstBinaryOp, Block, CallableBody, DestructureKind, ElseBranch,
+        ElseExprBranch, Expr, FunctionDecl, ImplBlock, Item, MatchCaseBody, MethodDecl, Pattern,
+        Stmt, TypeDecl, TypeMember, TypeRef,
     },
     diagnostic::Diagnostic,
     ir,
@@ -704,12 +704,13 @@ impl<'a> FunctionLowerer<'a> {
         match stmt {
             Stmt::Binding(binding) => {
                 let destructure_single_value =
-                    binding.bindings.len() > 1 && binding.values.len() == 1;
+                    binding.destructure.is_some() && binding.values.len() == 1;
                 let source_value =
                     destructure_single_value.then(|| self.lower_expr(&binding.values[0]));
-                let destructure_fields = destructure_single_value.then(|| {
-                    self.destructure_field_names(&binding.values[0], binding.bindings.len())
-                });
+                let destructure_fields =
+                    matches!(binding.destructure, Some(DestructureKind::Record)).then(|| {
+                        self.destructure_field_names(&binding.values[0], binding.bindings.len())
+                    });
                 for (index, local) in binding.bindings.iter().enumerate() {
                     if local.name == "_" {
                         if let Some(value) = if destructure_single_value {
@@ -3748,6 +3749,7 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
                 .iter()
                 .map(|value| rewrite_placeholder_expr(value, name))
                 .collect(),
+            destructure: binding.destructure,
             span: binding.span,
         }),
         Stmt::Assignment(assignment) => Stmt::Assignment(ast::AssignmentStmt {

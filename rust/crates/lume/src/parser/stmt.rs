@@ -77,7 +77,7 @@ impl<'a> Parser<'a> {
         if bindings.len() > 1 && values.len() == 1 {
             self.error_at_current(
                 "unexpected_token",
-                "destructuring bindings require 'let (...) = value'",
+                "destructuring bindings require 'let (...) = value' or 'let { ... } = value'",
             );
             return None;
         }
@@ -86,6 +86,7 @@ impl<'a> Parser<'a> {
             visibility: Visibility::Default,
             bindings,
             values,
+            destructure: None,
             span: start.cover(end),
         })
     }
@@ -94,6 +95,38 @@ impl<'a> Parser<'a> {
         let start = self.consume_keyword(Keyword::Let, "expected 'let'")?;
 
         if self.at(TokenKind::LBrace) {
+            if self.is_brace_destructuring_binding_start() {
+                self.consume(TokenKind::LBrace, "expected '{' after 'let'")?;
+                let bindings = self.parse_binding_list(false)?;
+                self.consume(
+                    TokenKind::RBrace,
+                    "expected '}' after destructuring bindings",
+                )?;
+                self.consume(TokenKind::Eq, "expected '=' after destructuring bindings")?;
+                if self.at(TokenKind::Newline) {
+                    self.error_at_current(
+                        "expected_expression",
+                        "expected expression on same line after \"=\"",
+                    );
+                    return None;
+                }
+                let values = self.parse_expr_list()?;
+                if values.len() != 1 {
+                    self.error_at_current(
+                        "unexpected_token",
+                        "destructuring bindings require a single initializer expression",
+                    );
+                    return None;
+                }
+                let end = values.last().map(Expr::span).unwrap_or(start);
+                return Some(Stmt::Binding(BindingStmt {
+                    visibility: Visibility::Default,
+                    bindings,
+                    values,
+                    destructure: Some(DestructureKind::Record),
+                    span: start.cover(end),
+                }));
+            }
             let (clauses, clauses_end) = self.parse_refutable_clause_block("let")?;
             self.consume_keyword(Keyword::Else, "expected 'else' after let clause block")?;
             let else_block = self.parse_block_or_inline_stmt_body("let else")?;
@@ -134,6 +167,7 @@ impl<'a> Parser<'a> {
                 visibility: Visibility::Default,
                 bindings,
                 values,
+                destructure: Some(DestructureKind::Tuple),
                 span: start.cover(end),
             }));
         }
@@ -166,7 +200,7 @@ impl<'a> Parser<'a> {
                         if bindings.len() > 1 && values.len() == 1 {
                             self.error_at_current(
                                 "unexpected_token",
-                                "destructuring bindings require 'let (...) = value'",
+                                "destructuring bindings require 'let (...) = value' or 'let { ... } = value'",
                             );
                             return None;
                         }
@@ -175,6 +209,7 @@ impl<'a> Parser<'a> {
                             visibility: Visibility::Default,
                             bindings,
                             values,
+                            destructure: None,
                             span: start.cover(end),
                         }));
                     }
@@ -231,7 +266,7 @@ impl<'a> Parser<'a> {
         if bindings.len() > 1 && values.len() == 1 {
             self.error_at_current(
                 "unexpected_token",
-                "destructuring bindings require 'let (...) = value'",
+                "destructuring bindings require 'let (...) = value' or 'let { ... } = value'",
             );
             return None;
         }
@@ -241,6 +276,7 @@ impl<'a> Parser<'a> {
             visibility: Visibility::Default,
             bindings,
             values,
+            destructure: None,
             span: start.cover(end),
         })
     }
@@ -272,6 +308,25 @@ impl<'a> Parser<'a> {
 
     pub(super) fn is_binding_start(&self) -> bool {
         self.at(TokenKind::Identifier)
+    }
+
+    pub(super) fn is_brace_destructuring_binding_start(&self) -> bool {
+        if !self.at(TokenKind::LBrace) {
+            return false;
+        }
+        let mut parser = Parser {
+            tokens: self.tokens,
+            index: self.index,
+            diagnostics: Vec::new(),
+            allow_trailing_block_call: self.allow_trailing_block_call,
+        };
+        if !parser.match_token(TokenKind::LBrace) || !parser.at(TokenKind::Identifier) {
+            return false;
+        }
+        if parser.parse_binding_list(false).is_none() {
+            return false;
+        }
+        parser.match_token(TokenKind::RBrace) && parser.at(TokenKind::Eq)
     }
 
     pub(super) fn try_parse_assignment_stmt(&mut self) -> Option<AssignmentStmt> {

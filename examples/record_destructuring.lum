@@ -19,22 +19,22 @@ class Triple {
 }
 
 def main() Int {
-    let (c Int, d Str) = Pair(7, "world")
+    let { c Int, d Str } = Pair { 7, "world" }
     OS.println("class", c, d)
 
-    let (inferredRecordLeft, inferredRecordRight) = Pair(10, "infer")
+    let { inferredRecordLeft, inferredRecordRight } = Pair { 10, "infer" }
     OS.println("class inferred", inferredRecordLeft, inferredRecordRight)
 
-    let (mixedRecordLeft Int, mixedRecordRight) = Pair(11, "partial")
+    let { mixedRecordLeft Int, mixedRecordRight } = Pair { 11, "partial" }
     OS.println("class mixed", mixedRecordLeft, mixedRecordRight)
 
-    let (recordPairLeft, recordPairRight) = Pair(22, "record-pair")
+    let { recordPairLeft, recordPairRight } = Pair { 22, "record-pair" }
     OS.println("class pair", recordPairLeft, recordPairRight)
 
-    let (_, skippedOnlyRecordValue) = Pair(23, "visible")
+    let { _, skippedOnlyRecordValue } = Pair { 23, "visible" }
     OS.println("class skip only", skippedOnlyRecordValue)
 
-    let (skippedRecordLeft Int, _, skippedRecordRight Str) = Triple(15, "drop", "kept")
+    let { skippedRecordLeft Int, _, skippedRecordRight Str } = Triple { 15, "drop", "kept" }
     OS.println("class skip", skippedRecordLeft, skippedRecordRight)
 
     0

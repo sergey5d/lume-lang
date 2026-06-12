@@ -7,10 +7,10 @@ use std::{
 use crate::{
     Diagnostic,
     ast::{
-        AssignOp, AssignmentStmt, BinaryOp, Block, CallableBody, ElseBranch, ElseExprBranch, Expr,
-        ForBinding, FunctionDecl, IfConditionClause, IfStmt, ImplBlock, Item, LambdaBody,
-        MatchCase, MatchCaseBody, MethodDecl, Pattern, Program, Stmt, TypeDecl, TypeKind,
-        TypeMember, TypeRef, Visibility,
+        AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
+        ElseBranch, ElseExprBranch, Expr, ForBinding, FunctionDecl, IfConditionClause, IfStmt,
+        ImplBlock, Item, LambdaBody, MatchCase, MatchCaseBody, MethodDecl, Pattern, Program, Stmt,
+        TypeDecl, TypeKind, TypeMember, TypeRef, Visibility,
     },
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, collect_module_order,
@@ -579,7 +579,7 @@ impl<'a> Checker<'a> {
                 .iter()
                 .map(|expr| self.check_expr(expr))
                 .collect::<Vec<_>>();
-            let slot_types = self.binding_slot_types(&binding_stmt.bindings, &value_types);
+            let slot_types = self.binding_slot_types(binding_stmt, &value_types);
             for (index, binding) in binding_stmt.bindings.iter().enumerate() {
                 let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
                 let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
@@ -921,7 +921,8 @@ impl<'a> Checker<'a> {
         if let Some(value) = &stmt.binding_value {
             let value_ty = self.check_expr(value);
             let inner = self.unwrap_inner_type(&value_ty);
-            let slot_types = self.destructure_slots(&inner, stmt.bindings.len());
+            let slot_types =
+                self.destructure_slots(&inner, stmt.bindings.len(), DestructureKind::Tuple);
             self.push_scope();
             for (index, binding) in stmt.bindings.iter().enumerate() {
                 let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
@@ -1014,7 +1015,7 @@ impl<'a> Checker<'a> {
                         }
                     })
                     .collect::<Vec<_>>();
-                let slot_types = self.binding_slot_types(&binding_stmt.bindings, &value_types);
+                let slot_types = self.binding_slot_types(binding_stmt, &value_types);
                 for (index, binding) in binding_stmt.bindings.iter().enumerate() {
                     let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
                     let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
@@ -1184,7 +1185,8 @@ impl<'a> Checker<'a> {
         } else if let Some(value) = &stmt.binding_value {
             let value_ty = self.check_expr(value);
             let inner = self.unwrap_inner_type(&value_ty);
-            let slot_types = self.destructure_slots(&inner, stmt.bindings.len());
+            let slot_types =
+                self.destructure_slots(&inner, stmt.bindings.len(), DestructureKind::Tuple);
             self.push_scope();
             for (index, binding) in stmt.bindings.iter().enumerate() {
                 let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
@@ -1259,7 +1261,8 @@ impl<'a> Checker<'a> {
         for value in &binding.values {
             self.check_expr(value);
         }
-        let slot_types = self.destructure_slots(&item_ty, binding.bindings.len());
+        let slot_types =
+            self.destructure_slots(&item_ty, binding.bindings.len(), DestructureKind::Tuple);
         for (index, local) in binding.bindings.iter().enumerate() {
             let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
             let explicit = local.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
@@ -1268,23 +1271,26 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn binding_slot_types(&self, bindings: &[crate::ast::Binding], value_types: &[Ty]) -> Vec<Ty> {
-        if bindings.len() > 1 && value_types.len() == 1 {
-            return self.destructure_slots(&value_types[0], bindings.len());
+    fn binding_slot_types(&self, binding_stmt: &BindingStmt, value_types: &[Ty]) -> Vec<Ty> {
+        if let Some(kind) = binding_stmt.destructure {
+            let value_ty = value_types.first().cloned().unwrap_or(Ty::Unknown);
+            return self.destructure_slots(&value_ty, binding_stmt.bindings.len(), kind);
         }
-        (0..bindings.len())
+        (0..binding_stmt.bindings.len())
             .map(|index| value_types.get(index).cloned().unwrap_or(Ty::Unknown))
             .collect()
     }
 
-    fn destructure_slots(&self, ty: &Ty, count: usize) -> Vec<Ty> {
+    fn destructure_slots(&self, ty: &Ty, count: usize, kind: DestructureKind) -> Vec<Ty> {
         if count <= 1 {
             return vec![ty.clone()];
         }
         let mut slots = match ty {
-            Ty::Tuple(items) => items.clone(),
-            Ty::Record(fields) => fields.iter().map(|(_, ty)| ty.clone()).collect(),
-            Ty::Named(name, _) => self
+            Ty::Tuple(items) if kind == DestructureKind::Tuple => items.clone(),
+            Ty::Record(fields) if kind == DestructureKind::Record => {
+                fields.iter().map(|(_, ty)| ty.clone()).collect()
+            }
+            Ty::Named(name, _) if kind == DestructureKind::Record => self
                 .lookup_any_type(name)
                 .map(|sig| sig.fields.iter().map(|field| field.ty.clone()).collect())
                 .unwrap_or_default(),
@@ -1712,7 +1718,7 @@ impl<'a> Checker<'a> {
         let hinted_params = match expected_params {
             Some(ref params_hint) if params_hint.len() == params.len() => params_hint.clone(),
             Some(ref params_hint) if destructured_external => {
-                self.destructure_slots(&params_hint[0], params.len())
+                self.destructure_slots(&params_hint[0], params.len(), DestructureKind::Tuple)
             }
             _ => vec![Ty::Unknown; params.len()],
         };

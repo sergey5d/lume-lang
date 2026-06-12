@@ -19,22 +19,22 @@ class Crate {
 }
 
 def main() Int {
-    let (e Int, f Str) = Box(9, "boxed")
+    let { e Int, f Str } = Box { 9, "boxed" }
     OS.println("class", e, f)
 
-    let (inferredClassLeft, inferredClassRight) = Box(12, "class")
+    let { inferredClassLeft, inferredClassRight } = Box { 12, "class" }
     OS.println("class inferred", inferredClassLeft, inferredClassRight)
 
-    let (mixedClassLeft Int, mixedClassRight) = Box(13, "typed")
+    let { mixedClassLeft Int, mixedClassRight } = Box { 13, "typed" }
     OS.println("class mixed", mixedClassLeft, mixedClassRight)
 
-    let (classPairLeft, classPairRight) = Box(24, "class-pair")
+    let { classPairLeft, classPairRight } = Box { 24, "class-pair" }
     OS.println("class pair", classPairLeft, classPairRight)
 
-    let (_, skippedOnlyClassValue) = Box(25, "class-only")
+    let { _, skippedOnlyClassValue } = Box { 25, "class-only" }
     OS.println("class skip only", skippedOnlyClassValue)
 
-    let (skippedClassLeft Int, _, skippedClassRight Str) = Crate(16, "drop", "class-skip")
+    let { skippedClassLeft Int, _, skippedClassRight Str } = Crate { 16, "drop", "class-skip" }
     OS.println("class skip", skippedClassLeft, skippedClassRight)
 
     0

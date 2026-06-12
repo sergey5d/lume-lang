@@ -1759,6 +1759,30 @@ def run() Int {
 	}
 }
 
+func TestParseBraceDestructuringBinding(t *testing.T) {
+	src := `
+def run(box Box) Int {
+	let { value Int, label Str } = box
+	return value
+}
+`
+
+	program, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	stmt, ok := program.Functions[0].Body.Statements[0].(*ValStmt)
+	if !ok {
+		t.Fatalf("expected binding statement, got %#v", program.Functions[0].Body.Statements[0])
+	}
+	if stmt.Destructure != DestructureRecord {
+		t.Fatalf("expected record destructuring, got %#v", stmt.Destructure)
+	}
+	if len(stmt.Bindings) != 2 || stmt.Bindings[0].Name != "value" || stmt.Bindings[1].Name != "label" {
+		t.Fatalf("unexpected bindings: %#v", stmt.Bindings)
+	}
+}
+
 func TestParseImplicitDestructuringRequiresLet(t *testing.T) {
 	src := `
 def run() Unit {

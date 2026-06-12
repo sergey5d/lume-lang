@@ -213,10 +213,11 @@ type Expr interface {
 
 // ValStmt declares one or more bindings with matching initializer expressions.
 type ValStmt struct {
-	Bindings []Binding `json:"bindings"`
-	Values   []Expr    `json:"values"`
-	Public   bool      `json:"public,omitempty"`
-	Span     Span      `json:"span"`
+	Bindings    []Binding       `json:"bindings"`
+	Values      []Expr          `json:"values"`
+	Destructure DestructureKind `json:"destructure,omitempty"`
+	Public      bool            `json:"public,omitempty"`
+	Span        Span            `json:"span"`
 }
 
 // Binding describes a single declared name in a binding statement.
@@ -227,6 +228,15 @@ type Binding struct {
 	Deferred bool     `json:"deferred,omitempty"`
 	Span     Span     `json:"span"`
 }
+
+// DestructureKind tracks which surface form introduced a multi-binding destructure.
+type DestructureKind string
+
+const (
+	DestructureNone   DestructureKind = ""
+	DestructureTuple  DestructureKind = "tuple"
+	DestructureRecord DestructureKind = "record"
+)
 
 func (*ValStmt) statementNode() {}
 

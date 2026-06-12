@@ -121,7 +121,7 @@ func (p *Parser) parseVarBindingStmt() (Statement, error) {
 		return nil, err
 	}
 	if len(bindings) > 1 && len(values) == 1 {
-		return nil, fmt.Errorf("destructuring bindings require 'let (...) = value'")
+		return nil, fmt.Errorf("destructuring bindings require 'let (...) = value' or 'let { ... } = value'")
 	}
 	for i := range bindings {
 		if i >= len(values) || values[i] == nil {
@@ -149,6 +149,48 @@ func (p *Parser) parseLetStmt() (Statement, error) {
 	}
 
 	if p.check(TokenLBrace) {
+		if p.isBraceDestructuringLetStart() {
+			braceStart, err := p.consume(TokenLBrace, "expected '{' after 'let'")
+			if err != nil {
+				return nil, err
+			}
+			var first Token
+			if p.check(TokenIdentifier) {
+				first, err = p.consume(TokenIdentifier, "expected binding name after '{'")
+			} else {
+				first, err = p.consume(TokenUnder, "expected binding name after '{'")
+			}
+			if err != nil {
+				return nil, err
+			}
+			bindings, err := p.parseBindingsWithStart(first, true)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := p.consume(TokenRBrace, "expected '}' after destructuring bindings"); err != nil {
+				return nil, err
+			}
+			operator, err := p.consume(TokenAssign, "expected '=' after destructuring bindings")
+			if err != nil {
+				return nil, err
+			}
+			values, err := p.parseBindingInitializers(len(bindings), operator)
+			if err != nil {
+				return nil, err
+			}
+			if len(values) != 1 || values[0] == nil {
+				return nil, fmt.Errorf("destructuring bindings require a single initializer expression")
+			}
+			value := wrapThunkExpr(nil, values[0])
+			stmt := &ValStmt{Bindings: bindings, Values: []Expr{value}, Destructure: DestructureRecord}
+			stmt.Span = mergeSpans(tokenSpan(braceStart), exprSpan(value))
+			for _, binding := range bindings {
+				if binding.Name != "_" {
+					p.declare(binding.Name)
+				}
+			}
+			return stmt, nil
+		}
 		clauses, span, err := p.parseRefutableClauseBlock("let")
 		if err != nil {
 			return nil, err
@@ -198,7 +240,7 @@ func (p *Parser) parseLetStmt() (Statement, error) {
 			return nil, fmt.Errorf("destructuring bindings require a single initializer expression")
 		}
 		value := wrapThunkExpr(nil, values[0])
-		stmt := &ValStmt{Bindings: bindings, Values: []Expr{value}}
+		stmt := &ValStmt{Bindings: bindings, Values: []Expr{value}, Destructure: DestructureTuple}
 		stmt.Span = mergeSpans(tokenSpan(start), exprSpan(value))
 		for _, binding := range bindings {
 			if binding.Name != "_" {
@@ -328,6 +370,35 @@ func ifConditionClauseFromRefutable(clause RefutableClause) IfConditionClause {
 	}
 }
 
+func (p *Parser) isBraceDestructuringLetStart() bool {
+	if !p.check(TokenLBrace) {
+		return false
+	}
+	save := p.pos
+	defer func() { p.pos = save }()
+	p.advance()
+	if !p.check(TokenIdentifier) && !p.check(TokenUnder) {
+		return false
+	}
+	var first Token
+	var err error
+	if p.check(TokenIdentifier) {
+		first, err = p.consume(TokenIdentifier, "expected binding name")
+	} else {
+		first, err = p.consume(TokenUnder, "expected binding name")
+	}
+	if err != nil {
+		return false
+	}
+	if _, err := p.parseBindingsWithStart(first, true); err != nil {
+		return false
+	}
+	if _, err := p.consume(TokenRBrace, "expected '}' after destructuring bindings"); err != nil {
+		return false
+	}
+	return p.check(TokenAssign)
+}
+
 func (p *Parser) parseIfConditionClauses(initial []IfConditionClause) ([]IfConditionClause, error) {
 	clauses := append([]IfConditionClause{}, initial...)
 	for p.match(TokenAndAnd) {
@@ -387,7 +458,7 @@ func (p *Parser) parseBindingStmtWithStart(start Token, firstIsName bool) (State
 
 func (p *Parser) finishBindingStmt(start Token, bindings []Binding, values []Expr) (Statement, error) {
 	if len(bindings) > 1 && len(values) == 1 {
-		return nil, fmt.Errorf("destructuring bindings require 'let (...) = value'")
+		return nil, fmt.Errorf("destructuring bindings require 'let (...) = value' or 'let { ... } = value'")
 	}
 	for i := range bindings {
 		if i < len(values) && values[i] != nil {

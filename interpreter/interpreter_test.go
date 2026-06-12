@@ -1967,8 +1967,8 @@ class Box {
 }
 
 def run() Int {
-	let (a Int, b Str) = Pair(5, "x")
-	let (c Int, d Str) = Box(7, "y")
+	let { a Int, b Str } = Pair { 5, "x" }
+	let { c Int, d Str } = Box { 7, "y" }
 	return a + c
 }
 `
@@ -1992,7 +1992,7 @@ class Triple {
 }
 
 def run() Str {
-	let (a Int, _, c Str) = Triple(1, "drop", "keep")
+	let { a Int, _, c Str } = Triple { 1, "drop", "keep" }
 	return c
 }
 `

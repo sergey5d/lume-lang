@@ -274,7 +274,15 @@ pub struct BindingStmt {
     pub visibility: Visibility,
     pub bindings: Vec<Binding>,
     pub values: Vec<Expr>,
+    pub destructure: Option<DestructureKind>,
     pub span: Span,
+}
+
+/// Which surface syntax introduced a destructuring binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestructureKind {
+    Tuple,
+    Record,
 }
 
 /// A single binding introduced by a binding statement or loop form.

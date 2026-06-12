@@ -836,8 +836,8 @@ class Box {
 }
 
 def run() Int {
-	let (a Int, b Str) = Pair(5, "x")
-	let (c Int, d Str) = Box(7, "y")
+	let { a Int, b Str } = Pair { 5, "x" }
+	let { c Int, d Str } = Box { 7, "y" }
 	return a + c
 }
 `
@@ -857,7 +857,7 @@ class Triple {
 }
 
 def run() Int {
-	let (a Int, _, c Str) = Triple(1, "drop", "keep")
+	let { a Int, _, c Str } = Triple { 1, "drop", "keep" }
 	return a
 }
 `
@@ -876,7 +876,36 @@ class Box {
 }
 
 def run() Int {
-	let (a Int, b Str) = Box(7)
+	let { a Int, b Str } = Box { 7 }
+	return a
+}
+`
+
+	result := Analyze(parseProgram(t, src))
+	if len(result.Diagnostics) == 0 {
+		t.Fatalf("expected diagnostics, got none")
+	}
+	found := false
+	for _, diag := range result.Diagnostics {
+		if diag.Code == "invalid_binding_count" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected invalid_binding_count diagnostic, got %#v", result.Diagnostics)
+	}
+}
+
+func TestAnalyzeTupleDestructuringDoesNotDestructureClass(t *testing.T) {
+	src := `
+class Pair {
+	left Int
+	right Str
+}
+
+def run() Int {
+	let (a Int, b Str) = Pair { 5, "x" }
 	return a
 }
 `

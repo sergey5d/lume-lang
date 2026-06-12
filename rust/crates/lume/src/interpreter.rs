@@ -3180,6 +3180,10 @@ fn lookup_named_field(fields: &[(String, Value)], name: &str) -> Option<Value> {
         .iter()
         .find(|(field_name, _)| field_name == name)
         .map(|(_, value)| value.clone())
+        .or_else(|| {
+            ordered_member(fields.len(), name)
+                .and_then(|index| fields.get(index).map(|(_, value)| value.clone()))
+        })
 }
 
 fn set_named_field(fields: &mut [(String, Value)], name: &str, value: Value) -> Option<()> {
@@ -3191,8 +3195,13 @@ fn set_named_field(fields: &mut [(String, Value)], name: &str, value: Value) -> 
 }
 
 fn tuple_member(items: &[Value], name: &str) -> Option<Value> {
+    ordered_member(items.len(), name).and_then(|index| items.get(index).cloned())
+}
+
+fn ordered_member(len: usize, name: &str) -> Option<usize> {
     let index = name.strip_prefix('_')?.parse::<usize>().ok()?;
-    items.get(index.checked_sub(1)?).cloned()
+    let index = index.checked_sub(1)?;
+    (index < len).then_some(index)
 }
 
 fn normalize_index(len: usize, index: i64) -> Option<usize> {
@@ -3211,6 +3220,10 @@ fn aggregate_named_field(aggregate: &AggregateValue, name: &str) -> Option<Value
         .iter()
         .position(|field_name| field_name == name)
         .and_then(|index| aggregate.fields.get(index).cloned())
+        .or_else(|| {
+            ordered_member(aggregate.fields.len(), name)
+                .and_then(|index| aggregate.fields.get(index).cloned())
+        })
 }
 
 fn pattern_field_value(value: &Value, name: &str) -> Option<Value> {
