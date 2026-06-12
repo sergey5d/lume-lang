@@ -1,6 +1,6 @@
 # Rust Implementation
 
-This folder is the start of a Rust implementation of `Lume`.
+This folder contains the active Rust implementation of `Lume`.
 
 The goal is not to mirror the Go code file-for-file. The goal is to keep the
 same broad pipeline while moving toward a runtime that is easier to optimize:
@@ -116,11 +116,7 @@ It supports:
 
 The intended next steps are:
 
-1. tighten output parity further by comparing more behavior against the Go path
-2. remove the remaining latent `unsupported` branches in lowering/runtime
-3. widen unexercised stdlib/runtime behavior beyond the current sample set
-4. decide whether Rust should replace only the interpreter path or also the
-   backend/codegen tooling
-
-That keeps the Rust implementation aligned with the direction we discussed:
-optimize one implementation path instead of maintaining multiple backends.
+1. remove the remaining latent `unsupported` branches in lowering/runtime
+2. widen unexercised stdlib/runtime behavior beyond the current sample set
+3. tighten diagnostics and runtime parity across the checked-in examples
+4. keep simplifying the implementation around one maintained runtime path
