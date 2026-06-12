@@ -21,7 +21,7 @@ def format(prefix Str, value Int) Str {
 }
 
 def main() Int {
-	formatter = Formatter()
+	formatter = Formatter {}
 
 	OS.println("plain function", format("regular-", 7))
 	OS.println("mixed function", format("named-", value = 9))

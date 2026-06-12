@@ -32,6 +32,7 @@ pub struct RuntimeField {
     pub name: String,
     pub ty: ir::Type,
     pub mutable: bool,
+    pub hidden: bool,
     pub initializer: Option<ir::Constant>,
 }
 
@@ -187,6 +188,7 @@ impl RuntimeProgram {
                 name: field.name.clone(),
                 ty: field.ty.clone(),
                 mutable: field.mutable,
+                hidden: field.visibility == crate::ast::Visibility::Hidden,
                 initializer: field.initializer.clone(),
             })
             .collect()

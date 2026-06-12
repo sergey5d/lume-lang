@@ -1226,12 +1226,16 @@ impl<'a> Interpreter<'a> {
                 let right = self.eval_operand_ref(frame, right, span)?;
                 self.eval_binary(*op, left, right, span)
             }
-            ir::RValue::Call { callee, args } => {
+            ir::RValue::Call {
+                callee,
+                args,
+                structural,
+            } => {
                 let args = args
                     .iter()
                     .map(|arg| self.eval_operand_ref(frame, arg, span))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.invoke_callee(frame, callee, args, span)
+                self.invoke_callee(frame, callee, args, span, *structural)
             }
             ir::RValue::Tuple(items) => Ok(Value::Tuple(
                 items
@@ -1575,6 +1579,7 @@ impl<'a> Interpreter<'a> {
         callee: &ir::Callee,
         args: Vec<Value>,
         span: Option<Span>,
+        structural: bool,
     ) -> Result<Value, Diagnostic> {
         match callee {
             ir::Callee::Direct(id) => self.call_function(*id, None, None, args, span),
@@ -1587,7 +1592,9 @@ impl<'a> Interpreter<'a> {
                 self.invoke_method(receiver, method, args, span)
             }
             ir::Callee::Intrinsic(intrinsic) => self.invoke_intrinsic(intrinsic, args, span),
-            ir::Callee::Named { path } => self.invoke_named_path(frame, path, args, span),
+            ir::Callee::Named { path } => {
+                self.invoke_named_path(frame, path, args, span, structural)
+            }
         }
     }
 
@@ -1622,6 +1629,7 @@ impl<'a> Interpreter<'a> {
         path: &[String],
         args: Vec<Value>,
         span: Option<Span>,
+        structural: bool,
     ) -> Result<Value, Diagnostic> {
         if path.is_empty() {
             return Err(self.runtime_error(span, "empty callee path"));
@@ -1632,7 +1640,7 @@ impl<'a> Interpreter<'a> {
             if let Some(function) = self.lookup_function(name) {
                 return self.call_function(function, None, None, args, span);
             }
-            return self.invoke_root_named(name, args, span);
+            return self.invoke_root_named(name, args, span, structural);
         }
 
         if path[0] == "OS" && path.len() == 2 {
@@ -1660,7 +1668,7 @@ impl<'a> Interpreter<'a> {
         }
 
         if path.len() == 2 {
-            if let Some(value) = self.construct_named_path(path, args.clone(), span)? {
+            if let Some(value) = self.construct_named_path(path, args.clone(), span, structural)? {
                 return Ok(value);
             }
         }
@@ -1744,6 +1752,7 @@ impl<'a> Interpreter<'a> {
             &[type_name.to_string(), member.to_string()],
             Vec::new(),
             span,
+            false,
         )
     }
 
@@ -1752,16 +1761,19 @@ impl<'a> Interpreter<'a> {
         name: &str,
         args: Vec<Value>,
         span: Option<Span>,
+        structural: bool,
     ) -> Result<Value, Diagnostic> {
-        if let Some(value) = self.construct_builtin(name, &args, span)? {
-            return Ok(value);
+        if !structural {
+            if let Some(value) = self.construct_builtin(name, &args, span)? {
+                return Ok(value);
+            }
         }
         if args.is_empty() {
             if let Some(value) = self.lookup_object_singleton(name, span)? {
                 return Ok(value);
             }
         }
-        if let Some(value) = self.construct_named_type(name, args.clone(), span)? {
+        if let Some(value) = self.construct_named_type(name, args.clone(), span, structural)? {
             return Ok(value);
         }
         if let Some(value) = self.lookup_runtime_value(None, name) {
@@ -1775,6 +1787,7 @@ impl<'a> Interpreter<'a> {
         path: &[String],
         args: Vec<Value>,
         span: Option<Span>,
+        _structural: bool,
     ) -> Result<Option<Value>, Diagnostic> {
         if path.len() != 2 {
             return Ok(None);
@@ -1891,6 +1904,7 @@ impl<'a> Interpreter<'a> {
         type_name: &str,
         args: Vec<Value>,
         span: Option<Span>,
+        structural: bool,
     ) -> Result<Option<Value>, Diagnostic> {
         let Some(ty) = self
             .runtime
@@ -1920,34 +1934,37 @@ impl<'a> Interpreter<'a> {
                 .collect(),
         })));
 
-        if args.len() == 1 {
-            let mut aggregate = match &object {
-                Value::Aggregate(object) => object.borrow_mut(),
-                _ => unreachable!(),
-            };
-            if let Value::Record(values) = &args[0] {
-                let values = values.borrow();
-                if ty
-                    .fields
-                    .iter()
-                    .all(|field| lookup_named_field(&values, &field.name).is_some())
-                {
-                    for (index, field) in ty.fields.iter().enumerate() {
-                        let value = lookup_named_field(&values, &field.name)
-                            .expect("named constructor field")
-                            .clone();
-                        aggregate.fields[index] = self.coerce_value_to_type(value, &field.ty);
-                    }
-                    drop(aggregate);
+        let has_explicit_constructor = ty.methods.iter().any(|method| method.name == "new");
+
+        if structural {
+            if has_explicit_constructor {
+                return Err(self.runtime_error(
+                    span,
+                    format!(
+                        "class '{}' cannot use brace-based construction because it defines explicit constructors",
+                        type_name
+                    ),
+                ));
+            }
+
+            match args.as_slice() {
+                [Value::Record(values)] => {
+                    let values = values.borrow();
+                    self.apply_named_record_constructor(&object, &ty, &values, span)?;
                     return Ok(Some(object));
                 }
-                if values.len() <= aggregate.fields.len() {
-                    for (index, ((_, value), field)) in values.iter().zip(&ty.fields).enumerate() {
-                        aggregate.fields[index] =
-                            self.coerce_value_to_type(value.clone(), &field.ty);
-                    }
-                    drop(aggregate);
+                [Value::Tuple(values)] => {
+                    self.apply_positional_record_constructor(&object, &ty, values, span)?;
                     return Ok(Some(object));
+                }
+                _ => {
+                    return Err(self.runtime_error(
+                        span,
+                        format!(
+                            "brace-based construction for '{}' expects named or positional record fields",
+                            type_name
+                        ),
+                    ));
                 }
             }
         }
@@ -1958,40 +1975,163 @@ impl<'a> Interpreter<'a> {
             return Ok(Some(object));
         }
 
+        if has_explicit_constructor {
+            return Err(self.runtime_error(
+                span,
+                format!(
+                    "no constructor overload for class '{}' matches {} arguments",
+                    type_name,
+                    args.len()
+                ),
+            ));
+        }
+
+        Err(self.runtime_error(
+            span,
+            format!(
+                "class '{}' does not have an implicit '()' constructor; use '{} {{ ... }}' or define 'new'",
+                type_name, type_name
+            ),
+        ))
+    }
+
+    fn apply_named_record_constructor(
+        &mut self,
+        object: &Value,
+        ty: &runtime::RuntimeType,
+        values: &[(String, Value)],
+        span: Option<Span>,
+    ) -> Result<(), Diagnostic> {
+        if ty
+            .fields
+            .iter()
+            .any(|field| field.hidden && field.initializer.is_none())
         {
-            let mut aggregate = match &object {
-                Value::Aggregate(object) => object.borrow_mut(),
-                _ => unreachable!(),
-            };
-            if args.len() == 1 {
-                match &args[0] {
-                    Value::Tuple(items) if items.len() <= aggregate.fields.len() => {
-                        for (index, value) in items.iter().cloned().enumerate() {
-                            aggregate.fields[index] =
-                                self.coerce_value_to_type(value, &ty.fields[index].ty);
-                        }
-                        return Ok(Some(object.clone()));
-                    }
-                    _ => {}
-                }
-            }
-            if args.len() > aggregate.fields.len() {
+            return Err(self.runtime_error(
+                span,
+                format!(
+                    "class '{}' cannot be built from an anonymous record because it has private fields without initializers",
+                    ty.name
+                ),
+            ));
+        }
+
+        let visible_fields = ty
+            .fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .collect::<Vec<_>>();
+        let required_visible = visible_fields
+            .iter()
+            .filter(|field| field.initializer.is_none())
+            .count();
+        if values.len() < required_visible || values.len() > visible_fields.len() {
+            return Err(self.runtime_error(
+                span,
+                format!(
+                    "class '{}' requires named brace fields that match the visible class shape",
+                    ty.name
+                ),
+            ));
+        }
+
+        let mut aggregate = match object {
+            Value::Aggregate(object) => object.borrow_mut(),
+            _ => unreachable!(),
+        };
+        for (name, value) in values {
+            let Some(field) = visible_fields.iter().find(|field| field.name == *name) else {
                 return Err(self.runtime_error(
                     span,
                     format!(
-                        "constructor '{}' accepts at most {} positional fields, got {}",
-                        type_name,
-                        aggregate.fields.len(),
-                        args.len()
+                        "class '{}' requires named brace fields that match the visible class shape",
+                        ty.name
+                    ),
+                ));
+            };
+            aggregate.fields[field.slot.0] = self.coerce_value_to_type(value.clone(), &field.ty);
+        }
+
+        for field in visible_fields {
+            if field.initializer.is_none()
+                && !values.iter().any(|(name, _)| *name == field.name)
+            {
+                return Err(self.runtime_error(
+                    span,
+                    format!(
+                        "class '{}' requires named brace fields that match the visible class shape",
+                        ty.name
                     ),
                 ));
             }
-            for (index, value) in args.into_iter().enumerate() {
-                aggregate.fields[index] = value;
-            }
         }
 
-        Ok(Some(object))
+        Ok(())
+    }
+
+    fn apply_positional_record_constructor(
+        &mut self,
+        object: &Value,
+        ty: &runtime::RuntimeType,
+        values: &[Value],
+        span: Option<Span>,
+    ) -> Result<(), Diagnostic> {
+        if ty
+            .fields
+            .iter()
+            .any(|field| field.hidden && field.initializer.is_none())
+        {
+            return Err(self.runtime_error(
+                span,
+                format!(
+                    "class '{}' cannot use positional brace construction because it has private fields without initializers",
+                    ty.name
+                ),
+            ));
+        }
+
+        if ty.fields.iter().enumerate().any(|(index, field)| {
+            field.hidden
+                && field.initializer.is_some()
+                && ty.fields[index + 1..].iter().any(|later| !later.hidden)
+        }) {
+            return Err(self.runtime_error(
+                span,
+                format!(
+                    "class '{}' cannot use positional brace construction because private defaulted fields must come after all public fields",
+                    ty.name
+                ),
+            ));
+        }
+
+        let visible_fields = ty
+            .fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .collect::<Vec<_>>();
+        if values.len() > visible_fields.len()
+            || visible_fields[values.len()..]
+                .iter()
+                .any(|field| field.initializer.is_none())
+        {
+            return Err(self.runtime_error(
+                span,
+                format!(
+                    "class '{}' positional brace construction must match the public field order and may omit only trailing defaulted fields",
+                    ty.name
+                ),
+            ));
+        }
+
+        let mut aggregate = match object {
+            Value::Aggregate(object) => object.borrow_mut(),
+            _ => unreachable!(),
+        };
+        for (value, field) in values.iter().zip(visible_fields.iter()) {
+            aggregate.fields[field.slot.0] = self.coerce_value_to_type(value.clone(), &field.ty);
+        }
+
+        Ok(())
     }
 
     fn construct_value(
@@ -2007,7 +2147,7 @@ impl<'a> Interpreter<'a> {
                     .iter()
                     .map(|field| self.eval_operand_ref(frame, &field.value, span))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.construct_named_type(name, args, span)?.ok_or_else(|| {
+                self.construct_named_type(name, args, span, false)?.ok_or_else(|| {
                     self.runtime_error(span, format!("cannot construct type '{name}'"))
                 })
             }
@@ -4415,8 +4555,8 @@ $name
             }
 
             def main() Unit {
-                amount Amount = Amount(42, "hello")
-                pair PairBox = PairBox(5, 9)
+                amount Amount = Amount { 42, "hello" }
+                pair PairBox = PairBox { 5, 9 }
                 values = List(MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3))
                 partialMapped List[Option[Int]] = values.map(partial {
                     case SomeX(x) => x + 1
@@ -4452,14 +4592,14 @@ $name
             }
 
             impl Amount {
-                def multiple(other Amount) Amount = Amount(
-                    amount = this.amount * other.amount,
-                    description = this.description + " " + other.description,
+                def multiple(other Amount) Amount = Amount {
+                    amount = this.amount * other.amount
+                    description = this.description + " " + other.description
                     count = 0
-                )
+                }
             }
 
-            a1 = Amount(10, "description", 5)
+            a1 = Amount { 10, "description", 5 }
             a2 = a1.multiple(a1)
             a3 = a2 with { amount = 101, description = a2.description + " updated" }
             a4 = a3 with { amount = 102 } with { count = 7 }
@@ -4509,11 +4649,11 @@ $name
             }
 
             def main() Unit {
-                OS.println(match MaybeApple.SomeX(Apple(12)) {
+                OS.println(match MaybeApple.SomeX(Apple(class { 12 })) {
                     case SomeX(Apple(size)) => "apple " + size
                     case MaybeApple.NoneX => "apple none"
                 })
-                OS.println(match MaybeAmount.SomeX(Amount(13, "cad")) {
+                OS.println(match MaybeAmount.SomeX(Amount(class { 13, "cad" })) {
                     case SomeX(Amount(count, label)) => "amount " + count + " " + label
                     case MaybeAmount.NoneX => "amount none"
                 })
@@ -4603,8 +4743,8 @@ $name
             class PreferFirst with FirstChoice, SecondChoice {}
 
             def main() Unit {
-                rabbit = Rabbit()
-                prefer = PreferFirst()
+                rabbit = Rabbit {}
+                prefer = PreferFirst {}
                 OS.println(rabbit.hop())
                 OS.println(prefer.choose())
             }

@@ -59,23 +59,23 @@ def lowestCommonAncestor(root TreeNode, valP Int, valQ Int) Option[TreeNode] =
     find(Some(root), valP, valQ, None(), None()).ancestor
 
 def main() Unit {
-    root = TreeNode(
+    root = TreeNode {
         3,
-        Some(TreeNode(
+        Some(TreeNode {
             5,
-            Some(TreeNode(6, None(), None())),
-            Some(TreeNode(
+            Some(TreeNode { 6, None(), None() }),
+            Some(TreeNode {
                 2,
-                Some(TreeNode(7, None(), None())),
-                Some(TreeNode(4, None(), None()))
-            ))
-        )),
-        Some(TreeNode(
+                Some(TreeNode { 7, None(), None() }),
+                Some(TreeNode { 4, None(), None() })
+            })
+        }),
+        Some(TreeNode {
             1,
-            Some(TreeNode(0, None(), None())),
-            Some(TreeNode(8, None(), None()))
-        ))
-    )
+            Some(TreeNode { 0, None(), None() }),
+            Some(TreeNode { 8, None(), None() })
+        })
+    }
 
     result = find(Some(root), 5, 1, None(), None())
     missing = lowestCommonAncestor(root, 10, 42)

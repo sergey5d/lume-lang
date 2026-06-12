@@ -33,4 +33,4 @@ def run(value CounterPrecursor) Int {
     0
 }
 
-def main() Int = run(Counter())
+def main() Int = run(Counter {})

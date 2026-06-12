@@ -50,6 +50,7 @@ pub(super) fn define() -> RuntimeType {
                     name: "value".to_string(),
                     ty: ir::Type::Unknown,
                     mutable: false,
+                    hidden: false,
                     initializer: None,
                 }],
             },

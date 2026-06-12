@@ -21,7 +21,7 @@ impl Worker {
 }
 
 def main() Int {
-    pair PairBox = PairBox(5, 9)
+    pair PairBox = PairBox { 5, 9 }
 
     match pair {
         case PairBox(left, right) => OS.println("pair " + left + "-" + right)
@@ -32,7 +32,7 @@ def main() Int {
     }
     OS.println(picked)
 
-    workerLike WorkerLike = Worker()
+    workerLike WorkerLike = Worker {}
     match workerLike {
         case worker Worker => OS.println("worker " + worker.doWork())
     }

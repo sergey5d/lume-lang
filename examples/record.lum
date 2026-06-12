@@ -28,11 +28,11 @@ class Amount with Hopper, Jumper {
 }
 
 impl Amount {
-    def multiple(other Amount) Amount = Amount(
-        amount = this.amount * other.amount,
-        description = this.description + " " + other.description,
+    def multiple(other Amount) Amount = Amount {
+        amount = this.amount * other.amount
+        description = this.description + " " + other.description
         count = 0
-    )
+    }
 
     def reportAmount() {
         OS.println("amount:", amount)
@@ -43,7 +43,7 @@ impl Amount {
     def jump(steps Int) Str = "Jump " + steps + " steps"
 }
 
-a1 = Amount(10, "description", 5)
+a1 = Amount { 10, "description", 5 }
 
 a2 = a1.multiple(a1)
 

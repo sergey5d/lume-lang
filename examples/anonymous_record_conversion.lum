@@ -51,14 +51,20 @@ def main() Unit {
         name = "Ada"
         age = 10
     }
-    user User = User(userRecord)
+    user User = User {
+        name = userRecord.name
+        age = userRecord.age
+    }
 
     person Person = Person { "Ben", 12 }
 
     pointRecord = class {
         x = 3, y = 4
     }
-    point MutablePoint = MutablePoint(pointRecord)
+    point MutablePoint = MutablePoint {
+        x = pointRecord.x
+        y = pointRecord.y
+    }
 
     fullPerson Person = Person {
         name = "Nora"

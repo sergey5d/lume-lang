@@ -1887,19 +1887,26 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
     ) -> Option<Ty> {
+        let structural_record_arg = call_uses_structural_record_arg(args);
         match callee {
             Expr::Identifier { name, .. } => {
-                if let Some(ty) = self.check_builtin_constructor(name, args, span) {
-                    return Some(ty);
+                if !structural_record_arg {
+                    if let Some(ty) = self.check_builtin_constructor(name, args, span) {
+                        return Some(ty);
+                    }
                 }
                 if name == "new"
                     && self.current_method.as_deref() == Some("new")
                     && self.current_owner.is_some()
                 {
-                    return self
-                        .current_owner
-                        .clone()
-                        .map(|owner| self.check_named_type_constructor(&owner, args, span));
+                    return self.current_owner.clone().map(|owner| {
+                        self.check_named_type_constructor(
+                            &owner,
+                            args,
+                            span,
+                            structural_record_arg,
+                        )
+                    });
                 }
                 if let Some(case) = self.world.lookup_enum_case(self.module, name) {
                     return Some(self.check_constructor_signature(
@@ -1910,13 +1917,28 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 if let Some(sig) = self.lookup_type_local(name) {
-                    return Some(self.check_named_type_constructor(&sig, args, span));
+                    return Some(self.check_named_type_constructor(
+                        &sig,
+                        args,
+                        span,
+                        structural_record_arg,
+                    ));
                 }
                 if let Some(sig) = self.world.lookup_imported_type(self.module, name) {
-                    return Some(self.check_named_type_constructor(&sig, args, span));
+                    return Some(self.check_named_type_constructor(
+                        &sig,
+                        args,
+                        span,
+                        structural_record_arg,
+                    ));
                 }
                 if let Some(sig) = self.world.ambient.types.get(name).cloned() {
-                    return Some(self.check_named_type_constructor(&sig, args, span));
+                    return Some(self.check_named_type_constructor(
+                        &sig,
+                        args,
+                        span,
+                        structural_record_arg,
+                    ));
                 }
                 None
             }
@@ -1928,10 +1950,20 @@ impl<'a> Checker<'a> {
                 }) {
                     let (module_info, member) = module;
                     if let Some(sig) = module_info.types.get(&member).cloned() {
-                        return Some(self.check_named_type_constructor(&sig, args, span));
+                        return Some(self.check_named_type_constructor(
+                            &sig,
+                            args,
+                            span,
+                            structural_record_arg,
+                        ));
                     }
                     if let Some(sig) = module_info.objects.get(&member).cloned() {
-                        return Some(self.check_named_type_constructor(&sig, args, span));
+                        return Some(self.check_named_type_constructor(
+                            &sig,
+                            args,
+                            span,
+                            structural_record_arg,
+                        ));
                     }
                 }
                 if let Expr::Identifier {
@@ -2098,6 +2130,7 @@ impl<'a> Checker<'a> {
         sig: &TypeSig,
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
+        structural_record_arg: bool,
     ) -> Ty {
         let ret = Ty::Named(
             sig.name.clone(),
@@ -2107,12 +2140,19 @@ impl<'a> Checker<'a> {
                 .collect(),
         );
 
-        if args.len() == 1 {
-            if let Some(record_ty) =
-                self.extract_constructor_record_arg(&args[0].value, &sig.fields)
-            {
-                return self.check_record_constructor_conversion(sig, &ret, &record_ty, span);
+        if structural_record_arg {
+            if sig.methods.contains_key("new") {
+                self.add_error(
+                    "no_matching_overload",
+                    format!(
+                        "class '{}' cannot use brace-based construction because it defines explicit constructors",
+                        sig.name
+                    ),
+                    span,
+                );
+                return ret;
             }
+            return self.check_record_constructor_conversion(sig, &ret, &args[0].value, span);
         }
 
         if let Some(overloads) = sig.methods.get("new") {
@@ -2164,28 +2204,15 @@ impl<'a> Checker<'a> {
             return ret;
         }
 
-        let fields = sig
-            .fields
-            .iter()
-            .filter(|field| !field.hidden || !field.has_initializer)
-            .cloned()
-            .collect::<Vec<_>>();
-        if args.len() == 1 {
-            let actual = self.check_expr(&args[0].value);
-            if matches!(actual, Ty::Named(_, _)) && fields.len() != 1 {
-                self.add_error(
-                    "no_matching_overload",
-                    format!(
-                        "no constructor overload for class '{}' matches {} arguments",
-                        sig.name,
-                        args.len()
-                    ),
-                    span,
-                );
-                return ret;
-            }
-        }
-        self.check_constructor_signature(&fields, &ret, args, span)
+        self.add_error(
+            "no_matching_overload",
+            format!(
+                "class '{}' does not have an implicit '()' constructor; use '{} {{ ... }}' or define 'new'",
+                sig.name, sig.name
+            ),
+            span,
+        );
+        ret
     }
 
     fn check_constructor_signature(
@@ -2966,49 +2993,27 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn extract_constructor_record_arg(&mut self, expr: &Expr, params: &[FieldSig]) -> Option<Ty> {
-        match expr {
-            Expr::RecordLiteral { fields, values, .. } if !fields.is_empty() => Some(Ty::Record(
-                fields
-                    .iter()
-                    .filter_map(|field| {
-                        field
-                            .name
-                            .as_ref()
-                            .map(|name| (name.clone(), self.check_expr(&field.value)))
-                    })
-                    .collect(),
-            )),
-            Expr::RecordLiteral { fields, values, .. }
-                if fields.is_empty() && !values.is_empty() =>
-            {
-                Some(Ty::Record(
-                    values
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(index, value)| {
-                            params
-                                .get(index)
-                                .map(|param| (param.name.clone(), self.check_expr(value)))
-                        })
-                        .collect(),
-                ))
-            }
-            _ => {
-                let actual = self.check_expr(expr);
-                matches!(actual, Ty::Record(_)).then_some(actual)
-            }
-        }
-    }
-
     fn check_record_constructor_conversion(
         &mut self,
         sig: &TypeSig,
         ret: &Ty,
-        record_ty: &Ty,
+        expr: &Expr,
         span: crate::source::Span,
     ) -> Ty {
-        let Ty::Record(fields) = record_ty else {
+        let named_error = || {
+            format!(
+                "class '{}' requires named brace fields that match the visible class shape",
+                sig.name
+            )
+        };
+        let positional_error = || {
+            format!(
+                "class '{}' positional brace construction must match the public field order and may omit only trailing defaulted fields",
+                sig.name
+            )
+        };
+
+        let Expr::RecordLiteral { fields, values, .. } = expr else {
             return materialize_type(ret);
         };
         if sig
@@ -3032,16 +3037,59 @@ impl<'a> Checker<'a> {
             .iter()
             .filter(|field| !field.hidden)
             .collect::<Vec<_>>();
-        let required_visible = visible_fields
-            .iter()
-            .filter(|field| !field.has_initializer)
-            .count();
 
-        if fields.len() < required_visible || fields.len() > visible_fields.len() {
+        if !fields.is_empty() {
+            let required_visible = visible_fields
+                .iter()
+                .filter(|field| !field.has_initializer)
+                .count();
+
+            if fields.len() < required_visible || fields.len() > visible_fields.len() {
+                self.add_error("no_matching_overload", named_error(), span);
+                return materialize_type(ret);
+            }
+
+            for arg in fields {
+                let Some(name) = arg.name.as_deref() else {
+                    self.add_error("no_matching_overload", named_error(), span);
+                    return materialize_type(ret);
+                };
+                let Some(field) = visible_fields.iter().find(|field| field.name == name) else {
+                    self.add_error("no_matching_overload", named_error(), span);
+                    return materialize_type(ret);
+                };
+                let actual = self.check_expr_against(&arg.value, &field.ty);
+                if !self.is_assignable(&actual, &field.ty) {
+                    self.add_error("no_matching_overload", named_error(), span);
+                    return materialize_type(ret);
+                }
+            }
+
+            for field in &visible_fields {
+                if field.has_initializer {
+                    continue;
+                }
+                if !fields
+                    .iter()
+                    .any(|arg| arg.name.as_deref() == Some(field.name.as_str()))
+                {
+                    self.add_error("no_matching_overload", named_error(), span);
+                    return materialize_type(ret);
+                }
+            }
+
+            return materialize_type(ret);
+        }
+
+        if sig.fields.iter().enumerate().any(|(index, field)| {
+            field.hidden
+                && field.has_initializer
+                && sig.fields[index + 1..].iter().any(|later| !later.hidden)
+        }) {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "class '{}' requires an anonymous record with exactly matching field names and types",
+                    "class '{}' cannot use positional brace construction because private defaulted fields must come after all public fields",
                     sig.name
                 ),
                 span,
@@ -3049,26 +3097,22 @@ impl<'a> Checker<'a> {
             return materialize_type(ret);
         }
 
-        for field in &visible_fields {
-            let Some((_, actual)) = fields.iter().find(|(name, _)| name == &field.name) else {
-                if !field.has_initializer {
-                    self.add_error(
-                        "no_matching_overload",
-                        format!(
-                            "class '{}' requires an anonymous record with exactly matching field names and types",
-                            sig.name
-                        ),
-                        span,
-                    );
-                    return materialize_type(ret);
-                }
-                continue;
-            };
-            if !self.is_assignable(actual, &field.ty) {
+        if values.len() > visible_fields.len()
+            || visible_fields[values.len()..]
+                .iter()
+                .any(|field| !field.has_initializer)
+        {
+            self.add_error("no_matching_overload", positional_error(), span);
+            return materialize_type(ret);
+        }
+
+        for (value, field) in values.iter().zip(visible_fields.iter()) {
+            let actual = self.check_expr_against(value, &field.ty);
+            if !self.is_assignable(&actual, &field.ty) {
                 self.add_error(
                     "no_matching_overload",
                     format!(
-                        "class '{}' requires an anonymous record with exactly matching field names and types",
+                        "class '{}' positional brace construction must match the public field order and types",
                         sig.name
                     ),
                     span,
@@ -3077,19 +3121,6 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if fields
-            .iter()
-            .any(|(name, _)| !visible_fields.iter().any(|field| field.name == *name))
-        {
-            self.add_error(
-                "no_matching_overload",
-                format!(
-                    "class '{}' requires an anonymous record with exactly matching field names and types",
-                    sig.name
-                ),
-                span,
-            );
-        }
         materialize_type(ret)
     }
 
@@ -3725,6 +3756,17 @@ fn arrange_constructor_args<'a>(
     }
 }
 
+fn call_uses_structural_record_arg(args: &[crate::ast::CallArg]) -> bool {
+    matches!(
+        args,
+        [crate::ast::CallArg {
+            name: None,
+            value: Expr::RecordLiteral { .. },
+            ..
+        }]
+    )
+}
+
 fn path_starts_with_os(expr: &Expr) -> bool {
     match expr {
         Expr::Identifier { name, .. } => name == "OS",
@@ -4170,9 +4212,115 @@ def main() Int {
     }
 
     #[test]
+    fn rejects_implicit_paren_class_constructor_without_new() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+def main() Unit {
+    _ User = User("Ada")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("does not have an implicit '()' constructor")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_brace_class_construction_with_trailing_defaults() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+    age Int
+    city Str = "NYC"
+    hidden score Int = 5
+}
+
+impl User {
+    def scoreValue() Int = score
+}
+
+def main() Int {
+    user User = User { "Ada", 10 }
+    return user.scoreValue()
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_brace_construction_when_explicit_new_exists() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+impl User {
+    def new(name Str) {
+        this.name = name
+    }
+}
+
+def main() Unit {
+    _ User = User { "Ada" }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("cannot use brace-based construction")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_positional_braces_when_private_default_breaks_public_order() {
+        let program = parse_inline(
+            r#"
+class Broken {
+    name Str
+    hidden score Int = 5
+    age Int
+}
+
+def main() Unit {
+    _ Broken = Broken { "Ada", 10 }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("private defaulted fields must come after all public fields")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn checks_parity_examples() {
         let root = workspace_root();
         let paths = [
+            "examples/classes.lum",
             "examples/tuple_destructuring.lum",
             "examples/record_destructuring.lum",
             "examples/class_destructuring.lum",

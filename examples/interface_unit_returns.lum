@@ -24,7 +24,7 @@ impl Printer {
 }
 
 def main() Unit {
-    printer Printer = Printer()
+    printer Printer = Printer {}
     printer.printExplicit()
     printer.printImplicit()
 }

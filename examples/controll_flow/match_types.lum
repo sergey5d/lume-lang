@@ -46,8 +46,8 @@ def describe(value WorkerLike) {
 }
 
 def main() Int {
-    describe(Worker())
-    describe(Other())
-    describe(Slacker())
+    describe(Worker {})
+    describe(Other {})
+    describe(Slacker {})
     0
 }

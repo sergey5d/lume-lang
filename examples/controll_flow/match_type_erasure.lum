@@ -56,9 +56,9 @@ def describeNamedWorker(value Named) {
 
 def main() Int {
     describeList([1, 2, 3])
-    describeClass(Worker("Ada"))
-    describeRecord(Amount(7, "usd"))
-    describeInterface(Worker("Bob"))
-    describeNamedWorker(Worker("Zoe"))
+    describeClass(Worker { "Ada" })
+    describeRecord(Amount { 7, "usd" })
+    describeInterface(Worker { "Bob" })
+    describeNamedWorker(Worker { "Zoe" })
     0
 }

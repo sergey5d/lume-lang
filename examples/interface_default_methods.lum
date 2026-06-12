@@ -25,8 +25,8 @@ class PreferFirst with FirstChoice, SecondChoice {
 }
 
 def main() Unit {
-    greeter Greeter = OverrideBox()
-    prefer = PreferFirst()
+    greeter Greeter = OverrideBox {}
+    prefer = PreferFirst {}
 
     OS.println("override", greeter.greet())
     OS.println("conflict", prefer.choose())

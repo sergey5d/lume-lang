@@ -22,7 +22,7 @@ impl Rabbit {
 }
 
 def main() Unit {
-    rabbit = Rabbit()
+    rabbit = Rabbit {}
     OS.println(rabbit.hop())
     OS.println(rabbit.jump(3))
     OS.println(rabbit is Hopper)

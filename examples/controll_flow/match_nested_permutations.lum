@@ -87,17 +87,17 @@ class FlagRecord {
 }
 
 def main() Unit {
-    classInClass = match AppleBox(Apple(11)) {
+    classInClass = match AppleBox(class { apple = Apple(class { 11 }) }) {
         case AppleBox(Apple(size)) => "class in class " + size
     }
     OS.println(classInClass)
 
-    recordInClass = match AmountBox(Amount(3, "usd")) {
+    recordInClass = match AmountBox(class { amount = Amount(class { 3, "usd" }) }) {
         case AmountBox(Amount(count, label)) => "record in class " + count + " " + label
     }
     OS.println(recordInClass)
 
-    classInRecord = match AppleRecord(Apple(7)) {
+    classInRecord = match AppleRecord(class { apple = Apple(class { 7 }) }) {
         case AppleRecord(Apple(size)) => "class in record " + size
     }
     OS.println(classInRecord)
@@ -112,22 +112,22 @@ def main() Unit {
     }
     OS.println(tupleTupleTuple)
 
-    tupleInClass = match PairHolder((4, 5)) {
+    tupleInClass = match PairHolder(class { pair = (4, 5) }) {
         case PairHolder((left, right)) => "tuple in class " + left + " " + right
     }
     OS.println(tupleInClass)
 
-    classInTuple = match (Apple(6), 9) {
+    classInTuple = match (Apple(class { 6 }), 9) {
         case (Apple(size), tail) => "class in tuple " + size + " " + tail
     }
     OS.println(classInTuple)
 
-    recordInTuple = match (Amount(8, "eur"), 0) {
+    recordInTuple = match (Amount(class { 8, "eur" }), 0) {
         case (Amount(count, label), _) => "record in tuple " + count + " " + label
     }
     OS.println(recordInTuple)
 
-    tupleInRecord = match PairRecord((10, 11)) {
+    tupleInRecord = match PairRecord(class { pair = (10, 11) }) {
         case PairRecord((left, right)) => "tuple in record " + left + " " + right
     }
     OS.println(tupleInRecord)
@@ -139,13 +139,13 @@ def main() Unit {
     }
     OS.println(enumInEnum)
 
-    classInEnum = match MaybeApple.SomeX(Apple(12)) {
+    classInEnum = match MaybeApple.SomeX(Apple(class { 12 })) {
         case SomeX(Apple(size)) => "class in enum " + size
         case MaybeApple.NoneX => "class in enum none"
     }
     OS.println(classInEnum)
 
-    recordInEnum = match MaybeAmount.SomeX(Amount(13, "cad")) {
+    recordInEnum = match MaybeAmount.SomeX(Amount(class { 13, "cad" })) {
         case SomeX(Amount(count, label)) => "record in enum " + count + " " + label
         case MaybeAmount.NoneX => "record in enum none"
     }
@@ -157,13 +157,13 @@ def main() Unit {
     }
     OS.println(tupleInEnum)
 
-    enumInClass = match FlagBox(InnerFlag.Off) {
+    enumInClass = match FlagBox(class { value = InnerFlag.Off }) {
         case FlagBox(InnerFlag.On) => "enum in class on"
         case FlagBox(InnerFlag.Off) => "enum in class off"
     }
     OS.println(enumInClass)
 
-    enumInRecord = match FlagRecord(InnerFlag.On) {
+    enumInRecord = match FlagRecord(class { value = InnerFlag.On }) {
         case FlagRecord(InnerFlag.On) => "enum in record on"
         case FlagRecord(InnerFlag.Off) => "enum in record off"
     }

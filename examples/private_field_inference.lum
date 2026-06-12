@@ -26,13 +26,13 @@ impl Greeter {
 }
 
 def main() Int {
-    box = CounterBox()
+    box = CounterBox {}
     box.bump()
     box.bump()
     box.bump()
     OS.println("box " + box.total())
 
-    box2 = CounterBox()
+    box2 = CounterBox {}
     box2.bump()
     box2.bump()
     box2.bump()

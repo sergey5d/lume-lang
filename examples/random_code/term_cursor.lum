@@ -40,9 +40,9 @@ impl Cursor {
     def new(term Str, documents List[Str]) {
         this.term = term
         this.documents = documents
-        this.current := Location(-1, -1)
+        this.current := Location { -1, -1 }
         this.valid := false
-        this.seek(Location(-1, -1))
+        this.seek(Location { -1, -1 })
     }
 
     def isValid() Bool = valid
@@ -51,7 +51,7 @@ impl Cursor {
 
     def advance() Unit {
         if valid {
-            this.seek(Location(current.docId, current.position + 1))
+            this.seek(Location { current.docId, current.position + 1 })
         }
     }
 
@@ -73,7 +73,7 @@ impl Cursor {
 
             while pos < docTerms.size() && !found {
                 if docTerms[pos] == term {
-                    this.current := Location(docId, pos)
+                    this.current := Location { docId, pos }
                     this.valid := true
                     found := true
                 }
@@ -88,7 +88,7 @@ impl Cursor {
         }
 
         if !found {
-            this.current := Location(-1, -1)
+            this.current := Location { -1, -1 }
             this.valid := false
         }
     }
@@ -120,9 +120,9 @@ def toBeOrNotToBe() Unit {
         loc2 := c2.get()
 
         if loc1.docId > loc2.docId {
-            c2.seek(Location(loc1.docId, 0))
+            c2.seek(Location { loc1.docId, 0 })
         } else if loc1.docId < loc2.docId {
-            c1.seek(Location(loc2.docId, 0))
+            c1.seek(Location { loc2.docId, 0 })
         } else {
 
             currDocId = loc1.docId
@@ -151,7 +151,7 @@ def toBeOrNotToBe() Unit {
             if !failed && c2Stack.isEmpty() && loc1.docId > c1Orig.docId {
                 result.append(c1Orig.docId)
             } else {
-                c1.seek(Location(loc2.docId, 0))
+                c1.seek(Location { loc2.docId, 0 })
             }
         }
     }
@@ -200,9 +200,9 @@ def toBeOrNotToBe2() Unit {
 
     def alignDocs(doc1 Int, doc2 Int) {
         if doc1 > doc2 {
-            c2.seek(Location(doc1, 0))
+            c2.seek(Location { doc1, 0 })
         } else if doc1 < doc2 {
-            c1.seek(Location(doc2, 0))
+            c1.seek(Location { doc2, 0 })
         }
     }
 

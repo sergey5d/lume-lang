@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# no_matching_overload at .*: no constructor overload for class 'Target' matches 1 arguments
+# no_matching_overload at .*: class 'Target' does not have an implicit '()' constructor; use 'Target { ... }' or define 'new'
 
 class Source {
     name Str

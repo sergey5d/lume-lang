@@ -18,9 +18,9 @@ import model/things/C/*
 import model/things/C/{printLn as printN, print}
 
 def main() Int {
-    value A = A()
-    aliasA AliasA = AliasA()
-    valueB AliasB = AliasB()
+    value A = A {}
+    aliasA AliasA = AliasA {}
+    valueB AliasB = AliasB {}
     named Named = value
 
     OS.println(named.label())

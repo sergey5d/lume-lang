@@ -1470,6 +1470,7 @@ impl<'a> FunctionLowerer<'a> {
                     method: "isSuccess".to_string(),
                 },
                 args: Vec::new(),
+                structural: false,
             },
             ir::Type::Bool,
             Some(stmt.span),
@@ -1491,6 +1492,7 @@ impl<'a> FunctionLowerer<'a> {
                     method: "unwrap".to_string(),
                 },
                 args: Vec::new(),
+                structural: false,
             },
             ir::Type::Unknown,
             Some(stmt.span),
@@ -1633,6 +1635,7 @@ impl<'a> FunctionLowerer<'a> {
                             ir::Operand::Copy(Box::new(ir::Place::Local(result))),
                             yielded,
                         ],
+                        structural: false,
                     },
                 },
             });
@@ -1661,6 +1664,7 @@ impl<'a> FunctionLowerer<'a> {
                                 ir::Operand::Copy(Box::new(ir::Place::Local(result))),
                                 yielded,
                             ],
+                            structural: false,
                         },
                     },
                 });
@@ -1732,6 +1736,7 @@ impl<'a> FunctionLowerer<'a> {
                 value: ir::RValue::Call {
                     callee: ir::Callee::Intrinsic(ir::Intrinsic::IterInit),
                     args: vec![iter_value],
+                    structural: false,
                 },
             },
         });
@@ -1746,6 +1751,7 @@ impl<'a> FunctionLowerer<'a> {
             ir::RValue::Call {
                 callee: ir::Callee::Intrinsic(ir::Intrinsic::IterHasNext),
                 args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(iter_local)))],
+                structural: false,
             },
             ir::Type::Bool,
             Some(first.span),
@@ -1767,6 +1773,7 @@ impl<'a> FunctionLowerer<'a> {
             ir::RValue::Call {
                 callee: ir::Callee::Intrinsic(ir::Intrinsic::IterNext),
                 args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(iter_local)))],
+                structural: false,
             },
             ir::Type::Unknown,
             Some(first.span),
@@ -1950,6 +1957,7 @@ impl<'a> FunctionLowerer<'a> {
                         path: vec!["None".to_string()],
                     },
                     args: Vec::new(),
+                    structural: false,
                 }
             } else {
                 ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit))
@@ -2062,6 +2070,7 @@ impl<'a> FunctionLowerer<'a> {
                     path: vec!["Some".to_string()],
                 },
                 args: vec![value],
+                structural: false,
             }
         } else {
             ir::RValue::Use(value)
@@ -2177,6 +2186,7 @@ impl<'a> FunctionLowerer<'a> {
                                     case_name.clone(),
                                 )),
                                 args: vec![scrutinee.clone()],
+                                structural: false,
                             },
                             ir::Type::Bool,
                             Some(*span),
@@ -2206,6 +2216,7 @@ impl<'a> FunctionLowerer<'a> {
                         ir::RValue::Call {
                             callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantField(field_name)),
                             args: vec![scrutinee.clone()],
+                            structural: false,
                         },
                         ir::Type::Unknown,
                         Some(arg.span()),
@@ -2400,6 +2411,7 @@ impl<'a> FunctionLowerer<'a> {
                         ir::RValue::Call {
                             callee: ir::Callee::Named { path },
                             args: Vec::new(),
+                            structural: false,
                         },
                         ir::Type::Unknown,
                         Some(*span),
@@ -2518,6 +2530,7 @@ impl<'a> FunctionLowerer<'a> {
                     method: "isSuccess".to_string(),
                 },
                 args: Vec::new(),
+                structural: false,
             },
             ir::Type::Bool,
             Some(span),
@@ -2539,6 +2552,7 @@ impl<'a> FunctionLowerer<'a> {
                     method: "unwrap".to_string(),
                 },
                 args: Vec::new(),
+                structural: false,
             },
             ir::Type::Unknown,
             Some(span),
@@ -2691,6 +2705,7 @@ impl<'a> FunctionLowerer<'a> {
                 return Some(ir::RValue::Call {
                     callee: ir::Callee::Named { path },
                     args: Vec::new(),
+                    structural: false,
                 });
             }
         }
@@ -2735,6 +2750,7 @@ impl<'a> FunctionLowerer<'a> {
                     .into_iter()
                     .map(|arg| self.lower_expr(&arg.value))
                     .collect(),
+                structural: call_uses_structural_record_arg(args),
             }),
             Expr::Member { receiver, name, .. } => Some(ir::RValue::Field {
                 base: self.lower_expr(receiver),
@@ -2803,6 +2819,7 @@ impl<'a> FunctionLowerer<'a> {
                 method: method.to_string(),
             },
             args: vec![self.lower_expr(right)],
+            structural: false,
         }
     }
 
@@ -2971,11 +2988,8 @@ impl<'a> FunctionLowerer<'a> {
                 return Some(names);
             }
         }
-        if !has_explicit_constructor {
-            Some(ty.fields.iter().map(|field| field.name.clone()).collect())
-        } else {
-            None
-        }
+        let _ = has_explicit_constructor;
+        None
     }
 
     fn lower_place(&mut self, expr: &Expr) -> Option<ir::Place> {
@@ -3481,6 +3495,17 @@ fn arrange_named_call_args<'a>(
     }
 
     Some(slots.into_iter().flatten().collect())
+}
+
+fn call_uses_structural_record_arg(args: &[ast::CallArg]) -> bool {
+    matches!(
+        args,
+        [ast::CallArg {
+            name: None,
+            value: ast::Expr::RecordLiteral { .. },
+            ..
+        }]
+    )
 }
 
 fn param_names_from_function(function: &ir::Function) -> Vec<String> {
@@ -4166,7 +4191,7 @@ mod tests {
 
                 def add(value Int) Int = plus(value)
 
-                current = Amount(1, "a")
+                current = Amount { 1, "a" }
                 updated = current with { amount = add(inc(1)) }
                 return updated.amount
             }

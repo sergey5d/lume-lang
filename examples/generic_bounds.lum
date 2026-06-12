@@ -21,7 +21,7 @@ def pick[T with Ordering[T]](value T) T = value
 def useBox(value Box[Int]) Int = value.value
 
 def main() Int {
-    mapper Mapper = Mapper()
+    mapper Mapper = Mapper {}
     OS.println(pick(3) + mapper.pick(4))
     0
 }

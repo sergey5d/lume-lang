@@ -364,17 +364,22 @@ settings Settings = Settings {}
 ```
 
 Rules for field-based class construction:
-- `Type { ... }` checks the brace payload against the visible construction shape of the target class
+- `Type(...)` is never synthesized from fields
+- `Type(...)` only works when the target class defines `new(...)` or the target is a builtin constructor form such as `List(...)`
+- `Type { ... }` and `Type(class { ... })` are the structural construction forms
+- any explicit `new(...)` disables structural brace construction for that class
 - `Type {}` works when the visible construction shape has no required fields
-- field names and field types must match exactly
-- public fields without initializers are required
-- public fields with initializers are optional and may be provided or omitted
-- private fields with initializers are not part of the accepted shape and may not be provided
-- private fields without initializers block this conversion entirely
-- mutable vs immutable field differences do not matter for shape matching
-- explicit constructors are ignored for this conversion path
+- named braces check only visible public fields
+- in named braces, public fields without initializers are required
+- in named braces, public fields with initializers are optional
+- in named braces, private fields are never part of the accepted shape
+- private fields without initializers block structural construction entirely
+- positional braces follow declared public-field order
+- positional braces may omit only a trailing suffix of public fields that already have initializers
+- positional braces are rejected when a private initialized field appears before a later public field
+- mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
-- nested inner constructions must still name the target class explicitly, for example `owner = Person { ... }`
+- nested inner constructions must still name the target class explicitly, for example `owner = Person(class { name = "Ada", age = 10 })`
 - `Type({ ... })` is not supported; plain `{ ... }` inside call parentheses is treated as a block, not as an anonymous record literal
 
 Anonymous record shapes are structural:

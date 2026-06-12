@@ -1,8 +1,27 @@
 # EXPECT:
-# a fields 15 Sammy
-# a alt 6 5
-# b manual 5 Bobby
-# combo 11
+# brace named Sammy 15 NYC
+# brace positional Ben 12 Paris
+# brace hidden Liam 8 5
+# ctor alt 6 5
+# ctor manual 5 Bobby
+
+# Class construction rules in one place:
+# - classes without explicit `new` use brace construction
+# - positional braces follow public field order
+# - trailing public defaults may be omitted
+# - hidden defaulted fields may trail public fields and stay out of the shape
+# - any explicit `new` disables brace-based construction for that class
+
+class Profile {
+    name Str
+    age Int
+    city Str = "NYC"
+    hidden score Int = 5
+}
+
+impl Profile {
+    def scoreValue() Int = score
+}
 
 class A {
     age Int
@@ -17,14 +36,7 @@ impl A {
         this.name = name
     }
 
-    # explicit call to another constructor
     def new(maturity Int) = new(maturity - 15, "5")
-
-    def new(name Str) {
-        # no need to call another constructor if we initialize all fields here
-        this.name = name
-        this.age = 15
-    }
 
     def trueAge() Int = age
 
@@ -32,14 +44,10 @@ impl A {
 }
 
 class B {
-    # immutable member variables
     hidden age Int
     hidden name Str
-    # initialized mutable variable
     hidden var malnutritioned Bool = false
-    # not yet initialized mutable variable
     hidden var unassigned Float
-    # not yet initialized immutable variable (syntax is for consistency only)
     hidden questionable Int = ?
 }
 
@@ -57,16 +65,24 @@ impl B {
 }
 
 def main() Unit {
-    aFromFields A = A { age = 15, name = "Sammy" }
+    named Profile = Profile {
+        name = "Sammy"
+        age = 15
+    }
+    positional Profile = Profile { "Ben", 12, "Paris" }
+    hiddenDefault Profile = Profile { "Liam", 8 }
+
     aFromAlt A = A(maturity = 21)
     bManual B = B(5, "Bobby")
 
-    combo Int = aFromAlt.trueAge() + bManual.trueAge()
-
-    if aFromFields.trueName() == "Sammy" {
-        OS.println("a fields", aFromFields.trueAge(), aFromFields.trueName())
-        OS.println("a alt", aFromAlt.trueAge(), aFromAlt.trueName())
-        OS.println("b manual", bManual.trueAge(), bManual.trueName())
-        OS.println("combo", combo)
-    }
+    OS.println("brace named", named.name, named.age, named.city)
+    OS.println("brace positional", positional.name, positional.age, positional.city)
+    OS.println(
+        "brace hidden",
+        hiddenDefault.name,
+        hiddenDefault.age,
+        hiddenDefault.scoreValue()
+    )
+    OS.println("ctor alt", aFromAlt.trueAge(), aFromAlt.trueName())
+    OS.println("ctor manual", bManual.trueAge(), bManual.trueName())
 }

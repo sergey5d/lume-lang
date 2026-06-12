@@ -497,6 +497,7 @@ pub enum RValue {
     Call {
         callee: Callee,
         args: Vec<Operand>,
+        structural: bool,
     },
     Tuple(Vec<Operand>),
     List(Vec<Operand>),
