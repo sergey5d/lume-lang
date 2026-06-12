@@ -12,11 +12,16 @@ class A {
 }
 
 impl A {
-    # explicit call to primary constructor
-    def init(maturity Int) = init(maturity - 15, "5")
+    def new(age Int, name Str) {
+        this.age = age
+        this.name = name
+    }
 
-    def init(name Str) {
-        # no need to call primary constructor if we init all fields in secondary constructor
+    # explicit call to another constructor
+    def new(maturity Int) = new(maturity - 15, "5")
+
+    def new(name Str) {
+        # no need to call another constructor if we initialize all fields here
         this.name = name
         this.age = 15
     }
@@ -39,7 +44,7 @@ class B {
 }
 
 impl B {
-    def init(age Int, name Str) {
+    def new(age Int, name Str) {
         this.age = age
         this.name = name
         this.unassigned := 1.1

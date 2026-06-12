@@ -477,7 +477,7 @@ func instanceMethods(obj *instance) []*parser.MethodDecl {
 }
 
 func implicitConstructorFields(class *parser.ClassDecl) []parser.FieldDecl {
-	if !hasSafeImplicitRuntimeConstructor(class) {
+	if !usesImplicitRuntimeConstructor(class) {
 		return nil
 	}
 	fields := make([]parser.FieldDecl, 0, len(class.Fields))
@@ -505,6 +505,19 @@ func hasSafeImplicitRuntimeConstructor(class *parser.ClassDecl) bool {
 	return true
 }
 
+func hasExplicitRuntimeConstructor(class *parser.ClassDecl) bool {
+	for _, method := range class.Methods {
+		if method.Constructor {
+			return true
+		}
+	}
+	return false
+}
+
+func usesImplicitRuntimeConstructor(class *parser.ClassDecl) bool {
+	return !hasExplicitRuntimeConstructor(class) && hasSafeImplicitRuntimeConstructor(class)
+}
+
 func (in *Interpreter) applyImplicitConstructor(receiver *instance, args []Value, span parser.Span) error {
 	fields := implicitConstructorFields(receiver.class)
 	if len(args) != len(fields) {
@@ -522,6 +535,9 @@ func constructorParamOptions(class *parser.ClassDecl) [][]parser.Parameter {
 		if method.Constructor {
 			options = append(options, method.Parameters)
 		}
+	}
+	if hasExplicitRuntimeConstructor(class) {
+		return options
 	}
 	fields := implicitConstructorFields(class)
 	params := make([]parser.Parameter, len(fields))
@@ -551,7 +567,7 @@ func reorderConstructorValueArgs(class *parser.ClassDecl, args []namedValueArg, 
 
 func (in *Interpreter) constructInto(receiver *instance, class *parser.ClassDecl, args []Value, parent *env, span parser.Span) error {
 	for _, method := range class.Methods {
-		if method.Constructor && in.runtimeMethodMatches(method, args) {
+		if method.Constructor && (!method.Private || canAccessPrivateRuntimeConstructor(class, parent)) && in.runtimeMethodMatches(method, args) {
 			_, err := in.callMethod(receiver, method, args, parent)
 			return err
 		}
@@ -568,10 +584,22 @@ func (in *Interpreter) constructInto(receiver *instance, class *parser.ClassDecl
 			}
 		}
 	}
-	if len(implicitConstructorFields(class)) > 0 || len(args) == 0 {
+	if usesImplicitRuntimeConstructor(class) && (len(implicitConstructorFields(class)) > 0 || len(args) == 0) {
 		return in.applyImplicitConstructor(receiver, args, span)
 	}
 	return RuntimeError{Message: fmt.Sprintf("constructor '%s' expects 0 args, got %d", class.Name, len(args)), Span: span}
+}
+
+func canAccessPrivateRuntimeConstructor(class *parser.ClassDecl, parent *env) bool {
+	if parent == nil {
+		return false
+	}
+	thisSlot, ok := parent.get("this")
+	if !ok {
+		return false
+	}
+	instance, ok := thisSlot.value.(*instance)
+	return ok && instance.class != nil && instance.class.Name == class.Name
 }
 
 func (in *Interpreter) construct(class *parser.ClassDecl, args []Value, parent *env) (Value, error) {
@@ -2111,10 +2139,10 @@ func (in *Interpreter) evalExpr(expr parser.Expr, local *env) (Value, error) {
 }
 
 func (in *Interpreter) evalCall(call *parser.CallExpr, local *env) (Value, error) {
-	if ident, ok := call.Callee.(*parser.Identifier); ok && ident.Name == "init" {
+	if ident, ok := call.Callee.(*parser.Identifier); ok && ident.Name == "new" {
 		ctorFlag, ok := local.get("__constructor__")
 		if !ok || ctorFlag.value != true {
-			return nil, RuntimeError{Message: "'init(...)' is only valid inside constructors", Span: call.Span}
+			return nil, RuntimeError{Message: "'new(...)' is only valid inside constructors", Span: call.Span}
 		}
 		thisSlot, ok := local.get("this")
 		if !ok {

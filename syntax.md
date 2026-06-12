@@ -427,10 +427,10 @@ impl Counter {
 }
 ```
 
-Constructors currently use `def init(...)`.
+Constructors currently use `def new(...)`.
 
-- `init(...)` declares a constructor
-- `init(...)` inside another constructor delegates to another constructor of the same class
+- `new(...)` declares a constructor
+- `new(...)` inside another constructor delegates to another constructor of the same class
 - `this` is only the instance receiver, for example `this.age`
 
 ```txt
@@ -440,12 +440,12 @@ class Person {
 }
 
 impl Person {
-    def init(age Int, name Str) {
+    def new(age Int, name Str) {
         this.age = age
         this.name = name
     }
 
-    def init(age Int) = init(age, "unknown")
+    def new(age Int) = new(age, "unknown")
 }
 ```
 

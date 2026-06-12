@@ -7,7 +7,7 @@ class SecretBadge {
 }
 
 impl SecretBadge {
-    def init(name Str) {
+    def new(name Str) {
         this.name = name
         this.code = 99
     }

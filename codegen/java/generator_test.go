@@ -48,7 +48,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 

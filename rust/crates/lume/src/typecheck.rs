@@ -198,6 +198,7 @@ struct ParamSig {
 struct FunctionSig {
     params: Vec<ParamSig>,
     ret: Ty,
+    visibility: Visibility,
 }
 
 #[derive(Debug, Clone)]
@@ -699,7 +700,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 TypeMember::Method(method) => {
-                    if decl.kind == TypeKind::Interface && method.name == "init" {
+                    if decl.kind == TypeKind::Interface && method.name == "new" {
                         self.add_error(
                             "invalid_interface_method",
                             format!(
@@ -1891,8 +1892,8 @@ impl<'a> Checker<'a> {
                 if let Some(ty) = self.check_builtin_constructor(name, args, span) {
                     return Some(ty);
                 }
-                if name == "init"
-                    && self.current_method.as_deref() == Some("init")
+                if name == "new"
+                    && self.current_method.as_deref() == Some("new")
                     && self.current_owner.is_some()
                 {
                     return self
@@ -2114,8 +2115,14 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if let Some(overloads) = sig.methods.get("init") {
-            if let Some(ctor) = self.choose_overload(overloads, args) {
+        if let Some(overloads) = sig.methods.get("new") {
+            let can_access_hidden = self.can_access_hidden_constructor(sig);
+            let visible = overloads
+                .iter()
+                .filter(|ctor| ctor.visibility != Visibility::Hidden || can_access_hidden)
+                .cloned()
+                .collect::<Vec<_>>();
+            if let Some(ctor) = self.choose_overload(&visible, args) {
                 let params = ctor
                     .params
                     .iter()
@@ -2129,6 +2136,32 @@ impl<'a> Checker<'a> {
                     .collect::<Vec<_>>();
                 return self.check_constructor_signature(&params, &ret, args, span);
             }
+            let hidden = overloads
+                .iter()
+                .filter(|ctor| ctor.visibility == Visibility::Hidden && !can_access_hidden)
+                .cloned()
+                .collect::<Vec<_>>();
+            if self.choose_overload(&hidden, args).is_some() {
+                self.add_error(
+                    "private_access",
+                    format!(
+                        "cannot access private constructor of class '{}' outside class '{}'",
+                        sig.name, sig.name
+                    ),
+                    span,
+                );
+                return ret;
+            }
+            self.add_error(
+                "no_matching_overload",
+                format!(
+                    "no constructor overload for class '{}' matches {} arguments",
+                    sig.name,
+                    args.len()
+                ),
+                span,
+            );
+            return ret;
         }
 
         let fields = sig
@@ -2667,7 +2700,7 @@ impl<'a> Checker<'a> {
         receiver_ty: &Ty,
         field_name: &str,
     ) -> bool {
-        if self.current_method.as_deref() != Some("init") {
+        if self.current_method.as_deref() != Some("new") {
             return false;
         }
         let Some(owner) = &self.current_owner else {
@@ -2726,6 +2759,12 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn can_access_hidden_constructor(&self, owner: &TypeSig) -> bool {
+        self.current_owner
+            .as_ref()
+            .is_some_and(|current| current.name == owner.name)
+    }
+
     fn member_method_sigs(&self, receiver: &Ty, name: &str) -> Option<Vec<FunctionSig>> {
         match receiver {
             Ty::Named(type_name, args) => {
@@ -2751,6 +2790,7 @@ impl<'a> Checker<'a> {
                                 })
                                 .collect(),
                             ret: substitute_type(&method.ret, &subst),
+                            visibility: method.visibility,
                         })
                         .collect(),
                 )
@@ -3384,6 +3424,7 @@ fn function_sig_from_function(
             .as_ref()
             .map(|ty| convert_type_ref(ty, &type_params))
             .unwrap_or(Ty::Unknown),
+        visibility: function.visibility,
     }
 }
 
@@ -3413,6 +3454,7 @@ fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -
             .as_ref()
             .map(|ty| convert_type_ref(ty, &type_params))
             .unwrap_or(Ty::Unknown),
+        visibility: method.visibility,
     }
 }
 

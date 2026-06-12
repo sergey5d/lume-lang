@@ -483,7 +483,7 @@ func (r *Resolver) resolveClass(decl *parser.ClassDecl) {
 }
 
 // resolveMethod handles both ordinary methods and constructors, toggling the
-// constructor flag so `init(...)` calls can be treated specially later on.
+// constructor flag so `new(...)` calls can be treated specially later on.
 func (r *Resolver) resolveMethod(method *parser.MethodDecl) {
 	r.pushTypeScope()
 	defer r.popTypeScope()
@@ -695,7 +695,7 @@ func (r *Resolver) resolveExpr(expr parser.Expr) {
 			r.resolveExpr(item)
 		}
 	case *parser.CallExpr:
-		if ident, ok := e.Callee.(*parser.Identifier); !(ok && ident.Name == "init" && r.currentMethodCtor) {
+		if ident, ok := e.Callee.(*parser.Identifier); !(ok && ident.Name == "new" && r.currentMethodCtor) {
 			r.resolveExpr(e.Callee)
 		}
 		for _, arg := range e.Args {

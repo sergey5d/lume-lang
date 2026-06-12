@@ -533,7 +533,7 @@ class Box {
 }
 
 impl Box {
-	def init(value Int) {
+	def new(value Int) {
 		this.value = value
 	}
 }
@@ -646,7 +646,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -668,7 +668,7 @@ def run() Int {
 	}
 }
 
-func TestAnalyzeImplicitPrimaryConstructorAndThisDelegation(t *testing.T) {
+func TestAnalyzeExplicitConstructorDelegation(t *testing.T) {
 	src := `
 class Counter {
 	count Int
@@ -677,8 +677,13 @@ class Counter {
 }
 
 impl Counter {
-	def init(seed Int) {
-		init(count = seed, label = "ok")
+	def new(count Int, label Str) {
+		this.count = count
+		this.label = label
+	}
+
+	def new(seed Int) {
+		new(count = seed, label = "ok")
 	}
 }
 
@@ -793,7 +798,7 @@ class Team {
 }
 
 impl Team {
-	def init(name Str, owner Person) {
+	def new(name Str, owner Person) {
 		this.name = name
 		this.owner = owner
 	}
@@ -1386,7 +1391,7 @@ class Good with Stringable {
 }
 
 impl Good {
-	def init() {
+	def new() {
 	}
 
 	def show() Str {
@@ -1398,7 +1403,7 @@ class Bad with Stringable {
 }
 
 impl Bad {
-	def init() {
+	def new() {
 	}
 }
 `
@@ -1489,7 +1494,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -1537,7 +1542,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -1564,7 +1569,7 @@ class SecretBox {
 }
 
 impl SecretBox {
-	def init(value Int) {
+	def new(value Int) {
 		this.value = value
 	}
 
@@ -1599,7 +1604,7 @@ class SecretBox {
 }
 
 impl SecretBox {
-	def init(value Int) {
+	def new(value Int) {
 		this.value = value
 	}
 
@@ -1626,7 +1631,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -1662,7 +1667,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -1693,7 +1698,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -1725,11 +1730,11 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
-	def init(value Int) {
+	def new(value Int) {
 		this.count = value
 	}
 }
@@ -1768,7 +1773,7 @@ class Counter {
 }
 
 impl Counter {
-	def init() {
+	def new() {
 		this.seen = false
 	}
 }
@@ -1839,7 +1844,7 @@ class Box[T] {
 }
 
 impl Box[T] {
-	def init(value T) {
+	def new(value T) {
 		this.value = value
 	}
 
@@ -1937,7 +1942,7 @@ class Counter with Eq[Counter] {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -1966,7 +1971,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 }
@@ -2240,7 +2245,7 @@ class Vec {
 }
 
 impl Vec {
-	def init(left Int, right Int) {
+	def new(left Int, right Int) {
 		this.items := Array.ofLength(2)
 		this.items[0] := left
 		this.items[1] := right

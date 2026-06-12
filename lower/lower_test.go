@@ -24,7 +24,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -84,7 +84,7 @@ def run(input Int) Int {
 		t.Fatalf("expected first statement to be binding decl, got %T", lowered.Functions[0].Body[0])
 	}
 	if _, ok := first.Init.(*Construct); !ok {
-		t.Fatalf("expected constructor init, got %T", first.Init)
+		t.Fatalf("expected constructor new, got %T", first.Init)
 	}
 	ifStmt, ok := lowered.Functions[0].Body[1].(*If)
 	if !ok {

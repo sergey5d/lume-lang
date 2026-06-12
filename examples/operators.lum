@@ -9,7 +9,7 @@ class Vec {
 }
 
 impl Vec {
-    def init(left Int, right Int) {
+    def new(left Int, right Int) {
         this.items := Array.ofLength(2)
         this.items[0] := left
         this.items[1] := right

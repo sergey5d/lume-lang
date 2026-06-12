@@ -37,7 +37,7 @@ class Cursor {
 }
 
 impl Cursor {
-    def init(term Str, documents List[Str]) {
+    def new(term Str, documents List[Str]) {
         this.term = term
         this.documents = documents
         this.current := Location(-1, -1)

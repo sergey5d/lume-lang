@@ -1104,7 +1104,7 @@ impl<'a> Interpreter<'a> {
                         .map(|operand| self.eval_operand(&frame, &operand, block.terminator.span))
                         .transpose()?
                         .unwrap_or(Value::Unit);
-                    if function.name == "init" {
+                    if function.name == "new" {
                         if let (Some(Value::Aggregate(receiver)), Value::Aggregate(result)) =
                             (frame.locals.first().cloned(), returned.clone())
                         {
@@ -1952,7 +1952,7 @@ impl<'a> Interpreter<'a> {
             }
         }
 
-        if let Some(init) = self.find_method_overload_for_kind(type_name, ty.kind, "init", &args) {
+        if let Some(init) = self.find_method_overload_for_kind(type_name, ty.kind, "new", &args) {
             let receiver = object.clone();
             let _ = self.call_function(init, Some(receiver), None, args, span)?;
             return Ok(Some(object));
@@ -2603,7 +2603,7 @@ impl<'a> Interpreter<'a> {
             fields: field_values,
         })));
         if let Some(init) =
-            self.find_method_overload_for_kind(&ty.name, crate::ast::TypeKind::Object, "init", &[])
+            self.find_method_overload_for_kind(&ty.name, crate::ast::TypeKind::Object, "new", &[])
         {
             let _ = self.call_function(init, Some(value.clone()), None, Vec::new(), span)?;
         }
@@ -3988,7 +3988,7 @@ mod tests {
             }
 
             impl Counter {
-                def init(count Int) {
+                def new(count Int) {
                     this.count = count
                 }
 
@@ -4043,7 +4043,7 @@ mod tests {
             }
 
             impl Vec {
-                def init(left Int, right Int) {
+                def new(left Int, right Int) {
                     this.items := Array.ofLength(2)
                     this.items[0] := left
                     this.items[1] := right

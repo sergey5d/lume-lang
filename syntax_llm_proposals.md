@@ -255,7 +255,7 @@ public class Person {
     age Int
     name Str
 
-    def init(age Int, name Str) {
+    def new(age Int, name Str) {
         this.age = age
         this.name = name
     }

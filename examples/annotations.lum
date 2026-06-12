@@ -17,7 +17,7 @@ class Service {
 
 impl Service {
     @Route(path = "/health")
-    def init() {
+    def new() {
         this.name = "ok"
     }
 

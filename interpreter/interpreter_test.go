@@ -458,7 +458,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -523,7 +523,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -1144,7 +1144,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -1217,7 +1217,7 @@ class Counter {
 }
 
 impl Counter {
-	def init(count Int) {
+	def new(count Int) {
 		this.count = count
 	}
 
@@ -1345,7 +1345,7 @@ class Vec {
 }
 
 impl Vec {
-	def init(left Int, right Int) {
+	def new(left Int, right Int) {
 		this.items := Array.ofLength(2)
 		this.items[0] := left
 		this.items[1] := right
@@ -1909,7 +1909,7 @@ class Team {
 }
 
 impl Team {
-	def init(name Str, owner Person) {
+	def new(name Str, owner Person) {
 		this.name = name
 		this.owner = owner
 	}
@@ -2161,7 +2161,7 @@ def run() Int {
 	}
 }
 
-func TestImplicitPrimaryConstructorAndThisDelegation(t *testing.T) {
+func TestExplicitConstructorDelegation(t *testing.T) {
 	src := `
 class Counter {
 	count Int
@@ -2170,8 +2170,13 @@ class Counter {
 }
 
 impl Counter {
-	def init(seed Int) {
-		init(count = seed, label = "ok")
+	def new(count Int, label Str) {
+		this.count = count
+		this.label = label
+	}
+
+	def new(seed Int) {
+		new(count = seed, label = "ok")
 	}
 
 	def value() Int = count

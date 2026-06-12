@@ -189,7 +189,7 @@ class Box {
 }
 
 impl Box {
-	def init(value Int) {
+	def new(value Int) {
 		this.value = value
 	}
 }
@@ -356,7 +356,7 @@ class Box[T] with Mapper[T, Stringable] {
 }
 
 impl Box[T] {
-	def init(value T) {
+	def new(value T) {
 		this.value = value
 	}
 
@@ -371,7 +371,7 @@ class SolidWork with Stringable {
 }
 
 impl SolidWork {
-	def init(a Int, b Bool) {
+	def new(a Int, b Bool) {
 		this.a = a
 		this.b = b
 	}

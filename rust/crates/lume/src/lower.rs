@@ -2810,7 +2810,7 @@ impl<'a> FunctionLowerer<'a> {
         if let Some(path) = expr_path(callee) {
             if path.len() == 1 {
                 let name = &path[0];
-                if name == "init" && self.function().name == "init" {
+                if name == "new" && self.function().name == "new" {
                     if let ir::FunctionKind::Method { owner } = self.function().kind {
                         if let Some(owner_name) =
                             self.program.types.get(owner.0).map(|ty| ty.name.clone())
@@ -2960,17 +2960,22 @@ impl<'a> FunctionLowerer<'a> {
             .copied()
             .filter_map(|id| {
                 let function = self.program.function(id)?;
-                (function.name == "init").then_some(function)
+                (function.name == "new").then_some(function)
             })
             .collect::<Vec<_>>();
         init_candidates.sort_by_key(|function| function.params.len());
-        for function in init_candidates {
+        let has_explicit_constructor = !init_candidates.is_empty();
+        for function in &init_candidates {
             let names = param_names_from_function(function);
             if arrange_named_call_args(&names, args).is_some() {
                 return Some(names);
             }
         }
-        Some(ty.fields.iter().map(|field| field.name.clone()).collect())
+        if !has_explicit_constructor {
+            Some(ty.fields.iter().map(|field| field.name.clone()).collect())
+        } else {
+            None
+        }
     }
 
     fn lower_place(&mut self, expr: &Expr) -> Option<ir::Place> {

@@ -1166,7 +1166,7 @@ impl<'a> Resolver<'a> {
 
     fn resolve_method(&mut self, method: &MethodDecl) {
         self.resolve_annotations(&method.annotations);
-        let is_constructor = method.name == "init";
+        let is_constructor = method.name == "new";
         let previous_constructor = self.current_constructor;
         self.current_constructor = is_constructor;
         self.push_type_scope();
@@ -1491,7 +1491,7 @@ impl<'a> Resolver<'a> {
             Expr::Call { callee, args, .. } => {
                 let skip_init = matches!(
                     callee.as_ref(),
-                    Expr::Identifier { name, .. } if self.current_constructor && name == "init"
+                    Expr::Identifier { name, .. } if self.current_constructor && name == "new"
                 );
                 if !skip_init {
                     self.resolve_expr(callee);

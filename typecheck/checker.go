@@ -537,7 +537,7 @@ func (c *Checker) checkInterface(decl *parser.InterfaceDecl) {
 	}
 	c.validateTypeParameterBounds(decl.TypeParameters)
 	for _, method := range decl.Methods {
-		if method.Name == "init" {
+		if method.Name == "new" {
 			c.addDiagnostic("invalid_interface_method", "interface '"+decl.Name+"': interfaces cannot declare constructors", method.Span)
 		}
 		c.checkInterfaceMethod(decl, method)
@@ -2667,7 +2667,7 @@ func (c *Checker) checkExprWithExpected(expr parser.Expr, expected *Type) *Type 
 
 func (c *Checker) checkCall(call *parser.CallExpr) *Type {
 	if ident, ok := call.Callee.(*parser.Identifier); ok {
-		if ident.Name == "init" && c.currentClass != nil && c.currentMethod != nil && c.currentMethod.Constructor {
+		if ident.Name == "new" && c.currentClass != nil && c.currentMethod != nil && c.currentMethod.Constructor {
 			info := c.classes[c.currentClass.Name]
 			classType := &Type{Kind: TypeClass, Name: c.currentClass.Name}
 			if hasNamedCallArgs(call.Args) {
@@ -4649,7 +4649,7 @@ func (c *Checker) checkConstructorRules(class classInfo) {
 		}
 		seen[key] = ctor
 		if missing := c.uninitializedLetFields(class.decl, ctor); len(missing) > 0 {
-			c.addDiagnostic("uninitialized_field", "constructor 'init' must initialize immutable fields: "+joinNames(missing), ctor.Span)
+			c.addDiagnostic("uninitialized_field", "constructor 'new' must initialize immutable fields: "+joinNames(missing), ctor.Span)
 		}
 	}
 }
@@ -4752,7 +4752,7 @@ func (c *Checker) instantiateFieldType(field fieldInfo, subst map[string]*Type) 
 }
 
 func primaryConstructorParams(class *parser.ClassDecl) []parser.Parameter {
-	if !hasSafeImplicitConstructor(class) {
+	if !usesImplicitConstructor(class) {
 		return nil
 	}
 	params := make([]parser.Parameter, 0, len(class.Fields))
@@ -4771,6 +4771,19 @@ func (c *Checker) primaryConstructorSignature(class *parser.ClassDecl) Signature
 		out[i] = c.resolveDeclaredType(param.Type)
 	}
 	return Signature{Parameters: out, ReturnType: &Type{Kind: TypeClass, Name: class.Name}}
+}
+
+func hasExplicitConstructor(class *parser.ClassDecl) bool {
+	for _, method := range class.Methods {
+		if method.Constructor {
+			return true
+		}
+	}
+	return false
+}
+
+func usesImplicitConstructor(class *parser.ClassDecl) bool {
+	return !hasExplicitConstructor(class) && hasSafeImplicitConstructor(class)
 }
 
 func hasSafeImplicitConstructor(class *parser.ClassDecl) bool {
@@ -4906,14 +4919,18 @@ func (c *Checker) reorderCallArgs(params []parser.Parameter, args []parser.CallA
 
 func (c *Checker) resolveConstructorOverload(class classInfo, argTypes []*Type, span parser.Span) (*parser.MethodDecl, bool) {
 	candidates := make([]*parser.MethodDecl, 0, len(class.constructors))
+	privateMatch := false
 	for _, ctor := range class.constructors {
 		sig := c.instantiateMethodSignature(ctor, class.decl, nil)
 		if signatureMatches(sig, argTypes) {
+			if ctor.Private && !c.canAccessPrivate(class.decl) {
+				privateMatch = true
+				continue
+			}
 			candidates = append(candidates, ctor)
 		}
 	}
-	primarySig := c.primaryConstructorSignature(class.decl)
-	primaryMatches := signatureMatches(primarySig, argTypes)
+	primaryMatches := usesImplicitConstructor(class.decl) && signatureMatches(c.primaryConstructorSignature(class.decl), argTypes)
 	if primaryMatches && len(candidates) == 0 {
 		return nil, true
 	}
@@ -4929,6 +4946,10 @@ func (c *Checker) resolveConstructorOverload(class classInfo, argTypes []*Type, 
 	}
 	if len(candidates) > 1 {
 		c.addDiagnostic("ambiguous_overload", "constructor call for class '"+class.decl.Name+"' is ambiguous", span)
+		return nil, false
+	}
+	if privateMatch {
+		c.addDiagnostic("private_access", "cannot access private constructor of class '"+class.decl.Name+"' outside class '"+class.decl.Name+"'", span)
 		return nil, false
 	}
 	c.addDiagnostic("no_matching_overload", fmt.Sprintf("no constructor overload for class '%s' matches %d arguments", class.decl.Name, len(argTypes)), span)
@@ -5003,9 +5024,10 @@ func (c *Checker) resolveMethodOverload(class classInfo, receiver *Type, name st
 
 func (c *Checker) resolveNamedConstructorOverload(class classInfo, args []parser.CallArg, span parser.Span) (*parser.MethodDecl, []parser.Expr, bool) {
 	var (
-		matchCtor  *parser.MethodDecl
-		matchArgs  []parser.Expr
-		matchCount int
+		matchCtor    *parser.MethodDecl
+		matchArgs    []parser.Expr
+		matchCount   int
+		privateMatch bool
 	)
 	for _, ctor := range class.constructors {
 		ordered, ok := tryReorderCallArgs(ctor.Parameters, args)
@@ -5017,16 +5039,22 @@ func (c *Checker) resolveNamedConstructorOverload(class classInfo, args []parser
 		if !signatureMatches(sig, argTypes) {
 			continue
 		}
+		if ctor.Private && !c.canAccessPrivate(class.decl) {
+			privateMatch = true
+			continue
+		}
 		matchCtor = ctor
 		matchArgs = ordered
 		matchCount++
 	}
 	primaryParams := primaryConstructorParams(class.decl)
-	if ordered, ok := tryReorderCallArgs(primaryParams, args); ok {
-		argTypes := c.checkArgTypes(ordered)
-		if signatureMatches(c.primaryConstructorSignature(class.decl), argTypes) {
-			matchArgs = ordered
-			matchCount++
+	if len(primaryParams) > 0 || len(args) == 0 {
+		if ordered, ok := tryReorderCallArgs(primaryParams, args); ok {
+			argTypes := c.checkArgTypes(ordered)
+			if signatureMatches(c.primaryConstructorSignature(class.decl), argTypes) {
+				matchArgs = ordered
+				matchCount++
+			}
 		}
 	}
 	if matchCount == 1 {
@@ -5045,6 +5073,10 @@ func (c *Checker) resolveNamedConstructorOverload(class classInfo, args []parser
 	}
 	if len(class.constructors) == 0 {
 		c.reorderCallArgs(primaryParams, args, span, "constructor '"+class.decl.Name+"'")
+		return nil, nil, false
+	}
+	if privateMatch {
+		c.addDiagnostic("private_access", "cannot access private constructor of class '"+class.decl.Name+"' outside class '"+class.decl.Name+"'", span)
 		return nil, nil, false
 	}
 	c.addDiagnostic("no_matching_overload", fmt.Sprintf("no constructor overload for class '%s' matches %d arguments", class.decl.Name, len(args)), span)

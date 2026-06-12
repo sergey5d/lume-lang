@@ -41,7 +41,7 @@ hidden class RangeIterator with Iterator[Int] {
 }
 
 impl RangeIterator {
-    def init(start Int, end Int, step Int) {
+    def new(start Int, end Int, step Int) {
         this.current := start
         this.end := end
         this.step := step

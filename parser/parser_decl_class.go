@@ -280,7 +280,7 @@ func (p *Parser) parseMethod(annotations []Annotation, private bool) (*MethodDec
 	if err != nil {
 		return nil, err
 	}
-	constructor := nameLexeme == "init"
+	constructor := nameLexeme == "new"
 	var returnType *TypeRef
 	if !constructor && !p.check(TokenAssign) && !(p.check(TokenLBrace) && !p.typeRefFollowedBy(TokenAssign)) {
 		typ, err := p.parseTypeRef()
