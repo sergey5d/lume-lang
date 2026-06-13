@@ -2,6 +2,7 @@
 # brace named Sammy 15 NYC
 # brace positional Ben 12 Paris
 # brace hidden Liam 8 5
+# brace hidden-third Ada 4 7
 # ctor alt 6 5
 # ctor manual 5 Bobby
 
@@ -21,6 +22,16 @@ class Profile {
 
 impl Profile {
     def scoreValue() Int = score
+}
+
+class HiddenTail {
+    name Str
+    level Int
+    hidden bonus Int = 7
+}
+
+impl HiddenTail {
+    def bonusValue() Int = bonus
 }
 
 class A {
@@ -71,6 +82,7 @@ def main() Unit {
     }
     positional Profile = Profile { "Ben", 12, "Paris" }
     hiddenDefault Profile = Profile { "Liam", 8 }
+    hiddenThird HiddenTail = HiddenTail { "Ada", 4 }
 
     aFromAlt A = A(maturity = 21)
     bManual B = B(5, "Bobby")
@@ -82,6 +94,12 @@ def main() Unit {
         hiddenDefault.name,
         hiddenDefault.age,
         hiddenDefault.scoreValue()
+    )
+    OS.println(
+        "brace hidden-third",
+        hiddenThird.name,
+        hiddenThird.level,
+        hiddenThird.bonusValue()
     )
     OS.println("ctor alt", aFromAlt.trueAge(), aFromAlt.trueName())
     OS.println("ctor manual", bManual.trueAge(), bManual.trueName())

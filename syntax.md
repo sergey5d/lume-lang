@@ -360,6 +360,7 @@ profile MixedProfile = MixedProfile {
     name = "Liam"
     age = 8
 }
+tail HiddenTail = HiddenTail { "Ada", 4 }
 settings Settings = Settings {}
 ```
 
