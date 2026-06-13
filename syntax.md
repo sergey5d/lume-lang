@@ -965,7 +965,8 @@ for { loc @location, @name } <- users {
 Pattern loop:
 
 ```txt
-for Some(item) <- maybeItems {
+allSome = [Some(5), Some(6)]
+for Some(item) <- allSome {
     OS.println(item)
 }
 ```
@@ -1008,8 +1009,11 @@ for (value, idx) <- rows {
 Class destructuring in `for` clauses uses braces and follows the same
 positional or named rules as `let { ... }`.
 
-Pattern-based `for` clauses are also supported. They assert that each produced
-value matches the pattern, and panic at runtime on mismatch.
+Pattern-based `for` clauses are supported when the compiler can prove that
+every produced value matches the pattern. That proof may come from the item type
+being irrefutable for the pattern, or from an exact known iterable such as a
+literal list of matching values. If the compiler can see a non-matching
+alternative, it rejects the loop.
 
 `continue` is valid in `while`, `for`, and `for ... yield`.
 Inside `for ... yield`, it skips the current iteration without producing a

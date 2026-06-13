@@ -4817,20 +4817,40 @@ $name
     }
 
     #[test]
-    fn runs_plain_let_and_for_pattern_bindings() {
+    fn runs_plain_let_and_irrefutable_for_pattern_bindings() {
         let program = lower_inline(
             r#"
+            class Pair {
+                left Int
+                right Int
+            }
+
             def main() Unit {
                 value = Some(5)
                 let Some(item) = value
                 OS.println("let", item)
 
-                for Some(loopItem) <- [Some(1), Some(2), Some(3)] {
-                    OS.println("for", loopItem)
+                allSome = [Some(5), Some(6)]
+                for Some(loopItem) <- allSome {
+                    OS.println("known", loopItem)
                 }
 
-                mapped = for Some(mappedItem) <- [Some(10), Some(20)] yield {
+                knownMapped = for Some(mappedItem) <- allSome yield {
                     mappedItem + 1
+                }
+
+                for result <- knownMapped {
+                    OS.println("known yield", result)
+                }
+
+                pairs = List(Pair { 1, 10 }, Pair { 2, 20 }, Pair { 3, 30 })
+
+                for Pair(left, right) <- pairs {
+                    OS.println("for", left, right)
+                }
+
+                mapped = for Pair(left, right) <- pairs yield {
+                    left + right
                 }
 
                 for result <- mapped {
@@ -4844,7 +4864,7 @@ $name
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(
             run.output,
-            "let 5\nfor 1\nfor 2\nfor 3\nyield 11\nyield 21\n"
+            "let 5\nknown 5\nknown 6\nknown yield 6\nknown yield 7\nfor 1 10\nfor 2 20\nfor 3 30\nyield 11\nyield 22\nyield 33\n"
         );
     }
 

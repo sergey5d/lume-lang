@@ -185,6 +185,22 @@ impl Ty {
 struct ValueInfo {
     ty: Ty,
     mutable: bool,
+    known: Option<KnownValue>,
+}
+
+#[derive(Debug, Clone)]
+enum KnownValue {
+    Unit,
+    Bool(bool),
+    Int(i64),
+    Float(String),
+    String(String),
+    List(Vec<KnownValue>),
+    Tuple(Vec<KnownValue>),
+    Constructor {
+        path: Vec<String>,
+        args: Vec<KnownValue>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -604,6 +620,12 @@ impl<'a> Checker<'a> {
                     ValueInfo {
                         ty,
                         mutable: binding.mutable,
+                        known: (!binding.mutable
+                            && binding_stmt.bindings.len() == 1
+                            && binding_stmt.values.len() == 1
+                            && binding_stmt.destructure.is_none())
+                            .then(|| self.known_value_from_expr(&binding_stmt.values[0]))
+                            .flatten(),
                     },
                 );
             }
@@ -1034,6 +1056,12 @@ impl<'a> Checker<'a> {
                     })
                     .collect::<Vec<_>>();
                 let slot_types = self.binding_slot_types(binding_stmt, &value_types);
+                let known_value = (!binding_stmt.bindings[0].mutable
+                    && binding_stmt.bindings.len() == 1
+                    && binding_stmt.values.len() == 1
+                    && binding_stmt.destructure.is_none())
+                    .then(|| self.known_value_from_expr(&binding_stmt.values[0]))
+                    .flatten();
                 for (index, binding) in binding_stmt.bindings.iter().enumerate() {
                     let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
                     let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
@@ -1052,7 +1080,12 @@ impl<'a> Checker<'a> {
                             ),
                         );
                     }
-                    self.define_local(&binding.name, ty, binding.mutable);
+                    self.define_local_known(
+                        &binding.name,
+                        ty,
+                        binding.mutable,
+                        (index == 0).then(|| known_value.clone()).flatten(),
+                    );
                 }
                 Ty::unit()
             }
@@ -1296,6 +1329,134 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn require_irrefutable_for_pattern(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee: &Ty,
+        source: &Expr,
+        span: crate::source::Span,
+    ) {
+        if !self.pattern_is_irrefutable(pattern, scrutinee)
+            && !self.known_expr_matches_pattern(pattern, source)
+        {
+            self.add_error(
+                "refutable_for_pattern",
+                format!(
+                    "for pattern must be irrefutable for value of type '{}'",
+                    scrutinee.describe()
+                ),
+                span,
+            );
+        }
+    }
+
+    fn known_expr_matches_pattern(&self, pattern: &Pattern, source: &Expr) -> bool {
+        match self.known_value_from_expr(source) {
+            Some(KnownValue::List(items)) => items
+                .iter()
+                .all(|item| self.known_value_matches_pattern(item, pattern)),
+            Some(value) => self.known_value_matches_pattern(&value, pattern),
+            None => false,
+        }
+    }
+
+    fn known_value_from_expr(&self, expr: &Expr) -> Option<KnownValue> {
+        match expr {
+            Expr::Identifier { name, .. } => self.lookup_value(name)?.known.clone(),
+            Expr::Group { inner, .. } => self.known_value_from_expr(inner),
+            Expr::Unit { .. } => Some(KnownValue::Unit),
+            Expr::Bool { value, .. } => Some(KnownValue::Bool(*value)),
+            Expr::Integer { raw, .. } => raw.parse().ok().map(KnownValue::Int),
+            Expr::Float { raw, .. } => Some(KnownValue::Float(raw.clone())),
+            Expr::String { raw, .. } => Some(KnownValue::String(raw.clone())),
+            Expr::ListLiteral { items, .. } => items
+                .iter()
+                .map(|item| self.known_value_from_expr(item))
+                .collect::<Option<Vec<_>>>()
+                .map(KnownValue::List),
+            Expr::TupleLiteral { items, .. } => items
+                .iter()
+                .map(|item| self.known_value_from_expr(item))
+                .collect::<Option<Vec<_>>>()
+                .map(KnownValue::Tuple),
+            Expr::Call { callee, args, .. } => {
+                let path = expr_path_for_known_value(callee)?;
+                if path == ["List".to_string()] {
+                    if args.iter().any(|arg| arg.name.is_some()) {
+                        return None;
+                    }
+                    return args
+                        .iter()
+                        .map(|arg| self.known_value_from_expr(&arg.value))
+                        .collect::<Option<Vec<_>>>()
+                        .map(KnownValue::List);
+                }
+                if args.iter().any(|arg| arg.name.is_some()) {
+                    return None;
+                }
+                if self.lookup_case_by_path(&path).is_none()
+                    && self.lookup_destructured_type_pattern(&path).is_none()
+                {
+                    return None;
+                }
+                let values = args
+                    .iter()
+                    .map(|arg| self.known_value_from_expr(&arg.value))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(KnownValue::Constructor { path, args: values })
+            }
+            other => {
+                let path = expr_path_for_known_value(other)?;
+                let case = self.lookup_case_by_path(&path)?;
+                case.params
+                    .is_empty()
+                    .then_some(KnownValue::Constructor {
+                        path,
+                        args: Vec::new(),
+                    })
+            }
+        }
+    }
+
+    fn known_value_matches_pattern(&self, value: &KnownValue, pattern: &Pattern) -> bool {
+        match pattern {
+            Pattern::Wildcard { .. } | Pattern::Binding { .. } => true,
+            Pattern::Type { .. } => false,
+            Pattern::Literal { value: pattern_value, .. } => {
+                matches!(
+                    (value, pattern_value),
+                    (KnownValue::Unit, Expr::Unit { .. })
+                        | (KnownValue::Bool(true), Expr::Bool { value: true, .. })
+                        | (KnownValue::Bool(false), Expr::Bool { value: false, .. })
+                ) || match (value, pattern_value) {
+                    (KnownValue::Int(left), Expr::Integer { raw, .. }) => {
+                        raw.parse::<i64>().ok().is_some_and(|right| *left == right)
+                    }
+                    (KnownValue::Float(left), Expr::Float { raw, .. }) => left == raw,
+                    (KnownValue::String(left), Expr::String { raw, .. }) => left == raw,
+                    _ => false,
+                }
+            }
+            Pattern::Tuple { elements, .. } => match value {
+                KnownValue::Tuple(items) if items.len() == elements.len() => items
+                    .iter()
+                    .zip(elements.iter())
+                    .all(|(item, pattern)| self.known_value_matches_pattern(item, pattern)),
+                _ => false,
+            },
+            Pattern::Constructor { path, args, .. } => match value {
+                KnownValue::Constructor {
+                    path: value_path,
+                    args: value_args,
+                } if value_path == path && value_args.len() == args.len() => value_args
+                    .iter()
+                    .zip(args.iter())
+                    .all(|(item, pattern)| self.known_value_matches_pattern(item, pattern)),
+                _ => false,
+            },
+        }
+    }
+
     fn check_else_branch(&mut self, branch: &ElseBranch) {
         match branch {
             ElseBranch::If(stmt) => self.check_if_stmt(stmt),
@@ -1332,6 +1493,12 @@ impl<'a> Checker<'a> {
                     .map(|expr| self.check_expr(expr))
                     .unwrap_or(Ty::Unknown)
             };
+            let source = binding
+                .iterable
+                .as_ref()
+                .or_else(|| binding.values.first())
+                .expect("pattern-based for binding should have a source");
+            self.require_irrefutable_for_pattern(pattern, &value_ty, source, pattern.span());
             self.bind_pattern(pattern, &value_ty);
             return;
         }
@@ -3663,6 +3830,10 @@ impl<'a> Checker<'a> {
     }
 
     fn define_local(&mut self, name: &str, ty: Ty, mutable: bool) {
+        self.define_local_known(name, ty, mutable, None);
+    }
+
+    fn define_local_known(&mut self, name: &str, ty: Ty, mutable: bool, known: Option<KnownValue>) {
         if name == "_" {
             return;
         }
@@ -3670,7 +3841,7 @@ impl<'a> Checker<'a> {
             self.push_scope();
         }
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), ValueInfo { ty, mutable });
+            scope.insert(name.to_string(), ValueInfo { ty, mutable, known });
         }
     }
 
@@ -4107,6 +4278,19 @@ fn path_starts_with_os(expr: &Expr) -> bool {
         Expr::Member { receiver, .. } => path_starts_with_os(receiver),
         Expr::Group { inner, .. } => path_starts_with_os(inner),
         _ => false,
+    }
+}
+
+fn expr_path_for_known_value(expr: &Expr) -> Option<Vec<String>> {
+    match expr {
+        Expr::Identifier { name, .. } => Some(vec![name.clone()]),
+        Expr::Member { receiver, name, .. } => {
+            let mut path = expr_path_for_known_value(receiver)?;
+            path.push(name.clone());
+            Some(path)
+        }
+        Expr::Group { inner, .. } => expr_path_for_known_value(inner),
+        _ => None,
     }
 }
 
@@ -4890,6 +5074,31 @@ def main() Unit {
                     && diag
                         .message
                         .contains("if let pattern is irrefutable for value of type 'Worker'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_refutable_for_pattern() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    values List[Option[Int]] = [Some(1), None]
+    for Some(value) <- values {
+        OS.println(value)
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "refutable_for_pattern"
+                    && diag
+                        .message
+                        .contains("for pattern must be irrefutable for value of type 'Option[Int]'")
             }),
             "{:#?}",
             result.diagnostics
