@@ -317,7 +317,6 @@ impl<'a> Parser<'a> {
             field_name: None,
             ty,
             mutable,
-            deferred: false,
             span: start.cover(span),
         })
     }
@@ -339,7 +338,6 @@ impl<'a> Parser<'a> {
                 field_name: Some(field_name),
                 ty,
                 mutable,
-                deferred: false,
                 span: start.cover(end),
             });
         }
@@ -364,7 +362,6 @@ impl<'a> Parser<'a> {
             field_name,
             ty,
             mutable,
-            deferred: false,
             span: start.cover(end),
         })
     }

@@ -231,12 +231,12 @@ seed Int = 1
 var counter Int = 0
 ```
 
-Deferred / uninitialized fields are only valid in class-like field declarations:
+Fields without initializers are only valid in class-like field declarations:
 
 ```txt
 class Box {
     hidden var cached Int
-    hidden label Str = ?
+    hidden label Str
 }
 ```
 

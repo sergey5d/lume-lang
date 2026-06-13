@@ -3,8 +3,8 @@
 # INTERPRETER
 
 object OS with Printer {
-    stdout Printer = ?
-    stderr Printer = ?
+    stdout Printer
+    stderr Printer
 
     def print(value Str...) Unit = ()
     def println(value Str...) Unit = ()

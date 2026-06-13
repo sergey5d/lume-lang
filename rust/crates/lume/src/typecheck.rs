@@ -624,8 +624,8 @@ impl<'a> Checker<'a> {
                             && binding_stmt.bindings.len() == 1
                             && binding_stmt.values.len() == 1
                             && binding_stmt.destructure.is_none())
-                            .then(|| self.known_value_from_expr(&binding_stmt.values[0]))
-                            .flatten(),
+                        .then(|| self.known_value_from_expr(&binding_stmt.values[0]))
+                        .flatten(),
                     },
                 );
             }
@@ -1060,8 +1060,8 @@ impl<'a> Checker<'a> {
                     && binding_stmt.bindings.len() == 1
                     && binding_stmt.values.len() == 1
                     && binding_stmt.destructure.is_none())
-                    .then(|| self.known_value_from_expr(&binding_stmt.values[0]))
-                    .flatten();
+                .then(|| self.known_value_from_expr(&binding_stmt.values[0]))
+                .flatten();
                 for (index, binding) in binding_stmt.bindings.iter().enumerate() {
                     let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
                     let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
@@ -1408,12 +1408,10 @@ impl<'a> Checker<'a> {
             other => {
                 let path = expr_path_for_known_value(other)?;
                 let case = self.lookup_case_by_path(&path)?;
-                case.params
-                    .is_empty()
-                    .then_some(KnownValue::Constructor {
-                        path,
-                        args: Vec::new(),
-                    })
+                case.params.is_empty().then_some(KnownValue::Constructor {
+                    path,
+                    args: Vec::new(),
+                })
             }
         }
     }
@@ -1422,7 +1420,10 @@ impl<'a> Checker<'a> {
         match pattern {
             Pattern::Wildcard { .. } | Pattern::Binding { .. } => true,
             Pattern::Type { .. } => false,
-            Pattern::Literal { value: pattern_value, .. } => {
+            Pattern::Literal {
+                value: pattern_value,
+                ..
+            } => {
                 matches!(
                     (value, pattern_value),
                     (KnownValue::Unit, Expr::Unit { .. })

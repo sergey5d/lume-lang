@@ -154,7 +154,6 @@ pub struct FieldDecl {
     pub name: String,
     pub ty: Option<TypeRef>,
     pub initializer: Option<Expr>,
-    pub deferred: bool,
     pub span: Span,
 }
 
@@ -294,7 +293,6 @@ pub struct Binding {
     pub field_name: Option<String>,
     pub ty: Option<TypeRef>,
     pub mutable: bool,
-    pub deferred: bool,
     pub span: Span,
 }
 

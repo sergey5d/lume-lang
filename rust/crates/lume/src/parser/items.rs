@@ -533,18 +533,14 @@ impl<'a> Parser<'a> {
             None
         };
 
-        let (initializer, deferred, end) =
+        let (initializer, end) =
             if self.match_token(TokenKind::Eq) || self.match_token(TokenKind::ColonAssign) {
                 let assign_span = self.previous_span();
-                if self.match_token(TokenKind::Question) {
-                    (None, true, self.previous_span())
-                } else {
-                    let expr = self.parse_expr()?;
-                    let end = expr.span();
-                    (Some(expr), false, assign_span.cover(end))
-                }
+                let expr = self.parse_expr()?;
+                let end = expr.span();
+                (Some(expr), assign_span.cover(end))
             } else {
-                (None, false, ty.as_ref().map(TypeRef::span).unwrap_or(start))
+                (None, ty.as_ref().map(TypeRef::span).unwrap_or(start))
             };
 
         Some(FieldDecl {
@@ -554,7 +550,6 @@ impl<'a> Parser<'a> {
             name,
             ty,
             initializer,
-            deferred,
             span: start.cover(end),
         })
     }

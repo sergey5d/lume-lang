@@ -255,6 +255,24 @@ impl Counter {
 }
 
 #[test]
+fn rejects_question_field_placeholder() {
+    let file = SourceFile::new(
+        "test.lum",
+        r#"
+class Box {
+    hidden label Str = ?
+}
+"#,
+    );
+    let lexed = lex(&file);
+    assert!(
+        !lexed.diagnostics.is_empty(),
+        "expected lexer rejection for '?', got {:#?}",
+        lexed.diagnostics
+    );
+}
+
+#[test]
 fn parses_record_literal_forms() {
     match parse_expr_only(r#"class { name = "Ana", age = 10 }"#) {
         Expr::RecordLiteral { fields, values, .. } => {

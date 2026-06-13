@@ -59,7 +59,7 @@ class B {
     hidden name Str
     hidden var malnutritioned Bool = false
     hidden var unassigned Float
-    hidden questionable Int = ?
+    hidden questionable Int
 }
 
 impl B {
