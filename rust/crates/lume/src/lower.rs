@@ -2341,13 +2341,22 @@ impl<'a> FunctionLowerer<'a> {
             _ => return None,
         };
         let ty = self.program.types.iter().find(|ty| {
-            ty.name == *type_name
-                && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
-                && ty.fields.len() == arity
+            ty.name == *type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
         })?;
+        let visible_fields = ty
+            .fields
+            .iter()
+            .filter(|field| field.visibility != ast::Visibility::Hidden)
+            .collect::<Vec<_>>();
+        if visible_fields.len() != arity {
+            return None;
+        }
         Some((
             ir::Type::named(type_name.clone()),
-            ty.fields.iter().map(|field| field.name.clone()).collect(),
+            visible_fields
+                .iter()
+                .map(|field| field.name.clone())
+                .collect(),
         ))
     }
 

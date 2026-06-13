@@ -5,6 +5,7 @@
 # class pair 24 class-pair
 # class skip only class-only
 # class skip 16 class-skip
+# hidden positional Sergey Tampa
 # named Sergey Tampa
 # named same Sergey
 # named alias Tampa Sergey
@@ -28,6 +29,20 @@ class User {
     age Int
 }
 
+class SecretUser {
+    name Str
+    hidden token Str
+    location Str
+}
+
+impl SecretUser {
+    def new(name Str, token Str, location Str) {
+        this.name = name
+        this.token = token
+        this.location = location
+    }
+}
+
 def main() Int {
     let { e Int, f Str } = Box { 9, "boxed" }
     OS.println("class", e, f)
@@ -46,6 +61,9 @@ def main() Int {
 
     let { skippedClassLeft Int, _, skippedClassRight Str } = Crate { 16, "drop", "class-skip" }
     OS.println("class skip", skippedClassLeft, skippedClassRight)
+
+    let { publicName, publicLocation } = SecretUser("Sergey", "secret", "Tampa")
+    OS.println("hidden positional", publicName, publicLocation)
 
     user User = User { name = "Sergey", location = "Tampa", age = 37 }
 

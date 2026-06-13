@@ -1442,7 +1442,13 @@ impl<'a> Checker<'a> {
             }
             Ty::Named(name, _) if kind == DestructureKind::Record => self
                 .lookup_any_type(name)
-                .map(|sig| sig.fields.iter().map(|field| field.ty.clone()).collect())
+                .map(|sig| {
+                    sig.fields
+                        .iter()
+                        .filter(|field| !field.hidden)
+                        .map(|field| field.ty.clone())
+                        .collect()
+                })
                 .unwrap_or_default(),
             Ty::Unknown => vec![Ty::Unknown; count],
             _ => Vec::new(),
@@ -2836,7 +2842,13 @@ impl<'a> Checker<'a> {
                 }),
             _ => None,
         }?;
-        Some(sig.fields.iter().map(|field| field.ty.clone()).collect())
+        Some(
+            sig.fields
+                .iter()
+                .filter(|field| !field.hidden)
+                .map(|field| field.ty.clone())
+                .collect(),
+        )
     }
 
     fn unwrap_inner_type(&self, ty: &Ty) -> Ty {
@@ -4522,6 +4534,34 @@ def main() Str {
     user User = User { name = "Sergey", location = "Tampa", age = 37 }
     let { loc Str @location, name @name } = user
     return name + " from " + loc
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn positional_class_destructuring_skips_hidden_fields() {
+        let program = parse_inline(
+            r#"
+class SecretUser {
+    name Str
+    hidden token Str
+    location Str
+}
+
+impl SecretUser {
+    def new(name Str, token Str, location Str) {
+        this.name = name
+        this.token = token
+        this.location = location
+    }
+}
+
+def main() Str {
+    let { userName Str, userLocation Str } = SecretUser("Sergey", "secret", "Tampa")
+    return userName + " from " + userLocation
 }
 "#,
         );
