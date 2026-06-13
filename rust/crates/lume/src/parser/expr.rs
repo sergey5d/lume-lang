@@ -1,3 +1,4 @@
+use super::stmt::ForClauseTarget;
 use super::*;
 
 impl<'a> Parser<'a> {
@@ -192,23 +193,39 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_for_yield_expr_after_start(&mut self, start: Span) -> Option<Expr> {
-        let bindings = if self.match_token(TokenKind::LBrace) {
-            self.parse_for_binding_block()?
-        } else {
-            let bindings = self.parse_binding_list(false)?;
-            self.consume(TokenKind::LeftArrow, "expected '<-' after for bindings")?;
-            let iterable = self.parse_expr_without_trailing_block_call()?;
-            vec![ForBinding {
-                span: bindings
-                    .first()
-                    .map(|binding| binding.span)
-                    .unwrap_or(iterable.span())
-                    .cover(iterable.span()),
-                bindings,
-                iterable: Some(iterable),
-                values: Vec::new(),
-            }]
-        };
+        let bindings =
+            if self.at(TokenKind::LBrace) && !self.is_for_brace_destructuring_binding_start() {
+                self.consume(TokenKind::LBrace, "expected '{' after 'for'")?;
+                self.parse_for_binding_block()?
+            } else {
+                let target = self.parse_for_clause_target(false)?;
+                self.consume(TokenKind::LeftArrow, "expected '<-' after for bindings")?;
+                let iterable = self.parse_expr_without_trailing_block_call()?;
+                let (bindings, destructure, pattern, target_span) = match target {
+                    ForClauseTarget::Bindings {
+                        bindings,
+                        destructure,
+                    } => {
+                        let target_span = bindings
+                            .first()
+                            .map(|binding| binding.span)
+                            .unwrap_or(iterable.span());
+                        (bindings, destructure, None, target_span)
+                    }
+                    ForClauseTarget::Pattern(pattern) => {
+                        let pattern_span = pattern.span();
+                        (Vec::new(), None, Some(pattern), pattern_span)
+                    }
+                };
+                vec![ForBinding {
+                    span: target_span.cover(iterable.span()),
+                    bindings,
+                    destructure,
+                    pattern,
+                    iterable: Some(iterable),
+                    values: Vec::new(),
+                }]
+            };
         self.consume_keyword(Keyword::Yield, "expected 'yield' after for bindings")?;
         let yield_body = self.parse_yield_body_block()?;
         Some(Expr::ForYield {
@@ -223,16 +240,30 @@ impl<'a> Parser<'a> {
         let mut bindings = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let mutable = self.match_keyword(Keyword::Var);
-            let clause_bindings = self.parse_binding_list(mutable)?;
+            let target = self.parse_for_clause_target(mutable)?;
             if self.match_token(TokenKind::LeftArrow) {
                 let iterable = self.parse_expr_without_trailing_block_call()?;
-                let span = clause_bindings
-                    .first()
-                    .map(|binding| binding.span)
-                    .unwrap_or(iterable.span())
-                    .cover(iterable.span());
+                let (clause_bindings, destructure, pattern, target_span) = match target {
+                    ForClauseTarget::Bindings {
+                        bindings,
+                        destructure,
+                    } => {
+                        let target_span = bindings
+                            .first()
+                            .map(|binding| binding.span)
+                            .unwrap_or(iterable.span());
+                        (bindings, destructure, None, target_span)
+                    }
+                    ForClauseTarget::Pattern(pattern) => {
+                        let pattern_span = pattern.span();
+                        (Vec::new(), None, Some(pattern), pattern_span)
+                    }
+                };
+                let span = target_span.cover(iterable.span());
                 bindings.push(ForBinding {
                     bindings: clause_bindings,
+                    destructure,
+                    pattern,
                     iterable: Some(iterable),
                     values: Vec::new(),
                     span,
@@ -240,16 +271,38 @@ impl<'a> Parser<'a> {
             } else {
                 self.consume(TokenKind::Eq, "expected '=' or '<-' in for binding block")?;
                 let values = self.parse_expr_list()?;
-                let start = clause_bindings
-                    .first()
-                    .map(|binding| binding.span)
-                    .unwrap_or_else(|| values.last().map(Expr::span).unwrap());
+                let (clause_bindings, destructure, pattern, target_span) = match target {
+                    ForClauseTarget::Bindings {
+                        bindings,
+                        destructure,
+                    } => {
+                        let target_span = bindings
+                            .first()
+                            .map(|binding| binding.span)
+                            .unwrap_or_else(|| values.last().map(Expr::span).unwrap());
+                        (bindings, destructure, None, target_span)
+                    }
+                    ForClauseTarget::Pattern(pattern) => {
+                        let pattern_span = pattern.span();
+                        (Vec::new(), None, Some(pattern), pattern_span)
+                    }
+                };
+                let start = target_span;
                 let end = values
                     .last()
                     .map(Expr::span)
                     .unwrap_or_else(|| clause_bindings.last().map(|binding| binding.span).unwrap());
+                if (destructure.is_some() || pattern.is_some()) && values.len() != 1 {
+                    self.error_at_current(
+                        "unexpected_token",
+                        "pattern and destructuring for-bindings require a single initializer expression",
+                    );
+                    return None;
+                }
                 bindings.push(ForBinding {
                     bindings: clause_bindings,
+                    destructure,
+                    pattern,
                     iterable: None,
                     values,
                     span: start.cover(end),

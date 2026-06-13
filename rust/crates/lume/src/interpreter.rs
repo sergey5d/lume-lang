@@ -306,6 +306,14 @@ fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: 
                 rewrite_expr_for_runtime(value, module, graph);
             }
         }
+        ast::Stmt::PatternBinding(stmt) => {
+            for clause in &mut stmt.clauses {
+                rewrite_pattern_for_runtime(&mut clause.pattern, module);
+                rewrite_expr_for_runtime(&mut clause.value, module, graph);
+            }
+            rewrite_pattern_for_runtime(&mut stmt.pattern, module);
+            rewrite_expr_for_runtime(&mut stmt.value, module, graph);
+        }
         ast::Stmt::Assignment(assign) => {
             for target in &mut assign.targets {
                 rewrite_expr_for_runtime(target, module, graph);
@@ -396,6 +404,9 @@ fn rewrite_for_binding_for_runtime(
     module: &LoadedModule,
     graph: &ModuleGraph,
 ) {
+    if let Some(pattern) = &mut binding.pattern {
+        rewrite_pattern_for_runtime(pattern, module);
+    }
     for local in &mut binding.bindings {
         if let Some(ty) = &mut local.ty {
             rewrite_type_ref_for_runtime(ty, module);
@@ -2561,7 +2572,7 @@ impl<'a> Interpreter<'a> {
                     (
                         aggregate.type_name.clone(),
                         aggregate.kind,
-                        aggregate_named_field(&aggregate, method),
+                        self.aggregate_field_value(&aggregate, method),
                     )
                 };
                 if let Some(function) =
@@ -2853,7 +2864,7 @@ impl<'a> Interpreter<'a> {
                     return Ok(Value::Aggregate(aggregate.clone()));
                 }
                 let aggregate = aggregate.borrow();
-                aggregate_named_field(&aggregate, name).ok_or_else(|| {
+                self.aggregate_field_value(&aggregate, name).ok_or_else(|| {
                     self.runtime_error(
                         span,
                         if let Some(case_name) = &aggregate.case_name {
@@ -2876,6 +2887,44 @@ impl<'a> Interpreter<'a> {
                 format!("cannot access field '{}' on {}", name, base.render()),
             )),
         }
+    }
+
+    fn aggregate_field_value(&self, aggregate: &AggregateValue, name: &str) -> Option<Value> {
+        aggregate
+            .field_names
+            .iter()
+            .position(|field_name| field_name == name)
+            .and_then(|index| aggregate.fields.get(index).cloned())
+            .or_else(|| {
+                self.aggregate_visible_field_index(aggregate, name)
+                    .and_then(|index| aggregate.fields.get(index).cloned())
+            })
+    }
+
+    fn aggregate_visible_field_index(
+        &self,
+        aggregate: &AggregateValue,
+        name: &str,
+    ) -> Option<usize> {
+        let visible_index = ordered_member_index(name)?;
+        let type_id = aggregate.runtime_type_id?;
+        let runtime_type = self.runtime.types.get(type_id.0)?;
+        if let Some(case_id) = aggregate.case_id {
+            return runtime_type
+                .enum_cases
+                .get(case_id.0)?
+                .fields
+                .iter()
+                .filter(|field| !field.hidden)
+                .nth(visible_index)
+                .map(|field| field.slot.0);
+        }
+        runtime_type
+            .fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .nth(visible_index)
+            .map(|field| field.slot.0)
     }
 
     fn set_member(
@@ -3337,9 +3386,13 @@ fn tuple_member(items: &[Value], name: &str) -> Option<Value> {
     ordered_member(items.len(), name).and_then(|index| items.get(index).cloned())
 }
 
-fn ordered_member(len: usize, name: &str) -> Option<usize> {
+fn ordered_member_index(name: &str) -> Option<usize> {
     let index = name.strip_prefix('_')?.parse::<usize>().ok()?;
-    let index = index.checked_sub(1)?;
+    index.checked_sub(1)
+}
+
+fn ordered_member(len: usize, name: &str) -> Option<usize> {
+    let index = ordered_member_index(name)?;
     (index < len).then_some(index)
 }
 
@@ -4255,6 +4308,49 @@ mod tests {
     }
 
     #[test]
+    fn runs_for_class_destructuring_with_visible_fields() {
+        let program = lower_inline(
+            r#"
+            class SecretUser {
+                name Str
+                hidden token Str
+                location Str
+            }
+
+            impl SecretUser {
+                def new(name Str, token Str, location Str) {
+                    this.name = name
+                    this.token = token
+                    this.location = location
+                }
+            }
+
+            def main() Unit {
+                users = List(
+                    SecretUser("Sergey", "secret-1", "Tampa"),
+                    SecretUser("Ada", "secret-2", "London"),
+                )
+
+                for { userName, userLocation } <- users {
+                    OS.println("pos", userName, userLocation)
+                }
+
+                for { loc @location, @name } <- users {
+                    OS.println("named", name, loc)
+                }
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "pos Sergey Tampa\npos Ada London\nnamed Sergey Tampa\nnamed Ada London\n"
+        );
+    }
+
+    #[test]
     fn runs_option_and_result_methods() {
         let program = lower_inline(
             r#"
@@ -4718,6 +4814,38 @@ $name
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "binding 7\n");
         assert_eq!(run.return_value.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn runs_plain_let_and_for_pattern_bindings() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                value = Some(5)
+                let Some(item) = value
+                OS.println("let", item)
+
+                for Some(loopItem) <- [Some(1), Some(2), Some(3)] {
+                    OS.println("for", loopItem)
+                }
+
+                mapped = for Some(mappedItem) <- [Some(10), Some(20)] yield {
+                    mappedItem + 1
+                }
+
+                for result <- mapped {
+                    OS.println("yield", result)
+                }
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "let 5\nfor 1\nfor 2\nfor 3\nyield 11\nyield 21\n"
+        );
     }
 
     #[test]

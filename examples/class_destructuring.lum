@@ -6,7 +6,11 @@
 # class skip only class-only
 # class skip 16 class-skip
 # hidden positional Sergey Tampa
+# for positional Sergey Tampa
+# for positional Ada London
 # named Sergey Tampa
+# for named Sergey Tampa
+# for named Ada London
 # named same Sergey
 # named alias Tampa Sergey
 # named skip Sergey
@@ -65,10 +69,22 @@ def main() Int {
     let { publicName, publicLocation } = SecretUser("Sergey", "secret", "Tampa")
     OS.println("hidden positional", publicName, publicLocation)
 
+    users = List(
+        SecretUser("Sergey", "secret-1", "Tampa"),
+        SecretUser("Ada", "secret-2", "London"),
+    )
+    for { userName, userLocation } <- users {
+        OS.println("for positional", userName, userLocation)
+    }
+
     user User = User { name = "Sergey", location = "Tampa", age = 37 }
 
     let { name @name, @location } = user
     OS.println("named", name, location)
+
+    for { loc @location, loopName @name } <- users {
+        OS.println("for named", loopName, loc)
+    }
 
     let { nameAgain @name } = user
     OS.println("named same", nameAgain)

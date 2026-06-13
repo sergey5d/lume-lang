@@ -232,7 +232,13 @@ impl<'a> Parser<'a> {
             .get(self.index + 1)
             .is_some_and(|token| token.kind == TokenKind::LBrace)
         {
-            return true;
+            let parser = Parser {
+                tokens: self.tokens,
+                index: self.index + 1,
+                diagnostics: Vec::new(),
+                allow_trailing_block_call: self.allow_trailing_block_call,
+            };
+            return !parser.is_for_brace_destructuring_binding_start();
         }
         let mut i = self.index + 1;
         while let Some(token) = self.tokens.get(i) {

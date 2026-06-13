@@ -236,6 +236,7 @@ pub struct Block {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Binding(BindingStmt),
+    PatternBinding(PatternBindingStmt),
     Assignment(AssignmentStmt),
     If(IfStmt),
     Match(MatchStmt),
@@ -253,6 +254,7 @@ impl Stmt {
     pub fn span(&self) -> Span {
         match self {
             Stmt::Binding(stmt) => stmt.span,
+            Stmt::PatternBinding(stmt) => stmt.span,
             Stmt::Assignment(stmt) => stmt.span,
             Stmt::If(stmt) => stmt.span,
             Stmt::Match(stmt) => stmt.span,
@@ -407,10 +409,22 @@ pub struct LetElseStmt {
     pub span: Span,
 }
 
+/// A `let PATTERN = expr` statement, or grouped `let { ... }`, that panics on
+/// pattern mismatch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatternBindingStmt {
+    pub clauses: Vec<RefutableClause>,
+    pub pattern: Pattern,
+    pub value: Expr,
+    pub span: Span,
+}
+
 /// One generator/binding clause inside a `for` loop or `for ... yield`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForBinding {
     pub bindings: Vec<Binding>,
+    pub destructure: Option<DestructureKind>,
+    pub pattern: Option<Pattern>,
     pub iterable: Option<Expr>,
     pub values: Vec<Expr>,
     pub span: Span,

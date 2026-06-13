@@ -785,6 +785,10 @@ if let _ Worker = value {
 }
 ```
 
+`if let` is intended for refutable matches. If the compiler can prove the
+pattern always succeeds for the scrutinee type, it rejects the construct and
+asks you to use plain `let` instead.
+
 When the payload needs more destructuring, prefer doing that on the next line inside the branch:
 
 ```txt
@@ -846,6 +850,24 @@ let {
 - the pattern is matched against the right-hand value
 - if the match succeeds, bindings remain visible after the statement
 - if the match fails, the `else` block is evaluated and implicitly returns from the current callable
+
+If you want an assertive match without a fallback, plain pattern `let` is also
+supported:
+
+```txt
+let Some(item) = maybeValue
+```
+
+Grouped assertive pattern bindings work the same way:
+
+```txt
+let {
+    Some(left) = maybeLeft
+    Some(right) = maybeRight
+}
+```
+
+These plain pattern `let` forms panic at runtime if the pattern does not match.
 
 Propagation form:
 
@@ -923,8 +945,28 @@ for i <- Range(0, 10) {
 Destructuring loop:
 
 ```txt
-for x, y, char <- rows {
+for (x, y, char) <- rows {
     OS.println(char)
+}
+```
+
+Class destructuring loop:
+
+```txt
+for { name, location } <- users {
+    OS.println(name, location)
+}
+
+for { loc @location, @name } <- users {
+    OS.println(name, loc)
+}
+```
+
+Pattern loop:
+
+```txt
+for Some(item) <- maybeItems {
+    OS.println(item)
 }
 ```
 
@@ -954,6 +996,20 @@ items = for item <- [1, 2, 3] yield item * 2
 ```
 
 `for` clauses in the block form may also include local `=` and `:=` bindings.
+
+Tuple destructuring in `for` clauses must use parentheses:
+
+```txt
+for (value, idx) <- rows {
+    OS.println(value, idx)
+}
+```
+
+Class destructuring in `for` clauses uses braces and follows the same
+positional or named rules as `let { ... }`.
+
+Pattern-based `for` clauses are also supported. They assert that each produced
+value matches the pattern, and panic at runtime on mismatch.
 
 `continue` is valid in `while`, `for`, and `for ... yield`.
 Inside `for ... yield`, it skips the current iteration without producing a

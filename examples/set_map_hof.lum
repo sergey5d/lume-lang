@@ -85,7 +85,7 @@ def main() Unit {
         total += item
     }
 
-    for key Str, value Int <- values {
+    for (key Str, value Int) <- values {
         total += value
     }
 

@@ -9,8 +9,8 @@ use crate::{
     ast::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
         ElseBranch, ElseExprBranch, Expr, ForBinding, FunctionDecl, IfConditionClause, IfStmt,
-        ImplBlock, Item, LambdaBody, MatchCase, MatchCaseBody, MethodDecl, Pattern, Program, Stmt,
-        TypeDecl, TypeKind, TypeMember, TypeRef, Visibility,
+        ImplBlock, Item, LambdaBody, MatchCase, MatchCaseBody, MethodDecl, Pattern,
+        PatternBindingStmt, Program, Stmt, TypeDecl, TypeKind, TypeMember, TypeRef, Visibility,
     },
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, collect_module_order,
@@ -869,6 +869,11 @@ impl<'a> Checker<'a> {
                 match clause {
                     IfConditionClause::Let(clause) => {
                         let value_ty = self.check_expr(&clause.value);
+                        self.require_refutable_if_pattern(
+                            &clause.pattern,
+                            &value_ty,
+                            clause.pattern.span(),
+                        );
                         self.bind_pattern(&clause.pattern, &value_ty);
                     }
                     IfConditionClause::Expr(condition) => {
@@ -893,6 +898,11 @@ impl<'a> Checker<'a> {
             self.push_scope();
             for clause in &stmt.pattern_clauses {
                 let value_ty = self.check_expr(&clause.value);
+                self.require_refutable_if_pattern(
+                    &clause.pattern,
+                    &value_ty,
+                    clause.pattern.span(),
+                );
                 self.bind_pattern(&clause.pattern, &value_ty);
             }
             let then_ty = self.check_block_against(&stmt.then_block, expected);
@@ -908,6 +918,7 @@ impl<'a> Checker<'a> {
             let value_ty = self.check_expr(value);
             self.push_scope();
             if let Some(pattern) = &stmt.pattern {
+                self.require_refutable_if_pattern(pattern, &value_ty, pattern.span());
                 self.bind_pattern(pattern, &value_ty);
             }
             let then_ty = self.check_block_against(&stmt.then_block, expected);
@@ -1045,6 +1056,10 @@ impl<'a> Checker<'a> {
                 }
                 Ty::unit()
             }
+            Stmt::PatternBinding(stmt) => {
+                self.check_pattern_binding_stmt(stmt);
+                Ty::unit()
+            }
             Stmt::Assignment(assignment) => {
                 self.check_assignment(assignment);
                 Ty::unit()
@@ -1154,6 +1169,11 @@ impl<'a> Checker<'a> {
                 match clause {
                     IfConditionClause::Let(clause) => {
                         let value_ty = self.check_expr(&clause.value);
+                        self.require_refutable_if_pattern(
+                            &clause.pattern,
+                            &value_ty,
+                            clause.pattern.span(),
+                        );
                         self.bind_pattern(&clause.pattern, &value_ty);
                     }
                     IfConditionClause::Expr(condition) => {
@@ -1177,6 +1197,11 @@ impl<'a> Checker<'a> {
             self.push_scope();
             for clause in &stmt.pattern_clauses {
                 let value_ty = self.check_expr(&clause.value);
+                self.require_refutable_if_pattern(
+                    &clause.pattern,
+                    &value_ty,
+                    clause.pattern.span(),
+                );
                 self.bind_pattern(&clause.pattern, &value_ty);
             }
             self.check_block(&stmt.then_block);
@@ -1185,6 +1210,7 @@ impl<'a> Checker<'a> {
             let value_ty = self.check_expr(value);
             self.push_scope();
             if let Some(pattern) = &stmt.pattern {
+                self.require_refutable_if_pattern(pattern, &value_ty, pattern.span());
                 self.bind_pattern(pattern, &value_ty);
             }
             self.check_block(&stmt.then_block);
@@ -1240,6 +1266,36 @@ impl<'a> Checker<'a> {
         self.bind_pattern(&stmt.pattern, &value_ty);
     }
 
+    fn check_pattern_binding_stmt(&mut self, stmt: &PatternBindingStmt) {
+        if !stmt.clauses.is_empty() {
+            for clause in &stmt.clauses {
+                let value_ty = self.check_expr(&clause.value);
+                self.bind_pattern(&clause.pattern, &value_ty);
+            }
+            return;
+        }
+        let value_ty = self.check_expr(&stmt.value);
+        self.bind_pattern(&stmt.pattern, &value_ty);
+    }
+
+    fn require_refutable_if_pattern(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee: &Ty,
+        span: crate::source::Span,
+    ) {
+        if self.pattern_is_irrefutable(pattern, scrutinee) {
+            self.add_error(
+                "irrefutable_if_let",
+                format!(
+                    "if let pattern is irrefutable for value of type '{}'; use 'let' instead",
+                    scrutinee.describe()
+                ),
+                span,
+            );
+        }
+    }
+
     fn check_else_branch(&mut self, branch: &ElseBranch) {
         match branch {
             ElseBranch::If(stmt) => self.check_if_stmt(stmt),
@@ -1265,23 +1321,79 @@ impl<'a> Checker<'a> {
     }
 
     fn check_for_binding(&mut self, binding: &ForBinding) {
-        let item_ty = if let Some(iterable) = &binding.iterable {
-            let iterable_ty = self.check_expr(iterable);
-            self.iterable_item_type(&iterable_ty)
-        } else {
-            Ty::Unknown
-        };
-        for value in &binding.values {
-            self.check_expr(value);
+        if let Some(pattern) = &binding.pattern {
+            let value_ty = if let Some(iterable) = &binding.iterable {
+                let iterable_ty = self.check_expr(iterable);
+                self.iterable_item_type(&iterable_ty)
+            } else {
+                binding
+                    .values
+                    .first()
+                    .map(|expr| self.check_expr(expr))
+                    .unwrap_or(Ty::Unknown)
+            };
+            self.bind_pattern(pattern, &value_ty);
+            return;
         }
-        self.check_destructure_source(
-            &item_ty,
-            DestructureKind::Tuple,
-            binding.bindings.len(),
-            binding.span,
-        );
-        let slot_types =
-            self.destructure_slots(&item_ty, binding.bindings.len(), DestructureKind::Tuple);
+        let slot_types = if let Some(iterable) = &binding.iterable {
+            let iterable_ty = self.check_expr(iterable);
+            let item_ty = self.iterable_item_type(&iterable_ty);
+            if let Some(kind) = binding.destructure {
+                self.check_destructure_source(&item_ty, kind, binding.bindings.len(), binding.span);
+                if kind == DestructureKind::Record {
+                    self.record_binding_slot_types(&item_ty, &binding.bindings, binding.span)
+                } else {
+                    self.destructure_slots(&item_ty, binding.bindings.len(), kind)
+                }
+            } else {
+                vec![item_ty]
+            }
+        } else {
+            let value_types = binding
+                .values
+                .iter()
+                .enumerate()
+                .map(|(index, expr)| {
+                    if binding.bindings.len() == 1 {
+                        if let Some(expected) = binding.bindings[0]
+                            .ty
+                            .as_ref()
+                            .map(|ty| self.ty_from_type_ref(ty))
+                        {
+                            return self.check_expr_against(expr, &expected);
+                        }
+                    }
+                    if let Some(expected) = binding
+                        .bindings
+                        .get(index)
+                        .and_then(|binding| binding.ty.as_ref())
+                        .map(|ty| self.ty_from_type_ref(ty))
+                    {
+                        self.check_expr_against(expr, &expected)
+                    } else {
+                        self.check_expr(expr)
+                    }
+                })
+                .collect::<Vec<_>>();
+            if let Some(kind) = binding.destructure {
+                let value_ty = value_types.first().cloned().unwrap_or(Ty::Unknown);
+                self.check_destructure_source(
+                    &value_ty,
+                    kind,
+                    binding.bindings.len(),
+                    binding.span,
+                );
+                if kind == DestructureKind::Record {
+                    self.record_binding_slot_types(&value_ty, &binding.bindings, binding.span)
+                } else {
+                    self.destructure_slots(&value_ty, binding.bindings.len(), kind)
+                }
+            } else {
+                (0..binding.bindings.len())
+                    .map(|index| value_types.get(index).cloned().unwrap_or(Ty::Unknown))
+                    .collect()
+            }
+        };
         for (index, local) in binding.bindings.iter().enumerate() {
             let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
             let explicit = local.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
@@ -2718,6 +2830,40 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn pattern_is_irrefutable(&self, pattern: &Pattern, scrutinee: &Ty) -> bool {
+        match pattern {
+            Pattern::Wildcard { .. } | Pattern::Binding { .. } => true,
+            Pattern::Type { target, .. } => {
+                !matches!(scrutinee, Ty::Unknown)
+                    && self.is_assignable(scrutinee, &self.ty_from_type_ref(target))
+            }
+            Pattern::Literal { .. } => false,
+            Pattern::Tuple { elements, .. } => match scrutinee {
+                Ty::Tuple(items) if items.len() == elements.len() => elements
+                    .iter()
+                    .zip(items.iter())
+                    .all(|(pattern, item)| self.pattern_is_irrefutable(pattern, item)),
+                _ => false,
+            },
+            Pattern::Constructor { path, args, .. } => {
+                if self.lookup_case_by_pattern(path, scrutinee).is_some() {
+                    return false;
+                }
+                let Some((destructured_ty, field_tys)) =
+                    self.lookup_destructured_type_pattern(path)
+                else {
+                    return false;
+                };
+                self.is_assignable(scrutinee, &destructured_ty)
+                    && args.len() == field_tys.len()
+                    && args
+                        .iter()
+                        .zip(field_tys.iter())
+                        .all(|(pattern, field_ty)| self.pattern_is_irrefutable(pattern, field_ty))
+            }
+        }
+    }
+
     fn check_match_exhaustiveness(
         &mut self,
         value_ty: &Ty,
@@ -2827,7 +2973,7 @@ impl<'a> Checker<'a> {
         self.lookup_case_by_path(path)
     }
 
-    fn lookup_destructured_type_fields(&self, path: &[String]) -> Option<Vec<Ty>> {
+    fn lookup_destructured_type_pattern(&self, path: &[String]) -> Option<(Ty, Vec<Ty>)> {
         let sig = match path {
             [name] => self.lookup_any_type(name),
             [module_alias, name] => self
@@ -2842,13 +2988,22 @@ impl<'a> Checker<'a> {
                 }),
             _ => None,
         }?;
-        Some(
-            sig.fields
-                .iter()
-                .filter(|field| !field.hidden)
-                .map(|field| field.ty.clone())
-                .collect(),
-        )
+        let ty = Ty::Named(
+            sig.name.clone(),
+            sig.type_params.iter().map(|_| Ty::Unknown).collect(),
+        );
+        let fields = sig
+            .fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .map(|field| field.ty.clone())
+            .collect();
+        Some((ty, fields))
+    }
+
+    fn lookup_destructured_type_fields(&self, path: &[String]) -> Option<Vec<Ty>> {
+        self.lookup_destructured_type_pattern(path)
+            .map(|(_, fields)| fields)
     }
 
     fn unwrap_inner_type(&self, ty: &Ty) -> Ty {
@@ -4243,6 +4398,12 @@ fn contains_placeholder_expr(expr: &Expr) -> bool {
 fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Binding(binding) => binding.values.iter().any(contains_placeholder_expr),
+        Stmt::PatternBinding(stmt) => {
+            stmt.clauses
+                .iter()
+                .any(|clause| contains_placeholder_expr(&clause.value))
+                || contains_placeholder_expr(&stmt.value)
+        }
         Stmt::Assignment(assignment) => assignment.values.iter().any(contains_placeholder_expr),
         Stmt::Expr(expr) => contains_placeholder_expr(&expr.expr),
         Stmt::If(stmt) => {
@@ -4676,6 +4837,59 @@ def main() Unit {
                     && diag
                         .message
                         .contains("tuple pattern requires a tuple value")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_irrefutable_if_let_tuple_pattern() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    pair (Int, Str) = (1, "x")
+    if let (left, right) = pair {
+        OS.println(left, right)
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "irrefutable_if_let"
+                    && diag
+                        .message
+                        .contains("if let pattern is irrefutable for value of type '(Int, Str)'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_irrefutable_if_let_type_pattern() {
+        let program = parse_inline(
+            r#"
+class Worker {
+}
+
+def main() Unit {
+    worker Worker = Worker {}
+    if let item Worker = worker {
+        OS.println(item)
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "irrefutable_if_let"
+                    && diag
+                        .message
+                        .contains("if let pattern is irrefutable for value of type 'Worker'")
             }),
             "{:#?}",
             result.diagnostics

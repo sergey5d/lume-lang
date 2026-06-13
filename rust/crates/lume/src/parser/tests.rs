@@ -90,6 +90,147 @@ def run(limit Int) Int {
 }
 
 #[test]
+fn parses_for_tuple_destructuring_with_parentheses() {
+    let result = parse(
+        r#"
+def run(rows List[(Int, Int)]) Unit {
+    for (value, idx) <- rows {
+        OS.println(value, idx)
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn parses_for_class_destructuring_with_braces() {
+    let result = parse(
+        r#"
+def run(rows List[Row]) Unit {
+    for { value, label } <- rows {
+        OS.println(value, label)
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => match &block.statements[0] {
+                Stmt::For(stmt) => {
+                    assert_eq!(stmt.bindings.len(), 1);
+                    let binding = &stmt.bindings[0];
+                    assert_eq!(binding.destructure, Some(DestructureKind::Record));
+                    assert_eq!(binding.bindings.len(), 2);
+                    assert_eq!(binding.bindings[0].name, "value");
+                    assert_eq!(binding.bindings[0].field_name, None);
+                    assert_eq!(binding.bindings[1].name, "label");
+                    assert_eq!(binding.bindings[1].field_name, None);
+                }
+                other => panic!("expected for stmt, got {other:#?}"),
+            },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_for_named_class_destructuring_with_braces() {
+    let result = parse(
+        r#"
+def run(users List[User]) Unit {
+    for { name @name, loc @location, _ @country } <- users {
+        OS.println(name, loc)
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => match &block.statements[0] {
+                Stmt::For(stmt) => {
+                    assert_eq!(stmt.bindings.len(), 1);
+                    let binding = &stmt.bindings[0];
+                    assert_eq!(binding.destructure, Some(DestructureKind::Record));
+                    assert_eq!(binding.bindings.len(), 3);
+                    assert_eq!(binding.bindings[0].name, "name");
+                    assert_eq!(binding.bindings[0].field_name.as_deref(), Some("name"));
+                    assert_eq!(binding.bindings[1].name, "loc");
+                    assert_eq!(binding.bindings[1].field_name.as_deref(), Some("location"));
+                    assert_eq!(binding.bindings[2].name, "_");
+                    assert_eq!(binding.bindings[2].field_name.as_deref(), Some("country"));
+                }
+                other => panic!("expected for stmt, got {other:#?}"),
+            },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_for_constructor_pattern() {
+    let result = parse(
+        r#"
+def run(values List[Option[Int]]) Unit {
+    for Some(value) <- values {
+        OS.println(value)
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => match &block.statements[0] {
+                Stmt::For(stmt) => {
+                    assert_eq!(stmt.bindings.len(), 1);
+                    let binding = &stmt.bindings[0];
+                    assert!(binding.bindings.is_empty());
+                    assert_eq!(binding.destructure, None);
+                    match binding.pattern.as_ref() {
+                        Some(Pattern::Constructor { path, args, .. }) => {
+                            assert_eq!(path, &vec!["Some".to_string()]);
+                            assert_eq!(args.len(), 1);
+                        }
+                        other => panic!("expected constructor pattern, got {other:#?}"),
+                    }
+                }
+                other => panic!("expected for stmt, got {other:#?}"),
+            },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
+fn rejects_for_tuple_destructuring_without_parentheses() {
+    let result = parse(
+        r#"
+def run(rows List[(Int, Int)]) Unit {
+    for value, idx <- rows {
+        OS.println(value, idx)
+    }
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| diag
+            .message
+            .contains("tuple destructuring in 'for' requires parentheses")),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_class_and_impl() {
     let result = parse(
         r#"
@@ -382,6 +523,37 @@ def run(value Worker) Int {
                 other => panic!("expected let-else statement, got {other:#?}"),
             }
         }
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_plain_let_pattern_binding() {
+    let result = parse(
+        r#"
+def run(value Option[Int]) Int {
+    let Some(item) = value
+    return item
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => match &block.statements[0] {
+            Stmt::PatternBinding(stmt) => match &stmt.pattern {
+                Pattern::Constructor { path, args, .. } => {
+                    assert_eq!(path, &vec!["Some".to_string()]);
+                    assert_eq!(args.len(), 1);
+                }
+                other => panic!("expected pattern binding, got {other:#?}"),
+            },
+            other => panic!("expected pattern binding statement, got {other:#?}"),
+        },
         other => panic!("expected block body, got {other:#?}"),
     }
 }

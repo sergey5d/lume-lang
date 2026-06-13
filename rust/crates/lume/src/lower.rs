@@ -778,6 +778,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                 }
             }
+            Stmt::PatternBinding(stmt) => self.lower_pattern_binding_stmt(stmt),
             Stmt::Assignment(assignment) => {
                 for (target_expr, value_expr) in
                     assignment.targets.iter().zip(assignment.values.iter())
@@ -1314,6 +1315,55 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = if join_used { Some(join_block) } else { None };
     }
 
+    fn lower_pattern_binding_stmt(&mut self, stmt: &ast::PatternBindingStmt) {
+        if !stmt.clauses.is_empty() {
+            let failure_block = self.add_block();
+            let continue_block = self.add_block();
+
+            self.lower_refutable_clause_chain(&stmt.clauses, continue_block, failure_block);
+
+            self.current_block = Some(failure_block);
+            self.emit_panic("let pattern did not match", stmt.span);
+            self.terminate(ir::Terminator {
+                span: Some(stmt.span),
+                kind: ir::TerminatorKind::Unreachable,
+            });
+
+            self.current_block = Some(continue_block);
+            return;
+        }
+
+        let scrutinee = self.lower_expr(&stmt.value);
+        let plan = self.lower_pattern_plan(scrutinee, &stmt.pattern);
+        let success_block = self.add_block();
+        let failure_block = self.add_block();
+        let continue_block = self.add_block();
+
+        self.terminate(ir::Terminator {
+            span: Some(stmt.span),
+            kind: ir::TerminatorKind::Branch {
+                condition: plan.condition,
+                then_block: success_block,
+                else_block: failure_block,
+            },
+        });
+
+        self.current_block = Some(success_block);
+        self.apply_pending_bindings(plan.bindings);
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(continue_block));
+        }
+
+        self.current_block = Some(failure_block);
+        self.emit_panic("let pattern did not match", stmt.span);
+        self.terminate(ir::Terminator {
+            span: Some(stmt.span),
+            kind: ir::TerminatorKind::Unreachable,
+        });
+
+        self.current_block = Some(continue_block);
+    }
+
     fn lower_let_else_stmt(&mut self, stmt: &ast::LetElseStmt) {
         if !stmt.clauses.is_empty() {
             self.lower_let_else_clauses(stmt);
@@ -1398,6 +1448,21 @@ impl<'a> FunctionLowerer<'a> {
                 break;
             }
         }
+    }
+
+    fn emit_panic(&mut self, message: &str, span: Span) {
+        self.push_statement(ir::Statement {
+            span: Some(span),
+            kind: ir::StatementKind::Eval {
+                value: ir::RValue::Call {
+                    callee: ir::Callee::Intrinsic(ir::Intrinsic::Panic),
+                    args: vec![ir::Operand::Const(ir::Constant::String(
+                        message.to_string(),
+                    ))],
+                    structural: false,
+                },
+            },
+        });
     }
 
     fn lower_if_condition_clause_chain(
@@ -1688,31 +1753,92 @@ impl<'a> FunctionLowerer<'a> {
 
         let first = &bindings[0];
         if !first.values.is_empty() && first.iterable.is_none() {
-            for (index, binding) in first.bindings.iter().enumerate() {
-                if binding.name == "_" {
-                    continue;
+            if let Some(pattern) = &first.pattern {
+                let scrutinee = self.lower_expr(&first.values[0]);
+                let plan = self.lower_pattern_plan(scrutinee, pattern);
+                let success_block = self.add_block();
+                let failure_block = self.add_block();
+
+                self.terminate(ir::Terminator {
+                    span: Some(first.span),
+                    kind: ir::TerminatorKind::Branch {
+                        condition: plan.condition,
+                        then_block: success_block,
+                        else_block: failure_block,
+                    },
+                });
+
+                self.current_block = Some(success_block);
+                self.apply_pending_bindings(plan.bindings);
+                self.lower_for_bindings(&bindings[1..], body, span);
+
+                self.current_block = Some(failure_block);
+                self.emit_panic("for pattern did not match", first.span);
+                self.terminate(ir::Terminator {
+                    span: Some(first.span),
+                    kind: ir::TerminatorKind::Unreachable,
+                });
+                return;
+            }
+            if first.destructure.is_some() && first.values.len() == 1 {
+                let source_value = self.lower_expr(&first.values[0]);
+                let field_names = matches!(first.destructure, Some(DestructureKind::Record))
+                    .then(|| self.destructure_field_names_from_bindings(&first.bindings));
+                for (index, binding) in first.bindings.iter().enumerate() {
+                    if binding.name == "_" {
+                        continue;
+                    }
+                    let field_value = match first.destructure {
+                        Some(DestructureKind::Record) => self.emit_temp_from_rvalue(
+                            ir::RValue::Field {
+                                base: source_value.clone(),
+                                name: field_names
+                                    .as_ref()
+                                    .and_then(|fields| fields.get(index).cloned())
+                                    .unwrap_or_else(|| format!("_{}", index + 1)),
+                            },
+                            ir::Type::Unknown,
+                            Some(binding.span),
+                        ),
+                        Some(DestructureKind::Tuple) => self.emit_temp_from_rvalue(
+                            ir::RValue::Field {
+                                base: source_value.clone(),
+                                name: format!("_{}", index + 1),
+                            },
+                            ir::Type::Unknown,
+                            Some(binding.span),
+                        ),
+                        None => source_value.clone(),
+                    };
+                    self.bind_loop_binding(binding, field_value);
                 }
-                let ty = binding
-                    .ty
-                    .as_ref()
-                    .map(lower_type_ref)
-                    .unwrap_or(ir::Type::Unknown);
-                let local_id = self.add_local(
-                    binding.name.clone(),
-                    ty,
-                    binding.mutable,
-                    ir::LocalKind::Binding,
-                );
-                self.current_scope().insert(binding.name.clone(), local_id);
-                if let Some(value) = first.values.get(index) {
-                    let operand = self.lower_expr(value);
-                    self.push_statement(ir::Statement {
-                        span: Some(binding.span),
-                        kind: ir::StatementKind::Assign {
-                            target: ir::Place::Local(local_id),
-                            value: ir::RValue::Use(operand),
-                        },
-                    });
+            } else {
+                for (index, binding) in first.bindings.iter().enumerate() {
+                    if binding.name == "_" {
+                        continue;
+                    }
+                    let ty = binding
+                        .ty
+                        .as_ref()
+                        .map(lower_type_ref)
+                        .unwrap_or(ir::Type::Unknown);
+                    let local_id = self.add_local(
+                        binding.name.clone(),
+                        ty,
+                        binding.mutable,
+                        ir::LocalKind::Binding,
+                    );
+                    self.current_scope().insert(binding.name.clone(), local_id);
+                    if let Some(value) = first.values.get(index) {
+                        let operand = self.lower_expr(value);
+                        self.push_statement(ir::Statement {
+                            span: Some(binding.span),
+                            kind: ir::StatementKind::Assign {
+                                target: ir::Place::Local(local_id),
+                                value: ir::RValue::Use(operand),
+                            },
+                        });
+                    }
                 }
             }
             self.lower_for_bindings(&bindings[1..], body, span);
@@ -1778,35 +1904,91 @@ impl<'a> FunctionLowerer<'a> {
             ir::Type::Unknown,
             Some(first.span),
         );
-        self.bind_for_values(&first.bindings, item);
-        self.lower_for_bindings(&bindings[1..], body, span);
-        self.pop_scope();
-        if self.current_block.is_some() {
-            self.terminate(ir::Terminator::goto(cond_block));
+        if let Some(pattern) = &first.pattern {
+            let plan = self.lower_pattern_plan(item, pattern);
+            let success_block = self.add_block();
+            let failure_block = self.add_block();
+
+            self.terminate(ir::Terminator {
+                span: Some(first.span),
+                kind: ir::TerminatorKind::Branch {
+                    condition: plan.condition,
+                    then_block: success_block,
+                    else_block: failure_block,
+                },
+            });
+
+            self.current_block = Some(success_block);
+            self.apply_pending_bindings(plan.bindings);
+            self.lower_for_bindings(&bindings[1..], body, span);
+            self.pop_scope();
+            if self.current_block.is_some() {
+                self.terminate(ir::Terminator::goto(cond_block));
+            }
+
+            self.current_block = Some(failure_block);
+            self.emit_panic("for pattern did not match", first.span);
+            self.terminate(ir::Terminator {
+                span: Some(first.span),
+                kind: ir::TerminatorKind::Unreachable,
+            });
+        } else {
+            self.bind_for_values(first, item);
+            self.lower_for_bindings(&bindings[1..], body, span);
+            self.pop_scope();
+            if self.current_block.is_some() {
+                self.terminate(ir::Terminator::goto(cond_block));
+            }
         }
         self.loop_exits.pop();
         self.loop_continues.pop();
         self.current_block = Some(exit_block);
     }
 
-    fn bind_for_values(&mut self, bindings: &[ast::Binding], item: ir::Operand) {
-        if bindings.len() <= 1 {
-            if let Some(binding) = bindings.first() {
-                self.bind_loop_binding(binding, item);
-            }
+    fn bind_for_values(&mut self, binding: &ast::ForBinding, item: ir::Operand) {
+        if binding.pattern.is_some() {
+            self.invariant(
+                "pattern-based for bindings should branch before local binding",
+                binding.span,
+            );
             return;
         }
-
-        for (index, binding) in bindings.iter().enumerate() {
-            let field_value = self.emit_temp_from_rvalue(
-                ir::RValue::Field {
-                    base: item.clone(),
-                    name: format!("_{}", index + 1),
-                },
-                ir::Type::Unknown,
-                Some(binding.span),
-            );
-            self.bind_loop_binding(binding, field_value);
+        match binding.destructure {
+            None => {
+                if let Some(local) = binding.bindings.first() {
+                    self.bind_loop_binding(local, item);
+                }
+            }
+            Some(DestructureKind::Tuple) => {
+                for (index, local) in binding.bindings.iter().enumerate() {
+                    let field_value = self.emit_temp_from_rvalue(
+                        ir::RValue::Field {
+                            base: item.clone(),
+                            name: format!("_{}", index + 1),
+                        },
+                        ir::Type::Unknown,
+                        Some(local.span),
+                    );
+                    self.bind_loop_binding(local, field_value);
+                }
+            }
+            Some(DestructureKind::Record) => {
+                let field_names = self.destructure_field_names_from_bindings(&binding.bindings);
+                for (index, local) in binding.bindings.iter().enumerate() {
+                    let field_value = self.emit_temp_from_rvalue(
+                        ir::RValue::Field {
+                            base: item.clone(),
+                            name: field_names
+                                .get(index)
+                                .cloned()
+                                .unwrap_or_else(|| format!("_{}", index + 1)),
+                        },
+                        ir::Type::Unknown,
+                        Some(local.span),
+                    );
+                    self.bind_loop_binding(local, field_value);
+                }
+            }
         }
     }
 
@@ -1858,6 +2040,19 @@ impl<'a> FunctionLowerer<'a> {
                             .as_ref()
                             .and_then(|fields| fields.get(index).cloned())
                     })
+                    .unwrap_or_else(|| format!("_{}", index + 1))
+            })
+            .collect()
+    }
+
+    fn destructure_field_names_from_bindings(&self, bindings: &[ast::Binding]) -> Vec<String> {
+        bindings
+            .iter()
+            .enumerate()
+            .map(|(index, binding)| {
+                binding
+                    .field_name
+                    .clone()
                     .unwrap_or_else(|| format!("_{}", index + 1))
             })
             .collect()
@@ -3744,6 +3939,8 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
                 .iter()
                 .map(|binding| ast::ForBinding {
                     bindings: binding.bindings.clone(),
+                    destructure: binding.destructure,
+                    pattern: binding.pattern.clone(),
                     iterable: binding
                         .iterable
                         .as_ref()
@@ -3807,6 +4004,20 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
                 .collect(),
             destructure: binding.destructure,
             span: binding.span,
+        }),
+        Stmt::PatternBinding(stmt) => Stmt::PatternBinding(ast::PatternBindingStmt {
+            clauses: stmt
+                .clauses
+                .iter()
+                .map(|clause| ast::RefutableClause {
+                    pattern: clause.pattern.clone(),
+                    value: rewrite_placeholder_expr(&clause.value, name),
+                    span: clause.span,
+                })
+                .collect(),
+            pattern: stmt.pattern.clone(),
+            value: rewrite_placeholder_expr(&stmt.value, name),
+            span: stmt.span,
         }),
         Stmt::Assignment(assignment) => Stmt::Assignment(ast::AssignmentStmt {
             targets: assignment
@@ -3906,6 +4117,8 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
                 .iter()
                 .map(|binding| ast::ForBinding {
                     bindings: binding.bindings.clone(),
+                    destructure: binding.destructure,
+                    pattern: binding.pattern.clone(),
                     iterable: binding
                         .iterable
                         .as_ref()
@@ -3981,6 +4194,12 @@ fn body_contains_placeholder(body: &Option<CallableBody>) -> bool {
 fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Binding(binding) => binding.values.iter().any(contains_placeholder_expr),
+        Stmt::PatternBinding(stmt) => {
+            stmt.clauses
+                .iter()
+                .any(|clause| contains_placeholder_expr(&clause.value))
+                || contains_placeholder_expr(&stmt.value)
+        }
         Stmt::Assignment(assignment) => {
             assignment.targets.iter().any(contains_placeholder_expr)
                 || assignment.values.iter().any(contains_placeholder_expr)

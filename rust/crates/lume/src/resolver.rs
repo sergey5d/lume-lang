@@ -10,8 +10,8 @@ use crate::{
         Annotation, AssignOp, AssignmentStmt, Binding, Block, CallableBody, ElseBranch,
         ElseExprBranch, Expr, ExprStmt, ForBinding, ForStmt, FunctionDecl, IfConditionClause,
         IfStmt, ImplBlock, ImportSymbol, LambdaBody, LetElseStmt, MatchCase, MatchCaseBody,
-        MethodDecl, Pattern, Program, RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember,
-        TypeParam, TypeRef, Visibility, WhileStmt,
+        MethodDecl, Pattern, PatternBindingStmt, Program, RecordTypeField, Stmt, TypeDecl,
+        TypeKind, TypeMember, TypeParam, TypeRef, Visibility, WhileStmt,
     },
     lexer::lex,
     parser::parse_program,
@@ -1224,6 +1224,7 @@ impl<'a> Resolver<'a> {
                     self.define_binding(local, "duplicate_binding");
                 }
             }
+            Stmt::PatternBinding(stmt) => self.resolve_pattern_binding(stmt),
             Stmt::Assignment(assignment) => self.resolve_assignment(assignment),
             Stmt::If(stmt) => self.resolve_if_stmt(stmt),
             Stmt::Match(stmt) => {
@@ -1381,6 +1382,18 @@ impl<'a> Resolver<'a> {
         self.resolve_pattern(&stmt.pattern);
     }
 
+    fn resolve_pattern_binding(&mut self, stmt: &PatternBindingStmt) {
+        if !stmt.clauses.is_empty() {
+            for clause in &stmt.clauses {
+                self.resolve_expr(&clause.value);
+                self.resolve_pattern(&clause.pattern);
+            }
+            return;
+        }
+        self.resolve_expr(&stmt.value);
+        self.resolve_pattern(&stmt.pattern);
+    }
+
     fn resolve_else_branch(&mut self, branch: &ElseBranch) {
         match branch {
             ElseBranch::If(stmt) => self.resolve_if_stmt(stmt),
@@ -1411,6 +1424,10 @@ impl<'a> Resolver<'a> {
         }
         for value in &binding.values {
             self.resolve_expr(value);
+        }
+        if let Some(pattern) = &binding.pattern {
+            self.resolve_pattern(pattern);
+            return;
         }
         for local in &binding.bindings {
             self.resolve_type_ref(local.ty.as_ref());

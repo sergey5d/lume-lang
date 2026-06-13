@@ -38,7 +38,7 @@ def syntax1(rows List[(Int, Int, Str)]) Unit {
     if let Some(firstRow) = rows.get(0) {
         let (_, initialY Int, _) = firstRow
         var lastY = initialY
-        for x Int, y Int, char Str <- rows {
+        for (x Int, y Int, char Str) <- rows {
             for lineStep <- Range(y, lastY) {
                 OS.println()
             }
@@ -60,7 +60,7 @@ def syntax2(rows List[(Int, Int, Str)]) Unit {
     if let Some(firstRow) = rows.get(0) {
         let (_, initialY Int, _) = firstRow
         var lastY = initialY
-        for x, y, char <- rows {
+        for (x, y, char) <- rows {
             for lineStep <- Range(y, lastY) {
                 OS.println()
             }
@@ -104,9 +104,9 @@ def syntax3(rows List[(Int, Int, Str)]) Unit {
 def syntax4(rows List[(Int, Int, Str)]) Unit {
     var lastX = 0
     for {
-        _, initialY Int, _ <- rows.get(0)
+        (_, initialY Int, _) <- rows.get(0)
         var lastY = initialY
-        x, y, char Str <- rows
+        (x, y, char Str) <- rows
         # just as an example
         xImmutable = x
     } yield {
