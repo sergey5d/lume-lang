@@ -1079,25 +1079,61 @@ Tuple destructuring:
 let (left Int, right Str) = (5, "hello")
 ```
 
-Record destructuring:
+Anonymous record / class-shape destructuring uses braces:
 
 ```txt
-let (value Int, label Str) = Amount(7, "world")
+let { value Int, label Str } = class { value = 7, label = "world" }
 ```
 
-Class destructuring:
+Class destructuring also uses braces:
 
 ```txt
-let (left Int, right Str) = Box(9, "boxed")
+let { left Int, right Str } = Box { 9, "boxed" }
 ```
 
 Skip pattern:
 
 ```txt
-let (left Int, _, right Str) = (1, "drop", "keep")
+let { left Int, _, right Str } = Crate { 1, "drop", "keep" }
 ```
 
-Classes with private fields are not destructurable.
+Class destructuring currently has two conceptual modes:
+
+- positional destructuring
+- named destructuring
+
+Positional destructuring is the current behavior:
+
+```txt
+let { a Int, b Str } = Box { 9, "boxed" }
+let { inferredLeft, inferredRight } = Box { 12, "class" }
+```
+
+Rules for positional class destructuring:
+
+- matching follows visible field order
+- local binding names on the left do not need to match field names
+- `_` skips a positional field
+- the same positional idea applies anywhere destructuring patterns are allowed
+
+Named destructuring matches by field name instead of by field position.
+It allows reordering and partial extraction:
+
+```txt
+let { @location, @name } = user
+let { loc @location, nam @name } = user
+let { _ @location, @name } = user
+```
+
+Rules for named class destructuring:
+
+- `@field` binds the field to a local with the same name
+- `local @field` binds field `field` to local `local`
+- `_ @field` skips a field by name
+- named destructuring may extract only a subset of fields
+- named destructuring may reorder fields freely
+- positional and named entries must not be mixed in the same `{ ... }`
+- hidden fields cannot be named in destructuring
 
 ## Operators
 

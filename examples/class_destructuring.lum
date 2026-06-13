@@ -5,6 +5,10 @@
 # class pair 24 class-pair
 # class skip only class-only
 # class skip 16 class-skip
+# named Sergey Tampa
+# named same Sergey
+# named alias Tampa Sergey
+# named skip Sergey
 # 0
 
 class Box {
@@ -16,6 +20,12 @@ class Crate {
     value Int
     spare Str
     label Str
+}
+
+class User {
+    name Str
+    location Str
+    age Int
 }
 
 def main() Int {
@@ -36,6 +46,20 @@ def main() Int {
 
     let { skippedClassLeft Int, _, skippedClassRight Str } = Crate { 16, "drop", "class-skip" }
     OS.println("class skip", skippedClassLeft, skippedClassRight)
+
+    user User = User { name = "Sergey", location = "Tampa", age = 37 }
+
+    let { name @name, @location } = user
+    OS.println("named", name, location)
+
+    let { nameAgain @name } = user
+    OS.println("named same", nameAgain)
+
+    let { loc @location, nam @name } = user
+    OS.println("named alias", loc, nam)
+
+    let { _ @location, userName @name } = user
+    OS.println("named skip", userName)
 
     0
 }

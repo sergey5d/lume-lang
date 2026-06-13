@@ -1299,11 +1299,102 @@ impl<'a> Checker<'a> {
                 binding_stmt.bindings.len(),
                 binding_stmt.span,
             );
+            if kind == DestructureKind::Record {
+                return self.record_binding_slot_types(
+                    &value_ty,
+                    &binding_stmt.bindings,
+                    binding_stmt.span,
+                );
+            }
             return self.destructure_slots(&value_ty, binding_stmt.bindings.len(), kind);
         }
         (0..binding_stmt.bindings.len())
             .map(|index| value_types.get(index).cloned().unwrap_or(Ty::Unknown))
             .collect()
+    }
+
+    fn record_binding_slot_types(
+        &mut self,
+        ty: &Ty,
+        bindings: &[crate::ast::Binding],
+        span: crate::source::Span,
+    ) -> Vec<Ty> {
+        let uses_named = bindings.iter().any(|binding| binding.field_name.is_some());
+        if !uses_named {
+            return self.destructure_slots(ty, bindings.len(), DestructureKind::Record);
+        }
+        if matches!(ty, Ty::Unknown) {
+            return vec![Ty::Unknown; bindings.len()];
+        }
+        if bindings.iter().any(|binding| binding.field_name.is_none()) {
+            self.add_error(
+                "invalid_destructure",
+                "cannot mix positional and named brace destructuring",
+                span,
+            );
+        }
+        let Some(fields) = self.destructure_record_fields(ty) else {
+            return vec![Ty::Unknown; bindings.len()];
+        };
+        let field_map = fields
+            .into_iter()
+            .map(|(name, ty, hidden)| (name, (ty, hidden)))
+            .collect::<HashMap<_, _>>();
+        let mut seen = HashSet::new();
+        bindings
+            .iter()
+            .map(|binding| {
+                let Some(field_name) = binding.field_name.as_ref() else {
+                    return Ty::Unknown;
+                };
+                if !seen.insert(field_name.clone()) {
+                    self.add_error(
+                        "invalid_destructure",
+                        format!("duplicate named destructuring field '{}'", field_name),
+                        binding.span,
+                    );
+                }
+                let Some((field_ty, hidden)) = field_map.get(field_name).cloned() else {
+                    self.add_error(
+                        "invalid_destructure",
+                        format!(
+                            "type '{}' does not have a field named '{}'",
+                            ty.describe(),
+                            field_name
+                        ),
+                        binding.span,
+                    );
+                    return Ty::Unknown;
+                };
+                if hidden {
+                    self.add_error(
+                        "invalid_destructure",
+                        format!("cannot destructure hidden field '{}'", field_name),
+                        binding.span,
+                    );
+                    return Ty::Unknown;
+                }
+                field_ty
+            })
+            .collect()
+    }
+
+    fn destructure_record_fields(&self, ty: &Ty) -> Option<Vec<(String, Ty, bool)>> {
+        match ty {
+            Ty::Record(fields) => Some(
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), ty.clone(), false))
+                    .collect(),
+            ),
+            Ty::Named(name, _) => self.lookup_any_type(name).map(|sig| {
+                sig.fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.ty.clone(), field.hidden))
+                    .collect()
+            }),
+            _ => None,
+        }
     }
 
     fn check_destructure_source(
@@ -1327,7 +1418,10 @@ impl<'a> Checker<'a> {
 
         let message = match kind {
             DestructureKind::Tuple => {
-                format!("tuple destructuring requires a tuple value, got '{}'", ty.describe())
+                format!(
+                    "tuple destructuring requires a tuple value, got '{}'",
+                    ty.describe()
+                )
             }
             DestructureKind::Record => format!(
                 "brace destructuring requires a class or anonymous record value, got '{}'",
@@ -1955,12 +2049,7 @@ impl<'a> Checker<'a> {
                     && self.current_owner.is_some()
                 {
                     return self.current_owner.clone().map(|owner| {
-                        self.check_named_type_constructor(
-                            &owner,
-                            args,
-                            span,
-                            structural_record_arg,
-                        )
+                        self.check_named_type_constructor(&owner, args, span, structural_record_arg)
                     });
                 }
                 if let Some(case) = self.world.lookup_enum_case(self.module, name) {
@@ -4304,10 +4393,9 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diag| diag.message.contains("does not have an implicit '()' constructor")),
+            result.diagnostics.iter().any(|diag| diag
+                .message
+                .contains("does not have an implicit '()' constructor")),
             "{:#?}",
             result.diagnostics
         );
@@ -4385,10 +4473,9 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diag| diag.message.contains("private defaulted fields must come after all public fields")),
+            result.diagnostics.iter().any(|diag| diag
+                .message
+                .contains("private defaulted fields must come after all public fields")),
             "{:#?}",
             result.diagnostics
         );
@@ -4422,6 +4509,83 @@ def main() Unit {
     }
 
     #[test]
+    fn allows_named_class_destructuring_by_field() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+    location Str
+    age Int
+}
+
+def main() Str {
+    user User = User { name = "Sergey", location = "Tampa", age = 37 }
+    let { loc Str @location, name @name } = user
+    return name + " from " + loc
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_unknown_named_destructure_field() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+    location Str
+}
+
+def main() Unit {
+    user User = User { name = "Sergey", location = "Tampa" }
+    let { @missing } = user
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_destructure"
+                    && diag
+                        .message
+                        .contains("does not have a field named 'missing'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_mixed_positional_and_named_brace_destructuring() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+    location Str
+}
+
+def main() Unit {
+    user User = User { name = "Sergey", location = "Tampa" }
+    let { @name, location } = user
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_destructure"
+                    && diag
+                        .message
+                        .contains("cannot mix positional and named brace destructuring")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn rejects_class_to_tuple_assignment() {
         let program = parse_inline(
             r#"
@@ -4439,9 +4603,9 @@ def main() Unit {
         assert!(
             result.diagnostics.iter().any(|diag| {
                 diag.code == "invalid_binding_type"
-                    && diag
-                        .message
-                        .contains("cannot assign value of type 'Box' to binding 'pair' of type '(Int, Str)'")
+                    && diag.message.contains(
+                        "cannot assign value of type 'Box' to binding 'pair' of type '(Int, Str)'",
+                    )
             }),
             "{:#?}",
             result.diagnostics
@@ -4469,7 +4633,9 @@ def main() Unit {
         assert!(
             result.diagnostics.iter().any(|diag| {
                 diag.code == "invalid_destructure"
-                    && diag.message.contains("tuple pattern requires a tuple value")
+                    && diag
+                        .message
+                        .contains("tuple pattern requires a tuple value")
             }),
             "{:#?}",
             result.diagnostics

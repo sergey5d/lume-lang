@@ -289,6 +289,7 @@ pub enum DestructureKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Binding {
     pub name: String,
+    pub field_name: Option<String>,
     pub ty: Option<TypeRef>,
     pub mutable: bool,
     pub deferred: bool,

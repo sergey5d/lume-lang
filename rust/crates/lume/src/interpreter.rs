@@ -2053,9 +2053,7 @@ impl<'a> Interpreter<'a> {
         }
 
         for field in visible_fields {
-            if field.initializer.is_none()
-                && !values.iter().any(|(name, _)| *name == field.name)
-            {
+            if field.initializer.is_none() && !values.iter().any(|(name, _)| *name == field.name) {
                 return Err(self.runtime_error(
                     span,
                     format!(
@@ -2147,9 +2145,10 @@ impl<'a> Interpreter<'a> {
                     .iter()
                     .map(|field| self.eval_operand_ref(frame, &field.value, span))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.construct_named_type(name, args, span, false)?.ok_or_else(|| {
-                    self.runtime_error(span, format!("cannot construct type '{name}'"))
-                })
+                self.construct_named_type(name, args, span, false)?
+                    .ok_or_else(|| {
+                        self.runtime_error(span, format!("cannot construct type '{name}'"))
+                    })
             }
             ir::Type::Record(field_types) => {
                 let mut out = Vec::new();
@@ -4303,6 +4302,39 @@ $name
             run.output,
             "hello world 7 $done\n\nhello\n$name\n\n\n\nfmt 7\npair left 9\n"
         );
+    }
+
+    #[test]
+    fn runs_named_class_destructuring_bindings() {
+        let program = lower_inline(
+            r#"
+            class User {
+                name Str
+                location Str
+                age Int
+            }
+
+            def main() Unit {
+                user User = User { name = "Sergey", location = "Tampa", age = 37 }
+
+                let { name @name, @location } = user
+                OS.println(name, location)
+
+                let { nameAgain @name } = user
+                OS.println(nameAgain)
+
+                let { nam @name, loc @location } = user
+                OS.println(nam, loc)
+
+                let { _ @location, @name } = user
+                OS.println(name)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "Sergey Tampa\nSergey\nSergey Tampa\nSergey\n");
     }
 
     fn collect_header_parity_failures(include_failures: bool) -> (Vec<String>, Vec<String>) {

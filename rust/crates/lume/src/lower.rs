@@ -709,7 +709,7 @@ impl<'a> FunctionLowerer<'a> {
                     destructure_single_value.then(|| self.lower_expr(&binding.values[0]));
                 let destructure_fields =
                     matches!(binding.destructure, Some(DestructureKind::Record)).then(|| {
-                        self.destructure_field_names(&binding.values[0], binding.bindings.len())
+                        self.destructure_field_names(&binding.values[0], &binding.bindings)
                     });
                 for (index, local) in binding.bindings.iter().enumerate() {
                     if local.name == "_" {
@@ -1835,15 +1835,32 @@ impl<'a> FunctionLowerer<'a> {
         });
     }
 
-    fn destructure_field_names(&self, expr: &Expr, count: usize) -> Vec<String> {
-        if let Expr::Call { callee, .. } = expr {
+    fn destructure_field_names(&self, expr: &Expr, bindings: &[ast::Binding]) -> Vec<String> {
+        let positional_fields = if let Expr::Call { callee, .. } = expr {
             if let Some(path) = expr_path(callee) {
-                if let Some((_, fields)) = self.lookup_destructured_type_fields(&path, count) {
-                    return fields;
-                }
+                self.lookup_destructured_type_fields(&path, bindings.len())
+                    .map(|(_, fields)| fields)
+            } else {
+                None
             }
-        }
-        (0..count).map(|index| format!("_{}", index + 1)).collect()
+        } else {
+            None
+        };
+        bindings
+            .iter()
+            .enumerate()
+            .map(|(index, binding)| {
+                binding
+                    .field_name
+                    .clone()
+                    .or_else(|| {
+                        positional_fields
+                            .as_ref()
+                            .and_then(|fields| fields.get(index).cloned())
+                    })
+                    .unwrap_or_else(|| format!("_{}", index + 1))
+            })
+            .collect()
     }
 
     fn bind_unwrap_values(&mut self, bindings: &[ast::Binding], item: ir::Operand) {

@@ -206,7 +206,42 @@ def run(box Box) Int {
                     assert_eq!(binding.destructure, Some(DestructureKind::Record));
                     assert_eq!(binding.bindings.len(), 2);
                     assert_eq!(binding.bindings[0].name, "value");
+                    assert_eq!(binding.bindings[0].field_name, None);
                     assert_eq!(binding.bindings[1].name, "label");
+                    assert_eq!(binding.bindings[1].field_name, None);
+                }
+                other => panic!("expected binding, got {other:#?}"),
+            },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_named_brace_destructuring_binding() {
+    let result = parse(
+        r#"
+def run(user User) Str {
+    let { name @name, loc @location, _ @country } = user
+    return name + loc
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => match &block.statements[0] {
+                Stmt::Binding(binding) => {
+                    assert_eq!(binding.destructure, Some(DestructureKind::Record));
+                    assert_eq!(binding.bindings.len(), 3);
+                    assert_eq!(binding.bindings[0].name, "name");
+                    assert_eq!(binding.bindings[0].field_name.as_deref(), Some("name"));
+                    assert_eq!(binding.bindings[1].name, "loc");
+                    assert_eq!(binding.bindings[1].field_name.as_deref(), Some("location"));
+                    assert_eq!(binding.bindings[2].name, "_");
+                    assert_eq!(binding.bindings[2].field_name.as_deref(), Some("country"));
                 }
                 other => panic!("expected binding, got {other:#?}"),
             },

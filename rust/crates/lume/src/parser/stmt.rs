@@ -97,7 +97,7 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::LBrace) {
             if self.is_brace_destructuring_binding_start() {
                 self.consume(TokenKind::LBrace, "expected '{' after 'let'")?;
-                let bindings = self.parse_binding_list(false)?;
+                let bindings = self.parse_brace_destructure_binding_list(false)?;
                 self.consume(
                     TokenKind::RBrace,
                     "expected '}' after destructuring bindings",
@@ -291,11 +291,70 @@ impl<'a> Parser<'a> {
         let span = ty.as_ref().map(TypeRef::span).unwrap_or(start);
         Some(Binding {
             name,
+            field_name: None,
             ty,
             mutable,
             deferred: false,
             span: start.cover(span),
         })
+    }
+
+    pub(super) fn parse_brace_destructure_binding(&mut self, mutable: bool) -> Option<Binding> {
+        if self.match_token(TokenKind::At) {
+            let start = self.previous_span();
+            let (field_name, field_span) =
+                self.expect_identifier("expected field name after '@'")?;
+            let ty =
+                if self.binding_type_starts_on_same_line(field_span) && self.can_start_type_ref() {
+                    Some(self.parse_type_ref()?)
+                } else {
+                    None
+                };
+            let end = ty.as_ref().map(TypeRef::span).unwrap_or(field_span);
+            return Some(Binding {
+                name: field_name.clone(),
+                field_name: Some(field_name),
+                ty,
+                mutable,
+                deferred: false,
+                span: start.cover(end),
+            });
+        }
+
+        let (name, start) = self.expect_binding_name("expected binding name")?;
+        let ty = if self.binding_type_starts_on_same_line(start) && self.can_start_type_ref() {
+            Some(self.parse_type_ref()?)
+        } else {
+            None
+        };
+        let mut end = ty.as_ref().map(TypeRef::span).unwrap_or(start);
+        let field_name = if self.match_token(TokenKind::At) {
+            let (field_name, field_span) =
+                self.expect_identifier("expected field name after '@'")?;
+            end = end.cover(field_span);
+            Some(field_name)
+        } else {
+            None
+        };
+        Some(Binding {
+            name,
+            field_name,
+            ty,
+            mutable,
+            deferred: false,
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_brace_destructure_binding_list(
+        &mut self,
+        mutable: bool,
+    ) -> Option<Vec<Binding>> {
+        let mut bindings = vec![self.parse_brace_destructure_binding(mutable)?];
+        while self.match_token(TokenKind::Comma) {
+            bindings.push(self.parse_brace_destructure_binding(mutable)?);
+        }
+        Some(bindings)
     }
 
     pub(super) fn parse_binding_list(&mut self, mutable: bool) -> Option<Vec<Binding>> {
@@ -320,10 +379,12 @@ impl<'a> Parser<'a> {
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
         };
-        if !parser.match_token(TokenKind::LBrace) || !parser.at(TokenKind::Identifier) {
+        if !parser.match_token(TokenKind::LBrace)
+            || !(parser.at(TokenKind::Identifier) || parser.at(TokenKind::At))
+        {
             return false;
         }
-        if parser.parse_binding_list(false).is_none() {
+        if parser.parse_brace_destructure_binding_list(false).is_none() {
             return false;
         }
         parser.match_token(TokenKind::RBrace) && parser.at(TokenKind::Eq)
