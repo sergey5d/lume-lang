@@ -922,6 +922,12 @@ impl<'a> Checker<'a> {
         if let Some(value) = &stmt.binding_value {
             let value_ty = self.check_expr(value);
             let inner = self.unwrap_inner_type(&value_ty);
+            self.check_destructure_source(
+                &inner,
+                DestructureKind::Tuple,
+                stmt.bindings.len(),
+                value.span(),
+            );
             let slot_types =
                 self.destructure_slots(&inner, stmt.bindings.len(), DestructureKind::Tuple);
             self.push_scope();
@@ -1186,6 +1192,12 @@ impl<'a> Checker<'a> {
         } else if let Some(value) = &stmt.binding_value {
             let value_ty = self.check_expr(value);
             let inner = self.unwrap_inner_type(&value_ty);
+            self.check_destructure_source(
+                &inner,
+                DestructureKind::Tuple,
+                stmt.bindings.len(),
+                value.span(),
+            );
             let slot_types =
                 self.destructure_slots(&inner, stmt.bindings.len(), DestructureKind::Tuple);
             self.push_scope();
@@ -1262,6 +1274,12 @@ impl<'a> Checker<'a> {
         for value in &binding.values {
             self.check_expr(value);
         }
+        self.check_destructure_source(
+            &item_ty,
+            DestructureKind::Tuple,
+            binding.bindings.len(),
+            binding.span,
+        );
         let slot_types =
             self.destructure_slots(&item_ty, binding.bindings.len(), DestructureKind::Tuple);
         for (index, local) in binding.bindings.iter().enumerate() {
@@ -1272,14 +1290,51 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn binding_slot_types(&self, binding_stmt: &BindingStmt, value_types: &[Ty]) -> Vec<Ty> {
+    fn binding_slot_types(&mut self, binding_stmt: &BindingStmt, value_types: &[Ty]) -> Vec<Ty> {
         if let Some(kind) = binding_stmt.destructure {
             let value_ty = value_types.first().cloned().unwrap_or(Ty::Unknown);
+            self.check_destructure_source(
+                &value_ty,
+                kind,
+                binding_stmt.bindings.len(),
+                binding_stmt.span,
+            );
             return self.destructure_slots(&value_ty, binding_stmt.bindings.len(), kind);
         }
         (0..binding_stmt.bindings.len())
             .map(|index| value_types.get(index).cloned().unwrap_or(Ty::Unknown))
             .collect()
+    }
+
+    fn check_destructure_source(
+        &mut self,
+        ty: &Ty,
+        kind: DestructureKind,
+        count: usize,
+        span: crate::source::Span,
+    ) {
+        if count <= 1 || matches!(ty, Ty::Unknown) {
+            return;
+        }
+
+        let valid = match kind {
+            DestructureKind::Tuple => matches!(ty, Ty::Tuple(_)),
+            DestructureKind::Record => matches!(ty, Ty::Record(_) | Ty::Named(_, _)),
+        };
+        if valid {
+            return;
+        }
+
+        let message = match kind {
+            DestructureKind::Tuple => {
+                format!("tuple destructuring requires a tuple value, got '{}'", ty.describe())
+            }
+            DestructureKind::Record => format!(
+                "brace destructuring requires a class or anonymous record value, got '{}'",
+                ty.describe()
+            ),
+        };
+        self.add_error("invalid_destructure", message, span);
     }
 
     fn destructure_slots(&self, ty: &Ty, count: usize, kind: DestructureKind) -> Vec<Ty> {
@@ -2522,6 +2577,16 @@ impl<'a> Checker<'a> {
                         self.bind_pattern(pattern, item);
                     }
                 } else {
+                    if !matches!(scrutinee, Ty::Unknown) {
+                        self.add_error(
+                            "invalid_destructure",
+                            format!(
+                                "tuple pattern requires a tuple value, got '{}'",
+                                scrutinee.describe()
+                            ),
+                            pattern.span(),
+                        );
+                    }
                     for pattern in elements {
                         self.bind_pattern(pattern, &Ty::Unknown);
                     }
@@ -2529,7 +2594,7 @@ impl<'a> Checker<'a> {
             }
             Pattern::Constructor { path, args, .. } => {
                 let case_name = path.last().cloned().unwrap_or_default();
-                if let Some(case) = self.lookup_case_by_path(path) {
+                if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
                     let mut subst = HashMap::new();
                     infer_type_subst(&case.result, scrutinee, &mut subst);
                     for (pattern, param) in args.iter().zip(case.params.iter()) {
@@ -2652,6 +2717,19 @@ impl<'a> Checker<'a> {
                 .and_then(|sig| sig.enum_cases.get(case_name).cloned()),
             _ => None,
         }
+    }
+
+    fn lookup_case_by_pattern(&self, path: &[String], scrutinee: &Ty) -> Option<EnumCaseSig> {
+        if let Ty::Named(enum_name, _) = scrutinee {
+            if let Some(case_name) = self.match_case_name_for_enum(path, enum_name) {
+                if let Some(sig) = self.lookup_any_type(enum_name) {
+                    if let Some(case) = sig.enum_cases.get(case_name) {
+                        return Some(case.clone());
+                    }
+                }
+            }
+        }
+        self.lookup_case_by_path(path)
     }
 
     fn lookup_destructured_type_fields(&self, path: &[String]) -> Option<Vec<Ty>> {
@@ -4311,6 +4389,88 @@ def main() Unit {
                 .diagnostics
                 .iter()
                 .any(|diag| diag.message.contains("private defaulted fields must come after all public fields")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_class_to_tuple_destructuring() {
+        let program = parse_inline(
+            r#"
+class Box {
+    value Int
+    label Str
+}
+
+def main() Unit {
+    let (a, b) = Box { 1, "x" }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_destructure"
+                    && diag
+                        .message
+                        .contains("tuple destructuring requires a tuple value")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_class_to_tuple_assignment() {
+        let program = parse_inline(
+            r#"
+class Box {
+    value Int
+    label Str
+}
+
+def main() Unit {
+    pair (Int, Str) = Box { 1, "x" }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_binding_type"
+                    && diag
+                        .message
+                        .contains("cannot assign value of type 'Box' to binding 'pair' of type '(Int, Str)'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_tuple_pattern_against_class_value() {
+        let program = parse_inline(
+            r#"
+class Box {
+    value Int
+    label Str
+}
+
+def main() Unit {
+    box Box = Box { 1, "x" }
+    match box {
+        case (a, b) => OS.println(a, b)
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_destructure"
+                    && diag.message.contains("tuple pattern requires a tuple value")
+            }),
             "{:#?}",
             result.diagnostics
         );
