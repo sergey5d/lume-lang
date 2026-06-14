@@ -537,6 +537,7 @@ pub enum Expr {
     Call {
         callee: Box<Expr>,
         args: Vec<CallArg>,
+        uses_brace_syntax: bool,
         span: Span,
     },
     Member {

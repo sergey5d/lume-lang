@@ -1895,7 +1895,12 @@ impl<'a> Checker<'a> {
             Expr::TupleLiteral { items, .. } => {
                 Ty::Tuple(items.iter().map(|item| self.check_expr(item)).collect())
             }
-            Expr::Call { callee, args, span } => self.check_call(callee, args, *span),
+            Expr::Call {
+                callee,
+                args,
+                uses_brace_syntax,
+                span,
+            } => self.check_call(callee, args, *uses_brace_syntax, *span),
             Expr::Member {
                 receiver,
                 name,
@@ -2199,6 +2204,7 @@ impl<'a> Checker<'a> {
         &mut self,
         callee: &Expr,
         args: &[crate::ast::CallArg],
+        uses_brace_syntax: bool,
         span: crate::source::Span,
     ) -> Ty {
         if self.is_builtin_print_call(callee) {
@@ -2207,7 +2213,7 @@ impl<'a> Checker<'a> {
             }
             return Ty::unit();
         }
-        if let Some(ty) = self.try_check_constructor_call(callee, args, span) {
+        if let Some(ty) = self.try_check_constructor_call(callee, args, uses_brace_syntax, span) {
             return ty;
         }
         if let Some((params, ret)) = self.callable_signature_for_args(callee, args) {
@@ -2320,9 +2326,12 @@ impl<'a> Checker<'a> {
         &mut self,
         callee: &Expr,
         args: &[crate::ast::CallArg],
+        uses_brace_syntax: bool,
         span: crate::source::Span,
     ) -> Option<Ty> {
-        let structural_record_arg = call_uses_structural_record_arg(args);
+        let structural_record_arg = call_uses_structural_record_arg(args, uses_brace_syntax);
+        let parenthesized_record_arg =
+            constructor_uses_parenthesized_record_arg(self, args, uses_brace_syntax);
         match callee {
             Expr::Identifier { name, .. } => {
                 if !structural_record_arg {
@@ -2335,7 +2344,13 @@ impl<'a> Checker<'a> {
                     && self.current_owner.is_some()
                 {
                     return self.current_owner.clone().map(|owner| {
-                        self.check_named_type_constructor(&owner, args, span, structural_record_arg)
+                        self.check_named_type_constructor(
+                            &owner,
+                            args,
+                            span,
+                            structural_record_arg,
+                            parenthesized_record_arg,
+                        )
                     });
                 }
                 if let Some(case) = self.world.lookup_enum_case(self.module, name) {
@@ -2352,6 +2367,7 @@ impl<'a> Checker<'a> {
                         args,
                         span,
                         structural_record_arg,
+                        parenthesized_record_arg,
                     ));
                 }
                 if let Some(sig) = self.world.lookup_imported_type(self.module, name) {
@@ -2360,6 +2376,7 @@ impl<'a> Checker<'a> {
                         args,
                         span,
                         structural_record_arg,
+                        parenthesized_record_arg,
                     ));
                 }
                 if let Some(sig) = self.world.ambient.types.get(name).cloned() {
@@ -2368,6 +2385,7 @@ impl<'a> Checker<'a> {
                         args,
                         span,
                         structural_record_arg,
+                        parenthesized_record_arg,
                     ));
                 }
                 None
@@ -2385,6 +2403,7 @@ impl<'a> Checker<'a> {
                             args,
                             span,
                             structural_record_arg,
+                            parenthesized_record_arg,
                         ));
                     }
                     if let Some(sig) = module_info.objects.get(&member).cloned() {
@@ -2393,6 +2412,7 @@ impl<'a> Checker<'a> {
                             args,
                             span,
                             structural_record_arg,
+                            parenthesized_record_arg,
                         ));
                     }
                 }
@@ -2561,6 +2581,7 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
         structural_record_arg: bool,
+        parenthesized_record_arg: bool,
     ) -> Ty {
         let ret = Ty::Named(
             sig.name.clone(),
@@ -2569,6 +2590,18 @@ impl<'a> Checker<'a> {
                 .map(|name| Ty::TypeParam(name.clone()))
                 .collect(),
         );
+
+        if parenthesized_record_arg {
+            self.add_error(
+                "no_matching_overload",
+                format!(
+                    "constructor syntax for '{}' does not accept anonymous record arguments in '(...)'; use '{} {{ ... }}'",
+                    sig.name, sig.name
+                ),
+                span,
+            );
+            return ret;
+        }
 
         if structural_record_arg {
             if sig.methods.contains_key("new") {
@@ -4262,7 +4295,11 @@ fn arrange_constructor_args<'a>(
     }
 }
 
-fn call_uses_structural_record_arg(args: &[crate::ast::CallArg]) -> bool {
+fn call_uses_structural_record_arg(args: &[crate::ast::CallArg], uses_brace_syntax: bool) -> bool {
+    uses_brace_syntax && has_single_record_literal_arg(args)
+}
+
+fn has_single_record_literal_arg(args: &[crate::ast::CallArg]) -> bool {
     matches!(
         args,
         [crate::ast::CallArg {
@@ -4271,6 +4308,19 @@ fn call_uses_structural_record_arg(args: &[crate::ast::CallArg]) -> bool {
             ..
         }]
     )
+}
+
+fn constructor_uses_parenthesized_record_arg(
+    checker: &Checker<'_>,
+    args: &[crate::ast::CallArg],
+    uses_brace_syntax: bool,
+) -> bool {
+    !uses_brace_syntax
+        && matches!(
+            args,
+            [crate::ast::CallArg { name: None, value, .. }]
+                if matches!(checker.probe_expr_type(value), Ty::Record(_))
+        )
 }
 
 fn path_starts_with_os(expr: &Expr) -> bool {
@@ -4809,6 +4859,29 @@ def main() Unit {
                 .diagnostics
                 .iter()
                 .any(|diag| diag.message.contains("cannot use brace-based construction")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_parenthesized_anonymous_record_type_construction() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+def main() Unit {
+    _ User = User(class { name = "Ada" })
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| diag
+                .message
+                .contains("does not accept anonymous record arguments in '(...)'")),
             "{:#?}",
             result.diagnostics
         );

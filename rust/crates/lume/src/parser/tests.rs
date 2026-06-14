@@ -301,8 +301,13 @@ fn parses_record_literal_forms() {
     }
 
     match parse_expr_only("Person { name, age }") {
-        Expr::Call { args, .. } => {
+        Expr::Call {
+            args,
+            uses_brace_syntax,
+            ..
+        } => {
             assert_eq!(args.len(), 1);
+            assert!(uses_brace_syntax);
             match &args[0].value {
                 Expr::RecordLiteral { fields, values, .. } => {
                     assert!(fields.is_empty());
@@ -315,8 +320,13 @@ fn parses_record_literal_forms() {
     }
 
     match parse_expr_only("Settings {}") {
-        Expr::Call { args, .. } => {
+        Expr::Call {
+            args,
+            uses_brace_syntax,
+            ..
+        } => {
             assert_eq!(args.len(), 1);
+            assert!(uses_brace_syntax);
             match &args[0].value {
                 Expr::RecordLiteral { fields, values, .. } => {
                     assert!(fields.is_empty());

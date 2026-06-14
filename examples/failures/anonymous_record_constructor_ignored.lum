@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# no_matching_overload at .*: class 'SecretBadge' cannot use brace-based construction because it defines explicit constructors
+# no_matching_overload at .*: constructor syntax for 'SecretBadge' does not accept anonymous record arguments in '\(\.\.\.\)'; use 'SecretBadge \{ \.\.\. \}'
 
 class SecretBadge {
     name Str

@@ -821,6 +821,7 @@ impl<'a> Parser<'a> {
                 expr = Expr::Call {
                     callee: Box::new(expr),
                     args,
+                    uses_brace_syntax: false,
                     span: start.cover(end),
                 };
                 continue;
@@ -908,6 +909,7 @@ impl<'a> Parser<'a> {
                         span: arg.span(),
                         value: arg.clone(),
                     }],
+                    uses_brace_syntax: true,
                     span: start.cover(arg.span()),
                 };
                 continue;
@@ -939,7 +941,7 @@ impl<'a> Parser<'a> {
                 if self.is_bare_record_call_arg_start() {
                     self.error_at_current(
                         "unexpected_token",
-                        "bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(class { ... })'",
+                        "bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }'",
                     );
                     return None;
                 }

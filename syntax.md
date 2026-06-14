@@ -367,7 +367,7 @@ settings Settings = Settings {}
 Rules for field-based class construction:
 - `Type(...)` is never synthesized from fields
 - `Type(...)` only works when the target class defines `new(...)` or the target is a builtin constructor form such as `List(...)`
-- `Type { ... }` and `Type(class { ... })` are the structural construction forms
+- `Type { ... }` is the structural construction form
 - any explicit `new(...)` disables structural brace construction for that class
 - `Type {}` works when the visible construction shape has no required fields
 - named braces check only visible public fields
@@ -380,7 +380,7 @@ Rules for field-based class construction:
 - positional braces are rejected when a private initialized field appears before a later public field
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
-- nested inner constructions must still name the target class explicitly, for example `owner = Person(class { name = "Ada", age = 10 })`
+- nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name = "Ada", age = 10 }` and then `owner = Team { leader = leader }`
 - `Type({ ... })` is not supported; plain `{ ... }` inside call parentheses is treated as a block, not as an anonymous record literal
 
 Anonymous record shapes are structural:

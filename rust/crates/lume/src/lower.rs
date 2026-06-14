@@ -2964,14 +2964,19 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Binary {
                 left, op, right, ..
             } => Some(self.lower_binary_rvalue(left, *op, right)),
-            Expr::Call { callee, args, .. } => Some(ir::RValue::Call {
+            Expr::Call {
+                callee,
+                args,
+                uses_brace_syntax,
+                ..
+            } => Some(ir::RValue::Call {
                 callee: self.lower_callee(callee),
                 args: self
                     .reorder_call_args(callee, args)
                     .into_iter()
                     .map(|arg| self.lower_expr(&arg.value))
                     .collect(),
-                structural: call_uses_structural_record_arg(args),
+                structural: call_uses_structural_record_arg(args, *uses_brace_syntax),
             }),
             Expr::Member { receiver, name, .. } => Some(ir::RValue::Field {
                 base: self.lower_expr(receiver),
@@ -3718,15 +3723,16 @@ fn arrange_named_call_args<'a>(
     Some(slots.into_iter().flatten().collect())
 }
 
-fn call_uses_structural_record_arg(args: &[ast::CallArg]) -> bool {
-    matches!(
-        args,
-        [ast::CallArg {
-            name: None,
-            value: ast::Expr::RecordLiteral { .. },
-            ..
-        }]
-    )
+fn call_uses_structural_record_arg(args: &[ast::CallArg], uses_brace_syntax: bool) -> bool {
+    uses_brace_syntax
+        && matches!(
+            args,
+            [ast::CallArg {
+                name: None,
+                value: ast::Expr::RecordLiteral { .. },
+                ..
+            }]
+        )
 }
 
 fn param_names_from_function(function: &ir::Function) -> Vec<String> {
@@ -3771,7 +3777,12 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
                 .collect(),
             span: *span,
         },
-        Expr::Call { callee, args, span } => Expr::Call {
+        Expr::Call {
+            callee,
+            args,
+            uses_brace_syntax,
+            span,
+        } => Expr::Call {
             callee: Box::new(rewrite_placeholder_expr(callee, name)),
             args: args
                 .iter()
@@ -3781,6 +3792,7 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
                     span: arg.span,
                 })
                 .collect(),
+            uses_brace_syntax: *uses_brace_syntax,
             span: *span,
         },
         Expr::Member {

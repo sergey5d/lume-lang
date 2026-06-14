@@ -486,7 +486,12 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
                 rewrite_expr_for_runtime(item, module, graph);
             }
         }
-        ast::Expr::Call { callee, args, span } => {
+        ast::Expr::Call {
+            callee,
+            args,
+            uses_brace_syntax: _,
+            span,
+        } => {
             rewrite_expr_for_runtime(callee, module, graph);
             for arg in args {
                 rewrite_expr_for_runtime(&mut arg.value, module, graph);
@@ -1978,6 +1983,16 @@ impl<'a> Interpreter<'a> {
                     ));
                 }
             }
+        }
+
+        if matches!(args.as_slice(), [Value::Record(_)]) {
+            return Err(self.runtime_error(
+                span,
+                format!(
+                    "constructor syntax for '{}' does not accept anonymous record arguments in '(...)'; use '{} {{ ... }}'",
+                    type_name, type_name
+                ),
+            ));
         }
 
         if let Some(init) = self.find_method_overload_for_kind(type_name, ty.kind, "new", &args) {
@@ -4777,11 +4792,13 @@ $name
             }
 
             def main() Unit {
-                OS.println(match MaybeApple.SomeX(Apple(class { 12 })) {
+                apple = Apple { 12 }
+                OS.println(match MaybeApple.SomeX(apple) {
                     case SomeX(Apple(size)) => "apple " + size
                     case MaybeApple.NoneX => "apple none"
                 })
-                OS.println(match MaybeAmount.SomeX(Amount(class { 13, "cad" })) {
+                amount = Amount { 13, "cad" }
+                OS.println(match MaybeAmount.SomeX(amount) {
                     case SomeX(Amount(count, label)) => "amount " + count + " " + label
                     case MaybeAmount.NoneX => "amount none"
                 })

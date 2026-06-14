@@ -52,3 +52,8 @@ fun { x, y ->
   - Open question:
     - whether to add an explicit `tuple(instance)` construct later for class/record -> tuple projection
     - whether anonymous record -> tuple should remain unsupported, or use the same explicit `tuple(instance)` surface later
+
+- Consider explicit anonymous-record-to-class conversion syntax such as `anon as User`.
+  - Goal:
+    - keep `Type { ... }` as construction syntax
+    - avoid treating `Type(class { ... })` or `Type(recordValue)` as implicit nominal conversion

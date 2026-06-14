@@ -1,5 +1,5 @@
 # FAIL:
-# bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }' or 'Type(class { ... })'
+# bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }'
 
 class MixedProfile {
     name Str
