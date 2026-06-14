@@ -4448,6 +4448,34 @@ $name
         assert_eq!(run.output, "Sergey Tampa\nSergey\nSergey Tampa\nSergey\n");
     }
 
+    #[test]
+    fn runs_trailing_block_lambda_call_syntax() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                empty [Int] = []
+                mappedEmpty = empty.map {
+                    value -> value + 5
+                }
+
+                values [Int] = [1, 2]
+                mapped = values.map {
+                    value -> value + 5
+                }
+
+                OS.println(mappedEmpty.size())
+                OS.println(mapped.contains(6))
+                OS.println(mapped.contains(7))
+                OS.println(mapped.size())
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "0\ntrue\ntrue\n2\n");
+    }
+
     fn collect_header_parity_failures(include_failures: bool) -> (Vec<String>, Vec<String>) {
         let root = repo_root();
         let mut files = Vec::new();
