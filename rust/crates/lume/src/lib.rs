@@ -1,4 +1,6 @@
 pub mod ast;
+pub mod core;
+pub mod desugar;
 pub mod diagnostic;
 pub mod interpreter;
 pub mod ir;
@@ -10,6 +12,7 @@ pub mod runtime;
 pub mod source;
 pub mod typecheck;
 
+pub use desugar::{desugar_block, desugar_callable_body, desugar_expr, desugar_function_decl};
 pub use diagnostic::{Diagnostic, Severity};
 pub use interpreter::{PathRunResult, RunResult, run_path, run_program, run_program_entry};
 pub use lexer::{Keyword, LexResult, Token, TokenKind, lex};
