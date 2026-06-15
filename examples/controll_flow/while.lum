@@ -5,6 +5,10 @@
 # short 0
 # short 1
 # short 2
+# loop 0
+# loop 1
+# loop 2
+# after loop
 # 0
 
 def next(label Str, value Int) Int {
@@ -23,6 +27,20 @@ def main() Int {
     while shortCount < 3 {
         shortCount := next("short", shortCount)
     }
+
+    var loopCount Int = 0
+    while true {
+        OS.println("loop " + loopCount)
+        loopCount += 1
+        if loopCount == 3 {
+            break
+        }
+    }
+
+    while true {
+        break
+    }
+    OS.println("after loop")
 
     0
 }
