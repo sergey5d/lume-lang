@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{
-        self, AssignOp, BinaryOp as AstBinaryOp, Block, CallableBody, DestructureKind, ElseBranch,
-        ElseExprBranch, Expr, FunctionDecl, ImplBlock, Item, MatchCaseBody, MethodDecl, Pattern,
-        Stmt, TypeDecl, TypeMember, TypeRef,
+    ast::{self, BinaryOp as AstBinaryOp, ImplBlock, Item, TypeDecl, TypeMember},
+    core::{
+        self, AssignOp, Block, CallableBody, DestructureKind, ElseBranch, ElseExprBranch, Expr,
+        FunctionDecl, MatchCase, MatchCaseBody, MethodDecl, Pattern, Stmt, TypeRef,
     },
+    desugar,
     diagnostic::Diagnostic,
     ir,
     source::Span,
@@ -130,10 +131,10 @@ impl<'a> Lowerer<'a> {
                     self.function_ids.insert(function.name.clone(), id);
                     self.function_work.push(FunctionWork {
                         id,
-                        decl: function.clone(),
+                        decl: desugar::desugar_function_decl(function),
                     });
                 }
-                Item::Statement(Stmt::Binding(binding)) => {
+                Item::Statement(ast::Stmt::Binding(binding)) => {
                     for (index, local) in binding.bindings.iter().enumerate() {
                         if self.global_ids.contains_key(&local.name) || local.name == "_" {
                             continue;
@@ -152,7 +153,10 @@ impl<'a> Lowerer<'a> {
                         let id = self.program.add_global(global);
                         self.global_ids.insert(local.name.clone(), id);
                         if let Some(expr) = binding.values.get(index).cloned() {
-                            self.global_inits.push(GlobalInit { id, expr });
+                            self.global_inits.push(GlobalInit {
+                                id,
+                                expr: desugar::desugar_expr(&expr),
+                            });
                         }
                     }
                 }
@@ -209,7 +213,7 @@ impl<'a> Lowerer<'a> {
                     methods_to_attach.push(id);
                     self.method_work.push(MethodWork {
                         id,
-                        decl: method.clone(),
+                        decl: desugar::desugar_method_decl(method),
                         fields: implicit_fields.clone(),
                         this_local,
                     });
@@ -295,7 +299,7 @@ impl<'a> Lowerer<'a> {
             method_ids.push(id);
             self.method_work.push(MethodWork {
                 id,
-                decl: method.clone(),
+                decl: desugar::desugar_method_decl(method),
                 fields: fields.clone(),
                 this_local,
             });
@@ -313,7 +317,7 @@ impl<'a> Lowerer<'a> {
         type_params: &[ast::TypeParam],
         return_type: Option<&TypeRef>,
         kind: ir::FunctionKind,
-        params: &[ast::Param],
+        params: &[core::Param],
         this_local: Option<(String, ir::Type)>,
         span: Span,
     ) -> ir::FunctionId {
@@ -345,7 +349,7 @@ impl<'a> Lowerer<'a> {
         &mut self,
         owner: ir::TypeId,
         owner_name: &str,
-        method: &MethodDecl,
+        method: &ast::MethodDecl,
     ) -> (ir::FunctionId, ir::LocalId) {
         let id = self.declare_function(
             &method.name,
@@ -942,8 +946,8 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_lambda_rvalue(
         &mut self,
-        params: &[ast::LambdaParam],
-        body: &ast::LambdaBody,
+        params: &[core::LambdaParam],
+        body: &Expr,
         span: Span,
     ) -> ir::RValue {
         let nested_name = format!(
@@ -984,14 +988,7 @@ impl<'a> FunctionLowerer<'a> {
                     }
                 }
             }
-            match body {
-                ast::LambdaBody::Expr(expr) => {
-                    lowerer.lower_callable_body(&CallableBody::Expr((**expr).clone()), span);
-                }
-                ast::LambdaBody::Block(block) => {
-                    lowerer.lower_callable_body(&CallableBody::Block(block.clone()), span);
-                }
-            }
+            lowerer.lower_callable_body(&CallableBody::Expr(body.clone()), span);
             lowerer.finish_closure_captures()
         };
         ir::RValue::Closure {
@@ -1004,12 +1001,12 @@ impl<'a> FunctionLowerer<'a> {
         let param_name = format!("v{}", self.function().locals.len() + 1);
         let rewritten = rewrite_placeholder_expr(expr, &param_name);
         let rvalue = self.lower_lambda_rvalue(
-            &[ast::LambdaParam {
+            &[core::LambdaParam {
                 name: param_name,
                 ty: None,
                 span: expr.span(),
             }],
-            &ast::LambdaBody::Expr(Box::new(rewritten)),
+            &rewritten,
             expr.span(),
         );
         let temp = self.add_temp(ir::Type::Unknown);
@@ -1026,7 +1023,7 @@ impl<'a> FunctionLowerer<'a> {
     fn lower_callable_closure(
         &mut self,
         name: &str,
-        params: &[ast::Param],
+        params: &[core::Param],
         return_type: Option<&TypeRef>,
         body: Option<&CallableBody>,
         span: Span,
@@ -1165,7 +1162,7 @@ impl<'a> FunctionLowerer<'a> {
         sources
     }
 
-    fn lower_if_stmt(&mut self, stmt: &ast::IfStmt) {
+    fn lower_if_stmt(&mut self, stmt: &core::IfStmt) {
         if !stmt.condition_clauses.is_empty() {
             self.lower_if_condition_clauses(stmt, &stmt.condition_clauses);
             return;
@@ -1222,8 +1219,8 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_if_condition_clauses(
         &mut self,
-        stmt: &ast::IfStmt,
-        clauses: &[ast::IfConditionClause],
+        stmt: &core::IfStmt,
+        clauses: &[core::IfConditionClause],
     ) {
         let then_block = self.add_block();
         let else_block = self.add_block();
@@ -1251,7 +1248,7 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = if join_used { Some(join_block) } else { None };
     }
 
-    fn lower_if_pattern_clauses(&mut self, stmt: &ast::IfStmt, clauses: &[ast::RefutableClause]) {
+    fn lower_if_pattern_clauses(&mut self, stmt: &core::IfStmt, clauses: &[core::RefutableClause]) {
         let then_block = self.add_block();
         let else_block = self.add_block();
         let join_block = self.add_block();
@@ -1278,7 +1275,7 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = if join_used { Some(join_block) } else { None };
     }
 
-    fn lower_if_pattern_stmt(&mut self, stmt: &ast::IfStmt, pattern: &Pattern, value: &Expr) {
+    fn lower_if_pattern_stmt(&mut self, stmt: &core::IfStmt, pattern: &Pattern, value: &Expr) {
         let scrutinee = self.lower_expr(value);
         let plan = self.lower_pattern_plan(scrutinee, pattern);
         let then_block = self.add_block();
@@ -1315,7 +1312,7 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = if join_used { Some(join_block) } else { None };
     }
 
-    fn lower_pattern_binding_stmt(&mut self, stmt: &ast::PatternBindingStmt) {
+    fn lower_pattern_binding_stmt(&mut self, stmt: &core::PatternBindingStmt) {
         if !stmt.clauses.is_empty() {
             let failure_block = self.add_block();
             let continue_block = self.add_block();
@@ -1364,7 +1361,7 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = Some(continue_block);
     }
 
-    fn lower_let_else_stmt(&mut self, stmt: &ast::LetElseStmt) {
+    fn lower_let_else_stmt(&mut self, stmt: &core::LetElseStmt) {
         if !stmt.clauses.is_empty() {
             self.lower_let_else_clauses(stmt);
             return;
@@ -1401,7 +1398,7 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = Some(continue_block);
     }
 
-    fn lower_let_else_clauses(&mut self, stmt: &ast::LetElseStmt) {
+    fn lower_let_else_clauses(&mut self, stmt: &core::LetElseStmt) {
         let failure_block = self.add_block();
         let continue_block = self.add_block();
 
@@ -1420,7 +1417,7 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_refutable_clause_chain(
         &mut self,
-        clauses: &[ast::RefutableClause],
+        clauses: &[core::RefutableClause],
         success_target: ir::BlockId,
         failure_target: ir::BlockId,
     ) {
@@ -1467,7 +1464,7 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_if_condition_clause_chain(
         &mut self,
-        clauses: &[ast::IfConditionClause],
+        clauses: &[core::IfConditionClause],
         success_target: ir::BlockId,
         failure_target: ir::BlockId,
     ) {
@@ -1479,7 +1476,7 @@ impl<'a> FunctionLowerer<'a> {
             };
 
             match clause {
-                ast::IfConditionClause::Let(clause) => {
+                core::IfConditionClause::Let(clause) => {
                     let scrutinee = self.lower_expr(&clause.value);
                     let plan = self.lower_pattern_plan(scrutinee, &clause.pattern);
                     self.terminate(ir::Terminator {
@@ -1493,7 +1490,7 @@ impl<'a> FunctionLowerer<'a> {
                     self.current_block = Some(success_block);
                     self.apply_pending_bindings(plan.bindings);
                 }
-                ast::IfConditionClause::Expr(condition) => {
+                core::IfConditionClause::Expr(condition) => {
                     let cond = self.lower_expr(condition);
                     self.terminate(ir::Terminator {
                         span: Some(condition.span()),
@@ -1513,7 +1510,7 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn lower_if_unwrap_stmt(&mut self, stmt: &ast::IfStmt, value: &Expr) {
+    fn lower_if_unwrap_stmt(&mut self, stmt: &core::IfStmt, value: &Expr) {
         let source = self.lower_expr(value);
         let source_local = self.add_temp(ir::Type::Unknown);
         self.push_statement(ir::Statement {
@@ -1591,7 +1588,7 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn lower_if_stmt_tail_value(&mut self, stmt: &ast::IfStmt) -> Option<ir::Operand> {
+    fn lower_if_stmt_tail_value(&mut self, stmt: &core::IfStmt) -> Option<ir::Operand> {
         let condition = stmt.condition.clone()?;
         if !stmt.condition_clauses.is_empty()
             || !stmt.pattern_clauses.is_empty()
@@ -1610,7 +1607,7 @@ impl<'a> FunctionLowerer<'a> {
         Some(self.lower_expr(&expr))
     }
 
-    fn lower_while_stmt(&mut self, stmt: &ast::WhileStmt) {
+    fn lower_while_stmt(&mut self, stmt: &core::WhileStmt) {
         let cond_block = self.add_block();
         let body_block = self.add_block();
         let exit_block = self.add_block();
@@ -1641,7 +1638,7 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = Some(exit_block);
     }
 
-    fn lower_for_stmt(&mut self, stmt: &ast::ForStmt) {
+    fn lower_for_stmt(&mut self, stmt: &core::ForStmt) {
         if stmt.bindings.is_empty() {
             let body_block = self.add_block();
             let exit_block = self.add_block();
@@ -1667,7 +1664,7 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_for_yield_expr(
         &mut self,
-        bindings: &[ast::ForBinding],
+        bindings: &[core::ForBinding],
         yield_body: &Block,
         span: Span,
     ) -> ir::Operand {
@@ -1742,7 +1739,7 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_for_bindings(
         &mut self,
-        bindings: &[ast::ForBinding],
+        bindings: &[core::ForBinding],
         body: &dyn Fn(&mut Self),
         span: Span,
     ) {
@@ -1945,7 +1942,7 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = Some(exit_block);
     }
 
-    fn bind_for_values(&mut self, binding: &ast::ForBinding, item: ir::Operand) {
+    fn bind_for_values(&mut self, binding: &core::ForBinding, item: ir::Operand) {
         if binding.pattern.is_some() {
             self.invariant(
                 "pattern-based for bindings should branch before local binding",
@@ -2099,7 +2096,7 @@ impl<'a> FunctionLowerer<'a> {
         });
     }
 
-    fn lower_match_stmt(&mut self, stmt: &ast::MatchStmt) {
+    fn lower_match_stmt(&mut self, stmt: &core::MatchStmt) {
         let scrutinee = self.lower_expr(&stmt.value);
         let join_block = self.add_block();
         self.current_block = self.current_block.or(Some(self.function().entry));
@@ -2134,7 +2131,7 @@ impl<'a> FunctionLowerer<'a> {
         &mut self,
         partial: bool,
         value: &Expr,
-        cases: &[ast::MatchCase],
+        cases: &[core::MatchCase],
         span: Span,
     ) -> ir::Operand {
         let scrutinee = self.lower_expr(value);
@@ -2191,7 +2188,7 @@ impl<'a> FunctionLowerer<'a> {
     fn lower_match_case(
         &mut self,
         scrutinee: ir::Operand,
-        case: &ast::MatchCase,
+        case: &core::MatchCase,
         body_block: ir::BlockId,
         fail_block: ir::BlockId,
         result_target: Option<ir::LocalId>,
@@ -2314,7 +2311,7 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             Pattern::Literal { value, span } => {
-                let right = self.lower_expr(value);
+                let right = self.lower_pattern_literal_expr(value);
                 let condition = self.emit_temp_from_rvalue(
                     ir::RValue::Binary {
                         op: ir::BinaryOp::Eq,
@@ -2443,6 +2440,11 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
         }
+    }
+
+    fn lower_pattern_literal_expr(&mut self, expr: &ast::Expr) -> ir::Operand {
+        let expr = desugar::desugar_expr(expr);
+        self.lower_expr(&expr)
     }
 
     fn lookup_constructor_pattern_kind(
@@ -2645,7 +2647,6 @@ impl<'a> FunctionLowerer<'a> {
                 );
                 ir::Operand::Const(ir::Constant::Unit)
             }),
-            Expr::Group { inner, .. } => self.lower_expr(inner),
             Expr::Integer { raw, .. } => raw
                 .parse::<i64>()
                 .map(ir::Constant::Int)
@@ -2967,7 +2968,7 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Call {
                 callee,
                 args,
-                uses_brace_syntax,
+                style,
                 ..
             } => Some(ir::RValue::Call {
                 callee: self.lower_callee(callee),
@@ -2976,7 +2977,7 @@ impl<'a> FunctionLowerer<'a> {
                     .into_iter()
                     .map(|arg| self.lower_expr(&arg.value))
                     .collect(),
-                structural: call_uses_structural_record_arg(args, *uses_brace_syntax),
+                structural: call_uses_structural_record_arg(args, *style),
             }),
             Expr::Member { receiver, name, .. } => Some(ir::RValue::Field {
                 base: self.lower_expr(receiver),
@@ -3095,8 +3096,8 @@ impl<'a> FunctionLowerer<'a> {
     fn reorder_call_args<'b>(
         &self,
         callee: &Expr,
-        args: &'b [ast::CallArg],
-    ) -> Vec<&'b ast::CallArg> {
+        args: &'b [core::CallArg],
+    ) -> Vec<&'b core::CallArg> {
         if args.iter().all(|arg| arg.name.is_none()) {
             return args.iter().collect();
         }
@@ -3106,7 +3107,7 @@ impl<'a> FunctionLowerer<'a> {
             .unwrap_or_else(|| args.iter().collect())
     }
 
-    fn call_param_names(&self, callee: &Expr, args: &[ast::CallArg]) -> Option<Vec<String>> {
+    fn call_param_names(&self, callee: &Expr, args: &[core::CallArg]) -> Option<Vec<String>> {
         if let Some(path) = expr_path(callee) {
             if path.len() == 1 {
                 let name = &path[0];
@@ -3169,7 +3170,7 @@ impl<'a> FunctionLowerer<'a> {
     fn method_param_names(
         &self,
         method: &str,
-        args: &[ast::CallArg],
+        args: &[core::CallArg],
         owner_hint: Option<&str>,
     ) -> Option<Vec<String>> {
         self.program
@@ -3195,7 +3196,7 @@ impl<'a> FunctionLowerer<'a> {
     fn constructor_param_names(
         &self,
         ty: &ir::TypeDef,
-        args: &[ast::CallArg],
+        args: &[core::CallArg],
     ) -> Option<Vec<String>> {
         let mut init_candidates = ty
             .methods
@@ -3240,7 +3241,6 @@ impl<'a> FunctionLowerer<'a> {
                 base: Box::new(self.lower_expr(receiver)),
                 index: Box::new(self.lower_expr(index)),
             }),
-            Expr::Group { inner, .. } => self.lower_place(inner),
             _ => {
                 self.invariant(
                     "assignment target should be validated before lowering",
@@ -3445,14 +3445,16 @@ fn lower_type_ref(reference: &TypeRef) -> ir::Type {
     }
 }
 
-fn lower_field_initializer_constant(initializer: Option<&Expr>) -> Option<ir::Constant> {
+fn lower_field_initializer_constant(initializer: Option<&ast::Expr>) -> Option<ir::Constant> {
     match initializer? {
-        Expr::Group { inner, .. } => lower_field_initializer_constant(Some(inner)),
-        Expr::Integer { raw, .. } => Some(ir::Constant::Int(raw.parse::<i64>().unwrap_or(0))),
-        Expr::Float { raw, .. } => Some(ir::Constant::Float(raw.parse::<f64>().unwrap_or(0.0))),
-        Expr::String { raw, .. } => Some(ir::Constant::String(raw.clone())),
-        Expr::Bool { value, .. } => Some(ir::Constant::Bool(*value)),
-        Expr::Unit { .. } => Some(ir::Constant::Unit),
+        ast::Expr::Group { inner, .. } => lower_field_initializer_constant(Some(inner)),
+        ast::Expr::Integer { raw, .. } => Some(ir::Constant::Int(raw.parse::<i64>().unwrap_or(0))),
+        ast::Expr::Float { raw, .. } => {
+            Some(ir::Constant::Float(raw.parse::<f64>().unwrap_or(0.0)))
+        }
+        ast::Expr::String { raw, .. } => Some(ir::Constant::String(raw.clone())),
+        ast::Expr::Bool { value, .. } => Some(ir::Constant::Bool(*value)),
+        ast::Expr::Unit { .. } => Some(ir::Constant::Unit),
         _ => None,
     }
 }
@@ -3472,7 +3474,6 @@ fn expr_path(expr: &Expr) -> Option<Vec<String>> {
             path.push(name.clone());
             Some(path)
         }
-        Expr::Group { inner, .. } => expr_path(inner),
         _ => None,
     }
 }
@@ -3659,7 +3660,6 @@ fn contains_placeholder_expr(expr: &Expr) -> bool {
         }
         Expr::Try { value, .. } => contains_placeholder_expr(value),
         Expr::Lambda { .. } => false,
-        Expr::Group { inner, .. } => contains_placeholder_expr(inner),
         Expr::Identifier { .. }
         | Expr::Integer { .. }
         | Expr::Float { .. }
@@ -3696,8 +3696,8 @@ fn lower_if_stmt_else_expr(branch: &ElseBranch) -> Option<ElseExprBranch> {
 
 fn arrange_named_call_args<'a>(
     params: &[String],
-    args: &'a [ast::CallArg],
-) -> Option<Vec<&'a ast::CallArg>> {
+    args: &'a [core::CallArg],
+) -> Option<Vec<&'a core::CallArg>> {
     let mut slots = vec![None; params.len()];
     let mut positional_index = 0usize;
     for arg in args {
@@ -3723,13 +3723,13 @@ fn arrange_named_call_args<'a>(
     Some(slots.into_iter().flatten().collect())
 }
 
-fn call_uses_structural_record_arg(args: &[ast::CallArg], uses_brace_syntax: bool) -> bool {
-    uses_brace_syntax
+fn call_uses_structural_record_arg(args: &[core::CallArg], style: core::CallStyle) -> bool {
+    style == core::CallStyle::Brace
         && matches!(
             args,
-            [ast::CallArg {
+            [core::CallArg {
                 name: None,
-                value: ast::Expr::RecordLiteral { .. },
+                value: Expr::RecordLiteral { .. },
                 ..
             }]
         )
@@ -3780,19 +3780,19 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
         Expr::Call {
             callee,
             args,
-            uses_brace_syntax,
+            style,
             span,
         } => Expr::Call {
             callee: Box::new(rewrite_placeholder_expr(callee, name)),
             args: args
                 .iter()
-                .map(|arg| ast::CallArg {
+                .map(|arg| core::CallArg {
                     name: arg.name.clone(),
                     value: rewrite_placeholder_expr(&arg.value, name),
                     span: arg.span,
                 })
                 .collect(),
-            uses_brace_syntax: *uses_brace_syntax,
+            style: *style,
             span: *span,
         },
         Expr::Member {
@@ -3821,7 +3821,7 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
             receiver: Box::new(rewrite_placeholder_expr(receiver, name)),
             updates: updates
                 .iter()
-                .map(|update| ast::CallArg {
+                .map(|update| core::CallArg {
                     name: update.name.clone(),
                     value: rewrite_placeholder_expr(&update.value, name),
                     span: update.span,
@@ -3836,7 +3836,7 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
         } => Expr::RecordLiteral {
             fields: fields
                 .iter()
-                .map(|field| ast::CallArg {
+                .map(|field| core::CallArg {
                     name: field.name.clone(),
                     value: rewrite_placeholder_expr(&field.value, name),
                     span: field.span,
@@ -3856,7 +3856,7 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
             interfaces: interfaces.clone(),
             methods: methods
                 .iter()
-                .map(|method| ast::MethodDecl {
+                .map(|method| core::MethodDecl {
                     annotations: method.annotations.clone(),
                     visibility: method.visibility,
                     name: method.name.clone(),
@@ -3921,25 +3921,7 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
         } => Expr::Match {
             partial: *partial,
             value: Box::new(rewrite_placeholder_expr(value, name)),
-            cases: cases
-                .iter()
-                .map(|case| ast::MatchCase {
-                    pattern: case.pattern.clone(),
-                    guard: case
-                        .guard
-                        .as_ref()
-                        .map(|guard| rewrite_placeholder_expr(guard, name)),
-                    body: match &case.body {
-                        MatchCaseBody::Expr(expr) => {
-                            MatchCaseBody::Expr(rewrite_placeholder_expr(expr, name))
-                        }
-                        MatchCaseBody::Block(block) => {
-                            MatchCaseBody::Block(rewrite_block(block, name))
-                        }
-                    },
-                    span: case.span,
-                })
-                .collect(),
+            cases: rewrite_match_cases(cases, name),
             span: *span,
         },
         Expr::ForYield {
@@ -3949,7 +3931,7 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
         } => Expr::ForYield {
             bindings: bindings
                 .iter()
-                .map(|binding| ast::ForBinding {
+                .map(|binding| core::ForBinding {
                     bindings: binding.bindings.clone(),
                     destructure: binding.destructure,
                     pattern: binding.pattern.clone(),
@@ -3973,10 +3955,6 @@ fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
             span: *span,
         },
         Expr::Lambda { .. } => expr.clone(),
-        Expr::Group { inner, span } => Expr::Group {
-            inner: Box::new(rewrite_placeholder_expr(inner, name)),
-            span: *span,
-        },
         Expr::Identifier { .. }
         | Expr::Integer { .. }
         | Expr::Float { .. }
@@ -4006,7 +3984,7 @@ fn rewrite_block(block: &Block, name: &str) -> Block {
 
 fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
     match stmt {
-        Stmt::Binding(binding) => Stmt::Binding(ast::BindingStmt {
+        Stmt::Binding(binding) => Stmt::Binding(core::BindingStmt {
             visibility: binding.visibility,
             bindings: binding.bindings.clone(),
             values: binding
@@ -4017,11 +3995,11 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
             destructure: binding.destructure,
             span: binding.span,
         }),
-        Stmt::PatternBinding(stmt) => Stmt::PatternBinding(ast::PatternBindingStmt {
+        Stmt::PatternBinding(stmt) => Stmt::PatternBinding(core::PatternBindingStmt {
             clauses: stmt
                 .clauses
                 .iter()
-                .map(|clause| ast::RefutableClause {
+                .map(|clause| core::RefutableClause {
                     pattern: clause.pattern.clone(),
                     value: rewrite_placeholder_expr(&clause.value, name),
                     span: clause.span,
@@ -4031,7 +4009,7 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
             value: rewrite_placeholder_expr(&stmt.value, name),
             span: stmt.span,
         }),
-        Stmt::Assignment(assignment) => Stmt::Assignment(ast::AssignmentStmt {
+        Stmt::Assignment(assignment) => Stmt::Assignment(core::AssignmentStmt {
             targets: assignment
                 .targets
                 .iter()
@@ -4045,7 +4023,7 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
                 .collect(),
             span: assignment.span,
         }),
-        Stmt::If(stmt) => Stmt::If(ast::IfStmt {
+        Stmt::If(stmt) => Stmt::If(core::IfStmt {
             condition: stmt
                 .condition
                 .as_ref()
@@ -4054,15 +4032,15 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
                 .condition_clauses
                 .iter()
                 .map(|clause| match clause {
-                    ast::IfConditionClause::Let(clause) => {
-                        ast::IfConditionClause::Let(ast::RefutableClause {
+                    core::IfConditionClause::Let(clause) => {
+                        core::IfConditionClause::Let(core::RefutableClause {
                             pattern: clause.pattern.clone(),
                             value: rewrite_placeholder_expr(&clause.value, name),
                             span: clause.span,
                         })
                     }
-                    ast::IfConditionClause::Expr(condition) => {
-                        ast::IfConditionClause::Expr(rewrite_placeholder_expr(condition, name))
+                    core::IfConditionClause::Expr(condition) => {
+                        core::IfConditionClause::Expr(rewrite_placeholder_expr(condition, name))
                     }
                 })
                 .collect(),
@@ -4074,7 +4052,7 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
             pattern_clauses: stmt
                 .pattern_clauses
                 .iter()
-                .map(|clause| ast::RefutableClause {
+                .map(|clause| core::RefutableClause {
                     pattern: clause.pattern.clone(),
                     value: rewrite_placeholder_expr(&clause.value, name),
                     span: clause.span,
@@ -4097,11 +4075,11 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
             }),
             span: stmt.span,
         }),
-        Stmt::LetElse(stmt) => Stmt::LetElse(ast::LetElseStmt {
+        Stmt::LetElse(stmt) => Stmt::LetElse(core::LetElseStmt {
             clauses: stmt
                 .clauses
                 .iter()
-                .map(|clause| ast::RefutableClause {
+                .map(|clause| core::RefutableClause {
                     pattern: clause.pattern.clone(),
                     value: rewrite_placeholder_expr(&clause.value, name),
                     span: clause.span,
@@ -4112,22 +4090,22 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
             else_block: rewrite_block(&stmt.else_block, name),
             span: stmt.span,
         }),
-        Stmt::Match(stmt) => Stmt::Match(ast::MatchStmt {
+        Stmt::Match(stmt) => Stmt::Match(core::MatchStmt {
             partial: stmt.partial,
             value: rewrite_placeholder_expr(&stmt.value, name),
             cases: rewrite_match_cases(&stmt.cases, name),
             span: stmt.span,
         }),
-        Stmt::While(stmt) => Stmt::While(ast::WhileStmt {
+        Stmt::While(stmt) => Stmt::While(core::WhileStmt {
             condition: rewrite_placeholder_expr(&stmt.condition, name),
             body: rewrite_block(&stmt.body, name),
             span: stmt.span,
         }),
-        Stmt::For(stmt) => Stmt::For(ast::ForStmt {
+        Stmt::For(stmt) => Stmt::For(core::ForStmt {
             bindings: stmt
                 .bindings
                 .iter()
-                .map(|binding| ast::ForBinding {
+                .map(|binding| core::ForBinding {
                     bindings: binding.bindings.clone(),
                     destructure: binding.destructure,
                     pattern: binding.pattern.clone(),
@@ -4146,7 +4124,7 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
             body: rewrite_block(&stmt.body, name),
             span: stmt.span,
         }),
-        Stmt::Return(stmt) => Stmt::Return(ast::ReturnStmt {
+        Stmt::Return(stmt) => Stmt::Return(core::ReturnStmt {
             value: stmt
                 .value
                 .as_ref()
@@ -4155,11 +4133,11 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
         }),
         Stmt::Break(stmt) => Stmt::Break(stmt.clone()),
         Stmt::Continue(stmt) => Stmt::Continue(stmt.clone()),
-        Stmt::Expr(stmt) => Stmt::Expr(ast::ExprStmt {
+        Stmt::Expr(stmt) => Stmt::Expr(core::ExprStmt {
             expr: rewrite_placeholder_expr(&stmt.expr, name),
             span: stmt.span,
         }),
-        Stmt::LocalFunction(function) => Stmt::LocalFunction(ast::FunctionDecl {
+        Stmt::LocalFunction(function) => Stmt::LocalFunction(core::FunctionDecl {
             annotations: function.annotations.clone(),
             visibility: function.visibility,
             name: function.name.clone(),
@@ -4172,10 +4150,10 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
     }
 }
 
-fn rewrite_match_cases(cases: &[ast::MatchCase], name: &str) -> Vec<ast::MatchCase> {
+fn rewrite_match_cases(cases: &[MatchCase], name: &str) -> Vec<MatchCase> {
     cases
         .iter()
-        .map(|case| ast::MatchCase {
+        .map(|case| MatchCase {
             pattern: case.pattern.clone(),
             guard: case
                 .guard
@@ -4221,8 +4199,12 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
                 .as_ref()
                 .is_some_and(contains_placeholder_expr)
                 || stmt.condition_clauses.iter().any(|clause| match clause {
-                    ast::IfConditionClause::Let(clause) => contains_placeholder_expr(&clause.value),
-                    ast::IfConditionClause::Expr(condition) => contains_placeholder_expr(condition),
+                    core::IfConditionClause::Let(clause) => {
+                        contains_placeholder_expr(&clause.value)
+                    }
+                    core::IfConditionClause::Expr(condition) => {
+                        contains_placeholder_expr(condition)
+                    }
                 })
                 || stmt
                     .pattern_clauses
