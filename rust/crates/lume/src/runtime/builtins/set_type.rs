@@ -21,6 +21,7 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(0, ":+", vec![ir::Type::Unknown], set_plus),
             builtin_method(1, "++", vec![ir::Type::Unknown], set_concat),
             builtin_method(2, "add", vec![ir::Type::Unknown], set_add),
+            builtin_method(14, "addAll", vec![ir::Type::Unknown], set_add_all),
             builtin_method(3, "iterator", Vec::new(), set_iterator),
             builtin_method(4, "map", vec![function_unknown()], set_map),
             builtin_method(5, "flatMap", vec![function_unknown()], set_flat_map),
@@ -100,6 +101,24 @@ fn set_add(
         return Err(interpreter.runtime_error(span, "Set.add expects 1 argument"));
     };
     push_unique(&mut set_items(&receiver).borrow_mut(), value.clone());
+    Ok(receiver)
+}
+
+fn set_add_all(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let [other] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Set.addAll expects 1 argument"));
+    };
+    let rhs = iterable_values(other.clone(), span, interpreter)?;
+    let items = set_items(&receiver);
+    let mut items = items.borrow_mut();
+    for value in rhs {
+        push_unique(&mut items, value);
+    }
     Ok(receiver)
 }
 

@@ -2213,6 +2213,9 @@ impl<'a> Checker<'a> {
             }
             return Ty::unit();
         }
+        if let Some(ty) = self.check_builtin_static_factory_call(callee, args, span) {
+            return ty;
+        }
         if let Some(ty) = self.try_check_constructor_call(callee, args, uses_brace_syntax, span) {
             return ty;
         }
@@ -2242,6 +2245,58 @@ impl<'a> Checker<'a> {
                 Ty::Unknown
             }
         }
+    }
+
+    fn check_builtin_static_factory_call(
+        &mut self,
+        callee: &Expr,
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) -> Option<Ty> {
+        let Expr::Member { receiver, name, .. } = callee else {
+            return None;
+        };
+        if name != "from" {
+            return None;
+        }
+        let Expr::Identifier {
+            name: type_name, ..
+        } = receiver.as_ref()
+        else {
+            return None;
+        };
+
+        let result_name = match type_name.as_str() {
+            "List" => "List",
+            "Set" => "Set",
+            _ => return None,
+        };
+
+        if args.len() != 1 {
+            self.add_error(
+                "invalid_argument_count",
+                format!("{result_name}.from expects 1 argument, got {}", args.len()),
+                span,
+            );
+        }
+
+        let source_ty = args
+            .first()
+            .map(|arg| self.check_expr(&arg.value))
+            .unwrap_or(Ty::Unknown);
+        let item_ty = self.iterable_item_type(&source_ty);
+        if matches!(item_ty, Ty::Unknown) && !matches!(source_ty, Ty::Unknown) {
+            let arg_span = args.first().map(|arg| arg.span).unwrap_or(span);
+            self.add_error(
+                "invalid_argument_type",
+                format!(
+                    "{result_name}.from expects iterable argument, got '{}'",
+                    source_ty.describe()
+                ),
+                arg_span,
+            );
+        }
+        Some(Ty::Named(result_name.to_string(), vec![item_ty]))
     }
 
     fn check_signature_call(

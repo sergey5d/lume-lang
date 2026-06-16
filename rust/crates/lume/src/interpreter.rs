@@ -1689,6 +1689,28 @@ impl<'a> Interpreter<'a> {
             ]))));
         }
 
+        if path[0] == "List" && path.len() == 2 && path[1] == "from" {
+            if args.len() != 1 {
+                return Err(self.runtime_error(
+                    span,
+                    format!("List.from expects 1 argument, got {}", args.len()),
+                ));
+            }
+            let values = iterable_values(args[0].clone(), span, self)?;
+            return Ok(Value::list(values));
+        }
+
+        if path[0] == "Set" && path.len() == 2 && path[1] == "from" {
+            if args.len() != 1 {
+                return Err(self.runtime_error(
+                    span,
+                    format!("Set.from expects 1 argument, got {}", args.len()),
+                ));
+            }
+            let values = iterable_values(args[0].clone(), span, self)?;
+            return Ok(Value::set(unique_values(values)));
+        }
+
         if path.len() == 2 {
             if let Some(value) = self.construct_named_path(path, args.clone(), span, structural)? {
                 return Ok(value);
@@ -4443,6 +4465,37 @@ $name
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "a\np\ntrue\n");
+    }
+
+    #[test]
+    fn runs_collection_from_add_and_add_all_methods() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                base = [1, 2]
+                grown = List.from(base)
+                grown.add(3)
+                grown.addAll([4, 5])
+
+                seen = Set(1, 2)
+                more = Set.from(seen)
+                more.add(3)
+                more.addAll([2, 4, 4])
+
+                OS.println("base", base.size(), base.get(1).getOr(0))
+                OS.println("grown", grown.size(), grown.get(4).getOr(0))
+                OS.println("seen", seen.size(), seen.contains(3))
+                OS.println("more", more.size(), more.contains(4))
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "base 2 2\ngrown 5 5\nseen 2 false\nmore 4 true\n"
+        );
     }
 
     #[test]

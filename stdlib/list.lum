@@ -4,6 +4,8 @@
 
 interface List[T] with Iterable[T] {
     def append(value T) List[T]
+    def add(value T) List[T]
+    def addAll(values Iterable[T]) List[T]
     def map[X](f T -> X) List[X]
     def flatMap[X](f T -> List[X]) List[X]
     def filter(f T -> Bool) List[T]

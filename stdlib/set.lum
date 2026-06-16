@@ -4,6 +4,7 @@
 
 interface Set[T] with Iterable[T] {
     def add(value T) Set[T]
+    def addAll(values Iterable[T]) Set[T]
     def iterator() Iterator[T]
     def map[X](f T -> X) Set[X]
     def flatMap[X](f T -> Set[X]) Set[X]

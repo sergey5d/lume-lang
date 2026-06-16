@@ -21,6 +21,8 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(0, ":+", vec![ir::Type::Unknown], list_append_copy),
             builtin_method(1, "++", vec![ir::Type::Unknown], list_concat),
             builtin_method(2, "append", vec![ir::Type::Unknown], list_append_mut),
+            builtin_method(29, "add", vec![ir::Type::Unknown], list_append_mut),
+            builtin_method(30, "addAll", vec![ir::Type::Unknown], list_add_all),
             builtin_method(3, "map", vec![function_unknown()], list_map),
             builtin_method(4, "flatMap", vec![function_unknown()], list_flat_map),
             builtin_method(5, "filter", vec![function_unknown()], list_filter),
@@ -46,7 +48,6 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(20, "tail", Vec::new(), list_tail),
             builtin_method(21, "first", Vec::new(), list_first),
             builtin_method(22, "last", Vec::new(), list_last),
-            builtin_method(23, "clone", Vec::new(), list_clone),
             builtin_method(24, "count", vec![function_unknown()], list_count),
             builtin_method(25, "contains", vec![ir::Type::Unknown], list_contains),
             builtin_method(26, "find", vec![ir::Type::Unknown], list_find),
@@ -113,6 +114,20 @@ fn list_append_mut(
         return Err(interpreter.runtime_error(span, "List.append expects 1 argument"));
     }
     list_items(&receiver).borrow_mut().push(args[0].clone());
+    Ok(receiver)
+}
+
+fn list_add_all(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let [other] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "List.addAll expects 1 argument"));
+    };
+    let rhs = iterable_values(other.clone(), span, interpreter)?;
+    list_items(&receiver).borrow_mut().extend(rhs);
     Ok(receiver)
 }
 
@@ -478,18 +493,6 @@ fn list_last(
         Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),
     })
-}
-
-fn list_clone(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "Array.clone expects 0 arguments"));
-    }
-    Ok(Value::list(list_items(&receiver).borrow().clone()))
 }
 
 fn list_count(

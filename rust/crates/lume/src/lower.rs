@@ -3137,6 +3137,12 @@ impl<'a> FunctionLowerer<'a> {
             } else if path.len() == 2 {
                 let owner = &path[0];
                 let member = &path[1];
+                if matches!(
+                    (owner.as_str(), member.as_str()),
+                    ("List", "from") | ("Set", "from")
+                ) {
+                    return Some(vec!["values".to_string()]);
+                }
                 if let Some(type_def) = self.program.types.iter().find(|ty| ty.name == *owner) {
                     if type_def.kind == ast::TypeKind::Enum {
                         if let Some(case) =
