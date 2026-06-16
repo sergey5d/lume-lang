@@ -851,7 +851,14 @@ impl<'a> Checker<'a> {
 
     fn check_callable_body(&mut self, body: &CallableBody) -> Ty {
         match body {
-            CallableBody::Expr(expr) => self.check_expr_against(expr, &self.current_return.clone()),
+            CallableBody::Expr(expr) => {
+                let actual = self.check_expr_against(expr, &self.current_return.clone());
+                if self.current_return == Ty::unit() {
+                    self.check_discarded_expr_after_unit_expected(expr);
+                    return Ty::unit();
+                }
+                actual
+            }
             CallableBody::Block(block) => {
                 self.check_block_against(block, &self.current_return.clone())
             }
@@ -877,7 +884,14 @@ impl<'a> Checker<'a> {
                 self.check_stmt(statement)
             };
             if index + 1 == block.statements.len() {
-                last = ty;
+                if *expected == Ty::unit() {
+                    if let Stmt::Expr(expr_stmt) = statement {
+                        self.check_discarded_expr_after_unit_expected(&expr_stmt.expr);
+                    }
+                    last = Ty::unit();
+                } else {
+                    last = ty;
+                }
             }
         }
         self.pop_scope();
@@ -1098,17 +1112,11 @@ impl<'a> Checker<'a> {
                 Ty::unit()
             }
             Stmt::If(stmt) => {
-                self.check_if_stmt(stmt);
+                let _ = self.check_if_stmt_value(stmt, &Ty::unit());
                 Ty::unit()
             }
             Stmt::Match(stmt) => {
-                let value_ty = self.check_expr(&stmt.value);
-                for case in &stmt.cases {
-                    self.check_match_case(case, &value_ty);
-                }
-                if !stmt.partial {
-                    self.check_match_exhaustiveness(&value_ty, &stmt.cases, stmt.span);
-                }
+                let _ = self.check_match_stmt_value(stmt, &Ty::unit());
                 Ty::unit()
             }
             Stmt::While(stmt) => {
@@ -1178,7 +1186,11 @@ impl<'a> Checker<'a> {
                 }
                 Ty::unit()
             }
-            Stmt::Expr(expr_stmt) => self.check_expr(&expr_stmt.expr),
+            Stmt::Expr(expr_stmt) => {
+                let ty = self.check_expr(&expr_stmt.expr);
+                self.check_discarded_expr_in_statement(&expr_stmt.expr);
+                ty
+            }
             Stmt::LocalFunction(function) => {
                 let sig = function_sig_from_function(function, &[]);
                 self.define_local(
@@ -1192,89 +1204,6 @@ impl<'a> Checker<'a> {
                 self.check_function(function);
                 Ty::unit()
             }
-        }
-    }
-
-    fn check_if_stmt(&mut self, stmt: &IfStmt) {
-        if !stmt.condition_clauses.is_empty() {
-            self.push_scope();
-            for clause in &stmt.condition_clauses {
-                match clause {
-                    IfConditionClause::Let(clause) => {
-                        let value_ty = self.check_expr(&clause.value);
-                        self.require_refutable_if_pattern(
-                            &clause.pattern,
-                            &value_ty,
-                            clause.pattern.span(),
-                        );
-                        self.bind_pattern(&clause.pattern, &value_ty);
-                    }
-                    IfConditionClause::Expr(condition) => {
-                        let condition_ty = self.check_expr(condition);
-                        self.require_bool(
-                            &condition_ty,
-                            condition.span(),
-                            "if condition must be Bool",
-                        );
-                    }
-                }
-            }
-            self.check_block(&stmt.then_block);
-            self.pop_scope();
-            if let Some(branch) = &stmt.else_branch {
-                self.check_else_branch(branch);
-            }
-            return;
-        }
-        if !stmt.pattern_clauses.is_empty() {
-            self.push_scope();
-            for clause in &stmt.pattern_clauses {
-                let value_ty = self.check_expr(&clause.value);
-                self.require_refutable_if_pattern(
-                    &clause.pattern,
-                    &value_ty,
-                    clause.pattern.span(),
-                );
-                self.bind_pattern(&clause.pattern, &value_ty);
-            }
-            self.check_block(&stmt.then_block);
-            self.pop_scope();
-        } else if let Some(value) = &stmt.pattern_value {
-            let value_ty = self.check_expr(value);
-            self.push_scope();
-            if let Some(pattern) = &stmt.pattern {
-                self.require_refutable_if_pattern(pattern, &value_ty, pattern.span());
-                self.bind_pattern(pattern, &value_ty);
-            }
-            self.check_block(&stmt.then_block);
-            self.pop_scope();
-        } else if let Some(value) = &stmt.binding_value {
-            let value_ty = self.check_expr(value);
-            let inner = self.unwrap_inner_type(&value_ty);
-            self.check_destructure_source(
-                &inner,
-                DestructureKind::Tuple,
-                stmt.bindings.len(),
-                value.span(),
-            );
-            let slot_types =
-                self.destructure_slots(&inner, stmt.bindings.len(), DestructureKind::Tuple);
-            self.push_scope();
-            for (index, binding) in stmt.bindings.iter().enumerate() {
-                let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
-                let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
-                let ty = explicit.clone().unwrap_or_else(|| inferred.clone());
-                self.define_local(&binding.name, ty, false);
-            }
-            self.check_block(&stmt.then_block);
-            self.pop_scope();
-        } else if let Some(condition) = &stmt.condition {
-            let condition_ty = self.check_expr(condition);
-            self.require_bool(&condition_ty, condition.span(), "if condition must be Bool");
-            self.check_block(&stmt.then_block);
-        }
-        if let Some(else_branch) = &stmt.else_branch {
-            self.check_else_branch(else_branch);
         }
     }
 
@@ -1455,15 +1384,6 @@ impl<'a> Checker<'a> {
                     .all(|(item, pattern)| self.known_value_matches_pattern(item, pattern)),
                 _ => false,
             },
-        }
-    }
-
-    fn check_else_branch(&mut self, branch: &ElseBranch) {
-        match branch {
-            ElseBranch::If(stmt) => self.check_if_stmt(stmt),
-            ElseBranch::Block(block) => {
-                self.check_block(block);
-            }
         }
     }
 
@@ -2184,6 +2104,11 @@ impl<'a> Checker<'a> {
                 self.check_block_against(block, expected_ret.as_ref().unwrap_or(&Ty::Unknown))
             }
         };
+        if expected_ret.as_ref().is_some_and(|ret| *ret == Ty::unit()) {
+            if let LambdaBody::Expr(expr) = body {
+                self.check_discarded_expr_after_unit_expected(expr);
+            }
+        }
         self.pop_scope();
         let ret = if expected_ret
             .as_ref()
@@ -2297,6 +2222,110 @@ impl<'a> Checker<'a> {
             );
         }
         Some(Ty::Named(result_name.to_string(), vec![item_ty]))
+    }
+
+    fn check_discarded_expr_in_statement(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Call { .. } | Expr::Try { .. } | Expr::Unit { .. } | Expr::ForYield { .. } => {}
+            Expr::Group { inner, .. } => self.check_discarded_expr_in_statement(inner),
+            Expr::Block { body, .. } => self.check_discarded_block_tail_in_statement(body),
+            Expr::If {
+                then_block,
+                else_branch,
+                ..
+            } => {
+                self.check_discarded_block_tail_in_statement(then_block);
+                self.check_discarded_else_expr_branch(else_branch);
+            }
+            Expr::Match { cases, .. } => {
+                for case in cases {
+                    match &case.body {
+                        MatchCaseBody::Block(block) => {
+                            self.check_discarded_block_tail_in_statement(block)
+                        }
+                        MatchCaseBody::Expr(expr) => self.check_discarded_expr_in_statement(expr),
+                    }
+                }
+            }
+            _ => self.add_error(
+                "discarded_expression",
+                "discarded expression has no effect; did you mean to assign it or return it?",
+                expr.span(),
+            ),
+        }
+    }
+
+    fn check_discarded_expr_after_unit_expected(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Call { .. } | Expr::Try { .. } | Expr::Unit { .. } | Expr::ForYield { .. } => {}
+            Expr::Group { inner, .. } => self.check_discarded_expr_after_unit_expected(inner),
+            Expr::Block { .. } => {}
+            Expr::If {
+                then_block,
+                else_branch,
+                ..
+            } => {
+                self.check_discarded_block_tail_in_statement(then_block);
+                self.check_discarded_else_expr_branch(else_branch);
+            }
+            Expr::Match { cases, .. } => {
+                for case in cases {
+                    match &case.body {
+                        MatchCaseBody::Block(block) => {
+                            self.check_discarded_block_tail_in_statement(block)
+                        }
+                        MatchCaseBody::Expr(expr) => self.check_discarded_expr_in_statement(expr),
+                    }
+                }
+            }
+            _ => self.add_error(
+                "discarded_expression",
+                "discarded expression has no effect; did you mean to assign it or return it?",
+                expr.span(),
+            ),
+        }
+    }
+
+    fn check_discarded_block_tail_in_statement(&mut self, block: &Block) {
+        let Some(statement) = block.statements.last() else {
+            return;
+        };
+        match statement {
+            Stmt::Expr(expr_stmt) => self.check_discarded_expr_in_statement(&expr_stmt.expr),
+            Stmt::If(stmt) => self.check_discarded_if_stmt_in_statement(stmt),
+            Stmt::Match(stmt) => self.check_discarded_match_stmt_in_statement(stmt),
+            _ => {}
+        }
+    }
+
+    fn check_discarded_if_stmt_in_statement(&mut self, stmt: &IfStmt) {
+        self.check_discarded_block_tail_in_statement(&stmt.then_block);
+        if let Some(branch) = &stmt.else_branch {
+            self.check_discarded_else_branch_in_statement(branch);
+        }
+    }
+
+    fn check_discarded_else_branch_in_statement(&mut self, branch: &ElseBranch) {
+        match branch {
+            ElseBranch::If(stmt) => self.check_discarded_if_stmt_in_statement(stmt),
+            ElseBranch::Block(block) => self.check_discarded_block_tail_in_statement(block),
+        }
+    }
+
+    fn check_discarded_match_stmt_in_statement(&mut self, stmt: &crate::ast::MatchStmt) {
+        for case in &stmt.cases {
+            match &case.body {
+                MatchCaseBody::Block(block) => self.check_discarded_block_tail_in_statement(block),
+                MatchCaseBody::Expr(expr) => self.check_discarded_expr_in_statement(expr),
+            }
+        }
+    }
+
+    fn check_discarded_else_expr_branch(&mut self, branch: &ElseExprBranch) {
+        match branch {
+            ElseExprBranch::If(expr) => self.check_discarded_expr_in_statement(expr),
+            ElseExprBranch::Block(block) => self.check_discarded_block_tail_in_statement(block),
+        }
     }
 
     fn check_signature_call(
@@ -5229,6 +5258,88 @@ def main() Unit {
                         .message
                         .contains("for pattern must be irrefutable for value of type 'Option[Int]'")
             }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_discarded_pure_trailing_expression_in_unit_callable() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    value Int = 10
+    value + 5
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "discarded_expression"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_discarded_identifier_statement() {
+        let program = parse_inline(
+            r#"
+def main() Int {
+    value Int = 10
+    value
+    return 0
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "discarded_expression"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_discarded_call_expression_in_unit_callable() {
+        let program = parse_inline(
+            r#"
+def sideEffect() Int = 5
+
+def main() Unit {
+    sideEffect()
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_discarded_pure_expression_in_if_branch() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    if true {
+        1 + 2
+    } else {
+        3 + 4
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "discarded_expression"),
             "{:#?}",
             result.diagnostics
         );

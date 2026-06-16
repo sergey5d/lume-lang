@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# discarded_expression at .*: discarded expression has no effect; did you mean to assign it or return it\?
+
+def main() Unit {
+    if true {
+        1 + 2
+    } else {
+        3 + 4
+    }
+}

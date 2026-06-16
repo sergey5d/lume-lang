@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# discarded_expression at .*: discarded expression has no effect; did you mean to assign it or return it\?
+
+def main() Unit {
+    value Int = 10
+    value + 5
+}
