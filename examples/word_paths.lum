@@ -1,0 +1,65 @@
+# EXPECT:
+# apple -> egg -> goat -> tiger -> rat
+
+# Preferred first-match shape once runnable Rune values are exposed:
+# def matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str]) Option[Str]
+#
+# Today the executable sample uses Str for the single-character slot.
+# "First" means first successful path in `allWords` order.
+
+def letters(word Str) Array[Str] = word.split("")
+
+def firstLetter(word Str) Str = letters(word)[1]
+
+def lastLetter(word Str) Str {
+    chars Array[Str] = letters(word)
+    chars[chars.size() - 2]
+}
+
+def matches(firstChar Str, endWord Str, allWords [Str], pickedWords Set[Str]) Option[Str] {
+    for word <- allWords {
+        if pickedWords.contains(word) {
+            continue
+        }
+
+        if firstLetter(word) != firstChar {
+            continue
+        }
+
+        if word == endWord {
+            return Some(word)
+        }
+
+        nextPicked = pickedWords :+ word
+
+        if let Some(suffix) = matches(lastLetter(word), endWord, allWords, nextPicked) {
+            return Some(word + " -> " + suffix)
+        }
+    }
+
+    None()
+}
+
+def firstPath(startWord Str, endWord Str, allWords [Str]) Option[Str] {
+    if startWord == endWord {
+        return Some(startWord)
+    }
+
+    suffix = matches(lastLetter(startWord), endWord, allWords, Set(startWord))
+    suffix.map(path -> startWord + " -> " + path)
+}
+
+def main() Unit {
+    words [Str] = [
+        "apple",
+        "egg",
+        "goat",
+        "grape",
+        "elephant",
+        "tiger",
+        "rat"
+    ]
+
+    path = firstPath("apple", "rat", words).getOr("no match")
+    OS.println(path)
+}
