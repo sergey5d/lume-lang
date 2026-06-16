@@ -1,0 +1,88 @@
+# EXPECT:
+# time 0 cost 3 allowed true usage 3
+# time 0 cost 2 allowed true usage 5
+# time 0 cost 1 allowed false usage 5
+# time 2 cost 2 allowed false usage 5
+# time 5 cost 2 allowed true usage 2
+# time 6 cost 4 allowed false usage 2
+# time 7 cost 3 allowed true usage 5
+
+# A sliding-window limiter remembers accepted requests that still fall inside
+# the current time window. Old requests fall out of the window all at once.
+class SlidingWindowLimiter {
+    hidden capacity Int
+    hidden windowSize Int
+    hidden var accepted List[{ time Int, cost Int }]
+}
+
+impl SlidingWindowLimiter {
+    def new(capacity Int, windowSize Int) {
+        this.capacity = capacity
+        this.windowSize = windowSize
+        this.accepted = []
+    }
+
+    def prune(now Int) Unit {
+        # Keep only requests whose timestamp still belongs to the active window.
+        windowStart = now - this.windowSize
+        kept List[{ time Int, cost Int }] = []
+
+        for request <- this.accepted {
+            if request.time > windowStart {
+                kept.add(request)
+            }
+        }
+
+        this.accepted = kept
+    }
+
+    def usedInWindow() Int {
+        var total Int = 0
+
+        for request <- this.accepted {
+            total += request.cost
+        }
+
+        total
+    }
+
+    def allow(now Int, cost Int) Bool {
+        # First drop requests that are no longer inside the sliding window.
+        this.prune(now)
+
+        currentUsage = this.usedInWindow()
+
+        # Reject requests that would push total usage above the window limit.
+        if currentUsage + cost > this.capacity {
+            return false
+        }
+
+        # Accepted requests are remembered until they age out of the window.
+        this.accepted.add(class { time = now, cost = cost })
+        true
+    }
+
+    def currentUsage() Int = this.usedInWindow()
+}
+
+def main() Unit {
+    # Capacity 5 over a 5-tick sliding window.
+    bucket = SlidingWindowLimiter(5, 5)
+
+    # Each request carries named fields instead of a positional tuple.
+    requests List[{ time Int, cost Int }] = List(
+        class { time = 0, cost = 3 },
+        class { time = 0, cost = 2 },
+        class { time = 0, cost = 1 },
+        class { time = 2, cost = 2 },
+        class { time = 5, cost = 2 },
+        class { time = 6, cost = 4 },
+        class { time = 7, cost = 3 },
+    )
+
+    for request <- requests {
+        allowed = bucket.allow(request.time, request.cost)
+        # Show whether the request passed and how much window usage remains live.
+        OS.println("time", request.time, "cost", request.cost, "allowed", allowed, "usage", bucket.currentUsage())
+    }
+}
