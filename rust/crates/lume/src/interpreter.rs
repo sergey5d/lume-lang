@@ -720,6 +720,7 @@ pub(crate) enum Value {
     Int(i64),
     Float(f64),
     String(String),
+    Rune(char),
     Tuple(Vec<Value>),
     List(Rc<RefCell<Vec<Value>>>),
     Set(Rc<RefCell<Vec<Value>>>),
@@ -781,6 +782,7 @@ impl Value {
                 rendered
             }
             Value::String(value) => value.clone(),
+            Value::Rune(value) => value.to_string(),
             Value::Tuple(items) => format!(
                 "({})",
                 items
@@ -1396,6 +1398,10 @@ impl<'a> Interpreter<'a> {
             ir::Type::Named { name, args } if name == "Either" => {
                 let _ = args;
                 self.either_left(Value::Unit)
+            }
+            ir::Type::Named { name, args } if name == "Rune" => {
+                let _ = args;
+                Value::Rune('\0')
             }
             _ => Value::Unit,
         }
@@ -3193,6 +3199,7 @@ impl<'a> Interpreter<'a> {
                     }
                 }
                 Value::String(_) => name == "Str",
+                Value::Rune(_) => name == "Rune",
                 Value::Int(_) => name == "Int" || name == "Int64",
                 Value::Float(_) => name == "Float" || name == "Float64",
                 Value::Bool(_) => name == "Bool",
@@ -3554,6 +3561,7 @@ pub(crate) fn values_equal(left: &Value, right: &Value) -> bool {
         (Value::Int(lhs), Value::Int(rhs)) => lhs == rhs,
         (Value::Float(lhs), Value::Float(rhs)) => lhs == rhs,
         (Value::String(lhs), Value::String(rhs)) => lhs == rhs,
+        (Value::Rune(lhs), Value::Rune(rhs)) => lhs == rhs,
         (Value::Tuple(lhs), Value::Tuple(rhs)) => {
             lhs.len() == rhs.len() && lhs.iter().zip(rhs).all(|(lhs, rhs)| values_equal(lhs, rhs))
         }
@@ -4413,6 +4421,28 @@ $name
             run.output,
             "hello world 7 $done\n\nhello\n$name\n\n\n\nfmt 7\npair left 9\n"
         );
+    }
+
+    #[test]
+    fn runs_string_rune_access_methods() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                word Str = "apple"
+                first Rune = word.expectRuneAt(0)
+                let Some(second) = word.runeAt(1)
+                missing = word.runeAt(9)
+
+                OS.println(first)
+                OS.println(second)
+                OS.println(missing.isEmpty())
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "a\np\ntrue\n");
     }
 
     #[test]

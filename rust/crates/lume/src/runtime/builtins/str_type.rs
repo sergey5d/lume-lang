@@ -17,10 +17,24 @@ pub(super) fn define() -> RuntimeType {
         methods: vec![
             builtin_method(0, "size", Vec::new(), str_size),
             builtin_method(1, "split", vec![crate::ir::Type::Str], str_split),
+            builtin_method(2, "runeAt", vec![crate::ir::Type::Int], str_rune_at),
+            builtin_method(
+                3,
+                "expectRuneAt",
+                vec![crate::ir::Type::Int],
+                str_expect_rune_at,
+            ),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
     }
+}
+
+fn string_rune_at(text: &str, index: i64) -> Option<char> {
+    if index < 0 {
+        return None;
+    }
+    text.chars().nth(index as usize)
 }
 
 fn str_size(
@@ -59,4 +73,45 @@ fn str_split(
             .map(|part| Value::String(part.to_string()))
             .collect(),
     ))
+}
+
+fn str_rune_at(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!();
+    };
+    let [index] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Str.runeAt expects 1 argument"));
+    };
+    let index = index.as_int(interpreter, span, "Str.runeAt index")?;
+    Ok(match string_rune_at(&text, index) {
+        Some(value) => interpreter.option_some(Value::Rune(value)),
+        None => interpreter.option_none(),
+    })
+}
+
+fn str_expect_rune_at(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!();
+    };
+    let [index] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Str.expectRuneAt expects 1 argument"));
+    };
+    let index = index.as_int(interpreter, span, "Str.expectRuneAt index")?;
+    match string_rune_at(&text, index) {
+        Some(value) => Ok(Value::Rune(value)),
+        None => Err(interpreter.runtime_error(
+            span,
+            format!("Str.expectRuneAt index {} out of bounds", index),
+        )),
+    }
 }
