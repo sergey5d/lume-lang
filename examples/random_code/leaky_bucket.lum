@@ -1,0 +1,77 @@
+# EXPECT:
+# time 0 cost 3 allowed true level 3
+# time 0 cost 2 allowed true level 5
+# time 0 cost 1 allowed false level 5
+# time 2 cost 2 allowed true level 5
+# time 3 cost 3 allowed false level 4
+# time 7 cost 5 allowed true level 5
+
+# A leaky bucket keeps a running fill level.
+# Requests add water to the bucket, and time drains it at a fixed rate.
+class LeakyBucket {
+    hidden capacity Int
+    hidden leakPerTick Int
+    hidden var level Int = 0
+    hidden var lastTick Int = 0
+}
+
+impl LeakyBucket {
+    def new(capacity Int, leakPerTick Int) {
+        this.capacity = capacity
+        this.leakPerTick = leakPerTick
+    }
+
+    def drain(now Int) Unit {
+        # First advance the bucket state to "now" by leaking water out.
+        elapsed = now - this.lastTick
+        if elapsed <= 0 {
+            return
+        }
+
+        leaked = elapsed * this.leakPerTick
+        if leaked >= this.level {
+            this.level = 0
+        } else {
+            this.level -= leaked
+        }
+
+        this.lastTick = now
+    }
+
+    def allow(now Int, cost Int) Bool {
+        # Every request sees the bucket after time-based leaking has happened.
+        this.drain(now)
+
+        # Reject requests that would overflow the bucket.
+        if this.level + cost > this.capacity {
+            return false
+        }
+
+        # Accepted requests consume capacity immediately.
+        this.level += cost
+        true
+    }
+
+    def currentLevel() Int = this.level
+}
+
+def main() Unit {
+    # Capacity 5, leaking 1 unit per tick.
+    bucket = LeakyBucket(5, 1)
+
+    # Each pair is (time, request cost).
+    requests List[(Int, Int)] = List(
+        (0, 3),
+        (0, 2),
+        (0, 1),
+        (2, 2),
+        (3, 3),
+        (7, 5),
+    )
+
+    for (time, cost) <- requests {
+        allowed = bucket.allow(time, cost)
+        # Show whether the request passed and what the bucket level is after it.
+        OS.println("time", time, "cost", cost, "allowed", allowed, "level", bucket.currentLevel())
+    }
+}

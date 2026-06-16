@@ -1,0 +1,79 @@
+# EXPECT:
+# time 0 cost 3 allowed true tokens 2
+# time 0 cost 2 allowed true tokens 0
+# time 0 cost 1 allowed false tokens 0
+# time 2 cost 2 allowed true tokens 0
+# time 3 cost 3 allowed false tokens 1
+# time 7 cost 5 allowed true tokens 0
+
+# A token bucket stores available allowance as tokens.
+# Time adds tokens back up to the bucket capacity, and each request spends them.
+class TokenBucket {
+    hidden capacity Int
+    hidden refillPerTick Int
+    hidden var tokens Int = 0
+    hidden var lastTick Int = 0
+}
+
+impl TokenBucket {
+    def new(capacity Int, refillPerTick Int) {
+        this.capacity = capacity
+        this.refillPerTick = refillPerTick
+        # Token buckets usually start full so they allow an initial burst.
+        this.tokens = capacity
+    }
+
+    def refill(now Int) Unit {
+        # First bring the bucket forward to "now" by adding earned tokens.
+        elapsed = now - this.lastTick
+        if elapsed <= 0 {
+            return
+        }
+
+        earned = elapsed * this.refillPerTick
+        if this.tokens + earned >= this.capacity {
+            this.tokens = this.capacity
+        } else {
+            this.tokens += earned
+        }
+
+        this.lastTick = now
+    }
+
+    def allow(now Int, cost Int) Bool {
+        # Every request sees the bucket after time-based refill has happened.
+        this.refill(now)
+
+        # Reject requests that need more tokens than are currently available.
+        if cost > this.tokens {
+            return false
+        }
+
+        # Accepted requests spend tokens immediately.
+        this.tokens -= cost
+        true
+    }
+
+    def currentTokens() Int = this.tokens
+}
+
+def main() Unit {
+    # Capacity 5, refilling 1 token per tick.
+    bucket = TokenBucket(5, 1)
+
+    # Each pair is (time, request cost).
+    requests List[(Int, Int)] = List(
+        (0, 3),
+        (0, 2),
+        (0, 1),
+        (2, 2),
+        (3, 3),
+        (7, 5),
+    )
+
+    for (time, cost) <- requests {
+        allowed = bucket.allow(time, cost)
+        # Show whether the request passed and how many tokens remain after it.
+        OS.println("time", time, "cost", cost, "allowed", allowed, "tokens", bucket.currentTokens())
+    }
+}
