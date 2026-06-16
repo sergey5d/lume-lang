@@ -94,7 +94,7 @@
       "patterns": [
         {
           "name": "keyword.control.lume",
-          "match": "\\b(?:if|then|else|for|while|yield|partial|match|unwrap|return|break|is|try)\\b"
+          "match": "\\b(?:if|then|else|for|while|yield|partial|match|unwrap|return|break|continue|is|try)\\b"
         },
         {
           "name": "keyword.declaration.lume",
@@ -154,7 +154,7 @@
       "patterns": [
         {
           "name": "support.type.builtin.lume",
-          "match": "\\b(?:Int|Str|Bool|Float|Unit|Array|List|Set|Map|Option|Result|Either|Iterator|Printer|OS)\\b"
+          "match": "\\b(?:Int|Int64|Bool|Rune|Float|Float64|Str|Unit|Array|List|Set|Map|Option|Result|Either|Iterator|Iterable|Ordering|Eq|Printer|OS|IntRange|Tuple2|Tuple3|Tuple4|Tuple5|Tuple6|Tuple7|Tuple8|Tuple9|Tuple10)\\b"
         },
         {
           "name": "entity.name.type.lume",
