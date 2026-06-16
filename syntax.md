@@ -429,7 +429,7 @@ class Counter {
 }
 
 impl Counter {
-    def inc() Int = value + 1
+    def inc() Int = this.value + 1
 }
 ```
 
@@ -437,7 +437,8 @@ Constructors currently use `def new(...)`.
 
 - `new(...)` declares a constructor
 - `new(...)` inside another constructor delegates to another constructor of the same class
-- `this` is only the instance receiver, for example `this.age`
+- `this` is the instance receiver
+- instance fields must be accessed through `this.`, for example `this.age`
 
 ```txt
 class Person {
@@ -593,7 +594,7 @@ class Amount with Named {
 }
 
 impl Amount {
-    def label() Str = label
+    def label() Str = this.label
 }
 ```
 
@@ -1244,7 +1245,7 @@ Operator declarations use symbolic `def` forms on interfaces, classes, records, 
 ```txt
 def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
 def -() Vec = Vec(-this[0], -this[1])
-def [](index Int) Int = items[index]
+def [](index Int) Int = this.items[index]
 def :+(value Int) Vec = ...
 def ++(other Vec) Vec = ...
 ```

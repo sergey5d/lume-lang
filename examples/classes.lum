@@ -21,7 +21,7 @@ class Profile {
 }
 
 impl Profile {
-    def scoreValue() Int = score
+    def scoreValue() Int = this.score
 }
 
 class HiddenTail {
@@ -31,7 +31,7 @@ class HiddenTail {
 }
 
 impl HiddenTail {
-    def bonusValue() Int = bonus
+    def bonusValue() Int = this.bonus
 }
 
 class A {
@@ -49,9 +49,9 @@ impl A {
 
     def new(maturity Int) = new(maturity - 15, "5")
 
-    def trueAge() Int = age
+    def trueAge() Int = this.age
 
-    def trueName() Str = name
+    def trueName() Str = this.name
 }
 
 class B {
@@ -70,9 +70,9 @@ impl B {
         this.questionable = 1
     }
 
-    def trueAge() Int = age
+    def trueAge() Int = this.age
 
-    def trueName() Str = name
+    def trueName() Str = this.name
 }
 
 def main() Unit {

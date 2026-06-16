@@ -10,7 +10,7 @@ enum Color {
     color Str
     temperature Int
 
-    def isReddish() Bool = temperature % 5 == 0
+    def isReddish() Bool = this.temperature % 5 == 0
 
     case Black {
         color = "xxx"

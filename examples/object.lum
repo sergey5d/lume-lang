@@ -18,7 +18,7 @@ object A {
     # explicit factory method
     def create(str Str) B = B { size = 1 }
 
-    def value() Int = count
+    def value() Int = this.count
 
     def test(a Int) Int {
         return a + this.value()

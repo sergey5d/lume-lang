@@ -15,7 +15,7 @@ impl Vec {
         this.items[1] := right
     }
 
-    def [](index Int) Int = items[index]
+    def [](index Int) Int = this.items[index]
     def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
     def -() Vec = Vec(-this[0], -this[1])
 }

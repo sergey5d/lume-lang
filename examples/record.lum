@@ -35,7 +35,7 @@ impl Amount {
     }
 
     def reportAmount() {
-        OS.println("amount:", amount)
+        OS.println("amount:", this.amount)
     }
 
     def hop() Str = "Hop-hop"

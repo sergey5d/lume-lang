@@ -7,7 +7,7 @@ class Adder {
 }
 
 impl Adder {
-    def add(value Int) Int = amount + value
+    def add(value Int) Int = this.amount + value
 }
 
 def main() Int {

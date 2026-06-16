@@ -815,9 +815,6 @@ impl<'a> Checker<'a> {
                 .collect(),
         );
         self.define_local("this", self_ty, false);
-        for field in &owner.fields {
-            self.define_local(&field.name, field.ty.clone(), field.mutable);
-        }
         for param in &method.params {
             let ty = param
                 .ty
@@ -1708,7 +1705,7 @@ impl<'a> Checker<'a> {
                 } else {
                     self.add_error(
                         "undefined_name",
-                        format!("undefined name '{}'", name),
+                        self.undefined_value_message(name),
                         *span,
                     );
                     Ty::Unknown
@@ -1789,7 +1786,7 @@ impl<'a> Checker<'a> {
                 .unwrap_or_else(|| {
                     self.add_error(
                         "undefined_name",
-                        format!("undefined name '{}'", name),
+                        self.undefined_value_message(name),
                         *span,
                     );
                     Ty::Unknown
@@ -3524,6 +3521,21 @@ impl<'a> Checker<'a> {
             .or_else(|| self.world.lookup_imported_global(self.module, name))
     }
 
+    fn undefined_value_message(&self, name: &str) -> String {
+        if self
+            .current_owner
+            .as_ref()
+            .is_some_and(|owner| owner.fields.iter().any(|field| field.name == name))
+        {
+            format!(
+                "undefined name '{}'; if you meant the field, write 'this.{}'",
+                name, name
+            )
+        } else {
+            format!("undefined name '{}'", name)
+        }
+    }
+
     fn is_builtin_print_call(&self, callee: &Expr) -> bool {
         match callee {
             Expr::Identifier { name, .. } => {
@@ -4905,7 +4917,7 @@ class User {
 }
 
 impl User {
-    def scoreValue() Int = score
+    def scoreValue() Int = this.score
 }
 
 def main() Int {

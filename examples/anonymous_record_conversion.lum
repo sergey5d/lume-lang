@@ -33,7 +33,7 @@ impl SecretBadge {
         this.code = 99
     }
 
-    def codeValue() Int = code
+    def codeValue() Int = this.code
 }
 
 class MixedProfile {
@@ -43,7 +43,7 @@ class MixedProfile {
 }
 
 impl MixedProfile {
-    def scoreValue() Int = score
+    def scoreValue() Int = this.score
 }
 
 def main() Unit {

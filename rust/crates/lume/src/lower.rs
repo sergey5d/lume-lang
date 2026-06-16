@@ -31,7 +31,6 @@ pub fn lower_program(program: &ast::Program) -> LowerResult {
 struct MethodWork {
     id: ir::FunctionId,
     decl: MethodDecl,
-    fields: Vec<ImplicitField>,
     this_local: ir::LocalId,
 }
 
@@ -45,12 +44,6 @@ struct FunctionWork {
 struct GlobalInit {
     id: ir::GlobalId,
     expr: Expr,
-}
-
-#[derive(Debug, Clone)]
-struct ImplicitField {
-    name: String,
-    ty: ir::Type,
 }
 
 struct Lowerer<'a> {
@@ -182,7 +175,6 @@ impl<'a> Lowerer<'a> {
         };
 
         let mut fields = Vec::new();
-        let mut implicit_fields = Vec::new();
         let mut methods_to_attach = Vec::new();
         let mut cases = Vec::new();
 
@@ -202,10 +194,6 @@ impl<'a> Lowerer<'a> {
                         initializer: lower_field_initializer_constant(field.initializer.as_ref()),
                         span: Some(field.span),
                     });
-                    implicit_fields.push(ImplicitField {
-                        name: field.name.clone(),
-                        ty,
-                    });
                 }
                 TypeMember::Method(method) => {
                     let (id, this_local) =
@@ -214,7 +202,6 @@ impl<'a> Lowerer<'a> {
                     self.method_work.push(MethodWork {
                         id,
                         decl: desugar::desugar_method_decl(method),
-                        fields: implicit_fields.clone(),
                         this_local,
                     });
                 }
@@ -278,21 +265,6 @@ impl<'a> Lowerer<'a> {
         else {
             return;
         };
-        let fields = self
-            .program
-            .types
-            .get(type_id.0)
-            .map(|ty| {
-                ty.fields
-                    .iter()
-                    .map(|field| ImplicitField {
-                        name: field.name.clone(),
-                        ty: field.ty.clone(),
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
         let mut method_ids = Vec::new();
         for method in &block.methods {
             let (id, this_local) = self.declare_method_function(type_id, target_name, method);
@@ -300,7 +272,6 @@ impl<'a> Lowerer<'a> {
             self.method_work.push(MethodWork {
                 id,
                 decl: desugar::desugar_method_decl(method),
-                fields: fields.clone(),
                 this_local,
             });
         }
@@ -405,9 +376,6 @@ impl<'a> Lowerer<'a> {
                 &mut self.diagnostics,
             );
             lowerer.bind_existing("this", job.this_local);
-            for field in &job.fields {
-                lowerer.bind_implicit_field(&field.name, field.ty.clone());
-            }
             for (index, param) in job.decl.params.iter().enumerate() {
                 if let Some(local_id) = lowerer.function().params.get(index).copied() {
                     if param.name != "_" {
@@ -479,7 +447,6 @@ struct FunctionLowerer<'a> {
     functions: &'a HashMap<String, ir::FunctionId>,
     case_fields: &'a HashMap<String, Vec<String>>,
     scopes: Vec<HashMap<String, ir::LocalId>>,
-    implicit_fields: HashMap<String, ir::Type>,
     capture_sources: HashMap<String, CaptureSource>,
     capture_locals: HashMap<String, ir::LocalId>,
     closure_captures: Vec<ir::Operand>,
@@ -563,7 +530,6 @@ impl<'a> FunctionLowerer<'a> {
             functions,
             case_fields,
             scopes: vec![HashMap::new()],
-            implicit_fields: HashMap::new(),
             capture_sources: HashMap::new(),
             capture_locals: HashMap::new(),
             closure_captures: Vec::new(),
@@ -583,10 +549,8 @@ impl<'a> FunctionLowerer<'a> {
     fn with_capture_sources(
         mut self,
         capture_sources: HashMap<String, CaptureSource>,
-        implicit_fields: HashMap<String, ir::Type>,
     ) -> Self {
         self.capture_sources = capture_sources;
-        self.implicit_fields = implicit_fields;
         self
     }
 
@@ -633,10 +597,6 @@ impl<'a> FunctionLowerer<'a> {
         if name == "this" {
             self.this_local = Some(local);
         }
-    }
-
-    fn bind_implicit_field(&mut self, name: &str, ty: ir::Type) {
-        self.implicit_fields.insert(name.to_string(), ty);
     }
 
     fn lower_callable_body(&mut self, body: &CallableBody, span: Span) {
@@ -917,7 +877,6 @@ impl<'a> FunctionLowerer<'a> {
         }
         let function_id = self.program.add_function(nested);
         let capture_sources = self.visible_capture_sources(Some(&function.name));
-        let implicit_fields = self.implicit_fields.clone();
         let captures = {
             let mut lowerer = FunctionLowerer::new(
                 self.program,
@@ -927,7 +886,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.case_fields,
                 self.diagnostics,
             )
-            .with_capture_sources(capture_sources, implicit_fields);
+            .with_capture_sources(capture_sources);
             for (index, param) in function.params.iter().enumerate() {
                 if let Some(local_id) = lowerer.function().params.get(index).copied() {
                     if param.name != "_" {
@@ -970,7 +929,6 @@ impl<'a> FunctionLowerer<'a> {
         }
         let function_id = self.program.add_function(nested);
         let capture_sources = self.visible_capture_sources(None);
-        let implicit_fields = self.implicit_fields.clone();
         let captures = {
             let mut lowerer = FunctionLowerer::new(
                 self.program,
@@ -980,7 +938,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.case_fields,
                 self.diagnostics,
             )
-            .with_capture_sources(capture_sources, implicit_fields);
+            .with_capture_sources(capture_sources);
             for (index, param) in params.iter().enumerate() {
                 if let Some(local_id) = lowerer.function().params.get(index).copied() {
                     if param.name != "_" {
@@ -1047,7 +1005,6 @@ impl<'a> FunctionLowerer<'a> {
         }
         let function_id = self.program.add_function(nested);
         let capture_sources = self.visible_capture_sources(None);
-        let implicit_fields = self.implicit_fields.clone();
         let captures = {
             let mut lowerer = FunctionLowerer::new(
                 self.program,
@@ -1057,7 +1014,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.case_fields,
                 self.diagnostics,
             )
-            .with_capture_sources(capture_sources, implicit_fields);
+            .with_capture_sources(capture_sources);
             for (index, param) in params.iter().enumerate() {
                 if let Some(local_id) = lowerer.function().params.get(index).copied() {
                     if param.name != "_" {
@@ -3274,21 +3231,6 @@ impl<'a> FunctionLowerer<'a> {
         if let Some(local) = self.capture_local(name) {
             return Some(ir::Place::Local(local));
         }
-        if let (Some(this_local), Some(_)) = (self.this_local, self.implicit_fields.get(name)) {
-            return Some(ir::Place::Field {
-                base: Box::new(ir::Operand::Copy(Box::new(ir::Place::Local(this_local)))),
-                name: name.to_string(),
-            });
-        }
-        if self.implicit_fields.contains_key(name) {
-            if let Some(this_local) = self.capture_local("this") {
-                self.this_local = Some(this_local);
-                return Some(ir::Place::Field {
-                    base: Box::new(ir::Operand::Copy(Box::new(ir::Place::Local(this_local)))),
-                    name: name.to_string(),
-                });
-            }
-        }
         None
     }
 
@@ -4347,7 +4289,7 @@ mod tests {
             }
 
             impl Counter {
-                def bump(delta Int) Int = value + delta
+                def bump(delta Int) Int = this.value + delta
             }
             "#,
         );

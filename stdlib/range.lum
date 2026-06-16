@@ -9,7 +9,7 @@ class IntRange with Iterable[Int] {
 }
 
 impl IntRange {
-    def iterator() Iterator[Int] = RangeIterator(start = start, end = end, step = step)
+    def iterator() Iterator[Int] = RangeIterator(start = this.start, end = this.end, step = this.step)
 
     def zip[X](other List[X]) List[(Int, X)] {
         out List[(Int, X)] = []

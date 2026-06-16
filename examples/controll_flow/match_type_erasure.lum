@@ -15,7 +15,7 @@ class Worker with Named {
 }
 
 impl Worker {
-    def label() Str = name
+    def label() Str = this.name
 }
 
 class Amount {

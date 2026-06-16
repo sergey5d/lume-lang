@@ -221,16 +221,12 @@ struct TypeInfo {
 
 #[derive(Debug, Clone, Copy)]
 struct SymbolicField {
-    span: crate::source::Span,
-    mutable: bool,
     name: &'static str,
 }
 
 impl SymbolicField {
-    fn from_binding(name: &str, span: crate::source::Span, mutable: bool) -> Self {
+    fn from_binding(name: &str) -> Self {
         Self {
-            span,
-            mutable,
             name: Box::leak(name.to_string().into_boxed_str()),
         }
     }
@@ -685,11 +681,7 @@ fn summarize_type(decl: &TypeDecl) -> TypeInfo {
     for member in &decl.members {
         match member {
             TypeMember::Field(field) => {
-                fields.push(SymbolicField::from_binding(
-                    field.name.as_str(),
-                    field.span,
-                    field.mutable,
-                ));
+                fields.push(SymbolicField::from_binding(field.name.as_str()));
             }
             TypeMember::Method(method) => {
                 methods.insert(
@@ -733,6 +725,7 @@ struct Resolver<'a> {
     imported_types: HashMap<String, TypeInfo>,
     imported_objects: HashMap<String, TypeInfo>,
     modules_by_alias: HashMap<String, ModuleNamespace>,
+    field_hint_scopes: Vec<HashSet<String>>,
     loop_depth: usize,
     current_constructor: bool,
 }
@@ -761,6 +754,7 @@ impl<'a> Resolver<'a> {
             imported_types: HashMap::new(),
             imported_objects: HashMap::new(),
             modules_by_alias: HashMap::new(),
+            field_hint_scopes: Vec::new(),
             loop_depth: 0,
             current_constructor: false,
         }
@@ -1019,7 +1013,12 @@ impl<'a> Resolver<'a> {
         }
 
         self.push_scope();
-        self.define_implicit_this_and_fields(decl);
+        self.push_field_hints(
+            decl.members.iter().filter_map(|member| match member {
+                TypeMember::Field(field) => Some(field.name.as_str()),
+                _ => None,
+            }),
+        );
         if decl.kind == TypeKind::Enum {
             for member in &decl.members {
                 if let TypeMember::Case(case) = member {
@@ -1056,6 +1055,7 @@ impl<'a> Resolver<'a> {
                 TypeMember::Field(_) => {}
             }
         }
+        self.pop_field_hints();
         self.pop_scope();
         self.pop_type_scope();
     }
@@ -1073,22 +1073,15 @@ impl<'a> Resolver<'a> {
         });
 
         self.push_scope();
-        self.define_implicit_this(target_name.map(|_| block.span));
-        if let Some(info) = &target_fields {
-            for field in &info.fields {
-                self.define_value(
-                    field.name,
-                    field.span,
-                    field.mutable,
-                    "duplicate_binding",
-                    format!("duplicate binding '{}'", field.name),
-                    true,
-                );
-            }
-        }
+        self.push_field_hints(
+            target_fields
+                .iter()
+                .flat_map(|info| info.fields.iter().map(|field| field.name)),
+        );
         for method in &block.methods {
             self.resolve_method(method);
         }
+        self.pop_field_hints();
         self.pop_scope();
         self.pop_type_scope();
     }
@@ -1132,22 +1125,6 @@ impl<'a> Resolver<'a> {
                 }
             }
             other => self.resolve_type_ref(Some(other)),
-        }
-    }
-
-    fn define_implicit_this_and_fields(&mut self, decl: &TypeDecl) {
-        self.define_implicit_this(Some(decl.span));
-        for member in &decl.members {
-            if let TypeMember::Field(field) = member {
-                self.define_value(
-                    field.name.as_str(),
-                    field.span,
-                    field.mutable,
-                    "duplicate_binding",
-                    format!("duplicate binding '{}'", field.name),
-                    true,
-                );
-            }
         }
     }
 
@@ -1461,7 +1438,7 @@ impl<'a> Resolver<'a> {
                 } else {
                     self.add_error(
                         "undefined_name",
-                        format!("undefined name '{}'", name),
+                        self.undefined_value_message(name),
                         *span,
                     );
                 }
@@ -1489,7 +1466,7 @@ impl<'a> Resolver<'a> {
                 if !self.is_name_defined(name) {
                     self.add_error(
                         "undefined_name",
-                        format!("undefined name '{}'", name),
+                        self.undefined_value_message(name),
                         *span,
                     );
                 }
@@ -1958,6 +1935,31 @@ impl<'a> Resolver<'a> {
             || self.modules_by_alias.contains_key(name)
             || self.ambient.values.contains(name)
             || self.ambient.types.contains_key(name)
+    }
+
+    fn push_field_hints<'b>(&mut self, fields: impl Iterator<Item = &'b str>) {
+        self.field_hint_scopes
+            .push(fields.map(|name| name.to_string()).collect());
+    }
+
+    fn pop_field_hints(&mut self) {
+        self.field_hint_scopes.pop();
+    }
+
+    fn undefined_value_message(&self, name: &str) -> String {
+        if self
+            .field_hint_scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.contains(name))
+        {
+            format!(
+                "undefined name '{}'; if you meant the field, write 'this.{}'",
+                name, name
+            )
+        } else {
+            format!("undefined name '{}'", name)
+        }
     }
 
     fn lookup_type(&self, name: &str) -> Option<&TypeInfo> {

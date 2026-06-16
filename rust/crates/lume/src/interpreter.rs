@@ -4286,7 +4286,7 @@ mod tests {
                     this.items[1] := right
                 }
 
-                def [](index Int) Int = items[index]
+                def [](index Int) Int = this.items[index]
                 def :+(value Int) Vec = Vec(this[0] + value, this[1] + value)
                 def :-(value Int) Vec = Vec(this[0] - value, this[1] - value)
                 def --(other Vec) Vec = Vec(this[0] - other[0], this[1] - other[1])
@@ -4718,7 +4718,7 @@ $name
                 color Str
                 temperature Int
 
-                def isReddish() Bool = temperature % 5 == 0
+                def isReddish() Bool = this.temperature % 5 == 0
 
                 case Black {
                     color = "xxx"

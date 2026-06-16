@@ -45,13 +45,13 @@ impl Cursor {
         this.seek(Location { -1, -1 })
     }
 
-    def isValid() Bool = valid
+    def isValid() Bool = this.valid
 
-    def get() Location = current
+    def get() Location = this.current
 
     def advance() Unit {
-        if valid {
-            this.seek(Location { current.docId, current.position + 1 })
+        if this.valid {
+            this.seek(Location { this.current.docId, this.current.position + 1 })
         }
     }
 
@@ -63,8 +63,8 @@ impl Cursor {
             docId := location.docId
         }
 
-        while docId < documents.size() && !found {
-            docTerms = documents[docId].split(" ")
+        while docId < this.documents.size() && !found {
+            docTerms = this.documents[docId].split(" ")
             var pos Int = 0
 
             if docId == location.docId && location.position >= 0 {
@@ -72,7 +72,7 @@ impl Cursor {
             }
 
             while pos < docTerms.size() && !found {
-                if docTerms[pos] == term {
+                if docTerms[pos] == this.term {
                     this.current := Location { docId, pos }
                     this.valid := true
                     found := true

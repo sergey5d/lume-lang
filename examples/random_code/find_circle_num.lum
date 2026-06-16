@@ -22,27 +22,27 @@ impl DisjointSet {
 
     def findParent(v Int) Int {
         var current Int = v
-        while arr[current] != current {
-            current := arr[current]
+        while this.arr[current] != current {
+            current := this.arr[current]
         }
         return current
     }
 
     def union(v1 Int, v2 Int) {
-        v1SelfParent = arr[v1] == v1
-        v2SelfParent = arr[v2] == v2
+        v1SelfParent = this.arr[v1] == v1
+        v2SelfParent = this.arr[v2] == v2
 
         if v1SelfParent && v2SelfParent {
-            arr[v2] := v1
+            this.arr[v2] := v1
         } else if v1SelfParent {
-            arr[v1] := arr[v2]
+            this.arr[v1] := this.arr[v2]
         } else if v2SelfParent {
-            arr[v2] := arr[v1]
+            this.arr[v2] := this.arr[v1]
         } else {
             v1Parent = this.findParent(v1)
             v2Parent = this.findParent(v2)
             if v1Parent != v2Parent {
-                arr[v1Parent] := v2Parent
+                this.arr[v1Parent] := v2Parent
             }
         }
     }
