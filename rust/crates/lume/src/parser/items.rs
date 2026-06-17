@@ -13,7 +13,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_import_decl(&mut self) -> Option<ImportDecl> {
         let start = self.previous_span();
-        let (segments, mut span) = self.parse_import_segments("expected import path")?;
+        let (segments, mut span) = self.parse_import_segments("expected use path")?;
         let mut import = ImportDecl {
             path: String::new(),
             object_name: None,
@@ -41,8 +41,8 @@ impl<'a> Parser<'a> {
                         span = span.cover(symbols_span);
                     }
                     TokenKind::Identifier => {
-                        let (name, name_span) = self
-                            .expect_identifier("expected import symbol, '*', or '{' after '/'")?;
+                        let (name, name_span) =
+                            self.expect_identifier("expected use symbol, '*', or '{' after '/'")?;
                         if self.match_token(TokenKind::Slash) {
                             import.path = segments.join("/");
                             import.object_name = Some(name);
@@ -56,7 +56,7 @@ impl<'a> Parser<'a> {
                             } else {
                                 self.error_at_current(
                                     "unexpected_token",
-                                    "expected object member import '*', or '{'",
+                                    "expected object member use '*', or '{'",
                                 );
                                 return None;
                             }
@@ -81,7 +81,7 @@ impl<'a> Parser<'a> {
                     _ => {
                         self.error_at_current(
                             "unexpected_token",
-                            "expected import symbol, '*', or '{' after '/'",
+                            "expected use symbol, '*', or '{' after '/'",
                         );
                         return None;
                     }
@@ -255,7 +255,7 @@ impl<'a> Parser<'a> {
         let open = self.previous_span();
         let mut symbols = Vec::new();
         loop {
-            let (name, name_span) = self.expect_identifier("expected import symbol")?;
+            let (name, name_span) = self.expect_identifier("expected use symbol")?;
             let mut symbol = ImportSymbol {
                 name,
                 alias: None,
@@ -271,7 +271,7 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        let end = self.consume(TokenKind::RBrace, "expected '}' after import symbol list")?;
+        let end = self.consume(TokenKind::RBrace, "expected '}' after use symbol list")?;
         Some((symbols, open.cover(end)))
     }
 

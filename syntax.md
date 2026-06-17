@@ -98,36 +98,36 @@ OS.stderr.println("oops")
 
 `OS.stdout` and `OS.stderr` implement `Printer`.
 
-## Imports
+## Use
 
-Supported import forms:
+Supported use forms:
 
 ```txt
-import module/sub
-import module/sub/*
-import module/sub/A
-import module/sub/A as B
-import module/sub/{A, B as D, C}
+use module/sub
+use module/sub/*
+use module/sub/A
+use module/sub/A as B
+use module/sub/{A, B as D, C}
 ```
 
 Meaning:
 
-- `import module/sub`
+- `use module/sub`
   qualified access through the module name, for example `sub.A`
-- `import module/sub/*`
-  import all public symbols unqualified
-- `import module/sub/A`
-  import one symbol unqualified
-- `import module/sub/A as B`
-  import one symbol with a local alias
-- `import module/sub/{A, B as D, C}`
-  import a selected symbol set
-- `import module/sub/Object/*`
-  import all visible singleton methods unqualified
-- `import module/sub/Object/{printLn as printN, print}`
-  import selected visible singleton methods from a singleton
+- `use module/sub/*`
+  use all public symbols unqualified
+- `use module/sub/A`
+  use one symbol unqualified
+- `use module/sub/A as B`
+  use one symbol with a local alias
+- `use module/sub/{A, B as D, C}`
+  use a selected symbol set
+- `use module/sub/Object/*`
+  use all visible singleton methods unqualified
+- `use module/sub/Object/{printLn as printN, print}`
+  use selected visible singleton methods from a singleton
 
-Built-in `OS` methods are imported implicitly in every file, so `print(...)`, `println(...)`, `printf(...)`, and `panic(...)` work without writing `import OS/*`. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
+Built-in `OS` methods are available implicitly in every file, so `print(...)`, `println(...)`, `printf(...)`, and `panic(...)` work without writing `use OS/*`. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
 
 ## Top-Level Declarations
 

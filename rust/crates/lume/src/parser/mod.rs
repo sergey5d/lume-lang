@@ -61,7 +61,7 @@ impl<'a> Parser<'a> {
 
         self.skip_newlines();
         let mut imports = Vec::new();
-        while self.match_keyword(Keyword::Import) {
+        while self.match_keyword(Keyword::Use) {
             if let Some(import) = self.parse_import_decl() {
                 imports.push(import);
             }

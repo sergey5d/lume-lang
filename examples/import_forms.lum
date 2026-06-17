@@ -9,13 +9,13 @@
 
 module app
 
-import model/things
-import model/things/A
-import model/things/A as AliasA
-import model/things/{B as AliasB, Named}
-import model/things/*
-import model/things/C/*
-import model/things/C/{printLn as printN, print}
+use model/things
+use model/things/A
+use model/things/A as AliasA
+use model/things/{B as AliasB, Named}
+use model/things/*
+use model/things/C/*
+use model/things/C/{printLn as printN, print}
 
 def main() Int {
     value A = A {}

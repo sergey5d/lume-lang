@@ -3,8 +3,8 @@
 # 36
 
 module app
-import util
-import model/user
+use util
+use model/user
 
 def main() Unit {
     person = user.Person { name = "Ada", age = 36 }

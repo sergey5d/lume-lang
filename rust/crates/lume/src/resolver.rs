@@ -251,7 +251,7 @@ pub(crate) fn load_module(
         return Ok(abs);
     }
     if !loading.insert(abs.clone()) {
-        return Err(format!("import cycle detected at {}", abs.display()));
+        return Err(format!("use cycle detected at {}", abs.display()));
     }
 
     let program = parse_program_from_path(&abs)?;
@@ -282,7 +282,7 @@ pub(crate) fn load_module(
         let child = graph
             .modules
             .get(&child_abs)
-            .ok_or_else(|| format!("loaded import missing {}", child_abs.display()))?;
+            .ok_or_else(|| format!("loaded module missing {}", child_abs.display()))?;
 
         if !module.dependencies.contains(&child_abs) {
             module.dependencies.push(child_abs.clone());
@@ -292,21 +292,21 @@ pub(crate) fn load_module(
             if let Some(existing) = import_paths.get(&alias) {
                 if existing != &import.path {
                     return Err(format!(
-                        "duplicate import alias '{}' for paths '{}' and '{}'",
+                        "duplicate use alias '{}' for paths '{}' and '{}'",
                         alias, existing, import.path
                     ));
                 }
             }
             if module.symbol_imports.contains_key(&alias) {
                 return Err(format!(
-                    "module import alias '{}' conflicts with imported symbol",
+                    "module use alias '{}' conflicts with used symbol",
                     alias
                 ));
             }
             if let Some(child_module) = child.program.module.as_ref() {
                 if child_module.name != alias {
                     return Err(format!(
-                        "import '{}' expected module '{}', got '{}'",
+                        "use '{}' expected module '{}', got '{}'",
                         import.path, alias, child_module.name
                     ));
                 }
@@ -342,7 +342,7 @@ pub(crate) fn load_module(
                 )
                 .ok_or_else(|| {
                     format!(
-                        "import '{}' has no visible member '{}' on object '{}'",
+                        "use '{}' has no visible member '{}' on object '{}'",
                         import.path, symbol.name, object_name
                     )
                 })?
@@ -350,7 +350,7 @@ pub(crate) fn load_module(
                 resolve_imported_symbol(child, symbol.name.as_str(), same_module).ok_or_else(
                     || {
                         format!(
-                            "import '{}' has no public symbol '{}'",
+                            "use '{}' has no public symbol '{}'",
                             import.path, symbol.name
                         )
                     },
@@ -360,7 +360,7 @@ pub(crate) fn load_module(
             let local_name = symbol.alias.clone().unwrap_or(symbol.name.clone());
             if module.imports.contains_key(&local_name) {
                 return Err(format!(
-                    "imported symbol '{}' conflicts with module import alias",
+                    "used symbol '{}' conflicts with module use alias",
                     local_name
                 ));
             }
@@ -369,7 +369,7 @@ pub(crate) fn load_module(
                     || existing.original_name != resolved.original_name
                     || existing.object_name != resolved.object_name
                 {
-                    return Err(format!("duplicate imported symbol '{}'", local_name));
+                    return Err(format!("duplicate used symbol '{}'", local_name));
                 }
             }
             module.symbol_imports.insert(local_name, resolved);

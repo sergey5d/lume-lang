@@ -6,7 +6,7 @@
 
 use crate::source::Span;
 
-/// A parsed source file with an optional module header, imports, and top-level items.
+/// A parsed source file with an optional module header, use declarations, and top-level items.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Program {
     pub module: Option<ModuleDecl>,
@@ -22,7 +22,7 @@ pub struct ModuleDecl {
     pub span: Span,
 }
 
-/// A single `import ...` declaration.
+/// A single `use ...` declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportDecl {
     pub path: String,
@@ -32,7 +32,7 @@ pub struct ImportDecl {
     pub span: Span,
 }
 
-/// One imported symbol inside a selective import list.
+/// One used symbol inside a selective use list.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportSymbol {
     pub name: String,

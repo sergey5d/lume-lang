@@ -4,8 +4,8 @@
 
 module app
 
-import model/pubdemo
-import model/pubdemo/{prefix}
+use model/pubdemo
+use model/pubdemo/{prefix}
 
 def main() Unit {
     OS.println(pubdemo.greet("Ada"))

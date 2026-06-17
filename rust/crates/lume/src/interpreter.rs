@@ -5483,7 +5483,7 @@ $name
     #[test]
     fn run_path_executes_plain_module_imports() {
         let path = repo_root().join("examples/imports.lum");
-        let run = run_path(path, None).expect("run imports");
+        let run = run_path(path, None).expect("run uses");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "hello, Ada\n36\n");
     }
@@ -5491,7 +5491,7 @@ $name
     #[test]
     fn run_path_executes_symbol_and_object_import_forms() {
         let path = repo_root().join("examples/import_forms.lum");
-        let run = run_path(path, None).expect("run import forms");
+        let run = run_path(path, None).expect("run use forms");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "A\nA\nB\n11\n112\n110\n");
         assert_eq!(run.return_value.as_deref(), Some("0"));
@@ -5500,7 +5500,7 @@ $name
     #[test]
     fn run_path_executes_public_imports_across_modules() {
         let path = repo_root().join("examples/pub_imports.lum");
-        let run = run_path(path, None).expect("run pub imports");
+        let run = run_path(path, None).expect("run public uses");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "hello, Ada\nhello!\n");
     }

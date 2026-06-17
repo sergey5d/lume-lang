@@ -80,17 +80,17 @@ Finalized policy:
 
 ### 6. Module / Visibility Polish
 
-Current module/import support is usable.
+Current module/use support is usable.
 
 Settled direction:
 - top-level bindings are private by default
 - top-level functions are private by default
 - exported top-level functions and exported immutable module bindings use explicit `public`
-- mutable module state should not be exposed directly as imported variables
+- mutable module state should not be exposed directly as used variables
 
 Still open:
-- whether object members should ever be importable directly, for example importing `OS.println`-style names without importing the whole object surface
-- if both a wide module import and a renamed selective import target the same module, the wide import should come first and the `as` import should come after it
+- whether object members should ever be usable directly, for example using `OS.println`-style names without using the whole object surface
+- if both a wide module use and a renamed selective use target the same module, the wide use should come first and the `as` use should come after it
 
 ## Longer-OS Ideas
 

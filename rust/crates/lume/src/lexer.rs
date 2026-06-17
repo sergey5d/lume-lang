@@ -19,7 +19,6 @@ pub enum Keyword {
     Hidden,
     If,
     Impl,
-    Import,
     Interface,
     Is,
     Let,
@@ -34,6 +33,7 @@ pub enum Keyword {
     Then,
     True,
     Try,
+    Use,
     Var,
     While,
     With,
@@ -299,7 +299,7 @@ impl<'a> Lexer<'a> {
             "hidden" => TokenKind::Keyword(Keyword::Hidden),
             "if" => TokenKind::Keyword(Keyword::If),
             "impl" => TokenKind::Keyword(Keyword::Impl),
-            "import" => TokenKind::Keyword(Keyword::Import),
+            "use" => TokenKind::Keyword(Keyword::Use),
             "interface" => TokenKind::Keyword(Keyword::Interface),
             "is" => TokenKind::Keyword(Keyword::Is),
             "let" => TokenKind::Keyword(Keyword::Let),
@@ -524,7 +524,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "import model/things/{A as Alias}\nif true then 1 else 0\nitems = for value <- values yield value :+ 1 ++ more\nspread Str... = \"\"\"\nhello\n\"\"\"\npi = 1.25\n",
+            "use model/things/{A as Alias}\nif true then 1 else 0\nitems = for value <- values yield value :+ 1 ++ more\nspread Str... = \"\"\"\nhello\n\"\"\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
