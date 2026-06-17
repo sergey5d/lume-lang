@@ -601,6 +601,37 @@ def run(value Worker) Int {
 }
 
 #[test]
+fn parses_inline_let_else_return_body() {
+    let result = parse(
+        r#"
+def run(value Option[Int]) Unit {
+    let Some(item) = value else return ()
+    OS.println(item)
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => match &block.statements[0] {
+            Stmt::LetElse(stmt) => {
+                assert_eq!(stmt.else_block.statements.len(), 1);
+                match &stmt.else_block.statements[0] {
+                    Stmt::Return(_) => {}
+                    other => panic!("expected inline return body, got {other:#?}"),
+                }
+            }
+            other => panic!("expected let-else statement, got {other:#?}"),
+        },
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_plain_let_pattern_binding() {
     let result = parse(
         r#"

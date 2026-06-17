@@ -9,8 +9,9 @@ use crate::{
     ast::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
         ElseBranch, ElseExprBranch, Expr, ForBinding, FunctionDecl, IfConditionClause, IfStmt,
-        ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase, MatchCaseBody, MethodDecl, Pattern,
-        PatternBindingStmt, Program, Stmt, TypeDecl, TypeKind, TypeMember, TypeRef, Visibility,
+        ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase, MatchCaseBody, MatchStmt,
+        MethodDecl, Pattern, PatternBindingStmt, Program, Stmt, TypeDecl, TypeKind, TypeMember,
+        TypeRef, Visibility,
     },
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, collect_module_order,
@@ -82,6 +83,7 @@ pub fn check_path(path: impl AsRef<Path>) -> Result<PathCheckResult, String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Ty {
     Unknown,
+    Never,
     Named(String, Vec<Ty>),
     Tuple(Vec<Ty>),
     Record(Vec<(String, Ty)>),
@@ -92,6 +94,10 @@ enum Ty {
 impl Ty {
     fn named(name: impl Into<String>) -> Self {
         Self::Named(name.into(), Vec::new())
+    }
+
+    fn never() -> Self {
+        Self::Never
     }
 
     fn list(item: Ty) -> Self {
@@ -125,6 +131,7 @@ impl Ty {
     fn describe(&self) -> String {
         match self {
             Ty::Unknown => "<unknown>".to_string(),
+            Ty::Never => "Never".to_string(),
             Ty::Named(name, args) if args.is_empty() => name.clone(),
             Ty::Named(name, args) => format!(
                 "{}[{}]",
@@ -1286,7 +1293,14 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        self.check_block_against(&stmt.else_block, &self.current_return.clone());
+        self.check_block(&stmt.else_block);
+        if !self.block_guarantees_control_exit(&stmt.else_block) {
+            self.add_error(
+                "non_diverging_let_else",
+                "let-else fallback must exit control flow with 'return', 'break', 'continue', or a call returning Never",
+                stmt.else_block.span,
+            );
+        }
         if !stmt.clauses.is_empty() {
             for clause in &stmt.clauses {
                 let value_ty = self.check_expr(&clause.value);
@@ -1308,6 +1322,73 @@ impl<'a> Checker<'a> {
         }
         let value_ty = self.check_expr(&stmt.value);
         self.bind_pattern(&stmt.pattern, &value_ty);
+    }
+
+    fn block_guarantees_control_exit(&self, block: &Block) -> bool {
+        block
+            .statements
+            .iter()
+            .any(|statement| self.stmt_guarantees_control_exit(statement))
+    }
+
+    fn stmt_guarantees_control_exit(&self, stmt: &Stmt) -> bool {
+        match stmt {
+            Stmt::Return(_) | Stmt::Break(_) | Stmt::Continue(_) => true,
+            Stmt::Expr(expr_stmt) => self.expr_guarantees_control_exit(&expr_stmt.expr),
+            Stmt::If(stmt) => self.if_stmt_guarantees_control_exit(stmt),
+            Stmt::Match(stmt) => self.match_stmt_guarantees_control_exit(stmt),
+            _ => false,
+        }
+    }
+
+    fn expr_guarantees_control_exit(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Group { inner, .. } => self.expr_guarantees_control_exit(inner),
+            Expr::Call { callee, args, .. } => self.call_returns_never(callee, args),
+            _ => false,
+        }
+    }
+
+    fn call_returns_never(&self, callee: &Expr, args: &[crate::ast::CallArg]) -> bool {
+        if self.is_builtin_panic_call(callee) {
+            return true;
+        }
+
+        if let Some((_, ret)) = self.callable_signature_for_args_probe(callee, args) {
+            return matches!(ret, Ty::Never);
+        }
+
+        matches!(self.probe_expr_type(callee), Ty::Function(_, ret) if matches!(*ret, Ty::Never))
+    }
+
+    fn if_stmt_guarantees_control_exit(&self, stmt: &IfStmt) -> bool {
+        self.block_guarantees_control_exit(&stmt.then_block)
+            && stmt
+                .else_branch
+                .as_ref()
+                .is_some_and(|branch| self.else_branch_guarantees_control_exit(branch))
+    }
+
+    fn else_branch_guarantees_control_exit(&self, branch: &ElseBranch) -> bool {
+        match branch {
+            ElseBranch::If(stmt) => self.if_stmt_guarantees_control_exit(stmt),
+            ElseBranch::Block(block) => self.block_guarantees_control_exit(block),
+        }
+    }
+
+    fn match_stmt_guarantees_control_exit(&self, stmt: &MatchStmt) -> bool {
+        !stmt.partial
+            && stmt
+                .cases
+                .iter()
+                .all(|case| self.match_case_body_guarantees_control_exit(&case.body))
+    }
+
+    fn match_case_body_guarantees_control_exit(&self, body: &MatchCaseBody) -> bool {
+        match body {
+            MatchCaseBody::Block(block) => self.block_guarantees_control_exit(block),
+            MatchCaseBody::Expr(_) => false,
+        }
     }
 
     fn require_refutable_if_pattern(
@@ -2202,6 +2283,12 @@ impl<'a> Checker<'a> {
         uses_brace_syntax: bool,
         span: crate::source::Span,
     ) -> Ty {
+        if self.is_builtin_panic_call(callee) {
+            for arg in args {
+                self.check_expr(&arg.value);
+            }
+            return Ty::never();
+        }
         if self.is_builtin_print_call(callee) {
             for arg in args {
                 self.check_expr(&arg.value);
@@ -3041,6 +3128,55 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn callable_signature_for_args_probe(
+        &self,
+        callee: &Expr,
+        args: &[crate::ast::CallArg],
+    ) -> Option<(Vec<ParamSig>, Ty)> {
+        match callee {
+            Expr::Identifier { name, .. } => {
+                let functions = self.lookup_functions(name)?;
+                let sig = self
+                    .choose_overload(&functions, args)
+                    .or_else(|| functions.first())?
+                    .clone();
+                Some((sig.params, sig.ret))
+            }
+            Expr::Member { receiver, name, .. } => {
+                if let Some((module, member)) =
+                    module_alias_and_member(callee).and_then(|(alias, member)| {
+                        self.world
+                            .lookup_module_alias(self.module, &alias)
+                            .map(|module| (module, member))
+                    })
+                {
+                    if let Some(functions) = module.functions.get(&member) {
+                        let sig = self
+                            .choose_overload(functions, args)
+                            .or_else(|| functions.first())?
+                            .clone();
+                        return Some((sig.params, sig.ret));
+                    }
+                }
+                if let Some(sigs) = self.static_method_sigs(receiver, name) {
+                    let sig = self
+                        .choose_overload(&sigs, args)
+                        .or_else(|| sigs.first())?
+                        .clone();
+                    return Some((sig.params, sig.ret));
+                }
+                let receiver_ty = self.probe_expr_type(receiver);
+                let methods = self.member_method_sigs(&receiver_ty, name)?;
+                let method = self
+                    .choose_overload(&methods, args)
+                    .or_else(|| methods.first())?
+                    .clone();
+                Some((method.params, method.ret))
+            }
+            _ => None,
+        }
+    }
+
     fn static_member_value_type(&self, receiver: &Expr, name: &str) -> Option<Ty> {
         let Expr::Identifier {
             name: type_name, ..
@@ -3655,13 +3791,18 @@ impl<'a> Checker<'a> {
 
     fn is_builtin_print_call(&self, callee: &Expr) -> bool {
         match callee {
-            Expr::Identifier { name, .. } => {
-                matches!(name.as_str(), "print" | "println" | "printf" | "panic")
-            }
+            Expr::Identifier { name, .. } => matches!(name.as_str(), "print" | "println" | "printf"),
             Expr::Member { receiver, name, .. } => {
-                matches!(name.as_str(), "print" | "println" | "printf" | "panic")
-                    && path_starts_with_os(receiver)
+                matches!(name.as_str(), "print" | "println" | "printf") && path_starts_with_os(receiver)
             }
+            _ => false,
+        }
+    }
+
+    fn is_builtin_panic_call(&self, callee: &Expr) -> bool {
+        match callee {
+            Expr::Identifier { name, .. } => name == "panic",
+            Expr::Member { receiver, name, .. } => name == "panic" && path_starts_with_os(receiver),
             _ => false,
         }
     }
@@ -4034,6 +4175,9 @@ impl<'a> Checker<'a> {
         if self.is_type_param(name) {
             return Ty::TypeParam(name.to_string());
         }
+        if name == "Never" && args.is_empty() {
+            return Ty::Never;
+        }
         if let Some(sig) = self.lookup_any_type(name) {
             return Ty::Named(sig.name.clone(), args);
         }
@@ -4337,6 +4481,8 @@ fn convert_type_ref(reference: &TypeRef, type_params: &HashSet<String>) -> Ty {
         TypeRef::Named { name, args, .. } => {
             if type_params.contains(name) {
                 Ty::TypeParam(name.clone())
+            } else if name == "Never" && args.is_empty() {
+                Ty::Never
             } else {
                 Ty::Named(
                     name.clone(),
@@ -4620,6 +4766,7 @@ fn infer_type_subst(expected: &Ty, actual: &Ty, subst: &mut HashMap<String, Ty>)
                 infer_type_subst(expected_ret, actual_ret, subst);
             }
         }
+        Ty::Never => {}
         Ty::Unknown => {}
     }
 }
@@ -4627,6 +4774,7 @@ fn infer_type_subst(expected: &Ty, actual: &Ty, subst: &mut HashMap<String, Ty>)
 fn substitute_type(ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
     match ty {
         Ty::TypeParam(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        Ty::Never => Ty::Never,
         Ty::Named(name, args) => Ty::Named(
             name.clone(),
             args.iter().map(|arg| substitute_type(arg, subst)).collect(),
@@ -4657,6 +4805,7 @@ fn substitute_type(ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
 fn materialize_type(ty: &Ty) -> Ty {
     match ty {
         Ty::TypeParam(_) => Ty::Unknown,
+        Ty::Never => Ty::Never,
         Ty::Named(name, args) => {
             Ty::Named(name.clone(), args.iter().map(materialize_type).collect())
         }
@@ -4679,10 +4828,14 @@ fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
     if matches!(actual, Ty::Unknown) || matches!(expected, Ty::Unknown) {
         return true;
     }
+    if matches!(actual, Ty::Never) {
+        return true;
+    }
     if actual == expected {
         return true;
     }
     match (actual, expected) {
+        (Ty::Never, Ty::Never) => true,
         (Ty::TypeParam(left), Ty::TypeParam(right)) => left == right,
         (Ty::Named(left, left_args), Ty::Named(right, right_args)) => {
             left == right
@@ -5384,6 +5537,79 @@ def main() Unit {
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn rejects_non_diverging_let_else() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    value Option[Int] = Some(1)
+    let Some(item) = value else {
+        ()
+    }
+    OS.println(item)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "non_diverging_let_else"
+                    && diag
+                        .message
+                        .contains("must exit control flow with 'return', 'break', 'continue', or a call returning Never")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_diverging_let_else_with_continue() {
+        let program = parse_inline(
+            r#"
+enum MaybeInt {
+    case NoneX
+    case SomeX {
+        value Int
+    }
+}
+
+def main() Unit {
+    values List[MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX]
+    for value <- values {
+        let SomeX(item) = value else continue
+        OS.println(item)
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_let_else_with_never_call_fallback() {
+        let program = parse_inline(
+            r#"
+enum MaybeInt {
+    case NoneX
+    case SomeX {
+        value Int
+    }
+}
+
+def fail() Never = panic("boom")
+
+def main(value MaybeInt) Unit {
+    let SomeX(item) = value else fail()
+    OS.println(item)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]

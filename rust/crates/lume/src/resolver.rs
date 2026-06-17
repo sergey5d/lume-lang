@@ -141,7 +141,7 @@ impl AmbientRegistry {
         let mut registry = AmbientRegistry::default();
         for value in [
             "List", "Map", "Set", "Array", "Range", "Int", "Int64", "Bool", "Rune", "Float",
-            "Float64", "Str", "Unit", "print", "println", "printf", "panic",
+            "Float64", "Str", "Unit", "Never", "print", "println", "printf", "panic",
         ] {
             registry.values.insert(value.to_string());
         }
@@ -2257,7 +2257,9 @@ fn type_ref_name(reference: &TypeRef) -> Option<&str> {
 
 fn builtin_type_arity(name: &str) -> Option<usize> {
     match name {
-        "Int" | "Int64" | "Bool" | "Rune" | "Float" | "Float64" | "Str" | "Unit" => Some(0),
+        "Int" | "Int64" | "Bool" | "Rune" | "Float" | "Float64" | "Str" | "Unit" | "Never" => {
+            Some(0)
+        }
         _ => None,
     }
 }

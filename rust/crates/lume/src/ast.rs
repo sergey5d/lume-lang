@@ -404,8 +404,9 @@ pub struct ForStmt {
 }
 
 /// A `let PATTERN = expr else { ... }` statement, or a grouped
-/// `let { ... } else { ... }`, that returns from the current callable on match
-/// failure.
+/// `let { ... } else { ... }`, whose fallback must exit the current control
+/// flow path on match failure, either explicitly or through a `Never`-returning
+/// call.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LetElseStmt {
     pub clauses: Vec<RefutableClause>,

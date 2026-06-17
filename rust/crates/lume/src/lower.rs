@@ -3456,6 +3456,9 @@ fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
 
 fn lower_type_ref(reference: &TypeRef) -> ir::Type {
     match reference {
+        TypeRef::Named { name, args, .. } if name == "Never" && args.is_empty() => {
+            ir::Type::Never
+        }
         TypeRef::Named { name, args, .. } => ir::Type::Named {
             name: name.clone(),
             args: args.iter().map(lower_type_ref).collect(),
