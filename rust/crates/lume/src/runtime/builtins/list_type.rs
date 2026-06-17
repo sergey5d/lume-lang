@@ -41,6 +41,8 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(13, "zipWithIndex", Vec::new(), list_zip_with_index),
             builtin_method(14, "size", Vec::new(), list_size),
             builtin_method(15, "isEmpty", Vec::new(), list_is_empty),
+            builtin_method(31, "nonEmpty", Vec::new(), list_non_empty),
+            builtin_method(32, "makeStr", vec![ir::Type::Str], list_make_str),
             builtin_method(16, "get", vec![ir::Type::Int], list_get),
             builtin_method(17, "remove", vec![ir::Type::Int], list_remove),
             builtin_method(18, "removeLast", Vec::new(), list_remove_last),
@@ -375,6 +377,45 @@ fn list_is_empty(
         return Err(interpreter.runtime_error(span, "List.isEmpty expects 0 arguments"));
     }
     Ok(Value::Bool(list_items(&receiver).borrow().is_empty()))
+}
+
+fn list_non_empty(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "List.nonEmpty expects 0 arguments"));
+    }
+    Ok(Value::Bool(!list_items(&receiver).borrow().is_empty()))
+}
+
+fn list_make_str(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let [separator] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "List.makeStr expects 1 argument"));
+    };
+    let Value::String(separator) = separator else {
+        return Err(interpreter.runtime_error(
+            span,
+            format!("List.makeStr expects Str separator, got {}", separator.render()),
+        ));
+    };
+
+    let items = list_items(&receiver).borrow().clone();
+    let mut rendered = String::new();
+    for (index, item) in items.iter().enumerate() {
+        if index > 0 {
+            rendered.push_str(separator);
+        }
+        rendered.push_str(&item.render());
+    }
+    Ok(Value::String(rendered))
 }
 
 fn list_get(

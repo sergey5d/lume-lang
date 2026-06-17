@@ -3156,6 +3156,9 @@ impl<'a> FunctionLowerer<'a> {
                 ) {
                     return Some(vec!["values".to_string()]);
                 }
+                if matches!((owner.as_str(), member.as_str()), ("Float", "parse")) {
+                    return Some(vec!["text".to_string()]);
+                }
                 if let Some(params) =
                     self.method_param_names_for_kind(owner, ast::TypeKind::Object, member, args)
                 {
@@ -3533,6 +3536,9 @@ fn is_named_runtime_value_path(program: &ir::Program, path: &[String]) -> bool {
 fn is_named_runtime_callee_path(program: &ir::Program, path: &[String]) -> bool {
     if path.is_empty() {
         return false;
+    }
+    if matches!(path, [owner, method] if owner == "Float" && method == "parse") {
+        return true;
     }
     if path.len() == 1 {
         return builtin_callable_root_name(&path[0])

@@ -2208,6 +2208,9 @@ impl<'a> Checker<'a> {
             }
             return Ty::unit();
         }
+        if let Some(ty) = self.check_builtin_static_method_call(callee, args, span) {
+            return ty;
+        }
         if let Some(ty) = self.check_builtin_static_factory_call(callee, args, span) {
             return ty;
         }
@@ -2292,6 +2295,47 @@ impl<'a> Checker<'a> {
             );
         }
         Some(Ty::Named(result_name.to_string(), vec![item_ty]))
+    }
+
+    fn check_builtin_static_method_call(
+        &mut self,
+        callee: &Expr,
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) -> Option<Ty> {
+        let Expr::Member { receiver, name, .. } = callee else {
+            return None;
+        };
+        let Expr::Identifier {
+            name: type_name, ..
+        } = receiver.as_ref()
+        else {
+            return None;
+        };
+
+        match (type_name.as_str(), name.as_str()) {
+            ("Float", "parse") => {
+                if args.len() != 1 {
+                    self.add_error(
+                        "invalid_argument_count",
+                        format!("Float.parse expects 1 argument, got {}", args.len()),
+                        span,
+                    );
+                }
+                if let Some(arg) = args.first() {
+                    let ty = self.check_expr(&arg.value);
+                    self.require_assignable(
+                        &ty,
+                        &Ty::str(),
+                        arg.span,
+                        "invalid_argument_type",
+                        format!("Float.parse expects Str argument, got '{}'", ty.describe()),
+                    );
+                }
+                Some(Ty::float())
+            }
+            _ => None,
+        }
     }
 
     fn check_discarded_expr_in_statement(&mut self, expr: &Expr) {

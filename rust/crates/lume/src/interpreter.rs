@@ -769,7 +769,7 @@ impl Value {
         ))
     }
 
-    fn render(&self) -> String {
+    pub(crate) fn render(&self) -> String {
         match self {
             Value::Unit => "()".to_string(),
             Value::Bool(value) => value.to_string(),
@@ -1709,6 +1709,25 @@ impl<'a> Interpreter<'a> {
             }
             let values = iterable_values(args[0].clone(), span, self)?;
             return Ok(Value::set(unique_values(values)));
+        }
+
+        if path[0] == "Float" && path.len() == 2 && path[1] == "parse" {
+            if args.len() != 1 {
+                return Err(self.runtime_error(
+                    span,
+                    format!("Float.parse expects 1 argument, got {}", args.len()),
+                ));
+            }
+            let Value::String(text) = &args[0] else {
+                return Err(self.runtime_error(
+                    span,
+                    format!("Float.parse expects Str, got {}", args[0].render()),
+                ));
+            };
+            let parsed = text.parse::<f64>().map_err(|_| {
+                self.runtime_error(span, format!("Float.parse could not parse '{}'", text))
+            })?;
+            return Ok(Value::Float(parsed));
         }
 
         if path.len() == 2 {
@@ -4809,6 +4828,24 @@ $name
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "7\n");
+    }
+
+    #[test]
+    fn runs_float_parse_and_list_string_helpers() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                values = ["btc", "usd"]
+                OS.println(Float.parse("1.2") + 0.8)
+                OS.println(values.makeStr("-"))
+                OS.println(values.nonEmpty())
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "2.0\nbtc-usd\ntrue\n");
     }
 
     #[test]

@@ -20,8 +20,21 @@ interface List[T] with Iterable[T] {
     def head() Option[T]
     def tail() List[T]
     def isEmpty() Bool
+    def nonEmpty() Bool = !this.isEmpty()
     def remove(index Int) Option[T]
     def removeLast() Option[T]
     def size() Int
     def forEach(f T -> Unit)
+
+    def makeStr(separator Str) Str {
+        var result Str = ""
+        for idx <- Range(0, this.size()) {
+            let Some(item) = this.get(idx) else ()
+            if idx > 0 {
+                result := result + separator
+            }
+            result := result + item
+        }
+        result
+    }
 }
