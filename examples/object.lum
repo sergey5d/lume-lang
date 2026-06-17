@@ -9,9 +9,11 @@ class B {
     size Int
 }
 
-object A {
+single A {
     var count Int = 2
+}
 
+impl single A {
     # explicit factory method
     def create(sizeValue Int) B = B { size = sizeValue }
 

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{self, BinaryOp as AstBinaryOp, ImplBlock, Item, TypeDecl, TypeMember},
+    ast::{
+        self, BinaryOp as AstBinaryOp, ImplBlock, ImplTargetKind, Item, TypeDecl, TypeMember,
+    },
     core::{
         self, AssignOp, Block, CallableBody, DestructureKind, ElseBranch, ElseExprBranch, Expr,
         FunctionDecl, MatchCase, MatchCaseBody, MethodDecl, Pattern, Stmt, TypeRef,
@@ -156,6 +158,14 @@ impl<'a> Lowerer<'a> {
                 _ => {}
             }
         }
+        for item in &self.source.items {
+            let Item::Impl(block) = item else {
+                continue;
+            };
+            if block.target_kind == ImplTargetKind::Single {
+                self.declare_synthetic_single(block);
+            }
+        }
     }
 
     fn define_items(&mut self) {
@@ -256,13 +266,16 @@ impl<'a> Lowerer<'a> {
             );
             return;
         };
-        let Some(type_id) = self
-            .program
-            .types
-            .iter()
-            .find(|ty| ty.name == target_name)
-            .map(|ty| ty.id)
+        let Some(type_id) = self.impl_target_type_id(target_name, block.target_kind)
         else {
+            self.add_error(
+                "lower_invariant",
+                format!(
+                    "impl target '{}' should be declared before lowering methods",
+                    target_name
+                ),
+                block.span,
+            );
             return;
         };
         let mut method_ids = Vec::new();
@@ -278,6 +291,49 @@ impl<'a> Lowerer<'a> {
 
         if let Some(ty) = self.program.types.get_mut(type_id.0) {
             ty.methods.extend(method_ids);
+        }
+    }
+
+    fn declare_synthetic_single(&mut self, block: &ImplBlock) {
+        let Some(target_name) = named_type_name(&block.target) else {
+            return;
+        };
+        let key = (target_name.to_string(), ast::TypeKind::Object);
+        if self.type_ids.contains_key(&key) {
+            return;
+        }
+
+        // `impl single Name` can attach singleton methods to an explicit
+        // `single Name { ... }` declaration or synthesize an empty companion.
+        let mut ty = ir::TypeDef::new(ast::TypeKind::Object, target_name.to_string());
+        if let Some(base_decl) = self.source.items.iter().find_map(|item| match item {
+            Item::Type(decl) if decl.name == target_name && decl.kind != ast::TypeKind::Object => {
+                Some(decl)
+            }
+            _ => None,
+        }) {
+            ty.visibility = base_decl.visibility;
+            ty.span = Some(base_decl.span);
+        } else {
+            ty.span = Some(block.span);
+        }
+        let id = self.program.add_type(ty);
+        self.type_ids.insert(key, id);
+    }
+
+    fn impl_target_type_id(
+        &self,
+        target_name: &str,
+        target_kind: ImplTargetKind,
+    ) -> Option<ir::TypeId> {
+        match target_kind {
+            ImplTargetKind::Single => self
+                .type_ids
+                .get(&(target_name.to_string(), ast::TypeKind::Object))
+                .copied(),
+            ImplTargetKind::Instance => self.type_ids.iter().find_map(|((name, kind), id)| {
+                (name == target_name && *kind != ast::TypeKind::Object).then_some(*id)
+            }),
         }
     }
 
@@ -3100,19 +3156,23 @@ impl<'a> FunctionLowerer<'a> {
                 ) {
                     return Some(vec!["values".to_string()]);
                 }
-                if let Some(type_def) = self.program.types.iter().find(|ty| ty.name == *owner) {
-                    if type_def.kind == ast::TypeKind::Enum {
-                        if let Some(case) =
-                            type_def.enum_cases.iter().find(|case| case.name == *member)
-                        {
-                            return Some(
-                                case.fields.iter().map(|field| field.name.clone()).collect(),
-                            );
-                        }
-                    }
-                    if let Some(params) = self.method_param_names(member, args, Some(owner)) {
-                        return Some(params);
-                    }
+                if let Some(params) =
+                    self.method_param_names_for_kind(owner, ast::TypeKind::Object, member, args)
+                {
+                    return Some(params);
+                }
+                if let Some(case) = self
+                    .program
+                    .types
+                    .iter()
+                    .filter(|ty| ty.name == *owner && ty.kind == ast::TypeKind::Enum)
+                    .flat_map(|ty| ty.enum_cases.iter())
+                    .find(|case| case.name == *member)
+                {
+                    return Some(case.fields.iter().map(|field| field.name.clone()).collect());
+                }
+                if let Some(params) = self.method_param_names(member, args, Some(owner)) {
+                    return Some(params);
                 }
             }
         }
@@ -3148,6 +3208,32 @@ impl<'a> FunctionLowerer<'a> {
             .find_map(|(id, function)| {
                 let names = param_names_from_function(function);
                 let _ = id;
+                if arrange_named_call_args(&names, args).is_some() || args.len() == names.len() {
+                    Some(names)
+                } else {
+                    None
+                }
+            })
+    }
+
+    fn method_param_names_for_kind(
+        &self,
+        owner: &str,
+        kind: ast::TypeKind,
+        method: &str,
+        args: &[core::CallArg],
+    ) -> Option<Vec<String>> {
+        self.program
+            .types
+            .iter()
+            .filter(|ty| ty.name == owner && ty.kind == kind)
+            .flat_map(|ty| ty.methods.iter().copied())
+            .filter_map(|id| {
+                let function = self.program.function(id)?;
+                (function.name == method).then_some(function)
+            })
+            .find_map(|function| {
+                let names = param_names_from_function(function);
                 if arrange_named_call_args(&names, args).is_some() || args.len() == names.len() {
                     Some(names)
                 } else {

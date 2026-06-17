@@ -123,9 +123,9 @@ Meaning:
 - `import module/sub/{A, B as D, C}`
   import a selected symbol set
 - `import module/sub/Object/*`
-  import all visible object methods unqualified
+  import all visible singleton methods unqualified
 - `import module/sub/Object/{printLn as printN, print}`
-  import selected visible object methods from an object
+  import selected visible singleton methods from a singleton
 
 Built-in `OS` methods are imported implicitly in every file, so `print(...)`, `println(...)`, `printf(...)`, and `panic(...)` work without writing `import OS/*`. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
 
@@ -149,7 +149,7 @@ def health2() Str = "ok"
 
 Supported targets currently include:
 
-- top-level `def`, `class`, `object`, `enum`, `interface`
+- top-level `def`, `class`, `single`, `enum`, `interface`
 - fields
 - methods
 - interface methods
@@ -168,14 +168,14 @@ Top-level forms:
 - `def`
 - `interface`
 - `class`
-- `object`
+- `single`
 - `enum`
 - `public def`
 - `public name Type = expr`
 - `hidden def`
 - `hidden interface`
 - `hidden class`
-- `hidden object`
+- `hidden single`
 - `hidden enum`
 
 Examples:
@@ -191,7 +191,7 @@ class Box[T] {
     value T
 }
 
-object Counter {
+single Counter {
     var count Int = 0
 }
 
@@ -240,7 +240,7 @@ class Box {
 }
 ```
 
-`hidden` fields in classes and objects may infer their type from an initializer:
+`hidden` fields in classes and singles may infer their type from an initializer:
 
 ```txt
 class Box {
@@ -248,7 +248,7 @@ class Box {
     hidden var hits = 0
 }
 
-object Greeter {
+single Greeter {
     hidden hello = "Hello"
 }
 ```
@@ -575,15 +575,20 @@ impl Box[T] {
 }
 ```
 
-When a class or object implements an interface method inside an `impl Type { ... }` block, it uses ordinary `def`.
+When a class or singleton implements an interface method inside an `impl ... { ... }` block, it uses ordinary `def`.
 
-Object:
+Singleton:
 
 ```txt
-object MathBox {
+single MathBox {
+}
+
+impl single MathBox {
     def double(value Int) Int = value * 2
 }
 ```
+
+`impl single Name { ... }` may also synthesize an empty singleton companion when `Name` already exists and no singleton fields are needed.
 
 Another class example:
 
@@ -1320,7 +1325,7 @@ Supported today:
 - `public` on top-level immutable bindings
 - `hidden` on top-level `def`
 - `hidden` on top-level `interface`
-- `hidden` on top-level `class` / `object` / `enum`
+- `hidden` on top-level `class` / `single` / `enum`
 - `hidden` on fields
 - `hidden` on methods
 

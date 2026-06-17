@@ -2,7 +2,10 @@
 # 7
 # 0
 
-object Ascending with Ordering[Int] {
+single Ascending with Ordering[Int] {
+}
+
+impl single Ascending {
     def compare(left Int, right Int) Int = left - right
 }
 

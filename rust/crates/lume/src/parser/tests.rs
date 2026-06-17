@@ -255,6 +255,51 @@ impl Counter {
 }
 
 #[test]
+fn parses_single_and_impl_single() {
+    let result = parse(
+        r#"
+single Counter {
+    hidden value = 0
+}
+
+impl single Counter {
+    def next() Int = this.value + 1
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    assert_eq!(program.items.len(), 2);
+    match &program.items[0] {
+        Item::Type(decl) => assert_eq!(decl.kind, TypeKind::Object),
+        other => panic!("expected singleton type, got {other:#?}"),
+    }
+    match &program.items[1] {
+        Item::Impl(block) => assert_eq!(block.target_kind, ImplTargetKind::Single),
+        other => panic!("expected impl block, got {other:#?}"),
+    }
+}
+
+#[test]
+fn rejects_methods_in_single_body() {
+    let result = parse(
+        r#"
+single Counter {
+    def next() Int = 1
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("cannot declare methods in its body")),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn rejects_question_field_placeholder() {
     let file = SourceFile::new(
         "test.lum",

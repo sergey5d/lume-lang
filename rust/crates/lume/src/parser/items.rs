@@ -106,6 +106,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Keyword(Keyword::Class)
             | TokenKind::Keyword(Keyword::Object)
+            | TokenKind::Keyword(Keyword::Single)
             | TokenKind::Keyword(Keyword::Interface)
             | TokenKind::Keyword(Keyword::Enum) => {
                 if visibility == Visibility::Public {
@@ -314,6 +315,11 @@ impl<'a> Parser<'a> {
                 self.advance();
                 (TypeKind::Object, span)
             }
+            TokenKind::Keyword(Keyword::Single) => {
+                let span = self.current_span();
+                self.advance();
+                (TypeKind::Object, span)
+            }
             TokenKind::Keyword(Keyword::Interface) => {
                 let span = self.current_span();
                 self.advance();
@@ -327,7 +333,7 @@ impl<'a> Parser<'a> {
             _ => {
                 self.error_at_current(
                     "expected_type_decl",
-                    "expected class, object, interface, or enum",
+                    "expected class, single, interface, or enum",
                 );
                 return None;
             }
@@ -379,6 +385,16 @@ impl<'a> Parser<'a> {
             }
             match self.current_kind() {
                 TokenKind::Keyword(Keyword::Def) => {
+                    if kind == TypeKind::Object {
+                        self.error_at_current(
+                            "unexpected_method_decl",
+                            format!(
+                                "single '{}' cannot declare methods in its body; use 'impl single {}'",
+                                name, name
+                            ),
+                        );
+                        return None;
+                    }
                     let method = self.parse_method_decl(
                         member_annotations,
                         member_visibility,
@@ -442,6 +458,11 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_impl_block(&mut self) -> Option<ImplBlock> {
         let start = self.consume_keyword(Keyword::Impl, "expected 'impl'")?;
+        let target_kind = if self.match_keyword(Keyword::Single) {
+            ImplTargetKind::Single
+        } else {
+            ImplTargetKind::Instance
+        };
         let target = self.parse_type_ref()?;
         if self.match_token(TokenKind::Dot) {
             let _ = self.expect_identifier("expected enum case name after '.'")?;
@@ -476,6 +497,7 @@ impl<'a> Parser<'a> {
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after impl body")?;
         Some(ImplBlock {
+            target_kind,
             target,
             methods,
             span: start.cover(end),

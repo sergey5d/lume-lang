@@ -4757,7 +4757,7 @@ $name
     }
 
     #[test]
-    fn runs_enum_and_object_with_same_name() {
+    fn runs_enum_and_single_with_same_name() {
         let program = lower_inline(
             r#"
             enum Color {
@@ -4770,7 +4770,7 @@ $name
                 case Blue
             }
 
-            object Color {
+            impl single Color {
                 def palette() Str = "palette"
             }
 
@@ -4785,6 +4785,30 @@ $name
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "red\npalette\n");
+    }
+
+    #[test]
+    fn runs_impl_single_without_explicit_single_decl() {
+        let program = lower_inline(
+            r#"
+            class Box {
+                value Int
+            }
+
+            impl single Box {
+                def from(value Int) Box = Box { value = value }
+            }
+
+            def main() Unit {
+                box = Box.from(7)
+                OS.println(box.value)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "7\n");
     }
 
     #[test]
@@ -5014,13 +5038,13 @@ $name
                     def close() Unit = OS.println("closed")
                 }
 
-                single = Reader {
+                soloReader = Reader {
                     def read() Str = "solo"
                 }
 
                 OS.println(handler.read())
                 handler.close()
-                OS.println(single.read())
+                OS.println(soloReader.read())
             }
             "#,
         );

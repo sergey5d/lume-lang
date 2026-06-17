@@ -9,7 +9,7 @@ use crate::{
     ast::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
         ElseBranch, ElseExprBranch, Expr, ForBinding, FunctionDecl, IfConditionClause, IfStmt,
-        ImplBlock, Item, LambdaBody, MatchCase, MatchCaseBody, MethodDecl, Pattern,
+        ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase, MatchCaseBody, MethodDecl, Pattern,
         PatternBindingStmt, Program, Stmt, TypeDecl, TypeKind, TypeMember, TypeRef, Visibility,
     },
     resolver::{
@@ -307,11 +307,15 @@ impl ModuleInfo {
                         self.types.insert(decl.name.clone(), sig);
                     }
                 }
-                Item::Impl(block) => self.merge_impl(block),
                 Item::Statement(Stmt::Binding(binding)) => {
                     self.global_binding_stmts.push(binding.clone());
                 }
                 _ => {}
+            }
+        }
+        for item in &items {
+            if let Item::Impl(block) = item {
+                self.merge_impl(block);
             }
         }
     }
@@ -321,16 +325,25 @@ impl ModuleInfo {
             return;
         };
         let target_type_params = impl_target_type_params(&block.target);
-        if let Some(sig) = self.types.get_mut(target_name) {
-            for method in &block.methods {
-                sig.methods
-                    .entry(method.name.clone())
-                    .or_default()
-                    .push(function_sig_from_method(method, &target_type_params));
+        let target = match block.target_kind {
+            ImplTargetKind::Instance => self.types.get_mut(target_name),
+            ImplTargetKind::Single => {
+                if !self.objects.contains_key(target_name) {
+                    if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
+                        return;
+                    }
+                    let sig = self
+                        .types
+                        .get(target_name)
+                        .cloned()
+                        .map(|base| synthetic_single_sig_from_type(&base))
+                        .unwrap_or_else(|| standalone_single_sig(target_name));
+                    self.objects.insert(target_name.to_string(), sig);
+                }
+                self.objects.get_mut(target_name)
             }
-            return;
-        }
-        if let Some(sig) = self.objects.get_mut(target_name) {
+        };
+        if let Some(sig) = target {
             for method in &block.methods {
                 sig.methods
                     .entry(method.name.clone())
@@ -390,6 +403,30 @@ impl AmbientInfo {
         }
 
         Ok(ambient)
+    }
+}
+
+fn synthetic_single_sig_from_type(base: &TypeSig) -> TypeSig {
+    TypeSig {
+        kind: TypeKind::Object,
+        name: base.name.clone(),
+        type_params: Vec::new(),
+        with_bounds: Vec::new(),
+        fields: Vec::new(),
+        methods: HashMap::new(),
+        enum_cases: HashMap::new(),
+    }
+}
+
+fn standalone_single_sig(name: &str) -> TypeSig {
+    TypeSig {
+        kind: TypeKind::Object,
+        name: name.to_string(),
+        type_params: Vec::new(),
+        with_bounds: Vec::new(),
+        fields: Vec::new(),
+        methods: HashMap::new(),
+        enum_cases: HashMap::new(),
     }
 }
 
@@ -768,22 +805,58 @@ impl<'a> Checker<'a> {
         let Some(target_name) = type_ref_named_name(&block.target) else {
             return;
         };
-        let Some(type_sig) = self.lookup_type_local(target_name) else {
-            self.add_error(
-                "unknown_impl_target",
-                format!("unknown impl target '{}'", target_name),
-                block.span,
-            );
-            return;
+        let type_sig = match block.target_kind {
+            ImplTargetKind::Instance => {
+                let Some(type_sig) = self.lookup_type_local(target_name) else {
+                    self.add_error(
+                        "unknown_impl_target",
+                        format!("unknown impl target '{}'", target_name),
+                        block.span,
+                    );
+                    return;
+                };
+                if type_sig.kind == TypeKind::Interface || type_sig.kind == TypeKind::Object {
+                    self.add_error(
+                        "unknown_impl_target",
+                        format!("unknown impl target '{}'", target_name),
+                        block.span,
+                    );
+                    return;
+                }
+                type_sig
+            }
+            ImplTargetKind::Single => {
+                if let Some(object_sig) = self.lookup_object_local(target_name) {
+                    object_sig
+                } else if let Some(base_sig) = self.lookup_type_local(target_name) {
+                    if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
+                        self.add_error(
+                            "invalid_type_arity",
+                            format!(
+                                "single '{}' expects no type arguments; write 'impl single {}'",
+                                target_name, target_name
+                            ),
+                            block.span,
+                        );
+                        return;
+                    }
+                    synthetic_single_sig_from_type(&base_sig)
+                } else {
+                    if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
+                        self.add_error(
+                            "invalid_type_arity",
+                            format!(
+                                "single '{}' expects no type arguments; write 'impl single {}'",
+                                target_name, target_name
+                            ),
+                            block.span,
+                        );
+                        return;
+                    }
+                    standalone_single_sig(target_name)
+                }
+            }
         };
-        if type_sig.kind == TypeKind::Interface {
-            self.add_error(
-                "unknown_impl_target",
-                format!("unknown impl target '{}'", target_name),
-                block.span,
-            );
-            return;
-        }
         self.push_type_params(type_sig.type_params.iter().map(String::as_str));
         for method in &block.methods {
             self.check_method(method, &type_sig);
@@ -4924,6 +4997,25 @@ def main() Int {
     user User = User { "Ada", 10 }
     return user.scoreValue()
 }
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_impl_single_without_explicit_single_decl() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+impl single User {
+    def make(name Str) User = User { name = name }
+}
+
+def main() User = User.make("Ada")
 "#,
         );
         let result = check_program(&program);

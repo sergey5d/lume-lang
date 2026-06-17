@@ -20,7 +20,10 @@
 # remove 2 3
 # size 3
 
-object Descending with Ordering[Int] {
+single Descending with Ordering[Int] {
+}
+
+impl single Descending {
     def compare(left Int, right Int) Int = right - left
 }
 

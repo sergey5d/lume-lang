@@ -74,6 +74,13 @@ pub enum TypeKind {
     Enum,
 }
 
+/// Distinguishes instance-side impls from singleton-side impls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImplTargetKind {
+    Instance,
+    Single,
+}
+
 /// A `class`, `record`, `object`, `interface`, or `enum` declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDecl {
@@ -107,6 +114,7 @@ pub struct EnumCaseDecl {
 /// An `impl` block that adds methods to an existing type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplBlock {
+    pub target_kind: ImplTargetKind,
     pub target: TypeRef,
     pub methods: Vec<MethodDecl>,
     pub span: Span,

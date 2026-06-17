@@ -12,7 +12,7 @@ enum Color {
     case Blue
 }
 
-object Color {
+impl single Color {
     def palette() Str = "palette"
 }
 

@@ -17,11 +17,11 @@ def main() Unit {
         def close() Unit = OS.println("closed")
     }
 
-    single = Reader {
+    soloReader = Reader {
         def read() Str = "solo"
     }
 
     OS.println(handler.read())
     handler.close()
-    OS.println(single.read())
+    OS.println(soloReader.read())
 }

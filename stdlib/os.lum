@@ -2,10 +2,12 @@
 # JAVA_SKIP
 # INTERPRETER
 
-object OS with Printer {
+single OS with Printer {
     stdout Printer
     stderr Printer
+}
 
+impl single OS {
     def print(value Str...) Unit = ()
     def println(value Str...) Unit = ()
     def printf(format Str, value Str...) Unit = ()
