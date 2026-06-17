@@ -903,26 +903,24 @@ impl<'a> FunctionLowerer<'a> {
                     let Some(target) = self.lower_place(target_expr) else {
                         continue;
                     };
-                    let value = if matches!(
-                        assignment.operator,
-                        AssignOp::Assign | AssignOp::Reassign
-                    ) {
-                        ir::RValue::Use(self.lower_expr(value_expr))
-                    } else {
-                        let Some(op) = map_assign_op(assignment.operator) else {
-                            self.invariant(
-                                "assignment operator should map before lowering",
-                                assignment.span,
-                            );
-                            continue;
+                    let value =
+                        if matches!(assignment.operator, AssignOp::Assign | AssignOp::Reassign) {
+                            ir::RValue::Use(self.lower_expr(value_expr))
+                        } else {
+                            let Some(op) = map_assign_op(assignment.operator) else {
+                                self.invariant(
+                                    "assignment operator should map before lowering",
+                                    assignment.span,
+                                );
+                                continue;
+                            };
+                            let current = ir::Operand::Copy(Box::new(target.clone()));
+                            ir::RValue::Binary {
+                                op,
+                                left: current,
+                                right: self.lower_expr(value_expr),
+                            }
                         };
-                        let current = ir::Operand::Copy(Box::new(target.clone()));
-                        ir::RValue::Binary {
-                            op,
-                            left: current,
-                            right: self.lower_expr(value_expr),
-                        }
-                    };
                     self.push_statement(ir::Statement {
                         span: Some(assignment.span),
                         kind: ir::StatementKind::Assign { target, value },

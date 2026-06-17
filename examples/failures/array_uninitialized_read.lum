@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*uninitialized array element.*
+
+def main() Unit {
+    values Array[Int] = Array.ofLength(2)
+    OS.println(values[0])
+}

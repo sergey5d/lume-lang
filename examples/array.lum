@@ -12,6 +12,8 @@
 # zip 5 b
 # zipIndex 6 2
 # assigned 9 10
+# filled 7 7
+# generated 0 4
 # size 3
 
 def main() Unit {
@@ -38,6 +40,8 @@ def main() Unit {
     assigned = Array.ofLength(2)
     assigned[0] := 9
     assigned[1] := 10
+    filled = Array.fill(2, 7)
+    generated = Array.generate(3, idx -> idx * 2)
 
     OS.println("get " + middle + " " + values.get(9).isEmpty())
     OS.println("first " + first)
@@ -48,5 +52,7 @@ def main() Unit {
     OS.println("zip " + zippedValue + " " + zippedLabel)
     OS.println("zipIndex " + indexedValue + " " + indexedPos)
     OS.println("assigned " + assigned[0] + " " + assigned[1])
+    OS.println("filled " + filled[0] + " " + filled[1])
+    OS.println("generated " + generated[0] + " " + generated[2])
     OS.println("size " + values.size())
 }

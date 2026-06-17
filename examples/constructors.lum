@@ -6,6 +6,7 @@
 
 # Constructor rule summary:
 # - direct `this.field = ...` inside `new` means constructor initialization
+# - constructor setup may write the same mutable field more than once with `=`
 # - later field mutation uses `:=`
 # - nested writes through an initialized field still use `:=`
 
@@ -18,6 +19,7 @@ class Profile {
 impl Profile {
     def new(name Str, visits Int) {
         this.name = name
+        this.visits = 0
         this.visits = visits
         this.active = true
     }

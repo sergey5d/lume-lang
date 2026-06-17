@@ -719,6 +719,7 @@ fn expr_path_ast(expr: &ast::Expr) -> Option<Vec<String>> {
 #[derive(Clone)]
 pub(crate) enum Value {
     Unit,
+    Uninitialized,
     Bool(bool),
     Int(i64),
     Float(f64),
@@ -775,6 +776,7 @@ impl Value {
     pub(crate) fn render(&self) -> String {
         match self {
             Value::Unit => "()".to_string(),
+            Value::Uninitialized => "<uninitialized>".to_string(),
             Value::Bool(value) => value.to_string(),
             Value::Int(value) => value.to_string(),
             Value::Float(value) => {
@@ -1682,21 +1684,71 @@ impl<'a> Interpreter<'a> {
             return self.invoke_os_method(&path[2], args, span);
         }
 
-        if path[0] == "Array" && path.len() == 2 && path[1] == "ofLength" {
-            if args.len() != 1 {
-                return Err(self.runtime_error(
-                    span,
-                    format!("Array.ofLength expects 1 argument, got {}", args.len()),
-                ));
+        if path[0] == "Array" && path.len() == 2 {
+            let method = path[1].as_str();
+            match method {
+                "ofLength" => {
+                    if args.len() != 1 {
+                        return Err(self.runtime_error(
+                            span,
+                            format!("Array.ofLength expects 1 argument, got {}", args.len()),
+                        ));
+                    }
+                    let len = args[0].as_int(self, span, "Array.ofLength length")?;
+                    if len < 0 {
+                        return Err(
+                            self.runtime_error(span, "Array.ofLength length must be non-negative")
+                        );
+                    }
+                    return Ok(Value::List(Rc::new(RefCell::new(vec![
+                        Value::Uninitialized;
+                        len as usize
+                    ]))));
+                }
+                "fill" => {
+                    if args.len() != 2 {
+                        return Err(self.runtime_error(
+                            span,
+                            format!("Array.fill expects 2 arguments, got {}", args.len()),
+                        ));
+                    }
+                    let len = args[0].as_int(self, span, "Array.fill length")?;
+                    if len < 0 {
+                        return Err(
+                            self.runtime_error(span, "Array.fill length must be non-negative")
+                        );
+                    }
+                    return Ok(Value::List(Rc::new(RefCell::new(vec![
+                        args[1].clone();
+                        len as usize
+                    ]))));
+                }
+                "generate" => {
+                    if args.len() != 2 {
+                        return Err(self.runtime_error(
+                            span,
+                            format!("Array.generate expects 2 arguments, got {}", args.len()),
+                        ));
+                    }
+                    let len = args[0].as_int(self, span, "Array.generate length")?;
+                    if len < 0 {
+                        return Err(
+                            self.runtime_error(span, "Array.generate length must be non-negative")
+                        );
+                    }
+                    let callback = args[1].clone();
+                    let mut values = Vec::with_capacity(len as usize);
+                    for index in 0..(len as usize) {
+                        values.push(self.invoke_value(
+                            callback.clone(),
+                            vec![Value::Int(index as i64)],
+                            span,
+                        )?);
+                    }
+                    return Ok(Value::List(Rc::new(RefCell::new(values))));
+                }
+                _ => {}
             }
-            let len = args[0].as_int(self, span, "Array.ofLength length")?;
-            if len < 0 {
-                return Err(self.runtime_error(span, "Array.ofLength length must be non-negative"));
-            }
-            return Ok(Value::List(Rc::new(RefCell::new(vec![
-                Value::Unit;
-                len as usize
-            ]))));
         }
 
         if path[0] == "List" && path.len() == 2 && path[1] == "from" {
@@ -2453,11 +2505,11 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match intrinsic {
-            ir::Intrinsic::Print => self.invoke_print(false, args),
-            ir::Intrinsic::Println => self.invoke_print(true, args),
+            ir::Intrinsic::Print => self.invoke_print(false, args, span),
+            ir::Intrinsic::Println => self.invoke_print(true, args, span),
             ir::Intrinsic::Printf => self.invoke_printf(args, span),
             ir::Intrinsic::Panic => {
-                let message = self.render_panic_message(&args, span);
+                let message = self.render_panic_message(&args, span)?;
                 Err(self.runtime_error(span, message))
             }
             ir::Intrinsic::IterInit => {
@@ -2510,19 +2562,28 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match method {
-            "print" => self.invoke_print(false, args),
-            "println" => self.invoke_print(true, args),
+            "print" => self.invoke_print(false, args, span),
+            "println" => self.invoke_print(true, args, span),
             "printf" => self.invoke_printf(args, span),
             "panic" => {
-                let message = self.render_panic_message(&args, span);
+                let message = self.render_panic_message(&args, span)?;
                 Err(self.runtime_error(span, message))
             }
             _ => Err(self.runtime_error(span, format!("unknown OS method '{}'", method))),
         }
     }
 
-    fn invoke_print(&mut self, newline: bool, args: Vec<Value>) -> Result<Value, Diagnostic> {
-        let rendered = args.iter().map(Value::render).collect::<Vec<_>>().join(" ");
+    fn invoke_print(
+        &mut self,
+        newline: bool,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let rendered = args
+            .iter()
+            .map(|value| self.render_value(value, span, "print argument"))
+            .collect::<Result<Vec<_>, _>>()?
+            .join(" ");
         self.output.push_str(&rendered);
         if newline {
             self.output.push('\n');
@@ -2536,28 +2597,37 @@ impl<'a> Interpreter<'a> {
         }
         let format = match &args[0] {
             Value::String(value) => value.clone(),
-            other => other.render(),
+            other => self.render_value(other, span, "printf format")?,
         };
+        for value in &args[1..] {
+            self.ensure_observable_value(value, span, "printf argument")?;
+        }
         let text = format_printf(&format, &args[1..])
             .map_err(|message| self.runtime_error(span, message))?;
         self.output.push_str(&text);
         Ok(Value::Unit)
     }
 
-    fn render_panic_message(&self, args: &[Value], span: Option<Span>) -> String {
+    fn render_panic_message(
+        &self,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<String, Diagnostic> {
         let message = if args.is_empty() {
             "panic".to_string()
         } else {
-            args.iter().map(Value::render).collect::<String>()
+            args.iter()
+                .map(|value| self.render_value(value, span, "panic argument"))
+                .collect::<Result<String, _>>()?
         };
-        if let Some(span) = span {
+        Ok(if let Some(span) = span {
             format!(
                 "panic: {} at {}:{}",
                 message, span.start_pos.line, span.start_pos.column
             )
         } else {
             format!("panic: {}", message)
-        }
+        })
     }
 
     fn iter_init(&mut self, value: Value, span: Option<Span>) -> Result<Value, Diagnostic> {
@@ -2596,11 +2666,11 @@ impl<'a> Interpreter<'a> {
                 match &mut *iterator {
                     IteratorState::List { items, index } => {
                         let items = items.borrow();
-                        let Some(value) = items.get(*index).cloned() else {
+                        let Some(value) = items.get(*index) else {
                             return Err(self.runtime_error(span, "iterator is exhausted"));
                         };
                         *index += 1;
-                        Ok(value)
+                        self.clone_initialized_value(value, span, "iterator")
                     }
                     IteratorState::Range { current, step, .. } => {
                         let value = *current;
@@ -2746,7 +2816,7 @@ impl<'a> Interpreter<'a> {
                 let [other] = args.as_slice() else {
                     return Err(self.runtime_error(span, "Iterator.zip expects 1 argument"));
                 };
-                let lhs = iterator_values(iterator);
+                let lhs = iterator_values(iterator, span, self)?;
                 let rhs = iterable_values(other.clone(), span, self)?;
                 let out = lhs
                     .into_iter()
@@ -2761,7 +2831,7 @@ impl<'a> Interpreter<'a> {
                         self.runtime_error(span, "Iterator.zipWithIndex expects 0 arguments")
                     );
                 }
-                let out = iterator_values(iterator)
+                let out = iterator_values(iterator, span, self)?
                     .into_iter()
                     .enumerate()
                     .map(|(index, value)| Value::Tuple(vec![value, Value::Int(index as i64)]))
@@ -3048,11 +3118,15 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         if let Value::Map(entries) = base {
-            let value = entries
-                .borrow()
-                .iter()
-                .find(|(key, _)| values_equal(key, &index))
-                .map(|(_, value)| value.clone());
+            self.ensure_observable_value(&index, span, "map lookup key")?;
+            let mut value = None;
+            for (key, entry_value) in entries.borrow().iter() {
+                self.ensure_observable_value(key, span, "map lookup key")?;
+                if values_equal(key, &index) {
+                    value = Some(entry_value.clone());
+                    break;
+                }
+            }
             return Ok(match value {
                 Some(value) => self.option_some(value),
                 None => self.option_none(),
@@ -3065,17 +3139,19 @@ impl<'a> Interpreter<'a> {
                 let index = normalize_index(items.len(), index).ok_or_else(|| {
                     self.runtime_error(span, format!("list index {} out of bounds", index))
                 })?;
-                items.get(index).cloned().ok_or_else(|| {
-                    self.runtime_error(span, format!("list index {} out of bounds", index))
-                })
+                items.get(index).map_or_else(
+                    || Err(self.runtime_error(span, format!("list index {} out of bounds", index))),
+                    |value| self.clone_initialized_value(value, span, "index access"),
+                )
             }
             Value::Tuple(items) => {
                 let index = normalize_index(items.len(), index).ok_or_else(|| {
                     self.runtime_error(span, format!("tuple index {} out of bounds", index))
                 })?;
-                items.get(index).cloned().ok_or_else(|| {
-                    self.runtime_error(span, format!("tuple index {} out of bounds", index))
-                })
+                items.get(index).map_or_else(
+                    || Err(self.runtime_error(span, format!("tuple index {} out of bounds", index))),
+                    |value| self.clone_initialized_value(value, span, "index access"),
+                )
             }
             other => self.invoke_method(other, "[]", vec![Value::Int(index)], span),
         }
@@ -3178,8 +3254,16 @@ impl<'a> Interpreter<'a> {
                 (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs % rhs)),
                 (left, right) => self.invoke_method(left, "%", vec![right], span),
             },
-            ir::BinaryOp::Eq => Ok(Value::Bool(values_equal(&left, &right))),
-            ir::BinaryOp::NotEq => Ok(Value::Bool(!values_equal(&left, &right))),
+            ir::BinaryOp::Eq => {
+                self.ensure_observable_value(&left, span, "equality comparison")?;
+                self.ensure_observable_value(&right, span, "equality comparison")?;
+                Ok(Value::Bool(values_equal(&left, &right)))
+            }
+            ir::BinaryOp::NotEq => {
+                self.ensure_observable_value(&left, span, "equality comparison")?;
+                self.ensure_observable_value(&right, span, "equality comparison")?;
+                Ok(Value::Bool(!values_equal(&left, &right)))
+            }
             ir::BinaryOp::Less => compare_binary(left, right, span, |lhs, rhs| lhs < rhs, self),
             ir::BinaryOp::LessEq => compare_binary(left, right, span, |lhs, rhs| lhs <= rhs, self),
             ir::BinaryOp::Greater => compare_binary(left, right, span, |lhs, rhs| lhs > rhs, self),
@@ -3400,6 +3484,101 @@ impl<'a> Interpreter<'a> {
             span.unwrap_or_else(default_span),
         )
     }
+
+    fn uninitialized_array_error(&self, span: Option<Span>, context: &str) -> Diagnostic {
+        self.runtime_error(
+            span,
+            format!("{context} read an uninitialized array element"),
+        )
+    }
+
+    pub(crate) fn ensure_initialized_value(
+        &self,
+        value: &Value,
+        span: Option<Span>,
+        context: &str,
+    ) -> Result<(), Diagnostic> {
+        match value {
+            Value::Uninitialized => Err(self.uninitialized_array_error(span, context)),
+            _ => Ok(()),
+        }
+    }
+
+    pub(crate) fn clone_initialized_value(
+        &self,
+        value: &Value,
+        span: Option<Span>,
+        context: &str,
+    ) -> Result<Value, Diagnostic> {
+        self.ensure_initialized_value(value, span, context)?;
+        Ok(value.clone())
+    }
+
+    pub(crate) fn clone_initialized_values(
+        &self,
+        values: &[Value],
+        span: Option<Span>,
+        context: &str,
+    ) -> Result<Vec<Value>, Diagnostic> {
+        values
+            .iter()
+            .map(|value| self.clone_initialized_value(value, span, context))
+            .collect()
+    }
+
+    pub(crate) fn ensure_observable_value(
+        &self,
+        value: &Value,
+        span: Option<Span>,
+        context: &str,
+    ) -> Result<(), Diagnostic> {
+        self.ensure_initialized_value(value, span, context)?;
+        match value {
+            Value::Tuple(items) => {
+                for item in items {
+                    self.ensure_observable_value(item, span, context)?;
+                }
+            }
+            Value::List(items) | Value::Set(items) => {
+                for item in items.borrow().iter() {
+                    self.ensure_observable_value(item, span, context)?;
+                }
+            }
+            Value::Map(entries) => {
+                for (key, value) in entries.borrow().iter() {
+                    self.ensure_observable_value(key, span, context)?;
+                    self.ensure_observable_value(value, span, context)?;
+                }
+            }
+            Value::Record(fields) => {
+                for (_, value) in fields.borrow().iter() {
+                    self.ensure_observable_value(value, span, context)?;
+                }
+            }
+            Value::Aggregate(aggregate) => {
+                for value in aggregate.borrow().fields.iter() {
+                    self.ensure_observable_value(value, span, context)?;
+                }
+            }
+            Value::Iterator(iterator) => {
+                for value in iterator_values(iterator, span, self)? {
+                    self.ensure_observable_value(&value, span, context)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub(crate) fn render_value(
+        &self,
+        value: &Value,
+        span: Option<Span>,
+        context: &str,
+    ) -> Result<String, Diagnostic> {
+        self.ensure_observable_value(value, span, context)?;
+        Ok(value.render())
+    }
 }
 
 impl Value {
@@ -3410,6 +3589,7 @@ impl Value {
         context: &str,
     ) -> Result<bool, Diagnostic> {
         match self {
+            Value::Uninitialized => Err(in_.uninitialized_array_error(span, context)),
             Value::Bool(value) => Ok(*value),
             _ => Err(in_.runtime_error(
                 span,
@@ -3425,6 +3605,7 @@ impl Value {
         context: &str,
     ) -> Result<i64, Diagnostic> {
         match self {
+            Value::Uninitialized => Err(in_.uninitialized_array_error(span, context)),
             Value::Int(value) => Ok(*value),
             _ => Err(in_.runtime_error(
                 span,
@@ -3440,6 +3621,7 @@ impl Value {
         context: &str,
     ) -> Result<f64, Diagnostic> {
         match self {
+            Value::Uninitialized => Err(in_.uninitialized_array_error(span, context)),
             Value::Int(value) => Ok(*value as f64),
             Value::Float(value) => Ok(*value),
             _ => Err(in_.runtime_error(
@@ -3539,18 +3721,22 @@ pub(crate) fn map_put_entry(entries: &mut Vec<(Value, Value)>, key: Value, value
     }
 }
 
-fn iterator_values(iterator: &Rc<RefCell<IteratorState>>) -> Vec<Value> {
+fn iterator_values(
+    iterator: &Rc<RefCell<IteratorState>>,
+    span: Option<Span>,
+    in_: &Interpreter<'_>,
+) -> Result<Vec<Value>, Diagnostic> {
     let mut state = iterator.borrow().clone();
     let mut out = Vec::new();
     loop {
         match &mut state {
             IteratorState::List { items, index } => {
                 let items = items.borrow();
-                let Some(value) = items.get(*index).cloned() else {
+                let Some(value) = items.get(*index) else {
                     break;
                 };
                 *index += 1;
-                out.push(value);
+                out.push(in_.clone_initialized_value(value, span, "iteration")?);
             }
             IteratorState::Range { current, end, step } => {
                 let done = if *step >= 0 {
@@ -3567,7 +3753,7 @@ fn iterator_values(iterator: &Rc<RefCell<IteratorState>>) -> Vec<Value> {
             }
         }
     }
-    out
+    Ok(out)
 }
 
 pub(crate) fn iterable_values(
@@ -3576,14 +3762,25 @@ pub(crate) fn iterable_values(
     in_: &Interpreter<'_>,
 ) -> Result<Vec<Value>, Diagnostic> {
     match value {
-        Value::List(items) => Ok(items.borrow().clone()),
-        Value::Set(items) => Ok(items.borrow().clone()),
-        Value::Iterator(iterator) => Ok(iterator_values(&iterator)),
-        Value::Map(entries) => Ok(entries
+        Value::List(items) => {
+            let items = items.borrow();
+            in_.clone_initialized_values(&items, span, "iteration")
+        }
+        Value::Set(items) => {
+            let items = items.borrow();
+            in_.clone_initialized_values(&items, span, "iteration")
+        }
+        Value::Iterator(iterator) => iterator_values(&iterator, span, in_),
+        Value::Map(entries) => entries
             .borrow()
             .iter()
-            .map(|(key, value)| Value::Tuple(vec![key.clone(), value.clone()]))
-            .collect()),
+            .map(|(key, value)| {
+                Ok(Value::Tuple(vec![
+                    in_.clone_initialized_value(key, span, "iteration")?,
+                    in_.clone_initialized_value(value, span, "iteration")?,
+                ]))
+            })
+            .collect(),
         other => Err(in_.runtime_error(
             span,
             format!("expected iterable value, got {}", other.render()),

@@ -2184,10 +2184,7 @@ impl<'a> Checker<'a> {
                     expected.describe()
                 ),
             );
-            if !matches!(
-                assignment.operator,
-                AssignOp::Assign | AssignOp::Reassign
-            )
+            if !matches!(assignment.operator, AssignOp::Assign | AssignOp::Reassign)
                 && !expected.is_numeric()
                 && !expected.is_str()
                 && !matches!(expected, Ty::Unknown)
@@ -2786,6 +2783,106 @@ impl<'a> Checker<'a> {
         };
 
         match (type_name.as_str(), name.as_str()) {
+            ("Array", "ofLength") => {
+                if args.len() != 1 {
+                    self.add_error(
+                        "invalid_argument_count",
+                        format!("Array.ofLength expects 1 argument, got {}", args.len()),
+                        span,
+                    );
+                }
+                if let Some(arg) = args.first() {
+                    let ty = self.check_expr(&arg.value);
+                    self.require_assignable(
+                        &ty,
+                        &Ty::int(),
+                        arg.span,
+                        "invalid_argument_type",
+                        format!("Array.ofLength expects Int length, got '{}'", ty.describe()),
+                    );
+                }
+                Some(Ty::Named("Array".to_string(), vec![Ty::Unknown]))
+            }
+            ("Array", "fill") => {
+                if args.len() != 2 {
+                    self.add_error(
+                        "invalid_argument_count",
+                        format!("Array.fill expects 2 arguments, got {}", args.len()),
+                        span,
+                    );
+                }
+                if let Some(arg) = args.first() {
+                    let ty = self.check_expr(&arg.value);
+                    self.require_assignable(
+                        &ty,
+                        &Ty::int(),
+                        arg.span,
+                        "invalid_argument_type",
+                        format!("Array.fill expects Int length, got '{}'", ty.describe()),
+                    );
+                }
+                let item_ty = args
+                    .get(1)
+                    .map(|arg| self.check_expr(&arg.value))
+                    .unwrap_or(Ty::Unknown);
+                Some(Ty::Named("Array".to_string(), vec![item_ty]))
+            }
+            ("Array", "generate") => {
+                if args.len() != 2 {
+                    self.add_error(
+                        "invalid_argument_count",
+                        format!("Array.generate expects 2 arguments, got {}", args.len()),
+                        span,
+                    );
+                }
+                if let Some(arg) = args.first() {
+                    let ty = self.check_expr(&arg.value);
+                    self.require_assignable(
+                        &ty,
+                        &Ty::int(),
+                        arg.span,
+                        "invalid_argument_type",
+                        format!("Array.generate expects Int length, got '{}'", ty.describe()),
+                    );
+                }
+                let item_ty = args
+                    .get(1)
+                    .map(|arg| {
+                        let expected = Ty::Function(vec![Ty::int()], Box::new(Ty::Unknown));
+                        let generator_ty = self.check_expr_against(&arg.value, &expected);
+                        match generator_ty {
+                            Ty::Function(params, ret) if params.len() == 1 => {
+                                if !matches!(params[0], Ty::Unknown)
+                                    && !self.is_assignable(&Ty::int(), &params[0])
+                                {
+                                    self.add_error(
+                                        "invalid_argument_type",
+                                        format!(
+                                            "Array.generate expects (Int) -> T generator, got '{}'",
+                                            Ty::Function(params.clone(), ret.clone()).describe()
+                                        ),
+                                        arg.span,
+                                    );
+                                }
+                                *ret
+                            }
+                            Ty::Unknown => Ty::Unknown,
+                            other => {
+                                self.add_error(
+                                    "invalid_argument_type",
+                                    format!(
+                                        "Array.generate expects (Int) -> T generator, got '{}'",
+                                        other.describe()
+                                    ),
+                                    arg.span,
+                                );
+                                Ty::Unknown
+                            }
+                        }
+                    })
+                    .unwrap_or(Ty::Unknown);
+                Some(Ty::Named("Array".to_string(), vec![item_ty]))
+            }
             ("Float", "parse") => {
                 if args.len() != 1 {
                     self.add_error(
@@ -3118,29 +3215,6 @@ impl<'a> Checker<'a> {
                     name: type_name, ..
                 } = receiver.as_ref()
                 {
-                    if type_name == "Array" && name == "ofLength" {
-                        if args.len() != 1 {
-                            self.add_error(
-                                "invalid_argument_count",
-                                format!("Array.ofLength expects 1 argument, got {}", args.len()),
-                                span,
-                            );
-                        }
-                        if let Some(arg) = args.first() {
-                            let ty = self.check_expr(&arg.value);
-                            self.require_assignable(
-                                &ty,
-                                &Ty::int(),
-                                arg.span,
-                                "invalid_argument_type",
-                                format!(
-                                    "Array.ofLength expects Int length, got '{}'",
-                                    ty.describe()
-                                ),
-                            );
-                        }
-                        return Some(Ty::Named("Array".to_string(), vec![Ty::Unknown]));
-                    }
                     if let Some(sig) = self.lookup_type_local(type_name) {
                         if let Some(case) = sig.enum_cases.get(name).cloned() {
                             return Some(self.check_constructor_signature(
@@ -5678,6 +5752,32 @@ def main() User = User.make("Ada")
             r#"
 def main() Option[Int] {
     return Option.when(true, 7)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_array_fill_static_helper() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    values Array[Int] = Array.fill(3, 7)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_array_generate_static_helper() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    values Array[Int] = Array.generate(3, idx -> idx + 1)
 }
 "#,
         );

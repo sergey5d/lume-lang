@@ -76,6 +76,29 @@ fn list_items(receiver: &Value) -> Rc<RefCell<Vec<Value>>> {
     items.clone()
 }
 
+fn list_values(
+    interpreter: &Interpreter<'_>,
+    receiver: &Value,
+    span: Option<Span>,
+    context: &str,
+) -> Result<Vec<Value>, Diagnostic> {
+    let items = list_items(receiver);
+    let items = items.borrow();
+    interpreter.clone_initialized_values(&items, span, context)
+}
+
+fn values_match(
+    interpreter: &Interpreter<'_>,
+    left: &Value,
+    right: &Value,
+    span: Option<Span>,
+    context: &str,
+) -> Result<bool, Diagnostic> {
+    interpreter.ensure_observable_value(left, span, context)?;
+    interpreter.ensure_observable_value(right, span, context)?;
+    Ok(values_equal(left, right))
+}
+
 fn list_append_copy(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
@@ -143,7 +166,7 @@ fn list_map(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "List.map expects 1 argument"));
     };
-    let values = list_items(&receiver).borrow().clone();
+    let values = list_values(interpreter, &receiver, span, "List.map")?;
     let mut out = Vec::with_capacity(values.len());
     for value in values {
         out.push(interpreter.invoke_value(callback.clone(), vec![value], span)?);
@@ -160,7 +183,7 @@ fn list_flat_map(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "List.flatMap expects 1 argument"));
     };
-    let values = list_items(&receiver).borrow().clone();
+    let values = list_values(interpreter, &receiver, span, "List.flatMap")?;
     let mut out = Vec::new();
     for value in values {
         let mapped = interpreter.invoke_value(callback.clone(), vec![value], span)?;
@@ -178,7 +201,7 @@ fn list_filter(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "List.filter expects 1 argument"));
     };
-    let values = list_items(&receiver).borrow().clone();
+    let values = list_values(interpreter, &receiver, span, "List.filter")?;
     let mut out = Vec::new();
     for value in values {
         if interpreter
@@ -202,7 +225,7 @@ fn list_fold(
     }
     let mut acc = args[0].clone();
     let callback = args[1].clone();
-    let values = list_items(&receiver).borrow().clone();
+    let values = list_values(interpreter, &receiver, span, "List.fold")?;
     for value in values {
         acc = interpreter.invoke_value(callback.clone(), vec![acc, value], span)?;
     }
@@ -218,7 +241,7 @@ fn list_reduce(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "List.reduce expects 1 argument"));
     };
-    let values = list_items(&receiver).borrow().clone();
+    let values = list_values(interpreter, &receiver, span, "List.reduce")?;
     let Some((first, rest)) = values.split_first() else {
         return Ok(interpreter.option_none());
     };
@@ -238,7 +261,7 @@ fn list_exists(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "List.exists expects 1 argument"));
     };
-    let values = list_items(&receiver).borrow().clone();
+    let values = list_values(interpreter, &receiver, span, "List.exists")?;
     for value in values {
         if interpreter
             .invoke_value(callback.clone(), vec![value], span)?
@@ -259,7 +282,7 @@ fn list_for_each(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "List.forEach expects 1 argument"));
     };
-    let values = list_items(&receiver).borrow().clone();
+    let values = list_values(interpreter, &receiver, span, "List.forEach")?;
     for value in values {
         let _ = interpreter.invoke_value(callback.clone(), vec![value], span)?;
     }
@@ -275,7 +298,7 @@ fn list_for_all(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "List.forAll expects 1 argument"));
     };
-    let values = list_items(&receiver).borrow().clone();
+    let values = list_values(interpreter, &receiver, span, "List.forAll")?;
     for value in values {
         if !interpreter
             .invoke_value(callback.clone(), vec![value], span)?
@@ -297,7 +320,10 @@ fn list_sort(
         return Err(interpreter.runtime_error(span, "List.sort expects 1 argument"));
     };
     let items = list_items(&receiver);
-    let mut values = items.borrow().clone();
+    let mut values = {
+        let items = items.borrow();
+        interpreter.clone_initialized_values(&items, span, "List.sort")?
+    };
     let len = values.len();
     for i in 0..len {
         for j in (i + 1)..len {
@@ -325,7 +351,7 @@ fn list_zip(
     let [other] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "List.zip expects 1 argument"));
     };
-    let lhs = list_items(&receiver).borrow().clone();
+    let lhs = list_values(interpreter, &receiver, span, "List.zip")?;
     let rhs = iterable_values(other.clone(), span, interpreter)?;
     Ok(Value::list(
         lhs.into_iter()
@@ -344,12 +370,10 @@ fn list_zip_with_index(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "List.zipWithIndex expects 0 arguments"));
     }
-    let items = list_items(&receiver);
+    let items = list_values(interpreter, &receiver, span, "List.zipWithIndex")?;
     Ok(Value::list(
         items
-            .borrow()
-            .iter()
-            .cloned()
+            .into_iter()
             .enumerate()
             .map(|(index, value)| Value::Tuple(vec![value, Value::Int(index as i64)]))
             .collect(),
@@ -411,13 +435,13 @@ fn list_make_str(
         ));
     };
 
-    let items = list_items(&receiver).borrow().clone();
+    let items = list_values(interpreter, &receiver, span, "List.makeStr")?;
     let mut rendered = String::new();
     for (index, item) in items.iter().enumerate() {
         if index > 0 {
             rendered.push_str(separator);
         }
-        rendered.push_str(&item.render());
+        rendered.push_str(&interpreter.render_value(item, span, "List.makeStr")?);
     }
     Ok(Value::String(rendered))
 }
@@ -432,7 +456,12 @@ fn list_get(
         return Err(interpreter.runtime_error(span, "List.get expects 1 argument"));
     }
     let index = args[0].as_int(interpreter, span, "List.get index")?;
-    let value = list_items(&receiver).borrow().get(index as usize).cloned();
+    let items = list_items(&receiver);
+    let items = items.borrow();
+    let value = items
+        .get(index as usize)
+        .map(|value| interpreter.clone_initialized_value(value, span, "List.get"))
+        .transpose()?;
     Ok(match value {
         Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),
@@ -454,7 +483,9 @@ fn list_remove(
     if index < 0 || index as usize >= items.len() {
         return Ok(interpreter.option_none());
     }
-    Ok(interpreter.option_some(items.remove(index as usize)))
+    let value = items.remove(index as usize);
+    interpreter.ensure_initialized_value(&value, span, "List.remove")?;
+    Ok(interpreter.option_some(value))
 }
 
 fn list_remove_last(
@@ -468,7 +499,10 @@ fn list_remove_last(
     }
     let value = list_items(&receiver).borrow_mut().pop();
     Ok(match value {
-        Some(value) => interpreter.option_some(value),
+        Some(value) => {
+            interpreter.ensure_initialized_value(&value, span, "List.removeLast")?;
+            interpreter.option_some(value)
+        }
         None => interpreter.option_none(),
     })
 }
@@ -482,7 +516,12 @@ fn list_head(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "List.head expects 0 arguments"));
     }
-    let value = list_items(&receiver).borrow().first().cloned();
+    let items = list_items(&receiver);
+    let items = items.borrow();
+    let value = items
+        .first()
+        .map(|value| interpreter.clone_initialized_value(value, span, "List.head"))
+        .transpose()?;
     Ok(match value {
         Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),
@@ -503,7 +542,7 @@ fn list_tail(
     let tail = if values.len() <= 1 {
         Vec::new()
     } else {
-        values[1..].to_vec()
+        interpreter.clone_initialized_values(&values[1..], span, "List.tail")?
     };
     Ok(Value::list(tail))
 }
@@ -517,7 +556,12 @@ fn list_first(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "Array.first expects 0 arguments"));
     }
-    let value = list_items(&receiver).borrow().first().cloned();
+    let items = list_items(&receiver);
+    let items = items.borrow();
+    let value = items
+        .first()
+        .map(|value| interpreter.clone_initialized_value(value, span, "Array.first"))
+        .transpose()?;
     Ok(match value {
         Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),
@@ -533,7 +577,12 @@ fn list_last(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "Array.last expects 0 arguments"));
     }
-    let value = list_items(&receiver).borrow().last().cloned();
+    let items = list_items(&receiver);
+    let items = items.borrow();
+    let value = items
+        .last()
+        .map(|value| interpreter.clone_initialized_value(value, span, "Array.last"))
+        .transpose()?;
     Ok(match value {
         Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),
@@ -549,7 +598,7 @@ fn list_count(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Array.count expects 1 argument"));
     };
-    let values = list_items(&receiver).borrow().clone();
+    let values = list_values(interpreter, &receiver, span, "Array.count")?;
     let mut count = 0i64;
     for value in values {
         if interpreter
@@ -571,12 +620,13 @@ fn list_contains(
     let [needle] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Array.contains expects 1 argument"));
     };
-    Ok(Value::Bool(
-        list_items(&receiver)
-            .borrow()
-            .iter()
-            .any(|value| values_equal(value, needle)),
-    ))
+    let items = list_items(&receiver);
+    for value in items.borrow().iter() {
+        if values_match(interpreter, value, needle, span, "Array.contains")? {
+            return Ok(Value::Bool(true));
+        }
+    }
+    Ok(Value::Bool(false))
 }
 
 fn list_find(
@@ -588,15 +638,13 @@ fn list_find(
     let [needle] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Array.find expects 1 argument"));
     };
-    let value = list_items(&receiver)
-        .borrow()
-        .iter()
-        .find(|value| values_equal(value, needle))
-        .cloned();
-    Ok(match value {
-        Some(value) => interpreter.option_some(value),
-        None => interpreter.option_none(),
-    })
+    let items = list_items(&receiver);
+    for value in items.borrow().iter() {
+        if values_match(interpreter, value, needle, span, "Array.find")? {
+            return Ok(interpreter.option_some(value.clone()));
+        }
+    }
+    Ok(interpreter.option_none())
 }
 
 fn list_index_of(
@@ -608,13 +656,13 @@ fn list_index_of(
     let [needle] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Array.indexOf expects 1 argument"));
     };
-    let index = list_items(&receiver)
-        .borrow()
-        .iter()
-        .position(|value| values_equal(value, needle))
-        .map(|index| index as i64)
-        .unwrap_or(-1);
-    Ok(Value::Int(index))
+    let items = list_items(&receiver);
+    for (index, value) in items.borrow().iter().enumerate() {
+        if values_match(interpreter, value, needle, span, "Array.indexOf")? {
+            return Ok(Value::Int(index as i64));
+        }
+    }
+    Ok(Value::Int(-1))
 }
 
 fn list_iterator(
