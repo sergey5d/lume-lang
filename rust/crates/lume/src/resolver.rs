@@ -140,7 +140,8 @@ impl AmbientRegistry {
     fn with_builtin_values() -> Self {
         let mut registry = AmbientRegistry::default();
         for value in [
-            "List", "Map", "Set", "Array", "Range", "print", "println", "printf", "panic",
+            "List", "Map", "Set", "Array", "Range", "Int", "Int64", "Bool", "Rune", "Float",
+            "Float64", "Str", "Unit", "print", "println", "printf", "panic",
         ] {
             registry.values.insert(value.to_string());
         }
