@@ -1,0 +1,74 @@
+# EXPECT:
+# profile Ada 2 true
+# profile bumped 3
+# stock 7
+# slots 10 20
+
+# Constructor rule summary:
+# - direct `this.field = ...` inside `new` means constructor initialization
+# - later field mutation uses `:=`
+# - nested writes through an initialized field still use `:=`
+
+class Profile {
+    name Str = "unknown"
+    hidden var visits Int = 0
+    hidden var active Bool = false
+}
+
+impl Profile {
+    def new(name Str, visits Int) {
+        this.name = name
+        this.visits = visits
+        this.active = true
+    }
+
+    def bump() Unit {
+        this.visits := this.visits + 1
+    }
+
+    def visitCount() Int = this.visits
+
+    def isActive() Bool = this.active
+}
+
+class Stock {
+    hidden count Int = 5
+}
+
+impl Stock {
+    def new(count Int) {
+        this.count = count
+    }
+
+    def value() Int = this.count
+}
+
+class Slots {
+    hidden var items Array[Int]
+}
+
+impl Slots {
+    def new(left Int, right Int) {
+        this.items = Array.ofLength(2)
+        this.items[0] := left
+        this.items[1] := right
+    }
+
+    def left() Int = this.items[0]
+
+    def right() Int = this.items[1]
+}
+
+def main() Unit {
+    profile = Profile("Ada", 2)
+    OS.println("profile", profile.name, profile.visitCount(), profile.isActive())
+
+    profile.bump()
+    OS.println("profile bumped", profile.visitCount())
+
+    stock = Stock(7)
+    OS.println("stock", stock.value())
+
+    slots = Slots(10, 20)
+    OS.println("slots", slots.left(), slots.right())
+}

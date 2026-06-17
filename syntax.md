@@ -282,6 +282,10 @@ Constructor field initialization:
 this.value = value
 ```
 
+Inside `new`, direct writes to `this.field` use `=` even for `var` fields or
+fields that already have defaults. `:=` and compound assignment are for
+post-construction mutation.
+
 Member reassignment:
 
 ```txt

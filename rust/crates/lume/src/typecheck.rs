@@ -2241,6 +2241,12 @@ impl<'a> Checker<'a> {
                                 *span,
                             );
                         }
+                    } else if can_initialize {
+                        self.add_error(
+                            "unexpected_token",
+                            "use '=' for field initialization in constructors; reassignment operators are only for mutation after construction",
+                            *span,
+                        );
                     } else if !field.mutable {
                         self.add_error(
                             "assign_immutable",
@@ -5834,6 +5840,59 @@ def main() Unit {
                 .diagnostics
                 .iter()
                 .any(|diag| diag.message.contains("cannot use brace-based construction")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_constructor_equals_for_field_initialization() {
+        let program = parse_inline(
+            r#"
+class Counter {
+    hidden var count Int = 0
+    name Str = "unknown"
+}
+
+impl Counter {
+    def new(count Int, name Str) {
+        this.count = count
+        this.name = name
+    }
+}
+
+def main() Unit {
+    _ Counter = Counter(1, "Ada")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_reassign_operator_on_field_inside_constructor() {
+        let program = parse_inline(
+            r#"
+class Counter {
+    hidden var count Int = 0
+}
+
+impl Counter {
+    def new(count Int) {
+        this.count := count
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "unexpected_token"
+                    && diag
+                        .message
+                        .contains("use '=' for field initialization in constructors")
+            }),
             "{:#?}",
             result.diagnostics
         );
