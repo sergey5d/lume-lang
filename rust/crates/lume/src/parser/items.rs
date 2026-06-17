@@ -511,7 +511,13 @@ impl<'a> Parser<'a> {
         allow_signature_only: bool,
     ) -> Option<MethodDecl> {
         let start = self.consume_keyword(Keyword::Def, "expected 'def'")?;
-        let (name, _) = self.parse_callable_name("expected method name")?;
+        let (name, _) = if self.at(TokenKind::Keyword(Keyword::Expect)) {
+            let token = self.current().clone();
+            self.advance();
+            (token.lexeme, token.span)
+        } else {
+            self.parse_callable_name("expected method name")?
+        };
         let type_params = self.parse_type_params()?;
         let params = self.parse_param_list()?;
         let return_type = self.parse_optional_return_type();

@@ -972,7 +972,9 @@ impl<'a> Checker<'a> {
                     self.check_field_initializer_expr(item, owner, initialized_fields);
                 }
             }
-            Expr::Call { callee, args, span, .. } => {
+            Expr::Call {
+                callee, args, span, ..
+            } => {
                 if let Expr::Member { receiver, name, .. } = callee.as_ref() {
                     if matches!(receiver.as_ref(), Expr::Identifier { name: receiver_name, .. } if receiver_name == "this")
                     {
@@ -1025,7 +1027,9 @@ impl<'a> Checker<'a> {
                 self.check_field_initializer_expr(receiver, owner, initialized_fields);
                 self.check_field_initializer_expr(index, owner, initialized_fields);
             }
-            Expr::RecordUpdate { receiver, updates, .. } => {
+            Expr::RecordUpdate {
+                receiver, updates, ..
+            } => {
                 self.check_field_initializer_expr(receiver, owner, initialized_fields);
                 for update in updates {
                     self.check_field_initializer_expr(&update.value, owner, initialized_fields);
@@ -1040,7 +1044,9 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::AnonymousInterface { .. } | Expr::Lambda { .. } => {}
-            Expr::Try { value, .. } | Expr::Unary { expr: value, .. } | Expr::Group { inner: value, .. } => {
+            Expr::Try { value, .. }
+            | Expr::Unary { expr: value, .. }
+            | Expr::Group { inner: value, .. } => {
                 self.check_field_initializer_expr(value, owner, initialized_fields);
             }
             Expr::Binary { left, right, .. } => {
@@ -2188,11 +2194,7 @@ impl<'a> Checker<'a> {
                     }
                     value.ty
                 } else {
-                    self.add_error(
-                        "undefined_name",
-                        self.undefined_value_message(name),
-                        *span,
-                    );
+                    self.add_error("undefined_name", self.undefined_value_message(name), *span);
                     Ty::Unknown
                 }
             }
@@ -2269,11 +2271,7 @@ impl<'a> Checker<'a> {
                 .or_else(|| self.lookup_function_type(name))
                 .or_else(|| self.lookup_named_constructor_type(name))
                 .unwrap_or_else(|| {
-                    self.add_error(
-                        "undefined_name",
-                        self.undefined_value_message(name),
-                        *span,
-                    );
+                    self.add_error("undefined_name", self.undefined_value_message(name), *span);
                     Ty::Unknown
                 }),
             Expr::Placeholder { .. } => self
@@ -2444,6 +2442,16 @@ impl<'a> Checker<'a> {
                         format!(
                             "try requires Option[T], Result[T, E], or Either[L, R], got '{}'",
                             value_ty.describe()
+                        ),
+                        *span,
+                    );
+                } else if !self.try_propagates_from(&value_ty, &self.current_return) {
+                    self.add_error(
+                        "invalid_try",
+                        format!(
+                            "try on '{}' cannot propagate from enclosing return type '{}'",
+                            value_ty.describe(),
+                            self.current_return.describe()
                         ),
                         *span,
                     );
@@ -2751,6 +2759,33 @@ impl<'a> Checker<'a> {
                     );
                 }
                 Some(Ty::float())
+            }
+            ("Option", "when") => {
+                if args.len() != 2 {
+                    self.add_error(
+                        "invalid_argument_count",
+                        format!("Option.when expects 2 arguments, got {}", args.len()),
+                        span,
+                    );
+                }
+                if let Some(arg) = args.first() {
+                    let ty = self.check_expr(&arg.value);
+                    self.require_assignable(
+                        &ty,
+                        &Ty::bool(),
+                        arg.span,
+                        "invalid_argument_type",
+                        format!(
+                            "Option.when expects Bool condition, got '{}'",
+                            ty.describe()
+                        ),
+                    );
+                }
+                let value_ty = args
+                    .get(1)
+                    .map(|arg| self.check_expr(&arg.value))
+                    .unwrap_or(Ty::Unknown);
+                Some(Ty::option(value_ty))
             }
             _ => None,
         }
@@ -3881,6 +3916,42 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn try_propagates_from(&self, source: &Ty, target: &Ty) -> bool {
+        match (source, target) {
+            (Ty::Unknown, _) | (_, Ty::Unknown) => true,
+            (Ty::Named(source_name, source_args), Ty::Named(target_name, target_args))
+                if source_name == "Option"
+                    && target_name == "Option"
+                    && source_args.len() == 1
+                    && target_args.len() == 1 =>
+            {
+                true
+            }
+            (Ty::Named(source_name, source_args), Ty::Named(target_name, target_args))
+                if source_name == "Result"
+                    && target_name == "Result"
+                    && !source_args.is_empty()
+                    && !target_args.is_empty() =>
+            {
+                match (source_args.get(1), target_args.get(1)) {
+                    (Some(source_error), Some(target_error)) => {
+                        self.is_assignable(source_error, target_error)
+                    }
+                    _ => true,
+                }
+            }
+            (Ty::Named(source_name, source_args), Ty::Named(target_name, target_args))
+                if source_name == "Either"
+                    && target_name == "Either"
+                    && source_args.len() == 2
+                    && target_args.len() == 2 =>
+            {
+                self.is_assignable(&source_args[0], &target_args[0])
+            }
+            _ => false,
+        }
+    }
+
     fn iterable_item_type(&self, ty: &Ty) -> Ty {
         match ty {
             Ty::Named(name, args)
@@ -4122,9 +4193,12 @@ impl<'a> Checker<'a> {
 
     fn is_builtin_print_call(&self, callee: &Expr) -> bool {
         match callee {
-            Expr::Identifier { name, .. } => matches!(name.as_str(), "print" | "println" | "printf"),
+            Expr::Identifier { name, .. } => {
+                matches!(name.as_str(), "print" | "println" | "printf")
+            }
             Expr::Member { receiver, name, .. } => {
-                matches!(name.as_str(), "print" | "println" | "printf") && path_starts_with_os(receiver)
+                matches!(name.as_str(), "print" | "println" | "printf")
+                    && path_starts_with_os(receiver)
             }
             _ => false,
         }
@@ -5548,6 +5622,116 @@ def main() User = User.make("Ada")
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_option_when_static_helper() {
+        let program = parse_inline(
+            r#"
+def main() Option[Int] {
+    return Option.when(true, 7)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_try_with_same_option_family_and_different_success_type() {
+        let program = parse_inline(
+            r#"
+def main(source Option[Int]) Option[Str] {
+    value = try source
+    panic("done")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_try_with_same_result_family_and_different_success_type() {
+        let program = parse_inline(
+            r#"
+def main(source Result[Int, Str]) Result[Str, Str] {
+    value = try source
+    panic("done")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_try_with_mismatched_container_family() {
+        let program = parse_inline(
+            r#"
+def main(source Result[Int, Str]) Option[Int] {
+    value = try source
+    panic("done")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_try"
+                    && diag
+                        .message
+                        .contains("cannot propagate from enclosing return type 'Option[Int]'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_try_with_mismatched_result_error_type() {
+        let program = parse_inline(
+            r#"
+def main(source Result[Int, Int]) Result[Str, Str] {
+    value = try source
+    panic("done")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_try"
+                    && diag
+                        .message
+                        .contains("cannot propagate from enclosing return type 'Result[Str, Str]'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_try_with_mismatched_either_left_type() {
+        let program = parse_inline(
+            r#"
+def main(source Either[Int, Int]) Either[Str, Str] {
+    value = try source
+    panic("done")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_try"
+                    && diag
+                        .message
+                        .contains("cannot propagate from enclosing return type 'Either[Str, Str]'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

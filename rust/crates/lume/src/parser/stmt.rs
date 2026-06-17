@@ -38,6 +38,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt(false).map(Stmt::Match),
             TokenKind::Keyword(Keyword::Partial) => self.parse_match_stmt(true).map(Stmt::Match),
             TokenKind::Keyword(Keyword::Let) => self.parse_let_stmt(),
+            TokenKind::Keyword(Keyword::Expect) => self.parse_expect_stmt(),
             TokenKind::Keyword(Keyword::Var) => {
                 let stmt = self.parse_binding_stmt_after_var()?;
                 Some(Stmt::Binding(stmt))
@@ -148,6 +149,7 @@ impl<'a> Parser<'a> {
                 }));
             }
             return Some(Stmt::PatternBinding(PatternBindingStmt {
+                kind: PatternBindingKind::Let,
                 clauses,
                 pattern: Pattern::Wildcard { span: clauses_end },
                 value: Expr::Unit { span: clauses_end },
@@ -256,6 +258,55 @@ impl<'a> Parser<'a> {
         }
         let end = value.span();
         Some(Stmt::PatternBinding(PatternBindingStmt {
+            kind: PatternBindingKind::Let,
+            clauses: Vec::new(),
+            pattern,
+            value,
+            span: start.cover(end),
+        }))
+    }
+
+    pub(super) fn parse_expect_stmt(&mut self) -> Option<Stmt> {
+        let start = self.consume_keyword(Keyword::Expect, "expected 'expect'")?;
+
+        if self.at(TokenKind::LBrace) {
+            let (clauses, clauses_end) = self.parse_refutable_clause_block("expect")?;
+            if self.match_keyword(Keyword::Else) {
+                self.error_at_current(
+                    "unexpected_token",
+                    "expect does not support 'else'; use 'let ... else ...' or plain 'expect'",
+                );
+                return None;
+            }
+            return Some(Stmt::PatternBinding(PatternBindingStmt {
+                kind: PatternBindingKind::Expect,
+                clauses,
+                pattern: Pattern::Wildcard { span: clauses_end },
+                value: Expr::Unit { span: clauses_end },
+                span: start.cover(clauses_end),
+            }));
+        }
+
+        let pattern = self.parse_pattern()?;
+        self.consume(TokenKind::Eq, "expected '=' after expect pattern")?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"=\"",
+            );
+            return None;
+        }
+        let value = self.parse_expr()?;
+        if self.match_keyword(Keyword::Else) {
+            self.error_at_current(
+                "unexpected_token",
+                "expect does not support 'else'; use 'let ... else ...' or plain 'expect'",
+            );
+            return None;
+        }
+        let end = value.span();
+        Some(Stmt::PatternBinding(PatternBindingStmt {
+            kind: PatternBindingKind::Expect,
             clauses: Vec::new(),
             pattern,
             value,

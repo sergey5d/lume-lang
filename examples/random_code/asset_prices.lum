@@ -23,6 +23,8 @@ impl AssetPrices {
 
             split = asset.split("-")
 
+            #expect split.size() == 3
+
             println("split: " + split[0] + "-" + split[1] + "-" + split[2])
 
             fromAsset = split[0]
@@ -32,17 +34,15 @@ impl AssetPrices {
             if !result.contains(fromAsset) {
                 result.put(fromAsset, [])
             }
-            if let Some(fromPrices) = result.get(fromAsset) {
-                fromPrices.add((split[1], price))
-            }
-
-
+            expect Some(fromPrices) = result.get(fromAsset)
+            fromPrices.add((split[1], price))
+            
             if !result.contains(toAsset) {
                 result.put(toAsset, [])
             }
-            if let Some(toPrices) = result.get(toAsset) {
-                toPrices.add((fromAsset, price))
-            }
+
+            expect Some(toPrices) = result.get(toAsset)
+            toPrices.add((fromAsset, price))
         }
 
         result
@@ -59,7 +59,7 @@ impl AssetPrices {
 
     def findPrice(currAsset Str, endAsset Str, visited Set[Str], prices [((Str, Str), Float)]) Option[[Str]] {
 
-        let Some(permutations) = this.asset2PriceMap.get(currAsset) else return None()
+        permutations = try this.asset2PriceMap.get(currAsset)
 
         results [Str] = []
 
@@ -87,11 +87,7 @@ impl AssetPrices {
             }
         }
 
-        if results.nonEmpty() {
-            Some(results)
-        } else {
-            None()
-        }
+        Option.when(results.nonEmpty(), results)
     }
 }
 

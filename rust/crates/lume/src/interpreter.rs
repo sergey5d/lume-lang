@@ -1737,6 +1737,21 @@ impl<'a> Interpreter<'a> {
             return Ok(Value::Float(parsed));
         }
 
+        if path[0] == "Option" && path.len() == 2 && path[1] == "when" {
+            if args.len() != 2 {
+                return Err(self.runtime_error(
+                    span,
+                    format!("Option.when expects 2 arguments, got {}", args.len()),
+                ));
+            }
+            let condition = args[0].as_bool(self, span, "Option.when condition")?;
+            return Ok(if condition {
+                self.option_some(args[1].clone())
+            } else {
+                self.option_none()
+            });
+        }
+
         if path.len() == 2 {
             if let Some(value) = self.construct_named_path(path, args.clone(), span, structural)? {
                 return Ok(value);
@@ -4855,6 +4870,24 @@ $name
     }
 
     #[test]
+    fn runs_option_when_static_helper() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                someValue = Option.when(true, 7)
+                noValue = Option.when(false, 7)
+                OS.println(someValue.expect())
+                OS.println(noValue.isEmpty())
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "7\ntrue\n");
+    }
+
+    #[test]
     fn runs_match_patterns_for_records_classes_and_partial_enums() {
         let program = lower_inline(
             r#"
@@ -5091,6 +5124,23 @@ $name
             run.output,
             "let 5\nknown 5\nknown 6\nknown yield 6\nknown yield 7\nfor 1 10\nfor 2 20\nfor 3 30\nyield 11\nyield 22\nyield 33\n"
         );
+    }
+
+    #[test]
+    fn runs_expect_pattern_bindings() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                first Option[Int] = Some(5)
+                expect Some(value) = first
+                OS.println("expect", value)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "expect 5\n");
     }
 
     #[test]

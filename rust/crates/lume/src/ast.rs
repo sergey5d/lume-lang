@@ -416,10 +416,19 @@ pub struct LetElseStmt {
     pub span: Span,
 }
 
-/// A `let PATTERN = expr` statement, or grouped `let { ... }`, that panics on
-/// pattern mismatch.
+/// Distinguishes the surface keyword used for a panic-on-mismatch pattern
+/// binding statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatternBindingKind {
+    Let,
+    Expect,
+}
+
+/// A `let PATTERN = expr` / `expect PATTERN = expr` statement, or grouped
+/// `let { ... }` / `expect { ... }`, that panics on pattern mismatch.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PatternBindingStmt {
+    pub kind: PatternBindingKind,
     pub clauses: Vec<RefutableClause>,
     pub pattern: Pattern,
     pub value: Expr,

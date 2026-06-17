@@ -1132,12 +1132,10 @@ impl<'a> Resolver<'a> {
         }
 
         self.push_scope();
-        self.push_field_hints(
-            decl.members.iter().filter_map(|member| match member {
-                TypeMember::Field(field) => Some(field.name.as_str()),
-                _ => None,
-            }),
-        );
+        self.push_field_hints(decl.members.iter().filter_map(|member| match member {
+            TypeMember::Field(field) => Some(field.name.as_str()),
+            _ => None,
+        }));
         if decl.kind != TypeKind::Enum {
             self.define_value(
                 "this",
@@ -1610,11 +1608,7 @@ impl<'a> Resolver<'a> {
                         // operator-shape validation stays a later typecheck concern.
                     }
                 } else {
-                    self.add_error(
-                        "undefined_name",
-                        self.undefined_value_message(name),
-                        *span,
-                    );
+                    self.add_error("undefined_name", self.undefined_value_message(name), *span);
                 }
             }
             Expr::Member { receiver, .. } => self.resolve_expr(receiver),
@@ -1638,11 +1632,7 @@ impl<'a> Resolver<'a> {
         match expr {
             Expr::Identifier { name, span } => {
                 if !self.is_name_defined(name) {
-                    self.add_error(
-                        "undefined_name",
-                        self.undefined_value_message(name),
-                        *span,
-                    );
+                    self.add_error("undefined_name", self.undefined_value_message(name), *span);
                 }
             }
             Expr::Placeholder { .. }

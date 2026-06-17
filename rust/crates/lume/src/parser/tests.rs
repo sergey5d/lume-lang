@@ -651,11 +651,46 @@ def run(value Option[Int]) Int {
         CallableBody::Block(block) => match &block.statements[0] {
             Stmt::PatternBinding(stmt) => match &stmt.pattern {
                 Pattern::Constructor { path, args, .. } => {
+                    assert_eq!(stmt.kind, PatternBindingKind::Let);
                     assert_eq!(path, &vec!["Some".to_string()]);
                     assert_eq!(args.len(), 1);
                 }
                 other => panic!("expected pattern binding, got {other:#?}"),
             },
+            other => panic!("expected pattern binding statement, got {other:#?}"),
+        },
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_expect_pattern_binding() {
+    let result = parse(
+        r#"
+def run(value Option[Int]) Int {
+    expect Some(item) = value
+    return item
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => match &block.statements[0] {
+            Stmt::PatternBinding(stmt) => {
+                assert_eq!(stmt.kind, PatternBindingKind::Expect);
+                match &stmt.pattern {
+                    Pattern::Constructor { path, args, .. } => {
+                        assert_eq!(path, &vec!["Some".to_string()]);
+                        assert_eq!(args.len(), 1);
+                    }
+                    other => panic!("expected pattern binding, got {other:#?}"),
+                }
+            }
             other => panic!("expected pattern binding statement, got {other:#?}"),
         },
         other => panic!("expected block body, got {other:#?}"),

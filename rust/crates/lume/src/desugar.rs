@@ -56,6 +56,10 @@ pub fn desugar_stmt(stmt: &ast::Stmt) -> core::Stmt {
             span: stmt.span,
         }),
         ast::Stmt::PatternBinding(stmt) => core::Stmt::PatternBinding(core::PatternBindingStmt {
+            kind: match stmt.kind {
+                ast::PatternBindingKind::Let => core::PatternBindingKind::Let,
+                ast::PatternBindingKind::Expect => core::PatternBindingKind::Expect,
+            },
             clauses: stmt.clauses.iter().map(desugar_refutable_clause).collect(),
             pattern: stmt.pattern.clone(),
             value: desugar_expr(&stmt.value),

@@ -103,7 +103,7 @@ Still open:
 
 Important design constraint:
 - expressing "same container family, different success type" is hard without higher-kinded types
-- so the current propagation model still relies on compiler help for failure rewrapping
+- so the current propagation model relies on compiler help for propagation checks
 
 Clarification on "failure conversion":
 - this does not necessarily mean superclass/subclass conversion
@@ -112,6 +112,13 @@ Clarification on "failure conversion":
   - `readFile() Result[Str, IoError]`
   - enclosing function returns `Result[Int, AppError]`
   - failure conversion would mean allowing `IoError` to be turned into something like `AppError.Io(...)` during propagation
+
+Current behavior:
+- same-family propagation with a different success type is supported
+- `Option[...]` can propagate only into `Option[...]`
+- `Result[..., E]` can propagate only into `Result[..., E2]` when `E` is assignable to `E2`
+- `Either[L, ...]` can propagate only into `Either[L2, ...]` when `L` is assignable to `L2`
+- wrapper-style error remapping during `try` is still not implemented
 
 ### 10. Smarter Type Narrowing
 

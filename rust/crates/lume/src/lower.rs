@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{
-        self, BinaryOp as AstBinaryOp, ImplBlock, ImplTargetKind, Item, TypeDecl, TypeMember,
-    },
+    ast::{self, BinaryOp as AstBinaryOp, ImplBlock, ImplTargetKind, Item, TypeDecl, TypeMember},
     core::{
         self, AssignOp, AssignmentStmt, Block, CallableBody, DestructureKind, ElseBranch,
         ElseExprBranch, Expr, FunctionDecl, MatchCase, MatchCaseBody, MethodDecl, Pattern, Stmt,
@@ -305,8 +303,7 @@ impl<'a> Lowerer<'a> {
             );
             return;
         };
-        let Some(type_id) = self.impl_target_type_id(target_name, block.target_kind)
-        else {
+        let Some(type_id) = self.impl_target_type_id(target_name, block.target_kind) else {
             self.add_error(
                 "lower_invariant",
                 format!(
@@ -705,10 +702,7 @@ impl<'a> FunctionLowerer<'a> {
         this
     }
 
-    fn with_capture_sources(
-        mut self,
-        capture_sources: HashMap<String, CaptureSource>,
-    ) -> Self {
+    fn with_capture_sources(mut self, capture_sources: HashMap<String, CaptureSource>) -> Self {
         self.capture_sources = capture_sources;
         self
     }
@@ -1429,6 +1423,10 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_pattern_binding_stmt(&mut self, stmt: &core::PatternBindingStmt) {
+        let panic_message = match stmt.kind {
+            core::PatternBindingKind::Let => "let pattern did not match",
+            core::PatternBindingKind::Expect => "expect pattern did not match",
+        };
         if !stmt.clauses.is_empty() {
             let failure_block = self.add_block();
             let continue_block = self.add_block();
@@ -1436,7 +1434,7 @@ impl<'a> FunctionLowerer<'a> {
             self.lower_refutable_clause_chain(&stmt.clauses, continue_block, failure_block);
 
             self.current_block = Some(failure_block);
-            self.emit_panic("let pattern did not match", stmt.span);
+            self.emit_panic(panic_message, stmt.span);
             self.terminate(ir::Terminator {
                 span: Some(stmt.span),
                 kind: ir::TerminatorKind::Unreachable,
@@ -1468,7 +1466,7 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         self.current_block = Some(failure_block);
-        self.emit_panic("let pattern did not match", stmt.span);
+        self.emit_panic(panic_message, stmt.span);
         self.terminate(ir::Terminator {
             span: Some(stmt.span),
             kind: ir::TerminatorKind::Unreachable,
@@ -3559,9 +3557,7 @@ fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
 
 fn lower_type_ref(reference: &TypeRef) -> ir::Type {
     match reference {
-        TypeRef::Named { name, args, .. } if name == "Never" && args.is_empty() => {
-            ir::Type::Never
-        }
+        TypeRef::Named { name, args, .. } if name == "Never" && args.is_empty() => ir::Type::Never,
         TypeRef::Named { name, args, .. } => ir::Type::Named {
             name: name.clone(),
             args: args.iter().map(lower_type_ref).collect(),
@@ -3643,7 +3639,9 @@ fn is_named_runtime_callee_path(program: &ir::Program, path: &[String]) -> bool 
     if path.is_empty() {
         return false;
     }
-    if matches!(path, [owner, method] if owner == "Float" && method == "parse") {
+    if matches!(path, [owner, method] if (owner == "Float" && method == "parse")
+        || (owner == "Option" && method == "when"))
+    {
         return true;
     }
     if path.len() == 1 {
@@ -4142,6 +4140,7 @@ fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
             span: binding.span,
         }),
         Stmt::PatternBinding(stmt) => Stmt::PatternBinding(core::PatternBindingStmt {
+            kind: stmt.kind,
             clauses: stmt
                 .clauses
                 .iter()

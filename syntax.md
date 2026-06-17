@@ -875,10 +875,24 @@ let {
 
 These plain pattern `let` forms panic at runtime if the pattern does not match.
 
-Possible future surface:
-- an explicit assertive form such as `expect Some(item) = maybeValue`
-- meaning: match the pattern, bind on success, and panic on mismatch
-- today, plain pattern `let` already fills that runtime role
+An explicit assertive form is also supported:
+
+```txt
+expect Some(item) = maybeValue
+```
+
+Grouped assertive `expect` works the same way:
+
+```txt
+expect {
+    Some(left) = maybeLeft
+    Some(right) = maybeRight
+}
+```
+
+`expect` matches the pattern, binds on success, and panics on mismatch.
+`expect` is statement-only and does not support `else`; use `let ... else`
+when you want an explicit fallback path.
 
 Propagation form:
 
@@ -892,6 +906,14 @@ item = try maybeValue
 - `Either[L, R]`
 
 and returns early with the original failure value when the source is empty / error / left.
+
+`try` is only valid when the enclosing callable returns a compatible propagation
+type:
+- `Option[T]` may propagate from any `Option[...]` return type
+- `Result[T, E]` may propagate from `Result[..., E2]` when `E` is assignable to `E2`
+- `Either[L, R]` may propagate from `Either[L2, ...]` when `L` is assignable to `L2`
+
+The success type may differ; the propagated failure side must still be compatible.
 
 Multiple dependent unwraps can be written as sequential `let ... else` / `try`
 statements or as a grouped `let` block:

@@ -828,7 +828,13 @@ impl<'a> Parser<'a> {
             }
             if self.match_token(TokenKind::Dot) {
                 self.skip_newlines();
-                let (name, end) = self.expect_identifier("expected member name after '.'")?;
+                let (name, end) = if self.at(TokenKind::Keyword(Keyword::Expect)) {
+                    let token = self.current().clone();
+                    self.advance();
+                    (token.lexeme, token.span)
+                } else {
+                    self.expect_identifier("expected member name after '.'")?
+                };
                 let start = expr.span();
                 expr = Expr::Member {
                     receiver: Box::new(expr),

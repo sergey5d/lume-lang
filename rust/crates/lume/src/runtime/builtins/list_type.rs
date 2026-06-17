@@ -404,7 +404,10 @@ fn list_make_str(
     let Value::String(separator) = separator else {
         return Err(interpreter.runtime_error(
             span,
-            format!("List.makeStr expects Str separator, got {}", separator.render()),
+            format!(
+                "List.makeStr expects Str separator, got {}",
+                separator.render()
+            ),
         ));
     };
 
