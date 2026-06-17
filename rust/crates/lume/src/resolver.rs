@@ -1374,6 +1374,7 @@ impl<'a> Resolver<'a> {
                 }
             }
             Stmt::PatternBinding(stmt) => self.resolve_pattern_binding(stmt),
+            Stmt::ExpectCondition(stmt) => self.resolve_expr(&stmt.condition),
             Stmt::Assignment(assignment) => self.resolve_assignment(assignment),
             Stmt::If(stmt) => self.resolve_if_stmt(stmt),
             Stmt::Match(stmt) => {

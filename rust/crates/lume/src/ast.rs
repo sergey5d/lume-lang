@@ -244,6 +244,7 @@ pub struct Block {
 pub enum Stmt {
     Binding(BindingStmt),
     PatternBinding(PatternBindingStmt),
+    ExpectCondition(ExpectConditionStmt),
     Assignment(AssignmentStmt),
     If(IfStmt),
     Match(MatchStmt),
@@ -262,6 +263,7 @@ impl Stmt {
         match self {
             Stmt::Binding(stmt) => stmt.span,
             Stmt::PatternBinding(stmt) => stmt.span,
+            Stmt::ExpectCondition(stmt) => stmt.span,
             Stmt::Assignment(stmt) => stmt.span,
             Stmt::If(stmt) => stmt.span,
             Stmt::Match(stmt) => stmt.span,
@@ -432,6 +434,13 @@ pub struct PatternBindingStmt {
     pub clauses: Vec<RefutableClause>,
     pub pattern: Pattern,
     pub value: Expr,
+    pub span: Span,
+}
+
+/// An `expect CONDITION` statement that panics when the condition is false.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExpectConditionStmt {
+    pub condition: Expr,
     pub span: Span,
 }
 

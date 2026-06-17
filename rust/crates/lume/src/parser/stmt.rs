@@ -287,16 +287,39 @@ impl<'a> Parser<'a> {
             }));
         }
 
-        let pattern = self.parse_pattern()?;
-        self.consume(TokenKind::Eq, "expected '=' after expect pattern")?;
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                "expected expression on same line after \"=\"",
-            );
-            return None;
+        let checkpoint = self.checkpoint();
+        let diagnostics_len = self.diagnostics.len();
+        if let Some(pattern) = self.parse_pattern() {
+            if self.match_token(TokenKind::Eq) {
+                if self.at(TokenKind::Newline) {
+                    self.error_at_current(
+                        "expected_expression",
+                        "expected expression on same line after \"=\"",
+                    );
+                    return None;
+                }
+                let value = self.parse_expr()?;
+                if self.match_keyword(Keyword::Else) {
+                    self.error_at_current(
+                        "unexpected_token",
+                        "expect does not support 'else'; use 'let ... else ...' or plain 'expect'",
+                    );
+                    return None;
+                }
+                let end = value.span();
+                return Some(Stmt::PatternBinding(PatternBindingStmt {
+                    kind: PatternBindingKind::Expect,
+                    clauses: Vec::new(),
+                    pattern,
+                    value,
+                    span: start.cover(end),
+                }));
+            }
         }
-        let value = self.parse_expr()?;
+        self.restore(checkpoint);
+        self.diagnostics.truncate(diagnostics_len);
+
+        let condition = self.parse_expr()?;
         if self.match_keyword(Keyword::Else) {
             self.error_at_current(
                 "unexpected_token",
@@ -304,12 +327,9 @@ impl<'a> Parser<'a> {
             );
             return None;
         }
-        let end = value.span();
-        Some(Stmt::PatternBinding(PatternBindingStmt {
-            kind: PatternBindingKind::Expect,
-            clauses: Vec::new(),
-            pattern,
-            value,
+        let end = condition.span();
+        Some(Stmt::ExpectCondition(ExpectConditionStmt {
+            condition,
             span: start.cover(end),
         }))
     }

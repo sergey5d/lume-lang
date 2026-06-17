@@ -314,6 +314,9 @@ fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: 
             rewrite_pattern_for_runtime(&mut stmt.pattern, module);
             rewrite_expr_for_runtime(&mut stmt.value, module, graph);
         }
+        ast::Stmt::ExpectCondition(stmt) => {
+            rewrite_expr_for_runtime(&mut stmt.condition, module, graph);
+        }
         ast::Stmt::Assignment(assign) => {
             for target in &mut assign.targets {
                 rewrite_expr_for_runtime(target, module, graph);
@@ -5141,6 +5144,23 @@ $name
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "expect 5\n");
+    }
+
+    #[test]
+    fn runs_expect_condition_statements() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                split = "BTC-USD-5.0".split("-")
+                expect split.size() == 3
+                OS.println("ok")
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "ok\n");
     }
 
     #[test]

@@ -894,6 +894,14 @@ expect {
 `expect` is statement-only and does not support `else`; use `let ... else`
 when you want an explicit fallback path.
 
+`expect` also supports plain boolean assertions:
+
+```txt
+expect split.size() == 3
+```
+
+This form requires a `Bool` condition and panics when the condition is `false`.
+
 Propagation form:
 
 ```txt

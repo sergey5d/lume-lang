@@ -698,6 +698,35 @@ def run(value Option[Int]) Int {
 }
 
 #[test]
+fn parses_expect_condition_statement() {
+    let result = parse(
+        r#"
+def run(split [Str]) Unit {
+    expect split.size() == 3
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => match &block.statements[0] {
+            Stmt::ExpectCondition(stmt) => match &stmt.condition {
+                Expr::Binary {
+                    op: BinaryOp::Eq, ..
+                } => {}
+                other => panic!("expected equality condition, got {other:#?}"),
+            },
+            other => panic!("expected expect condition statement, got {other:#?}"),
+        },
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_lambda_expression() {
     let result = parse("def make() Unit = values.map((x, y) -> x + y)\n");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);

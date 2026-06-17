@@ -65,6 +65,7 @@ pub fn desugar_stmt(stmt: &ast::Stmt) -> core::Stmt {
             value: desugar_expr(&stmt.value),
             span: stmt.span,
         }),
+        ast::Stmt::ExpectCondition(stmt) => desugar_expect_condition_stmt(stmt),
         ast::Stmt::Assignment(stmt) => core::Stmt::Assignment(core::AssignmentStmt {
             targets: stmt.targets.iter().map(desugar_expr).collect(),
             operator: stmt.operator,
@@ -128,6 +129,47 @@ pub fn desugar_stmt(stmt: &ast::Stmt) -> core::Stmt {
             core::Stmt::LocalFunction(desugar_function_decl(function))
         }
     }
+}
+
+fn desugar_expect_condition_stmt(stmt: &ast::ExpectConditionStmt) -> core::Stmt {
+    let panic_expr = core::Expr::Call {
+        callee: Box::new(core::Expr::Identifier {
+            name: "panic".to_string(),
+            span: stmt.span,
+        }),
+        args: vec![core::CallArg {
+            name: None,
+            value: core::Expr::String {
+                raw: "expect condition was false".to_string(),
+                span: stmt.span,
+            },
+            span: stmt.span,
+        }],
+        style: core::CallStyle::Paren,
+        span: stmt.span,
+    };
+
+    core::Stmt::If(core::IfStmt {
+        condition: Some(desugar_expr(&stmt.condition)),
+        condition_clauses: Vec::new(),
+        pattern: None,
+        pattern_value: None,
+        pattern_clauses: Vec::new(),
+        bindings: Vec::new(),
+        binding_value: None,
+        then_block: core::Block {
+            statements: Vec::new(),
+            span: stmt.span,
+        },
+        else_branch: Some(core::ElseBranch::Block(core::Block {
+            statements: vec![core::Stmt::Expr(core::ExprStmt {
+                expr: panic_expr,
+                span: stmt.span,
+            })],
+            span: stmt.span,
+        })),
+        span: stmt.span,
+    })
 }
 
 pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
