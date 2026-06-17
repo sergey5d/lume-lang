@@ -22,7 +22,7 @@ def find(
 ) { foundP Option[TreeNode], foundQ Option[TreeNode], ancestor Option[TreeNode] } = {
 
     let Some(current) = node else {
-        class { foundP = foundPNode, foundQ = foundQNode, ancestor = None() }
+        return class { foundP = foundPNode, foundQ = foundQNode, ancestor = None() }
     }
 
     var currentFoundP = foundPNode

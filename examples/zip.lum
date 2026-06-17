@@ -18,11 +18,11 @@ def main() Unit {
     listIndexed = items.zipWithIndex()
 
     let Some(firstPair) = listPairs.get(0) else {
-        ()
+        return ()
     }
-    let Some(secondPair) = listPairs.get(1) else ()
+    let Some(secondPair) = listPairs.get(1) else return ()
 
-    let Some(indexedPair) = listIndexed.get(2) else ()
+    let Some(indexedPair) = listIndexed.get(2) else return ()
 
     let (firstLeft, firstRight) = firstPair
     let (secondLeft, secondRight) = secondPair
@@ -52,10 +52,10 @@ def main() Unit {
     rangeIndexed = Range(7, 9).zipWithIndex()
 
     let Some(rangePair) = rangePairs.get(1) else {
-        ()
+        return ()
     }
     let Some(rangeIndexedPair) = rangeIndexed.get(1) else {
-        ()
+        return ()
     }
     let (rangeLeft, rangeRight) = rangePair
     let (rangeIndexedValue, rangeIndexedPos) = rangeIndexedPair

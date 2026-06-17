@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# non_diverging_let_else at .*: let-else fallback must exit control flow with 'return', 'break', 'continue', or a call returning Never
+
+enum MaybeInt {
+    case NoneX
+    case SomeX {
+        value Int
+    }
+}
+
+def main() Unit {
+    value MaybeInt = MaybeInt.NoneX
+    let SomeX(item) = value else ()
+    OS.println(item)
+}

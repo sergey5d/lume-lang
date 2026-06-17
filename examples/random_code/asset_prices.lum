@@ -2,18 +2,25 @@ module asset/price
 
 class AssetPrices {
 
-    assets = [
-        "BTC-USD-5.0",
-        "XTZ-BTC-1.2",
-        "SOL-EUR-4", 
-        "XTZ-SOL-8"
-    ]
+    assets [Str]
+    asset2PriceMap Map[Str, [(Str, Float)]]
+}
 
-    asset2PriceMap = Map[Str, [(Str, Float)]] = makePrices()
+impl AssetPrices {
+    def new() {
+        this.assets = [
+            "BTC-USD-5.0",
+            "XTZ-BTC-1.2",
+            "SOL-EUR-4",
+            "XTZ-SOL-8"
+        ]
+        this.asset2PriceMap = this.makePrices()
+    }
 
-    def makePrices() Map[Str, (Str, Float)] {
+    def makePrices() Map[Str, [(Str, Float)]] {
+        result Map[Str, [(Str, Float)]] = Map()
 
-        for asset <- assets {
+        for asset <- this.assets {
 
             split = asset.split("-")
 
@@ -23,20 +30,26 @@ class AssetPrices {
             toAsset = split[1]
             price = Float.parse(split[2])
 
-            if !asset2PriceMap.contains(fromAsset) {
-                asset2PriceMap.put(fromAsset, [])
+            if !result.contains(fromAsset) {
+                result.put(fromAsset, [])
             }
-            asset2PriceMap.get(fromAsset).add(split[1] : price)
+            if let Some(fromPrices) = result.get(fromAsset) {
+                fromPrices.add((split[1], price))
+            }
 
 
-            if !asset2PriceMap.contains(toAsset) {
-                asset2PriceMap.put(toAsset, [])
+            if !result.contains(toAsset) {
+                result.put(toAsset, [])
             }
-            asset2PriceMap.get(toAsset).add(fromAsset : price)
+            if let Some(toPrices) = result.get(toAsset) {
+                toPrices.add((fromAsset, price))
+            }
         }
+
+        result
     }
 
-    def makeResult(prices: [((Str, Str), Float)]) Str {
+    def makeResult(prices [((Str, Str), Float)]) Str {
 
         strings [Str] = prices.map(match {
             case ((from, to), price) => from + "->" + to + ":" + price
@@ -45,9 +58,9 @@ class AssetPrices {
         strings.makeStr(",")
     }
 
-    def findPrice(currAsset Str, endAsset Str, visited Set[Str], prices: [((Str, Str), Float)]) Option[[Str]]] {
+    def findPrice(currAsset Str, endAsset Str, visited Set[Str], prices [((Str, Str), Float)]) Option[[Str]] {
 
-        permutations = asset2PriceMap.get(currAsset)
+        let Some(permutations) = this.asset2PriceMap.get(currAsset) else return None()
 
         results [Str] = []
 
@@ -58,27 +71,27 @@ class AssetPrices {
             }
 
             newPrices = List.from(prices)
-            newPrices.add((currAsset, toAsset), price)
+            newPrices.add(((currAsset, toAsset), price))
 
             if toAsset == endAsset {
-                results.add(makeResult(newPrices))
+                results.add(this.makeResult(newPrices))
                 continue
             }
 
             newVisited = Set.from(visited)
             newVisited.add(toAsset)
 
-            priceResult = findPrice(toAsset, endAsset, newVisited, newPrices)
+            priceResult = this.findPrice(toAsset, endAsset, newVisited, newPrices)
 
-            if priceResult.isSet {
-                results.addAll(results)
+            if let Some(foundPrices) = priceResult {
+                results.addAll(foundPrices)
             }
         }
 
-        if results.nonEmpty {
+        if results.nonEmpty() {
             Some(results)
         } else {
-            None
+            None()
         }
     }
 }
@@ -86,15 +99,23 @@ class AssetPrices {
 def main() Unit {
 
 
-    prices = AssetPrices()
-
-    results = prices.findPrice("BTC", "USD", Set(), [])
-
-    match results {
+    def printResults(results Option[[Str]]) = match results {
         case Some(list) => list.forEach { elem ->
             println("result: " + elem)
         }
-        case None => 
+        case None => ()
     }
+
+    prices = AssetPrices()
+
+    results = prices.findPrice("XTZ", "USD", Set("XTZ"), [])
+
+    printResults(results)
+
+    println("next: ")
+
+    results2 = prices.findPrice("XTZ", "EUR", Set("XTZ"), [])
+
+    printResults(results2)
 
 }

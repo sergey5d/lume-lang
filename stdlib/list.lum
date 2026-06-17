@@ -29,11 +29,12 @@ interface List[T] with Iterable[T] {
     def makeStr(separator Str) Str {
         var result Str = ""
         for idx <- Range(0, this.size()) {
-            let Some(item) = this.get(idx) else ()
-            if idx > 0 {
-                result := result + separator
+            if let Some(item) = this.get(idx) {
+                if idx > 0 {
+                    result := result + separator
+                }
+                result := result + item
             }
-            result := result + item
         }
         result
     }

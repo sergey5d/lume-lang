@@ -855,7 +855,7 @@ let {
 `let ... else` is statement-oriented:
 - the pattern is matched against the right-hand value
 - if the match succeeds, bindings remain visible after the statement
-- if the match fails, the `else` block is evaluated and implicitly returns from the current callable
+- if the match fails, the `else` block is evaluated and must exit the current control-flow path, typically with `return`, `break`, `continue`, or a call whose return type is `Never`
 
 If you want an assertive match without a fallback, plain pattern `let` is also
 supported:
@@ -874,6 +874,11 @@ let {
 ```
 
 These plain pattern `let` forms panic at runtime if the pattern does not match.
+
+Possible future surface:
+- an explicit assertive form such as `expect Some(item) = maybeValue`
+- meaning: match the pattern, bind on success, and panic on mismatch
+- today, plain pattern `let` already fills that runtime role
 
 Propagation form:
 

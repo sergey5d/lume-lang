@@ -57,3 +57,11 @@ fun { x, y ->
   - Goal:
     - keep `Type { ... }` as construction syntax
     - avoid treating `Type(class { ... })` or `Type(recordValue)` as implicit nominal conversion
+
+- Consider an explicit assertive pattern-binding surface such as `expect Some(a) = optionOfA`.
+  - Intended meaning:
+    - match and bind on success
+    - panic if the pattern does not match
+  - Current state:
+    - plain pattern `let` already has that runtime behavior
+    - this would only make the intent more explicit in source

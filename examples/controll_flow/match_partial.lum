@@ -30,8 +30,8 @@ def main() Unit {
     OS.println(ifMapped.get(1).getOr(0))
     OS.println(matchMapped.get(0).getOr(0))
     OS.println(matchMapped.get(1).getOr(0))
-    let Some(firstPartial) = partialMapped.get(0) else ()
-    let Some(secondPartial) = partialMapped.get(1) else ()
+    let Some(firstPartial) = partialMapped.get(0) else return ()
+    let Some(secondPartial) = partialMapped.get(1) else return ()
     OS.println(firstPartial.getOr(0))
     OS.println(secondPartial.isEmpty())
 }
