@@ -1,0 +1,100 @@
+module asset/price
+
+class AssetPrices {
+
+    assets = [
+        "BTC-USD-5.0",
+        "XTZ-BTC-1.2",
+        "SOL-EUR-4", 
+        "XTZ-SOL-8"
+    ]
+
+    asset2PriceMap = Map[Str, [(Str, Float)]] = makePrices()
+
+    def makePrices() Map[Str, (Str, Float)] {
+
+        for asset <- assets {
+
+            split = asset.split("-")
+
+            println("split: " + split[0] + "-" + split[1] + "-" + split[2])
+
+            fromAsset = split[0]
+            toAsset = split[1]
+            price = Float.parse(split[2])
+
+            if !asset2PriceMap.contains(fromAsset) {
+                asset2PriceMap.put(fromAsset, [])
+            }
+            asset2PriceMap.get(fromAsset).add(split[1] : price)
+
+
+            if !asset2PriceMap.contains(toAsset) {
+                asset2PriceMap.put(toAsset, [])
+            }
+            asset2PriceMap.get(toAsset).add(fromAsset : price)
+        }
+    }
+
+    def makeResult(prices: [((Str, Str), Float)]) Str {
+
+        strings [Str] = prices.map(match {
+            case ((from, to), price) => from + "->" + to + ":" + price
+        })
+
+        strings.makeStr(",")
+    }
+
+    def findPrice(currAsset Str, endAsset Str, visited Set[Str], prices: [((Str, Str), Float)]) Option[[Str]]] {
+
+        permutations = asset2PriceMap.get(currAsset)
+
+        results [Str] = []
+
+        for (toAsset, price) <- permutations {
+
+            if visited.contains(toAsset) {
+                continue
+            }
+
+            newPrices = List.from(prices)
+            newPrices.add((currAsset, toAsset), price)
+
+            if toAsset == endAsset {
+                results.add(makeResult(newPrices))
+                continue
+            }
+
+            newVisited = Set.from(visited)
+            newVisited.add(toAsset)
+
+            priceResult = findPrice(toAsset, endAsset, newVisited, newPrices)
+
+            if priceResult.isSet {
+                results.addAll(results)
+            }
+        }
+
+        if results.nonEmpty {
+            Some(results)
+        } else {
+            None
+        }
+    }
+}
+
+def main() Unit {
+
+
+    prices = AssetPrices()
+
+    results = prices.findPrice("BTC", "USD", Set(), [])
+
+    match results {
+        case Some(list) => list.forEach { elem ->
+            println("result: " + elem)
+        }
+        case None => 
+    }
+
+}
