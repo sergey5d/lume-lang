@@ -40,8 +40,8 @@ impl Cursor {
     def new(term Str, documents List[Str]) {
         this.term = term
         this.documents = documents
-        this.current := Location { -1, -1 }
-        this.valid := false
+        this.current = Location { -1, -1 }
+        this.valid = false
         this.seek(Location { -1, -1 })
     }
 

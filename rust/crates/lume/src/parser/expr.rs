@@ -139,8 +139,58 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block().map(LambdaBody::Block);
         }
+        if self.at(TokenKind::Newline) {
+            return self.parse_implicit_lambda_body();
+        }
         self.parse_expr()
             .map(|expr| LambdaBody::Expr(Box::new(expr)))
+    }
+
+    fn parse_implicit_lambda_body(&mut self) -> Option<LambdaBody> {
+        self.skip_newlines();
+        let Some(first) = self.parse_stmt() else {
+            self.synchronize_stmt();
+            self.error_at_current(
+                "expected_expression",
+                "expected expression or lambda body after '->'",
+            );
+            return None;
+        };
+        let body_indent = first.span().start_pos.column;
+        let mut statements = vec![first];
+        loop {
+            self.skip_newlines();
+            if self.at(TokenKind::RParen)
+                || self.at(TokenKind::RBrace)
+                || self.at(TokenKind::Comma)
+                || self.at(TokenKind::Eof)
+                || self.current_span().start_pos.column < body_indent
+            {
+                break;
+            }
+            if let Some(stmt) = self.parse_stmt() {
+                statements.push(stmt);
+            } else {
+                self.synchronize_stmt();
+                break;
+            }
+        }
+
+        let first = statements
+            .first()
+            .cloned()
+            .expect("lambda body first statement");
+        let span = first
+            .span()
+            .cover(statements.last().map(Stmt::span).unwrap_or(first.span()));
+
+        if statements.len() == 1 {
+            if let Stmt::Expr(ExprStmt { expr, .. }) = statements.remove(0) {
+                return Some(LambdaBody::Expr(Box::new(expr)));
+            }
+        }
+
+        Some(LambdaBody::Block(Block { statements, span }))
     }
 
     pub(super) fn parse_if_expr(&mut self, start: Span) -> Option<Expr> {

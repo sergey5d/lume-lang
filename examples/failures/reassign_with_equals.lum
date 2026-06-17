@@ -1,0 +1,16 @@
+# FAIL_REGEX:
+# use ':=' for reassignment; '=' is only for bindings and constructor initialization
+
+class Counter {
+    hidden var count Int = 0
+}
+
+impl Counter {
+    def bump() Unit {
+        this.count = 1
+    }
+}
+
+def main() Unit {
+    Counter().bump()
+}

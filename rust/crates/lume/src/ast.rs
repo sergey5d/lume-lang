@@ -318,6 +318,7 @@ pub struct RefutableClause {
 /// Supported assignment operators after parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssignOp {
+    Assign,
     Reassign,
     AddAssign,
     SubAssign,

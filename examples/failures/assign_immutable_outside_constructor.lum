@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# assign_immutable at .*: cannot assign to immutable field 'count' outside constructor
+# assign_immutable at .*: cannot reassign immutable field 'count'
 
 class Counter {
     hidden count Int
@@ -11,7 +11,7 @@ impl Counter {
     }
 
     def bump() Int {
-        this.count = this.count + 1
+        this.count := this.count + 1
         this.count
     }
 }

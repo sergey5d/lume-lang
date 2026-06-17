@@ -11,8 +11,8 @@ class ArrayListIterator[T] with Iterator[T] {
 
 impl ArrayListIterator[T] {
     def new(items Array[T], limit Int) {
-        this.items := items
-        this.limit := limit
+        this.items = items
+        this.limit = limit
     }
 
     def hasNext() Bool = this.index < this.limit
@@ -31,7 +31,7 @@ class ArrayList[T] with Iterable[T] {
 
 impl ArrayList[T] {
     def new(capacity Int) {
-        this.items := Array.ofLength(capacity)
+        this.items = Array.ofLength(capacity)
     }
 
     def append(value T) Unit {

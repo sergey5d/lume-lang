@@ -2172,7 +2172,7 @@ impl<'a> Checker<'a> {
             .collect::<Vec<_>>();
         for (index, target) in assignment.targets.iter().enumerate() {
             let actual = value_types.get(index).cloned().unwrap_or(Ty::Unknown);
-            let expected = self.assignment_target_type(target);
+            let expected = self.assignment_target_type(target, assignment.operator);
             self.require_assignable(
                 &actual,
                 &expected,
@@ -2184,7 +2184,10 @@ impl<'a> Checker<'a> {
                     expected.describe()
                 ),
             );
-            if assignment.operator != AssignOp::Reassign
+            if !matches!(
+                assignment.operator,
+                AssignOp::Assign | AssignOp::Reassign
+            )
                 && !expected.is_numeric()
                 && !expected.is_str()
                 && !matches!(expected, Ty::Unknown)
@@ -2198,11 +2201,17 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn assignment_target_type(&mut self, target: &Expr) -> Ty {
+    fn assignment_target_type(&mut self, target: &Expr, operator: AssignOp) -> Ty {
         match target {
             Expr::Identifier { name, span } => {
                 if let Some(value) = self.lookup_value(name) {
-                    if !value.mutable {
+                    if operator == AssignOp::Assign {
+                        self.add_error(
+                            "unexpected_token",
+                            "use ':=' for reassignment; '=' is only for bindings and constructor initialization",
+                            *span,
+                        );
+                    } else if !value.mutable {
                         self.add_error(
                             "assign_immutable",
                             format!("cannot assign to immutable binding '{}'", name),
@@ -2222,15 +2231,20 @@ impl<'a> Checker<'a> {
             } => {
                 let receiver_ty = self.check_expr(receiver);
                 if let Some(field) = self.field_sig_for_member(&receiver_ty, name) {
-                    if !field.mutable
-                        && !self.can_assign_immutable_field(receiver, &receiver_ty, name)
-                    {
+                    let can_initialize =
+                        self.can_initialize_field_in_constructor(receiver, &receiver_ty, name);
+                    if operator == AssignOp::Assign {
+                        if !can_initialize {
+                            self.add_error(
+                                "unexpected_token",
+                                "use ':=' for reassignment; '=' is only for bindings and constructor initialization",
+                                *span,
+                            );
+                        }
+                    } else if !field.mutable {
                         self.add_error(
                             "assign_immutable",
-                            format!(
-                                "cannot assign to immutable field '{}' outside constructor",
-                                name
-                            ),
+                            format!("cannot reassign immutable field '{}'", name),
                             *span,
                         );
                     }
@@ -2250,8 +2264,17 @@ impl<'a> Checker<'a> {
                 })
             }
             Expr::Index {
-                receiver, index, ..
+                receiver,
+                index,
+                span,
             } => {
+                if operator == AssignOp::Assign {
+                    self.add_error(
+                        "unexpected_token",
+                        "use ':=' for reassignment; '=' is only for bindings and constructor initialization",
+                        *span,
+                    );
+                }
                 let receiver_ty = self.check_expr(receiver);
                 self.check_expr(index);
                 self.index_result_type(&receiver_ty)
@@ -4010,7 +4033,7 @@ impl<'a> Checker<'a> {
         sig.fields.iter().find(|field| field.name == name).cloned()
     }
 
-    fn can_assign_immutable_field(
+    fn can_initialize_field_in_constructor(
         &self,
         receiver: &Expr,
         receiver_ty: &Ty,

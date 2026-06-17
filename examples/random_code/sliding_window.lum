@@ -33,7 +33,7 @@ impl SlidingWindowLimiter {
             }
         }
 
-        this.accepted = kept
+        this.accepted := kept
     }
 
     def usedInWindow() Int {

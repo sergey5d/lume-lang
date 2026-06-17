@@ -263,6 +263,9 @@ Reassignment:
 count := count + 1
 ```
 
+`=` is for bindings and initialization, including field initialization inside a
+constructor; `:=` is for statement-level reassignment.
+
 Compound assignment:
 
 ```txt
@@ -273,10 +276,15 @@ count /= 2
 count %= 2
 ```
 
-Member assignment:
+Constructor field initialization:
 
 ```txt
 this.value = value
+```
+
+Member reassignment:
+
+```txt
 this.count := this.count + 1
 ```
 
@@ -517,7 +525,17 @@ Trailing block-lambda call syntax is also allowed when passing a lambda as an ar
 
 ```txt
 items.map { x -> x + 1 }
+
+items.forEach {
+    x ->
+        next = x + 1
+        println(next)
+}
 ```
+
+If the body after `->` starts on the next line, it may be either:
+- a single expression spread over later lines
+- or a multi-statement lambda body without an extra `{ ... }` wrapper
 
 Contextual `match` lambda sugar is also allowed in a unary-function context:
 
@@ -902,6 +920,15 @@ expect split.size() == 3
 
 This form requires a `Bool` condition and panics when the condition is `false`.
 
+Possible future extension:
+
+```txt
+expect split.size() == 3, "asset must have 3 parts"
+expect Some(value) = maybeValue, "missing value"
+```
+
+This is only a proposal for now; trailing messages on `expect` are not currently implemented.
+
 Propagation form:
 
 ```txt
@@ -1037,7 +1064,8 @@ items = for {
 items = for item <- [1, 2, 3] yield item * 2
 ```
 
-`for` clauses in the block form may also include local `=` and `:=` bindings.
+`for` clauses in the block form may also include local `=` bindings and `:=`
+updates.
 
 Tuple destructuring in `for` clauses must use parentheses:
 

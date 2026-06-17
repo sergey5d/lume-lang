@@ -561,15 +561,23 @@ impl<'a> Parser<'a> {
             None
         };
 
-        let (initializer, end) =
-            if self.match_token(TokenKind::Eq) || self.match_token(TokenKind::ColonAssign) {
-                let assign_span = self.previous_span();
-                let expr = self.parse_expr()?;
-                let end = expr.span();
-                (Some(expr), assign_span.cover(end))
-            } else {
-                (None, ty.as_ref().map(TypeRef::span).unwrap_or(start))
-            };
+        let (initializer, end) = if self.match_token(TokenKind::Eq) {
+            let assign_span = self.previous_span();
+            let expr = self.parse_expr()?;
+            let end = expr.span();
+            (Some(expr), assign_span.cover(end))
+        } else if self.match_token(TokenKind::ColonAssign) {
+            let assign_span = self.previous_span();
+            let _ = self.parse_expr();
+            self.diagnostics.push(Diagnostic::error(
+                "unexpected_token",
+                "use '=' for field initializers; ':=' is only for reassignment statements",
+                assign_span,
+            ));
+            return None;
+        } else {
+            (None, ty.as_ref().map(TypeRef::span).unwrap_or(start))
+        };
 
         Some(FieldDecl {
             annotations,

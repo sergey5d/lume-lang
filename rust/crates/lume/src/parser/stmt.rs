@@ -564,21 +564,22 @@ impl<'a> Parser<'a> {
             self.restore(checkpoint);
             return None;
         };
-        let operator =
-            if self.match_token(TokenKind::Eq) || self.match_token(TokenKind::ColonAssign) {
-                AssignOp::Reassign
-            } else if self.match_token(TokenKind::PlusEq) {
-                AssignOp::AddAssign
-            } else if self.match_token(TokenKind::MinusEq) {
-                AssignOp::SubAssign
-            } else if self.match_token(TokenKind::StarEq) {
-                AssignOp::MulAssign
-            } else if self.match_token(TokenKind::SlashEq) {
-                AssignOp::DivAssign
-            } else {
-                self.restore(checkpoint);
-                return None;
-            };
+        let operator = if self.match_token(TokenKind::Eq) {
+            AssignOp::Assign
+        } else if self.match_token(TokenKind::ColonAssign) {
+            AssignOp::Reassign
+        } else if self.match_token(TokenKind::PlusEq) {
+            AssignOp::AddAssign
+        } else if self.match_token(TokenKind::MinusEq) {
+            AssignOp::SubAssign
+        } else if self.match_token(TokenKind::StarEq) {
+            AssignOp::MulAssign
+        } else if self.match_token(TokenKind::SlashEq) {
+            AssignOp::DivAssign
+        } else {
+            self.restore(checkpoint);
+            return None;
+        };
         if self.at(TokenKind::Newline) {
             self.error_at_current(
                 "expected_expression",

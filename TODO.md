@@ -57,3 +57,21 @@ fun { x, y ->
   - Goal:
     - keep `Type { ... }` as construction syntax
     - avoid treating `Type(class { ... })` or `Type(recordValue)` as implicit nominal conversion
+
+- Consider optional trailing messages for `expect` via comma syntax.
+  - Candidate shapes:
+
+```txt
+expect split.size() == 3, "asset must have 3 parts"
+expect Some(value) = maybeValue, "missing value"
+expect {
+    Some(left) = maybeLeft
+    Some(right) = maybeRight
+}, "missing input"
+```
+
+  - Goal:
+    - keep the current statement-style `expect` syntax
+    - support the same message form for boolean and pattern `expect`
+  - Open question:
+    - whether the trailing message should be restricted to `Str`, or allow any value renderable to `Str`

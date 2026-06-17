@@ -4324,7 +4324,7 @@ mod tests {
 
             impl Vec {
                 def new(left Int, right Int) {
-                    this.items := Array.ofLength(2)
+                    this.items = Array.ofLength(2)
                     this.items[0] := left
                     this.items[1] := right
                 }
@@ -5161,6 +5161,26 @@ $name
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "ok\n");
+    }
+
+    #[test]
+    fn runs_trailing_block_lambda_with_multiline_body() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                items = [1, 2, 3]
+                items.forEach {
+                    item ->
+                        plusOne = item + 1
+                        OS.println(plusOne)
+                }
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "2\n3\n4\n");
     }
 
     #[test]

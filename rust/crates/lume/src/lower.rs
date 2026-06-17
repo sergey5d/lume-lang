@@ -903,7 +903,10 @@ impl<'a> FunctionLowerer<'a> {
                     let Some(target) = self.lower_place(target_expr) else {
                         continue;
                     };
-                    let value = if assignment.operator == AssignOp::Reassign {
+                    let value = if matches!(
+                        assignment.operator,
+                        AssignOp::Assign | AssignOp::Reassign
+                    ) {
                         ir::RValue::Use(self.lower_expr(value_expr))
                     } else {
                         let Some(op) = map_assign_op(assignment.operator) else {
@@ -3520,6 +3523,7 @@ fn intrinsic_for_name(name: &str) -> Option<ir::Intrinsic> {
 
 fn map_assign_op(op: AssignOp) -> Option<ir::BinaryOp> {
     match op {
+        AssignOp::Assign => None,
         AssignOp::Reassign => None,
         AssignOp::AddAssign => Some(ir::BinaryOp::Add),
         AssignOp::SubAssign => Some(ir::BinaryOp::Sub),

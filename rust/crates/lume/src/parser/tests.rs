@@ -774,6 +774,57 @@ def make() Unit = values.map {
 }
 
 #[test]
+fn parses_trailing_block_lambda_with_multiline_body() {
+    let result = parse(
+        r#"
+def make() Unit = values.forEach {
+    value ->
+        plusOne = value + 1
+        println(plusOne)
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Expr(Expr::Call {
+            args,
+            uses_brace_syntax,
+            ..
+        }) => {
+            assert!(uses_brace_syntax);
+            assert_eq!(args.len(), 1);
+            match &args[0].value {
+                Expr::Block { body, .. } => match &body.statements[0] {
+                    Stmt::Expr(ExprStmt {
+                        expr:
+                            Expr::Lambda {
+                                params,
+                                body: LambdaBody::Block(block),
+                                ..
+                            },
+                        ..
+                    }) => {
+                        assert_eq!(params.len(), 1);
+                        assert_eq!(params[0].name, "value");
+                        assert_eq!(block.statements.len(), 2);
+                    }
+                    other => {
+                        panic!("expected block-bodied lambda inside block arg, got {other:#?}")
+                    }
+                },
+                other => panic!("expected trailing block arg, got {other:#?}"),
+            }
+        }
+        other => panic!("expected trailing block call expression, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_list_type_ref_shorthand() {
     let result = parse(
         r#"

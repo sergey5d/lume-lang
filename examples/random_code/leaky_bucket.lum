@@ -30,12 +30,12 @@ impl LeakyBucket {
 
         leaked = elapsed * this.leakPerTick
         if leaked >= this.level {
-            this.level = 0
+            this.level := 0
         } else {
             this.level -= leaked
         }
 
-        this.lastTick = now
+        this.lastTick := now
     }
 
     def allow(now Int, cost Int) Bool {
