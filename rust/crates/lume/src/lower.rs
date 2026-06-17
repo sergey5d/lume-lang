@@ -5,8 +5,9 @@ use crate::{
         self, BinaryOp as AstBinaryOp, ImplBlock, ImplTargetKind, Item, TypeDecl, TypeMember,
     },
     core::{
-        self, AssignOp, Block, CallableBody, DestructureKind, ElseBranch, ElseExprBranch, Expr,
-        FunctionDecl, MatchCase, MatchCaseBody, MethodDecl, Pattern, Stmt, TypeRef,
+        self, AssignOp, AssignmentStmt, Block, CallableBody, DestructureKind, ElseBranch,
+        ElseExprBranch, Expr, FunctionDecl, MatchCase, MatchCaseBody, MethodDecl, Pattern, Stmt,
+        TypeRef,
     },
     desugar,
     diagnostic::Diagnostic,
@@ -48,6 +49,14 @@ struct GlobalInit {
     expr: Expr,
 }
 
+#[derive(Debug, Clone)]
+struct FieldInitWork {
+    id: ir::FunctionId,
+    this_local: ir::LocalId,
+    body: Block,
+    span: Span,
+}
+
 struct Lowerer<'a> {
     source: &'a ast::Program,
     diagnostics: Vec<Diagnostic>,
@@ -58,6 +67,7 @@ struct Lowerer<'a> {
     global_ids: HashMap<String, ir::GlobalId>,
     function_work: Vec<FunctionWork>,
     method_work: Vec<MethodWork>,
+    field_init_work: Vec<FieldInitWork>,
     global_inits: Vec<GlobalInit>,
 }
 
@@ -73,6 +83,7 @@ impl<'a> Lowerer<'a> {
             global_ids: HashMap::new(),
             function_work: Vec::new(),
             method_work: Vec::new(),
+            field_init_work: Vec::new(),
             global_inits: Vec::new(),
         }
     }
@@ -82,6 +93,7 @@ impl<'a> Lowerer<'a> {
         self.define_items();
         self.lower_top_level_functions();
         self.lower_methods();
+        self.lower_field_initializers();
         self.lower_global_initializers();
         if let Some(main) = self.function_ids.get("main").copied() {
             self.program.set_entry(main);
@@ -187,6 +199,7 @@ impl<'a> Lowerer<'a> {
         let mut fields = Vec::new();
         let mut methods_to_attach = Vec::new();
         let mut cases = Vec::new();
+        let mut field_init_stmts = Vec::new();
 
         for member in &decl.members {
             match member {
@@ -201,9 +214,19 @@ impl<'a> Lowerer<'a> {
                         mutable: field.mutable,
                         name: field.name.clone(),
                         ty: ty.clone(),
+                        has_initializer: field.initializer.is_some(),
                         initializer: lower_field_initializer_constant(field.initializer.as_ref()),
                         span: Some(field.span),
                     });
+                    if decl.kind != ast::TypeKind::Enum {
+                        if let Some(initializer) = &field.initializer {
+                            field_init_stmts.push(self.synthesize_field_initializer_stmt(
+                                &field.name,
+                                initializer,
+                                field.span,
+                            ));
+                        }
+                    }
                 }
                 TypeMember::Method(method) => {
                     let (id, this_local) =
@@ -235,6 +258,7 @@ impl<'a> Lowerer<'a> {
                                 .as_ref()
                                 .map(lower_type_ref)
                                 .unwrap_or(ir::Type::Unknown),
+                            has_initializer: field.initializer.is_some(),
                             initializer: lower_field_initializer_constant(
                                 field.initializer.as_ref(),
                             ),
@@ -250,8 +274,23 @@ impl<'a> Lowerer<'a> {
             }
         }
 
+        let field_init = (!field_init_stmts.is_empty()).then(|| {
+            let (id, this_local) = self.declare_field_init_function(type_id, &decl.name, decl.span);
+            self.field_init_work.push(FieldInitWork {
+                id,
+                this_local,
+                body: Block {
+                    statements: field_init_stmts,
+                    span: decl.span,
+                },
+                span: decl.span,
+            });
+            id
+        });
+
         if let Some(ty) = self.program.types.get_mut(type_id.0) {
             ty.fields = fields;
+            ty.field_init = field_init;
             ty.methods.extend(methods_to_attach);
             ty.enum_cases = cases;
         }
@@ -392,6 +431,30 @@ impl<'a> Lowerer<'a> {
         (id, this_local)
     }
 
+    fn declare_field_init_function(
+        &mut self,
+        owner: ir::TypeId,
+        owner_name: &str,
+        span: Span,
+    ) -> (ir::FunctionId, ir::LocalId) {
+        let id = self.declare_function(
+            "__field_init",
+            ast::Visibility::Hidden,
+            &[],
+            Some(&TypeRef::Named {
+                name: "Unit".to_string(),
+                args: Vec::new(),
+                span,
+            }),
+            ir::FunctionKind::Method { owner },
+            &[],
+            Some((String::from("this"), ir::Type::named(owner_name))),
+            span,
+        );
+        let this_local = self.program.functions[id.0].locals[0].id;
+        (id, this_local)
+    }
+
     fn lower_top_level_functions(&mut self) {
         let work = self.function_work.clone();
         for job in work {
@@ -487,6 +550,46 @@ impl<'a> Lowerer<'a> {
                 ir::Constant::Unit,
             ))));
         }
+    }
+
+    fn lower_field_initializers(&mut self) {
+        let work = self.field_init_work.clone();
+        for job in work {
+            if self.program.function(job.id).is_none() {
+                continue;
+            }
+            let mut lowerer = FunctionLowerer::new(
+                &mut self.program,
+                job.id,
+                &self.global_ids,
+                &self.function_ids,
+                &self.case_fields,
+                &mut self.diagnostics,
+            );
+            lowerer.bind_existing("this", job.this_local);
+            lowerer.lower_callable_body(&CallableBody::Block(job.body), job.span);
+        }
+    }
+
+    fn synthesize_field_initializer_stmt(
+        &self,
+        field_name: &str,
+        initializer: &ast::Expr,
+        span: Span,
+    ) -> Stmt {
+        Stmt::Assignment(AssignmentStmt {
+            targets: vec![Expr::Member {
+                receiver: Box::new(Expr::Identifier {
+                    name: "this".to_string(),
+                    span,
+                }),
+                name: field_name.to_string(),
+                span,
+            }],
+            operator: AssignOp::Reassign,
+            values: vec![desugar::desugar_expr(initializer)],
+            span,
+        })
     }
 
     fn add_error(&mut self, code: &'static str, message: impl Into<String>, span: Span) {

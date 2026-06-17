@@ -2,18 +2,17 @@ module asset/price
 
 class AssetPrices {
 
-    assets [Str]
+    assets [Str] = [
+        "BTC-USD-5.0",
+        "XTZ-BTC-1.2",
+        "SOL-EUR-4",
+        "XTZ-SOL-8"
+    ]
     asset2PriceMap Map[Str, [(Str, Float)]]
 }
 
 impl AssetPrices {
     def new() {
-        this.assets = [
-            "BTC-USD-5.0",
-            "XTZ-BTC-1.2",
-            "SOL-EUR-4",
-            "XTZ-SOL-8"
-        ]
         this.asset2PriceMap = this.makePrices()
     }
 

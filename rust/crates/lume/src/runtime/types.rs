@@ -33,6 +33,7 @@ pub struct RuntimeField {
     pub ty: ir::Type,
     pub mutable: bool,
     pub hidden: bool,
+    pub has_initializer: bool,
     pub initializer: Option<ir::Constant>,
 }
 
@@ -78,6 +79,7 @@ pub struct RuntimeType {
     pub kind: TypeKind,
     pub name: String,
     pub fields: Vec<RuntimeField>,
+    pub field_init: Option<ir::FunctionId>,
     pub methods: Vec<RuntimeMethod>,
     pub enum_cases: Vec<RuntimeEnumCase>,
     pub with_bounds: Vec<RuntimeTypeId>,
@@ -173,6 +175,7 @@ impl RuntimeProgram {
             kind: ir_ty.kind,
             name: ir_ty.name.clone(),
             fields: Self::build_fields(&ir_ty.fields),
+            field_init: ir_ty.field_init,
             methods: Self::build_methods(program, &ir_ty.methods),
             enum_cases: Self::build_enum_cases(&ir_ty.enum_cases),
             with_bounds: Vec::new(),
@@ -189,6 +192,7 @@ impl RuntimeProgram {
                 ty: field.ty.clone(),
                 mutable: field.mutable,
                 hidden: field.visibility == crate::ast::Visibility::Hidden,
+                has_initializer: field.has_initializer,
                 initializer: field.initializer.clone(),
             })
             .collect()

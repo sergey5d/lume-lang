@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# invalid_field_initializer at .*: field initializer cannot call instance method 'makePrices'; move this logic to 'new\(\)'
+
+class AssetPrices {
+    assets [Str] = this.makePrices()
+}
+
+impl AssetPrices {
+    def makePrices() [Str] = []
+}

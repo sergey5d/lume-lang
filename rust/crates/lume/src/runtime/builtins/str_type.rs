@@ -14,6 +14,7 @@ pub(super) fn define() -> RuntimeType {
         kind: TypeKind::Class,
         name: "Str".to_string(),
         fields: Vec::new(),
+        field_init: None,
         methods: vec![
             builtin_method(0, "size", Vec::new(), str_size),
             builtin_method(1, "split", vec![crate::ir::Type::Str], str_split),

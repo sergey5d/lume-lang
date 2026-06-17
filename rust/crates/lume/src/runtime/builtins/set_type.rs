@@ -17,6 +17,7 @@ pub(super) fn define() -> RuntimeType {
         kind: TypeKind::Class,
         name: "Set".to_string(),
         fields: Vec::new(),
+        field_init: None,
         methods: vec![
             builtin_method(0, ":+", vec![ir::Type::Unknown], set_plus),
             builtin_method(1, "++", vec![ir::Type::Unknown], set_concat),

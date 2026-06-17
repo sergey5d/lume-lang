@@ -1415,6 +1415,13 @@ impl<'a> Interpreter<'a> {
             .unwrap_or_else(|| self.default_value_for_type(&field.ty))
     }
 
+    fn allocate_runtime_fields(&self, fields: &[runtime::RuntimeField]) -> Vec<Value> {
+        fields
+            .iter()
+            .map(|field| self.default_value_for_type(&field.ty))
+            .collect()
+    }
+
     fn builtin_enum_variant(
         &self,
         enum_name: &str,
@@ -1990,12 +1997,12 @@ impl<'a> Interpreter<'a> {
             case_id: None,
             case_name: None,
             field_names: ty.fields.iter().map(|field| field.name.clone()).collect(),
-            fields: ty
-                .fields
-                .iter()
-                .map(|field| self.runtime_field_default_value(field))
-                .collect(),
+            fields: self.allocate_runtime_fields(&ty.fields),
         })));
+
+        if let Some(field_init) = ty.field_init {
+            let _ = self.call_function(field_init, Some(object.clone()), None, Vec::new(), span)?;
+        }
 
         let has_explicit_constructor = ty.methods.iter().any(|method| method.name == "new");
 
@@ -2078,7 +2085,7 @@ impl<'a> Interpreter<'a> {
         if ty
             .fields
             .iter()
-            .any(|field| field.hidden && field.initializer.is_none())
+            .any(|field| field.hidden && !field.has_initializer)
         {
             return Err(self.runtime_error(
                 span,
@@ -2096,7 +2103,7 @@ impl<'a> Interpreter<'a> {
             .collect::<Vec<_>>();
         let required_visible = visible_fields
             .iter()
-            .filter(|field| field.initializer.is_none())
+            .filter(|field| !field.has_initializer)
             .count();
         if values.len() < required_visible || values.len() > visible_fields.len() {
             return Err(self.runtime_error(
@@ -2126,7 +2133,7 @@ impl<'a> Interpreter<'a> {
         }
 
         for field in visible_fields {
-            if field.initializer.is_none() && !values.iter().any(|(name, _)| *name == field.name) {
+            if !field.has_initializer && !values.iter().any(|(name, _)| *name == field.name) {
                 return Err(self.runtime_error(
                     span,
                     format!(
@@ -2150,7 +2157,7 @@ impl<'a> Interpreter<'a> {
         if ty
             .fields
             .iter()
-            .any(|field| field.hidden && field.initializer.is_none())
+            .any(|field| field.hidden && !field.has_initializer)
         {
             return Err(self.runtime_error(
                 span,
@@ -2163,7 +2170,7 @@ impl<'a> Interpreter<'a> {
 
         if ty.fields.iter().enumerate().any(|(index, field)| {
             field.hidden
-                && field.initializer.is_some()
+                && field.has_initializer
                 && ty.fields[index + 1..].iter().any(|later| !later.hidden)
         }) {
             return Err(self.runtime_error(
@@ -2183,7 +2190,7 @@ impl<'a> Interpreter<'a> {
         if values.len() > visible_fields.len()
             || visible_fields[values.len()..]
                 .iter()
-                .any(|field| field.initializer.is_none())
+                .any(|field| !field.has_initializer)
         {
             return Err(self.runtime_error(
                 span,
@@ -2800,11 +2807,7 @@ impl<'a> Interpreter<'a> {
         if let Some(existing) = &self.object_singletons[ty.id.0] {
             return Ok(Some(existing.clone()));
         }
-        let field_values = ty
-            .fields
-            .iter()
-            .map(|field| self.runtime_field_default_value(field))
-            .collect::<Vec<_>>();
+        let field_values = self.allocate_runtime_fields(&ty.fields);
         let value = Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
             runtime_type_id: Some(ty.id),
             type_name: ty.name.clone(),
@@ -2814,6 +2817,9 @@ impl<'a> Interpreter<'a> {
             field_names: ty.fields.iter().map(|field| field.name.clone()).collect(),
             fields: field_values,
         })));
+        if let Some(field_init) = ty.field_init {
+            let _ = self.call_function(field_init, Some(value.clone()), None, Vec::new(), span)?;
+        }
         if let Some(init) =
             self.find_method_overload_for_kind(&ty.name, crate::ast::TypeKind::Object, "new", &[])
         {
@@ -4934,6 +4940,36 @@ $name
             run.output,
             "100 description description\n101 description description updated\n102 description description updated\n7\n"
         );
+    }
+
+    #[test]
+    fn runs_non_constant_field_initializers_before_new() {
+        let program = lower_inline(
+            r#"
+            class Portfolio {
+                assets [Str] = ["btc", "usd"]
+                assetCount Int = this.assets.size()
+                total Int
+            }
+
+            impl Portfolio {
+                def new() {
+                    this.total = this.assetCount + 1
+                }
+            }
+
+            def main() Unit {
+                portfolio = Portfolio()
+                OS.println(portfolio.assets.makeStr("-"))
+                OS.println(portfolio.assetCount)
+                OS.println(portfolio.total)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "btc-usd\n2\n3\n");
     }
 
     #[test]

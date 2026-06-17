@@ -103,6 +103,7 @@ pub struct TypeDef {
     pub type_params: Vec<String>,
     pub with_bounds: Vec<Type>,
     pub fields: Vec<Field>,
+    pub field_init: Option<FunctionId>,
     pub methods: Vec<FunctionId>,
     pub enum_cases: Vec<EnumCase>,
     pub span: Option<Span>,
@@ -118,6 +119,7 @@ impl TypeDef {
             type_params: Vec::new(),
             with_bounds: Vec::new(),
             fields: Vec::new(),
+            field_init: None,
             methods: Vec::new(),
             enum_cases: Vec::new(),
             span: None,
@@ -140,6 +142,7 @@ pub struct Field {
     pub mutable: bool,
     pub name: String,
     pub ty: Type,
+    pub has_initializer: bool,
     pub initializer: Option<Constant>,
     pub span: Option<Span>,
 }

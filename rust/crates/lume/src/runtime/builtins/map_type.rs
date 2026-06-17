@@ -19,6 +19,7 @@ pub(super) fn define() -> RuntimeType {
         kind: TypeKind::Class,
         name: "Map".to_string(),
         fields: Vec::new(),
+        field_init: None,
         methods: vec![
             builtin_method(0, "++", vec![ir::Type::Unknown], map_concat),
             builtin_method(

@@ -17,6 +17,7 @@ pub(super) fn define() -> RuntimeType {
         kind: TypeKind::Enum,
         name: "Result".to_string(),
         fields: Vec::new(),
+        field_init: None,
         methods: vec![
             builtin_method(0, "isOk", Vec::new(), result_is_ok),
             builtin_method(1, "isErr", Vec::new(), result_is_err),
@@ -45,6 +46,7 @@ pub(super) fn define() -> RuntimeType {
                     ty: ir::Type::Unknown,
                     mutable: false,
                     hidden: false,
+                    has_initializer: false,
                     initializer: None,
                 }],
             },
@@ -57,6 +59,7 @@ pub(super) fn define() -> RuntimeType {
                     ty: ir::Type::Unknown,
                     mutable: false,
                     hidden: false,
+                    has_initializer: false,
                     initializer: None,
                 }],
             },

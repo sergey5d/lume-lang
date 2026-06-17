@@ -1116,9 +1116,6 @@ impl<'a> Resolver<'a> {
                 TypeMember::Field(field) => {
                     self.resolve_annotations(&field.annotations);
                     self.resolve_type_ref(field.ty.as_ref());
-                    if let Some(initializer) = &field.initializer {
-                        self.resolve_expr(initializer);
-                    }
                 }
                 TypeMember::Case(case) => {
                     self.resolve_annotations(&case.annotations);
@@ -1141,6 +1138,23 @@ impl<'a> Resolver<'a> {
                 _ => None,
             }),
         );
+        if decl.kind != TypeKind::Enum {
+            self.define_value(
+                "this",
+                decl.span,
+                false,
+                "duplicate_binding",
+                "duplicate binding 'this'".to_string(),
+                true,
+            );
+            for member in &decl.members {
+                if let TypeMember::Field(field) = member {
+                    if let Some(initializer) = &field.initializer {
+                        self.resolve_expr(initializer);
+                    }
+                }
+            }
+        }
         if decl.kind == TypeKind::Enum {
             for member in &decl.members {
                 if let TypeMember::Case(case) = member {

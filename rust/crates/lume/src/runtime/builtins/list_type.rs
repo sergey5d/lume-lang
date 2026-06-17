@@ -17,6 +17,7 @@ pub(super) fn define() -> RuntimeType {
         kind: TypeKind::Class,
         name: "List".to_string(),
         fields: Vec::new(),
+        field_init: None,
         methods: vec![
             builtin_method(0, ":+", vec![ir::Type::Unknown], list_append_copy),
             builtin_method(1, "++", vec![ir::Type::Unknown], list_concat),

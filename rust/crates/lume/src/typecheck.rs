@@ -744,26 +744,6 @@ impl<'a> Checker<'a> {
                             );
                         }
                     }
-                    if let Some(initializer) = &field.initializer {
-                        let actual = self.check_expr(initializer);
-                        let expected = field
-                            .ty
-                            .as_ref()
-                            .map(|ty| self.ty_from_type_ref(ty))
-                            .unwrap_or_else(|| actual.clone());
-                        self.require_assignable(
-                            &actual,
-                            &expected,
-                            field.span,
-                            "invalid_field_initializer",
-                            format!(
-                                "field '{}' expects '{}' but initializer has type '{}'",
-                                field.name,
-                                expected.describe(),
-                                actual.describe()
-                            ),
-                        );
-                    }
                 }
                 TypeMember::Method(method) => {
                     if decl.kind == TypeKind::Interface && method.name == "new" {
@@ -805,7 +785,52 @@ impl<'a> Checker<'a> {
             }
         }
 
+        self.check_type_field_initializers(decl, &type_sig);
+
         self.pop_type_params();
+    }
+
+    fn check_type_field_initializers(&mut self, decl: &TypeDecl, owner: &TypeSig) {
+        if decl.kind == TypeKind::Enum {
+            return;
+        }
+
+        let previous_owner = self.current_owner.clone();
+        self.current_owner = Some(owner.clone());
+        self.push_scope();
+        self.define_local("this", self.owner_self_ty(owner), false);
+
+        let mut initialized_fields = HashSet::new();
+        for member in &decl.members {
+            let TypeMember::Field(field) = member else {
+                continue;
+            };
+            if let Some(initializer) = &field.initializer {
+                self.check_field_initializer_expr(initializer, owner, &initialized_fields);
+                let actual = self.check_expr(initializer);
+                let expected = field
+                    .ty
+                    .as_ref()
+                    .map(|ty| self.ty_from_type_ref(ty))
+                    .unwrap_or_else(|| actual.clone());
+                self.require_assignable(
+                    &actual,
+                    &expected,
+                    field.span,
+                    "invalid_field_initializer",
+                    format!(
+                        "field '{}' expects '{}' but initializer has type '{}'",
+                        field.name,
+                        expected.describe(),
+                        actual.describe()
+                    ),
+                );
+            }
+            initialized_fields.insert(field.name.clone());
+        }
+
+        self.pop_scope();
+        self.current_owner = previous_owner;
     }
 
     fn check_impl(&mut self, block: &ImplBlock) {
@@ -885,16 +910,7 @@ impl<'a> Checker<'a> {
         self.current_owner = Some(owner.clone());
         self.current_method = Some(method.name.clone());
         self.push_scope();
-
-        let self_ty = Ty::Named(
-            owner.name.clone(),
-            owner
-                .type_params
-                .iter()
-                .map(|name| Ty::TypeParam(name.clone()))
-                .collect(),
-        );
-        self.define_local("this", self_ty, false);
+        self.define_local("this", self.owner_self_ty(owner), false);
         for param in &method.params {
             let ty = param
                 .ty
@@ -924,6 +940,321 @@ impl<'a> Checker<'a> {
         self.current_return = previous_return;
         self.current_owner = previous_owner;
         self.current_method = previous_method;
+    }
+
+    fn owner_self_ty(&self, owner: &TypeSig) -> Ty {
+        Ty::Named(
+            owner.name.clone(),
+            owner
+                .type_params
+                .iter()
+                .map(|name| Ty::TypeParam(name.clone()))
+                .collect(),
+        )
+    }
+
+    fn check_field_initializer_expr(
+        &mut self,
+        expr: &Expr,
+        owner: &TypeSig,
+        initialized_fields: &HashSet<String>,
+    ) {
+        match expr {
+            Expr::Identifier { .. }
+            | Expr::Placeholder { .. }
+            | Expr::Integer { .. }
+            | Expr::Float { .. }
+            | Expr::String { .. }
+            | Expr::Bool { .. }
+            | Expr::Unit { .. } => {}
+            Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
+                for item in items {
+                    self.check_field_initializer_expr(item, owner, initialized_fields);
+                }
+            }
+            Expr::Call { callee, args, span, .. } => {
+                if let Expr::Member { receiver, name, .. } = callee.as_ref() {
+                    if matches!(receiver.as_ref(), Expr::Identifier { name: receiver_name, .. } if receiver_name == "this")
+                    {
+                        self.add_error(
+                            "invalid_field_initializer",
+                            format!(
+                                "field initializer cannot call instance method '{}'; move this logic to 'new()'",
+                                name
+                            ),
+                            *span,
+                        );
+                        for arg in args {
+                            self.check_field_initializer_expr(
+                                &arg.value,
+                                owner,
+                                initialized_fields,
+                            );
+                        }
+                        return;
+                    }
+                }
+                self.check_field_initializer_expr(callee, owner, initialized_fields);
+                for arg in args {
+                    self.check_field_initializer_expr(&arg.value, owner, initialized_fields);
+                }
+            }
+            Expr::Member {
+                receiver,
+                name,
+                span,
+            } => {
+                if matches!(receiver.as_ref(), Expr::Identifier { name: receiver_name, .. } if receiver_name == "this")
+                    && owner.fields.iter().any(|field| field.name == *name)
+                    && !initialized_fields.contains(name)
+                {
+                    self.add_error(
+                        "invalid_field_initializer",
+                        format!(
+                            "field initializer can read only fields declared earlier; '{}' is not available yet",
+                            name
+                        ),
+                        *span,
+                    );
+                }
+                self.check_field_initializer_expr(receiver, owner, initialized_fields);
+            }
+            Expr::Index {
+                receiver, index, ..
+            } => {
+                self.check_field_initializer_expr(receiver, owner, initialized_fields);
+                self.check_field_initializer_expr(index, owner, initialized_fields);
+            }
+            Expr::RecordUpdate { receiver, updates, .. } => {
+                self.check_field_initializer_expr(receiver, owner, initialized_fields);
+                for update in updates {
+                    self.check_field_initializer_expr(&update.value, owner, initialized_fields);
+                }
+            }
+            Expr::RecordLiteral { fields, values, .. } => {
+                for field in fields {
+                    self.check_field_initializer_expr(&field.value, owner, initialized_fields);
+                }
+                for value in values {
+                    self.check_field_initializer_expr(value, owner, initialized_fields);
+                }
+            }
+            Expr::AnonymousInterface { .. } | Expr::Lambda { .. } => {}
+            Expr::Try { value, .. } | Expr::Unary { expr: value, .. } | Expr::Group { inner: value, .. } => {
+                self.check_field_initializer_expr(value, owner, initialized_fields);
+            }
+            Expr::Binary { left, right, .. } => {
+                self.check_field_initializer_expr(left, owner, initialized_fields);
+                self.check_field_initializer_expr(right, owner, initialized_fields);
+            }
+            Expr::Is { left, .. } => {
+                self.check_field_initializer_expr(left, owner, initialized_fields);
+            }
+            Expr::If {
+                condition,
+                then_block,
+                else_branch,
+                ..
+            } => {
+                self.check_field_initializer_expr(condition, owner, initialized_fields);
+                self.check_field_initializer_block(then_block, owner, initialized_fields);
+                self.check_field_initializer_else_expr_branch(
+                    else_branch,
+                    owner,
+                    initialized_fields,
+                );
+            }
+            Expr::Block { body, .. } => {
+                self.check_field_initializer_block(body, owner, initialized_fields);
+            }
+            Expr::Match { value, cases, .. } => {
+                self.check_field_initializer_expr(value, owner, initialized_fields);
+                for case in cases {
+                    if let Some(guard) = &case.guard {
+                        self.check_field_initializer_expr(guard, owner, initialized_fields);
+                    }
+                    match &case.body {
+                        MatchCaseBody::Block(block) => {
+                            self.check_field_initializer_block(block, owner, initialized_fields);
+                        }
+                        MatchCaseBody::Expr(expr) => {
+                            self.check_field_initializer_expr(expr, owner, initialized_fields);
+                        }
+                    }
+                }
+            }
+            Expr::ForYield {
+                bindings,
+                yield_body,
+                ..
+            } => {
+                for binding in bindings {
+                    if let Some(iterable) = &binding.iterable {
+                        self.check_field_initializer_expr(iterable, owner, initialized_fields);
+                    }
+                    for value in &binding.values {
+                        self.check_field_initializer_expr(value, owner, initialized_fields);
+                    }
+                }
+                self.check_field_initializer_block(yield_body, owner, initialized_fields);
+            }
+        }
+    }
+
+    fn check_field_initializer_block(
+        &mut self,
+        block: &Block,
+        owner: &TypeSig,
+        initialized_fields: &HashSet<String>,
+    ) {
+        for statement in &block.statements {
+            self.check_field_initializer_stmt(statement, owner, initialized_fields);
+        }
+    }
+
+    fn check_field_initializer_stmt(
+        &mut self,
+        stmt: &Stmt,
+        owner: &TypeSig,
+        initialized_fields: &HashSet<String>,
+    ) {
+        match stmt {
+            Stmt::Binding(binding) => {
+                for value in &binding.values {
+                    self.check_field_initializer_expr(value, owner, initialized_fields);
+                }
+            }
+            Stmt::PatternBinding(stmt) => {
+                for clause in &stmt.clauses {
+                    self.check_field_initializer_expr(&clause.value, owner, initialized_fields);
+                }
+                self.check_field_initializer_expr(&stmt.value, owner, initialized_fields);
+            }
+            Stmt::Assignment(stmt) => {
+                for target in &stmt.targets {
+                    self.check_field_initializer_expr(target, owner, initialized_fields);
+                }
+                for value in &stmt.values {
+                    self.check_field_initializer_expr(value, owner, initialized_fields);
+                }
+            }
+            Stmt::If(stmt) => {
+                self.check_field_initializer_if_stmt(stmt, owner, initialized_fields);
+            }
+            Stmt::Match(stmt) => {
+                self.check_field_initializer_expr(&stmt.value, owner, initialized_fields);
+                for case in &stmt.cases {
+                    if let Some(guard) = &case.guard {
+                        self.check_field_initializer_expr(guard, owner, initialized_fields);
+                    }
+                    match &case.body {
+                        MatchCaseBody::Block(block) => {
+                            self.check_field_initializer_block(block, owner, initialized_fields);
+                        }
+                        MatchCaseBody::Expr(expr) => {
+                            self.check_field_initializer_expr(expr, owner, initialized_fields);
+                        }
+                    }
+                }
+            }
+            Stmt::While(stmt) => {
+                self.check_field_initializer_expr(&stmt.condition, owner, initialized_fields);
+                self.check_field_initializer_block(&stmt.body, owner, initialized_fields);
+            }
+            Stmt::For(stmt) => {
+                for binding in &stmt.bindings {
+                    if let Some(iterable) = &binding.iterable {
+                        self.check_field_initializer_expr(iterable, owner, initialized_fields);
+                    }
+                    for value in &binding.values {
+                        self.check_field_initializer_expr(value, owner, initialized_fields);
+                    }
+                }
+                self.check_field_initializer_block(&stmt.body, owner, initialized_fields);
+            }
+            Stmt::LetElse(stmt) => {
+                for clause in &stmt.clauses {
+                    self.check_field_initializer_expr(&clause.value, owner, initialized_fields);
+                }
+                self.check_field_initializer_expr(&stmt.value, owner, initialized_fields);
+                self.check_field_initializer_block(&stmt.else_block, owner, initialized_fields);
+            }
+            Stmt::Return(stmt) => {
+                if let Some(value) = &stmt.value {
+                    self.check_field_initializer_expr(value, owner, initialized_fields);
+                }
+            }
+            Stmt::Break(_) | Stmt::Continue(_) | Stmt::LocalFunction(_) => {}
+            Stmt::Expr(stmt) => {
+                self.check_field_initializer_expr(&stmt.expr, owner, initialized_fields);
+            }
+        }
+    }
+
+    fn check_field_initializer_if_stmt(
+        &mut self,
+        stmt: &IfStmt,
+        owner: &TypeSig,
+        initialized_fields: &HashSet<String>,
+    ) {
+        for clause in &stmt.condition_clauses {
+            match clause {
+                IfConditionClause::Let(clause) => {
+                    self.check_field_initializer_expr(&clause.value, owner, initialized_fields);
+                }
+                IfConditionClause::Expr(expr) => {
+                    self.check_field_initializer_expr(expr, owner, initialized_fields);
+                }
+            }
+        }
+        for clause in &stmt.pattern_clauses {
+            self.check_field_initializer_expr(&clause.value, owner, initialized_fields);
+        }
+        if let Some(condition) = &stmt.condition {
+            self.check_field_initializer_expr(condition, owner, initialized_fields);
+        }
+        if let Some(value) = &stmt.pattern_value {
+            self.check_field_initializer_expr(value, owner, initialized_fields);
+        }
+        if let Some(value) = &stmt.binding_value {
+            self.check_field_initializer_expr(value, owner, initialized_fields);
+        }
+        self.check_field_initializer_block(&stmt.then_block, owner, initialized_fields);
+        if let Some(branch) = &stmt.else_branch {
+            self.check_field_initializer_else_branch(branch, owner, initialized_fields);
+        }
+    }
+
+    fn check_field_initializer_else_branch(
+        &mut self,
+        branch: &ElseBranch,
+        owner: &TypeSig,
+        initialized_fields: &HashSet<String>,
+    ) {
+        match branch {
+            ElseBranch::If(stmt) => {
+                self.check_field_initializer_if_stmt(stmt, owner, initialized_fields);
+            }
+            ElseBranch::Block(block) => {
+                self.check_field_initializer_block(block, owner, initialized_fields);
+            }
+        }
+    }
+
+    fn check_field_initializer_else_expr_branch(
+        &mut self,
+        branch: &ElseExprBranch,
+        owner: &TypeSig,
+        initialized_fields: &HashSet<String>,
+    ) {
+        match branch {
+            ElseExprBranch::If(expr) => {
+                self.check_field_initializer_expr(expr, owner, initialized_fields);
+            }
+            ElseExprBranch::Block(block) => {
+                self.check_field_initializer_block(block, owner, initialized_fields);
+            }
+        }
     }
 
     fn check_callable_body(&mut self, body: &CallableBody) -> Ty {
@@ -5292,6 +5623,55 @@ def main() Unit {
             result.diagnostics.iter().any(|diag| diag
                 .message
                 .contains("private defaulted fields must come after all public fields")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_field_initializer_calling_instance_method() {
+        let program = parse_inline(
+            r#"
+class AssetPrices {
+    assets [Str] = this.makeAssets()
+}
+
+impl AssetPrices {
+    def makeAssets() [Str] = []
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_field_initializer"
+                    && diag
+                        .message
+                        .contains("field initializer cannot call instance method 'makeAssets'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_field_initializer_reading_later_field() {
+        let program = parse_inline(
+            r#"
+class Pair {
+    right Int = this.left
+    left Int = 1
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_field_initializer"
+                    && diag.message.contains(
+                        "field initializer can read only fields declared earlier; 'left' is not available yet",
+                    )
+            }),
             "{:#?}",
             result.diagnostics
         );

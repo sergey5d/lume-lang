@@ -17,6 +17,7 @@ pub(super) fn define() -> RuntimeType {
         kind: TypeKind::Enum,
         name: "Option".to_string(),
         fields: Vec::new(),
+        field_init: None,
         methods: vec![
             builtin_method(0, "isSet", Vec::new(), option_is_set),
             builtin_method(1, "isEmpty", Vec::new(), option_is_empty),
@@ -51,6 +52,7 @@ pub(super) fn define() -> RuntimeType {
                     ty: ir::Type::Unknown,
                     mutable: false,
                     hidden: false,
+                    has_initializer: false,
                     initializer: None,
                 }],
             },
