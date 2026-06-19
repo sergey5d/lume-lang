@@ -4327,6 +4327,12 @@ mod tests {
 
     fn extract_primary_load_error_message(err: &str) -> Option<String> {
         let trimmed = err.trim();
+        if let Some(first_line) = trimmed.lines().next() {
+            if let Some((_, message)) = first_line.rsplit_once("]: ") {
+                return Some(message.to_string());
+            }
+        }
+
         if !(trimmed.starts_with("parse ") || trimmed.starts_with("lex ")) {
             return None;
         }

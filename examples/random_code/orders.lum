@@ -33,18 +33,24 @@ impl OrderManager {
         status = arr[4]
 
         Order {
-            id = id, buySell = buySell, quantity = quantity, fills = [], status = status
+            id = id, asset = asset, buySell = buySell, quantity = quantity, fills = [], status = status, lastUpdated = this.currentTick
         }
+    }
+
+    def checkQueuedOrders() {
+
     }
 
     def handleOrder(str Str) {
 
-        parsedOrder = parseOrder()
+        checkQueuedOrders()
+
+        parsedOrder = parseOrder(str)
 
         savedOrder = this.map.get(parsedOrder.id)
 
         if !savedOrder.isSet() {
-            this.map.put(parseOrder.id, parsedOrder)
+            this.map.put(parsedOrder.id, parsedOrder)
         }
 
         order = savedOrder.getOrElse(parsedOrder)
@@ -66,16 +72,12 @@ impl OrderManager {
                     order.status = "IN+PROGRESS"
                 }
             }
-            case "CANCEL" => {
-                match savedOrder {
-                    case Some(so) =>
-                        if so.status == "FILLED" || so.status == "IN_PROGRESS" {
-                            println("attempt to cancel filled order " + so.id)
-                        }
-                    case None =>
-                        # add to deque
-                }
-            }
+            case "CANCEL" => 
+                if order.status == "FILLED" || order.status == "IN_PROGRESS" {
+                    println("attempt to cancel filled order " + so.id)
+                } else {
+                    queue.add(order)
+                }                        
         }
     }
 

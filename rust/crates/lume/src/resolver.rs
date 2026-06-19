@@ -386,31 +386,24 @@ pub(crate) fn parse_program_from_path(path: &Path) -> Result<Program, String> {
     let file = SourceFile::new(path.display().to_string(), text);
     let lexed = lex(&file);
     if !lexed.diagnostics.is_empty() {
-        return Err(format!(
-            "lex {}: {}",
-            path.display(),
-            format_diagnostics(&lexed.diagnostics)
-        ));
+        return Err(format_path_diagnostics(path, &lexed.diagnostics));
     }
     let parsed = parse_program(&lexed.tokens);
     if !parsed.diagnostics.is_empty() {
-        return Err(format!(
-            "parse {}: {}",
-            path.display(),
-            format_diagnostics(&parsed.diagnostics)
-        ));
+        return Err(format_path_diagnostics(path, &parsed.diagnostics));
     }
     parsed
         .program
         .ok_or_else(|| format!("parse {}: parser did not produce a program", path.display()))
 }
 
-fn format_diagnostics(diagnostics: &[Diagnostic]) -> String {
+fn format_path_diagnostics(path: &Path, diagnostics: &[Diagnostic]) -> String {
     diagnostics
         .iter()
         .map(|diagnostic| {
             format!(
-                "{}:{} {}[{}] {}",
+                "{}:{}:{}: {}[{}]: {}",
+                path.display(),
                 diagnostic.span.start_pos.line,
                 diagnostic.span.start_pos.column,
                 match diagnostic.severity {
@@ -422,7 +415,7 @@ fn format_diagnostics(diagnostics: &[Diagnostic]) -> String {
             )
         })
         .collect::<Vec<_>>()
-        .join("; ")
+        .join("\n")
 }
 
 fn module_alias(path: &str) -> String {
@@ -2389,6 +2382,38 @@ def main() Int {
             failures.is_empty(),
             "repo resolve failures:\n{}",
             failures.join("\n\n")
+        );
+    }
+
+    #[test]
+    fn formats_path_diagnostics_one_per_line() {
+        let diagnostics = vec![
+            Diagnostic::error(
+                "first",
+                "one",
+                crate::source::Span::new(
+                    0,
+                    1,
+                    crate::source::LineColumn::new(2, 3),
+                    crate::source::LineColumn::new(2, 4),
+                ),
+            ),
+            Diagnostic::error(
+                "second",
+                "two",
+                crate::source::Span::new(
+                    1,
+                    2,
+                    crate::source::LineColumn::new(4, 5),
+                    crate::source::LineColumn::new(4, 6),
+                ),
+            ),
+        ];
+
+        let rendered = format_path_diagnostics(Path::new("/tmp/test.lum"), &diagnostics);
+        assert_eq!(
+            rendered,
+            "/tmp/test.lum:2:3: error[first]: one\n/tmp/test.lum:4:5: error[second]: two"
         );
     }
 }
