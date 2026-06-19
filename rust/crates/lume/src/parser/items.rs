@@ -284,7 +284,11 @@ impl<'a> Parser<'a> {
         let (name, _) = self.parse_callable_name("expected function name")?;
         let type_params = self.parse_type_params()?;
         let params = self.parse_param_list()?;
-        let return_type = self.parse_optional_return_type();
+        let return_type = if self.callable_body_starts_here() {
+            None
+        } else {
+            self.parse_optional_return_type()
+        };
         let body = self.parse_callable_body()?;
         let end = body.span();
         Some(FunctionDecl {
@@ -520,7 +524,11 @@ impl<'a> Parser<'a> {
         };
         let type_params = self.parse_type_params()?;
         let params = self.parse_param_list()?;
-        let return_type = self.parse_optional_return_type();
+        let return_type = if self.callable_body_starts_here() {
+            None
+        } else {
+            self.parse_optional_return_type()
+        };
         let body = if self.at(TokenKind::LBrace) || self.at(TokenKind::Eq) {
             Some(self.parse_callable_body()?)
         } else if allow_signature_only {
@@ -598,6 +606,13 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::Eq, "expected '=' or '{' before callable body")?;
         let expr = self.parse_expr()?;
         Some(CallableBody::Expr(expr))
+    }
+
+    fn callable_body_starts_here(&self) -> bool {
+        matches!(
+            self.next_significant_token().kind,
+            TokenKind::LBrace | TokenKind::Eq
+        )
     }
 }
 

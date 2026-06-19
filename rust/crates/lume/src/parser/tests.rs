@@ -255,6 +255,32 @@ impl Counter {
 }
 
 #[test]
+fn parses_empty_method_body() {
+    let result = parse(
+        r#"
+class Counter {}
+
+impl Counter {
+    def reset() {
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn parses_empty_function_body() {
+    let result = parse(
+        r#"
+def main() {
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
 fn parses_single_and_impl_single() {
     let result = parse(
         r#"
