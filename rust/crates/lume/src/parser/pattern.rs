@@ -1,11 +1,10 @@
 use super::*;
 
 impl<'a> Parser<'a> {
-    pub(super) fn wrap_option_pattern(&self, pattern: Pattern) -> Pattern {
+    pub(super) fn wrap_extract_pattern(&self, pattern: Pattern) -> Pattern {
         let span = pattern.span();
-        Pattern::Constructor {
-            path: vec!["Some".to_string()],
-            args: vec![pattern],
+        Pattern::Extract {
+            inner: Box::new(pattern),
             span,
         }
     }
@@ -19,7 +18,7 @@ impl<'a> Parser<'a> {
             return Some((pattern, "="));
         }
         if self.match_token(TokenKind::LeftArrow) {
-            return Some((self.wrap_option_pattern(pattern), "<-"));
+            return Some((self.wrap_extract_pattern(pattern), "<-"));
         }
 
         let message = match owner {

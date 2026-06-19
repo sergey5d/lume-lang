@@ -676,12 +676,12 @@ def run(value Option[Int]) Unit {
     match &function.body {
         CallableBody::Block(block) => match &block.statements[0] {
             Stmt::LetElse(stmt) => match &stmt.pattern {
-                Pattern::Constructor { path, args, .. } => {
-                    assert_eq!(path, &vec!["Some".to_string()]);
-                    assert_eq!(args.len(), 1);
-                    assert!(matches!(&args[0], Pattern::Binding { name, .. } if name == "item"));
+                Pattern::Extract { inner, .. } => {
+                    assert!(
+                        matches!(inner.as_ref(), Pattern::Binding { name, .. } if name == "item")
+                    );
                 }
-                other => panic!("expected Some(...) shorthand pattern, got {other:#?}"),
+                other => panic!("expected extract shorthand pattern, got {other:#?}"),
             },
             other => panic!("expected let-else statement, got {other:#?}"),
         },
@@ -740,13 +740,13 @@ def run(value Option[Int]) Int {
     match &function.body {
         CallableBody::Block(block) => match &block.statements[0] {
             Stmt::PatternBinding(stmt) => match &stmt.pattern {
-                Pattern::Constructor { path, args, .. } => {
+                Pattern::Extract { inner, .. } => {
                     assert_eq!(stmt.kind, PatternBindingKind::Let);
-                    assert_eq!(path, &vec!["Some".to_string()]);
-                    assert_eq!(args.len(), 1);
-                    assert!(matches!(&args[0], Pattern::Binding { name, .. } if name == "item"));
+                    assert!(
+                        matches!(inner.as_ref(), Pattern::Binding { name, .. } if name == "item")
+                    );
                 }
-                other => panic!("expected Some(...) shorthand pattern, got {other:#?}"),
+                other => panic!("expected extract shorthand pattern, got {other:#?}"),
             },
             other => panic!("expected pattern binding statement, got {other:#?}"),
         },
@@ -809,14 +809,12 @@ def run(value Option[Int]) Int {
             Stmt::PatternBinding(stmt) => {
                 assert_eq!(stmt.kind, PatternBindingKind::Expect);
                 match &stmt.pattern {
-                    Pattern::Constructor { path, args, .. } => {
-                        assert_eq!(path, &vec!["Some".to_string()]);
-                        assert_eq!(args.len(), 1);
+                    Pattern::Extract { inner, .. } => {
                         assert!(
-                            matches!(&args[0], Pattern::Binding { name, .. } if name == "item")
+                            matches!(inner.as_ref(), Pattern::Binding { name, .. } if name == "item")
                         );
                     }
-                    other => panic!("expected Some(...) shorthand pattern, got {other:#?}"),
+                    other => panic!("expected extract shorthand pattern, got {other:#?}"),
                 }
             }
             other => panic!("expected pattern binding statement, got {other:#?}"),
@@ -850,14 +848,12 @@ def run(left Option[Int], right Option[Int]) Int {
                 assert_eq!(stmt.clauses.len(), 2);
                 for (clause, expected) in stmt.clauses.iter().zip(["first", "second"]) {
                     match &clause.pattern {
-                        Pattern::Constructor { path, args, .. } => {
-                            assert_eq!(path, &vec!["Some".to_string()]);
-                            assert_eq!(args.len(), 1);
+                        Pattern::Extract { inner, .. } => {
                             assert!(
-                                matches!(&args[0], Pattern::Binding { name, .. } if name == expected)
+                                matches!(inner.as_ref(), Pattern::Binding { name, .. } if name == expected)
                             );
                         }
-                        other => panic!("expected Some(...) shorthand clause, got {other:#?}"),
+                        other => panic!("expected extract shorthand clause, got {other:#?}"),
                     }
                 }
             }
@@ -887,12 +883,12 @@ def run(value Option[Int]) Unit {
     match &function.body {
         CallableBody::Block(block) => match &block.statements[0] {
             Stmt::If(stmt) => match stmt.pattern.as_ref() {
-                Some(Pattern::Constructor { path, args, .. }) => {
-                    assert_eq!(path, &vec!["Some".to_string()]);
-                    assert_eq!(args.len(), 1);
-                    assert!(matches!(&args[0], Pattern::Binding { name, .. } if name == "item"));
+                Some(Pattern::Extract { inner, .. }) => {
+                    assert!(
+                        matches!(inner.as_ref(), Pattern::Binding { name, .. } if name == "item")
+                    );
                 }
-                other => panic!("expected Some(...) shorthand if-let pattern, got {other:#?}"),
+                other => panic!("expected extract shorthand if-let pattern, got {other:#?}"),
             },
             other => panic!("expected if statement, got {other:#?}"),
         },

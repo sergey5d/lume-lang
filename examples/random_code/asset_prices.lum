@@ -43,14 +43,14 @@ impl AssetPrices {
             if !result.contains(fromAsset) {
                 result.put(fromAsset, [])
             }
-            expect Some(fromPrices) = result.get(fromAsset)
+            fromPrices = result.get(fromAsset).orPanic()
             fromPrices.add((split[1], price))
             
             if !result.contains(toAsset) {
                 result.put(toAsset, [])
             }
 
-            expect Some(toPrices) = result.get(toAsset)
+            expect toPrices <- result.get(toAsset)
             toPrices.add((fromAsset, price))
         }
 

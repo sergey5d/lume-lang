@@ -813,7 +813,7 @@ if let Some(item) = maybeValue {
 }
 ```
 
-For `Option`, `if let` also accepts the shorthand:
+`if let` also accepts the shorthand for the success case:
 
 ```txt
 if let item <- maybeValue {
@@ -871,7 +871,7 @@ let Some(item) = maybeValue else {
 }
 ```
 
-For `Option`, `<-` is shorthand for matching `Some(...)`:
+For success-carrying values, `<-` is shorthand for the success case:
 
 ```txt
 let item <- maybeValue else {
@@ -879,7 +879,13 @@ let item <- maybeValue else {
 }
 ```
 
-This is equivalent to `let Some(item) = maybeValue else { ... }`.
+This is equivalent to:
+- `let Some(item) = maybeValue else { ... }` for `Option[T]`
+- `let Ok(item) = maybeResult else { ... }` for `Result[T, E]`
+- `let Right(item) = maybeEither else { ... }` for `Either[L, R]`
+
+The shorthand requires the source type to be statically known as one of these
+forms. If the source type is unknown, use an explicit pattern instead.
 
 Type-pattern binding is also supported:
 
@@ -909,38 +915,16 @@ let {
 - if the match succeeds, bindings remain visible after the statement
 - if the match fails, the `else` block is evaluated and must exit the current control-flow path, typically with `return`, `break`, `continue`, or a call whose return type is `Never`
 
-If you want an assertive match without a fallback, plain pattern `let` is also
-supported:
+Plain pattern `let` is only allowed for irrefutable matches:
 
 ```txt
-let Some(item) = maybeValue
+pair (Int, Int) = (1, 2)
+let (left, right) = pair
 ```
 
-The same `Option` shorthand works here too:
-
-```txt
-let item <- maybeValue
-```
-
-Grouped assertive pattern bindings work the same way:
-
-```txt
-let {
-    Some(left) = maybeLeft
-    Some(right) = maybeRight
-}
-```
-
-Grouped `Option` extraction can use the shorthand per clause:
-
-```txt
-let {
-    left <- maybeLeft
-    right <- maybeRight
-}
-```
-
-These plain pattern `let` forms panic at runtime if the pattern does not match.
+If the match can fail, plain `let` is rejected and you must use `let ... else`.
+That includes success-case extraction shorthand such as `let item <- maybeValue`,
+which is always treated as refutable.
 
 An explicit assertive form is also supported:
 

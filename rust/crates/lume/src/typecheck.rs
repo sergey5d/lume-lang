@@ -5,18 +5,18 @@ use std::{
 };
 
 use crate::{
-    Diagnostic,
     ast::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
         ElseBranch, ElseExprBranch, Expr, ForBinding, FunctionDecl, IfConditionClause, IfStmt,
         ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase, MatchCaseBody, MatchStmt,
-        MethodDecl, Pattern, PatternBindingStmt, Program, Stmt, TypeDecl, TypeKind, TypeMember,
-        TypeRef, Visibility,
+        MethodDecl, Pattern, PatternBindingKind, PatternBindingStmt, Program, Stmt, TypeDecl,
+        TypeKind, TypeMember, TypeRef, Visibility,
     },
     resolver::{
-        ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, collect_module_order,
-        find_stdlib_dir, load_module_graph, parse_program_from_path, read_directives, resolve_path,
+        collect_module_order, find_stdlib_dir, load_module_graph, parse_program_from_path,
+        read_directives, resolve_path, ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph,
     },
+    Diagnostic,
 };
 
 #[derive(Debug, Clone)]
@@ -1673,11 +1673,21 @@ impl<'a> Checker<'a> {
         if !stmt.clauses.is_empty() {
             for clause in &stmt.clauses {
                 let value_ty = self.check_expr(&clause.value);
+                if matches!(stmt.kind, PatternBindingKind::Let) {
+                    self.require_safe_let_pattern(
+                        &clause.pattern,
+                        &value_ty,
+                        clause.pattern.span(),
+                    );
+                }
                 self.bind_pattern(&clause.pattern, &value_ty);
             }
             return;
         }
         let value_ty = self.check_expr(&stmt.value);
+        if matches!(stmt.kind, PatternBindingKind::Let) {
+            self.require_safe_let_pattern(&stmt.pattern, &value_ty, stmt.pattern.span());
+        }
         self.bind_pattern(&stmt.pattern, &value_ty);
     }
 
@@ -1809,6 +1819,24 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn require_safe_let_pattern(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee: &Ty,
+        span: crate::source::Span,
+    ) {
+        if !self.pattern_is_irrefutable(pattern, scrutinee) {
+            self.add_error(
+                "refutable_let_pattern",
+                format!(
+                    "plain 'let' pattern may fail for value of type '{}'; use 'let ... else ...' instead",
+                    scrutinee.describe()
+                ),
+                span,
+            );
+        }
+    }
+
     fn known_expr_matches_pattern(&self, pattern: &Pattern, source: &Expr) -> bool {
         match self.known_value_from_expr(source) {
             Some(KnownValue::List(items)) => items
@@ -1878,6 +1906,17 @@ impl<'a> Checker<'a> {
     fn known_value_matches_pattern(&self, value: &KnownValue, pattern: &Pattern) -> bool {
         match pattern {
             Pattern::Wildcard { .. } | Pattern::Binding { .. } => true,
+            Pattern::Extract { inner, .. } => match value {
+                KnownValue::Constructor { path, args }
+                    if path
+                        .last()
+                        .is_some_and(|name| matches!(name.as_str(), "Some" | "Ok" | "Right"))
+                        && args.len() == 1 =>
+                {
+                    self.known_value_matches_pattern(&args[0], inner)
+                }
+                _ => false,
+            },
             Pattern::Type { .. } => false,
             Pattern::Literal {
                 value: pattern_value,
@@ -2590,7 +2629,11 @@ impl<'a> Checker<'a> {
                 if !*partial {
                     self.check_match_exhaustiveness(&value_ty, cases, *span);
                 }
-                if *partial { Ty::option(result) } else { result }
+                if *partial {
+                    Ty::option(result)
+                } else {
+                    result
+                }
             }
             Expr::ForYield {
                 bindings,
@@ -3927,6 +3970,10 @@ impl<'a> Checker<'a> {
     fn bind_pattern(&mut self, pattern: &Pattern, scrutinee: &Ty) {
         match pattern {
             Pattern::Wildcard { .. } => {}
+            Pattern::Extract { inner, span } => {
+                let inner_ty = self.extract_pattern_inner_type(scrutinee, *span);
+                self.bind_pattern(inner, &inner_ty);
+            }
             Pattern::Binding { name, .. } => self.define_local(name, scrutinee.clone(), false),
             Pattern::Type { name, target, .. } => {
                 let target_ty = self.ty_from_type_ref(target);
@@ -3992,6 +4039,7 @@ impl<'a> Checker<'a> {
     fn pattern_is_irrefutable(&self, pattern: &Pattern, scrutinee: &Ty) -> bool {
         match pattern {
             Pattern::Wildcard { .. } | Pattern::Binding { .. } => true,
+            Pattern::Extract { .. } => false,
             Pattern::Type { target, .. } => {
                 !matches!(scrutinee, Ty::Unknown)
                     && self.is_assignable(scrutinee, &self.ty_from_type_ref(target))
@@ -4172,6 +4220,22 @@ impl<'a> Checker<'a> {
             Ty::Named(name, args) if name == "Either" && args.len() == 2 => args[1].clone(),
             _ => Ty::Unknown,
         }
+    }
+
+    fn extract_pattern_inner_type(&mut self, scrutinee: &Ty, span: crate::source::Span) -> Ty {
+        let inner = self.unwrap_inner_type(scrutinee);
+        if inner == Ty::Unknown {
+            let message = if matches!(scrutinee, Ty::Unknown) {
+                "'<-' pattern requires a known source type; add a type annotation or use an explicit pattern like 'Some(x)', 'Ok(x)', or 'Right(x)'".to_string()
+            } else {
+                format!(
+                    "'<-' pattern requires Option[T], Result[T, E], or Either[L, R], got '{}'",
+                    scrutinee.describe()
+                )
+            };
+            self.add_error("invalid_extract_pattern", message, span);
+        }
+        inner
     }
 
     fn try_propagates_from(&self, source: &Ty, target: &Ty) -> bool {
@@ -5848,7 +5912,7 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SourceFile, lex, parse_program};
+    use crate::{lex, parse_program, SourceFile};
 
     fn parse_inline(src: &str) -> Program {
         let file = SourceFile::new("test.lum", src);
@@ -6786,21 +6850,101 @@ def main(value MaybeInt) Unit {
     }
 
     #[test]
-    fn allows_option_extract_shorthand_forms() {
+    fn allows_extract_shorthand_forms() {
         let program = parse_inline(
             r#"
-def main(value Option[Int]) Int {
-    let item <- value else return 0
-    expect checked <- value
-    if let branch <- value {
-        return item + checked + branch
+def main(
+    optionValue Option[Int],
+    resultValue Result[Int, Str],
+    eitherValue Either[Str, Int]
+) Int {
+    let optionItem <- optionValue else return 0
+    let resultItem <- resultValue else return 1
+    expect eitherItem <- eitherValue
+    expect {
+        left <- optionValue
+        middle <- resultValue
+        right <- eitherValue
     }
-    return item + checked
+    if let branch <- optionValue {
+        return optionItem + resultItem + eitherItem + left + middle + right + branch
+    }
+    return optionItem + resultItem + eitherItem
 }
 "#,
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_plain_let_only_for_irrefutable_patterns() {
+        let program = parse_inline(
+            r#"
+def main() Int {
+    pair (Int, Int) = (4, 5)
+    let (left, right) = pair
+    return left + right
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_refutable_plain_let_patterns_without_else() {
+        let program = parse_inline(
+            r#"
+def main(
+    optionValue Option[Int],
+    resultValue Result[Int, Str],
+    eitherValue Either[Str, Int]
+) Int {
+    knownOption = Some(4)
+    widenedOption Option[Int] = Some(5)
+    let Some(optionItem) = optionValue
+    let resultItem <- resultValue
+    let {
+        eitherItem <- eitherValue
+    }
+    let knownItem <- knownOption
+    let widenedItem <- widenedOption
+    return 0
+}
+"#,
+        );
+        let result = check_program(&program);
+        let matches = result
+            .diagnostics
+            .iter()
+            .filter(|diag| {
+                diag.code == "refutable_let_pattern"
+                    && diag.message.contains("use 'let ... else ...' instead")
+            })
+            .count();
+        assert_eq!(matches, 5, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_extract_shorthand_for_unknown_source_type() {
+        let program = parse_inline(
+            r#"
+def main(value) Int {
+    let item <- value
+    return 0
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_extract_pattern"
+                    && diag.message.contains("requires a known source type")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

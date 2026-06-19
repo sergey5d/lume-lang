@@ -9,7 +9,7 @@ enum Option[T] {
 
     def isEmpty() Bool = !this.isSet()
 
-    def expect() T = match this {
+    def orPanic() T = match this {
         case Some(value) => value
         case Option.None => OS.panic("Option has no value")
     }

@@ -419,8 +419,7 @@ pub struct LetElseStmt {
     pub span: Span,
 }
 
-/// Distinguishes the surface keyword used for a panic-on-mismatch pattern
-/// binding statement.
+/// Distinguishes the surface keyword used for a pattern binding statement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatternBindingKind {
     Let,
@@ -428,7 +427,10 @@ pub enum PatternBindingKind {
 }
 
 /// A `let PATTERN = expr` / `expect PATTERN = expr` statement, or grouped
-/// `let { ... }` / `expect { ... }`, that panics on pattern mismatch.
+/// `let { ... }` / `expect { ... }`.
+///
+/// `expect` remains assertive and panics on mismatch. Plain `let` is only
+/// valid when the pattern is irrefutable.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PatternBindingStmt {
     pub kind: PatternBindingKind,
@@ -488,6 +490,10 @@ pub enum Pattern {
     Wildcard {
         span: Span,
     },
+    Extract {
+        inner: Box<Pattern>,
+        span: Span,
+    },
     Binding {
         name: String,
         span: Span,
@@ -516,6 +522,7 @@ impl Pattern {
     pub fn span(&self) -> Span {
         match self {
             Pattern::Wildcard { span }
+            | Pattern::Extract { span, .. }
             | Pattern::Binding { span, .. }
             | Pattern::Type { span, .. }
             | Pattern::Literal { span, .. }

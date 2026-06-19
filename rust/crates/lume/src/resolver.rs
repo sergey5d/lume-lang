@@ -1798,6 +1798,7 @@ impl<'a> Resolver<'a> {
     fn resolve_pattern(&mut self, pattern: &Pattern) {
         match pattern {
             Pattern::Wildcard { .. } => {}
+            Pattern::Extract { inner, .. } => self.resolve_pattern(inner),
             Pattern::Binding { name, span } => {
                 if name != "_" {
                     self.define_value(

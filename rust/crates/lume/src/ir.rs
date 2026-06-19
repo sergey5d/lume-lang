@@ -480,6 +480,8 @@ pub enum Intrinsic {
     IterHasNext,
     IterNext,
     ListAppend,
+    ExtractSuccessIsSet,
+    ExtractSuccessValue,
     VariantIs(String),
     VariantField(String),
 }

@@ -11,7 +11,7 @@ use crate::{
     diagnostic::Diagnostic,
     ir,
     lower::lower_program,
-    resolver::{LoadedModule, LocatedDiagnostic, ModuleGraph, load_module_graph},
+    resolver::{load_module_graph, LoadedModule, LocatedDiagnostic, ModuleGraph},
     runtime,
     source::{LineColumn, Span},
     typecheck::check_path,
@@ -452,6 +452,7 @@ fn rewrite_match_case_for_runtime(
 fn rewrite_pattern_for_runtime(pattern: &mut ast::Pattern, module: &LoadedModule) {
     match pattern {
         ast::Pattern::Wildcard { .. } | ast::Pattern::Binding { .. } => {}
+        ast::Pattern::Extract { inner, .. } => rewrite_pattern_for_runtime(inner, module),
         ast::Pattern::Type { target, .. } => rewrite_type_ref_for_runtime(target, module),
         ast::Pattern::Literal { value, .. } => {
             // handled by parent expr rewrite when embedded in match cases
@@ -2593,6 +2594,35 @@ impl<'a> Interpreter<'a> {
                 }
                 self.list_append(args[0].clone(), args[1].clone(), span)
             }
+            ir::Intrinsic::ExtractSuccessIsSet => {
+                if args.len() != 1 {
+                    return Err(self.runtime_error(span, "ExtractSuccessIsSet expects 1 argument"));
+                }
+                Ok(Value::Bool(matches!(
+                    &args[0],
+                    Value::Aggregate(variant)
+                        if matches!(
+                            variant.borrow().case_name.as_deref(),
+                            Some("Some" | "Ok" | "Right")
+                        )
+                )))
+            }
+            ir::Intrinsic::ExtractSuccessValue => {
+                if args.len() != 1 {
+                    return Err(self.runtime_error(span, "ExtractSuccessValue expects 1 argument"));
+                }
+                Ok(match &args[0] {
+                    Value::Aggregate(variant)
+                        if matches!(
+                            variant.borrow().case_name.as_deref(),
+                            Some("Some" | "Ok" | "Right")
+                        ) =>
+                    {
+                        pattern_field_value(&args[0], "value").unwrap_or(Value::Unit)
+                    }
+                    _ => Value::Unit,
+                })
+            }
             ir::Intrinsic::VariantIs(case_name) => {
                 if args.len() != 1 {
                     return Err(self.runtime_error(span, "VariantIs expects 1 argument"));
@@ -4271,7 +4301,7 @@ fn value_as_f64(value: &Value) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SourceFile, lex, parse_program};
+    use crate::{lex, parse_program, SourceFile};
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -5217,7 +5247,7 @@ $name
             def main() Unit {
                 someValue = Option.when(true, 7)
                 noValue = Option.when(false, 7)
-                OS.println(someValue.expect())
+                OS.println(someValue.orPanic())
                 OS.println(noValue.isEmpty())
             }
             "#,

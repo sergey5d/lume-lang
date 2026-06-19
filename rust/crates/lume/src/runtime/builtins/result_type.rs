@@ -1,8 +1,7 @@
 use crate::{
-    Diagnostic, Span,
     ast::TypeKind,
     interpreter::{Interpreter, Value},
-    ir,
+    ir, Diagnostic, Span,
 };
 
 use super::builtin_method;
@@ -30,11 +29,11 @@ pub(super) fn define() -> RuntimeType {
                 }],
                 result_map,
             ),
-            builtin_method(3, "expect", Vec::new(), result_expect),
+            builtin_method(3, "orPanic", Vec::new(), result_or_panic),
             builtin_method(4, "getError", Vec::new(), result_get_error),
             builtin_method(5, "getOr", vec![ir::Type::Unknown], result_get_or),
             builtin_method(6, "isSuccess", Vec::new(), result_is_ok),
-            builtin_method(7, "unwrap", Vec::new(), result_expect),
+            builtin_method(7, "unwrap", Vec::new(), result_or_panic),
         ],
         enum_cases: vec![
             RuntimeEnumCase {
@@ -120,7 +119,7 @@ fn result_map(
     }
 }
 
-fn result_expect(
+fn result_or_panic(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
     _args: Vec<Value>,

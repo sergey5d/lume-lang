@@ -1,0 +1,85 @@
+# EXPECT:
+# letElseOptionSome 15
+# letElseOptionNone 0
+# letElseResultOk 21
+# letElseResultErr -2
+# letElseEitherRight 32
+# letElseEitherLeft -3
+# letGroupElse 15
+# letGroupElseFail -1
+# expectOption 8
+# expectResult 34
+# expectEither 55
+# expectGroup 18
+# ifLet 89
+
+def letElseOption(value Option[Int]) Int {
+    let item <- value else return 0
+    item + 10
+}
+
+def letElseResult(value Result[Int, Str]) Int {
+    let item <- value else return -2
+    item + 20
+}
+
+def letElseEither(value Either[Str, Int]) Int {
+    let item <- value else return -3
+    item + 30
+}
+
+def letElseGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
+    let {
+        a <- left
+        b <- middle
+        c <- right
+    } else return -1
+    a + b + c
+}
+
+def expectOption(value Option[Int]) Int {
+    expect item <- value
+    item
+}
+
+def expectResult(value Result[Int, Str]) Int {
+    expect item <- value
+    item
+}
+
+def expectEither(value Either[Str, Int]) Int {
+    expect item <- value
+    item
+}
+
+def expectGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
+    expect {
+        a <- left
+        b <- middle
+        c <- right
+    }
+    a + b + c
+}
+
+def ifLetValue(value Option[Int]) Int {
+    if let item <- value {
+        return item
+    }
+    return -1
+}
+
+def main() Unit {
+    OS.println("letElseOptionSome " + letElseOption(Some(5)))
+    OS.println("letElseOptionNone " + letElseOption(None()))
+    OS.println("letElseResultOk " + letElseResult(Ok(1)))
+    OS.println("letElseResultErr " + letElseResult(Err("bad")))
+    OS.println("letElseEitherRight " + letElseEither(Right(2)))
+    OS.println("letElseEitherLeft " + letElseEither(Left("bad")))
+    OS.println("letGroupElse " + letElseGroup(Some(4), Ok(5), Right(6)))
+    OS.println("letGroupElseFail " + letElseGroup(Some(4), Err("bad"), Right(6)))
+    OS.println("expectOption " + expectOption(Some(8)))
+    OS.println("expectResult " + expectResult(Ok(34)))
+    OS.println("expectEither " + expectEither(Right(55)))
+    OS.println("expectGroup " + expectGroup(Some(5), Ok(6), Right(7)))
+    OS.println("ifLet " + ifLetValue(Some(89)))
+}

@@ -1,8 +1,7 @@
 use crate::{
-    Diagnostic, Span,
     ast::TypeKind,
     interpreter::{Interpreter, Value},
-    ir,
+    ir, Diagnostic, Span,
 };
 
 use super::builtin_method;
@@ -30,12 +29,12 @@ pub(super) fn define() -> RuntimeType {
                 }],
                 option_map,
             ),
-            builtin_method(3, "expect", Vec::new(), option_expect),
+            builtin_method(3, "orPanic", Vec::new(), option_or_panic),
             builtin_method(4, "getOr", vec![ir::Type::Unknown], option_get_or),
             builtin_method(5, "getOrElse", vec![ir::Type::Unknown], option_get_or_else),
             builtin_method(6, "iterator", Vec::new(), option_iterator),
             builtin_method(7, "isSuccess", Vec::new(), option_is_set),
-            builtin_method(8, "unwrap", Vec::new(), option_expect),
+            builtin_method(8, "unwrap", Vec::new(), option_or_panic),
         ],
         enum_cases: vec![
             RuntimeEnumCase {
@@ -115,14 +114,14 @@ fn option_map(
     }
 }
 
-fn option_expect(
+fn option_or_panic(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
     args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "Option.expect expects 0 arguments"));
+        return Err(interpreter.runtime_error(span, "Option.orPanic expects 0 arguments"));
     }
     let (case_id, first_field) = option_case(&receiver);
     if case_id != SOME_CASE {

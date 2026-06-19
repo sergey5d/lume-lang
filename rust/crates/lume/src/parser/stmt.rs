@@ -299,7 +299,7 @@ impl<'a> Parser<'a> {
             let (pattern, operator) = if self.match_token(TokenKind::Eq) {
                 (pattern, "=")
             } else if self.match_token(TokenKind::LeftArrow) {
-                (self.wrap_option_pattern(pattern), "<-")
+                (self.wrap_extract_pattern(pattern), "<-")
             } else {
                 self.restore(checkpoint);
                 self.diagnostics.truncate(diagnostics_len);

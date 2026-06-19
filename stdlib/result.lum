@@ -9,7 +9,7 @@ enum Result[T, E] {
 
     def isErr() Bool = !this.isOk()
 
-    def expect() T = match this {
+    def orPanic() T = match this {
         case Ok(value) => value
         case Err(_) => OS.panic("Result has no success value")
     }

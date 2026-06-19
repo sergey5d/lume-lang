@@ -1424,6 +1424,22 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_pattern_binding_stmt(&mut self, stmt: &core::PatternBindingStmt) {
+        if matches!(stmt.kind, core::PatternBindingKind::Let) {
+            if !stmt.clauses.is_empty() {
+                for clause in &stmt.clauses {
+                    let scrutinee = self.lower_expr(&clause.value);
+                    let plan = self.lower_pattern_plan(scrutinee, &clause.pattern);
+                    self.apply_pending_bindings(plan.bindings);
+                }
+                return;
+            }
+
+            let scrutinee = self.lower_expr(&stmt.value);
+            let plan = self.lower_pattern_plan(scrutinee, &stmt.pattern);
+            self.apply_pending_bindings(plan.bindings);
+            return;
+        }
+
         let panic_message = match stmt.kind {
             core::PatternBindingKind::Let => "let pattern did not match",
             core::PatternBindingKind::Expect => "expect pattern did not match",
@@ -2411,6 +2427,32 @@ impl<'a> FunctionLowerer<'a> {
     fn lower_pattern_plan(&mut self, scrutinee: ir::Operand, pattern: &Pattern) -> PatternPlan {
         match pattern {
             Pattern::Wildcard { .. } => PatternPlan::always_true(),
+            Pattern::Extract { inner, span } => {
+                let base_condition = self.emit_temp_from_rvalue(
+                    ir::RValue::Call {
+                        callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet),
+                        args: vec![scrutinee.clone()],
+                        structural: false,
+                    },
+                    ir::Type::Bool,
+                    Some(*span),
+                );
+                let payload = self.emit_temp_from_rvalue(
+                    ir::RValue::Call {
+                        callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue),
+                        args: vec![scrutinee],
+                        structural: false,
+                    },
+                    ir::Type::Unknown,
+                    Some(*span),
+                );
+                let inner_plan = self.lower_pattern_plan(payload, inner);
+                PatternPlan {
+                    condition: self
+                        .combine_conditions(vec![base_condition, inner_plan.condition], *span),
+                    bindings: inner_plan.bindings,
+                }
+            }
             Pattern::Binding { name, .. } => {
                 if name == "_" {
                     PatternPlan::always_true()
@@ -4507,7 +4549,7 @@ fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SourceFile, lex, parse_program};
+    use crate::{lex, parse_program, SourceFile};
 
     fn parse_inline(src: &str) -> ast::Program {
         let file = SourceFile::new("test.lum", src);
@@ -4566,11 +4608,10 @@ mod tests {
         let ir = lowered.program.expect("ir program");
         let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
         assert!(main.blocks.len() >= 6, "{:#?}", main.blocks);
-        assert!(
-            main.blocks
-                .iter()
-                .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. }))
-        );
+        assert!(main
+            .blocks
+            .iter()
+            .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. })));
     }
 
     #[test]
@@ -4665,11 +4706,10 @@ mod tests {
         let ir = lowered.program.expect("ir program");
         let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
         assert!(main.blocks.len() >= 8, "{:#?}", main.blocks);
-        assert!(
-            main.blocks
-                .iter()
-                .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. }))
-        );
+        assert!(main
+            .blocks
+            .iter()
+            .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. })));
         assert!(main.blocks.iter().any(|block| {
             block.statements.iter().any(|stmt| match &stmt.kind {
                 ir::StatementKind::Assign {

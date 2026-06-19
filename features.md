@@ -208,7 +208,9 @@ The preferred refutable-binding surface is now split into these forms:
 - `if let PATTERN = value && let OTHER = next && ready { ... }` for mixed refutable and boolean checks in one condition
 - `let PATTERN = value else { ... }` for extraction with an explicit failure path
 - `let { PATTERN = value ... } else { ... }` for multiple sequential refutable bindings sharing one fallback
-- `PATTERN <- optionValue` as shorthand for `Some(PATTERN) = optionValue` inside `if let`, `let`, `let ... else`, and `expect`
+- `PATTERN <- source` as shorthand for the success case inside `if let`, `let`, `let ... else`, and `expect`
+  `Some(PATTERN)` for `Option`, `Ok(PATTERN)` for `Result`, and `Right(PATTERN)` for `Either`
+  plain `let` does not accept this form; use `let ... else`, `if let`, or `expect`
 - `value = try source` for propagation from `Option`, `Result`, and `Either`
 
 TODO:
