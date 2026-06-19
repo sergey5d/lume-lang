@@ -1807,6 +1807,25 @@ impl<'a> Interpreter<'a> {
             return Ok(Value::set(unique_values(values)));
         }
 
+        if path[0] == "Int" && path.len() == 2 && path[1] == "parse" {
+            if args.len() != 1 {
+                return Err(self.runtime_error(
+                    span,
+                    format!("Int.parse expects 1 argument, got {}", args.len()),
+                ));
+            }
+            let Value::String(text) = &args[0] else {
+                return Err(self.runtime_error(
+                    span,
+                    format!("Int.parse expects Str, got {}", args[0].render()),
+                ));
+            };
+            return Ok(match text.parse::<i64>() {
+                Ok(parsed) => self.option_some(Value::Int(parsed)),
+                Err(_) => self.option_none(),
+            });
+        }
+
         if path[0] == "Float" && path.len() == 2 && path[1] == "parse" {
             if args.len() != 1 {
                 return Err(self.runtime_error(
@@ -1820,10 +1839,10 @@ impl<'a> Interpreter<'a> {
                     format!("Float.parse expects Str, got {}", args[0].render()),
                 ));
             };
-            let parsed = text.parse::<f64>().map_err(|_| {
-                self.runtime_error(span, format!("Float.parse could not parse '{}'", text))
-            })?;
-            return Ok(Value::Float(parsed));
+            return Ok(match text.parse::<f64>() {
+                Ok(parsed) => self.option_some(Value::Float(parsed)),
+                Err(_) => self.option_none(),
+            });
         }
 
         if path[0] == "Option" && path.len() == 2 && path[1] == "when" {
@@ -5143,12 +5162,17 @@ $name
     }
 
     #[test]
-    fn runs_float_parse_and_list_string_helpers() {
+    fn runs_parse_and_list_string_helpers() {
         let program = lower_inline(
             r#"
             def main() Unit {
                 values = ["btc", "usd"]
-                OS.println(Float.parse("1.2") + 0.8)
+                expect Some(parsedFloat) = Float.parse("1.2")
+                expect Some(parsedInt) = Int.parse("7")
+                OS.println(parsedFloat + 0.8)
+                OS.println(parsedInt + 1)
+                OS.println(Float.parse("oops").isEmpty())
+                OS.println(Int.parse("nope").isEmpty())
                 OS.println(values.makeStr("-"))
                 OS.println(values.nonEmpty())
             }
@@ -5157,7 +5181,7 @@ $name
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "2.0\nbtc-usd\ntrue\n");
+        assert_eq!(run.output, "2.0\n8\ntrue\ntrue\nbtc-usd\ntrue\n");
     }
 
     #[test]

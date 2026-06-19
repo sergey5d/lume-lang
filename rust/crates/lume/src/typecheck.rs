@@ -2896,6 +2896,26 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Ty::Unknown);
                 Some(Ty::Named("Array".to_string(), vec![item_ty]))
             }
+            ("Int", "parse") => {
+                if args.len() != 1 {
+                    self.add_error(
+                        "invalid_argument_count",
+                        format!("Int.parse expects 1 argument, got {}", args.len()),
+                        span,
+                    );
+                }
+                if let Some(arg) = args.first() {
+                    let ty = self.check_expr(&arg.value);
+                    self.require_assignable(
+                        &ty,
+                        &Ty::str(),
+                        arg.span,
+                        "invalid_argument_type",
+                        format!("Int.parse expects Str argument, got '{}'", ty.describe()),
+                    );
+                }
+                Some(Ty::option(Ty::int()))
+            }
             ("Float", "parse") => {
                 if args.len() != 1 {
                     self.add_error(
@@ -2914,7 +2934,7 @@ impl<'a> Checker<'a> {
                         format!("Float.parse expects Str argument, got '{}'", ty.describe()),
                     );
                 }
-                Some(Ty::float())
+                Some(Ty::option(Ty::float()))
             }
             ("Option", "when") => {
                 if args.len() != 2 {
@@ -4491,7 +4511,17 @@ impl<'a> Checker<'a> {
                 .count();
 
             if fields.len() < required_visible || fields.len() > visible_fields.len() {
-                self.add_error("no_matching_overload", named_error(), span);
+                self.add_error(
+                    "no_matching_overload",
+                    format!(
+                        "class '{}' named brace construction expects {}..{} visible fields, got {}",
+                        sig.name,
+                        required_visible,
+                        visible_fields.len(),
+                        fields.len()
+                    ),
+                    span,
+                );
                 return materialize_type(ret);
             }
 
@@ -4501,12 +4531,29 @@ impl<'a> Checker<'a> {
                     return materialize_type(ret);
                 };
                 let Some(field) = visible_fields.iter().find(|field| field.name == name) else {
-                    self.add_error("no_matching_overload", named_error(), span);
+                    self.add_error(
+                        "no_matching_overload",
+                        format!(
+                            "class '{}' has no visible field '{}' for named brace construction",
+                            sig.name, name
+                        ),
+                        arg.span,
+                    );
                     return materialize_type(ret);
                 };
                 let actual = self.check_expr_against(&arg.value, &field.ty);
                 if !self.is_assignable(&actual, &field.ty) {
-                    self.add_error("no_matching_overload", named_error(), span);
+                    self.add_error(
+                        "invalid_argument_type",
+                        format!(
+                            "field '{}' in class '{}' expects '{}' but got '{}'",
+                            field.name,
+                            sig.name,
+                            field.ty.describe(),
+                            actual.describe()
+                        ),
+                        arg.span,
+                    );
                     return materialize_type(ret);
                 }
             }
@@ -4519,7 +4566,14 @@ impl<'a> Checker<'a> {
                     .iter()
                     .any(|arg| arg.name.as_deref() == Some(field.name.as_str()))
                 {
-                    self.add_error("no_matching_overload", named_error(), span);
+                    self.add_error(
+                        "no_matching_overload",
+                        format!(
+                            "class '{}' named brace construction is missing required field '{}'",
+                            sig.name, field.name
+                        ),
+                        span,
+                    );
                     return materialize_type(ret);
                 }
             }
@@ -4556,12 +4610,15 @@ impl<'a> Checker<'a> {
             let actual = self.check_expr_against(value, &field.ty);
             if !self.is_assignable(&actual, &field.ty) {
                 self.add_error(
-                    "no_matching_overload",
+                    "invalid_argument_type",
                     format!(
-                        "class '{}' positional brace construction must match the public field order and types",
-                        sig.name
+                        "positional field '{}' in class '{}' expects '{}' but got '{}'",
+                        field.name,
+                        sig.name,
+                        field.ty.describe(),
+                        actual.describe()
                     ),
-                    span,
+                    value.span(),
                 );
                 return materialize_type(ret);
             }
@@ -5789,6 +5846,31 @@ def main() Int {
     }
 
     #[test]
+    fn reports_named_brace_field_type_mismatch() {
+        let program = parse_inline(
+            r#"
+class Order {
+    quantity Int
+}
+
+def main() Unit {
+    _ Order = Order { quantity = "oops" }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_argument_type"
+                    && diag.message.contains("field 'quantity' in class 'Order' expects 'Int'")
+                    && diag.message.contains("got 'Str'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn allows_impl_single_without_explicit_single_decl() {
         let program = parse_inline(
             r#"
@@ -5836,6 +5918,20 @@ def main() Int {
             r#"
 def main() Option[Int] {
     return Option.when(true, 7)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_int_and_float_parse_static_helpers() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    whole Option[Int] = Int.parse("7")
+    decimal Option[Float] = Float.parse("1.2")
 }
 "#,
         );

@@ -38,7 +38,7 @@ impl AssetPrices {
 
             fromAsset = split[0]
             toAsset = split[1]
-            price = Float.parse(split[2])
+            expect Some(price) = Float.parse(split[2])
 
             if !result.contains(fromAsset) {
                 result.put(fromAsset, [])

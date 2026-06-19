@@ -3281,7 +3281,10 @@ impl<'a> FunctionLowerer<'a> {
                 ) {
                     return Some(vec!["values".to_string()]);
                 }
-                if matches!((owner.as_str(), member.as_str()), ("Float", "parse")) {
+                if matches!(
+                    (owner.as_str(), member.as_str()),
+                    ("Int", "parse") | ("Float", "parse")
+                ) {
                     return Some(vec!["text".to_string()]);
                 }
                 if let Some(params) =
@@ -3664,7 +3667,7 @@ fn is_named_runtime_callee_path(program: &ir::Program, path: &[String]) -> bool 
     if path.is_empty() {
         return false;
     }
-    if matches!(path, [owner, method] if (owner == "Float" && method == "parse")
+    if matches!(path, [owner, method] if ((owner == "Int" || owner == "Float") && method == "parse")
         || (owner == "Option" && method == "when"))
     {
         return true;

@@ -6,7 +6,7 @@ class Order {
     var quantity Int
     fills [Int]
     var status Str
-    lastUpdated Int
+    var lastUpdated Int
 }
 
 class OrderManager {
@@ -17,29 +17,36 @@ class OrderManager {
 
 impl OrderManager {
 
-    def parseOrder(str Str) Order {
+    def parseOrder(str Str) Option[Order] {
 
         arr = str.split("\s*,")
 
-        expect arr.length() == 5
+        if arr.size() != 5  {
+            return None()
+        }
 
-        id = Int.parse(arr[0])
+        id = try Int.parse(arr[0])
 
         buySell = arr[1]
         asset = arr[2]
-        quantity = arr[3]
+
+        expect Some(quantity) = Int.parse(arr[3])
+        
         status = arr[4]
 
-        Order {
-            id = id, asset = asset, buySell = buySell, quantity = quantity, fills = [], status = status, lastUpdated = this.currentTick
+        Some {
+            Order {
+                id = id, asset = asset, buySell = buySell, quantity = quantity, fills = [], status = status, lastUpdated = this.currentTick
+            }
         }
     }
 
     def checkQueuedOrders() {
         while !this.queue.isEmpty() {
             first = this.queue[0]
-            if first.status == "CANCEL" {
+            if first.status == "NEW" {
                 if first.lastUpdated - this.currentTick > 5 {
+                    first.status := "CANCELLED"
                     this.queue.removeFirst()
                 } else {
                     break
@@ -56,7 +63,7 @@ impl OrderManager {
 
         checkQueuedOrders()
 
-        parsedOrder = parseOrder(str)
+        expect Some(parsedOrder) = parseOrder(str)
 
         savedOrder = this.map.get(parsedOrder.id)
 
@@ -83,12 +90,15 @@ impl OrderManager {
                     order.status := "IN+PROGRESS"
                 }
             }
-            case "CANCEL" => 
+            case "CANCEL" => {
                 if order.status == "FILLED" || order.status == "IN_PROGRESS" {
                     println("attempt to cancel filled order " + order.id)
                 } else {
+                    order.status := "NEW"
                     this.queue.add(order)
-                }                        
+                }     
+                order.lastUpdated := this.currentTick                   
+            }
         }
     }
 
