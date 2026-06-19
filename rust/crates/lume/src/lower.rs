@@ -3189,6 +3189,9 @@ impl<'a> FunctionLowerer<'a> {
                 if let Some(value) = self.lookup_value(name) {
                     return ir::Callee::Indirect(value);
                 }
+                if let Some(method) = self.lower_implicit_method_callee(name) {
+                    return method;
+                }
                 if is_named_runtime_callee_path(self.program, &path) {
                     return ir::Callee::Named { path };
                 }
@@ -3206,6 +3209,26 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         ir::Callee::Indirect(self.lower_expr(callee))
+    }
+
+    fn lower_implicit_method_callee(&mut self, name: &str) -> Option<ir::Callee> {
+        let ir::FunctionKind::Method { owner } = self.function().kind else {
+            return None;
+        };
+        let owner_type = self.program.types.get(owner.0)?;
+        let method_exists = owner_type.methods.iter().any(|method_id| {
+            self.program
+                .function(*method_id)
+                .is_some_and(|method| method.name == name)
+        });
+        if !method_exists {
+            return None;
+        }
+        let receiver = self.lookup_value("this")?;
+        Some(ir::Callee::Method {
+            receiver,
+            method: name.to_string(),
+        })
     }
 
     fn reorder_call_args<'b>(
@@ -4501,6 +4524,50 @@ mod tests {
         let ty = &ir.types[0];
         assert_eq!(ty.fields.len(), 1);
         assert_eq!(ty.methods.len(), 1);
+    }
+
+    #[test]
+    fn lowers_bare_method_calls_as_receiver_calls() {
+        let program = parse_inline(
+            r#"
+            class Counter {
+                value Int
+            }
+
+            impl Counter {
+                def add(delta Int) Int = this.value + delta
+                def twice(delta Int) Int = add(delta) + add(delta)
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let twice = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "twice")
+            .expect("twice method");
+        let add_calls = twice
+            .blocks
+            .iter()
+            .flat_map(|block| block.statements.iter())
+            .filter(|stmt| {
+                matches!(
+                    &stmt.kind,
+                    ir::StatementKind::Assign {
+                        value:
+                            ir::RValue::Call {
+                                callee: ir::Callee::Method { method, .. },
+                                ..
+                            },
+                        ..
+                    } if method == "add"
+                )
+            })
+            .count();
+        assert_eq!(add_calls, 2, "{:#?}", twice.blocks);
     }
 
     #[test]

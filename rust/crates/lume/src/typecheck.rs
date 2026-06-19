@@ -3578,6 +3578,13 @@ impl<'a> Checker<'a> {
                         .clone();
                     return Some((sig.params, sig.ret));
                 }
+                if let Some(methods) = self.lookup_implicit_method_functions(name) {
+                    let sig = self
+                        .choose_overload(&methods, args)
+                        .or_else(|| methods.first())?
+                        .clone();
+                    return Some((sig.params, sig.ret));
+                }
                 None
             }
             Expr::Member { receiver, name, .. } => {
@@ -3622,10 +3629,17 @@ impl<'a> Checker<'a> {
     ) -> Option<(Vec<ParamSig>, Ty)> {
         match callee {
             Expr::Identifier { name, .. } => {
-                let functions = self.lookup_functions(name)?;
+                if let Some(functions) = self.lookup_functions(name) {
+                    let sig = self
+                        .choose_overload(&functions, args)
+                        .or_else(|| functions.first())?
+                        .clone();
+                    return Some((sig.params, sig.ret));
+                }
+                let methods = self.lookup_implicit_method_functions(name)?;
                 let sig = self
-                    .choose_overload(&functions, args)
-                    .or_else(|| functions.first())?
+                    .choose_overload(&methods, args)
+                    .or_else(|| methods.first())?
                     .clone();
                 Some((sig.params, sig.ret))
             }
@@ -4546,6 +4560,17 @@ impl<'a> Checker<'a> {
             .cloned()
             .or_else(|| self.world.lookup_imported_function(self.module, name))
             .or_else(|| self.world.ambient.functions.get(name).cloned())
+    }
+
+    fn lookup_implicit_method_functions(&self, name: &str) -> Option<Vec<FunctionSig>> {
+        if self.lookup_value(name).is_some()
+            || self.lookup_functions(name).is_some()
+            || self.lookup_named_constructor_type(name).is_some()
+        {
+            return None;
+        }
+        let owner = self.current_owner.as_ref()?;
+        self.method_sigs_for_type(owner, name)
     }
 
     fn lookup_function_type(&self, name: &str) -> Option<Ty> {
@@ -5740,6 +5765,29 @@ impl single User {
 }
 
 def main() User = User.make("Ada")
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_bare_method_calls_inside_impls() {
+        let program = parse_inline(
+            r#"
+class Counter {
+    value Int
+}
+
+impl Counter {
+    def add(delta Int) Int = this.value + delta
+    def twice(delta Int) Int = add(delta) + add(delta)
+}
+
+def main() Int {
+    counter Counter = Counter { 5 }
+    return counter.twice(2)
+}
 "#,
         );
         let result = check_program(&program);

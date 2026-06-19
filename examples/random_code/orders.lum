@@ -47,13 +47,24 @@ impl OrderManager {
             this.map.put(parseOrder.id, parsedOrder)
         }
 
+        order = savedOrder.getOrElse(parsedOrder)
+
         match parsedOrder.status {
             case "NEW" => 
                 # the only thing here is to update quantity, the rest will be propagated by other order types
-                this.map.get(parsedOrder.id).forEech { so -> so.quantity = parsedOrder.quantity }
+                order.quantity = parsedOrder.quantity
             case "FILL" => {
-
-
+                order.fills.add(parsedOrder.quantity)
+                if order.quantity != 0 {
+                    totalFills = order.fills.reduce(0, (f1, f2) -> f1 + f2)
+                    if (totalFills == order.quantity) {
+                        order.status = "FILLED"
+                    } else {
+                        order.status = "IN+PROGRESS"
+                    }
+                } else {
+                    order.status = "IN+PROGRESS"
+                }
             }
             case "CANCEL" => {
                 match savedOrder {

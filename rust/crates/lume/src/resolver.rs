@@ -795,6 +795,7 @@ struct Resolver<'a> {
     imported_objects: HashMap<String, TypeInfo>,
     modules_by_alias: HashMap<String, ModuleNamespace>,
     field_hint_scopes: Vec<HashSet<String>>,
+    method_hint_scopes: Vec<HashSet<String>>,
     loop_depth: usize,
     current_constructor: bool,
 }
@@ -824,6 +825,7 @@ impl<'a> Resolver<'a> {
             imported_objects: HashMap::new(),
             modules_by_alias: HashMap::new(),
             field_hint_scopes: Vec::new(),
+            method_hint_scopes: Vec::new(),
             loop_depth: 0,
             current_constructor: false,
         }
@@ -1210,9 +1212,15 @@ impl<'a> Resolver<'a> {
                 .iter()
                 .flat_map(|info| info.fields.iter().map(|field| field.name)),
         );
+        self.push_method_hints(
+            target_fields
+                .iter()
+                .flat_map(|info| info.methods.keys().map(String::as_str)),
+        );
         for method in &block.methods {
             self.resolve_method(method);
         }
+        self.pop_method_hints();
         self.pop_field_hints();
         self.pop_scope();
         self.pop_type_scope();
@@ -1652,7 +1660,7 @@ impl<'a> Resolver<'a> {
                     callee.as_ref(),
                     Expr::Identifier { name, .. } if self.current_constructor && name == "new"
                 );
-                if !skip_init {
+                if !skip_init && !self.is_implicit_method_call(callee) {
                     self.resolve_expr(callee);
                 }
                 for arg in args {
@@ -2109,6 +2117,27 @@ impl<'a> Resolver<'a> {
 
     fn pop_field_hints(&mut self) {
         self.field_hint_scopes.pop();
+    }
+
+    fn push_method_hints<'b>(&mut self, methods: impl Iterator<Item = &'b str>) {
+        self.method_hint_scopes
+            .push(methods.map(|name| name.to_string()).collect());
+    }
+
+    fn pop_method_hints(&mut self) {
+        self.method_hint_scopes.pop();
+    }
+
+    fn is_implicit_method_call(&self, expr: &Expr) -> bool {
+        let Expr::Identifier { name, .. } = expr else {
+            return false;
+        };
+        !self.is_name_defined(name)
+            && self
+                .method_hint_scopes
+                .iter()
+                .rev()
+                .any(|scope| scope.contains(name))
     }
 
     fn undefined_value_message(&self, name: &str) -> String {
