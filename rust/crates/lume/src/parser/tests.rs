@@ -345,7 +345,7 @@ class Box {
 
 #[test]
 fn parses_record_literal_forms() {
-    match parse_expr_only(r#"class { name = "Ana", age = 10 }"#) {
+    match parse_expr_only(r#"class { name: "Ana", age: 10 }"#) {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(values.is_empty());
             assert_eq!(fields.len(), 2);
@@ -423,6 +423,42 @@ fn parses_record_literal_forms() {
             .iter()
             .any(|diag| diag.message.contains("'class(...)' is not supported")),
         "expected class(...) rejection, got diagnostics: {:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_equals_in_named_record_literal_fields() {
+    let result = parse(r#"def run() Unit = class { name = "Ana", age = 10 }"#);
+    assert!(
+        !result.diagnostics.is_empty(),
+        "expected parser diagnostics for '=' named construction fields"
+    );
+}
+
+#[test]
+fn rejects_bare_colon_record_arguments_inside_parens() {
+    let result = parse(
+        r#"
+class User {
+    name Str
+}
+
+def run() Unit {
+    _ User = User({
+        name: "Ana"
+    })
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag
+                .message
+                .contains("bare '{ ... }' record arguments are not allowed inside '(...)'")),
+        "expected bare record argument rejection, got diagnostics: {:#?}",
         result.diagnostics
     );
 }

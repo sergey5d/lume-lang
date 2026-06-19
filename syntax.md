@@ -311,7 +311,7 @@ updated = value with {
 Anonymous record literal:
 
 ```txt
-user = class { name = "Ada", age = 10 }
+user = class { name: "Ada", age: 10 }
 ```
 
 Positional anonymous record construction is also allowed when the target shape is already known:
@@ -324,8 +324,8 @@ Multiline anonymous record literal:
 
 ```txt
 user = class {
-    name = "Ada"
-    age = 10
+    name: "Ada"
+    age: 10
 }
 ```
 
@@ -334,15 +334,15 @@ Inferred field type from a local value:
 ```txt
 a = 1
 b = class {
-    count = a
+    count: a
 }
 ```
 
 Mixed separators are also valid:
 
 ```txt
-user = class { name = "Ada",
-    age = 10
+user = class { name: "Ada",
+    age: 10
 }
 ```
 
@@ -366,11 +366,11 @@ describe(class { "Cara", 14 })
 Named classes use the same brace construction surface:
 
 ```txt
-user User = User { name = "Ada", age = 10 }
+user User = User { name: "Ada", age: 10 }
 person Person = Person { "Ben", 12, "NYC" }
 profile MixedProfile = MixedProfile {
-    name = "Liam"
-    age = 8
+    name: "Liam"
+    age: 8
 }
 tail HiddenTail = HiddenTail { "Ada", 4 }
 settings Settings = Settings {}
@@ -392,7 +392,7 @@ Rules for field-based class construction:
 - positional braces are rejected when a private initialized field appears before a later public field
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
-- nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name = "Ada", age = 10 }` and then `owner = Team { leader = leader }`
+- nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
 - `Type({ ... })` is not supported; plain `{ ... }` inside call parentheses is treated as a block, not as an anonymous record literal
 
 Anonymous record shapes are structural:
@@ -401,7 +401,7 @@ Anonymous record shapes are structural:
 - missing fields are rejected
 - defaults are not part of the shape syntax
 - construction uses `class { ... }`; plain `{ ... }` remains a block expression
-- named fields inside construction braces use `field = value`
+- named fields inside construction braces use `field: value`
 - `class { value1, value2 }` is positional and requires an anonymous record shape from context
 - inside `class { ... }`, fields may be separated by commas, newlines, or a mix of both
 
@@ -1261,7 +1261,7 @@ let (left Int, right Str) = (5, "hello")
 Anonymous record / class-shape destructuring uses braces:
 
 ```txt
-let { value Int, label Str } = class { value = 7, label = "world" }
+let { value Int, label Str } = class { value: 7, label: "world" }
 ```
 
 Class destructuring also uses braces:

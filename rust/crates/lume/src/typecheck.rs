@@ -6058,7 +6058,7 @@ class Order {
 }
 
 def main() Unit {
-    _ Order = Order { quantity = "oops" }
+    _ Order = Order { quantity: "oops" }
 }
 "#,
         );
@@ -6087,7 +6087,7 @@ class Order {
 def main() Option[Order] {
     Some {
         Order {
-            quantity = 7
+            quantity: 7
         }
     }
 }
@@ -6106,7 +6106,7 @@ class User {
 }
 
 impl single User {
-    def make(name Str) User = User { name = name }
+    def make(name Str) User = User { name: name }
 }
 
 def main() User = User.make("Ada")
@@ -6446,7 +6446,7 @@ class User {
 }
 
 def main() Unit {
-    _ User = User(class { name = "Ada" })
+    _ User = User(class { name: "Ada" })
 }
 "#,
         );
@@ -6572,7 +6572,7 @@ class User {
 }
 
 def main() Str {
-    user User = User { name = "Sergey", location = "Tampa", age = 37 }
+    user User = User { name: "Sergey", location: "Tampa", age: 37 }
     let { loc Str @location, name @name } = user
     return name + " from " + loc
 }
@@ -6620,7 +6620,7 @@ class User {
 }
 
 def main() Unit {
-    user User = User { name = "Sergey", location = "Tampa" }
+    user User = User { name: "Sergey", location: "Tampa" }
     let { @missing } = user
 }
 "#,
@@ -6648,7 +6648,7 @@ class User {
 }
 
 def main() Unit {
-    user User = User { name = "Sergey", location = "Tampa" }
+    user User = User { name: "Sergey", location: "Tampa" }
     let { @name, location } = user
 }
 "#,

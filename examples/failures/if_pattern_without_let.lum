@@ -1,5 +1,5 @@
 # FAIL:
-# pattern matches in 'if' require 'let'; use 'if let Pattern = value { ... }'
+# pattern matches in 'if' require 'let'; use 'if let Pattern = value { ... }' or 'if let Pattern <- value { ... }'
 
 def main() Unit {
     value Option[Int] = Some(1)

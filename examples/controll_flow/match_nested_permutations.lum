@@ -88,21 +88,21 @@ class FlagRecord {
 
 def main() Unit {
     apple11 = Apple { 11 }
-    appleBox = AppleBox { apple = apple11 }
+    appleBox = AppleBox { apple: apple11 }
     classInClass = match appleBox {
         case AppleBox(Apple(size)) => "class in class " + size
     }
     OS.println(classInClass)
 
     amount3 = Amount { 3, "usd" }
-    amountBox = AmountBox { amount = amount3 }
+    amountBox = AmountBox { amount: amount3 }
     recordInClass = match amountBox {
         case AmountBox(Amount(count, label)) => "record in class " + count + " " + label
     }
     OS.println(recordInClass)
 
     apple7 = Apple { 7 }
-    appleRecord = AppleRecord { apple = apple7 }
+    appleRecord = AppleRecord { apple: apple7 }
     classInRecord = match appleRecord {
         case AppleRecord(Apple(size)) => "class in record " + size
     }
@@ -118,7 +118,7 @@ def main() Unit {
     }
     OS.println(tupleTupleTuple)
 
-    pairHolder = PairHolder { pair = (4, 5) }
+    pairHolder = PairHolder { pair: (4, 5) }
     tupleInClass = match pairHolder {
         case PairHolder((left, right)) => "tuple in class " + left + " " + right
     }
@@ -136,7 +136,7 @@ def main() Unit {
     }
     OS.println(recordInTuple)
 
-    pairRecord = PairRecord { pair = (10, 11) }
+    pairRecord = PairRecord { pair: (10, 11) }
     tupleInRecord = match pairRecord {
         case PairRecord((left, right)) => "tuple in record " + left + " " + right
     }
@@ -169,14 +169,14 @@ def main() Unit {
     }
     OS.println(tupleInEnum)
 
-    flagBox = FlagBox { value = InnerFlag.Off }
+    flagBox = FlagBox { value: InnerFlag.Off }
     enumInClass = match flagBox {
         case FlagBox(InnerFlag.On) => "enum in class on"
         case FlagBox(InnerFlag.Off) => "enum in class off"
     }
     OS.println(enumInClass)
 
-    flagRecord = FlagRecord { value = InnerFlag.On }
+    flagRecord = FlagRecord { value: InnerFlag.On }
     enumInRecord = match flagRecord {
         case FlagRecord(InnerFlag.On) => "enum in record on"
         case FlagRecord(InnerFlag.Off) => "enum in record off"

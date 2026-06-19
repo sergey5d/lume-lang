@@ -48,37 +48,37 @@ impl MixedProfile {
 
 def main() Unit {
     userRecord = class {
-        name = "Ada"
-        age = 10
+        name: "Ada"
+        age: 10
     }
     user User = User {
-        name = userRecord.name
-        age = userRecord.age
+        name: userRecord.name
+        age: userRecord.age
     }
 
     person Person = Person { "Ben", 12 }
 
     pointRecord = class {
-        x = 3, y = 4
+        x: 3, y: 4
     }
     point MutablePoint = MutablePoint {
-        x = pointRecord.x
-        y = pointRecord.y
+        x: pointRecord.x
+        y: pointRecord.y
     }
 
     fullPerson Person = Person {
-        name = "Nora"
-        age = 20
-        city = "Paris"
+        name: "Nora"
+        age: 20
+        city: "Paris"
     }
 
     profile MixedProfile = MixedProfile {
-        name = "Liam"
-        age = 8
+        name: "Liam"
+        age: 8
     }
 
     profile3 MixedProfile = MixedProfile {
-        name = "Liam", age = 8
+        name: "Liam", age: 8
     }
 
     OS.println("class", user.name, user.age)

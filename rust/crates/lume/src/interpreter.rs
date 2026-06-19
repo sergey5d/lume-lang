@@ -4712,7 +4712,7 @@ mod tests {
             def main() Int {
                 maybeOrder = Some {
                     Order {
-                        quantity = 7
+                        quantity: 7
                     }
                 }
                 expect Some(order) = maybeOrder
@@ -4917,7 +4917,7 @@ $name
             }
 
             def main() Unit {
-                user User = User { name = "Sergey", location = "Tampa", age = 37 }
+                user User = User { name: "Sergey", location: "Tampa", age: 37 }
 
                 let { name @name, @location } = user
                 OS.println(name, location)
@@ -5204,7 +5204,7 @@ $name
             }
 
             impl single Box {
-                def from(value Int) Box = Box { value = value }
+                def from(value Int) Box = Box { value: value }
             }
 
             def main() Unit {
@@ -5320,9 +5320,9 @@ $name
 
             impl Amount {
                 def multiple(other Amount) Amount = Amount {
-                    amount = this.amount * other.amount
-                    description = this.description + " " + other.description
-                    count = 0
+                    amount: this.amount * other.amount
+                    description: this.description + " " + other.description
+                    count: 0
                 }
             }
 

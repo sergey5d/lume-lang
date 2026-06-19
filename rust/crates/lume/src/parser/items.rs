@@ -609,10 +609,23 @@ impl<'a> Parser<'a> {
     }
 
     fn callable_body_starts_here(&self) -> bool {
-        matches!(
-            self.next_significant_token().kind,
-            TokenKind::LBrace | TokenKind::Eq
-        )
+        match self.next_significant_token().kind {
+            TokenKind::Eq => true,
+            TokenKind::LBrace => {
+                let mut parser = Parser {
+                    tokens: self.tokens,
+                    index: self.index,
+                    diagnostics: Vec::new(),
+                    allow_trailing_block_call: self.allow_trailing_block_call,
+                };
+                if parser.parse_type_ref().is_some() {
+                    parser.skip_newlines();
+                    return !matches!(parser.current_kind(), TokenKind::Eq | TokenKind::LBrace);
+                }
+                true
+            }
+            _ => false,
+        }
     }
 }
 

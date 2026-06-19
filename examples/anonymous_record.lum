@@ -20,23 +20,23 @@ def makeCounter(base Int) { count Int, next Int } = {
 
 def main() Unit {
     full = class {
-        name = "Ana"
-        age = 10
-        city = "NYC"
+        name: "Ana"
+        age: 10
+        city: "NYC"
     }
     smaller = class {
-        name = "Ben"
-        age = 12
+        name: "Ben"
+        age: 12
     }
     a = 1
     inferred = class {
-        count = a
+        count: a
     }
-    mixed = class { a = 5, c = 7,
-        b = 8
+    mixed = class { a: 5, c: 7,
+        b: 8
     }
-    mixedShape = class { name = "Ada",
-        age = 10
+    mixedShape = class { name: "Ada",
+        age: 10
     }
     narrow { name Str, age Int } = full
     positional { name Str, age Int } = class { "Ben", 12 }

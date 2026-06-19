@@ -77,8 +77,8 @@ impl B {
 
 def main() Unit {
     named Profile = Profile {
-        name = "Sammy"
-        age = 15
+        name: "Sammy"
+        age: 15
     }
     positional Profile = Profile { "Ben", 12, "Paris" }
     hiddenDefault Profile = Profile { "Liam", 8 }

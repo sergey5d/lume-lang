@@ -15,6 +15,6 @@ impl SecretBadge {
 
 def main() Unit {
     _ SecretBadge = SecretBadge(class {
-        name = "Mia"
+        name: "Mia"
     })
 }

@@ -8,7 +8,7 @@ class MixedProfile {
 
 def main() Unit {
     _ MixedProfile = MixedProfile({
-        name = "Liam"
-        age = 8
+        name: "Liam"
+        age: 8
     })
 }

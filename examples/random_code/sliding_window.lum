@@ -58,7 +58,7 @@ impl SlidingWindowLimiter {
         }
 
         # Accepted requests are remembered until they age out of the window.
-        this.accepted.add(class { time = now, cost = cost })
+        this.accepted.add(class { time: now, cost: cost })
         true
     }
 
@@ -71,13 +71,13 @@ def main() Unit {
 
     # Each request carries named fields instead of a positional tuple.
     requests List[{ time Int, cost Int }] = List(
-        class { time = 0, cost = 3 },
-        class { time = 0, cost = 2 },
-        class { time = 0, cost = 1 },
-        class { time = 2, cost = 2 },
-        class { time = 5, cost = 2 },
-        class { time = 6, cost = 4 },
-        class { time = 7, cost = 3 },
+        class { time: 0, cost: 3 },
+        class { time: 0, cost: 2 },
+        class { time: 0, cost: 1 },
+        class { time: 2, cost: 2 },
+        class { time: 5, cost: 2 },
+        class { time: 6, cost: 4 },
+        class { time: 7, cost: 3 },
     )
 
     for request <- requests {

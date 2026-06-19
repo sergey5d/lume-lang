@@ -13,8 +13,8 @@ class Target {
 
 def main() Unit {
     source Source = Source(class {
-        name = "Ada"
-        age = 10
+        name: "Ada"
+        age: 10
     })
     _ Target = Target(source)
 }

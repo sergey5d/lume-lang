@@ -439,9 +439,9 @@ impl<'a> Parser<'a> {
         let mut entries = Vec::new();
         self.skip_newlines();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let entry = if self.at(TokenKind::Identifier) && self.at_next(TokenKind::Eq) {
+            let entry = if self.at(TokenKind::Identifier) && self.at_next(TokenKind::Colon) {
                 let (name, name_span) = self.expect_identifier("expected record field name")?;
-                self.consume(TokenKind::Eq, "expected '=' after record field name")?;
+                self.consume(TokenKind::Colon, "expected ':' after record field name")?;
                 let value = self.parse_expr()?;
                 RecordEntry {
                     name: Some(name),
@@ -1158,7 +1158,7 @@ impl<'a> Parser<'a> {
             && (self
                 .tokens
                 .get(lookahead + 1)
-                .is_some_and(|token| token.kind == TokenKind::Eq)
+                .is_some_and(|token| token.kind == TokenKind::Colon)
                 || self.tokens.get(lookahead + 1).is_some_and(|token| {
                     token.kind == TokenKind::Comma || token.kind == TokenKind::RBrace
                 })

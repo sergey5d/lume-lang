@@ -77,7 +77,7 @@ def main() Int {
         OS.println("for positional", userName, userLocation)
     }
 
-    user User = User { name = "Sergey", location = "Tampa", age = 37 }
+    user User = User { name: "Sergey", location: "Tampa", age: 37 }
 
     let { name @name, @location } = user
     OS.println("named", name, location)

@@ -34,7 +34,7 @@ impl OrderManager {
 
         Some {
             Order {
-                id = id, asset = asset, buySell = buySell, quantity = quantity, fills = [], status = status, lastUpdated = this.currentTick
+                id: id, asset: asset, buySell: buySell, quantity: quantity, fills: [], status: status, lastUpdated: this.currentTick
             }
         }
     }
