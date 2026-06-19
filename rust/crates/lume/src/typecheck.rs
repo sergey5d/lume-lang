@@ -1711,17 +1711,29 @@ impl<'a> Checker<'a> {
     fn expr_guarantees_control_exit(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Group { inner, .. } => self.expr_guarantees_control_exit(inner),
-            Expr::Call { callee, args, .. } => self.call_returns_never(callee, args),
+            Expr::Call {
+                callee,
+                args,
+                uses_brace_syntax,
+                ..
+            } => self.call_returns_never(callee, args, *uses_brace_syntax),
             _ => false,
         }
     }
 
-    fn call_returns_never(&self, callee: &Expr, args: &[crate::ast::CallArg]) -> bool {
+    fn call_returns_never(
+        &self,
+        callee: &Expr,
+        args: &[crate::ast::CallArg],
+        uses_brace_syntax: bool,
+    ) -> bool {
         if self.is_builtin_panic_call(callee) {
             return true;
         }
 
-        if let Some((_, ret)) = self.callable_signature_for_args_probe(callee, args) {
+        if let Some((_, ret)) =
+            self.callable_signature_for_args_probe(callee, args, uses_brace_syntax)
+        {
             return matches!(ret, Ty::Never);
         }
 
@@ -2678,29 +2690,34 @@ impl<'a> Checker<'a> {
         uses_brace_syntax: bool,
         span: crate::source::Span,
     ) -> Ty {
+        let normalized_args = self.normalize_trailing_brace_call_args(callee, args, uses_brace_syntax);
         if self.is_builtin_panic_call(callee) {
-            for arg in args {
+            for arg in &normalized_args {
                 self.check_expr(&arg.value);
             }
             return Ty::never();
         }
         if self.is_builtin_print_call(callee) {
-            for arg in args {
+            for arg in &normalized_args {
                 self.check_expr(&arg.value);
             }
             return Ty::unit();
         }
-        if let Some(ty) = self.check_builtin_static_method_call(callee, args, span) {
+        if let Some(ty) = self.check_builtin_static_method_call(callee, &normalized_args, span) {
             return ty;
         }
-        if let Some(ty) = self.check_builtin_static_factory_call(callee, args, span) {
+        if let Some(ty) = self.check_builtin_static_factory_call(callee, &normalized_args, span) {
             return ty;
         }
-        if let Some(ty) = self.try_check_constructor_call(callee, args, uses_brace_syntax, span) {
+        if let Some(ty) =
+            self.try_check_constructor_call(callee, &normalized_args, uses_brace_syntax, span)
+        {
             return ty;
         }
-        if let Some((params, ret)) = self.callable_signature_for_args(callee, args) {
-            return self.check_signature_call(&params, &ret, args, span);
+        if let Some((params, ret)) =
+            self.callable_signature_for_args(callee, &normalized_args, uses_brace_syntax)
+        {
+            return self.check_signature_call(&params, &ret, &normalized_args, span);
         }
         let callee_ty = self.check_expr(callee);
         match callee_ty {
@@ -2710,10 +2727,10 @@ impl<'a> Checker<'a> {
                     .map(|ty| ParamSig {
                         name: String::new(),
                         ty,
-                        variadic: false,
-                    })
-                    .collect::<Vec<_>>();
-                self.check_signature_call(&sig_params, &ret, args, span)
+                    variadic: false,
+                })
+                .collect::<Vec<_>>();
+                self.check_signature_call(&sig_params, &ret, &normalized_args, span)
             }
             Ty::Unknown => Ty::Unknown,
             other => {
@@ -3605,6 +3622,7 @@ impl<'a> Checker<'a> {
         &mut self,
         callee: &Expr,
         args: &[crate::ast::CallArg],
+        _uses_brace_syntax: bool,
     ) -> Option<(Vec<ParamSig>, Ty)> {
         match callee {
             Expr::Identifier { name, .. } => {
@@ -3663,6 +3681,7 @@ impl<'a> Checker<'a> {
         &self,
         callee: &Expr,
         args: &[crate::ast::CallArg],
+        _uses_brace_syntax: bool,
     ) -> Option<(Vec<ParamSig>, Ty)> {
         match callee {
             Expr::Identifier { name, .. } => {
@@ -3713,6 +3732,71 @@ impl<'a> Checker<'a> {
             }
             _ => None,
         }
+    }
+
+    fn normalize_trailing_brace_call_args(
+        &self,
+        callee: &Expr,
+        args: &[crate::ast::CallArg],
+        uses_brace_syntax: bool,
+    ) -> Vec<crate::ast::CallArg> {
+        if !uses_brace_syntax
+            || self.brace_call_uses_structural_construction(callee)
+            || args.len() != 1
+        {
+            return args.to_vec();
+        }
+
+        let arg = &args[0];
+        let Expr::RecordLiteral { fields, values, span } = &arg.value else {
+            return args.to_vec();
+        };
+        if !fields.is_empty() {
+            return args.to_vec();
+        }
+
+        vec![crate::ast::CallArg {
+            name: None,
+            span: *span,
+            value: self.synthetic_block_expr_from_brace_values(values, *span),
+        }]
+    }
+
+    fn synthetic_block_expr_from_brace_values(&self, values: &[Expr], span: crate::source::Span) -> Expr {
+        Expr::Block {
+            span,
+            body: Block {
+                span,
+                statements: values
+                    .iter()
+                    .cloned()
+                    .map(|expr| {
+                        Stmt::Expr(crate::ast::ExprStmt {
+                            span: expr.span(),
+                            expr,
+                        })
+                    })
+                    .collect(),
+            },
+        }
+    }
+
+    fn brace_call_uses_structural_construction(&self, callee: &Expr) -> bool {
+        let class_sig = match callee {
+            Expr::Identifier { name, .. } => self
+                .lookup_type_local(name)
+                .or_else(|| self.world.lookup_imported_type(self.module, name))
+                .or_else(|| self.lookup_unique_module_type(name))
+                .or_else(|| self.world.ambient.types.get(name).cloned()),
+            Expr::Member { .. } => module_alias_and_member(callee).and_then(|(alias, member)| {
+                self.world
+                    .lookup_module_alias(self.module, &alias)
+                    .and_then(|module| module.types.get(&member).cloned())
+            }),
+            _ => None,
+        };
+
+        class_sig.is_some_and(|sig| sig.kind == TypeKind::Class)
     }
 
     fn static_member_value_type(&self, receiver: &Expr, name: &str) -> Option<Ty> {
@@ -5868,6 +5952,27 @@ def main() Unit {
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn allows_trailing_brace_call_result_for_enum_constructor() {
+        let program = parse_inline(
+            r#"
+class Order {
+    quantity Int
+}
+
+def main() Option[Order] {
+    Some {
+        Order {
+            quantity = 7
+        }
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]

@@ -4,8 +4,8 @@ use crate::{
     ast::{self, BinaryOp as AstBinaryOp, ImplBlock, ImplTargetKind, Item, TypeDecl, TypeMember},
     core::{
         self, AssignOp, AssignmentStmt, Block, CallableBody, DestructureKind, ElseBranch,
-        ElseExprBranch, Expr, FunctionDecl, MatchCase, MatchCaseBody, MethodDecl, Pattern, Stmt,
-        TypeRef,
+        ElseExprBranch, Expr, ExprStmt, FunctionDecl, MatchCase, MatchCaseBody, MethodDecl,
+        Pattern, Stmt, TypeRef,
     },
     desugar,
     diagnostic::Diagnostic,
@@ -3085,15 +3085,18 @@ impl<'a> FunctionLowerer<'a> {
                 args,
                 style,
                 ..
-            } => Some(ir::RValue::Call {
-                callee: self.lower_callee(callee),
-                args: self
-                    .reorder_call_args(callee, args)
-                    .into_iter()
-                    .map(|arg| self.lower_expr(&arg.value))
-                    .collect(),
-                structural: call_uses_structural_record_arg(args, *style),
-            }),
+            } => {
+                let normalized_args = self.normalize_trailing_brace_call_args(callee, args, *style);
+                Some(ir::RValue::Call {
+                    callee: self.lower_callee(callee),
+                    args: self
+                        .reorder_call_args(callee, &normalized_args)
+                        .into_iter()
+                        .map(|arg| self.lower_expr(&arg.value))
+                        .collect(),
+                    structural: call_uses_structural_record_arg(&normalized_args, *style),
+                })
+            }
             Expr::Member { receiver, name, .. } => Some(ir::RValue::Field {
                 base: self.lower_expr(receiver),
                 name: name.clone(),
@@ -3229,6 +3232,61 @@ impl<'a> FunctionLowerer<'a> {
             receiver,
             method: name.to_string(),
         })
+    }
+
+    fn normalize_trailing_brace_call_args(
+        &self,
+        callee: &Expr,
+        args: &[core::CallArg],
+        style: core::CallStyle,
+    ) -> Vec<core::CallArg> {
+        if style != core::CallStyle::Brace
+            || self.brace_call_uses_structural_construction(callee)
+            || args.len() != 1
+        {
+            return args.to_vec();
+        }
+
+        let arg = &args[0];
+        let Expr::RecordLiteral { fields, values, span } = &arg.value else {
+            return args.to_vec();
+        };
+        if !fields.is_empty() {
+            return args.to_vec();
+        }
+
+        vec![core::CallArg {
+            name: None,
+            span: *span,
+            value: self.synthetic_block_expr_from_brace_values(values, *span),
+        }]
+    }
+
+    fn synthetic_block_expr_from_brace_values(&self, values: &[Expr], span: Span) -> Expr {
+        Expr::Block {
+            span,
+            body: Block {
+                span,
+                statements: values
+                    .iter()
+                    .cloned()
+                    .map(|expr| Stmt::Expr(ExprStmt { span: expr.span(), expr }))
+                    .collect(),
+            },
+        }
+    }
+
+    fn brace_call_uses_structural_construction(&self, callee: &Expr) -> bool {
+        let Some(path) = expr_path(callee) else {
+            return false;
+        };
+        if path.len() != 1 {
+            return false;
+        }
+        self.program
+            .types
+            .iter()
+            .any(|ty| ty.name == path[0] && ty.kind == ast::TypeKind::Class)
     }
 
     fn reorder_call_args<'b>(

@@ -4670,6 +4670,32 @@ mod tests {
     }
 
     #[test]
+    fn runs_trailing_brace_call_result_for_enum_constructor() {
+        let program = lower_inline(
+            r#"
+            class Order {
+                quantity Int
+            }
+
+            def main() Int {
+                maybeOrder = Some {
+                    Order {
+                        quantity = 7
+                    }
+                }
+                expect Some(order) = maybeOrder
+                return order.quantity
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.return_value.as_deref(), Some("7"));
+        assert!(run.output.is_empty());
+    }
+
+    #[test]
     fn runs_match_for_yield_and_try() {
         let program = lower_inline(
             r#"
