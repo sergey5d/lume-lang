@@ -1,0 +1,94 @@
+
+class Order {
+    id Int
+    buySell Str
+    asset Str
+    quantity Int
+    fills [Int]
+    status Str
+    lastUpdated Int
+}
+
+class OrderManager {
+    hidden map Map[Int, Order] = Map()
+    hidden var currentTick Int = 0
+}
+
+impl OrderManager {
+
+    def parseOrder(str Str) Order {
+
+        currentTick += 1
+
+        arr = str.split("\s*,")
+
+        expect arr.length() == 5
+
+        id = Int.parse(arr[0])
+
+        buySell = arr[1]
+        asset = arr[2]
+        quantity = arr[3]
+        status = arr[4]
+
+        Order {
+            id = id, buySell = buySell, quantity = quantity, fills = [], status = status
+        }
+    }
+
+    def handleOrder(str Str) {
+
+        parsedOrder = parseOrder()
+
+        savedOrder = map.get(parsedOrder.id)
+
+        if !savedOrder.isSet() {
+            map.put(parseOrder.id, parsedOrder)
+        }
+
+        match parsedOrder.status {
+            case "NEW" => 
+                # the only thing here is to update quantity, the rest will be propagated by other order types
+                map.get(parsedOrder.id).forEech { so -> so.quantity = parsedOrder.quantity }
+            case "FILL" => {
+
+
+            }
+            case "CANCEL" => {
+                match savedOrder {
+                    case Some(so) =>
+                        if so.status == "FILLED" || so.status == "IN_PROGRESS" {
+                            println("attempt to cancel filled order " + so.id)
+                        }
+                    case None =>
+                        # add to deque
+                }
+            }
+        }
+    }
+
+    def testOrders() [Str] = {
+
+        orders = [
+            "1234, BUY, 10, NEW",
+            "1234, BUY, 1, FILL",
+            "1234, BUY, 5, FILL",
+            "1254, SELL, 20, NEW",
+            "1254, SELL, 20, FILL",
+            "1254, SELL, 20, CANCEL",
+        ]
+        orders
+    }
+}
+
+def main() {
+
+    manager = OrderManager()
+
+    orders = manager.testOrders()
+
+    for order <- orders {
+        handleOrder(order)
+    }
+
+}

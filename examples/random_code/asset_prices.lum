@@ -1,3 +1,12 @@
+# EXPECT:
+# split: BTC-USD-5.0
+# split: XTZ-BTC-1.2
+# split: SOL-EUR-4
+# split: XTZ-SOL-8
+# result: XTZ -> BTC at 1.2,BTC -> USD at 5.0
+# next: 
+# result: XTZ -> SOL at 8.0,SOL -> EUR at 4.0
+
 module asset/price
 
 class AssetPrices {
@@ -51,7 +60,7 @@ impl AssetPrices {
     def makeResult(prices [((Str, Str), Float)]) Str {
 
         strings [Str] = prices.map(match {
-            case ((from, to), price) => from + "->" + to + ":" + price
+            case ((from, to), price) => from + " -> " + to + " at " + price
         })
 
         strings.makeStr(",")
@@ -91,8 +100,7 @@ impl AssetPrices {
     }
 }
 
-def main() Unit {
-
+def main() {
 
     def printResults(results Option[[Str]]) = match results {
         case Some(list) => list.forEach { elem ->
@@ -107,7 +115,7 @@ def main() Unit {
 
     printResults(results)
 
-    println("next: ")
+    println("next:")
 
     results2 = prices.findPrice("XTZ", "EUR", Set("XTZ"), [])
 

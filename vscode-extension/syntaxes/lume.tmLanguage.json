@@ -94,11 +94,11 @@
       "patterns": [
         {
           "name": "keyword.control.lume",
-          "match": "\\b(?:if|then|else|for|while|yield|partial|match|unwrap|return|break|continue|is|try)\\b"
+          "match": "\\b(?:if|then|else|for|while|yield|partial|match|unwrap|return|break|continue|expect|is|try)\\b"
         },
         {
           "name": "keyword.declaration.lume",
-          "match": "\\b(?:def|class|record|enum|interface|object|impl|import|module|with|hidden|public|case|var|let)\\b"
+          "match": "\\b(?:def|class|record|enum|interface|object|impl|use|module|with|hidden|public|case|var|let)\\b"
         }
       ]
     },
