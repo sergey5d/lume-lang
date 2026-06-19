@@ -242,12 +242,11 @@ impl<'a> Parser<'a> {
         }
         self.restore(checkpoint);
 
-        let pattern = self.parse_pattern()?;
-        self.consume(TokenKind::Eq, "expected '=' after let pattern")?;
+        let (pattern, operator) = self.parse_refutable_pattern_head("let")?;
         if self.at(TokenKind::Newline) {
             self.error_at_current(
                 "expected_expression",
-                "expected expression on same line after \"=\"",
+                format!("expected expression on same line after \"{operator}\""),
             );
             return None;
         }
@@ -297,15 +296,14 @@ impl<'a> Parser<'a> {
         let checkpoint = self.checkpoint();
         let diagnostics_len = self.diagnostics.len();
         if let Some(pattern) = self.parse_pattern() {
-            if self.match_token(TokenKind::Eq) {
-                if self.at(TokenKind::Newline) {
-                    self.error_at_current(
-                        "expected_expression",
-                        "expected expression on same line after \"=\"",
-                    );
-                    return None;
-                }
-                let value = self.parse_expr()?;
+            let (pattern, operator) = if self.match_token(TokenKind::Eq) {
+                (pattern, "=")
+            } else if self.match_token(TokenKind::LeftArrow) {
+                (self.wrap_option_pattern(pattern), "<-")
+            } else {
+                self.restore(checkpoint);
+                self.diagnostics.truncate(diagnostics_len);
+                let condition = self.parse_expr()?;
                 if self.match_keyword(Keyword::Else) {
                     self.error_at_current(
                         "unexpected_token",
@@ -313,15 +311,35 @@ impl<'a> Parser<'a> {
                     );
                     return None;
                 }
-                let end = value.span();
-                return Some(Stmt::PatternBinding(PatternBindingStmt {
-                    kind: PatternBindingKind::Expect,
-                    clauses: Vec::new(),
-                    pattern,
-                    value,
+                let end = condition.span();
+                return Some(Stmt::ExpectCondition(ExpectConditionStmt {
+                    condition,
                     span: start.cover(end),
                 }));
+            };
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "expected_expression",
+                    format!("expected expression on same line after \"{operator}\""),
+                );
+                return None;
             }
+            let value = self.parse_expr()?;
+            if self.match_keyword(Keyword::Else) {
+                self.error_at_current(
+                    "unexpected_token",
+                    "expect does not support 'else'; use 'let ... else ...' or plain 'expect'",
+                );
+                return None;
+            }
+            let end = value.span();
+            return Some(Stmt::PatternBinding(PatternBindingStmt {
+                kind: PatternBindingKind::Expect,
+                clauses: Vec::new(),
+                pattern,
+                value,
+                span: start.cover(end),
+            }));
         }
         self.restore(checkpoint);
         self.diagnostics.truncate(diagnostics_len);
@@ -638,41 +656,27 @@ impl<'a> Parser<'a> {
                     (None, Vec::new(), None, None, clauses, Vec::new(), None)
                 }
             } else {
-                let pattern = self.parse_pattern()?;
-                self.consume(TokenKind::Eq, "expected '=' after if pattern")?;
-                if self.at(TokenKind::Newline) {
-                    self.error_at_current(
-                        "expected_expression",
-                        "expected expression on same line after \"=\"",
-                    );
-                    return None;
-                }
-                let value = self.parse_if_condition_expr()?;
+                let clause = self.parse_if_condition_refutable_clause("if let")?;
                 if self.at(TokenKind::AndAnd) {
-                    let clauses = self.parse_if_condition_clauses(vec![IfConditionClause::Let(
-                        RefutableClause {
-                            span: pattern.span().cover(value.span()),
-                            pattern,
-                            value,
-                        },
-                    )])?;
+                    let clauses =
+                        self.parse_if_condition_clauses(vec![IfConditionClause::Let(clause)])?;
                     (None, clauses, None, None, Vec::new(), Vec::new(), None)
                 } else {
                     (
                         None,
                         Vec::new(),
-                        Some(pattern),
-                        Some(value),
+                        Some(clause.pattern),
+                        Some(clause.value),
                         Vec::new(),
                         Vec::new(),
                         None,
                     )
                 }
             }
-        } else if self.pattern_followed_by_eq(self.index) {
+        } else if self.pattern_followed_by_refutable_operator(self.index) {
             self.error_at_current(
                 "unexpected_token",
-                "pattern matches in 'if' require 'let'; use 'if let Pattern = value { ... }'",
+                "pattern matches in 'if' require 'let'; use 'if let Pattern = value { ... }' or 'if let Pattern <- value { ... }'",
             );
             return None;
         } else {

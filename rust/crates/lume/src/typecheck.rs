@@ -2682,7 +2682,8 @@ impl<'a> Checker<'a> {
         uses_brace_syntax: bool,
         span: crate::source::Span,
     ) -> Ty {
-        let normalized_args = self.normalize_trailing_brace_call_args(callee, args, uses_brace_syntax);
+        let normalized_args =
+            self.normalize_trailing_brace_call_args(callee, args, uses_brace_syntax);
         if self.is_builtin_panic_call(callee) {
             for arg in &normalized_args {
                 self.check_expr(&arg.value);
@@ -2719,9 +2720,9 @@ impl<'a> Checker<'a> {
                     .map(|ty| ParamSig {
                         name: String::new(),
                         ty,
-                    variadic: false,
-                })
-                .collect::<Vec<_>>();
+                        variadic: false,
+                    })
+                    .collect::<Vec<_>>();
                 self.check_signature_call(&sig_params, &ret, &normalized_args, span)
             }
             Ty::Unknown => Ty::Unknown,
@@ -3740,7 +3741,12 @@ impl<'a> Checker<'a> {
         }
 
         let arg = &args[0];
-        let Expr::RecordLiteral { fields, values, span } = &arg.value else {
+        let Expr::RecordLiteral {
+            fields,
+            values,
+            span,
+        } = &arg.value
+        else {
             return args.to_vec();
         };
         if !fields.is_empty() {
@@ -3754,7 +3760,11 @@ impl<'a> Checker<'a> {
         }]
     }
 
-    fn synthetic_block_expr_from_brace_values(&self, values: &[Expr], span: crate::source::Span) -> Expr {
+    fn synthetic_block_expr_from_brace_values(
+        &self,
+        values: &[Expr],
+        span: crate::source::Span,
+    ) -> Expr {
         Expr::Block {
             span,
             body: Block {
@@ -4486,11 +4496,9 @@ impl<'a> Checker<'a> {
     fn describe_member_path(&self, expr: &Expr) -> Option<String> {
         match expr {
             Expr::Identifier { name, .. } => Some(name.clone()),
-            Expr::Member { receiver, name, .. } => Some(format!(
-                "{}.{}",
-                self.describe_member_path(receiver)?,
-                name
-            )),
+            Expr::Member { receiver, name, .. } => {
+                Some(format!("{}.{}", self.describe_member_path(receiver)?, name))
+            }
             _ => None,
         }
     }
@@ -5994,7 +6002,9 @@ def main() Unit {
         assert!(
             result.diagnostics.iter().any(|diag| {
                 diag.code == "invalid_argument_type"
-                    && diag.message.contains("field 'quantity' in class 'Order' expects 'Int'")
+                    && diag
+                        .message
+                        .contains("field 'quantity' in class 'Order' expects 'Int'")
                     && diag.message.contains("got 'Str'")
             }),
             "{:#?}",
@@ -6768,6 +6778,24 @@ def fail() Never = panic("boom")
 def main(value MaybeInt) Unit {
     let SomeX(item) = value else fail()
     OS.println(item)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_option_extract_shorthand_forms() {
+        let program = parse_inline(
+            r#"
+def main(value Option[Int]) Int {
+    let item <- value else return 0
+    expect checked <- value
+    if let branch <- value {
+        return item + checked + branch
+    }
+    return item + checked
 }
 "#,
         );

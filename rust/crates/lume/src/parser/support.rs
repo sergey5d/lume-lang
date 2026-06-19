@@ -162,7 +162,7 @@ impl<'a> Parser<'a> {
         self.current_span().start_pos.line == name_span.end_pos.line
     }
 
-    pub(super) fn pattern_followed_by_eq(&self, start: usize) -> bool {
+    pub(super) fn pattern_followed_by_refutable_operator(&self, start: usize) -> bool {
         let mut parser = Parser {
             tokens: self.tokens,
             index: start,
@@ -172,7 +172,7 @@ impl<'a> Parser<'a> {
         if parser.parse_pattern().is_none() {
             return false;
         }
-        parser.at(TokenKind::Eq)
+        matches!(parser.current_kind(), TokenKind::Eq | TokenKind::LeftArrow)
     }
 
     pub(super) fn scan_if_condition_expr_end(&self, start: usize) -> usize {

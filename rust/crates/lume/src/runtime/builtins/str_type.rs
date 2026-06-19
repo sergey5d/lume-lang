@@ -71,7 +71,10 @@ fn str_split(
         _ => return Err(interpreter.runtime_error(span, "Str.split separator must be Str")),
     };
     let pattern = Regex::new(&separator).map_err(|err| {
-        interpreter.runtime_error(span, format!("Str.split invalid regex '{}': {err}", separator))
+        interpreter.runtime_error(
+            span,
+            format!("Str.split invalid regex '{}': {err}", separator),
+        )
     })?;
     Ok(Value::list(
         pattern

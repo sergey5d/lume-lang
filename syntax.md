@@ -813,6 +813,14 @@ if let Some(item) = maybeValue {
 }
 ```
 
+For `Option`, `if let` also accepts the shorthand:
+
+```txt
+if let item <- maybeValue {
+    OS.println(item)
+}
+```
+
 Runtime type patterns also work in `if let`:
 
 ```txt
@@ -863,6 +871,16 @@ let Some(item) = maybeValue else {
 }
 ```
 
+For `Option`, `<-` is shorthand for matching `Some(...)`:
+
+```txt
+let item <- maybeValue else {
+    return Err("missing")
+}
+```
+
+This is equivalent to `let Some(item) = maybeValue else { ... }`.
+
 Type-pattern binding is also supported:
 
 ```txt
@@ -898,6 +916,12 @@ supported:
 let Some(item) = maybeValue
 ```
 
+The same `Option` shorthand works here too:
+
+```txt
+let item <- maybeValue
+```
+
 Grouped assertive pattern bindings work the same way:
 
 ```txt
@@ -907,12 +931,27 @@ let {
 }
 ```
 
+Grouped `Option` extraction can use the shorthand per clause:
+
+```txt
+let {
+    left <- maybeLeft
+    right <- maybeRight
+}
+```
+
 These plain pattern `let` forms panic at runtime if the pattern does not match.
 
 An explicit assertive form is also supported:
 
 ```txt
 expect Some(item) = maybeValue
+```
+
+And the matching shorthand:
+
+```txt
+expect item <- maybeValue
 ```
 
 Grouped assertive `expect` works the same way:
@@ -990,6 +1029,17 @@ let {
 if let {
     Some(left) = maybeLeft
     Some(right) = maybeRight
+} {
+    OS.println(left + right)
+}
+```
+
+And grouped clauses can use `<-` too:
+
+```txt
+if let {
+    left <- maybeLeft
+    right <- maybeRight
 } {
     OS.println(left + right)
 }

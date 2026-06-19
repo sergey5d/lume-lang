@@ -3248,7 +3248,12 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         let arg = &args[0];
-        let Expr::RecordLiteral { fields, values, span } = &arg.value else {
+        let Expr::RecordLiteral {
+            fields,
+            values,
+            span,
+        } = &arg.value
+        else {
             return args.to_vec();
         };
         if !fields.is_empty() {
@@ -3270,7 +3275,12 @@ impl<'a> FunctionLowerer<'a> {
                 statements: values
                     .iter()
                     .cloned()
-                    .map(|expr| Stmt::Expr(ExprStmt { span: expr.span(), expr }))
+                    .map(|expr| {
+                        Stmt::Expr(ExprStmt {
+                            span: expr.span(),
+                            expr,
+                        })
+                    })
                     .collect(),
             },
         }

@@ -28,7 +28,7 @@ impl OrderManager {
         buySell = arr[1]
         asset = arr[2]
 
-        expect Some(quantity) = Int.parse(arr[3])
+        expect quantity <- Int.parse(arr[3])
         
         status = arr[4]
 

@@ -1,22 +1,46 @@
 use super::*;
 
 impl<'a> Parser<'a> {
+    pub(super) fn wrap_option_pattern(&self, pattern: Pattern) -> Pattern {
+        let span = pattern.span();
+        Pattern::Constructor {
+            path: vec!["Some".to_string()],
+            args: vec![pattern],
+            span,
+        }
+    }
+
+    pub(super) fn parse_refutable_pattern_head(
+        &mut self,
+        owner: &'static str,
+    ) -> Option<(Pattern, &'static str)> {
+        let pattern = self.parse_pattern()?;
+        if self.match_token(TokenKind::Eq) {
+            return Some((pattern, "="));
+        }
+        if self.match_token(TokenKind::LeftArrow) {
+            return Some((self.wrap_option_pattern(pattern), "<-"));
+        }
+
+        let message = match owner {
+            "if let" => "expected '=' or '<-' after if pattern",
+            "let" => "expected '=' or '<-' after let pattern",
+            "expect" => "expected '=' or '<-' after expect pattern",
+            _ => "expected '=' or '<-' after pattern",
+        };
+        self.error_at_current("unexpected_token", message);
+        None
+    }
+
     pub(super) fn parse_refutable_clause(
         &mut self,
         owner: &'static str,
     ) -> Option<RefutableClause> {
-        let pattern = self.parse_pattern()?;
-        let eq_message = match owner {
-            "if let" => "expected '=' after if pattern",
-            "let" => "expected '=' after let pattern",
-            "expect" => "expected '=' after expect pattern",
-            _ => "expected '=' after pattern",
-        };
-        self.consume(TokenKind::Eq, eq_message)?;
+        let (pattern, operator) = self.parse_refutable_pattern_head(owner)?;
         if self.at(TokenKind::Newline) {
             self.error_at_current(
                 "expected_expression",
-                "expected expression on same line after \"=\"",
+                format!("expected expression on same line after \"{operator}\""),
             );
             return None;
         }
@@ -33,18 +57,11 @@ impl<'a> Parser<'a> {
         &mut self,
         owner: &'static str,
     ) -> Option<RefutableClause> {
-        let pattern = self.parse_pattern()?;
-        let eq_message = match owner {
-            "if let" => "expected '=' after if pattern",
-            "let" => "expected '=' after let pattern",
-            "expect" => "expected '=' after expect pattern",
-            _ => "expected '=' after pattern",
-        };
-        self.consume(TokenKind::Eq, eq_message)?;
+        let (pattern, operator) = self.parse_refutable_pattern_head(owner)?;
         if self.at(TokenKind::Newline) {
             self.error_at_current(
                 "expected_expression",
-                "expected expression on same line after \"=\"",
+                format!("expected expression on same line after \"{operator}\""),
             );
             return None;
         }
@@ -77,7 +94,9 @@ impl<'a> Parser<'a> {
         if clauses.is_empty() {
             self.error_at_current(
                 "unexpected_token",
-                format!("{owner} clause block must contain at least one 'PATTERN = value' clause"),
+                format!(
+                    "{owner} clause block must contain at least one 'PATTERN = value' or 'PATTERN <- value' clause"
+                ),
             );
             return None;
         }

@@ -658,6 +658,38 @@ def run(value Option[Int]) Unit {
 }
 
 #[test]
+fn parses_option_extract_let_else_shorthand() {
+    let result = parse(
+        r#"
+def run(value Option[Int]) Unit {
+    let item <- value else return ()
+    OS.println(item)
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => match &block.statements[0] {
+            Stmt::LetElse(stmt) => match &stmt.pattern {
+                Pattern::Constructor { path, args, .. } => {
+                    assert_eq!(path, &vec!["Some".to_string()]);
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(&args[0], Pattern::Binding { name, .. } if name == "item"));
+                }
+                other => panic!("expected Some(...) shorthand pattern, got {other:#?}"),
+            },
+            other => panic!("expected let-else statement, got {other:#?}"),
+        },
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_plain_let_pattern_binding() {
     let result = parse(
         r#"
@@ -682,6 +714,39 @@ def run(value Option[Int]) Int {
                     assert_eq!(args.len(), 1);
                 }
                 other => panic!("expected pattern binding, got {other:#?}"),
+            },
+            other => panic!("expected pattern binding statement, got {other:#?}"),
+        },
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_plain_let_option_extract_shorthand() {
+    let result = parse(
+        r#"
+def run(value Option[Int]) Int {
+    let item <- value
+    return item
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => match &block.statements[0] {
+            Stmt::PatternBinding(stmt) => match &stmt.pattern {
+                Pattern::Constructor { path, args, .. } => {
+                    assert_eq!(stmt.kind, PatternBindingKind::Let);
+                    assert_eq!(path, &vec!["Some".to_string()]);
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(&args[0], Pattern::Binding { name, .. } if name == "item"));
+                }
+                other => panic!("expected Some(...) shorthand pattern, got {other:#?}"),
             },
             other => panic!("expected pattern binding statement, got {other:#?}"),
         },
@@ -718,6 +783,118 @@ def run(value Option[Int]) Int {
                 }
             }
             other => panic!("expected pattern binding statement, got {other:#?}"),
+        },
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_expect_option_extract_shorthand() {
+    let result = parse(
+        r#"
+def run(value Option[Int]) Int {
+    expect item <- value
+    return item
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => match &block.statements[0] {
+            Stmt::PatternBinding(stmt) => {
+                assert_eq!(stmt.kind, PatternBindingKind::Expect);
+                match &stmt.pattern {
+                    Pattern::Constructor { path, args, .. } => {
+                        assert_eq!(path, &vec!["Some".to_string()]);
+                        assert_eq!(args.len(), 1);
+                        assert!(
+                            matches!(&args[0], Pattern::Binding { name, .. } if name == "item")
+                        );
+                    }
+                    other => panic!("expected Some(...) shorthand pattern, got {other:#?}"),
+                }
+            }
+            other => panic!("expected pattern binding statement, got {other:#?}"),
+        },
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_grouped_option_extract_shorthand() {
+    let result = parse(
+        r#"
+def run(left Option[Int], right Option[Int]) Int {
+    let {
+        first <- left
+        second <- right
+    } else return 0
+    return first + second
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => match &block.statements[0] {
+            Stmt::LetElse(stmt) => {
+                assert_eq!(stmt.clauses.len(), 2);
+                for (clause, expected) in stmt.clauses.iter().zip(["first", "second"]) {
+                    match &clause.pattern {
+                        Pattern::Constructor { path, args, .. } => {
+                            assert_eq!(path, &vec!["Some".to_string()]);
+                            assert_eq!(args.len(), 1);
+                            assert!(
+                                matches!(&args[0], Pattern::Binding { name, .. } if name == expected)
+                            );
+                        }
+                        other => panic!("expected Some(...) shorthand clause, got {other:#?}"),
+                    }
+                }
+            }
+            other => panic!("expected let-else statement, got {other:#?}"),
+        },
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_if_let_option_extract_shorthand() {
+    let result = parse(
+        r#"
+def run(value Option[Int]) Unit {
+    if let item <- value {
+        OS.println(item)
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => match &block.statements[0] {
+            Stmt::If(stmt) => match stmt.pattern.as_ref() {
+                Some(Pattern::Constructor { path, args, .. }) => {
+                    assert_eq!(path, &vec!["Some".to_string()]);
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(&args[0], Pattern::Binding { name, .. } if name == "item"));
+                }
+                other => panic!("expected Some(...) shorthand if-let pattern, got {other:#?}"),
+            },
+            other => panic!("expected if statement, got {other:#?}"),
         },
         other => panic!("expected block body, got {other:#?}"),
     }
