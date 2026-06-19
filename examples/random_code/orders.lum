@@ -12,13 +12,14 @@ class Order {
 class OrderManager {
     hidden map Map[Int, Order] = Map()
     hidden var currentTick Int = 0
+    hidden queue [Order] = []
 }
 
 impl OrderManager {
 
     def parseOrder(str Str) Order {
 
-        currentTick += 1
+        this.currentTick += 1
 
         arr = str.split("\s*,")
 
@@ -40,16 +41,16 @@ impl OrderManager {
 
         parsedOrder = parseOrder()
 
-        savedOrder = map.get(parsedOrder.id)
+        savedOrder = this.map.get(parsedOrder.id)
 
         if !savedOrder.isSet() {
-            map.put(parseOrder.id, parsedOrder)
+            this.map.put(parseOrder.id, parsedOrder)
         }
 
         match parsedOrder.status {
             case "NEW" => 
                 # the only thing here is to update quantity, the rest will be propagated by other order types
-                map.get(parsedOrder.id).forEech { so -> so.quantity = parsedOrder.quantity }
+                this.map.get(parsedOrder.id).forEech { so -> so.quantity = parsedOrder.quantity }
             case "FILL" => {
 
 
@@ -88,7 +89,7 @@ def main() {
     orders = manager.testOrders()
 
     for order <- orders {
-        handleOrder(order)
+        manager.handleOrder(order)
     }
 
 }

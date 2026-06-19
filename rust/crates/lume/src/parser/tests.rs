@@ -727,6 +727,59 @@ def run(split [Str]) Unit {
 }
 
 #[test]
+fn parses_if_expression_without_else_as_unit_block_expr() {
+    let result = parse(
+        r#"
+def run(flag Bool) Unit = match flag {
+    case true => if flag { println("x") }
+    case false => ()
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Expr(Expr::Match { cases, .. }) => match &cases[0].body {
+            MatchCaseBody::Expr(Expr::Block { body, .. }) => match &body.statements[0] {
+                Stmt::If(stmt) => assert!(stmt.else_branch.is_none()),
+                other => panic!("expected synthesized if statement, got {other:#?}"),
+            },
+            other => panic!("expected block-wrapped if expression, got {other:#?}"),
+        },
+        other => panic!("expected match expression body, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_empty_match_case_body_as_unit_expr() {
+    let result = parse(
+        r#"
+def run(flag Bool) Unit = match flag {
+    case true =>
+    case false => ()
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Expr(Expr::Match { cases, .. }) => match &cases[0].body {
+            MatchCaseBody::Expr(Expr::Unit { .. }) => {}
+            other => panic!("expected implicit unit match arm, got {other:#?}"),
+        },
+        other => panic!("expected match expression body, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_lambda_expression() {
     let result = parse("def make() Unit = values.map((x, y) -> x + y)\n");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);

@@ -9,6 +9,13 @@ pub(super) enum ForClauseTarget {
 }
 
 impl<'a> Parser<'a> {
+    fn match_case_body_is_omitted(&self) -> bool {
+        matches!(
+            self.next_significant_token().kind,
+            TokenKind::Keyword(Keyword::Case) | TokenKind::RBrace | TokenKind::Eof
+        )
+    }
+
     pub(super) fn parse_block(&mut self) -> Option<Block> {
         let start = self.consume(TokenKind::LBrace, "expected '{'")?;
         self.skip_newlines();
@@ -835,6 +842,8 @@ impl<'a> Parser<'a> {
             self.consume(TokenKind::FatArrow, "expected '=>' after match pattern")?;
             let body = if self.at(TokenKind::LBrace) {
                 MatchCaseBody::Block(self.parse_block()?)
+            } else if self.match_case_body_is_omitted() {
+                MatchCaseBody::Expr(self.unit_expr(self.previous_span()))
             } else {
                 MatchCaseBody::Expr(self.parse_expr()?)
             };
