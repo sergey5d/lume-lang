@@ -82,10 +82,10 @@ impl OrderManager {
                     if (totalFills == order.quantity) {
                         order.status := "FILLED"
                     } else {
-                        order.status := "IN+PROGRESS"
+                        order.status := "IN_PROGRESS"
                     }
                 } else {
-                    order.status := "IN+PROGRESS"
+                    order.status := "IN_PROGRESS"
                 }
             }
             case "CANCEL" => {
@@ -126,7 +126,7 @@ def main() {
 
     for id <- [1234, 1254] {
         expect Some(order) = manager.map.get(id)
-        println("order: " + order.id)
+        println("order: " + order)
     }
 
 }
