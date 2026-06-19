@@ -311,19 +311,19 @@ updated = value with {
 Anonymous record literal:
 
 ```txt
-user = class { name: "Ada", age: 10 }
+user = { name: "Ada", age: 10 }
 ```
 
 Positional anonymous record construction is also allowed when the target shape is already known:
 
 ```txt
-user { name Str, age Int } = class { "Ada", 10 }
+user { name Str, age Int } = { "Ada", 10 }
 ```
 
 Multiline anonymous record literal:
 
 ```txt
-user = class {
+user = {
     name: "Ada"
     age: 10
 }
@@ -333,7 +333,7 @@ Inferred field type from a local value:
 
 ```txt
 a = 1
-b = class {
+b = {
     count: a
 }
 ```
@@ -341,7 +341,7 @@ b = class {
 Mixed separators are also valid:
 
 ```txt
-user = class { name: "Ada",
+user = { name: "Ada",
     age: 10
 }
 ```
@@ -357,10 +357,10 @@ Positional construction also works for shaped parameters and shaped return value
 
 ```txt
 def makeUser() { name Str, age Int } = {
-    return class { "Ada", 10 }
+    return { "Ada", 10 }
 }
 
-describe(class { "Cara", 14 })
+describe({ "Cara", 14 })
 ```
 
 Named classes use the same brace construction surface:
@@ -393,17 +393,19 @@ Rules for field-based class construction:
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
-- `Type({ ... })` is not supported; plain `{ ... }` inside call parentheses is treated as a block, not as an anonymous record literal
+- `Type({ ... })` is not supported; class structural construction must use `Type { ... }`
 
 Anonymous record shapes are structural:
 - field names and field types must match at compile time
 - extra fields are allowed when passing a value to a narrower shape
 - missing fields are rejected
 - defaults are not part of the shape syntax
-- construction uses `class { ... }`; plain `{ ... }` remains a block expression
+- construction uses plain `{ ... }` in expression position
+- ordinary calls may still accept anonymous records in parentheses, for example `describe({ "Cara", 14 })`
 - named fields inside construction braces use `field: value`
-- `class { value1, value2 }` is positional and requires an anonymous record shape from context
-- inside `class { ... }`, fields may be separated by commas, newlines, or a mix of both
+- `{ value1, value2 }` is positional and requires an anonymous record shape from context
+- single-expression braces like `{ value }` are still block expressions, not anonymous records
+- inside `{ ... }`, fields may be separated by commas, newlines, or a mix of both
 
 ## Functions and Methods
 
@@ -1261,7 +1263,7 @@ let (left Int, right Str) = (5, "hello")
 Anonymous record / class-shape destructuring uses braces:
 
 ```txt
-let { value Int, label Str } = class { value: 7, label: "world" }
+let { value Int, label Str } = { value: 7, label: "world" }
 ```
 
 Class destructuring also uses braces:

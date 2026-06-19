@@ -345,7 +345,7 @@ class Box {
 
 #[test]
 fn parses_record_literal_forms() {
-    match parse_expr_only(r#"class { name: "Ana", age: 10 }"#) {
+    match parse_expr_only(r#"{ name: "Ana", age: 10 }"#) {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(values.is_empty());
             assert_eq!(fields.len(), 2);
@@ -355,7 +355,7 @@ fn parses_record_literal_forms() {
         other => panic!("expected named record literal, got {other:#?}"),
     }
 
-    match parse_expr_only("class { name, age }") {
+    match parse_expr_only("{ name, age }") {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(fields.is_empty());
             assert_eq!(values.len(), 2);
@@ -363,7 +363,7 @@ fn parses_record_literal_forms() {
         other => panic!("expected record literal, got {other:#?}"),
     }
 
-    match parse_expr_only(r#"class { 1, "x" }"#) {
+    match parse_expr_only(r#"{ 1, "x" }"#) {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(fields.is_empty());
             assert_eq!(values.len(), 2);
@@ -421,7 +421,7 @@ fn parses_record_literal_forms() {
         result
             .diagnostics
             .iter()
-            .any(|diag| diag.message.contains("'class(...)' is not supported")),
+            .any(|diag| diag.message.contains("anonymous record literals use '{ ... }'")),
         "expected class(...) rejection, got diagnostics: {:#?}",
         result.diagnostics
     );
@@ -429,7 +429,7 @@ fn parses_record_literal_forms() {
 
 #[test]
 fn rejects_equals_in_named_record_literal_fields() {
-    let result = parse(r#"def run() Unit = class { name = "Ana", age = 10 }"#);
+    let result = parse(r#"def run() Unit = { name = "Ana", age = 10 }"#);
     assert!(
         !result.diagnostics.is_empty(),
         "expected parser diagnostics for '=' named construction fields"
@@ -437,30 +437,37 @@ fn rejects_equals_in_named_record_literal_fields() {
 }
 
 #[test]
-fn rejects_bare_colon_record_arguments_inside_parens() {
+fn parses_record_literal_arguments_inside_parens() {
     let result = parse(
         r#"
 class User {
     name Str
 }
 
+def describe(user { name Str }) Str = user.name
+
 def run() Unit {
-    _ User = User({
+    _ = describe({
         name: "Ana"
     })
 }
 "#,
     );
     assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag
-                .message
-                .contains("bare '{ ... }' record arguments are not allowed inside '(...)'")),
-        "expected bare record argument rejection, got diagnostics: {:#?}",
+        result.diagnostics.is_empty(),
+        "expected parser to accept record literal call args, got diagnostics: {:#?}",
         result.diagnostics
     );
+}
+
+#[test]
+fn parses_single_expression_braces_as_block_not_record() {
+    match parse_expr_only("{ value }") {
+        Expr::Block { body, .. } => {
+            assert_eq!(body.statements.len(), 1);
+        }
+        other => panic!("expected block, got {other:#?}"),
+    }
 }
 
 #[test]

@@ -412,17 +412,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(super) fn parse_record_literal_expr(&mut self, start: Span) -> Option<Expr> {
-        if self.match_token(TokenKind::LBrace) {
-            return self.finish_brace_record_literal_expr(start);
-        }
-        self.error_at_current(
-            "unexpected_token",
-            "anonymous record literals use 'class { ... }'; 'class(...)' is not supported",
-        );
-        None
-    }
-
     pub(super) fn parse_brace_record_literal_expr(&mut self) -> Option<Expr> {
         let start = self.consume(TokenKind::LBrace, "expected '{'")?;
         self.finish_brace_record_literal_expr(start)
@@ -968,17 +957,8 @@ impl<'a> Parser<'a> {
                 self.restore(lambda_probe);
                 let prefers_block = self.try_parse_lambda_expr().is_some();
                 self.restore(checkpoint);
-                let arg = if !prefers_block {
-                    if let Some(record) = self.parse_brace_record_literal_expr() {
-                        record
-                    } else {
-                        self.restore(checkpoint);
-                        let block = self.parse_block()?;
-                        Expr::Block {
-                            span: block.span,
-                            body: block,
-                        }
-                    }
+                let arg = if !prefers_block && self.looks_like_brace_record_literal(true) {
+                    self.parse_brace_record_literal_expr()?
                 } else {
                     let block = self.parse_block()?;
                     Expr::Block {
@@ -1022,13 +1002,6 @@ impl<'a> Parser<'a> {
                     span,
                 });
             } else {
-                if self.is_bare_record_call_arg_start() {
-                    self.error_at_current(
-                        "unexpected_token",
-                        "bare '{ ... }' record arguments are not allowed inside '(...)'; use 'Type { ... }'",
-                    );
-                    return None;
-                }
                 let value = self.parse_expr()?;
                 args.push(CallArg {
                     name: None,
@@ -1099,15 +1072,21 @@ impl<'a> Parser<'a> {
                 Some(Expr::Bool { value: false, span })
             }
             TokenKind::Keyword(Keyword::Class) => {
-                let start = self.consume_keyword(Keyword::Class, "expected 'class'")?;
-                self.parse_record_literal_expr(start)
+                let _ = self.consume_keyword(Keyword::Class, "expected 'class'")?;
+                let message = if self.at(TokenKind::LBrace) {
+                    "anonymous record literals now use '{ ... }'; 'class { ... }' was removed"
+                } else {
+                    "anonymous record literals use '{ ... }'; 'class(...)' is not supported"
+                };
+                self.error_at_current("unexpected_token", message);
+                None
             }
             TokenKind::Keyword(Keyword::Record) => {
                 let _ = self.consume_keyword(Keyword::Record, "expected 'record'")?;
                 let message = if self.at(TokenKind::LBrace) {
-                    "anonymous record literals now use 'class { ... }'; 'record { ... }' was removed"
+                    "anonymous record literals now use '{ ... }'; 'record { ... }' was removed"
                 } else {
-                    "anonymous record literals use 'class { ... }'; 'record(...)' is not supported"
+                    "anonymous record literals use '{ ... }'; 'record(...)' is not supported"
                 };
                 self.error_at_current("unexpected_token", message);
                 None
@@ -1127,11 +1106,15 @@ impl<'a> Parser<'a> {
             TokenKind::LBracket => self.parse_list_literal(),
             TokenKind::LParen => self.parse_group_or_tuple_expr(),
             TokenKind::LBrace => {
-                let block = self.parse_block()?;
-                Some(Expr::Block {
-                    span: block.span,
-                    body: block,
-                })
+                if self.looks_like_brace_record_literal(false) {
+                    self.parse_brace_record_literal_expr()
+                } else {
+                    let block = self.parse_block()?;
+                    Some(Expr::Block {
+                        span: block.span,
+                        body: block,
+                    })
+                }
             }
             _ => {
                 self.error_at_current("expected_expression", "expected expression");
@@ -1140,7 +1123,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(super) fn is_bare_record_call_arg_start(&self) -> bool {
+    pub(super) fn looks_like_brace_record_literal(&self, allow_empty: bool) -> bool {
         if !self.at(TokenKind::LBrace) {
             return false;
         }
@@ -1152,19 +1135,51 @@ impl<'a> Parser<'a> {
         {
             lookahead += 1;
         }
-        self.tokens
+        if self
+            .tokens
+            .get(lookahead)
+            .is_some_and(|token| token.kind == TokenKind::RBrace)
+        {
+            return allow_empty;
+        }
+        if self
+            .tokens
             .get(lookahead)
             .is_some_and(|token| token.kind == TokenKind::Identifier)
-            && (self
+            && self
                 .tokens
                 .get(lookahead + 1)
                 .is_some_and(|token| token.kind == TokenKind::Colon)
-                || self.tokens.get(lookahead + 1).is_some_and(|token| {
-                    token.kind == TokenKind::Comma || token.kind == TokenKind::RBrace
-                })
-                || self.tokens.get(lookahead + 1).is_some_and(|token| {
-                    token.span.start_pos.line > self.tokens[lookahead].span.start_pos.line
-                }))
+        {
+            return true;
+        }
+
+        let mut depth = 1usize;
+        let mut nested_parens = 0usize;
+        let mut nested_brackets = 0usize;
+        while let Some(token) = self.tokens.get(lookahead) {
+            match token.kind {
+                TokenKind::LBrace => depth += 1,
+                TokenKind::RBrace => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                TokenKind::LParen => nested_parens += 1,
+                TokenKind::RParen => nested_parens = nested_parens.saturating_sub(1),
+                TokenKind::LBracket => nested_brackets += 1,
+                TokenKind::RBracket => nested_brackets = nested_brackets.saturating_sub(1),
+                TokenKind::Comma
+                    if depth == 1 && nested_parens == 0 && nested_brackets == 0 =>
+                {
+                    return true;
+                }
+                _ => {}
+            }
+            lookahead += 1;
+        }
+        false
     }
 
     pub(super) fn parse_list_literal(&mut self) -> Option<Expr> {

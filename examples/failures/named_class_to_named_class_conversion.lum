@@ -12,9 +12,9 @@ class Target {
 }
 
 def main() Unit {
-    source Source = Source(class {
+    source Source = Source {
         name: "Ada"
         age: 10
-    })
+    }
     _ Target = Target(source)
 }

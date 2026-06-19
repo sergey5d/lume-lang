@@ -6446,7 +6446,7 @@ class User {
 }
 
 def main() Unit {
-    _ User = User(class { name: "Ada" })
+    _ User = User({ name: "Ada" })
 }
 "#,
         );

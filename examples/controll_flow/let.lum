@@ -22,20 +22,20 @@ def plusThree(value Option[Int]) Option[Int] {
 
 def pairwise(left Option[Int], right Option[Str]) { count Int, label Str } = {
     let Some(count) = left else {
-        return class { count: 0, label: "no-left" }
+        return { count: 0, label: "no-left" }
     }
     let Some(label) = right else {
-        return class { count, "no-right" }
+        return { count, "no-right" }
     }
 
     let {
         Some(groupedCount) = left
         Some(groupedLabel) = right
     } else {
-        return class { count, label }
+        return { count, label }
     }
 
-    class { groupedCount, groupedLabel }
+    { groupedCount, groupedLabel }
 }
 
 def sumBoth(left Option[Int], right Option[Int]) Result[Int, Str] {

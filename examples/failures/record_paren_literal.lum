@@ -1,5 +1,5 @@
 # FAIL:
-# anonymous record literals use 'class { ... }'; 'class(...)' is not supported
+# anonymous record literals use '{ ... }'; 'class(...)' is not supported
 
 def main() Unit {
     _ = class(1, "x")
