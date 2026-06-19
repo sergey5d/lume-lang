@@ -33,6 +33,12 @@ pub(super) fn define() -> RuntimeType {
                 vec![ir::Type::Unknown, function_unknown()],
                 list_fold,
             ),
+            builtin_method(
+                33,
+                "reduce",
+                vec![ir::Type::Unknown, function_unknown()],
+                list_reduce_with_initial,
+            ),
             builtin_method(7, "reduce", vec![function_unknown()], list_reduce),
             builtin_method(8, "exists", vec![function_unknown()], list_exists),
             builtin_method(9, "forEach", vec![function_unknown()], list_for_each),
@@ -46,6 +52,7 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(32, "makeStr", vec![ir::Type::Str], list_make_str),
             builtin_method(16, "get", vec![ir::Type::Int], list_get),
             builtin_method(17, "remove", vec![ir::Type::Int], list_remove),
+            builtin_method(34, "removeFirst", Vec::new(), list_remove_first),
             builtin_method(18, "removeLast", Vec::new(), list_remove_last),
             builtin_method(19, "head", Vec::new(), list_head),
             builtin_method(20, "tail", Vec::new(), list_tail),
@@ -250,6 +257,18 @@ fn list_reduce(
         acc = interpreter.invoke_value(callback.clone(), vec![acc, value.clone()], span)?;
     }
     Ok(interpreter.option_some(acc))
+}
+
+fn list_reduce_with_initial(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if args.len() != 2 {
+        return Err(interpreter.runtime_error(span, "List.reduce expects 2 arguments"));
+    }
+    list_fold(interpreter, receiver, args, span)
 }
 
 fn list_exists(
@@ -485,6 +504,25 @@ fn list_remove(
     }
     let value = items.remove(index as usize);
     interpreter.ensure_initialized_value(&value, span, "List.remove")?;
+    Ok(interpreter.option_some(value))
+}
+
+fn list_remove_first(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "List.removeFirst expects 0 arguments"));
+    }
+    let items = list_items(&receiver);
+    let mut items = items.borrow_mut();
+    if items.is_empty() {
+        return Ok(interpreter.option_none());
+    }
+    let value = items.remove(0);
+    interpreter.ensure_initialized_value(&value, span, "List.removeFirst")?;
     Ok(interpreter.option_some(value))
 }
 

@@ -10,6 +10,7 @@ interface List[T] with Iterable[T] {
     def flatMap[X](f T -> List[X]) List[X]
     def filter(f T -> Bool) List[T]
     def fold[X](initial X, f (X, T) -> X) X
+    def reduce[X](initial X, f (X, T) -> X) X
     def reduce(f (T, T) -> T) Option[T]
     def exists(f T -> Bool) Bool
     def forAll(f T -> Bool) Bool
@@ -22,6 +23,7 @@ interface List[T] with Iterable[T] {
     def isEmpty() Bool
     def nonEmpty() Bool = !this.isEmpty()
     def remove(index Int) Option[T]
+    def removeFirst() Option[T]
     def removeLast() Option[T]
     def size() Int
     def forEach(f T -> Unit)

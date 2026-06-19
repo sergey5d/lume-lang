@@ -1516,10 +1516,9 @@ impl<'a> Interpreter<'a> {
         if runtime_ty.ir_type_id.is_some() {
             return Ok(None);
         }
-        let Some(runtime_method) = runtime_ty
-            .methods
-            .iter()
-            .find(|candidate| candidate.name == method)
+        let Some(runtime_method) = self
+            .choose_runtime_method_overload(&runtime_ty.methods, method, &args)
+            .cloned()
         else {
             return Ok(None);
         };
@@ -1531,6 +1530,41 @@ impl<'a> Interpreter<'a> {
             runtime::RuntimeMethodTarget::Builtin(handler) => handler(self, receiver, args, span)?,
         };
         Ok(Some(value))
+    }
+
+    fn choose_runtime_method_overload<'m>(
+        &self,
+        methods: &'m [runtime::RuntimeMethod],
+        name: &str,
+        args: &[Value],
+    ) -> Option<&'m runtime::RuntimeMethod> {
+        let mut best = None;
+        let mut best_score = i32::MIN;
+
+        for method in methods.iter().filter(|candidate| candidate.name == name) {
+            if method.params.len() != args.len() {
+                continue;
+            }
+
+            let mut score = 10;
+            let mut matches = true;
+            for (param, arg) in method.params.iter().zip(args) {
+                if !self.value_matches_type(arg, param) {
+                    matches = false;
+                    break;
+                }
+                if !matches!(param, ir::Type::Unknown | ir::Type::TypeParam(_)) {
+                    score += 2;
+                }
+            }
+
+            if matches && score > best_score {
+                best = Some(method);
+                best_score = score;
+            }
+        }
+
+        best
     }
 
     fn read_place(
@@ -2134,6 +2168,10 @@ impl<'a> Interpreter<'a> {
                     args.len()
                 ),
             ));
+        }
+
+        if args.is_empty() && ty.fields.iter().all(|field| field.has_initializer) {
+            return Ok(Some(object));
         }
 
         Err(self.runtime_error(
@@ -4563,6 +4601,53 @@ mod tests {
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "5\n3\n2\n7\n5\n4\n");
         assert_eq!(run.return_value, None);
+    }
+
+    #[test]
+    fn runs_list_remove_first_and_seeded_reduce() {
+        let program = lower_inline(
+            r#"
+            def main() Int {
+                values = List(1, 2, 3)
+                values.removeFirst()
+                return values.reduce(0, (acc, value) -> acc + value)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.return_value.as_deref(), Some("5"));
+        assert!(run.output.is_empty());
+    }
+
+    #[test]
+    fn runs_implicit_empty_paren_constructor_when_all_fields_initialized() {
+        let program = lower_inline(
+            r#"
+            class OrderManager {
+                hidden map Map[Int, Str] = Map()
+                hidden var currentTick Int = 0
+                hidden queue [Str] = []
+            }
+
+            impl OrderManager {
+                def current() Int = this.currentTick
+                def queued() Int = this.queue.size()
+                def entries() Int = this.map.size()
+            }
+
+            def main() Int {
+                manager = OrderManager()
+                return manager.current() + manager.queued() + manager.entries()
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.return_value.as_deref(), Some("0"));
+        assert!(run.output.is_empty());
     }
 
     #[test]

@@ -3,9 +3,9 @@ class Order {
     id Int
     buySell Str
     asset Str
-    quantity Int
+    var quantity Int
     fills [Int]
-    status Str
+    var status Str
     lastUpdated Int
 }
 
@@ -18,8 +18,6 @@ class OrderManager {
 impl OrderManager {
 
     def parseOrder(str Str) Order {
-
-        this.currentTick += 1
 
         arr = str.split("\s*,")
 
@@ -38,10 +36,23 @@ impl OrderManager {
     }
 
     def checkQueuedOrders() {
-
+        while !this.queue.isEmpty() {
+            first = this.queue[0]
+            if first.status == "CANCEL" {
+                if first.lastUpdated - this.currentTick > 5 {
+                    this.queue.removeFirst()
+                } else {
+                    break
+                }
+            } else {
+                this.queue.removeFirst()
+            }
+        }
     }
 
     def handleOrder(str Str) {
+
+        this.currentTick += 1
 
         checkQueuedOrders()
 
@@ -74,9 +85,9 @@ impl OrderManager {
             }
             case "CANCEL" => 
                 if order.status == "FILLED" || order.status == "IN_PROGRESS" {
-                    println("attempt to cancel filled order " + so.id)
+                    println("attempt to cancel filled order " + order.id)
                 } else {
-                    queue.add(order)
+                    this.queue.add(order)
                 }                        
         }
     }

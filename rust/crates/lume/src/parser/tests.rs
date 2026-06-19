@@ -806,6 +806,40 @@ def run(flag Bool) Unit = match flag {
 }
 
 #[test]
+fn parses_single_statement_match_case_body_without_braces() {
+    let result = parse(
+        r#"
+def run(flag Bool) Unit {
+    var total Int = 0
+    match flag {
+        case true => total += 1
+        case false => total += 2
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => match &block.statements[1] {
+            Stmt::Match(stmt) => match &stmt.cases[0].body {
+                MatchCaseBody::Block(body) => match &body.statements[0] {
+                    Stmt::Assignment(_) => {}
+                    other => panic!("expected assignment statement, got {other:#?}"),
+                },
+                other => panic!("expected block-wrapped statement arm, got {other:#?}"),
+            },
+            other => panic!("expected match statement, got {other:#?}"),
+        },
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_lambda_expression() {
     let result = parse("def make() Unit = values.map((x, y) -> x + y)\n");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);

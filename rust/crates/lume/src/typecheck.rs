@@ -80,6 +80,18 @@ pub fn check_path(path: impl AsRef<Path>) -> Result<PathCheckResult, String> {
     Ok(PathCheckResult { diagnostics })
 }
 
+fn default_stdlib_dir() -> Option<PathBuf> {
+    find_stdlib_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
+        .ok()
+        .or_else(|| find_stdlib_dir(Path::new(".")).ok())
+}
+
+fn default_inline_ambient() -> AmbientInfo {
+    default_stdlib_dir()
+        .and_then(|stdlib_dir| AmbientInfo::load(&stdlib_dir).ok())
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Ty {
     Unknown,
@@ -449,6 +461,7 @@ struct World {
 impl World {
     fn from_program(program: &Program) -> Self {
         Self {
+            ambient: default_inline_ambient(),
             root_module: Some(ModuleInfo::from_program("<memory>", program)),
             ..Self::default()
         }
@@ -3439,6 +3452,10 @@ impl<'a> Checker<'a> {
             return ret;
         }
 
+        if args.is_empty() && sig.fields.iter().all(|field| field.has_initializer) {
+            return ret;
+        }
+
         self.add_error(
             "no_matching_overload",
             format!(
@@ -5728,6 +5745,25 @@ def main() Unit {
     }
 
     #[test]
+    fn allows_implicit_empty_paren_constructor_when_all_fields_initialized() {
+        let program = parse_inline(
+            r#"
+class OrderManager {
+    hidden map Map[Int, Str] = Map()
+    hidden var currentTick Int = 0
+    hidden queue [Str] = []
+}
+
+def main() Unit {
+    _ OrderManager = OrderManager()
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
     fn allows_brace_class_construction_with_trailing_defaults() {
         let program = parse_inline(
             r#"
@@ -5839,6 +5875,38 @@ def main() Unit {
             r#"
 def main() Unit {
     expect 1 + 2 == 3
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_single_statement_match_arms_without_braces() {
+        let program = parse_inline(
+            r#"
+def main(flag Bool) Unit {
+    var total Int = 0
+    match flag {
+        case true => total += 1
+        case false => total += 2
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_list_remove_first_and_seeded_reduce() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    values = List(1, 2, 3)
+    removed Option[Int] = values.removeFirst()
+    total Int = values.reduce(0, (acc, value) -> acc + value)
 }
 "#,
         );

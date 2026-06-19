@@ -840,13 +840,7 @@ impl<'a> Parser<'a> {
                 None
             };
             self.consume(TokenKind::FatArrow, "expected '=>' after match pattern")?;
-            let body = if self.at(TokenKind::LBrace) {
-                MatchCaseBody::Block(self.parse_block()?)
-            } else if self.match_case_body_is_omitted() {
-                MatchCaseBody::Expr(self.unit_expr(self.previous_span()))
-            } else {
-                MatchCaseBody::Expr(self.parse_expr()?)
-            };
+            let body = self.parse_match_case_body()?;
             let end = match &body {
                 MatchCaseBody::Block(block) => block.span,
                 MatchCaseBody::Expr(expr) => expr.span(),
@@ -861,6 +855,37 @@ impl<'a> Parser<'a> {
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after match cases")?;
         Some((cases, end))
+    }
+
+    fn parse_match_case_body(&mut self) -> Option<MatchCaseBody> {
+        if self.match_case_body_is_omitted() {
+            return Some(MatchCaseBody::Expr(self.unit_expr(self.previous_span())));
+        }
+
+        self.skip_newlines();
+        if self.at(TokenKind::LBrace) {
+            return self.parse_block().map(MatchCaseBody::Block);
+        }
+
+        let checkpoint = self.checkpoint();
+        if let Some(expr) = self.parse_expr() {
+            if self.match_case_body_is_omitted() {
+                return Some(MatchCaseBody::Expr(expr));
+            }
+        }
+        self.restore(checkpoint);
+
+        let stmt = self.parse_stmt()?;
+        match stmt {
+            Stmt::Expr(expr_stmt) => Some(MatchCaseBody::Expr(expr_stmt.expr)),
+            other => {
+                let span = other.span();
+                Some(MatchCaseBody::Block(Block {
+                    statements: vec![other],
+                    span,
+                }))
+            }
+        }
     }
 
     pub(super) fn parse_return_stmt(&mut self) -> Option<ReturnStmt> {
