@@ -2281,11 +2281,7 @@ impl<'a> Checker<'a> {
                 self.member_type(&receiver_ty, name).unwrap_or_else(|| {
                     self.add_error(
                         "unknown_member",
-                        format!(
-                            "type '{}' has no field or method '{}'",
-                            receiver_ty.describe(),
-                            name
-                        ),
+                        self.unknown_member_message(receiver, &receiver_ty, name),
                         *span,
                     );
                     Ty::Unknown
@@ -2384,11 +2380,7 @@ impl<'a> Checker<'a> {
                 self.member_type(&receiver_ty, name).unwrap_or_else(|| {
                     self.add_error(
                         "unknown_member",
-                        format!(
-                            "type '{}' has no field or method '{}'",
-                            receiver_ty.describe(),
-                            name
-                        ),
+                        self.unknown_member_message(receiver, &receiver_ty, name),
                         *span,
                     );
                     Ty::Unknown
@@ -4444,6 +4436,62 @@ impl<'a> Checker<'a> {
             )
         } else {
             format!("undefined name '{}'", name)
+        }
+    }
+
+    fn unknown_member_message(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> String {
+        if let Ty::Function(_, _) = receiver_ty {
+            if let Expr::Member {
+                receiver: method_receiver,
+                name: method_name,
+                ..
+            } = receiver
+            {
+                let access = self
+                    .describe_member_path(receiver)
+                    .unwrap_or_else(|| format!("<expr>.{method_name}"));
+                let base_ty = self.probe_expr_type(method_receiver);
+                if !matches!(base_ty, Ty::Unknown) {
+                    return format!(
+                        "cannot access member '{}' on method '{}'; '{}' on type '{}' is a method value of type '{}', not an instance",
+                        name,
+                        method_name,
+                        access,
+                        base_ty.describe(),
+                        receiver_ty.describe(),
+                    );
+                }
+                return format!(
+                    "cannot access member '{}' on method '{}'; '{}' is a method value of type '{}', not an instance",
+                    name,
+                    method_name,
+                    access,
+                    receiver_ty.describe(),
+                );
+            }
+            return format!(
+                "cannot access member '{}' on function value of type '{}'",
+                name,
+                receiver_ty.describe(),
+            );
+        }
+
+        format!(
+            "type '{}' has no field or method '{}'",
+            receiver_ty.describe(),
+            name
+        )
+    }
+
+    fn describe_member_path(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Identifier { name, .. } => Some(name.clone()),
+            Expr::Member { receiver, name, .. } => Some(format!(
+                "{}.{}",
+                self.describe_member_path(receiver)?,
+                name
+            )),
+            _ => None,
         }
     }
 

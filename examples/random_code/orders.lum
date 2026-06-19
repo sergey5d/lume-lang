@@ -19,11 +19,9 @@ impl OrderManager {
 
     def parseOrder(str Str) Option[Order] {
 
-        arr = str.split("\s*,")
+        arr = str.split("\s*,\s*")
 
-        if arr.size() != 5  {
-            return None()
-        }
+        expect arr.size() == 5
 
         id = try Int.parse(arr[0])
 
@@ -105,12 +103,12 @@ impl OrderManager {
     def testOrders() [Str] = {
 
         orders = [
-            "1234, BUY, 10, NEW",
-            "1234, BUY, 1, FILL",
-            "1234, BUY, 5, FILL",
-            "1254, SELL, 20, NEW",
-            "1254, SELL, 20, FILL",
-            "1254, SELL, 20, CANCEL",
+            "1234, BUY, BTC, 10, NEW",
+            "1234, BUY, BTC, 1, FILL",
+            "1234, BUY, BTC, 5, FILL",
+            "1254, SELL, ETH, 20, NEW",
+            "1254, SELL, ETH, 20, FILL",
+            "1254, SELL, ETH, 20, CANCEL",
         ]
         orders
     }
@@ -126,7 +124,7 @@ def main() {
         manager.handleOrder(order)
     }
 
-    for id <- [1234, 1235] {
+    for id <- [1234, 1254] {
         expect Some(order) = manager.map.get(id)
         println("order: " + order.id)
     }
