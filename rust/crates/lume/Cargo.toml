@@ -10,3 +10,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "lume"
 path = "src/main.rs"
+
+[dependencies]
+regex = "1"

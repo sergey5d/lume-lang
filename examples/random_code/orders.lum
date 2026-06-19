@@ -126,4 +126,9 @@ def main() {
         manager.handleOrder(order)
     }
 
+    for id <- [1234, 1235] {
+        expect Some(order) = manager.map.get(id)
+        println("order: " + order.id)
+    }
+
 }

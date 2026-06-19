@@ -3,6 +3,7 @@ use crate::{
     ast::TypeKind,
     interpreter::{Interpreter, Value},
 };
+use regex::Regex;
 
 use super::builtin_method;
 use crate::runtime::{RuntimeType, RuntimeTypeId};
@@ -69,8 +70,12 @@ fn str_split(
         Value::String(value) => value.clone(),
         _ => return Err(interpreter.runtime_error(span, "Str.split separator must be Str")),
     };
+    let pattern = Regex::new(&separator).map_err(|err| {
+        interpreter.runtime_error(span, format!("Str.split invalid regex '{}': {err}", separator))
+    })?;
     Ok(Value::list(
-        text.split(&separator)
+        pattern
+            .split(&text)
             .map(|part| Value::String(part.to_string()))
             .collect(),
     ))

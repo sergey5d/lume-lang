@@ -5502,6 +5502,26 @@ $name
     }
 
     #[test]
+    fn runs_regex_string_split() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                split = "1234, BUY, 10, NEW".split("\s*,\s*")
+                expect split.size() == 4
+                OS.println(split[0])
+                OS.println(split[1])
+                OS.println(split[2])
+                OS.println(split[3])
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "1234\nBUY\n10\nNEW\n");
+    }
+
+    #[test]
     fn runs_trailing_block_lambda_with_multiline_body() {
         let program = lower_inline(
             r#"
