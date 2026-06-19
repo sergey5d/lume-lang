@@ -4301,7 +4301,7 @@ fn value_as_f64(value: &Value) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{lex, parse_program, SourceFile};
+    use crate::{check_program, lex, parse_program, SourceFile};
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -4314,6 +4314,8 @@ mod tests {
         let parsed = parse_program(&lexed.tokens);
         assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
         let program = parsed.program.expect("program");
+        let checked = check_program(&program);
+        assert!(checked.diagnostics.is_empty(), "{:#?}", checked.diagnostics);
         let lowered = lower_program(&program);
         assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
         lowered.program.expect("lowered program")
@@ -5455,9 +5457,9 @@ $name
             }
 
             def main() Unit {
-                value = Some(5)
-                let Some(item) = value
-                OS.println("let", item)
+                pair Pair = Pair { 5, 9 }
+                let Pair(item, other) = pair
+                OS.println("let", item + other)
 
                 allSome = [Some(5), Some(6)]
                 for Some(loopItem) <- allSome {
@@ -5493,7 +5495,7 @@ $name
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(
             run.output,
-            "let 5\nknown 5\nknown 6\nknown yield 6\nknown yield 7\nfor 1 10\nfor 2 20\nfor 3 30\nyield 11\nyield 22\nyield 33\n"
+            "let 14\nknown 5\nknown 6\nknown yield 6\nknown yield 7\nfor 1 10\nfor 2 20\nfor 3 30\nyield 11\nyield 22\nyield 33\n"
         );
     }
 
