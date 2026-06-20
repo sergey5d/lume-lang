@@ -420,6 +420,7 @@ pub enum ElseExprBranch {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallArg {
     pub name: Option<String>,
+    pub ty: Option<TypeRef>,
     pub value: Expr,
     pub span: Span,
 }

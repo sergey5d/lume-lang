@@ -10,6 +10,7 @@
 # Cara 14
 # Ana 10
 # 6
+# typed Ada 42
 
 def describe(user { name Str, age Int }) Str =
     user.name + " is " + user.age
@@ -57,4 +58,9 @@ def main() Unit {
     OS.println(narrow.name + " " + narrow.age)
     typedCounter { count Int, next Int } = makeCounter(5)
     OS.println(typedCounter.next)
+    typedAnon = {
+        name Str: "Ada"
+        age Int: 42
+    }
+    OS.println("typed", typedAnon.name, typedAnon.age)
 }

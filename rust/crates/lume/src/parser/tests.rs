@@ -396,8 +396,27 @@ fn parses_record_literal_forms() {
             assert_eq!(fields.len(), 2);
             assert_eq!(fields[0].name.as_deref(), Some("name"));
             assert_eq!(fields[1].name.as_deref(), Some("age"));
+            assert!(fields[0].ty.is_none());
         }
         other => panic!("expected named record literal, got {other:#?}"),
+    }
+
+    match parse_expr_only(r#"{ name Str: "Ana", age Int: 10 }"#) {
+        Expr::RecordLiteral { fields, values, .. } => {
+            assert!(values.is_empty());
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name.as_deref(), Some("name"));
+            assert!(matches!(
+                fields[0].ty,
+                Some(TypeRef::Named { ref name, .. }) if name == "Str"
+            ));
+            assert_eq!(fields[1].name.as_deref(), Some("age"));
+            assert!(matches!(
+                fields[1].ty,
+                Some(TypeRef::Named { ref name, .. }) if name == "Int"
+            ));
+        }
+        other => panic!("expected typed record literal, got {other:#?}"),
     }
 
     match parse_expr_only("{ name, age }") {

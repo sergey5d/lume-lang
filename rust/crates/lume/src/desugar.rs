@@ -146,6 +146,7 @@ fn desugar_expect_condition_stmt(stmt: &ast::ExpectConditionStmt) -> core::Stmt 
         }),
         args: vec![core::CallArg {
             name: None,
+            ty: None,
             value: core::Expr::String {
                 raw: "expect condition was false".to_string(),
                 span: stmt.span,
@@ -260,6 +261,7 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
                 .iter()
                 .map(|arg| core::CallArg {
                     name: arg.name.clone(),
+                    ty: arg.ty.clone(),
                     value: desugar_expr(&arg.value),
                     span: arg.span,
                 })
@@ -275,6 +277,7 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
                 .iter()
                 .map(|arg| core::CallArg {
                     name: arg.name.clone(),
+                    ty: arg.ty.clone(),
                     value: desugar_expr(&arg.value),
                     span: arg.span,
                 })
@@ -374,6 +377,7 @@ fn desugar_call_arg(arg: &ast::CallArg, style: core::CallStyle) -> core::CallArg
     let value = normalize_brace_lambda_arg(style, desugar_expr(&arg.value));
     core::CallArg {
         name: arg.name.clone(),
+        ty: arg.ty.clone(),
         value,
         span: arg.span,
     }

@@ -403,9 +403,19 @@ Anonymous record shapes are structural:
 - construction uses plain `{ ... }` in expression position
 - ordinary calls may still accept anonymous records in parentheses, for example `describe({ "Cara", 14 })`
 - named fields inside construction braces use `field: value`
+- named fields may carry an explicit initializer type as `field Type: value`
 - `{ value1, value2 }` is positional and requires an anonymous record shape from context
 - single-expression braces like `{ value }` are still block expressions, not anonymous records
 - inside `{ ... }`, fields may be separated by commas, newlines, or a mix of both
+
+Typed anonymous record fields:
+
+```txt
+user = {
+    name Str: "Ada"
+    age Int: 42
+}
+```
 
 ## Functions and Methods
 

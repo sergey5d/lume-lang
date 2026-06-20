@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*field 'name' is annotated as 'Str' but initializer has type 'Int'.*
+
+def main() Unit {
+    user = {
+        name Str: 42
+    }
+}

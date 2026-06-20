@@ -2578,15 +2578,34 @@ impl<'a> Checker<'a> {
                             .iter()
                             .filter_map(|field| {
                                 field.name.as_ref().map(|name| {
-                                    let expected_ty = expected_fields
-                                        .iter()
-                                        .find(|(expected_name, _)| expected_name == name)
-                                        .map(|(_, ty)| ty.clone())
-                                        .unwrap_or(Ty::Unknown);
-                                    (
-                                        name.clone(),
-                                        self.check_expr_against(&field.value, &expected_ty),
-                                    )
+                                    let annotated_ty =
+                                        field.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
+                                    let expected_ty =
+                                        annotated_ty.clone().unwrap_or_else(|| {
+                                            expected_fields
+                                                .iter()
+                                                .find(|(expected_name, _)| expected_name == name)
+                                                .map(|(_, ty)| ty.clone())
+                                                .unwrap_or(Ty::Unknown)
+                                        });
+                                    let actual = self.check_expr_against(&field.value, &expected_ty);
+                                    if let Some(annotated_ty) = annotated_ty {
+                                        self.require_assignable(
+                                            &actual,
+                                            &annotated_ty,
+                                            field.span,
+                                            "invalid_field_initializer_type",
+                                            format!(
+                                                "field '{}' is annotated as '{}' but initializer has type '{}'",
+                                                name,
+                                                annotated_ty.describe(),
+                                                actual.describe()
+                                            ),
+                                        );
+                                        (name.clone(), annotated_ty)
+                                    } else {
+                                        (name.clone(), actual)
+                                    }
                                 })
                             })
                             .collect(),
@@ -4745,10 +4764,14 @@ impl<'a> Checker<'a> {
                 fields
                     .iter()
                     .filter_map(|field| {
-                        field
-                            .name
-                            .as_ref()
-                            .map(|name| (name.clone(), self.probe_expr_type(&field.value)))
+                        field.name.as_ref().map(|name| {
+                            let ty = field
+                                .ty
+                                .as_ref()
+                                .map(|ty| self.ty_from_type_ref(ty))
+                                .unwrap_or_else(|| self.probe_expr_type(&field.value));
+                            (name.clone(), ty)
+                        })
                     })
                     .collect(),
             ),
@@ -6572,6 +6595,49 @@ def main() Unit {
             result.diagnostics.iter().any(|diag| diag
                 .message
                 .contains("does not accept anonymous record arguments in '(...)'")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_typed_anonymous_record_fields() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    value = "Ada"
+    user = {
+        name Str: value
+        age Int: 42
+    }
+    typed { name Str, age Int } = user
+    OS.println(typed.name)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_typed_anonymous_record_field_initializer_mismatch() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    user = {
+        name Str: 42
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_field_initializer_type"
+                    && diag.message.contains(
+                        "field 'name' is annotated as 'Str' but initializer has type 'Int'",
+                    )
+            }),
             "{:#?}",
             result.diagnostics
         );

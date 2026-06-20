@@ -421,6 +421,7 @@ impl<'a> Parser<'a> {
         #[derive(Clone)]
         struct RecordEntry {
             name: Option<String>,
+            ty: Option<TypeRef>,
             value: Expr,
             span: Span,
         }
@@ -428,19 +429,63 @@ impl<'a> Parser<'a> {
         let mut entries = Vec::new();
         self.skip_newlines();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let entry = if self.at(TokenKind::Identifier) && self.at_next(TokenKind::Colon) {
+            let entry = if self.at(TokenKind::Identifier) {
+                let checkpoint = self.checkpoint();
                 let (name, name_span) = self.expect_identifier("expected record field name")?;
-                self.consume(TokenKind::Colon, "expected ':' after record field name")?;
-                let value = self.parse_expr()?;
-                RecordEntry {
-                    name: Some(name),
-                    span: name_span.cover(value.span()),
-                    value,
+                if self.match_token(TokenKind::Colon) {
+                    let value = self.parse_expr()?;
+                    RecordEntry {
+                        name: Some(name),
+                        ty: None,
+                        span: name_span.cover(value.span()),
+                        value,
+                    }
+                } else if self.can_start_type_ref() {
+                    let ty = self.parse_type_ref();
+                    if let Some(ty) = ty {
+                        if self.match_token(TokenKind::Colon) {
+                            let value = self.parse_expr()?;
+                            RecordEntry {
+                                name: Some(name),
+                                ty: Some(ty),
+                                span: name_span.cover(value.span()),
+                                value,
+                            }
+                        } else {
+                            self.restore(checkpoint);
+                            let value = self.parse_expr()?;
+                            RecordEntry {
+                                name: None,
+                                ty: None,
+                                span: value.span(),
+                                value,
+                            }
+                        }
+                    } else {
+                        self.restore(checkpoint);
+                        let value = self.parse_expr()?;
+                        RecordEntry {
+                            name: None,
+                            ty: None,
+                            span: value.span(),
+                            value,
+                        }
+                    }
+                } else {
+                    self.restore(checkpoint);
+                    let value = self.parse_expr()?;
+                    RecordEntry {
+                        name: None,
+                        ty: None,
+                        span: value.span(),
+                        value,
+                    }
                 }
             } else {
                 let value = self.parse_expr()?;
                 RecordEntry {
                     name: None,
+                    ty: None,
                     span: value.span(),
                     value,
                 }
@@ -461,6 +506,7 @@ impl<'a> Parser<'a> {
                 if let Some(name) = entry.name {
                     fields.push(CallArg {
                         name: Some(name),
+                        ty: entry.ty,
                         value: entry.value,
                         span: entry.span,
                     });
@@ -575,6 +621,7 @@ impl<'a> Parser<'a> {
             let value = self.parse_expr()?;
             updates.push(CallArg {
                 name: Some(name),
+                ty: None,
                 span: name_span.cover(value.span()),
                 value,
             });
@@ -972,6 +1019,7 @@ impl<'a> Parser<'a> {
                     callee: Box::new(expr),
                     args: vec![CallArg {
                         name: None,
+                        ty: None,
                         span: arg.span(),
                         value: arg.clone(),
                     }],
@@ -1000,6 +1048,7 @@ impl<'a> Parser<'a> {
                 let span = name_span.cover(value.span());
                 args.push(CallArg {
                     name: Some(name),
+                    ty: None,
                     value,
                     span,
                 });
@@ -1007,6 +1056,7 @@ impl<'a> Parser<'a> {
                 let value = self.parse_expr()?;
                 args.push(CallArg {
                     name: None,
+                    ty: None,
                     span: value.span(),
                     value,
                 });
@@ -1148,12 +1198,24 @@ impl<'a> Parser<'a> {
             .tokens
             .get(lookahead)
             .is_some_and(|token| token.kind == TokenKind::Identifier)
-            && self
+        {
+            if self
                 .tokens
                 .get(lookahead + 1)
                 .is_some_and(|token| token.kind == TokenKind::Colon)
-        {
-            return true;
+            {
+                return true;
+            }
+
+            let mut parser = Parser {
+                tokens: self.tokens,
+                index: lookahead + 1,
+                diagnostics: Vec::new(),
+                allow_trailing_block_call: self.allow_trailing_block_call,
+            };
+            if parser.parse_type_ref().is_some() && parser.at(TokenKind::Colon) {
+                return true;
+            }
         }
 
         let mut depth = 1usize;
