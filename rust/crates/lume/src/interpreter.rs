@@ -913,6 +913,7 @@ pub(crate) enum IteratorState {
 struct Frame {
     function: ir::FunctionId,
     locals: Vec<Value>,
+    defers: Vec<Rc<ClosureValue>>,
 }
 
 pub(crate) struct Interpreter<'a> {
@@ -1023,6 +1024,7 @@ impl<'a> Interpreter<'a> {
                 .iter()
                 .map(|local| self.default_value_for_type(&local.ty))
                 .collect(),
+            defers: Vec::new(),
         };
 
         if matches!(function.kind, ir::FunctionKind::Method { .. }) {
@@ -1132,6 +1134,15 @@ impl<'a> Interpreter<'a> {
                         .map(|operand| self.eval_operand(&frame, &operand, block.terminator.span))
                         .transpose()?
                         .unwrap_or(Value::Unit);
+                    while let Some(deferred) = frame.defers.pop() {
+                        let _ = self.call_function(
+                            deferred.function,
+                            None,
+                            Some(deferred.captures.clone()),
+                            Vec::new(),
+                            block.terminator.span,
+                        )?;
+                    }
                     if function.name == "new" {
                         if let (Some(Value::Aggregate(receiver)), Value::Aggregate(result)) =
                             (frame.locals.first().cloned(), returned.clone())
@@ -1168,6 +1179,16 @@ impl<'a> Interpreter<'a> {
             ir::StatementKind::Assign { target, value } => {
                 let value = self.eval_rvalue(&value, Some(frame), statement.span)?;
                 self.assign_place(frame, &target, value, statement.span)
+            }
+            ir::StatementKind::Defer { value } => {
+                let value = self.eval_rvalue(&value, Some(frame), statement.span)?;
+                let Value::Closure(closure) = value else {
+                    return Err(
+                        self.runtime_error(statement.span, "defer expects a lowered closure value")
+                    );
+                };
+                frame.defers.push(closure);
+                Ok(())
             }
             ir::StatementKind::Eval { value } => {
                 let _ = self.eval_rvalue(&value, Some(frame), statement.span)?;
@@ -5683,7 +5704,7 @@ $name
     }
 
     #[test]
-    fn runs_defer_in_lifo_order_on_scope_exit() {
+    fn runs_defer_at_callable_exit_not_block_exit() {
         let program = lower_inline(
             r#"
             def cleanup(label Str) Unit {
@@ -5691,20 +5712,19 @@ $name
             }
 
             def main() Unit {
+                defer cleanup("outer")
                 {
-                    defer cleanup("first")
-                    defer {
-                        OS.println("second")
-                    }
+                    defer cleanup("inner")
                     OS.println("body")
                 }
+                OS.println("after block")
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "body\nsecond\nfirst\n");
+        assert_eq!(run.output, "body\nafter block\ninner\nouter\n");
     }
 
     #[test]
@@ -5732,26 +5752,26 @@ $name
     }
 
     #[test]
-    fn runs_defer_on_continue() {
+    fn runs_defer_as_lambda_bound() {
         let program = lower_inline(
             r#"
             def main() Unit {
-                for value <- [1, 2] {
-                    defer {
-                        OS.println("defer", value)
-                    }
-                    if value == 1 {
-                        continue
-                    }
-                    OS.println("body", value)
+                defer OS.println("main")
+
+                run = () -> {
+                    defer OS.println("lambda")
+                    OS.println("inside")
                 }
+
+                run()
+                OS.println("after")
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "defer 1\nbody 2\ndefer 2\n");
+        assert_eq!(run.output, "inside\nlambda\nafter\nmain\n");
     }
 
     #[test]

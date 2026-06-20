@@ -348,6 +348,7 @@ impl Statement {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatementKind {
     Assign { target: Place, value: RValue },
+    Defer { value: RValue },
     Eval { value: RValue },
 }
 

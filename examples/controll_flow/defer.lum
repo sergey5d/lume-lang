@@ -1,0 +1,22 @@
+# EXPECT:
+# start middle done
+# body inner outer
+# 0
+
+def basic() Unit {
+    OS.print("start ")
+    defer OS.println("done")
+    OS.print("middle ")
+}
+
+def lifo() Unit {
+    defer OS.println("outer")
+    defer OS.print("inner ")
+    OS.print("body ")
+}
+
+def main() Int {
+    basic()
+    lifo()
+    0
+}

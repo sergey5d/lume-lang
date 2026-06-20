@@ -781,9 +781,14 @@ Standalone nested blocks are valid expression statements:
 
 ## `defer`
 
-`defer` registers cleanup for the current lexical scope. Deferred actions run in
-LIFO order when that scope exits normally, and they also run on `return`,
-`break`, and `continue`.
+`defer` registers cleanup for the current callable. Deferred actions run in
+LIFO order when the enclosing function, method, or lambda returns.
+
+`defer` is not block-bound. A `defer` inside an inner `{ ... }` block still runs
+when the enclosing callable exits.
+
+A lambda has its own defer queue. A `defer` inside a lambda runs when that
+lambda returns, not when the outer function returns.
 
 Supported forms:
 
