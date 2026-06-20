@@ -4014,10 +4014,7 @@ impl<'a> Checker<'a> {
                 Ty::bool()
             }
             BinaryOp::Concat => self.check_symbolic_binary_operator(left, "++", right, span),
-            BinaryOp::Remove
-            | BinaryOp::Append
-            | BinaryOp::Prepend
-            | BinaryOp::Compose => {
+            BinaryOp::Remove | BinaryOp::Append | BinaryOp::Prepend | BinaryOp::Compose => {
                 let method = match op {
                     BinaryOp::Remove => "--",
                     BinaryOp::Append => ":+",
@@ -6198,6 +6195,55 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_symbolic_operator_when_type_declares_method() {
+        let program = parse_inline(
+            r#"
+class Vec {}
+
+impl Vec {
+    def :+(value Int) Vec = this
+    def ++(other Vec) Vec = this
+}
+
+def main() Unit {
+    left Vec = Vec()
+    right Vec = Vec()
+    grown Vec = left :+ 1
+    joined Vec = left ++ right
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_symbolic_collection_operators_without_methods() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    values = List(1)
+    appended = values :+ 2
+    merged = values ++ List(2)
+
+    seen = Set(1)
+    all = seen ++ Set(2)
+
+    pairs = Map("a": 1)
+    combined = pairs ++ Map("b": 2)
+}
+"#,
+        );
+        let result = check_program(&program);
+        let matches = result
+            .diagnostics
+            .iter()
+            .filter(|diag| diag.code == "unknown_member" && diag.message.contains("no overloaded"))
+            .count();
+        assert_eq!(matches, 4, "{:#?}", result.diagnostics);
     }
 
     #[test]

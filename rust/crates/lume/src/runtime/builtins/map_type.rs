@@ -3,9 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     Diagnostic, Span,
     ast::TypeKind,
-    interpreter::{
-        Interpreter, Value, iterable_values, map_put_entry, values_equal,
-    },
+    interpreter::{Interpreter, Value, iterable_values, map_put_entry, values_equal},
     ir,
 };
 

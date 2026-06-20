@@ -3398,10 +3398,9 @@ impl<'a> Interpreter<'a> {
                 (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs | rhs)),
                 _ => Err(self.runtime_error(span, "binary '|' expects Int values")),
             },
-            ir::BinaryOp::Concat => Err(self.runtime_error(
-                span,
-                "binary '++' requires an overloaded method",
-            )),
+            ir::BinaryOp::Concat => {
+                Err(self.runtime_error(span, "binary '++' requires an overloaded method"))
+            }
         }
     }
 
@@ -3886,34 +3885,6 @@ pub(crate) fn iterable_values(
             span,
             format!("expected iterable value, got {}", other.render()),
         )),
-    }
-}
-
-pub(crate) fn iterable_map_entries(
-    value: Value,
-    span: Option<Span>,
-    in_: &Interpreter<'_>,
-) -> Result<Vec<(Value, Value)>, Diagnostic> {
-    match value {
-        Value::Map(entries) => Ok(entries.borrow().clone()),
-        other => {
-            let items = iterable_values(other, span, in_)?;
-            let mut out = Vec::with_capacity(items.len());
-            for item in items {
-                match item {
-                    Value::Tuple(values) if values.len() == 2 => {
-                        out.push((values[0].clone(), values[1].clone()));
-                    }
-                    value => {
-                        return Err(in_.runtime_error(
-                            span,
-                            format!("expected map entry tuple, got {}", value.render()),
-                        ));
-                    }
-                }
-            }
-            Ok(out)
-        }
     }
 }
 
