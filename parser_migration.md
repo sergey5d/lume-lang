@@ -441,7 +441,7 @@ The migration is done when:
 - [x] Rust crate tests pass:
   - `cargo test --manifest-path rust/Cargo.toml -p lume`
 - [x] example parity still passes:
-  - `./run_samples.sh rust`
+  - `./run_samples.sh`
 - [x] there are no behavior or diagnostic regressions beyond intentional file/module moves
 
 ## Suggested First PR

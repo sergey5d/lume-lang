@@ -15,6 +15,7 @@ use crate::{
     },
     lexer::lex,
     parser::parse_program,
+    render_diagnostic,
     source::SourceFile,
 };
 
@@ -386,34 +387,34 @@ pub(crate) fn parse_program_from_path(path: &Path) -> Result<Program, String> {
     let file = SourceFile::new(path.display().to_string(), text);
     let lexed = lex(&file);
     if !lexed.diagnostics.is_empty() {
-        return Err(format_path_diagnostics(path, &lexed.diagnostics));
+        return Err(format_path_diagnostics(
+            path,
+            Some(&file.text),
+            &lexed.diagnostics,
+        ));
     }
     let parsed = parse_program(&lexed.tokens);
     if !parsed.diagnostics.is_empty() {
-        return Err(format_path_diagnostics(path, &parsed.diagnostics));
+        return Err(format_path_diagnostics(
+            path,
+            Some(&file.text),
+            &parsed.diagnostics,
+        ));
     }
     parsed
         .program
         .ok_or_else(|| format!("parse {}: parser did not produce a program", path.display()))
 }
 
-fn format_path_diagnostics(path: &Path, diagnostics: &[Diagnostic]) -> String {
+fn format_path_diagnostics(
+    path: &Path,
+    source: Option<&str>,
+    diagnostics: &[Diagnostic],
+) -> String {
+    let display = path.display().to_string();
     diagnostics
         .iter()
-        .map(|diagnostic| {
-            format!(
-                "{}:{}:{}: {}[{}]: {}",
-                path.display(),
-                diagnostic.span.start_pos.line,
-                diagnostic.span.start_pos.column,
-                match diagnostic.severity {
-                    crate::Severity::Error => "error",
-                    crate::Severity::Warning => "warning",
-                },
-                diagnostic.code,
-                diagnostic.message
-            )
-        })
+        .map(|diagnostic| render_diagnostic(&display, source, diagnostic))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -2415,10 +2416,14 @@ def main() Int {
             ),
         ];
 
-        let rendered = format_path_diagnostics(Path::new("/tmp/test.lum"), &diagnostics);
+        let rendered = format_path_diagnostics(
+            Path::new("/tmp/test.lum"),
+            Some("abc\n12345\n\n123456\n"),
+            &diagnostics,
+        );
         assert_eq!(
             rendered,
-            "/tmp/test.lum:2:3: error[first]: one\n/tmp/test.lum:4:5: error[second]: two"
+            "error[first]: one\n  --> /tmp/test.lum:2:3\n  |\n2 | 12345\n  |   ^\nerror[second]: two\n  --> /tmp/test.lum:4:5\n  |\n4 | 123456\n  |     ^"
         );
     }
 }

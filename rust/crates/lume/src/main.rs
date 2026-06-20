@@ -1,6 +1,9 @@
 use std::{env, fs, process::ExitCode};
 
-use lume::{Diagnostic, Severity, SourceFile, check_path, lex, parse_program, run_path};
+use lume::{
+    Diagnostic, SourceFile, check_path, lex, parse_program, render_diagnostic,
+    render_path_diagnostic, run_path,
+};
 
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
@@ -28,7 +31,7 @@ fn main() -> ExitCode {
             }
             if result.has_errors() {
                 for diagnostic in &result.diagnostics {
-                    print_diagnostic(&path, diagnostic);
+                    print_diagnostic(&path, Some(&file.text), diagnostic);
                 }
                 return ExitCode::from(1);
             }
@@ -43,7 +46,7 @@ fn main() -> ExitCode {
             let lexed = lex(&file);
             if lexed.has_errors() {
                 for diagnostic in &lexed.diagnostics {
-                    print_diagnostic(&path, diagnostic);
+                    print_diagnostic(&path, Some(&file.text), diagnostic);
                 }
                 return ExitCode::from(1);
             }
@@ -51,7 +54,7 @@ fn main() -> ExitCode {
             let parsed = parse_program(&lexed.tokens);
             if !parsed.diagnostics.is_empty() {
                 for diagnostic in &parsed.diagnostics {
-                    print_diagnostic(&path, diagnostic);
+                    print_diagnostic(&path, Some(&file.text), diagnostic);
                 }
                 return ExitCode::from(1);
             }
@@ -77,7 +80,13 @@ fn main() -> ExitCode {
                         ExitCode::SUCCESS
                     } else {
                         for located in &result.diagnostics {
-                            print_diagnostic(&located.path, &located.diagnostic);
+                            eprintln!(
+                                "{}",
+                                render_path_diagnostic(
+                                    std::path::Path::new(&located.path),
+                                    &located.diagnostic,
+                                )
+                            );
                         }
                         ExitCode::from(1)
                     }
@@ -99,7 +108,13 @@ fn main() -> ExitCode {
                 Ok(result) => {
                     if !result.diagnostics.is_empty() {
                         for located in &result.diagnostics {
-                            print_diagnostic(&located.path, &located.diagnostic);
+                            eprintln!(
+                                "{}",
+                                render_path_diagnostic(
+                                    std::path::Path::new(&located.path),
+                                    &located.diagnostic,
+                                )
+                            );
                         }
                         return ExitCode::from(1);
                     }
@@ -152,16 +167,6 @@ fn read_source(
     Ok(SourceFile::new(path, text))
 }
 
-fn print_diagnostic(path: &str, diagnostic: &Diagnostic) {
-    let severity = match diagnostic.severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-    };
-    eprintln!(
-        "{path}:{}:{}: {severity}[{}]: {}",
-        diagnostic.span.start_pos.line,
-        diagnostic.span.start_pos.column,
-        diagnostic.code,
-        diagnostic.message,
-    );
+fn print_diagnostic(path: &str, source: Option<&str>, diagnostic: &Diagnostic) {
+    eprintln!("{}", render_diagnostic(path, source, diagnostic));
 }

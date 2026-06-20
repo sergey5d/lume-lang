@@ -17,6 +17,7 @@ use crate::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, collect_module_order,
         find_stdlib_dir, load_module_graph, parse_program_from_path, read_directives, resolve_path,
     },
+    typecheck_diagnostics,
 };
 
 #[derive(Debug, Clone)]
@@ -3524,15 +3525,26 @@ impl<'a> Checker<'a> {
         }
 
         if structural_record_arg {
-            if sig.methods.contains_key("new") {
-                self.add_error(
-                    "no_matching_overload",
-                    format!(
-                        "class '{}' cannot use brace-based construction because it defines explicit constructors",
-                        sig.name
-                    ),
-                    span,
-                );
+            if let Some(constructors) = sig.methods.get("new") {
+                if constructors
+                    .iter()
+                    .all(|ctor| ctor.visibility == Visibility::Hidden)
+                {
+                    let help = self.hidden_constructor_factory_help(&sig.name, args);
+                    self.diagnostics
+                        .push(typecheck_diagnostics::hidden_field_constructor(
+                            span, &sig.name, help,
+                        ));
+                } else {
+                    self.add_error(
+                        "no_matching_overload",
+                        format!(
+                            "class '{}' cannot use brace-based construction because it defines explicit constructors",
+                            sig.name
+                        ),
+                        span,
+                    );
+                }
                 return ret;
             }
             return self.check_record_constructor_conversion(sig, &ret, &args[0].value, span);
@@ -3941,6 +3953,17 @@ impl<'a> Checker<'a> {
         }
         let sig = self.lookup_any_non_object_type(type_name)?;
         self.method_sigs_for_type(&sig, name)
+    }
+
+    fn hidden_constructor_factory_help(
+        &self,
+        class_name: &str,
+        args: &[crate::ast::CallArg],
+    ) -> Option<String> {
+        let object = self.lookup_any_object(class_name)?;
+        self.method_sigs_for_type(&object, "create")?;
+        let args = format_factory_help_args(args)?;
+        Some(format!("use {class_name}.create({args})"))
     }
 
     fn check_binary_expr(
@@ -5646,6 +5669,60 @@ fn constructor_uses_parenthesized_record_arg(
         )
 }
 
+fn format_factory_help_args(args: &[crate::ast::CallArg]) -> Option<String> {
+    if let [
+        crate::ast::CallArg {
+            name: None,
+            value: Expr::RecordLiteral { fields, values, .. },
+            ..
+        },
+    ] = args
+    {
+        if !fields.is_empty() {
+            return fields
+                .iter()
+                .map(|field| {
+                    Some(format!(
+                        "{} = {}",
+                        field.name.as_ref()?,
+                        format_help_expr(&field.value)
+                    ))
+                })
+                .collect::<Option<Vec<_>>>()
+                .map(|items| items.join(", "));
+        }
+        return Some(
+            values
+                .iter()
+                .map(format_help_expr)
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+    }
+
+    args.iter()
+        .map(|arg| {
+            Some(match &arg.name {
+                Some(name) => format!("{name} = {}", format_help_expr(&arg.value)),
+                None => format_help_expr(&arg.value),
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|items| items.join(", "))
+}
+
+fn format_help_expr(expr: &Expr) -> String {
+    match expr {
+        Expr::Identifier { name, .. } => name.clone(),
+        Expr::Integer { raw, .. } | Expr::Float { raw, .. } => raw.clone(),
+        Expr::String { raw, .. } if raw.starts_with('"') => raw.clone(),
+        Expr::String { raw, .. } => format!("{raw:?}"),
+        Expr::Bool { value, .. } => value.to_string(),
+        Expr::Unit { .. } => "()".to_string(),
+        _ => "...".to_string(),
+    }
+}
+
 fn path_starts_with_os(expr: &Expr) -> bool {
     match expr {
         Expr::Identifier { name, .. } => name == "OS",
@@ -6391,6 +6468,47 @@ def main() Unit {
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn reports_hidden_field_constructor_with_factory_help() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+impl User {
+    hidden def new(name Str) {
+        this.name = name
+    }
+}
+
+impl single User {
+    def create(name Str) User = User(name)
+}
+
+def main() Unit {
+    user = User { name: "Ada" }
+}
+"#,
+        );
+        let result = check_program(&program);
+        let diagnostic = result
+            .diagnostics
+            .iter()
+            .find(|diag| diag.code == "constructor_unavailable")
+            .expect("constructor diagnostic");
+        assert_eq!(diagnostic.message, "constructor is not available");
+        assert_eq!(
+            diagnostic.label.as_deref(),
+            Some("field construction is hidden")
+        );
+        assert_eq!(
+            diagnostic.notes,
+            vec!["User declares a private primary constructor"]
+        );
+        assert_eq!(diagnostic.helps, vec!["use User.create(name = \"Ada\")"]);
     }
 
     #[test]
