@@ -796,10 +796,6 @@ impl<'a> Parser<'a> {
             &[
                 (TokenKind::Plus, BinaryOp::Add),
                 (TokenKind::Minus, BinaryOp::Sub),
-                (TokenKind::PlusPlus, BinaryOp::Concat),
-                (TokenKind::MinusMinus, BinaryOp::Remove),
-                (TokenKind::ColonPlus, BinaryOp::Append),
-                (TokenKind::ColonMinus, BinaryOp::Prepend),
             ],
         )
     }

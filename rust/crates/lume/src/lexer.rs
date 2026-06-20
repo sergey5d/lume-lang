@@ -526,15 +526,13 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "use model/things/{A as Alias}\nif true then 1 else 0\nitems = for value <- values yield value :+ 1 ++ more\nspread Str... = \"\"\"\nhello\n\"\"\"\npi = 1.25\n",
+            "use model/things/{A as Alias}\nif true then 1 else 0\nitems = for value <- values yield value + 1\nspread Str... = \"\"\"\nhello\n\"\"\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::As)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Then)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
-        assert!(kinds.contains(&TokenKind::ColonPlus));
-        assert!(kinds.contains(&TokenKind::PlusPlus));
         assert!(kinds.contains(&TokenKind::Ellipsis));
         assert!(kinds.contains(&TokenKind::Float));
     }

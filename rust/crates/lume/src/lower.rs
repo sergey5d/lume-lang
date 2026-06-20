@@ -3151,32 +3151,11 @@ impl<'a> FunctionLowerer<'a> {
             AstBinaryOp::Colon => {
                 ir::RValue::Tuple(vec![self.lower_expr(left), self.lower_expr(right)])
             }
-            AstBinaryOp::Append => self.lower_operator_method_rvalue(left, ":+", right),
-            AstBinaryOp::Concat => self.lower_operator_method_rvalue(left, "++", right),
-            AstBinaryOp::Remove => self.lower_operator_method_rvalue(left, "--", right),
-            AstBinaryOp::Prepend => self.lower_operator_method_rvalue(left, ":-", right),
-            AstBinaryOp::Compose => self.lower_operator_method_rvalue(left, "::", right),
             _ => ir::RValue::Binary {
                 op: map_binary_op(op).expect("non-special binary operator should map to IR"),
                 left: self.lower_expr(left),
                 right: self.lower_expr(right),
             },
-        }
-    }
-
-    fn lower_operator_method_rvalue(
-        &mut self,
-        left: &Expr,
-        method: &str,
-        right: &Expr,
-    ) -> ir::RValue {
-        ir::RValue::Call {
-            callee: ir::Callee::Method {
-                receiver: self.lower_expr(left),
-                method: method.to_string(),
-            },
-            args: vec![self.lower_expr(right)],
-            structural: false,
         }
     }
 
@@ -3654,12 +3633,7 @@ fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
         AstBinaryOp::Mul => Some(ir::BinaryOp::Mul),
         AstBinaryOp::Div => Some(ir::BinaryOp::Div),
         AstBinaryOp::Mod => Some(ir::BinaryOp::Mod),
-        AstBinaryOp::Concat => Some(ir::BinaryOp::Concat),
-        AstBinaryOp::Colon
-        | AstBinaryOp::Remove
-        | AstBinaryOp::Append
-        | AstBinaryOp::Prepend
-        | AstBinaryOp::Compose => None,
+        AstBinaryOp::Colon => None,
     }
 }
 
@@ -4195,55 +4169,5 @@ mod tests {
                 )
             })
         }));
-    }
-
-    #[test]
-    fn lowers_symbolic_binary_operators_as_method_calls() {
-        let program = parse_inline(
-            r#"
-            class Vec {}
-
-            impl Vec {
-                def :+(value Int) Vec = this
-                def :-(value Int) Vec = this
-                def ++(other Vec) Vec = this
-                def --(other Vec) Vec = this
-            }
-
-            def main() Unit {
-                left Vec = Vec()
-                right Vec = Vec()
-                a = left :+ 1
-                b = left :- 1
-                c = left -- right
-                d = left ++ right
-            }
-            "#,
-        );
-
-        let lowered = lower_program(&program);
-        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
-        let ir = lowered.program.expect("ir program");
-        let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
-        let mut methods = Vec::new();
-        for block in &main.blocks {
-            for stmt in &block.statements {
-                if let ir::StatementKind::Assign {
-                    value:
-                        ir::RValue::Call {
-                            callee: ir::Callee::Method { method, .. },
-                            ..
-                        },
-                    ..
-                } = &stmt.kind
-                {
-                    methods.push(method.clone());
-                }
-            }
-        }
-        assert!(methods.iter().any(|method| method == ":+"), "{methods:#?}");
-        assert!(methods.iter().any(|method| method == ":-"), "{methods:#?}");
-        assert!(methods.iter().any(|method| method == "--"), "{methods:#?}");
-        assert!(methods.iter().any(|method| method == "++"), "{methods:#?}");
     }
 }

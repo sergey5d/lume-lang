@@ -256,6 +256,50 @@ impl Counter {
 }
 
 #[test]
+fn rejects_removed_symbolic_operator_methods() {
+    for operator in ["++", "--", ":+", ":-", "::"] {
+        let source = format!(
+            r#"
+class Vec {{}}
+
+impl Vec {{
+    def {operator}(other Vec) Vec = this
+}}
+"#
+        );
+        let result = parse(&source);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "expected_identifier"),
+            "expected callable name rejection for {operator}, got {:#?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
+fn rejects_removed_symbolic_infix_operators() {
+    for operator in ["++", "--", ":+", ":-", "::"] {
+        let source = format!(
+            r#"
+def main() Unit {{
+    left = 1
+    right = 2
+    value = left {operator} right
+}}
+"#
+        );
+        let result = parse(&source);
+        assert!(
+            !result.diagnostics.is_empty(),
+            "expected infix operator rejection for {operator}"
+        );
+    }
+}
+
+#[test]
 fn parses_empty_method_body() {
     let result = parse(
         r#"

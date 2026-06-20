@@ -1379,10 +1379,10 @@ Current operator overloading constraints:
   - arithmetic: `+`, `-`, `*`, `/`, `%`
   - unary: unary `-`
   - indexing: `[]`
-  - symbolic custom forms with no built-in collection meaning: `:+`, `:-`, `++`, `--`, `|`, `&`, `>>`, `<<`, `~`, `::`
 - Not allowed to overload:
   - logical operators: `&&`, `||`, `!`
   - equality operators: `==`, `!=`
+  - symbolic collection/custom forms: `:+`, `:-`, `++`, `--`, `::`
 - Comparison operators are intended to work through `Ordering[T]` rather than custom operator declarations.
 - Equality is intended to work through `Eq[T]` rather than custom operator declarations.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
@@ -1393,7 +1393,7 @@ Newline continuation:
 - A newline continues the current expression only when the previous line clearly ends in a continuation form.
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
-  - symbolic/custom infix operators: `<<`, `>>`, `|`, `&`, `::`, `:+`, `:-`, `++`, `--`
+  - bitwise operators: `|`, `&`
   - match arrow: `=>`
   - separators / chaining markers: `,`, `.`
 - Continuation is also allowed inside unmatched delimiters:

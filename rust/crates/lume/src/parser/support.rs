@@ -112,10 +112,6 @@ impl<'a> Parser<'a> {
             TokenKind::Star => "*",
             TokenKind::Slash => "/",
             TokenKind::Percent => "%",
-            TokenKind::PlusPlus => "++",
-            TokenKind::MinusMinus => "--",
-            TokenKind::ColonPlus => ":+",
-            TokenKind::ColonMinus => ":-",
             _ => {
                 self.error_at_current("expected_identifier", message);
                 return None;

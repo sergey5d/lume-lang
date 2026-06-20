@@ -575,7 +575,6 @@ pub enum BinaryOp {
     Or,
     BitAnd,
     BitOr,
-    Concat,
 }
 
 /// The lowered type vocabulary used by typechecking, lowering, and interpretation.

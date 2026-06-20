@@ -4036,86 +4036,8 @@ impl<'a> Checker<'a> {
                 }
                 Ty::bool()
             }
-            BinaryOp::Concat => self.check_symbolic_binary_operator(left, "++", right, span),
-            BinaryOp::Remove | BinaryOp::Append | BinaryOp::Prepend | BinaryOp::Compose => {
-                let method = match op {
-                    BinaryOp::Remove => "--",
-                    BinaryOp::Append => ":+",
-                    BinaryOp::Prepend => ":-",
-                    BinaryOp::Compose => "::",
-                    _ => unreachable!(),
-                };
-                self.check_symbolic_binary_operator(left, method, right, span)
-            }
             BinaryOp::Colon => Ty::Unknown,
         }
-    }
-
-    fn check_symbolic_binary_operator(
-        &mut self,
-        left: &Ty,
-        method: &str,
-        right: &Ty,
-        span: crate::source::Span,
-    ) -> Ty {
-        if matches!(left, Ty::Unknown) {
-            return Ty::Unknown;
-        }
-
-        let Some(methods) = self.member_method_sigs(left, method) else {
-            self.add_error(
-                "unknown_member",
-                format!(
-                    "type '{}' has no overloaded '{}' operator",
-                    left.describe(),
-                    method
-                ),
-                span,
-            );
-            return Ty::Unknown;
-        };
-
-        let mut arity_matched = false;
-        for method_sig in methods {
-            let [param] = method_sig.params.as_slice() else {
-                continue;
-            };
-            if param.variadic {
-                continue;
-            }
-            arity_matched = true;
-
-            let mut subst = HashMap::new();
-            infer_type_subst(&param.ty, right, &mut subst);
-            let expected = materialize_type(&substitute_type(&param.ty, &subst));
-            if self.is_assignable(right, &expected) {
-                return materialize_type(&substitute_type(&method_sig.ret, &subst));
-            }
-        }
-
-        if arity_matched {
-            self.add_error(
-                "invalid_argument_type",
-                format!(
-                    "operator '{}' on type '{}' cannot accept '{}'",
-                    method,
-                    left.describe(),
-                    right.describe()
-                ),
-                span,
-            );
-        } else {
-            self.add_error(
-                "no_matching_overload",
-                format!(
-                    "operator '{}' on type '{}' requires a single non-variadic argument",
-                    method,
-                    left.describe()
-                ),
-                span,
-            );
-        }
-        Ty::Unknown
     }
 
     fn check_else_expr_branch(&mut self, branch: &ElseExprBranch) -> Ty {
@@ -6272,55 +6194,6 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    }
-
-    #[test]
-    fn allows_symbolic_operator_when_type_declares_method() {
-        let program = parse_inline(
-            r#"
-class Vec {}
-
-impl Vec {
-    def :+(value Int) Vec = this
-    def ++(other Vec) Vec = this
-}
-
-def main() Unit {
-    left Vec = Vec()
-    right Vec = Vec()
-    grown Vec = left :+ 1
-    joined Vec = left ++ right
-}
-"#,
-        );
-        let result = check_program(&program);
-        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    }
-
-    #[test]
-    fn rejects_symbolic_collection_operators_without_methods() {
-        let program = parse_inline(
-            r#"
-def main() Unit {
-    values = List(1)
-    appended = values :+ 2
-    merged = values ++ List(2)
-
-    seen = Set(1)
-    all = seen ++ Set(2)
-
-    pairs = Map("a": 1)
-    combined = pairs ++ Map("b": 2)
-}
-"#,
-        );
-        let result = check_program(&program);
-        let matches = result
-            .diagnostics
-            .iter()
-            .filter(|diag| diag.code == "unknown_member" && diag.message.contains("no overloaded"))
-            .count();
-        assert_eq!(matches, 4, "{:#?}", result.diagnostics);
     }
 
     #[test]

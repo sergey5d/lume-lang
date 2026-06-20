@@ -198,7 +198,7 @@
         },
         {
           "name": "keyword.operator.symbolic.lume",
-          "match": "::|:\\+|\\+\\+|:-|--|<<|>>|[+\\-*/%&|]"
+          "match": "(?<!\\+)\\+(?!\\+)|(?<!-)\\-(?!-)|[*/%&|]"
         },
         {
           "name": "punctuation.separator.arguments.lume",

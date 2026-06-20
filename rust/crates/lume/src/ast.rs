@@ -756,9 +756,4 @@ pub enum BinaryOp {
     Mul,
     Div,
     Mod,
-    Concat,
-    Remove,
-    Append,
-    Prepend,
-    Compose,
 }

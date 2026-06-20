@@ -3398,9 +3398,6 @@ impl<'a> Interpreter<'a> {
                 (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs | rhs)),
                 _ => Err(self.runtime_error(span, "binary '|' expects Int values")),
             },
-            ir::BinaryOp::Concat => {
-                Err(self.runtime_error(span, "binary '++' requires an overloaded method"))
-            }
         }
     }
 
@@ -4592,7 +4589,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_symbolic_collection_and_operator_methods() {
+    fn runs_collection_methods_and_core_operator_methods() {
         let program = lower_inline(
             r#"
             class Vec {
@@ -4607,10 +4604,8 @@ mod tests {
                 }
 
                 def [](index Int) Int = this.items[index]
-                def :+(value Int) Vec = Vec(this[0] + value, this[1] + value)
-                def :-(value Int) Vec = Vec(this[0] - value, this[1] - value)
-                def ++(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
-                def --(other Vec) Vec = Vec(this[0] - other[0], this[1] - other[1])
+                def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
+                def -() Vec = Vec(-this[0], -this[1])
             }
 
             def main() Unit {
@@ -4628,17 +4623,15 @@ mod tests {
                 OS.println(pairs.size())
 
                 left Vec = Vec(5, 6)
-                OS.println((left :+ 2)[0])
-                OS.println((left :- 1)[1])
-                OS.println((left ++ Vec(1, 2))[1])
-                OS.println((left -- Vec(1, 2))[0])
+                OS.println((left + Vec(1, 2))[1])
+                OS.println((-left)[0])
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "5\n3\n2\n7\n5\n8\n4\n");
+        assert_eq!(run.output, "5\n3\n2\n8\n-5\n");
         assert_eq!(run.return_value, None);
     }
 
