@@ -24,7 +24,7 @@ enum Result[T, E] {
         case Err(_) => defaultValue
     }
 
-    def map[X](f T -> X) Result[X, E] = match this {
+    def map[X](f (T) -> X) Result[X, E] = match this {
         case Ok(value) => Ok(f(value))
         case Err(error) => Err(error)
     }

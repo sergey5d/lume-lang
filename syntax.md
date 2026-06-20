@@ -45,6 +45,10 @@ Function types:
 - `(Int) -> Str`
 - `(Int, Bool) -> Unit`
 
+Function type parameter lists must be parenthesized. Use `(Int) -> Int`,
+not `Int -> Int`. Lambda expressions still use ordinary arrow syntax, for
+example `value -> value + 1`.
+
 ## Strings
 
 Ordinary string literals use double quotes:
@@ -1367,7 +1371,7 @@ Other operators / constructs:
 
 - `is` for runtime type checks
 - `<-` for `for` iteration and success-case extraction in `if let`, `let ... else`, and `expect`
-- `->` for function types and lambdas
+- `->` for parenthesized function types and lambdas
 - `=>` for match cases
 - `with` for interface implementation, generic bounds, and record update
 

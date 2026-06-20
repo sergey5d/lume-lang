@@ -18,7 +18,7 @@ enum Either[L, R] {
         case Right(_) => false
     }
 
-    def map[T](f R -> T) Either[L, T] = match this {
+    def map[T](f (R) -> T) Either[L, T] = match this {
         case Left(value) => Left(value)
         case Right(value) => Right(f(value))
     }

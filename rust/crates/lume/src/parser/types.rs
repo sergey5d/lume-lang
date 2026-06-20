@@ -90,25 +90,61 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_type_ref(&mut self) -> Option<TypeRef> {
+        self.skip_newlines();
+        if self.at(TokenKind::LParen) {
+            return self.parse_parenthesized_or_function_type_ref();
+        }
+
         let left = self.parse_primary_type_ref()?;
-        if self.match_token(TokenKind::Arrow) {
+        if self.at(TokenKind::Arrow) {
+            self.error_at_current(
+                "invalid_function_type",
+                "function type parameters must be parenthesized; use '(T) -> U'",
+            );
+            self.advance();
             let ret = self.parse_type_ref()?;
-            let params = match left {
-                TypeRef::Tuple { fields, .. } => fields.into_iter().map(|field| field.ty).collect(),
-                other => vec![other],
-            };
-            let span = params
-                .first()
-                .map(TypeRef::span)
-                .unwrap_or(ret.span())
-                .cover(ret.span());
+            let span = left.span().cover(ret.span());
             return Some(TypeRef::Function {
-                params,
+                params: vec![left],
                 ret: Box::new(ret),
                 span,
             });
         }
         Some(left)
+    }
+
+    fn parse_parenthesized_or_function_type_ref(&mut self) -> Option<TypeRef> {
+        let start = self.consume(TokenKind::LParen, "expected '('")?;
+        self.skip_newlines();
+        let mut fields = Vec::new();
+        if !self.at(TokenKind::RParen) {
+            fields.push(self.parse_tuple_type_field()?);
+            while self.match_token(TokenKind::Comma) {
+                self.skip_newlines();
+                if self.at(TokenKind::RParen) {
+                    break;
+                }
+                fields.push(self.parse_tuple_type_field()?);
+            }
+        }
+        let end = self.consume(TokenKind::RParen, "expected ')' after tuple type")?;
+
+        if self.match_token(TokenKind::Arrow) {
+            let ret = self.parse_type_ref()?;
+            return Some(TypeRef::Function {
+                params: fields.into_iter().map(|field| field.ty).collect(),
+                ret: Box::new(ret.clone()),
+                span: start.cover(ret.span()),
+            });
+        }
+
+        if fields.len() == 1 && fields[0].name.is_none() {
+            return Some(fields.into_iter().next()?.ty);
+        }
+        Some(TypeRef::Tuple {
+            fields,
+            span: start.cover(end),
+        })
     }
 
     pub(super) fn parse_primary_type_ref(&mut self) -> Option<TypeRef> {
@@ -146,28 +182,8 @@ impl<'a> Parser<'a> {
                 span: start.cover(end),
             });
         }
-        if self.match_token(TokenKind::LParen) {
-            let start = self.previous_span();
-            self.skip_newlines();
-            let mut fields = Vec::new();
-            if !self.at(TokenKind::RParen) {
-                fields.push(self.parse_tuple_type_field()?);
-                while self.match_token(TokenKind::Comma) {
-                    self.skip_newlines();
-                    if self.at(TokenKind::RParen) {
-                        break;
-                    }
-                    fields.push(self.parse_tuple_type_field()?);
-                }
-            }
-            let end = self.consume(TokenKind::RParen, "expected ')' after tuple type")?;
-            if fields.len() == 1 && fields[0].name.is_none() {
-                return Some(fields.into_iter().next()?.ty);
-            }
-            return Some(TypeRef::Tuple {
-                fields,
-                span: start.cover(end),
-            });
+        if self.at(TokenKind::LParen) {
+            return self.parse_parenthesized_or_function_type_ref();
         }
 
         let (name, start) = self.expect_identifier("expected type name")?;

@@ -33,17 +33,17 @@ enum Either[L, R] {
        case Right(value) => value
     }
 
-    def map[X](f R -> X) Either[L, X] = match this {
+    def map[X](f (R) -> X) Either[L, X] = match this {
        case Left(value) => Left(value)
        case Right(value) => Right(f(value))
     }
 
-    def mapLeft[X](f L -> X) Either[X, R] = match this {
+    def mapLeft[X](f (L) -> X) Either[X, R] = match this {
        case Left(value) => Left(f(value))
        case Right(value) => Right(value)
     }
 
-    def flatMap[X](f R -> Either[L, X]) Either[L, X] = match this {
+    def flatMap[X](f (R) -> Either[L, X]) Either[L, X] = match this {
        case Left(value) => Left(value)
        case Right(value) => f(value)
     }

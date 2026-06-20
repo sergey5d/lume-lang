@@ -21,7 +21,7 @@ enum Option[T] {
 
     def getOrElse(defaultValue T) T = this.getOr(defaultValue)
 
-    def map[X](f T -> X) Option[X] = match this {
+    def map[X](f (T) -> X) Option[X] = match this {
         case Some(value) => Some(f(value))
         case Option.None => None()
     }

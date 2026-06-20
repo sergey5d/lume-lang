@@ -23,7 +23,7 @@ impl Adder {
 def main() Int {
     adder Adder = Adder { 5 }
 
-    lambda Int -> Int = x ->
+    lambda (Int) -> Int = x ->
        adder.add(x)
 
     OS.println(lambda(9))
@@ -31,7 +31,7 @@ def main() Int {
     lambda2 = (x Int) -> adder.add(x)
     OS.println(lambda2(19))
 
-    lambda3 Int -> Int = x -> {
+    lambda3 (Int) -> Int = x -> {
         adder.add(x)
     }
     OS.println(lambda3(29))

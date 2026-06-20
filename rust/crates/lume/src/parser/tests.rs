@@ -1449,6 +1449,57 @@ def wrap(input Map[Str, [Int]]) [[[(Str, Int)]]] {
 }
 
 #[test]
+fn parses_parenthesized_function_type_refs() {
+    let result = parse(
+        r#"
+def apply(f (Int) -> Int, both (Int, Str) -> Bool) Unit {}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match function.params[0].ty.as_ref().expect("first param type") {
+        TypeRef::Function { params, ret, .. } => {
+            assert_eq!(params.len(), 1);
+            assert!(matches!(&params[0], TypeRef::Named { name, .. } if name == "Int"));
+            assert!(matches!(ret.as_ref(), TypeRef::Named { name, .. } if name == "Int"));
+        }
+        other => panic!("expected single-param function type, got {other:#?}"),
+    }
+    match function.params[1].ty.as_ref().expect("second param type") {
+        TypeRef::Function { params, ret, .. } => {
+            assert_eq!(params.len(), 2);
+            assert!(matches!(&params[0], TypeRef::Named { name, .. } if name == "Int"));
+            assert!(matches!(&params[1], TypeRef::Named { name, .. } if name == "Str"));
+            assert!(matches!(ret.as_ref(), TypeRef::Named { name, .. } if name == "Bool"));
+        }
+        other => panic!("expected multi-param function type, got {other:#?}"),
+    }
+}
+
+#[test]
+fn rejects_unparenthesized_function_type_refs() {
+    let result = parse(
+        r#"
+def apply(f Int -> Int) Unit {}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_function_type"
+                && diag
+                    .message
+                    .contains("function type parameters must be parenthesized")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_single_param_typed_lambda_without_parens() {
     let result = parse(
         r#"
