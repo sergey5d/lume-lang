@@ -125,9 +125,9 @@ def run(rows List[Row]) Unit {
                     assert_eq!(binding.destructure, Some(DestructureKind::Record));
                     assert_eq!(binding.bindings.len(), 2);
                     assert_eq!(binding.bindings[0].name, "value");
-                    assert_eq!(binding.bindings[0].field_name, None);
+                    assert_eq!(binding.bindings[0].field_name.as_deref(), Some("value"));
                     assert_eq!(binding.bindings[1].name, "label");
-                    assert_eq!(binding.bindings[1].field_name, None);
+                    assert_eq!(binding.bindings[1].field_name.as_deref(), Some("label"));
                 }
                 other => panic!("expected for stmt, got {other:#?}"),
             },
@@ -142,7 +142,7 @@ fn parses_for_named_class_destructuring_with_braces() {
     let result = parse(
         r#"
 def run(users List[User]) Unit {
-    for { name @name, loc @location, _ @country } <- users {
+    for { name, location Str as loc, country as skipped } <- users {
         OS.println(name, loc)
     }
 }
@@ -162,7 +162,8 @@ def run(users List[User]) Unit {
                     assert_eq!(binding.bindings[0].field_name.as_deref(), Some("name"));
                     assert_eq!(binding.bindings[1].name, "loc");
                     assert_eq!(binding.bindings[1].field_name.as_deref(), Some("location"));
-                    assert_eq!(binding.bindings[2].name, "_");
+                    assert!(binding.bindings[1].ty.is_some());
+                    assert_eq!(binding.bindings[2].name, "skipped");
                     assert_eq!(binding.bindings[2].field_name.as_deref(), Some("country"));
                 }
                 other => panic!("expected for stmt, got {other:#?}"),
@@ -507,9 +508,9 @@ def run(box Box) Int {
                     assert_eq!(binding.destructure, Some(DestructureKind::Record));
                     assert_eq!(binding.bindings.len(), 2);
                     assert_eq!(binding.bindings[0].name, "value");
-                    assert_eq!(binding.bindings[0].field_name, None);
+                    assert_eq!(binding.bindings[0].field_name.as_deref(), Some("value"));
                     assert_eq!(binding.bindings[1].name, "label");
-                    assert_eq!(binding.bindings[1].field_name, None);
+                    assert_eq!(binding.bindings[1].field_name.as_deref(), Some("label"));
                 }
                 other => panic!("expected binding, got {other:#?}"),
             },
@@ -524,7 +525,7 @@ fn parses_named_brace_destructuring_binding() {
     let result = parse(
         r#"
 def run(user User) Str {
-    let { name @name, loc @location, _ @country } = user
+    let { name, location Str as loc, country as skipped } = user
     return name + loc
 }
 "#,
@@ -541,7 +542,8 @@ def run(user User) Str {
                     assert_eq!(binding.bindings[0].field_name.as_deref(), Some("name"));
                     assert_eq!(binding.bindings[1].name, "loc");
                     assert_eq!(binding.bindings[1].field_name.as_deref(), Some("location"));
-                    assert_eq!(binding.bindings[2].name, "_");
+                    assert!(binding.bindings[1].ty.is_some());
+                    assert_eq!(binding.bindings[2].name, "skipped");
                     assert_eq!(binding.bindings[2].field_name.as_deref(), Some("country"));
                 }
                 other => panic!("expected binding, got {other:#?}"),
@@ -550,6 +552,45 @@ def run(user User) Str {
         },
         other => panic!("expected function, got {other:#?}"),
     }
+}
+
+#[test]
+fn rejects_at_style_brace_destructuring() {
+    let result = parse(
+        r#"
+def run(user User) Unit {
+    let { @name } = user
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "unexpected_token"
+                && diag
+                    .message
+                    .contains("brace destructuring uses 'field', 'field Type', 'field as local', or 'field Type as local'")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_wildcard_brace_destructuring_entry() {
+    let result = parse(
+        r#"
+def run(user User) Unit {
+    let { _, location } = user
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "unexpected_token" && diag.message.contains("omit fields you do not need")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]

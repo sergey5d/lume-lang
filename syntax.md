@@ -1085,7 +1085,7 @@ for { name, location } <- users {
     OS.println(name, location)
 }
 
-for { loc @location, @name } <- users {
+for { location as loc, name } <- users {
     OS.println(name, loc)
 }
 ```
@@ -1136,7 +1136,7 @@ for (value, idx) <- rows {
 ```
 
 Class destructuring in `for` clauses uses braces and follows the same
-positional or named rules as `let { ... }`.
+name-based rules as `let { ... }`.
 
 Pattern-based `for` clauses are supported when the compiler can prove that
 every produced value matches the pattern. That proof may come from the item type
@@ -1280,49 +1280,46 @@ Class destructuring also uses braces:
 let { left Int, right Str } = Box { 9, "boxed" }
 ```
 
-Skip pattern:
+Aliases use `as`:
 
 ```txt
-let { left Int, _, right Str } = Crate { 1, "drop", "keep" }
+let { location Str as loc, name as user } = user
 ```
 
-Class destructuring currently has two conceptual modes:
-
-- positional destructuring
-- named destructuring
-
-Positional destructuring is the current behavior:
+Field pattern forms:
 
 ```txt
-let { a Int, b Str } = Box { 9, "boxed" }
-let { inferredLeft, inferredRight } = Box { 12, "class" }
+fieldName
+fieldName Type
+fieldName as localName
+fieldName Type as localName
 ```
 
-Rules for positional class destructuring:
+Brace destructuring for classes and anonymous records matches by field name.
+That means:
 
-- matching follows visible field order
-- local binding names on the left do not need to match field names
-- `_` skips a positional field
-- the same positional idea applies anywhere destructuring patterns are allowed
+- field order on the left does not matter
+- partial destructuring is allowed by omission
+- local aliases use `as`
+- hidden fields cannot be named
+- `_` is not needed; just leave fields out
 
-Named destructuring matches by field name instead of by field position.
-It allows reordering and partial extraction:
+Examples:
 
 ```txt
-let { @location, @name } = user
-let { loc @location, nam @name } = user
-let { _ @location, @name } = user
+let { name, location } = user
+let { location, name } = user
+let { location Str as loc, name as userName } = user
+let { name } = user
 ```
 
-Rules for named class destructuring:
+Invalid because the names do not match fields:
 
-- `@field` binds the field to a local with the same name
-- `local @field` binds field `field` to local `local`
-- `_ @field` skips a field by name
-- named destructuring may extract only a subset of fields
-- named destructuring may reorder fields freely
-- positional and named entries must not be mixed in the same `{ ... }`
-- hidden fields cannot be named in destructuring
+```txt
+let { usr, address } = user
+```
+
+The same name-based rule applies in `for { ... } <- items`.
 
 ## Operators
 

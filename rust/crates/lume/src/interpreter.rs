@@ -4814,11 +4814,11 @@ mod tests {
                     SecretUser("Ada", "secret-2", "London"),
                 )
 
-                for { userName, userLocation } <- users {
+                for { name as userName, location as userLocation } <- users {
                     OS.println("pos", userName, userLocation)
                 }
 
-                for { loc @location, @name } <- users {
+                for { location as loc, name } <- users {
                     OS.println("named", name, loc)
                 }
             }
@@ -4949,16 +4949,16 @@ $name
             def main() Unit {
                 user User = User { name: "Sergey", location: "Tampa", age: 37 }
 
-                let { name @name, @location } = user
+                let { name, location } = user
                 OS.println(name, location)
 
-                let { nameAgain @name } = user
+                let { name as nameAgain } = user
                 OS.println(nameAgain)
 
-                let { nam @name, loc @location } = user
+                let { name as nam, location as loc } = user
                 OS.println(nam, loc)
 
-                let { _ @location, @name } = user
+                let { name } = user
                 OS.println(name)
             }
             "#,

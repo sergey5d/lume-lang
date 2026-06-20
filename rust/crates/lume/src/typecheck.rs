@@ -2153,21 +2153,10 @@ impl<'a> Checker<'a> {
         &mut self,
         ty: &Ty,
         bindings: &[crate::ast::Binding],
-        span: crate::source::Span,
+        _span: crate::source::Span,
     ) -> Vec<Ty> {
-        let uses_named = bindings.iter().any(|binding| binding.field_name.is_some());
-        if !uses_named {
-            return self.destructure_slots(ty, bindings.len(), DestructureKind::Record);
-        }
         if matches!(ty, Ty::Unknown) {
             return vec![Ty::Unknown; bindings.len()];
-        }
-        if bindings.iter().any(|binding| binding.field_name.is_none()) {
-            self.add_error(
-                "invalid_destructure",
-                "cannot mix positional and named brace destructuring",
-                span,
-            );
         }
         let Some(fields) = self.destructure_record_fields(ty) else {
             return vec![Ty::Unknown; bindings.len()];
@@ -2180,7 +2169,22 @@ impl<'a> Checker<'a> {
         bindings
             .iter()
             .map(|binding| {
-                let Some(field_name) = binding.field_name.as_ref() else {
+                let field_name = binding
+                    .field_name
+                    .clone()
+                    .or_else(|| {
+                        if binding.name == "_" {
+                            self.add_error(
+                                "invalid_destructure",
+                                "brace destructuring matches by field name; omit fields you do not need",
+                                binding.span,
+                            );
+                            None
+                        } else {
+                            Some(binding.name.clone())
+                        }
+                    });
+                let Some(field_name) = field_name else {
                     return Ty::Unknown;
                 };
                 if !seen.insert(field_name.clone()) {
@@ -2190,7 +2194,7 @@ impl<'a> Checker<'a> {
                         binding.span,
                     );
                 }
-                let Some((field_ty, hidden)) = field_map.get(field_name).cloned() else {
+                let Some((field_ty, hidden)) = field_map.get(&field_name).cloned() else {
                     self.add_error(
                         "invalid_destructure",
                         format!(
@@ -6456,7 +6460,7 @@ class User {
 
 def main() Str {
     user User = User { name: "Sergey", location: "Tampa", age: 37 }
-    let { loc Str @location, name @name } = user
+    let { location Str as loc, name } = user
     return name + " from " + loc
 }
 "#,
@@ -6466,7 +6470,27 @@ def main() Str {
     }
 
     #[test]
-    fn positional_class_destructuring_skips_hidden_fields() {
+    fn allows_plain_class_destructuring_by_field_name_in_any_order() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+    location Str
+}
+
+def main() Str {
+    user User = User { name: "Sergey", location: "Tampa" }
+    let { location, name } = user
+    return name + " from " + location
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn named_class_destructuring_skips_hidden_fields() {
         let program = parse_inline(
             r#"
 class SecretUser {
@@ -6484,8 +6508,8 @@ impl SecretUser {
 }
 
 def main() Str {
-    let { userName Str, userLocation Str } = SecretUser("Sergey", "secret", "Tampa")
-    return userName + " from " + userLocation
+    let { location, name } = SecretUser("Sergey", "secret", "Tampa")
+    return name + " from " + location
 }
 "#,
         );
@@ -6504,7 +6528,7 @@ class User {
 
 def main() Unit {
     user User = User { name: "Sergey", location: "Tampa" }
-    let { @missing } = user
+    let { missing } = user
 }
 "#,
         );
@@ -6522,7 +6546,7 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_mixed_positional_and_named_brace_destructuring() {
+    fn allows_partial_brace_destructuring_by_omission() {
         let program = parse_inline(
             r#"
 class User {
@@ -6530,23 +6554,15 @@ class User {
     location Str
 }
 
-def main() Unit {
+def main() Str {
     user User = User { name: "Sergey", location: "Tampa" }
-    let { @name, location } = user
+    let { location } = user
+    return location
 }
 "#,
         );
         let result = check_program(&program);
-        assert!(
-            result.diagnostics.iter().any(|diag| {
-                diag.code == "invalid_destructure"
-                    && diag
-                        .message
-                        .contains("cannot mix positional and named brace destructuring")
-            }),
-            "{:#?}",
-            result.diagnostics
-        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]

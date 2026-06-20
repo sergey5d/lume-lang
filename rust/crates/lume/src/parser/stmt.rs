@@ -451,47 +451,51 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_brace_destructure_binding(&mut self, mutable: bool) -> Option<Binding> {
-        if self.match_token(TokenKind::At) {
-            let start = self.previous_span();
-            let (field_name, field_span) =
-                self.expect_identifier("expected field name after '@'")?;
-            let ty =
-                if self.binding_type_starts_on_same_line(field_span) && self.can_start_type_ref() {
-                    Some(self.parse_type_ref()?)
-                } else {
-                    None
-                };
-            let end = ty.as_ref().map(TypeRef::span).unwrap_or(field_span);
-            return Some(Binding {
-                name: field_name.clone(),
-                field_name: Some(field_name),
-                ty,
-                mutable,
-                span: start.cover(end),
-            });
+        if self.at(TokenKind::At) {
+            self.error_at_current(
+                "unexpected_token",
+                "brace destructuring uses 'field', 'field Type', 'field as local', or 'field Type as local'; '@field' is unsupported",
+            );
+            return None;
         }
 
-        let (name, start) = self.expect_binding_name("expected binding name")?;
-        let ty = if self.binding_type_starts_on_same_line(start) && self.can_start_type_ref() {
+        let (field_name, field_span) =
+            self.expect_identifier("expected field name in brace destructuring")?;
+        if field_name == "_" {
+            self.error_at_current(
+                "unexpected_token",
+                "brace destructuring matches by field name; omit fields you do not need",
+            );
+            return None;
+        }
+
+        let ty = if self.binding_type_starts_on_same_line(field_span) && self.can_start_type_ref() {
             Some(self.parse_type_ref()?)
         } else {
             None
         };
-        let mut end = ty.as_ref().map(TypeRef::span).unwrap_or(start);
-        let field_name = if self.match_token(TokenKind::At) {
-            let (field_name, field_span) =
-                self.expect_identifier("expected field name after '@'")?;
-            end = end.cover(field_span);
-            Some(field_name)
+        let typed_span = ty.as_ref().map(TypeRef::span).unwrap_or(field_span);
+
+        let (name, end) = if self.match_keyword(Keyword::As) {
+            let (alias, alias_span) =
+                self.expect_binding_name("expected local binding name after 'as'")?;
+            if alias == "_" {
+                self.error_at_current(
+                    "unexpected_token",
+                    "brace destructuring matches by field name; omit fields you do not need",
+                );
+                return None;
+            }
+            (alias, alias_span)
         } else {
-            None
+            (field_name.clone(), typed_span)
         };
         Some(Binding {
             name,
-            field_name,
+            field_name: Some(field_name),
             ty,
             mutable,
-            span: start.cover(end),
+            span: field_span.cover(end),
         })
     }
 
@@ -583,9 +587,13 @@ impl<'a> Parser<'a> {
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
         };
-        if !parser.match_token(TokenKind::LBrace)
-            || !(parser.at(TokenKind::Identifier) || parser.at(TokenKind::At))
-        {
+        if !parser.match_token(TokenKind::LBrace) {
+            return false;
+        }
+        if parser.at(TokenKind::At) || parser.is_placeholder_identifier() {
+            return true;
+        }
+        if !parser.at(TokenKind::Identifier) {
             return false;
         }
         if parser.parse_brace_destructure_binding_list(false).is_none() {
@@ -604,9 +612,13 @@ impl<'a> Parser<'a> {
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
         };
-        if !parser.match_token(TokenKind::LBrace)
-            || !(parser.at(TokenKind::Identifier) || parser.at(TokenKind::At))
-        {
+        if !parser.match_token(TokenKind::LBrace) {
+            return false;
+        }
+        if parser.at(TokenKind::At) || parser.is_placeholder_identifier() {
+            return true;
+        }
+        if !parser.at(TokenKind::Identifier) {
             return false;
         }
         if parser.parse_brace_destructure_binding_list(false).is_none() {

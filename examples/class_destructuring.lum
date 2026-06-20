@@ -5,15 +5,15 @@
 # class pair 24 class-pair
 # class skip only class-only
 # class skip 16 class-skip
-# hidden positional Sergey Tampa
-# for positional Sergey Tampa
-# for positional Ada London
+# hidden named Sergey Tampa
+# for named plain Sergey Tampa
+# for named plain Ada London
 # named Sergey Tampa
 # for named Sergey Tampa
 # for named Ada London
 # named same Sergey
 # named alias Tampa Sergey
-# named skip Sergey
+# partial Sergey
 # 0
 
 class Box {
@@ -48,52 +48,52 @@ impl SecretUser {
 }
 
 def main() Int {
-    let { e Int, f Str } = Box { 9, "boxed" }
+    let { value Int as e, label Str as f } = Box { 9, "boxed" }
     OS.println("class", e, f)
 
-    let { inferredClassLeft, inferredClassRight } = Box { 12, "class" }
+    let { value as inferredClassLeft, label as inferredClassRight } = Box { 12, "class" }
     OS.println("class inferred", inferredClassLeft, inferredClassRight)
 
-    let { mixedClassLeft Int, mixedClassRight } = Box { 13, "typed" }
+    let { value Int as mixedClassLeft, label as mixedClassRight } = Box { 13, "typed" }
     OS.println("class mixed", mixedClassLeft, mixedClassRight)
 
-    let { classPairLeft, classPairRight } = Box { 24, "class-pair" }
+    let { value as classPairLeft, label as classPairRight } = Box { 24, "class-pair" }
     OS.println("class pair", classPairLeft, classPairRight)
 
-    let { _, skippedOnlyClassValue } = Box { 25, "class-only" }
+    let { label as skippedOnlyClassValue } = Box { 25, "class-only" }
     OS.println("class skip only", skippedOnlyClassValue)
 
-    let { skippedClassLeft Int, _, skippedClassRight Str } = Crate { 16, "drop", "class-skip" }
+    let { value Int as skippedClassLeft, label Str as skippedClassRight } = Crate { 16, "drop", "class-skip" }
     OS.println("class skip", skippedClassLeft, skippedClassRight)
 
-    let { publicName, publicLocation } = SecretUser("Sergey", "secret", "Tampa")
-    OS.println("hidden positional", publicName, publicLocation)
+    let { name as publicName, location as publicLocation } = SecretUser("Sergey", "secret", "Tampa")
+    OS.println("hidden named", publicName, publicLocation)
 
     users = List(
         SecretUser("Sergey", "secret-1", "Tampa"),
         SecretUser("Ada", "secret-2", "London"),
     )
-    for { userName, userLocation } <- users {
-        OS.println("for positional", userName, userLocation)
+    for { name as userName, location as userLocation } <- users {
+        OS.println("for named plain", userName, userLocation)
     }
 
     user User = User { name: "Sergey", location: "Tampa", age: 37 }
 
-    let { name @name, @location } = user
+    let { name, location } = user
     OS.println("named", name, location)
 
-    for { loc @location, loopName @name } <- users {
+    for { location as loc, name as loopName } <- users {
         OS.println("for named", loopName, loc)
     }
 
-    let { nameAgain @name } = user
+    let { name as nameAgain } = user
     OS.println("named same", nameAgain)
 
-    let { loc @location, nam @name } = user
+    let { location as loc, name as nam } = user
     OS.println("named alias", loc, nam)
 
-    let { _ @location, userName @name } = user
-    OS.println("named skip", userName)
+    let { name as userName } = user
+    OS.println("partial", userName)
 
     0
 }

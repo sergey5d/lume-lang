@@ -2133,30 +2133,15 @@ impl<'a> FunctionLowerer<'a> {
         });
     }
 
-    fn destructure_field_names(&self, expr: &Expr, bindings: &[ast::Binding]) -> Vec<String> {
-        let positional_fields = if let Expr::Call { callee, .. } = expr {
-            if let Some(path) = expr_path(callee) {
-                self.lookup_destructured_type_fields(&path, bindings.len())
-                    .map(|(_, fields)| fields)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+    fn destructure_field_names(&self, _expr: &Expr, bindings: &[ast::Binding]) -> Vec<String> {
         bindings
             .iter()
-            .enumerate()
-            .map(|(index, binding)| {
+            .map(|binding| {
                 binding
                     .field_name
                     .clone()
-                    .or_else(|| {
-                        positional_fields
-                            .as_ref()
-                            .and_then(|fields| fields.get(index).cloned())
-                    })
-                    .unwrap_or_else(|| format!("_{}", index + 1))
+                    .or_else(|| (binding.name != "_").then(|| binding.name.clone()))
+                    .unwrap_or_else(|| "_".to_string())
             })
             .collect()
     }
@@ -2164,12 +2149,12 @@ impl<'a> FunctionLowerer<'a> {
     fn destructure_field_names_from_bindings(&self, bindings: &[ast::Binding]) -> Vec<String> {
         bindings
             .iter()
-            .enumerate()
-            .map(|(index, binding)| {
+            .map(|binding| {
                 binding
                     .field_name
                     .clone()
-                    .unwrap_or_else(|| format!("_{}", index + 1))
+                    .or_else(|| (binding.name != "_").then(|| binding.name.clone()))
+                    .unwrap_or_else(|| "_".to_string())
             })
             .collect()
     }
