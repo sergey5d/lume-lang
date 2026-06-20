@@ -4,7 +4,7 @@ use crate::{
     Diagnostic, Span,
     ast::TypeKind,
     interpreter::{
-        Interpreter, Value, iterable_map_entries, iterable_values, map_put_entry, values_equal,
+        Interpreter, Value, iterable_values, map_put_entry, values_equal,
     },
     ir,
 };
@@ -21,7 +21,6 @@ pub(super) fn define() -> RuntimeType {
         fields: Vec::new(),
         field_init: None,
         methods: vec![
-            builtin_method(0, "++", vec![ir::Type::Unknown], map_concat),
             builtin_method(
                 1,
                 "put",
@@ -64,23 +63,6 @@ fn map_entries(receiver: &Value) -> Rc<RefCell<Vec<(Value, Value)>>> {
         unreachable!();
     };
     entries.clone()
-}
-
-fn map_concat(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    let [other] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "operator ++ expects 1 argument"));
-    };
-    let entries = map_entries(&receiver);
-    let mut next = entries.borrow().clone();
-    for (key, value) in iterable_map_entries(other.clone(), span, interpreter)? {
-        map_put_entry(&mut next, key, value);
-    }
-    Ok(Value::map(next))
 }
 
 fn map_put(

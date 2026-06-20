@@ -18,7 +18,7 @@
 
 ```txt
 enum MyConstant {
-    someId Int = 1++
+    someId Int = auto
 
     case Constant1
     case Constant2
@@ -26,7 +26,7 @@ enum MyConstant {
 ```
 
   - Open questions:
-    - whether `1++` is the right syntax, or whether another explicit auto-increment marker would read better
+    - whether `auto` is the right marker, or whether another explicit auto-increment marker would read better
     - whether the generated values should be exposed through a built-in property like `ordinal` instead of a user-declared field
     - whether explicit overrides should be allowed in the same enum
     - how this should interact with non-`Int` enum-wide fields

@@ -19,8 +19,6 @@ pub(super) fn define() -> RuntimeType {
         fields: Vec::new(),
         field_init: None,
         methods: vec![
-            builtin_method(0, ":+", vec![ir::Type::Unknown], set_plus),
-            builtin_method(1, "++", vec![ir::Type::Unknown], set_concat),
             builtin_method(2, "add", vec![ir::Type::Unknown], set_add),
             builtin_method(14, "addAll", vec![ir::Type::Unknown], set_add_all),
             builtin_method(3, "iterator", Vec::new(), set_iterator),
@@ -57,39 +55,6 @@ fn set_items(receiver: &Value) -> Rc<RefCell<Vec<Value>>> {
         unreachable!();
     };
     items.clone()
-}
-
-fn set_plus(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    let [value] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "operator :+ expects 1 argument"));
-    };
-    let items = set_items(&receiver);
-    let mut next = items.borrow().clone();
-    push_unique(&mut next, value.clone());
-    Ok(Value::set(next))
-}
-
-fn set_concat(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    let [other] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "operator ++ expects 1 argument"));
-    };
-    let items = set_items(&receiver);
-    let rhs = iterable_values(other.clone(), span, interpreter)?;
-    let mut next = items.borrow().clone();
-    for value in rhs {
-        push_unique(&mut next, value);
-    }
-    Ok(Value::set(next))
 }
 
 fn set_add(

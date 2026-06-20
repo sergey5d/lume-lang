@@ -1371,8 +1371,6 @@ Operator declarations use symbolic `def` forms on interfaces, classes, and enums
 def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
 def -() Vec = Vec(-this[0], -this[1])
 def [](index Int) Int = this.items[index]
-def :+(value Int) Vec = ...
-def ++(other Vec) Vec = ...
 ```
 
 Current operator overloading constraints:
@@ -1380,13 +1378,14 @@ Current operator overloading constraints:
 - Allowed to overload:
   - arithmetic: `+`, `-`, `*`, `/`, `%`
   - unary: unary `-`
-  - collection-oriented: `[]`, `:+`, `:-`, `++`, `--`
-  - symbolic custom forms with no built-in language meaning: `|`, `&`, `>>`, `<<`, `~`, `::`
+  - indexing: `[]`
+  - symbolic custom forms with no built-in collection meaning: `:+`, `:-`, `++`, `--`, `|`, `&`, `>>`, `<<`, `~`, `::`
 - Not allowed to overload:
   - logical operators: `&&`, `||`, `!`
   - equality operators: `==`, `!=`
 - Comparison operators are intended to work through `Ordering[T]` rather than custom operator declarations.
 - Equality is intended to work through `Eq[T]` rather than custom operator declarations.
+- Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
 
 Newline continuation:
 

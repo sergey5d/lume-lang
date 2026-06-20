@@ -3398,21 +3398,10 @@ impl<'a> Interpreter<'a> {
                 (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs | rhs)),
                 _ => Err(self.runtime_error(span, "binary '|' expects Int values")),
             },
-            ir::BinaryOp::Concat => match (left, right) {
-                (Value::List(lhs), Value::List(rhs)) => {
-                    let mut items = lhs.borrow().clone();
-                    items.extend(rhs.borrow().iter().cloned());
-                    Ok(Value::List(Rc::new(RefCell::new(items))))
-                }
-                (Value::Set(lhs), Value::Set(rhs)) => {
-                    let mut items = lhs.borrow().clone();
-                    for value in rhs.borrow().iter().cloned() {
-                        push_unique(&mut items, value);
-                    }
-                    Ok(Value::Set(Rc::new(RefCell::new(items))))
-                }
-                _ => Err(self.runtime_error(span, "binary '++' expects List or Set values")),
-            },
+            ir::BinaryOp::Concat => Err(self.runtime_error(
+                span,
+                "binary '++' requires an overloaded method",
+            )),
         }
     }
 
@@ -4649,25 +4638,28 @@ mod tests {
                 def [](index Int) Int = this.items[index]
                 def :+(value Int) Vec = Vec(this[0] + value, this[1] + value)
                 def :-(value Int) Vec = Vec(this[0] - value, this[1] - value)
+                def ++(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
                 def --(other Vec) Vec = Vec(this[0] - other[0], this[1] - other[1])
             }
 
             def main() Unit {
                 items = List(1, 2)
-                appended = items :+ 3
-                merged = appended ++ List(4, 5)
-                OS.println(merged[4])
+                items.add(3)
+                items.addAll(List(4, 5))
+                OS.println(items[4])
 
                 seen = Set(1, 2)
-                all = seen ++ Set(3)
-                OS.println(all.size())
+                seen.add(3)
+                OS.println(seen.size())
 
-                pairs = Map("a": 1) ++ Map("b": 2)
+                pairs = Map("a": 1)
+                pairs.put("b", 2)
                 OS.println(pairs.size())
 
                 left Vec = Vec(5, 6)
                 OS.println((left :+ 2)[0])
                 OS.println((left :- 1)[1])
+                OS.println((left ++ Vec(1, 2))[1])
                 OS.println((left -- Vec(1, 2))[0])
             }
             "#,
@@ -4675,7 +4667,7 @@ mod tests {
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "5\n3\n2\n7\n5\n4\n");
+        assert_eq!(run.output, "5\n3\n2\n7\n5\n8\n4\n");
         assert_eq!(run.return_value, None);
     }
 

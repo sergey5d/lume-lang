@@ -19,8 +19,6 @@ pub(super) fn define() -> RuntimeType {
         fields: Vec::new(),
         field_init: None,
         methods: vec![
-            builtin_method(0, ":+", vec![ir::Type::Unknown], list_append_copy),
-            builtin_method(1, "++", vec![ir::Type::Unknown], list_concat),
             builtin_method(2, "append", vec![ir::Type::Unknown], list_append_mut),
             builtin_method(29, "add", vec![ir::Type::Unknown], list_append_mut),
             builtin_method(30, "addAll", vec![ir::Type::Unknown], list_add_all),
@@ -104,37 +102,6 @@ fn values_match(
     interpreter.ensure_observable_value(left, span, context)?;
     interpreter.ensure_observable_value(right, span, context)?;
     Ok(values_equal(left, right))
-}
-
-fn list_append_copy(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    let [value] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "operator :+ expects 1 argument"));
-    };
-    let items = list_items(&receiver);
-    let mut next = items.borrow().clone();
-    next.push(value.clone());
-    Ok(Value::list(next))
-}
-
-fn list_concat(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    let [other] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "operator ++ expects 1 argument"));
-    };
-    let items = list_items(&receiver);
-    let rhs = iterable_values(other.clone(), span, interpreter)?;
-    let mut next = items.borrow().clone();
-    next.extend(rhs);
-    Ok(Value::list(next))
 }
 
 fn list_append_mut(

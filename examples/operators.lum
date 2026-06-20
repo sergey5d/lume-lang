@@ -30,11 +30,11 @@ def main() Unit {
     OS.println(neg[0])
 
     items = List(1, 2)
-    items2 = items :+ 3
-    merged = items2 ++ List(4, 5)
-    OS.println(merged[4])
+    items.add(3)
+    items.addAll(List(4, 5))
+    OS.println(items[4])
 
     seen = Set(1, 2)
-    all = seen ++ Set(3)
-    OS.println(all.size())
+    seen.add(3)
+    OS.println(seen.size())
 }

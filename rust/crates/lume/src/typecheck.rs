@@ -4013,13 +4013,89 @@ impl<'a> Checker<'a> {
                 }
                 Ty::bool()
             }
-            BinaryOp::Concat => left.clone(),
+            BinaryOp::Concat => self.check_symbolic_binary_operator(left, "++", right, span),
             BinaryOp::Remove
             | BinaryOp::Append
             | BinaryOp::Prepend
-            | BinaryOp::Compose
-            | BinaryOp::Colon => Ty::Unknown,
+            | BinaryOp::Compose => {
+                let method = match op {
+                    BinaryOp::Remove => "--",
+                    BinaryOp::Append => ":+",
+                    BinaryOp::Prepend => ":-",
+                    BinaryOp::Compose => "::",
+                    _ => unreachable!(),
+                };
+                self.check_symbolic_binary_operator(left, method, right, span)
+            }
+            BinaryOp::Colon => Ty::Unknown,
         }
+    }
+
+    fn check_symbolic_binary_operator(
+        &mut self,
+        left: &Ty,
+        method: &str,
+        right: &Ty,
+        span: crate::source::Span,
+    ) -> Ty {
+        if matches!(left, Ty::Unknown) {
+            return Ty::Unknown;
+        }
+
+        let Some(methods) = self.member_method_sigs(left, method) else {
+            self.add_error(
+                "unknown_member",
+                format!(
+                    "type '{}' has no overloaded '{}' operator",
+                    left.describe(),
+                    method
+                ),
+                span,
+            );
+            return Ty::Unknown;
+        };
+
+        let mut arity_matched = false;
+        for method_sig in methods {
+            let [param] = method_sig.params.as_slice() else {
+                continue;
+            };
+            if param.variadic {
+                continue;
+            }
+            arity_matched = true;
+
+            let mut subst = HashMap::new();
+            infer_type_subst(&param.ty, right, &mut subst);
+            let expected = materialize_type(&substitute_type(&param.ty, &subst));
+            if self.is_assignable(right, &expected) {
+                return materialize_type(&substitute_type(&method_sig.ret, &subst));
+            }
+        }
+
+        if arity_matched {
+            self.add_error(
+                "invalid_argument_type",
+                format!(
+                    "operator '{}' on type '{}' cannot accept '{}'",
+                    method,
+                    left.describe(),
+                    right.describe()
+                ),
+                span,
+            );
+        } else {
+            self.add_error(
+                "no_matching_overload",
+                format!(
+                    "operator '{}' on type '{}' requires a single non-variadic argument",
+                    method,
+                    left.describe()
+                ),
+                span,
+            );
+        }
+        Ty::Unknown
     }
 
     fn check_else_expr_branch(&mut self, branch: &ElseExprBranch) -> Ty {

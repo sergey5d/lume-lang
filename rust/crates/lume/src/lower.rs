@@ -4206,6 +4206,7 @@ mod tests {
             impl Vec {
                 def :+(value Int) Vec = this
                 def :-(value Int) Vec = this
+                def ++(other Vec) Vec = this
                 def --(other Vec) Vec = this
             }
 
@@ -4215,7 +4216,7 @@ mod tests {
                 a = left :+ 1
                 b = left :- 1
                 c = left -- right
-                d = List(1) ++ List(2)
+                d = left ++ right
             }
             "#,
         );
