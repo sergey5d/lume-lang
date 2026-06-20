@@ -3,13 +3,13 @@
 ## Builtin Descriptor Follow-Ups
 
 - Revisit `Set[T]` / `Map[K, V]` collection API breadth.
-  - `iterator`, `map`, `flatMap`, `filter`, `fold`, `reduce`, `exists`, `forAll`, and `forEach` now exist in `stdlib/predef` and are wired through the runtime.
+  - `iterator`, `map`, `flatMap`, `filter`, `fold`, `reduce`, `exists`, `forAll`, and `forEach` now exist in stdlib interfaces and are wired through the runtime.
 
 - Revisit `Array[T]` collection API shape.
   - `map`, `exists`, `forAll`, and `forEach` now exist and fit fixed-size arrays reasonably well.
-  - `flatMap`, `filter`, `zip`, and `zipWithIndex` still need more thought.
-  - In particular, `zipWithIndex` producing another `Array[...]` may be the wrong result shape for a fixed-size collection surface.
-  - Decide whether those APIs should instead return `List[...]`, `Iterable[...]`, or be omitted from `Array` entirely.
+  - `zip` and `zipWithIndex` exist, but their fixed-size result shape still deserves scrutiny.
+  - `flatMap` and `filter` still need more thought.
+  - Decide whether those APIs should return `List[...]`, `Iterable[...]`, fixed-size `Array[...]`, or be omitted from `Array` entirely.
 
 ## Enum Follow-Ups
 
@@ -48,9 +48,9 @@ fun { x, y ->
 
 - Keep tuple conversion separate from anonymous-record conversion.
   - Current intended rule:
-    - class/record -> tuple is not implicit
+    - class/anonymous-record shape -> tuple is not implicit
   - Open question:
-    - whether to add an explicit `tuple(instance)` construct later for class/record -> tuple projection
+    - whether to add an explicit `tuple(instance)` construct later for class/anonymous-record projection
     - whether anonymous record -> tuple should remain unsupported, or use the same explicit `tuple(instance)` surface later
 
 - Consider explicit anonymous-record-to-class conversion syntax such as `anon as User`.

@@ -1,22 +1,12 @@
 # Match Problems
 
-This note captures the main remaining work for `match` after the current generic type-pattern erasure decision.
+This note captures the main remaining work for `match` after nested patterns,
+guards, `partial`, and generic type-pattern erasure landed.
 
-## 1. Nested Patterns
+## 1. Unreachable-Case Detection
 
-The biggest remaining expressive gap is nested patterns.
-
-Examples:
-
-- enum case inside another constructor pattern
-- tuple pattern inside enum/class/record pattern arguments
-- class/record extractor patterns nested inside other patterns
-
-This is the main feature still missing if `match` is meant to cover most structured destructuring use cases directly.
-
-## 2. Unreachable-Case Detection
-
-The checker handles basic exhaustiveness, but it still does not report unreachable later cases.
+The checker handles basic exhaustiveness, but it still does not report
+unreachable later cases.
 
 Examples:
 
@@ -26,51 +16,21 @@ Examples:
 
 This would make diagnostics much better and help `match` feel more complete.
 
-## 3. Final Totality Story
-
-The intended direction is mostly clear:
-
-- `match` should stay exhaustive / total
-- `try match` should stay partial
-- plain `match` should not fall back to runtime "no match" behavior
-
-But this should still be treated as a final language-design decision and documented clearly as part of the finished surface.
-
-## 4. Deeper Exhaustiveness
+## 2. Deeper Exhaustiveness
 
 Enum exhaustiveness exists, but it is still fairly shallow.
 
 Remaining work:
 
-- nested exhaustiveness
+- nested enum exhaustiveness
+- finite-domain tuple exhaustiveness
 - stronger missing-case reporting
-- better interaction with richer future pattern forms
+- better interaction with guards and richer pattern forms
 
-This becomes more important once nested patterns are added.
+Guards should probably continue to not contribute coverage, because that keeps
+the totality model simple and predictable.
 
-## 5. Pattern-Lambda Sugar
-
-Core `match` already works in placeholder-lambda form:
-
-```txt
-list.map(match _ {
-    SomeX(x) => x + 1
-    NoneX => 0
-})
-```
-
-Possible later shorthand:
-
-```txt
-list.map(match {
-    SomeX(x) => x + 1
-    NoneX => 0
-})
-```
-
-This is not a correctness blocker, but it is still open ergonomics work.
-
-## 6. Generic Type-Pattern Policy
+## 3. Generic Type-Pattern Policy
 
 This part is now mostly settled:
 
@@ -78,4 +38,37 @@ This part is now mostly settled:
 - runtime type patterns are erased
 - generic arguments inside runtime type patterns are rejected
 
-What still remains is mostly documentation and examples, so the rule feels deliberate rather than incidental.
+What still remains is mostly documentation and examples, so the rule feels
+deliberate rather than incidental.
+
+## 4. Pattern-Lambda Sugar
+
+Core `match` works inside explicit lambdas:
+
+```txt
+list.map(value -> match value {
+    case SomeX(x) => x + 1
+    case NoneX => 0
+})
+```
+
+Possible later shorthand, if we ever want contextual lambda sugar:
+
+```txt
+list.map(match {
+    case SomeX(x) => x + 1
+    case NoneX => 0
+})
+```
+
+This is not a correctness blocker, but it is still open ergonomics work.
+
+## 5. Current Settled Surface
+
+The main user-facing match story is now:
+
+- `match` is exhaustive / total
+- `partial` is the partial form and returns `Option[...]`
+- guards are supported on top-level cases
+- nested enum, tuple, and class extractor patterns are supported
+- plain `match` should not fall back to runtime "no match" behavior

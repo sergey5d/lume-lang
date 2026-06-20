@@ -320,7 +320,7 @@ Why:
 
 ### Phase 5: Extract `items.rs`
 
-Move module/import/top-level declaration parsing.
+Move module/use/top-level declaration parsing.
 
 Why:
 

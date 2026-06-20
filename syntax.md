@@ -385,11 +385,11 @@ Rules for field-based class construction:
 - named braces check only visible public fields
 - in named braces, public fields without initializers are required
 - in named braces, public fields with initializers are optional
-- in named braces, private fields are never part of the accepted shape
-- private fields without initializers block structural construction entirely
+- in named braces, hidden fields are never part of the accepted shape
+- hidden fields without initializers block structural construction entirely
 - positional braces follow declared public-field order
 - positional braces may omit only a trailing suffix of public fields that already have initializers
-- positional braces are rejected when a private initialized field appears before a later public field
+- positional braces are rejected when a hidden initialized field appears before a later public field
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
@@ -1349,7 +1349,7 @@ Boolean:
 Other operators / constructs:
 
 - `is` for runtime type checks
-- `<-` for `for` iteration and `if` option binding
+- `<-` for `for` iteration and success-case extraction in `if let`, `let ... else`, and `expect`
 - `->` for function types and lambdas
 - `=>` for match cases
 - `with` for interface implementation, generic bounds, and record update
@@ -1365,7 +1365,7 @@ SomeX(x) => x
 class Box[T] with Named
 ```
 
-Operator declarations use symbolic `def` forms on interfaces, classes, records, and enums:
+Operator declarations use symbolic `def` forms on interfaces, classes, and enums:
 
 ```txt
 def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])

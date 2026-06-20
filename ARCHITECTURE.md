@@ -82,7 +82,7 @@ like grouped expressions, parser call style flags, and lambda body variants.
 
 `resolver.rs` handles source loading and early semantic structure:
 
-- loads modules and imports into a `ModuleGraph`
+- loads modules and `use` declarations into a `ModuleGraph`
 - reads ambient stdlib declarations from `stdlib/`
 - checks symbol visibility and module/member access
 - performs early name-binding and structural diagnostics
@@ -97,7 +97,7 @@ like grouped expressions, parser call style flags, and lambda body variants.
 - bindings and assignments
 - calls, methods, constructors, and named arguments
 - control-flow forms such as `if`, `match`, `for`, and `let`
-- import usage and visibility rules
+- `use` declaration and visibility rules
 
 `check_program(...)` works on an in-memory AST program.
 `check_path(...)` is the full module-aware path that the CLI and runtime use.

@@ -9,28 +9,30 @@ same broad pipeline while moving toward a runtime that is easier to optimize:
 source
 -> lexer
 -> parser
--> semantic checks
--> type checking
+-> resolver
+-> type checker
+-> body-level Core desugaring
 -> lowered IR
+-> runtime metadata
 -> interpreter
 ```
 
 ## Current Scope
 
-The Rust implementation now has eight real building blocks:
+The Rust implementation now has these real building blocks:
 
 - a lexer that tokenizes Lume source and reports lexical diagnostics
 - a recursive-descent parser that builds a source-shaped AST
 - a semantic resolver that performs early name binding and structure checks
-- a first-pass type checker for values, calls, constructors, imports, and
+- a first-pass type checker for values, calls, constructors, use declarations, and
   common control-flow forms
 - a real interpreter-oriented IR with program, type, global, function, local,
   block, statement, terminator, operand, and rvalue structures
-- a first lowering pass that maps declarations plus real control-flow bodies
-  into that IR
+- a Core desugaring pass that normalizes callable bodies before lowering
+- a lowering pass that maps declarations plus Core bodies into IR
 - a real IR interpreter that executes lowered multi-module programs with
   globals, user-defined types/methods, `match`, `for`, `for ... yield`,
-  `unwrap`, closures, record updates, imports, and the stdlib/runtime helpers
+  `try`, `expect`, closures, record updates, use declarations, and the stdlib/runtime helpers
   needed by the checked-in examples
 - a repo-wide Rust parity test that runs non-skipped `examples/*.lum` files and
   validates `# EXPECT:`, `# FAIL:`, and `# FAIL_REGEX:` headers
@@ -51,11 +53,14 @@ rust/
         diagnostic.rs
         lexer.rs
         ast.rs
-        parser.rs
+        parser/
         resolver.rs
+        core.rs
+        desugar.rs
         typecheck.rs
         ir.rs
         lower.rs
+        runtime/
         interpreter.rs
 ```
 
@@ -75,14 +80,15 @@ The `tokens` command prints the token stream with spans.
 The `parse` command lexes, parses, and pretty-prints the AST for the requested
 file. Right now it covers:
 
-- packages and imports
+- modules and use declarations
 - top-level functions, types, impl blocks, and top-level bindings
-- class/record/object/interface/enum declarations
+- class/single/interface/enum declarations
 - fields, methods, enum cases, and impl methods
-- blocks, bindings, assignments, `if`, `while`, `for`, `return`, and `break`
+- blocks, bindings, assignments, `if`, `while`, `for`, `defer`, `return`,
+  `break`, and `continue`
 - calls, member access, indexing, lists, tuples, lambdas, and `if` expressions
 
-The `check` command resolves and type-checks the requested file and its imports,
+The `check` command resolves and type-checks the requested file and its `use` dependencies,
 installs ambient stdlib names from `stdlib/*.lum`, and reports diagnostics such
 as:
 
@@ -95,7 +101,7 @@ as:
 - invalid assignment and binding types
 - incorrect constructor arity and named arguments
 - invalid `break` outside a loop
-- unknown imported module members
+- unknown used module members
 
 The library also has a `lower_program(...)` entry point that produces the new
 IR used by the interpreter and the Rust tests.
@@ -104,9 +110,10 @@ The `run` command executes the lowered IR for the current Rust implementation.
 It supports:
 
 - top-level globals and entry functions (`main` by default, then `run`)
-- user-defined classes/records/objects/enums with methods
-- `if`, `while`, `match`, `for`, `for ... yield`, `return`, and `break`
-- `unwrap` over `Option`, `Result`, and `Either`
+- user-defined classes/singles/enums with methods
+- `if`, `while`, `match`, `partial`, `for`, `for ... yield`, `defer`,
+  `return`, `break`, and `continue`
+- `try` propagation and `expect` assertions over `Option`, `Result`, and `Either`
 - builtin constructors and helpers like `Range`, `List`, `Some`, `None`,
   `Ok`, `Err`, `Left`, `Right`, and `OS.println`
 - imported-module execution through the resolver/runtime merge path

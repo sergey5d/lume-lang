@@ -12,6 +12,8 @@ This file captures the main language gaps and near-term design directions.
 - literal/value patterns
 - class extractor patterns
 - simple type patterns
+- guards
+- nested enum / tuple / class extractor patterns
 
 Still missing:
 - generic type-aware type patterns at runtime
@@ -45,13 +47,15 @@ This reduces boilerplate and helps stdlib types feel native.
 
 The language now has `for ... yield`, `map`, `flatMap`, `filter`, `fold`, `reduce`, `exists`, `forAll`, and `forEach`, but stdlib collection ergonomics still need growth.
 
-Likely missing methods:
-- clearer `Map` indexing ergonomics:
-  - `map[key]` should likely act as lookup and return `Option[V]`
-  - `map[key] := value` should likely act as set/update
-  - this is intentionally different from list/array indexing, where `[]` may still return the element directly
+Current collection conveniences:
+- `Map` indexing exists: `map[key]` acts as lookup and returns `Option[V]`
+- `List` and `Array` have `zip` and `zipWithIndex`
+- `List`, `Set`, and `Map` have broad higher-order method coverage
+
+Likely remaining gaps:
+- clearer `Map` update ergonomics beyond `put`
 - maybe collection partitioning helpers
-- maybe zip / unzip style helpers later
+- maybe unzip style helpers later
 
 These can mostly live in the stdlib, but may still need runtime support in places.
 
@@ -75,7 +79,7 @@ Constraint:
 
 Finalized policy:
 - operator overloading is limited to interfaces, classes, and enums
-- objects do not participate
+- singles do not participate
 - top-level functions do not participate
 
 ### 6. Module / Visibility Polish
@@ -89,12 +93,12 @@ Settled direction:
 - mutable module state should not be exposed directly as used variables
 
 Still open:
-- whether object members should ever be usable directly, for example using `OS.println`-style names without using the whole object surface
+- whether singleton methods should ever be usable directly beyond explicit `use module/Single/*` and builtin `OS` prelude behavior
 - if both a wide module use and a renamed selective use target the same module, the wide use should come first and the `as` use should come after it
 
-## Longer-OS Ideas
+## Longer-Term Ideas
 
-### 9. Result / Either Style Error Values
+### 7. Result / Either Style Error Values
 
 `Option`, `Result`, `Either`, and `try`-based short-circuit propagation now exist.
 
@@ -120,7 +124,7 @@ Current behavior:
 - `Either[L, ...]` can propagate only into `Either[L2, ...]` when `L` is assignable to `L2`
 - wrapper-style error remapping during `try` is still not implemented
 
-### 10. Smarter Type Narrowing
+### 8. Smarter Type Narrowing
 
 Later improvements could include:
 - better narrowing after `is`
@@ -157,13 +161,19 @@ Main design question:
 - whether this should stay very local and conservative
 - or whether the checker should learn more control-flow-sensitive narrowing over time
 
-### 11. Deferred Cleanup
+### 9. Deferred Cleanup
 
-A Go-like `defer` construct is still a possible future feature.
+`defer` is implemented as callable-scoped cleanup.
 
-Potential shape:
+Supported shape:
 - `defer close()`
 - `defer { cleanup() }`
+
+Current behavior:
+- deferred actions run in LIFO order when the enclosing function, method, or lambda returns
+- `defer` is not block-scoped
+- lambdas have their own defer queue
+- deferred blocks may not contain `return`, `break`, or `continue`
 
 Main use cases:
 - resource cleanup
@@ -171,18 +181,17 @@ Main use cases:
 - keeping setup and cleanup close together in imperative code
 
 Open questions:
-- whether it should run at function exit only
-- whether it should support block scope
-- how it should interact with `return`, `break`, and runtime errors
+- whether runtime errors should also run pending defers
+- whether future async/concurrency features need a stronger cleanup model
 
 ## TBD
 
 ### `impl` Blocks For Methods
 
-Top-level `impl Type { ... }` blocks exist now for attaching methods to classes, records, and enums, but the language still needs a final decision on whether `impl` should remain required for ordinary methods.
+Top-level `impl Type { ... }` blocks exist now for attaching methods to classes and enums, and `impl single Name { ... }` attaches singleton methods. The language still needs a final decision on whether `impl` should remain required for ordinary methods.
 
 Open question:
-- keep `impl Type { ... }` as the required home for methods on classes/records/enums
+- keep `impl Type { ... }` as the required home for methods on classes/enums
 - or allow methods inline in the original type declaration and treat `impl` as optional extra syntax
 
 Current leaning:
@@ -208,7 +217,7 @@ The preferred refutable-binding surface is now split into these forms:
 - `if let PATTERN = value && let OTHER = next && ready { ... }` for mixed refutable and boolean checks in one condition
 - `let PATTERN = value else { ... }` for extraction with an explicit failure path
 - `let { PATTERN = value ... } else { ... }` for multiple sequential refutable bindings sharing one fallback
-- `PATTERN <- source` as shorthand for the success case inside `if let`, `let`, `let ... else`, and `expect`
+- `PATTERN <- source` as shorthand for the success case inside `if let`, `let ... else`, and `expect`
   `Some(PATTERN)` for `Option`, `Ok(PATTERN)` for `Result`, and `Right(PATTERN)` for `Either`
   plain `let` does not accept this form; use `let ... else`, `if let`, or `expect`
 - `value = try source` for propagation from `Option`, `Result`, and `Either`
@@ -248,11 +257,11 @@ The language still needs a final policy for conversions between:
 - tuples
 
 Current intended direction:
-- class -> anonymous record is allowed implicitly
+- class -> anonymous record shape is allowed where structural access is explicitly expected
 - tuple -> anonymous record is not allowed
-- anonymous record -> class should be allowed when the compiler can lower it into constructor-style code
-  - either a matching constructor exists
-  - or the target class has only public fields, with any private fields already initialized
+- anonymous record-shaped class construction should stay explicit through `Type { ... }`
+  - the target class must not define an explicit `new`
+  - the target class must have a valid visible structural shape
 - class -> tuple should stay explicit, if added at all
 
 Important separation:
@@ -264,22 +273,22 @@ Open questions:
 - how strict constructor matching should be
 - whether anonymous record -> tuple should exist at all
 - anonymous records use brace construction for both explicit named fields and contextual positional values
-  - `class { count = count, label = label }`
-  - positional brace construction like `class { 1, "x" }` is also allowed when a target anonymous-record shape is known from context
+  - `{ count: count, label: label }`
+  - positional brace construction like `{ 1, "x" }` is also allowed when a target anonymous-record shape is known from context
 - whether explicit tuple projection should use a builtin like `tuple(instance)`
 
-### Record Binding From String Templates
+### Anonymous-Record Binding From String Templates
 
-One possible future feature is record binding from interpolated-looking string templates, where a template shape declares the fields to extract.
+One possible future feature is anonymous-record binding from interpolated-looking string templates, where a template shape declares the fields to extract.
 
 Example direction:
 
 ```txt
-record1 = "$time_local-$agent"
+parsed = "$time_local-$agent"
 ```
 
 Possible meaning:
-- produce something like `class { time_local Str, agent Str }`
+- produce something like `{ time_local Str, agent Str }`
 - use the template itself as the binding/extraction surface
 
 Possible larger example:
@@ -291,7 +300,7 @@ Possible larger example:
 This could be useful for:
 - log parsing
 - simple structured extraction from line-oriented text
-- lightweight record creation without repeating field names separately
+- lightweight structured value creation without repeating field names separately
 
 Open questions:
 - whether this should be a pure binding/extraction feature, a parser combinator surface, or just syntax sugar over regex/string parsing
@@ -309,54 +318,38 @@ This is now settled:
 - partial matching now uses `partial`
 
 Related lambda-syntax discussion:
-- today placeholder-based forms like `list.map(match _ { ... })` work
-- possible future shorthand: allow implicit-input match lambdas without `_`
+- today explicit lambda forms like `list.map(value -> match value { ... })` work
+- possible future shorthand: allow implicit-input match lambdas
   - block form: `list.map(match { ... })`
   - single-expression shorthand form: `list.map(match: Some(x) => x + 1)`
 - this would only make sense in contexts where a one-argument lambda is expected
 - open question:
   - is this worthwhile readability improvement
-  - or unnecessary contextual magic compared to the explicit `match _ { ... }` form
+  - or unnecessary contextual magic compared to the explicit lambda form
 
-### Constructor / Companion Design
+### Constructor / Singleton Factory Design
 
-These are still open design options that need a decision.
+The current constructor surface is:
+- `def new(...)` declares explicit constructors
+- `hidden def new()` can hide an explicit constructor
+- any explicit `new` suppresses structural brace construction
+- `Type { ... }` is structural construction when no explicit constructor blocks it
+- `Type(...)` is reserved for explicit `new(...)` and builtin constructor forms
 
-Context:
-- keep autogenerated primary constructors for the common case
-- use same-named objects as privileged companions
-- companions may access private members of their class when construction requires it
-
-Open options under discussion:
-
-1. Keep autogenerated constructors and add a way to make the generated primary constructor private
-   Possible shape:
-   - `private def new(*) { ... }`
-
-2. Same as above, but using `...` instead of `*`
-   Possible shape:
-   - `private def new(...) { ... }`
-   Concern:
-   - `...` already means variadic parameters, so this may be misleading
-
-3. Remove user-declared constructors entirely and rely on:
-   - autogenerated primary constructors when fields allow them
-   - companion object factories when a class has private uninitialized members
-
-4. If a class defines a custom secondary construction path through its companion object, suppress the autogenerated primary constructor
-   Concern:
-   - this may be too implicit and surprising during refactors
+Still open:
+- whether same-named `single` declarations should act as privileged factory companions
+- whether singleton factory methods should ever get hidden-field access to class internals
+- whether additional constructor-hiding syntax is needed beyond `hidden def new()`
 
 Current leaning:
-- autogenerated constructors still make sense
-- companion objects are the special construction path for classes that cannot expose a normal public autogenerated constructor
-- if explicit control is needed, `private def new(*) { ... }` currently looks clearer than the `...` variant
+- autogenerated structural construction still makes sense for simple public shapes
+- explicit `new` remains the escape hatch for custom construction
+- `single` factory methods are useful as ordinary namespaced helpers, but hidden-field companion privileges should be a separate deliberate decision
 
 ## Suggested Priority Order
 
-1. `match`
-2. enum + pattern ergonomics
-3. derived `Eq` / `Hashed`
-4. stdlib collection/query growth
-5. operator overloading
-6. anonymous objects
+1. enum + pattern ergonomics
+2. derived `Eq` / `Hashed`
+3. stdlib collection/query growth
+4. operator overloading
+5. constructor/factory polish

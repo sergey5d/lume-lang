@@ -1,266 +1,208 @@
-# Syntax Proposals
+# Syntax Cleanup Notes
 
-This file captures a readability-first review of the current language syntax.
+This file captures readability-oriented syntax ideas against the current Lume
+surface. It is intentionally secondary to `syntax.md`, which is the reference
+for what works today.
 
-Goals:
+## Current Direction
 
-- readable
-- as little noise as possible
+The language is strongest when it keeps one obvious form for each major idea:
 
-Main principle:
+- `class` for nominal instance types
+- `single` for singleton namespaces/values
+- `enum` for tagged sums
+- `interface` for contracts
+- `impl Type { ... }` and `impl single Name { ... }` for behavior
+- `use` for module imports
+- `def new(...)` for explicit constructors
+- `Type { ... }` for structural class construction
+- `{ field: value }` for anonymous records
+- `try` for propagation
+- `expect` for assertive extraction or boolean assertions
+- explicit lambdas such as `value -> value + 1`
 
-- prefer one obvious way to write a thing over multiple short-but-clever forms
+The main cleanup principle still stands:
 
-## Overall Take
+- prefer regularity over clever compactness
+- keep punctuation meaningful
+- avoid adding a second spelling unless it buys real readability
 
-The language already has a readable core. The main thing hurting clarity is not punctuation by itself, but the number of alternate forms and context-sensitive shortcuts.
+## Settled Cleanup
 
-The best direction seems to be:
+These older surfaces should stay out of new examples and docs:
 
-- keep the explicit keyword-based core
-- trim magic/contextual sugar
-- reduce the number of ways to express the same construct
-- favor regularity over ultra-shortness
+- `import`; use `use`
+- named `record` declarations; use `class`
+- `object`; use `single`
+- anonymous `class { ... }` / `record { ... }`; use plain `{ ... }`
+- named fields with `=` inside construction; use `field: value`
+- language-level `unwrap` forms; use `let ... else`, `expect`, or `try`
+- placeholder expression lambdas like `_ + 1`; use `x -> x + 1`
+- class-to-tuple destructuring; use class/anonymous-record brace destructuring
+- `Type({ ... })` nominal conversion; use explicit construction or a future `anon as Type` form if adopted
 
 ## Keep
 
-These seem like strong parts of the current surface syntax and should probably stay:
+These still feel like strong surface choices:
 
 - `def`
 - `var`
 - `class`
-- `object`
+- `single`
 - `enum`
 - `interface`
 - `public`
 - `hidden`
 - `match` with mandatory `case`
+- `partial` as the partial-match form
 - `let`
+- `expect`
+- `defer`
 - `@Annotation(...)`
-- `class { ... }`
-- path-style imports
+- `Type { ... }`
+- `use module/path`
 - `->` for lambdas and function types
 - string interpolation
 - `with`
 
 Notes:
 
-- `case` improves readability more than it adds noise
-- `class { ... }` is explicit and much clearer than trying to reuse plain `{ ... }`
-- `public` / `hidden` are honest, readable visibility markers
+- `case` makes `match` blocks easier to scan.
+- `single` is clearer than `object` for singleton declarations.
+- `public` and `hidden` are readable visibility markers.
+- `expect` is a better assertive word than reviving `unwrap` syntax.
 
-## Trim First
+## Places To Keep Watching
 
-These are the first places where the syntax seems too clever relative to the value it gives.
+### 1. Method Placement
 
-### 2. Remove tuple-range magic in `for`
-
-Current issue:
-
-- `(0, 10)` means tuple almost everywhere
-- but inside `for` it can mean range
-- that makes tuples carry two meanings
-
-Preferred direction:
-
-- use `Range(0, 10)` now
-- maybe introduce a dedicated range form later if truly needed
-
-Preferred style:
+Current preferred style:
 
 ```txt
-for i <- Range(0, 10) {
-    println(i)
-}
-```
-
-### 3. Remove positional anonymous record construction
-
-Current issue:
-
-- historical positional anonymous records like `class("Ada", 10)` depended on contextual shape
-- it is short, but it adds hidden rules
-- it makes anonymous record construction less obvious
-
-Preferred direction:
-
-- keep only named-field anonymous record construction
-
-Preferred style:
-
-```txt
-user = class {
-    name = "Ada"
-    age = 10
-}
-```
-
-### 4. Trim operator overloading hard
-
-Current issue:
-
-- many symbolic operators increase surface area quickly
-- they tend to reduce readability more than they reduce noise
-
-Preferred direction:
-
-- keep arithmetic if needed
-- keep indexing if needed
-- strongly reconsider symbolic custom forms like:
-  - `:+`
-  - `:-`
-  - `++`
-  - `--`
-  - `|`
-  - `&`
-  - `<<`
-  - `>>`
-  - `::`
-
-The language reads better when behavior is mostly in methods and keywords rather than symbolic cleverness.
-
-### 5. Reconsider wildcard imports long-term
-
-Current issue:
-
-- `import pkg/*` is short
-- but it becomes harder to read where names came from
-
-Preferred direction:
-
-- prefer:
-  - `import pkg/sub`
-  - `import pkg/sub/{A, B as C}`
-
-- use wildcard import sparingly, or phase it down later
-
-## Simplify
-
-These are not necessarily bad, but they would benefit from choosing one main form.
-
-### 1. Unify method placement
-
-Current issue:
-
-- classes and records use `impl`
-- objects and enums can define methods inline
-- that creates an avoidable split in the mental model
-
-Preferred direction:
-
-- choose one model
-
-Most readable option:
-
-- allow methods inline everywhere
-- make `impl` optional or remove it later
-
-That would reduce grammar branching and make declaration reading simpler.
-
-### 2. Unify `if`
-
-Current issue:
-
-- statement `if`
-- block expression `if`
-- shorthand `if ... then ... else ...`
-
-Preferred direction:
-
-- keep one expression story:
-
-```txt
-result = if cond {
-    1
-} else {
-    0
-}
-```
-
-- drop `then`
-
-This is slightly longer, but much simpler overall.
-
-### 3. Keep `case` mandatory in `match` and `partial`
-
-This was a good change and should stay.
-
-Preferred style:
-
-```txt
-match value {
-    case Some(x) => x
-    case None => 0
-}
-```
-
-```txt
-partial value {
-    case Some(x) => x
-}
-```
-
-### 4. Keep `unwrap`, but avoid too many more binding variants
-
-Current syntax already has good coverage:
-
-- `if x <- maybe`
-- `unwrap x <- maybe`
-- block `unwrap { ... }`
-
-That is already a strong feature set. Additional special binding syntaxes should justify themselves carefully.
-
-## Areas That Feel Too Clever
-
-These features reduce characters but increase hidden rules:
-
-- contextual `match { ... }` lambda sugar
-- contextual `partial { ... }` lambda sugar
-- placeholder lambdas like `_ + 1`
-- historical shape-driven positional `record(...)`
-- tuple-as-range in `for`
-
-These should be treated with caution.
-
-The risk is not that they are impossible to learn. The risk is that they make the language feel less regular.
-
-## Where Extra Keywords Are Worth It
-
-These keywords are good noise:
-
-- `case`
-- `public`
-- `hidden`
-- `let`
-- `class`
-
-They make programs more explicit and reduce ambiguity.
-
-## Strongest 5 Cleanup Proposals
-
-If only five changes are made, the best candidates seem to be:
-
-1. remove `apply` as a language calling rule
-2. remove tuple-range magic from `for`
-3. remove positional anonymous `class(...)` (done)
-4. pick one `if` expression form and remove `then`
-5. unify method placement across all type declarations
-
-## Preferred Style Direction
-
-Example of the kind of syntax style that seems strongest:
-
-```txt
-public class Person {
-    age Int
+class Person {
     name Str
+    age Int
+}
 
-    def new(age Int, name Str) {
-        this.age = age
+impl Person {
+    def label() Str = this.name + " " + this.age
+}
+```
+
+Open question:
+
+- should inline methods remain supported as a convenience?
+- or should `impl` become the only documented home for behavior?
+
+The `impl` split reads better for medium and large types, but tiny examples can
+feel a little heavier.
+
+### 2. Single-Line Body Forms
+
+Current direction:
+
+- brace-delimited `if` is preferred
+- `for`, `match`, and `partial` are block-only
+- same-line `else expr` and `yield expr` are valid
+- if a body moves to the next line, use `{ ... }`
+
+This keeps shorthand useful without making newlines do too much hidden work.
+
+### 3. Constructor Surface
+
+Current direction:
+
+Structural construction when no explicit `new` exists:
+
+```txt
+class User {
+    name Str
+    age Int
+}
+
+user User = User { name: "Ada", age: 10 }
+```
+
+Explicit constructor calls when `new` exists:
+
+```txt
+class NamedUser {
+    name Str
+    age Int
+}
+
+impl NamedUser {
+    def new(name Str) {
         this.name = name
+        this.age = 0
+    }
+}
+
+user NamedUser = NamedUser("Ada")
+```
+
+Open questions:
+
+- should same-named `single` factories get any privileged access?
+- do we need more explicit syntax for hiding generated construction paths?
+- should anonymous-record-to-class conversion use `anon as User` later?
+
+### 4. Pattern-Lambda Sugar
+
+Current explicit style:
+
+```txt
+values.map(value -> match value {
+    case Some(x) => x + 1
+    case None => 0
+})
+```
+
+Possible future shorthand:
+
+```txt
+values.map(match {
+    case Some(x) => x + 1
+    case None => 0
+})
+```
+
+This should stay future-only until there is a clear readability win. It is
+contextual magic, and the explicit lambda is already understandable.
+
+### 5. Symbolic Operators
+
+Operator overloading exists, but it should stay conservative.
+
+Good candidates:
+
+- arithmetic-like value types
+- vectors / matrices / geometry values
+- domain values such as `Money`, `Distance`, or `Duration`
+
+Risky candidates:
+
+- symbolic forms that hide domain behavior
+- aliases for ordinary named methods
+- clever collection punctuation when `add`, `addAll`, `from`, or `put` reads better
+
+## Preferred Example Style
+
+```txt
+use model/user/User
+
+class Person {
+    name Str
+    age Int
+}
+
+impl Person {
+    def new(name Str) {
+        this.name = name
+        this.age = 0
     }
 
-    def label() Str = name
+    def label() Str = this.name + " " + this.age
 }
 
 def classify(value Option[Int]) Int =
@@ -269,122 +211,24 @@ def classify(value Option[Int]) Int =
         case None => 0
     }
 
-user = class {
-    name = "Ada"
-    age = 10
+anon = {
+    name: "Ada"
+    age: 10
 }
+
+person Person = Person { name: anon.name, age: anon.age }
 
 for i <- Range(0, 10) {
-    println(i)
-}
-
-result = if count > 0 {
-    "ok"
-} else {
-    "empty"
+    OS.println(i)
 }
 ```
 
 ## Summary
 
-The language should probably move toward:
+The syntax should keep moving toward:
 
 - fewer alternate forms
-- fewer context-sensitive shortcuts
-- fewer symbolic tricks
-- more regular declaration and control-flow syntax
-
-In short:
-
-- keep the explicit keyword-based core
-- cut magic
-- prefer regularity over clever compactness
-
-## Additional Notes
-
-These are active design notes worth considering separately from the earlier trim/simplify recommendations.
-
-### Consider replacing `class` / `record` with a `type` modifier
-
-Possible direction:
-
-- unify declaration vocabulary around `type`
-- then use modifiers or secondary markers to express the shape/semantics
-
-Examples:
-
-```txt
-type Person {
-    age Int
-    name Str
-}
-```
-
-or:
-
-```txt
-type record Person {
-    age Int
-    name Str
-}
-```
-
-Potential benefit:
-
-- fewer top-level declaration keywords
-- more uniform surface area
-
-Potential risk:
-
-- `class`, `record`, `enum`, `object`, `interface` currently communicate meaning very directly
-- collapsing them under `type` may reduce immediate readability unless the replacement is extremely clear
-
-### Consider a lighter pattern-first `match` expression form
-
-Possible direction:
-
-```txt
-match maybeUser {
-    some user -> return user.name
-    none -> return "Unknown"
-}
-```
-
-Potential benefit:
-
-- more concise than `case Some(user) => ...`
-- may read more naturally for common `Option`-style flows
-
-Potential risk:
-
-- introduces a second match surface alongside the general `case ... => ...` form
-- can make `Option`/`Result`-style matching feel special instead of uniform
-- `some` / `none` would need a clear relationship to enum cases and ordinary constructor patterns
-
-### Consider `try` instead of `unwrap`
-
-Possible direction:
-
-```txt
-fn loadUser(id: UserId) async -> Result<User, UserError> {
-    let response = try await http.get("/users/" + id)
-    return try parseUser(response.body)
-}
-```
-
-Potential benefit:
-
-- very familiar to many users
-- reads naturally for propagation-oriented code
-- may compose better than statement-shaped `unwrap` in expression-heavy flows
-
-Potential risk:
-
-- `try` usually implies one specific propagation protocol, while current `unwrap` is a more explicit language form
-- if both `try` and `unwrap` exist, the language may end up with two parallel unwrapping idioms
-- adopting `try` well may push the language toward a more expression-oriented error-handling model overall
-
-Open question:
-
-- whether `try` should replace `unwrap`
-- or whether `try` should become only a shorthand for propagation while `unwrap` remains the more explicit binding-oriented form
+- less contextual sugar
+- explicit behavior homes
+- clear construction syntax
+- explicit lambdas unless a shorthand is obviously better
