@@ -1284,6 +1284,11 @@ impl<'a> Interpreter<'a> {
                     .collect::<Result<Vec<_>, _>>()?;
                 self.invoke_callee(frame, callee, args, span, *structural)
             }
+            ir::RValue::NamedValue { path } => self
+                .resolve_named_value_path(frame, path, span)?
+                .ok_or_else(|| {
+                    self.runtime_error(span, format!("unknown value path '{}'", path.join(".")))
+                }),
             ir::RValue::Tuple(items) => Ok(Value::Tuple(
                 items
                     .iter()
@@ -1892,7 +1897,7 @@ impl<'a> Interpreter<'a> {
         }
 
         if path.len() == 2 {
-            if let Some(value) = self.construct_named_path(path, args.clone(), span, structural)? {
+            if let Some(value) = self.construct_named_path(path, args.clone(), span, true)? {
                 return Ok(value);
             }
         }
@@ -1959,7 +1964,7 @@ impl<'a> Interpreter<'a> {
         if name == "None" {
             return Ok(Some(self.option_none()));
         }
-        match self.construct_enum_case(None, name, Vec::new(), span) {
+        match self.construct_enum_case(None, name, Vec::new(), span, false) {
             Ok(value) => Ok(Some(value)),
             Err(error) if error.code == "runtime_error" => Ok(None),
             Err(error) => Err(error),
@@ -2011,7 +2016,7 @@ impl<'a> Interpreter<'a> {
         path: &[String],
         args: Vec<Value>,
         span: Option<Span>,
-        _structural: bool,
+        from_call: bool,
     ) -> Result<Option<Value>, Diagnostic> {
         if path.len() != 2 {
             return Ok(None);
@@ -2028,7 +2033,7 @@ impl<'a> Interpreter<'a> {
             .is_some_and(|ty| ty.enum_cases.iter().any(|case| case.name == *member))
         {
             return self
-                .construct_enum_case(Some(type_name), member, args, span)
+                .construct_enum_case(Some(type_name), member, args, span, from_call)
                 .map(Some);
         }
         Ok(None)
@@ -2089,10 +2094,10 @@ impl<'a> Interpreter<'a> {
                 Some(self.option_some(args[0].clone()))
             }
             "None" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "None expects 0 arguments"));
-                }
-                Some(self.option_none())
+                return Err(self.runtime_error(
+                    span,
+                    "enum case 'None' does not accept call syntax; use 'None'",
+                ));
             }
             "Ok" => {
                 if args.len() != 1 {
@@ -2499,6 +2504,7 @@ impl<'a> Interpreter<'a> {
         case_name: &str,
         args: Vec<Value>,
         span: Option<Span>,
+        from_call: bool,
     ) -> Result<Value, Diagnostic> {
         let mut matches = self
             .runtime
@@ -2525,6 +2531,17 @@ impl<'a> Interpreter<'a> {
             .iter()
             .find(|case| case.name == case_name)
             .expect("matched case");
+        if from_call && case.fields.is_empty() && args.is_empty() {
+            let display_name = explicit_enum
+                .map(|enum_name| format!("{enum_name}.{case_name}"))
+                .unwrap_or_else(|| case_name.to_string());
+            return Err(self.runtime_error(
+                span,
+                format!(
+                    "enum case '{display_name}' does not accept call syntax; use '{display_name}'"
+                ),
+            ));
+        }
         if args.is_empty() && case.fields.iter().all(|field| field.initializer.is_some()) {
             return Ok(Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
                 runtime_type_id: Some(ty.id),
@@ -4769,7 +4786,7 @@ mod tests {
             r#"
             def main() Unit {
                 some = Some(5)
-                none = None()
+                none = None
                 ok = Ok(9)
                 err = Err("missing")
                 OS.println("some", some.getOr(0))

@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*enum case 'None' does not accept call syntax; use 'None'.*
+
+def main() Unit {
+    value Option[Int] = None()
+}

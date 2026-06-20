@@ -32,7 +32,7 @@ def twoEithers(value Either[Str, Int], value2 Either[Str, Str]) Either[Str, Int]
 
 def main() {
     optionSome = plusOneOption(Some(5))
-    optionNone = plusOneOption(None())
+    optionNone = plusOneOption(None)
 
     OS.println("option some ${optionSome.getOr(0)}")
     OS.println("option none ${optionNone.isEmpty()}")

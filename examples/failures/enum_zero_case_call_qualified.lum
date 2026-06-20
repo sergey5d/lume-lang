@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*enum case 'Signal.Stop' does not accept call syntax; use 'Signal.Stop'.*
+
+enum Signal {
+    case Start {
+        code Int
+    }
+    case Stop
+}
+
+def main() Unit {
+    value Signal = Signal.Stop()
+}

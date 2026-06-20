@@ -505,6 +505,9 @@ pub enum RValue {
         args: Vec<Operand>,
         structural: bool,
     },
+    NamedValue {
+        path: Vec<String>,
+    },
     Tuple(Vec<Operand>),
     List(Vec<Operand>),
     Record(Vec<NamedOperand>),

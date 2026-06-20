@@ -253,6 +253,7 @@ struct FieldSig {
 #[derive(Debug, Clone)]
 struct EnumCaseSig {
     params: Vec<FieldSig>,
+    field_count: usize,
     result: Ty,
 }
 
@@ -2439,6 +2440,7 @@ impl<'a> Checker<'a> {
                 .lookup_value(name)
                 .map(|value| value.ty)
                 .or_else(|| self.lookup_function_type(name))
+                .or_else(|| self.lookup_bare_enum_case_value_type(name, expected))
                 .or_else(|| self.lookup_named_constructor_type(name))
                 .unwrap_or_else(|| {
                     self.add_error("undefined_name", self.undefined_value_message(name), *span);
@@ -2483,7 +2485,7 @@ impl<'a> Checker<'a> {
                 if let Some(ty) = self.module_member_value_type(expr) {
                     return ty;
                 }
-                if let Some(ty) = self.static_member_value_type(receiver, name) {
+                if let Some(ty) = self.static_member_value_type(receiver, name, expected) {
                     return ty;
                 }
                 let receiver_ty = self.check_expr(receiver);
@@ -2567,14 +2569,25 @@ impl<'a> Checker<'a> {
             }
             Expr::RecordLiteral { fields, values, .. } => {
                 if !fields.is_empty() {
+                    let expected_fields = match expected {
+                        Ty::Record(fields) => fields.as_slice(),
+                        _ => &[],
+                    };
                     return Ty::Record(
                         fields
                             .iter()
                             .filter_map(|field| {
-                                field
-                                    .name
-                                    .as_ref()
-                                    .map(|name| (name.clone(), self.check_expr(&field.value)))
+                                field.name.as_ref().map(|name| {
+                                    let expected_ty = expected_fields
+                                        .iter()
+                                        .find(|(expected_name, _)| expected_name == name)
+                                        .map(|(_, ty)| ty.clone())
+                                        .unwrap_or(Ty::Unknown);
+                                    (
+                                        name.clone(),
+                                        self.check_expr_against(&field.value, &expected_ty),
+                                    )
+                                })
                             })
                             .collect(),
                     );
@@ -3313,12 +3326,9 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Some(case) = self.world.lookup_enum_case(self.module, name) {
-                    return Some(self.check_constructor_signature(
-                        &case.params,
-                        &case.result,
-                        args,
-                        span,
-                    ));
+                    return Some(
+                        self.check_enum_case_constructor_signature(name, &case, args, span),
+                    );
                 }
                 if let Some(sig) = self.lookup_type_local(name) {
                     return Some(self.check_named_type_constructor(
@@ -3381,9 +3391,10 @@ impl<'a> Checker<'a> {
                 {
                     if let Some(sig) = self.lookup_type_local(type_name) {
                         if let Some(case) = sig.enum_cases.get(name).cloned() {
-                            return Some(self.check_constructor_signature(
-                                &case.params,
-                                &case.result,
+                            let display_name = format!("{type_name}.{name}");
+                            return Some(self.check_enum_case_constructor_signature(
+                                &display_name,
+                                &case,
                                 args,
                                 span,
                             ));
@@ -3394,9 +3405,10 @@ impl<'a> Checker<'a> {
                     }
                     if let Some(sig) = self.world.lookup_imported_type(self.module, type_name) {
                         if let Some(case) = sig.enum_cases.get(name).cloned() {
-                            return Some(self.check_constructor_signature(
-                                &case.params,
-                                &case.result,
+                            let display_name = format!("{type_name}.{name}");
+                            return Some(self.check_enum_case_constructor_signature(
+                                &display_name,
+                                &case,
                                 args,
                                 span,
                             ));
@@ -3404,9 +3416,10 @@ impl<'a> Checker<'a> {
                     }
                     if let Some(sig) = self.world.ambient.types.get(type_name) {
                         if let Some(case) = sig.enum_cases.get(name).cloned() {
-                            return Some(self.check_constructor_signature(
-                                &case.params,
-                                &case.result,
+                            let display_name = format!("{type_name}.{name}");
+                            return Some(self.check_enum_case_constructor_signature(
+                                &display_name,
+                                &case,
                                 args,
                                 span,
                             ));
@@ -3743,6 +3756,24 @@ impl<'a> Checker<'a> {
         materialize_type(&substitute_type(ret, &subst))
     }
 
+    fn check_enum_case_constructor_signature(
+        &mut self,
+        case_name: &str,
+        case: &EnumCaseSig,
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) -> Ty {
+        if case.field_count == 0 && args.is_empty() {
+            self.add_error(
+                "invalid_enum_case_call",
+                format!("enum case '{case_name}' does not accept call syntax; use '{case_name}'"),
+                span,
+            );
+            return case.result.clone();
+        }
+        self.check_constructor_signature(&case.params, &case.result, args, span)
+    }
+
     fn callable_signature_for_args(
         &mut self,
         callee: &Expr,
@@ -3933,7 +3964,7 @@ impl<'a> Checker<'a> {
         class_sig.is_some_and(|sig| sig.kind == TypeKind::Class)
     }
 
-    fn static_member_value_type(&self, receiver: &Expr, name: &str) -> Option<Ty> {
+    fn static_member_value_type(&self, receiver: &Expr, name: &str, expected: &Ty) -> Option<Ty> {
         let Expr::Identifier {
             name: type_name, ..
         } = receiver
@@ -3951,7 +3982,9 @@ impl<'a> Checker<'a> {
         }
         let sig = self.lookup_any_non_object_type(type_name)?;
         if let Some(case) = sig.enum_cases.get(name) {
-            return Some(case.result.clone());
+            if case.params.is_empty() {
+                return Some(self.materialize_enum_case_result_against(&case.result, expected));
+            }
         }
         None
     }
@@ -4938,6 +4971,9 @@ impl<'a> Checker<'a> {
     fn lookup_implicit_method_functions(&self, name: &str) -> Option<Vec<FunctionSig>> {
         if self.lookup_value(name).is_some()
             || self.lookup_functions(name).is_some()
+            || self
+                .lookup_bare_enum_case_value_type(name, &Ty::Unknown)
+                .is_some()
             || self.lookup_named_constructor_type(name).is_some()
         {
             return None;
@@ -4992,10 +5028,25 @@ impl<'a> Checker<'a> {
                     .collect(),
             ));
         }
-        if let Some(case) = self.world.lookup_enum_case(self.module, name) {
-            return Some(case.result);
-        }
         None
+    }
+
+    fn lookup_bare_enum_case_value_type(&self, name: &str, expected: &Ty) -> Option<Ty> {
+        let case = self.world.lookup_enum_case(self.module, name)?;
+        case.params
+            .is_empty()
+            .then(|| self.materialize_enum_case_result_against(&case.result, expected))
+    }
+
+    fn materialize_enum_case_result_against(&self, result: &Ty, expected: &Ty) -> Ty {
+        match (result, expected) {
+            (Ty::Named(result_name, result_args), Ty::Named(expected_name, expected_args))
+                if result_name == expected_name && result_args.len() == expected_args.len() =>
+            {
+                expected.clone()
+            }
+            _ => result.clone(),
+        }
     }
 
     fn lookup_type_local(&self, name: &str) -> Option<TypeSig> {
@@ -5368,6 +5419,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                     case.name.clone(),
                     EnumCaseSig {
                         params: ctor_params,
+                        field_count: case.fields.len(),
                         result: Ty::Named(
                             decl.name.clone(),
                             decl.type_params
@@ -6939,6 +6991,67 @@ def main(
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_bare_zero_payload_enum_cases() {
+        let program = parse_inline(
+            r#"
+enum MaybeInt {
+    case Missing
+    case Present {
+        value Int
+    }
+}
+
+def main() Unit {
+    first MaybeInt = Missing
+    second MaybeInt = MaybeInt.Missing
+    third MaybeInt = Present(1)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn materializes_bare_enum_case_in_expected_record_field() {
+        let program = parse_inline(
+            r#"
+class Node {
+    value Int
+}
+
+def missing() { node Option[Node] } {
+    return { node: None }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_zero_payload_enum_case_call_syntax() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    value Option[Int] = None()
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_enum_case_call"
+                    && diag
+                        .message
+                        .contains("enum case 'None' does not accept call syntax")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

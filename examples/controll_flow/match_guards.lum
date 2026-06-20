@@ -20,7 +20,7 @@ def describe(value MaybeInt) Int =
 def main() Unit {
     large MaybeInt = MaybeInt.SomeX(12)
     small MaybeInt = MaybeInt.SomeX(3)
-    empty MaybeInt = MaybeInt.NoneX()
+    empty MaybeInt = MaybeInt.NoneX
 
     OS.println(describe(large))
     OS.println(describe(small))

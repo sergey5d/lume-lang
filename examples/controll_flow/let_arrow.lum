@@ -70,7 +70,7 @@ def ifLetValue(value Option[Int]) Int {
 
 def main() Unit {
     OS.println("letElseOptionSome " + letElseOption(Some(5)))
-    OS.println("letElseOptionNone " + letElseOption(None()))
+    OS.println("letElseOptionNone " + letElseOption(None))
     OS.println("letElseResultOk " + letElseResult(Ok(1)))
     OS.println("letElseResultErr " + letElseResult(Err("bad")))
     OS.println("letElseEitherRight " + letElseEither(Right(2)))

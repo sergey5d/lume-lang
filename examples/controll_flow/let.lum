@@ -55,13 +55,13 @@ def sumPrefix(values List[Option[Int]]) Int {
 
 def main() Unit {
     some = plusOne(Some(5))
-    none = plusOne(None())
+    none = plusOne(None)
     optSome = plusThree(Some(5))
-    optNone = plusThree(None())
-    pair = pairwise(Some(5), None())
+    optNone = plusThree(None)
+    pair = pairwise(Some(5), None)
     sum = sumBoth(Some(4), Some(5))
-    sumFail = sumBoth(Some(4), None())
-    prefix = sumPrefix([Some(1), Some(2), Some(3), None(), Some(100)])
+    sumFail = sumBoth(Some(4), None)
+    prefix = sumPrefix([Some(1), Some(2), Some(3), None, Some(100)])
 
     OS.println("some ${some.getOr(0)}")
     OS.println("none ${none.getError()}")

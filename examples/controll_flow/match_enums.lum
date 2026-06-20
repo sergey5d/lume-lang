@@ -38,7 +38,7 @@ def matchSingleLine(value MaybeInt) Int = match value {
 
 def main() Int {
     some MaybeInt = MaybeInt.SomeX(5)
-    none MaybeInt = MaybeInt.NoneX()
+    none MaybeInt = MaybeInt.NoneX
     printOption(some)
     printOption(none)
     OS.println(matchSingleLine(some))

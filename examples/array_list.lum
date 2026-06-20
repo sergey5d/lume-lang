@@ -41,7 +41,7 @@ impl ArrayList[T] {
 
     def get(index Int) Option[T] =
         if index < 0 || index >= this.count {
-            None()
+            None
         } else {
             Some(this.items[index])
         }

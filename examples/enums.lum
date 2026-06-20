@@ -37,7 +37,7 @@ black = Color.Black
 reddish = black.isReddish()
 
 someInt = OptionX.SomeX(5)
-noneInt = OptionX.NoneX()
+noneInt = OptionX.NoneX
 
 someDefined = someInt.isDefined()
 

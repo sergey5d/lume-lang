@@ -680,6 +680,9 @@ Enum cases are data-only:
 - cases may assign shared enum fields
 - cases may not declare methods
 - there is no `impl Enum.Case { ... }` form
+- zero-payload cases are values and are written without call syntax, for example `None`
+- payload cases use call syntax, for example `Some(value)`
+- `None()`-style calls for zero-payload cases are invalid
 
 Behavior for enums belongs on the enum itself, either inline or in `impl Enum { ... }` blocks, and case-specific behavior should be expressed with `match`.
 

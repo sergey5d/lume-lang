@@ -2265,12 +2265,8 @@ impl<'a> FunctionLowerer<'a> {
 
         if let Some(block) = self.current_block_mut() {
             let default_value = if partial {
-                ir::RValue::Call {
-                    callee: ir::Callee::Named {
-                        path: vec!["None".to_string()],
-                    },
-                    args: Vec::new(),
-                    structural: false,
+                ir::RValue::NamedValue {
+                    path: vec!["None".to_string()],
                 }
             } else {
                 ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit))
@@ -2758,11 +2754,7 @@ impl<'a> FunctionLowerer<'a> {
                 let path = vec![name.clone()];
                 if is_named_runtime_value_path(self.program, &path) {
                     return self.emit_temp_from_rvalue(
-                        ir::RValue::Call {
-                            callee: ir::Callee::Named { path },
-                            args: Vec::new(),
-                            structural: false,
-                        },
+                        ir::RValue::NamedValue { path },
                         ir::Type::Unknown,
                         Some(*span),
                     );
@@ -3051,11 +3043,7 @@ impl<'a> FunctionLowerer<'a> {
     fn lower_rvalue(&mut self, expr: &Expr) -> Option<ir::RValue> {
         if let Some(path) = expr_path(expr) {
             if path.len() > 1 && is_named_runtime_value_path(self.program, &path) {
-                return Some(ir::RValue::Call {
-                    callee: ir::Callee::Named { path },
-                    args: Vec::new(),
-                    structural: false,
-                });
+                return Some(ir::RValue::NamedValue { path });
             }
         }
         match expr {
