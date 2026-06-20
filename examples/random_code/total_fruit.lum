@@ -1,0 +1,94 @@
+# EXPECT:
+# sample1 3
+# sample2 3
+# sample3 4
+# sample4 5
+# sameType 3
+# empty 0
+# 0
+
+def maxInt(left Int, right Int) Int {
+    if left > right {
+        left
+    } else {
+        right
+    }
+}
+
+def minInt(left Int, right Int) Int {
+    if left < right {
+        left
+    } else {
+        right
+    }
+}
+
+def totalFruit(fruits [Int]) Int {
+    var maxFruits Int = 0
+    var count Int = 0
+    len Int = fruits.size()
+    var i Int = 0
+
+    while i < len {
+        count := 1
+
+        type1 Int = fruits[i]
+        i += 1
+
+        # Consume the first contiguous run. This makes the next fruit, if any,
+        # the second basket type rather than accidentally picking type1 again.
+        while i < len && fruits[i] == type1 {
+            i += 1
+            count += 1
+        }
+
+        if i == len {
+            maxFruits := maxInt(maxFruits, count)
+            break
+        }
+
+        var last1 Int = i
+        var last2 Int = i
+
+        var j Int = i
+        type2 Int = fruits[j]
+        count += 1
+        j += 1
+
+        begJ Int = j
+
+        # Walk the current two-type window and remember the last seen position
+        # for each type. When a third type appears, the older last position is
+        # where the next candidate window should restart.
+        while j < len {
+            if fruits[j] == type1 {
+                last1 := j
+            } else if fruits[j] == type2 {
+                last2 := j
+            } else {
+                break
+            }
+            j += 1
+        }
+
+        count += j - begJ
+        maxFruits := maxInt(maxFruits, count)
+
+        i := minInt(last1, last2)
+    }
+
+    maxFruits
+}
+
+def main() Int {
+    OS.println("sample1", totalFruit(List(1, 2, 1)))
+    OS.println("sample2", totalFruit(List(0, 1, 2, 2)))
+    OS.println("sample3", totalFruit(List(1, 2, 3, 2, 2)))
+    OS.println("sample4", totalFruit(List(3, 3, 3, 1, 2, 1, 1, 2, 3, 3, 4)))
+    OS.println("sameType", totalFruit(List(7, 7, 7)))
+
+    empty List[Int] = []
+    OS.println("empty", totalFruit(empty))
+
+    0
+}
