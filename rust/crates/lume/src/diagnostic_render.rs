@@ -71,10 +71,8 @@ fn render_source_snippet(out: &mut String, source_line: &str, diagnostic: &Diagn
         " ".repeat(diagnostic.span.start_pos.column.saturating_sub(1)),
         "^".repeat(caret_width(diagnostic.span))
     ));
-    if let Some(label) = &diagnostic.label {
-        out.push(' ');
-        out.push_str(label);
-    }
+    out.push(' ');
+    out.push_str(diagnostic.label.as_deref().unwrap_or(&diagnostic.message));
     out.push('\n');
 }
 
@@ -138,6 +136,22 @@ mod tests {
         assert_eq!(
             rendered,
             "error[E0312]: constructor is not available\n  --> app.lum:1:8\n  |\n1 | user = User { name: \"Ada\" }\n  |        ^^^^^^^^^^^^^^^^^^^^^ field construction is hidden\n   |\n   = note: User declares a private primary constructor\n   = help: use User.create(name = \"Ada\")"
+        );
+    }
+
+    #[test]
+    fn renders_message_as_default_caret_label() {
+        let diagnostic = Diagnostic::error(
+            "undefined_name",
+            "undefined name 'value'",
+            Span::new(6, 11, LineColumn::new(1, 7), LineColumn::new(1, 12)),
+        );
+
+        let rendered = render_diagnostic("app.lum", Some("print(value)\n"), &diagnostic);
+
+        assert_eq!(
+            rendered,
+            "error[undefined_name]: undefined name 'value'\n  --> app.lum:1:7\n  |\n1 | print(value)\n  |       ^^^^^ undefined name 'value'"
         );
     }
 }

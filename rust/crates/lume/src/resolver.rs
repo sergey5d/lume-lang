@@ -2423,7 +2423,7 @@ def main() Int {
         );
         assert_eq!(
             rendered,
-            "error[first]: one\n  --> /tmp/test.lum:2:3\n  |\n2 | 12345\n  |   ^\nerror[second]: two\n  --> /tmp/test.lum:4:5\n  |\n4 | 123456\n  |     ^"
+            "error[first]: one\n  --> /tmp/test.lum:2:3\n  |\n2 | 12345\n  |   ^ one\nerror[second]: two\n  --> /tmp/test.lum:4:5\n  |\n4 | 123456\n  |     ^ two"
         );
     }
 }
