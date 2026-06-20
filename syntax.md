@@ -524,6 +524,13 @@ items.forEach {
 }
 ```
 
+Trailing brace call syntax is only for lambda arguments. Ordinary arguments,
+including enum constructor payloads, must still use parentheses:
+
+```txt
+maybeOrder = Some(Order { id: 7 })
+```
+
 If the body after `->` starts on the next line, it may be either:
 - a single expression spread over later lines
 - or a multi-statement lambda body without an extra `{ ... }` wrapper

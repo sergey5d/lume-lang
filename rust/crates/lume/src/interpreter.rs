@@ -4674,7 +4674,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_trailing_brace_call_result_for_enum_constructor() {
+    fn runs_parenthesized_enum_constructor_with_brace_class_payload() {
         let program = lower_inline(
             r#"
             class Order {
@@ -4682,11 +4682,11 @@ mod tests {
             }
 
             def main() Int {
-                maybeOrder = Some {
+                maybeOrder = Some(
                     Order {
                         quantity: 7
                     }
-                }
+                )
                 expect Some(order) = maybeOrder
                 return order.quantity
             }

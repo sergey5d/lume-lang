@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*trailing brace call syntax only accepts lambda arguments; use parentheses for ordinary arguments.*
+
+def wrap(value Int) Int = value
+
+def main() Int {
+    wrap {
+        5
+    }
+}

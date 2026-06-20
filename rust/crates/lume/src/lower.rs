@@ -4,8 +4,7 @@ use crate::{
     ast::{self, BinaryOp as AstBinaryOp, ImplBlock, ImplTargetKind, Item, TypeDecl, TypeMember},
     core::{
         self, AssignOp, AssignmentStmt, Block, CallableBody, DestructureKind, ElseBranch,
-        ElseExprBranch, Expr, ExprStmt, FunctionDecl, MatchCaseBody, MethodDecl, Pattern, Stmt,
-        TypeRef,
+        ElseExprBranch, Expr, FunctionDecl, MatchCaseBody, MethodDecl, Pattern, Stmt, TypeRef,
     },
     desugar,
     diagnostic::Diagnostic,
@@ -3215,67 +3214,11 @@ impl<'a> FunctionLowerer<'a> {
 
     fn normalize_trailing_brace_call_args(
         &self,
-        callee: &Expr,
+        _callee: &Expr,
         args: &[core::CallArg],
-        style: core::CallStyle,
+        _style: core::CallStyle,
     ) -> Vec<core::CallArg> {
-        if style != core::CallStyle::Brace
-            || self.brace_call_uses_structural_construction(callee)
-            || args.len() != 1
-        {
-            return args.to_vec();
-        }
-
-        let arg = &args[0];
-        let Expr::RecordLiteral {
-            fields,
-            values,
-            span,
-        } = &arg.value
-        else {
-            return args.to_vec();
-        };
-        if !fields.is_empty() {
-            return args.to_vec();
-        }
-
-        vec![core::CallArg {
-            name: None,
-            span: *span,
-            value: self.synthetic_block_expr_from_brace_values(values, *span),
-        }]
-    }
-
-    fn synthetic_block_expr_from_brace_values(&self, values: &[Expr], span: Span) -> Expr {
-        Expr::Block {
-            span,
-            body: Block {
-                span,
-                statements: values
-                    .iter()
-                    .cloned()
-                    .map(|expr| {
-                        Stmt::Expr(ExprStmt {
-                            span: expr.span(),
-                            expr,
-                        })
-                    })
-                    .collect(),
-            },
-        }
-    }
-
-    fn brace_call_uses_structural_construction(&self, callee: &Expr) -> bool {
-        let Some(path) = expr_path(callee) else {
-            return false;
-        };
-        if path.len() != 1 {
-            return false;
-        }
-        self.program
-            .types
-            .iter()
-            .any(|ty| ty.name == path[0] && ty.kind == ast::TypeKind::Class)
+        args.to_vec()
     }
 
     fn reorder_call_args<'b>(

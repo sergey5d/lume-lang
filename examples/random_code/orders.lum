@@ -32,11 +32,11 @@ impl OrderManager {
         
         status = arr[4]
 
-        Some {
+        Some(
             Order {
                 id: id, asset: asset, buySell: buySell, quantity: quantity, fills: [], status: status, lastUpdated: this.currentTick
             }
-        }
+        )
     }
 
     def checkQueuedOrders() {

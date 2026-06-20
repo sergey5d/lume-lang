@@ -2805,6 +2805,18 @@ impl<'a> Checker<'a> {
         uses_brace_syntax: bool,
         span: crate::source::Span,
     ) -> Ty {
+        if uses_brace_syntax
+            && !self.brace_call_uses_structural_construction(callee)
+            && !trailing_brace_call_has_lambda_arg(args)
+        {
+            self.add_error(
+                "invalid_trailing_brace_call",
+                "trailing brace call syntax only accepts lambda arguments; use parentheses for ordinary arguments",
+                span,
+            );
+            return Ty::Unknown;
+        }
+
         let normalized_args =
             self.normalize_trailing_brace_call_args(callee, args, uses_brace_syntax);
         if self.is_builtin_panic_call(callee) {
@@ -3892,58 +3904,11 @@ impl<'a> Checker<'a> {
 
     fn normalize_trailing_brace_call_args(
         &self,
-        callee: &Expr,
+        _callee: &Expr,
         args: &[crate::ast::CallArg],
-        uses_brace_syntax: bool,
+        _uses_brace_syntax: bool,
     ) -> Vec<crate::ast::CallArg> {
-        if !uses_brace_syntax
-            || self.brace_call_uses_structural_construction(callee)
-            || args.len() != 1
-        {
-            return args.to_vec();
-        }
-
-        let arg = &args[0];
-        let Expr::RecordLiteral {
-            fields,
-            values,
-            span,
-        } = &arg.value
-        else {
-            return args.to_vec();
-        };
-        if !fields.is_empty() {
-            return args.to_vec();
-        }
-
-        vec![crate::ast::CallArg {
-            name: None,
-            span: *span,
-            value: self.synthetic_block_expr_from_brace_values(values, *span),
-        }]
-    }
-
-    fn synthetic_block_expr_from_brace_values(
-        &self,
-        values: &[Expr],
-        span: crate::source::Span,
-    ) -> Expr {
-        Expr::Block {
-            span,
-            body: Block {
-                span,
-                statements: values
-                    .iter()
-                    .cloned()
-                    .map(|expr| {
-                        Stmt::Expr(crate::ast::ExprStmt {
-                            span: expr.span(),
-                            expr,
-                        })
-                    })
-                    .collect(),
-            },
-        }
+        args.to_vec()
     }
 
     fn brace_call_uses_structural_construction(&self, callee: &Expr) -> bool {
@@ -5645,6 +5610,29 @@ fn has_single_record_literal_arg(args: &[crate::ast::CallArg]) -> bool {
     )
 }
 
+fn trailing_brace_call_has_lambda_arg(args: &[crate::ast::CallArg]) -> bool {
+    let [
+        crate::ast::CallArg {
+            name: None, value, ..
+        },
+    ] = args
+    else {
+        return false;
+    };
+
+    match value {
+        Expr::Lambda { .. } => true,
+        Expr::Block { body, .. } => matches!(
+            body.statements.as_slice(),
+            [Stmt::Expr(crate::ast::ExprStmt {
+                expr: Expr::Lambda { .. },
+                ..
+            })]
+        ),
+        _ => false,
+    }
+}
+
 fn constructor_uses_parenthesized_record_arg(
     checker: &Checker<'_>,
     args: &[crate::ast::CallArg],
@@ -6103,7 +6091,28 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_trailing_brace_call_result_for_enum_constructor() {
+    fn allows_parenthesized_enum_constructor_with_brace_class_payload() {
+        let program = parse_inline(
+            r#"
+class Order {
+    quantity Int
+}
+
+def main() Option[Order] {
+    Some(
+        Order {
+            quantity: 7
+        }
+    )
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_trailing_brace_call_for_non_lambda_argument() {
         let program = parse_inline(
             r#"
 class Order {
@@ -6116,6 +6125,30 @@ def main() Option[Order] {
             quantity: 7
         }
     }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_trailing_brace_call"
+                    && diag.message.contains("only accepts lambda arguments")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_trailing_brace_call_for_lambda_argument() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    items = List(1, 2, 3)
+    mapped = items.map {
+        item -> item + 1
+    }
+    OS.println(mapped.size())
 }
 "#,
         );

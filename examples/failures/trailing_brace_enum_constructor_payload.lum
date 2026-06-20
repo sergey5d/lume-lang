@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*trailing brace call syntax only accepts lambda arguments; use parentheses for ordinary arguments.*
+
+class Order {
+    id Int
+}
+
+def main() Option[Order] {
+    Some {
+        Order {
+            id: 7
+        }
+    }
+}
