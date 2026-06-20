@@ -17,8 +17,8 @@ def main() Unit {
         MaybeInt.SomeX(6)
     )
 
-    extracted List[Option[Int]] = values.map(partial _ {
-           case SomeX(x) => x * 10
+    extracted List[Option[Int]] = values.map(value -> partial value {
+        case SomeX(x) => x * 10
         }
     )
 

@@ -4,8 +4,8 @@ use crate::{
     ast::{self, BinaryOp as AstBinaryOp, ImplBlock, ImplTargetKind, Item, TypeDecl, TypeMember},
     core::{
         self, AssignOp, AssignmentStmt, Block, CallableBody, DestructureKind, ElseBranch,
-        ElseExprBranch, Expr, ExprStmt, FunctionDecl, MatchCase, MatchCaseBody, MethodDecl,
-        Pattern, Stmt, TypeRef,
+        ElseExprBranch, Expr, ExprStmt, FunctionDecl, MatchCaseBody, MethodDecl, Pattern, Stmt,
+        TypeRef,
     },
     desugar,
     diagnostic::Diagnostic,
@@ -1107,29 +1107,6 @@ impl<'a> FunctionLowerer<'a> {
             function: function_id,
             captures,
         }
-    }
-
-    fn lower_placeholder_lambda(&mut self, expr: &Expr) -> ir::Operand {
-        let param_name = format!("v{}", self.function().locals.len() + 1);
-        let rewritten = rewrite_placeholder_expr(expr, &param_name);
-        let rvalue = self.lower_lambda_rvalue(
-            &[core::LambdaParam {
-                name: param_name,
-                ty: None,
-                span: expr.span(),
-            }],
-            &rewritten,
-            expr.span(),
-        );
-        let temp = self.add_temp(ir::Type::Unknown);
-        self.push_statement(ir::Statement {
-            span: Some(expr.span()),
-            kind: ir::StatementKind::Assign {
-                target: ir::Place::Local(temp),
-                value: rvalue,
-            },
-        });
-        ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
     }
 
     fn lower_callable_closure(
@@ -2778,9 +2755,6 @@ impl<'a> FunctionLowerer<'a> {
         if self.current_block.is_none() {
             return ir::Operand::Const(ir::Constant::Unit);
         }
-        if should_lower_as_placeholder_lambda(expr) {
-            return self.lower_placeholder_lambda(expr);
-        }
         match expr {
             Expr::Identifier { name, span } => self.lookup_value(name).unwrap_or_else(|| {
                 let path = vec![name.clone()];
@@ -2861,7 +2835,7 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Placeholder { span } => {
                 self.add_error(
                     "lower_invariant",
-                    "bare placeholder expression should be rewritten before lowering",
+                    "placeholder '_' cannot appear as an expression; use an explicit lambda parameter",
                     *span,
                 );
                 ir::Operand::Const(ir::Constant::Unit)
@@ -3871,84 +3845,6 @@ fn enum_case_is_value(case: &ir::EnumCase) -> bool {
     case.fields.is_empty() || case.fields.iter().all(|field| field.initializer.is_some())
 }
 
-fn contains_placeholder_expr(expr: &Expr) -> bool {
-    match expr {
-        Expr::Placeholder { .. } => true,
-        Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
-            items.iter().any(contains_placeholder_expr)
-        }
-        Expr::Call { callee, args, .. } => {
-            contains_placeholder_expr(callee)
-                || args.iter().any(|arg| contains_placeholder_expr(&arg.value))
-        }
-        Expr::Member { receiver, .. } => contains_placeholder_expr(receiver),
-        Expr::Index {
-            receiver, index, ..
-        } => contains_placeholder_expr(receiver) || contains_placeholder_expr(index),
-        Expr::RecordUpdate {
-            receiver, updates, ..
-        } => {
-            contains_placeholder_expr(receiver)
-                || updates
-                    .iter()
-                    .any(|update| contains_placeholder_expr(&update.value))
-        }
-        Expr::RecordLiteral { fields, .. } => fields
-            .iter()
-            .any(|field| contains_placeholder_expr(&field.value)),
-        Expr::AnonymousInterface { methods, .. } => methods
-            .iter()
-            .any(|method| body_contains_placeholder(&method.body)),
-        Expr::Unary { expr, .. } => contains_placeholder_expr(expr),
-        Expr::Binary { left, right, .. } => {
-            contains_placeholder_expr(left) || contains_placeholder_expr(right)
-        }
-        Expr::Is { left, .. } => contains_placeholder_expr(left),
-        Expr::If {
-            condition,
-            then_block,
-            else_branch,
-            ..
-        } => {
-            contains_placeholder_expr(condition)
-                || block_contains_placeholder(then_block)
-                || match else_branch.as_ref() {
-                    ElseExprBranch::If(expr) => contains_placeholder_expr(expr),
-                    ElseExprBranch::Block(block) => block_contains_placeholder(block),
-                }
-        }
-        Expr::Block { body, .. } => block_contains_placeholder(body),
-        Expr::Match { value, cases, .. } => {
-            contains_placeholder_expr(value)
-                || cases.iter().any(|case| match &case.body {
-                    MatchCaseBody::Expr(expr) => contains_placeholder_expr(expr),
-                    MatchCaseBody::Block(block) => block_contains_placeholder(block),
-                })
-        }
-        Expr::ForYield {
-            bindings,
-            yield_body,
-            ..
-        } => {
-            bindings.iter().any(|binding| {
-                binding
-                    .iterable
-                    .as_ref()
-                    .is_some_and(contains_placeholder_expr)
-                    || binding.values.iter().any(contains_placeholder_expr)
-            }) || block_contains_placeholder(yield_body)
-        }
-        Expr::Try { value, .. } => contains_placeholder_expr(value),
-        Expr::Lambda { .. } => false,
-        Expr::Identifier { .. }
-        | Expr::Integer { .. }
-        | Expr::Float { .. }
-        | Expr::String { .. }
-        | Expr::Bool { .. }
-        | Expr::Unit { .. } => false,
-    }
-}
-
 fn lower_if_stmt_else_expr(branch: &ElseBranch) -> Option<ElseExprBranch> {
     match branch {
         ElseBranch::Block(block) => Some(ElseExprBranch::Block(block.clone())),
@@ -4024,530 +3920,10 @@ fn param_names_from_function(function: &ir::Function) -> Vec<String> {
         .collect()
 }
 
-fn should_lower_as_placeholder_lambda(expr: &Expr) -> bool {
-    if matches!(expr, Expr::Lambda { .. }) || !contains_placeholder_expr(expr) {
-        return false;
-    }
-    match expr {
-        Expr::Call { callee, .. } => contains_placeholder_expr(callee),
-        Expr::RecordUpdate { receiver, .. } => contains_placeholder_expr(receiver),
-        Expr::Member { receiver, .. } => contains_placeholder_expr(receiver),
-        Expr::Index { receiver, .. } => contains_placeholder_expr(receiver),
-        _ => true,
-    }
-}
-
-fn rewrite_placeholder_expr(expr: &Expr, name: &str) -> Expr {
-    match expr {
-        Expr::Placeholder { span } => Expr::Identifier {
-            name: name.to_string(),
-            span: *span,
-        },
-        Expr::ListLiteral { items, span } => Expr::ListLiteral {
-            items: items
-                .iter()
-                .map(|item| rewrite_placeholder_expr(item, name))
-                .collect(),
-            span: *span,
-        },
-        Expr::TupleLiteral { items, span } => Expr::TupleLiteral {
-            items: items
-                .iter()
-                .map(|item| rewrite_placeholder_expr(item, name))
-                .collect(),
-            span: *span,
-        },
-        Expr::Call {
-            callee,
-            args,
-            style,
-            span,
-        } => Expr::Call {
-            callee: Box::new(rewrite_placeholder_expr(callee, name)),
-            args: args
-                .iter()
-                .map(|arg| core::CallArg {
-                    name: arg.name.clone(),
-                    value: rewrite_placeholder_expr(&arg.value, name),
-                    span: arg.span,
-                })
-                .collect(),
-            style: *style,
-            span: *span,
-        },
-        Expr::Member {
-            receiver,
-            name: member,
-            span,
-        } => Expr::Member {
-            receiver: Box::new(rewrite_placeholder_expr(receiver, name)),
-            name: member.clone(),
-            span: *span,
-        },
-        Expr::Index {
-            receiver,
-            index,
-            span,
-        } => Expr::Index {
-            receiver: Box::new(rewrite_placeholder_expr(receiver, name)),
-            index: Box::new(rewrite_placeholder_expr(index, name)),
-            span: *span,
-        },
-        Expr::RecordUpdate {
-            receiver,
-            updates,
-            span,
-        } => Expr::RecordUpdate {
-            receiver: Box::new(rewrite_placeholder_expr(receiver, name)),
-            updates: updates
-                .iter()
-                .map(|update| core::CallArg {
-                    name: update.name.clone(),
-                    value: rewrite_placeholder_expr(&update.value, name),
-                    span: update.span,
-                })
-                .collect(),
-            span: *span,
-        },
-        Expr::RecordLiteral {
-            fields,
-            values,
-            span,
-        } => Expr::RecordLiteral {
-            fields: fields
-                .iter()
-                .map(|field| core::CallArg {
-                    name: field.name.clone(),
-                    value: rewrite_placeholder_expr(&field.value, name),
-                    span: field.span,
-                })
-                .collect(),
-            values: values
-                .iter()
-                .map(|value| rewrite_placeholder_expr(value, name))
-                .collect(),
-            span: *span,
-        },
-        Expr::AnonymousInterface {
-            interfaces,
-            methods,
-            span,
-        } => Expr::AnonymousInterface {
-            interfaces: interfaces.clone(),
-            methods: methods
-                .iter()
-                .map(|method| core::MethodDecl {
-                    annotations: method.annotations.clone(),
-                    visibility: method.visibility,
-                    name: method.name.clone(),
-                    type_params: method.type_params.clone(),
-                    params: method.params.clone(),
-                    return_type: method.return_type.clone(),
-                    body: method
-                        .body
-                        .as_ref()
-                        .map(|body| rewrite_callable_body(body, name)),
-                    span: method.span,
-                })
-                .collect(),
-            span: *span,
-        },
-        Expr::Unary { op, expr, span } => Expr::Unary {
-            op: *op,
-            expr: Box::new(rewrite_placeholder_expr(expr, name)),
-            span: *span,
-        },
-        Expr::Binary {
-            left,
-            op,
-            right,
-            span,
-        } => Expr::Binary {
-            left: Box::new(rewrite_placeholder_expr(left, name)),
-            op: *op,
-            right: Box::new(rewrite_placeholder_expr(right, name)),
-            span: *span,
-        },
-        Expr::Is { left, target, span } => Expr::Is {
-            left: Box::new(rewrite_placeholder_expr(left, name)),
-            target: target.clone(),
-            span: *span,
-        },
-        Expr::If {
-            condition,
-            then_block,
-            else_branch,
-            span,
-        } => Expr::If {
-            condition: Box::new(rewrite_placeholder_expr(condition, name)),
-            then_block: rewrite_block(then_block, name),
-            else_branch: Box::new(match else_branch.as_ref() {
-                ElseExprBranch::If(expr) => {
-                    ElseExprBranch::If(Box::new(rewrite_placeholder_expr(expr, name)))
-                }
-                ElseExprBranch::Block(block) => ElseExprBranch::Block(rewrite_block(block, name)),
-            }),
-            span: *span,
-        },
-        Expr::Block { body, span } => Expr::Block {
-            body: rewrite_block(body, name),
-            span: *span,
-        },
-        Expr::Match {
-            partial,
-            value,
-            cases,
-            span,
-        } => Expr::Match {
-            partial: *partial,
-            value: Box::new(rewrite_placeholder_expr(value, name)),
-            cases: rewrite_match_cases(cases, name),
-            span: *span,
-        },
-        Expr::ForYield {
-            bindings,
-            yield_body,
-            span,
-        } => Expr::ForYield {
-            bindings: bindings
-                .iter()
-                .map(|binding| core::ForBinding {
-                    bindings: binding.bindings.clone(),
-                    destructure: binding.destructure,
-                    pattern: binding.pattern.clone(),
-                    iterable: binding
-                        .iterable
-                        .as_ref()
-                        .map(|iterable| rewrite_placeholder_expr(iterable, name)),
-                    values: binding
-                        .values
-                        .iter()
-                        .map(|value| rewrite_placeholder_expr(value, name))
-                        .collect(),
-                    span: binding.span,
-                })
-                .collect(),
-            yield_body: rewrite_block(yield_body, name),
-            span: *span,
-        },
-        Expr::Try { value, span } => Expr::Try {
-            value: Box::new(rewrite_placeholder_expr(value, name)),
-            span: *span,
-        },
-        Expr::Lambda { .. } => expr.clone(),
-        Expr::Identifier { .. }
-        | Expr::Integer { .. }
-        | Expr::Float { .. }
-        | Expr::String { .. }
-        | Expr::Bool { .. }
-        | Expr::Unit { .. } => expr.clone(),
-    }
-}
-
-fn rewrite_callable_body(body: &CallableBody, name: &str) -> CallableBody {
-    match body {
-        CallableBody::Expr(expr) => CallableBody::Expr(rewrite_placeholder_expr(expr, name)),
-        CallableBody::Block(block) => CallableBody::Block(rewrite_block(block, name)),
-    }
-}
-
-fn rewrite_block(block: &Block, name: &str) -> Block {
-    Block {
-        statements: block
-            .statements
-            .iter()
-            .map(|stmt| rewrite_stmt(stmt, name))
-            .collect(),
-        span: block.span,
-    }
-}
-
-fn rewrite_stmt(stmt: &Stmt, name: &str) -> Stmt {
-    match stmt {
-        Stmt::Binding(binding) => Stmt::Binding(core::BindingStmt {
-            visibility: binding.visibility,
-            bindings: binding.bindings.clone(),
-            values: binding
-                .values
-                .iter()
-                .map(|value| rewrite_placeholder_expr(value, name))
-                .collect(),
-            destructure: binding.destructure,
-            span: binding.span,
-        }),
-        Stmt::PatternBinding(stmt) => Stmt::PatternBinding(core::PatternBindingStmt {
-            kind: stmt.kind,
-            clauses: stmt
-                .clauses
-                .iter()
-                .map(|clause| core::RefutableClause {
-                    pattern: clause.pattern.clone(),
-                    value: rewrite_placeholder_expr(&clause.value, name),
-                    span: clause.span,
-                })
-                .collect(),
-            pattern: stmt.pattern.clone(),
-            value: rewrite_placeholder_expr(&stmt.value, name),
-            span: stmt.span,
-        }),
-        Stmt::Assignment(assignment) => Stmt::Assignment(core::AssignmentStmt {
-            targets: assignment
-                .targets
-                .iter()
-                .map(|target| rewrite_placeholder_expr(target, name))
-                .collect(),
-            operator: assignment.operator,
-            values: assignment
-                .values
-                .iter()
-                .map(|value| rewrite_placeholder_expr(value, name))
-                .collect(),
-            span: assignment.span,
-        }),
-        Stmt::If(stmt) => Stmt::If(core::IfStmt {
-            condition: stmt
-                .condition
-                .as_ref()
-                .map(|condition| rewrite_placeholder_expr(condition, name)),
-            condition_clauses: stmt
-                .condition_clauses
-                .iter()
-                .map(|clause| match clause {
-                    core::IfConditionClause::Let(clause) => {
-                        core::IfConditionClause::Let(core::RefutableClause {
-                            pattern: clause.pattern.clone(),
-                            value: rewrite_placeholder_expr(&clause.value, name),
-                            span: clause.span,
-                        })
-                    }
-                    core::IfConditionClause::Expr(condition) => {
-                        core::IfConditionClause::Expr(rewrite_placeholder_expr(condition, name))
-                    }
-                })
-                .collect(),
-            pattern: stmt.pattern.clone(),
-            pattern_value: stmt
-                .pattern_value
-                .as_ref()
-                .map(|value| rewrite_placeholder_expr(value, name)),
-            pattern_clauses: stmt
-                .pattern_clauses
-                .iter()
-                .map(|clause| core::RefutableClause {
-                    pattern: clause.pattern.clone(),
-                    value: rewrite_placeholder_expr(&clause.value, name),
-                    span: clause.span,
-                })
-                .collect(),
-            bindings: stmt.bindings.clone(),
-            binding_value: stmt
-                .binding_value
-                .as_ref()
-                .map(|value| rewrite_placeholder_expr(value, name)),
-            then_block: rewrite_block(&stmt.then_block, name),
-            else_branch: stmt.else_branch.as_ref().map(|branch| match branch {
-                ElseBranch::If(stmt) => ElseBranch::If(Box::new(
-                    match rewrite_stmt(&Stmt::If((**stmt).clone()), name) {
-                        Stmt::If(stmt) => stmt,
-                        _ => unreachable!(),
-                    },
-                )),
-                ElseBranch::Block(block) => ElseBranch::Block(rewrite_block(block, name)),
-            }),
-            span: stmt.span,
-        }),
-        Stmt::LetElse(stmt) => Stmt::LetElse(core::LetElseStmt {
-            clauses: stmt
-                .clauses
-                .iter()
-                .map(|clause| core::RefutableClause {
-                    pattern: clause.pattern.clone(),
-                    value: rewrite_placeholder_expr(&clause.value, name),
-                    span: clause.span,
-                })
-                .collect(),
-            pattern: stmt.pattern.clone(),
-            value: rewrite_placeholder_expr(&stmt.value, name),
-            else_block: rewrite_block(&stmt.else_block, name),
-            span: stmt.span,
-        }),
-        Stmt::Match(stmt) => Stmt::Match(core::MatchStmt {
-            partial: stmt.partial,
-            value: rewrite_placeholder_expr(&stmt.value, name),
-            cases: rewrite_match_cases(&stmt.cases, name),
-            span: stmt.span,
-        }),
-        Stmt::While(stmt) => Stmt::While(core::WhileStmt {
-            condition: rewrite_placeholder_expr(&stmt.condition, name),
-            body: rewrite_block(&stmt.body, name),
-            span: stmt.span,
-        }),
-        Stmt::For(stmt) => Stmt::For(core::ForStmt {
-            bindings: stmt
-                .bindings
-                .iter()
-                .map(|binding| core::ForBinding {
-                    bindings: binding.bindings.clone(),
-                    destructure: binding.destructure,
-                    pattern: binding.pattern.clone(),
-                    iterable: binding
-                        .iterable
-                        .as_ref()
-                        .map(|iterable| rewrite_placeholder_expr(iterable, name)),
-                    values: binding
-                        .values
-                        .iter()
-                        .map(|value| rewrite_placeholder_expr(value, name))
-                        .collect(),
-                    span: binding.span,
-                })
-                .collect(),
-            body: rewrite_block(&stmt.body, name),
-            span: stmt.span,
-        }),
-        Stmt::Return(stmt) => Stmt::Return(core::ReturnStmt {
-            value: stmt
-                .value
-                .as_ref()
-                .map(|value| rewrite_placeholder_expr(value, name)),
-            span: stmt.span,
-        }),
-        Stmt::Break(stmt) => Stmt::Break(stmt.clone()),
-        Stmt::Continue(stmt) => Stmt::Continue(stmt.clone()),
-        Stmt::Expr(stmt) => Stmt::Expr(core::ExprStmt {
-            expr: rewrite_placeholder_expr(&stmt.expr, name),
-            span: stmt.span,
-        }),
-        Stmt::LocalFunction(function) => Stmt::LocalFunction(core::FunctionDecl {
-            annotations: function.annotations.clone(),
-            visibility: function.visibility,
-            name: function.name.clone(),
-            type_params: function.type_params.clone(),
-            params: function.params.clone(),
-            return_type: function.return_type.clone(),
-            body: rewrite_callable_body(&function.body, name),
-            span: function.span,
-        }),
-    }
-}
-
-fn rewrite_match_cases(cases: &[MatchCase], name: &str) -> Vec<MatchCase> {
-    cases
-        .iter()
-        .map(|case| MatchCase {
-            pattern: case.pattern.clone(),
-            guard: case
-                .guard
-                .as_ref()
-                .map(|guard| rewrite_placeholder_expr(guard, name)),
-            body: match &case.body {
-                MatchCaseBody::Expr(expr) => {
-                    MatchCaseBody::Expr(rewrite_placeholder_expr(expr, name))
-                }
-                MatchCaseBody::Block(block) => MatchCaseBody::Block(rewrite_block(block, name)),
-            },
-            span: case.span,
-        })
-        .collect()
-}
-
-fn block_contains_placeholder(block: &Block) -> bool {
-    block.statements.iter().any(stmt_contains_placeholder)
-}
-
-fn body_contains_placeholder(body: &Option<CallableBody>) -> bool {
-    body.as_ref().is_some_and(|body| match body {
-        CallableBody::Expr(expr) => contains_placeholder_expr(expr),
-        CallableBody::Block(block) => block_contains_placeholder(block),
-    })
-}
-
-fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
-    match stmt {
-        Stmt::Binding(binding) => binding.values.iter().any(contains_placeholder_expr),
-        Stmt::PatternBinding(stmt) => {
-            stmt.clauses
-                .iter()
-                .any(|clause| contains_placeholder_expr(&clause.value))
-                || contains_placeholder_expr(&stmt.value)
-        }
-        Stmt::Assignment(assignment) => {
-            assignment.targets.iter().any(contains_placeholder_expr)
-                || assignment.values.iter().any(contains_placeholder_expr)
-        }
-        Stmt::If(stmt) => {
-            stmt.condition
-                .as_ref()
-                .is_some_and(contains_placeholder_expr)
-                || stmt.condition_clauses.iter().any(|clause| match clause {
-                    core::IfConditionClause::Let(clause) => {
-                        contains_placeholder_expr(&clause.value)
-                    }
-                    core::IfConditionClause::Expr(condition) => {
-                        contains_placeholder_expr(condition)
-                    }
-                })
-                || stmt
-                    .pattern_clauses
-                    .iter()
-                    .any(|clause| contains_placeholder_expr(&clause.value))
-                || stmt
-                    .pattern_value
-                    .as_ref()
-                    .is_some_and(contains_placeholder_expr)
-                || stmt
-                    .binding_value
-                    .as_ref()
-                    .is_some_and(contains_placeholder_expr)
-                || block_contains_placeholder(&stmt.then_block)
-                || stmt
-                    .else_branch
-                    .as_ref()
-                    .is_some_and(|branch| match branch {
-                        ElseBranch::If(stmt) => {
-                            stmt_contains_placeholder(&Stmt::If((**stmt).clone()))
-                        }
-                        ElseBranch::Block(block) => block_contains_placeholder(block),
-                    })
-        }
-        Stmt::Match(stmt) => {
-            contains_placeholder_expr(&stmt.value)
-                || stmt.cases.iter().any(|case| match &case.body {
-                    MatchCaseBody::Expr(expr) => contains_placeholder_expr(expr),
-                    MatchCaseBody::Block(block) => block_contains_placeholder(block),
-                })
-        }
-        Stmt::While(stmt) => {
-            contains_placeholder_expr(&stmt.condition) || block_contains_placeholder(&stmt.body)
-        }
-        Stmt::For(stmt) => {
-            stmt.bindings.iter().any(|binding| {
-                binding
-                    .iterable
-                    .as_ref()
-                    .is_some_and(contains_placeholder_expr)
-                    || binding.values.iter().any(contains_placeholder_expr)
-            }) || block_contains_placeholder(&stmt.body)
-        }
-        Stmt::Return(stmt) => stmt.value.as_ref().is_some_and(contains_placeholder_expr),
-        Stmt::Break(_) => false,
-        Stmt::Continue(_) => false,
-        Stmt::Expr(stmt) => contains_placeholder_expr(&stmt.expr),
-        Stmt::LetElse(stmt) => {
-            stmt.clauses
-                .iter()
-                .any(|clause| contains_placeholder_expr(&clause.value))
-                || contains_placeholder_expr(&stmt.value)
-                || block_contains_placeholder(&stmt.else_block)
-        }
-        Stmt::LocalFunction(function) => body_contains_placeholder(&Some(function.body.clone())),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{lex, parse_program, SourceFile};
+    use crate::{SourceFile, lex, parse_program};
 
     fn parse_inline(src: &str) -> ast::Program {
         let file = SourceFile::new("test.lum", src);
@@ -4606,10 +3982,11 @@ mod tests {
         let ir = lowered.program.expect("ir program");
         let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
         assert!(main.blocks.len() >= 6, "{:#?}", main.blocks);
-        assert!(main
-            .blocks
-            .iter()
-            .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. })));
+        assert!(
+            main.blocks
+                .iter()
+                .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. }))
+        );
     }
 
     #[test]
@@ -4704,10 +4081,11 @@ mod tests {
         let ir = lowered.program.expect("ir program");
         let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
         assert!(main.blocks.len() >= 8, "{:#?}", main.blocks);
-        assert!(main
-            .blocks
-            .iter()
-            .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. })));
+        assert!(
+            main.blocks
+                .iter()
+                .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. }))
+        );
         assert!(main.blocks.iter().any(|block| {
             block.statements.iter().any(|stmt| match &stmt.kind {
                 ir::StatementKind::Assign {
@@ -4738,7 +4116,7 @@ mod tests {
     }
 
     #[test]
-    fn lowers_local_functions_lambdas_record_updates_and_placeholders() {
+    fn lowers_local_functions_lambdas_and_record_updates() {
         let program = parse_inline(
             r#"
             class Amount {
@@ -4748,7 +4126,7 @@ mod tests {
 
             def main() Int {
                 base = 10
-                inc (Int) -> Int = _ + 1
+                inc (Int) -> Int = value -> value + 1
                 plus = value Int -> value + base
 
                 def add(value Int) Int = plus(value)

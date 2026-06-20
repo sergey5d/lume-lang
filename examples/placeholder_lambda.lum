@@ -13,12 +13,12 @@
 def applyTwice(f (Int) -> Int, value Int) Int = f(f(value))
 
 def main() Unit {
-    inc (Int) -> Int = _ + 1
+    inc (Int) -> Int = value -> value + 1
     items = List(1, 2, 3)
-    mapped = items.map(_ + 1)
+    mapped = items.map(item -> item + 1)
     str Str = "haha"
     words = [str]
-    sizes = words.map(_.size())
+    sizes = words.map(word -> word.size())
     pairs = List(("a", 1), ("bb", 2))
     pairMapped = pairs.map((key, value) -> key.size() + value)
     pairIgnored = pairs.map((_, value) -> value * 2)

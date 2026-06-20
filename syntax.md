@@ -478,20 +478,6 @@ Single-parameter lambda:
 x -> x + 1
 ```
 
-Underscore shorthand in a lambda-expected context:
-
-```txt
-inc (Int) -> Int = _ + 1
-items.map(_ + 1)
-```
-
-Rules:
-
-- if an expression containing `_` appears where a one-argument function is expected, it expands to a lambda
-- `_ + 1` becomes `x -> x + 1`
-- the shorthand is contextual; outside a lambda-expected position, `_` is not a normal value
-- this also works with larger expressions such as `items.map(if _ > 5 then 10 else 8)` or `items.map(match _ { ... })`
-
 Explicitly typed lambda:
 
 ```txt
@@ -516,7 +502,6 @@ Rules:
 - if a lambda is expected to take one argument and that argument is a tuple, `(a, b) -> ...` destructures that tuple into separate names
 - the same syntax still means a normal multi-parameter lambda when the contextual function type expects multiple arguments
 - `_` inside an explicit lambda parameter list means "ignore this parameter slot"
-- the placeholder shorthand rule for `_ + 1` only applies when there is no explicit `->` lambda parameter list
 
 Block lambda:
 
@@ -543,24 +528,22 @@ If the body after `->` starts on the next line, it may be either:
 - a single expression spread over later lines
 - or a multi-statement lambda body without an extra `{ ... }` wrapper
 
-Contextual `match` lambda sugar is also allowed in a unary-function context:
+Use an explicit lambda when mapping with a `match`:
 
 ```txt
-options.map(match {
+options.map(value -> match value {
     case SomeX(x) => x + 1
     case NoneX => 0
 })
 ```
 
-`match { ... }` in that position desugars to `match _ { ... }`. The same also works for `partial { ... }`.
+The same idea applies to `partial`:
 
 ```txt
-options.map(partial {
+options.map(value -> partial value {
     case SomeX(x) => x + 1
 })
 ```
-
-`partial { ... }` in that position desugars to `partial _ { ... }`.
 
 Nested blocks are also valid expressions:
 
@@ -1211,17 +1194,17 @@ result Option[Int] = partial value {
 }
 ```
 
-Contextual partial form:
+Partial mapped through an explicit lambda:
 
 ```txt
-values.map(partial {
+values.map(value -> partial value {
     case SomeX(x) => x + 1
 })
 ```
 
 `match` and `partial` always require a block of cases. Inline `match value: ...` shorthand is not supported.
 
-Every `match` and `partial` branch must start with `case`, including contextual forms like `match { ... }` and `partial { ... }`.
+Every `match` and `partial` branch must start with `case`.
 
 If no case matches, `partial` returns `None`.
 

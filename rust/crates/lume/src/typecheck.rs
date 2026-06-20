@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::{
+    Diagnostic,
     ast::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
         ElseBranch, ElseExprBranch, Expr, ForBinding, FunctionDecl, IfConditionClause, IfStmt,
@@ -13,10 +14,9 @@ use crate::{
         TypeKind, TypeMember, TypeRef, Visibility,
     },
     resolver::{
-        collect_module_order, find_stdlib_dir, load_module_graph, parse_program_from_path,
-        read_directives, resolve_path, ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph,
+        ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, collect_module_order,
+        find_stdlib_dir, load_module_graph, parse_program_from_path, read_directives, resolve_path,
     },
-    Diagnostic,
 };
 
 #[derive(Debug, Clone)]
@@ -608,7 +608,6 @@ struct Checker<'a> {
     diagnostics: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, ValueInfo>>,
     type_params: Vec<HashSet<String>>,
-    placeholder_hints: Vec<Ty>,
     current_return: Ty,
     current_owner: Option<TypeSig>,
     current_method: Option<String>,
@@ -624,7 +623,6 @@ impl<'a> Checker<'a> {
             diagnostics: Vec::new(),
             scopes: Vec::new(),
             type_params: Vec::new(),
-            placeholder_hints: Vec::new(),
             current_return: Ty::Unknown,
             current_owner: None,
             current_method: None,
@@ -2358,15 +2356,6 @@ impl<'a> Checker<'a> {
     }
 
     fn check_expr_against(&mut self, expr: &Expr, expected: &Ty) -> Ty {
-        if let Ty::Function(params, ret) = expected {
-            if !matches!(expr, Expr::Lambda { .. }) && contains_placeholder_expr(expr) {
-                let placeholder_ty = params.first().cloned().unwrap_or(Ty::Unknown);
-                self.placeholder_hints.push(placeholder_ty);
-                let body_ty = self.check_expr_against(expr, ret);
-                self.placeholder_hints.pop();
-                return Ty::Function(params.clone(), Box::new(body_ty));
-            }
-        }
         match expr {
             Expr::Identifier { name, span } => self
                 .lookup_value(name)
@@ -2377,11 +2366,15 @@ impl<'a> Checker<'a> {
                     self.add_error("undefined_name", self.undefined_value_message(name), *span);
                     Ty::Unknown
                 }),
-            Expr::Placeholder { .. } => self
-                .placeholder_hints
-                .last()
-                .cloned()
-                .unwrap_or(Ty::Unknown),
+            Expr::Placeholder { span } => {
+                self.add_error(
+                    "invalid_placeholder_expr",
+                    "'_' is not a valid expression here; use an explicit lambda like 'x -> ...'",
+                    *span,
+                );
+                let _ = expected;
+                Ty::Unknown
+            }
             Expr::Integer { .. } => Ty::int(),
             Expr::Float { .. } => Ty::float(),
             Expr::String { .. } => Ty::str(),
@@ -2629,11 +2622,7 @@ impl<'a> Checker<'a> {
                 if !*partial {
                     self.check_match_exhaustiveness(&value_ty, cases, *span);
                 }
-                if *partial {
-                    Ty::option(result)
-                } else {
-                    result
-                }
+                if *partial { Ty::option(result) } else { result }
             }
             Expr::ForYield {
                 bindings,
@@ -5734,185 +5723,10 @@ fn module_alias_and_member(expr: &Expr) -> Option<(String, String)> {
     }
 }
 
-fn contains_placeholder_expr(expr: &Expr) -> bool {
-    match expr {
-        Expr::Placeholder { .. } => true,
-        Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
-            items.iter().any(contains_placeholder_expr)
-        }
-        Expr::Call { callee, args, .. } => {
-            contains_placeholder_expr(callee)
-                || args.iter().any(|arg| contains_placeholder_expr(&arg.value))
-        }
-        Expr::Member { receiver, .. } => contains_placeholder_expr(receiver),
-        Expr::Index {
-            receiver, index, ..
-        } => contains_placeholder_expr(receiver) || contains_placeholder_expr(index),
-        Expr::RecordUpdate {
-            receiver, updates, ..
-        } => {
-            contains_placeholder_expr(receiver)
-                || updates
-                    .iter()
-                    .any(|arg| contains_placeholder_expr(&arg.value))
-        }
-        Expr::RecordLiteral { fields, .. } => fields
-            .iter()
-            .any(|field| contains_placeholder_expr(&field.value)),
-        Expr::AnonymousInterface { methods, .. } => methods.iter().any(|method| {
-            method.body.as_ref().is_some_and(|body| match body {
-                CallableBody::Expr(expr) => contains_placeholder_expr(expr),
-                CallableBody::Block(block) => {
-                    block.statements.iter().any(stmt_contains_placeholder)
-                }
-            })
-        }),
-        Expr::Unary { expr, .. } => contains_placeholder_expr(expr),
-        Expr::Binary { left, right, .. } => {
-            contains_placeholder_expr(left) || contains_placeholder_expr(right)
-        }
-        Expr::Is { left, .. } => contains_placeholder_expr(left),
-        Expr::If {
-            condition,
-            then_block,
-            else_branch,
-            ..
-        } => {
-            contains_placeholder_expr(condition)
-                || then_block.statements.iter().any(stmt_contains_placeholder)
-                || match else_branch.as_ref() {
-                    ElseExprBranch::If(expr) => contains_placeholder_expr(expr),
-                    ElseExprBranch::Block(block) => {
-                        block.statements.iter().any(stmt_contains_placeholder)
-                    }
-                }
-        }
-        Expr::Block { body, .. } => body.statements.iter().any(stmt_contains_placeholder),
-        Expr::Match { value, cases, .. } => {
-            contains_placeholder_expr(value)
-                || cases.iter().any(|case| match &case.body {
-                    MatchCaseBody::Expr(expr) => contains_placeholder_expr(expr),
-                    MatchCaseBody::Block(block) => {
-                        block.statements.iter().any(stmt_contains_placeholder)
-                    }
-                })
-        }
-        Expr::ForYield {
-            yield_body,
-            bindings,
-            ..
-        } => {
-            bindings.iter().any(|binding| {
-                binding
-                    .iterable
-                    .as_ref()
-                    .is_some_and(contains_placeholder_expr)
-                    || binding.values.iter().any(contains_placeholder_expr)
-            }) || yield_body.statements.iter().any(stmt_contains_placeholder)
-        }
-        Expr::Try { value, .. } => contains_placeholder_expr(value),
-        Expr::Lambda { body, .. } => match body {
-            LambdaBody::Expr(expr) => contains_placeholder_expr(expr),
-            LambdaBody::Block(block) => block.statements.iter().any(stmt_contains_placeholder),
-        },
-        Expr::Group { inner, .. } => contains_placeholder_expr(inner),
-        Expr::Identifier { .. }
-        | Expr::Integer { .. }
-        | Expr::Float { .. }
-        | Expr::String { .. }
-        | Expr::Bool { .. }
-        | Expr::Unit { .. } => false,
-    }
-}
-
-fn stmt_contains_placeholder(stmt: &Stmt) -> bool {
-    match stmt {
-        Stmt::Binding(binding) => binding.values.iter().any(contains_placeholder_expr),
-        Stmt::PatternBinding(stmt) => {
-            stmt.clauses
-                .iter()
-                .any(|clause| contains_placeholder_expr(&clause.value))
-                || contains_placeholder_expr(&stmt.value)
-        }
-        Stmt::ExpectCondition(stmt) => contains_placeholder_expr(&stmt.condition),
-        Stmt::Assignment(assignment) => assignment.values.iter().any(contains_placeholder_expr),
-        Stmt::Expr(expr) => contains_placeholder_expr(&expr.expr),
-        Stmt::If(stmt) => {
-            stmt.condition
-                .as_ref()
-                .is_some_and(contains_placeholder_expr)
-                || stmt
-                    .pattern_value
-                    .as_ref()
-                    .is_some_and(contains_placeholder_expr)
-                || stmt
-                    .binding_value
-                    .as_ref()
-                    .is_some_and(contains_placeholder_expr)
-                || stmt
-                    .then_block
-                    .statements
-                    .iter()
-                    .any(stmt_contains_placeholder)
-                || stmt
-                    .else_branch
-                    .as_ref()
-                    .is_some_and(|branch| match branch {
-                        ElseBranch::If(stmt) => {
-                            stmt_contains_placeholder(&Stmt::If((**stmt).clone()))
-                        }
-                        ElseBranch::Block(block) => {
-                            block.statements.iter().any(stmt_contains_placeholder)
-                        }
-                    })
-        }
-        Stmt::LetElse(stmt) => {
-            contains_placeholder_expr(&stmt.value)
-                || stmt
-                    .else_block
-                    .statements
-                    .iter()
-                    .any(stmt_contains_placeholder)
-        }
-        Stmt::While(stmt) => {
-            contains_placeholder_expr(&stmt.condition)
-                || stmt.body.statements.iter().any(stmt_contains_placeholder)
-        }
-        Stmt::For(stmt) => {
-            stmt.bindings.iter().any(|binding| {
-                binding
-                    .iterable
-                    .as_ref()
-                    .is_some_and(contains_placeholder_expr)
-                    || binding.values.iter().any(contains_placeholder_expr)
-            }) || stmt.body.statements.iter().any(stmt_contains_placeholder)
-        }
-        Stmt::Match(stmt) => {
-            contains_placeholder_expr(&stmt.value)
-                || stmt.cases.iter().any(|case| match &case.body {
-                    MatchCaseBody::Expr(expr) => contains_placeholder_expr(expr),
-                    MatchCaseBody::Block(block) => {
-                        block.statements.iter().any(stmt_contains_placeholder)
-                    }
-                })
-        }
-        Stmt::LocalFunction(function) => match &function.body {
-            CallableBody::Expr(expr) => contains_placeholder_expr(expr),
-            CallableBody::Block(block) => block.statements.iter().any(stmt_contains_placeholder),
-        },
-        Stmt::Return(stmt) => stmt
-            .value
-            .as_ref()
-            .is_some_and(|expr| contains_placeholder_expr(expr)),
-        Stmt::Break(_) => false,
-        Stmt::Continue(_) => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{lex, parse_program, SourceFile};
+    use crate::{SourceFile, lex, parse_program};
 
     fn parse_inline(src: &str) -> Program {
         let file = SourceFile::new("test.lum", src);
@@ -6796,6 +6610,26 @@ def main() Unit {
                     && diag
                         .message
                         .contains("must exit control flow with 'return', 'break', 'continue', or a call returning Never")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_placeholder_lambda_shorthand() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    items = List(1, 2, 3)
+    mapped = items.map(_ + 1)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_placeholder_expr" && diag.message.contains("explicit lambda")
             }),
             "{:#?}",
             result.diagnostics

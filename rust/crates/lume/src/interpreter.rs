@@ -11,7 +11,7 @@ use crate::{
     diagnostic::Diagnostic,
     ir,
     lower::lower_program,
-    resolver::{load_module_graph, LoadedModule, LocatedDiagnostic, ModuleGraph},
+    resolver::{LoadedModule, LocatedDiagnostic, ModuleGraph, load_module_graph},
     runtime,
     source::{LineColumn, Span},
     typecheck::check_path,
@@ -4301,7 +4301,7 @@ fn value_as_f64(value: &Value) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{check_program, lex, parse_program, SourceFile};
+    use crate::{SourceFile, check_program, lex, parse_program};
     use std::{
         fs,
         path::{Path, PathBuf},

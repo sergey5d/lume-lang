@@ -15,15 +15,15 @@ enum MaybeInt {
 
 def main() Unit {
     values = List(1, 6, 3)
-    ifMapped = values.map(if _ > 5 then 10 else 8)
+    ifMapped = values.map(value -> if value > 5 then 10 else 8)
 
     options = List(MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3))
-    matchMapped = options.map(match {
-       case SomeX(x) => x + 1
-       case NoneX => 0
+    matchMapped = options.map(value -> match value {
+        case SomeX(x) => x + 1
+        case NoneX => 0
     })
-    partialMapped List[Option[Int]] = options.map(partial {
-       case SomeX(x) => x + 1
+    partialMapped List[Option[Int]] = options.map(value -> partial value {
+        case SomeX(x) => x + 1
     })
 
     OS.println(ifMapped.get(0).getOr(0))

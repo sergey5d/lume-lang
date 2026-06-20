@@ -1,7 +1,8 @@
 use crate::{
+    Diagnostic, Span,
     ast::TypeKind,
     interpreter::{Interpreter, Value},
-    ir, Diagnostic, Span,
+    ir,
 };
 
 use super::builtin_method;

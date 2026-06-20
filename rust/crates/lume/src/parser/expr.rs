@@ -957,7 +957,10 @@ impl<'a> Parser<'a> {
                 self.restore(lambda_probe);
                 let prefers_block = self.try_parse_lambda_expr().is_some();
                 self.restore(checkpoint);
-                let arg = if !prefers_block && self.looks_like_brace_record_literal(true) {
+                let arg = if !prefers_block
+                    && (self.looks_like_brace_record_literal(true)
+                        || Self::is_constructor_like_expr(&expr))
+                {
                     self.parse_brace_record_literal_expr()?
                 } else {
                     let block = self.parse_block()?;
@@ -1170,9 +1173,7 @@ impl<'a> Parser<'a> {
                 TokenKind::RParen => nested_parens = nested_parens.saturating_sub(1),
                 TokenKind::LBracket => nested_brackets += 1,
                 TokenKind::RBracket => nested_brackets = nested_brackets.saturating_sub(1),
-                TokenKind::Comma
-                    if depth == 1 && nested_parens == 0 && nested_brackets == 0 =>
-                {
+                TokenKind::Comma if depth == 1 && nested_parens == 0 && nested_brackets == 0 => {
                     return true;
                 }
                 _ => {}
@@ -1180,6 +1181,23 @@ impl<'a> Parser<'a> {
             lookahead += 1;
         }
         false
+    }
+
+    fn is_constructor_like_expr(expr: &Expr) -> bool {
+        match expr {
+            Expr::Identifier { name, .. } => name
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_uppercase()),
+            Expr::Member { receiver, name, .. } => {
+                Self::is_constructor_like_expr(receiver)
+                    && name
+                        .chars()
+                        .next()
+                        .is_some_and(|ch| ch.is_ascii_uppercase())
+            }
+            _ => false,
+        }
     }
 
     pub(super) fn parse_list_literal(&mut self) -> Option<Expr> {

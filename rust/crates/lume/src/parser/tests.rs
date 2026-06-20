@@ -409,6 +409,25 @@ fn parses_record_literal_forms() {
         other => panic!("expected call, got {other:#?}"),
     }
 
+    match parse_expr_only("Box { 5 }") {
+        Expr::Call {
+            args,
+            uses_brace_syntax,
+            ..
+        } => {
+            assert_eq!(args.len(), 1);
+            assert!(uses_brace_syntax);
+            match &args[0].value {
+                Expr::RecordLiteral { fields, values, .. } => {
+                    assert!(fields.is_empty());
+                    assert_eq!(values.len(), 1);
+                }
+                other => panic!("expected single-value record literal call arg, got {other:#?}"),
+            }
+        }
+        other => panic!("expected call, got {other:#?}"),
+    }
+
     let file = SourceFile::new("test.lum", r#"def run() Unit = class(1, "x")"#);
     let lexed = lex(&file);
     assert!(
@@ -418,10 +437,9 @@ fn parses_record_literal_forms() {
     );
     let result = parse_program(&lexed.tokens);
     assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.message.contains("anonymous record literals use '{ ... }'")),
+        result.diagnostics.iter().any(|diag| diag
+            .message
+            .contains("anonymous record literals use '{ ... }'")),
         "expected class(...) rejection, got diagnostics: {:#?}",
         result.diagnostics
     );
