@@ -303,8 +303,8 @@ Record update:
 
 ```txt
 updated = value with {
-    age = 42
-    name = "Bob"
+    age: 42
+    name: "Bob"
 }
 ```
 

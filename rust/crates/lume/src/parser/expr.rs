@@ -568,7 +568,10 @@ impl<'a> Parser<'a> {
         let mut updates = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let (name, name_span) = self.expect_identifier("expected record field name")?;
-            self.consume(TokenKind::Eq, "expected '=' after record field name")?;
+            self.consume(
+                TokenKind::Colon,
+                "expected ':' after record update field name",
+            )?;
             let value = self.parse_expr()?;
             updates.push(CallArg {
                 name: Some(name),

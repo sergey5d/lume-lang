@@ -4130,7 +4130,7 @@ mod tests {
                 def add(value Int) Int = plus(value)
 
                 current = Amount { 1, "a" }
-                updated = current with { amount = add(inc(1)) }
+                updated = current with { amount: add(inc(1)) }
                 return updated.amount
             }
             "#,
