@@ -87,9 +87,10 @@ fn list_values(
     span: Option<Span>,
     context: &str,
 ) -> Result<Vec<Value>, Diagnostic> {
+    let _ = (span, context);
     let items = list_items(receiver);
     let items = items.borrow();
-    interpreter.clone_initialized_values(&items, span, context)
+    Ok(interpreter.clone_values(&items))
 }
 
 fn values_match(
@@ -308,7 +309,7 @@ fn list_sort(
     let items = list_items(&receiver);
     let mut values = {
         let items = items.borrow();
-        interpreter.clone_initialized_values(&items, span, "List.sort")?
+        interpreter.clone_values(&items)
     };
     let len = values.len();
     for i in 0..len {
@@ -446,8 +447,7 @@ fn list_get(
     let items = items.borrow();
     let value = items
         .get(index as usize)
-        .map(|value| interpreter.clone_initialized_value(value, span, "List.get"))
-        .transpose()?;
+        .map(|value| interpreter.clone_value(value));
     Ok(match value {
         Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),
@@ -470,7 +470,6 @@ fn list_remove(
         return Ok(interpreter.option_none());
     }
     let value = items.remove(index as usize);
-    interpreter.ensure_initialized_value(&value, span, "List.remove")?;
     Ok(interpreter.option_some(value))
 }
 
@@ -489,7 +488,6 @@ fn list_remove_first(
         return Ok(interpreter.option_none());
     }
     let value = items.remove(0);
-    interpreter.ensure_initialized_value(&value, span, "List.removeFirst")?;
     Ok(interpreter.option_some(value))
 }
 
@@ -504,10 +502,7 @@ fn list_remove_last(
     }
     let value = list_items(&receiver).borrow_mut().pop();
     Ok(match value {
-        Some(value) => {
-            interpreter.ensure_initialized_value(&value, span, "List.removeLast")?;
-            interpreter.option_some(value)
-        }
+        Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),
     })
 }
@@ -523,10 +518,7 @@ fn list_head(
     }
     let items = list_items(&receiver);
     let items = items.borrow();
-    let value = items
-        .first()
-        .map(|value| interpreter.clone_initialized_value(value, span, "List.head"))
-        .transpose()?;
+    let value = items.first().map(|value| interpreter.clone_value(value));
     Ok(match value {
         Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),
@@ -547,7 +539,7 @@ fn list_tail(
     let tail = if values.len() <= 1 {
         Vec::new()
     } else {
-        interpreter.clone_initialized_values(&values[1..], span, "List.tail")?
+        interpreter.clone_values(&values[1..])
     };
     Ok(Value::list(tail))
 }
@@ -563,10 +555,7 @@ fn list_first(
     }
     let items = list_items(&receiver);
     let items = items.borrow();
-    let value = items
-        .first()
-        .map(|value| interpreter.clone_initialized_value(value, span, "Array.first"))
-        .transpose()?;
+    let value = items.first().map(|value| interpreter.clone_value(value));
     Ok(match value {
         Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),
@@ -584,10 +573,7 @@ fn list_last(
     }
     let items = list_items(&receiver);
     let items = items.borrow();
-    let value = items
-        .last()
-        .map(|value| interpreter.clone_initialized_value(value, span, "Array.last"))
-        .transpose()?;
+    let value = items.last().map(|value| interpreter.clone_value(value));
     Ok(match value {
         Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),

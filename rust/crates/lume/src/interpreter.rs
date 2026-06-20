@@ -724,7 +724,6 @@ fn expr_path_ast(expr: &ast::Expr) -> Option<Vec<String>> {
 #[derive(Clone)]
 pub(crate) enum Value {
     Unit,
-    Uninitialized,
     Bool(bool),
     Int(i64),
     Float(f64),
@@ -781,7 +780,6 @@ impl Value {
     pub(crate) fn render(&self) -> String {
         match self {
             Value::Unit => "()".to_string(),
-            Value::Uninitialized => "<uninitialized>".to_string(),
             Value::Bool(value) => value.to_string(),
             Value::Int(value) => value.to_string(),
             Value::Float(value) => {
@@ -1747,23 +1745,30 @@ impl<'a> Interpreter<'a> {
         if path[0] == "Array" && path.len() == 2 {
             let method = path[1].as_str();
             match method {
-                "ofLength" => {
+                "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" => {
                     if args.len() != 1 {
                         return Err(self.runtime_error(
                             span,
-                            format!("Array.ofLength expects 1 argument, got {}", args.len()),
+                            format!("Array.{method} expects 1 argument, got {}", args.len()),
                         ));
                     }
-                    let len = args[0].as_int(self, span, "Array.ofLength length")?;
+                    let context = format!("Array.{method} length");
+                    let len = args[0].as_int(self, span, &context)?;
                     if len < 0 {
-                        return Err(
-                            self.runtime_error(span, "Array.ofLength length must be non-negative")
-                        );
+                        return Err(self.runtime_error(
+                            span,
+                            format!("Array.{method} length must be non-negative"),
+                        ));
                     }
-                    return Ok(Value::List(Rc::new(RefCell::new(vec![
-                        Value::Uninitialized;
-                        len as usize
-                    ]))));
+                    let default = match method {
+                        "ofInt" => Value::Int(0),
+                        "ofFloat" => Value::Float(0.0),
+                        "ofBool" => Value::Bool(false),
+                        "ofStr" => Value::String(String::new()),
+                        "ofRune" => Value::Rune('\0'),
+                        _ => unreachable!(),
+                    };
+                    return Ok(Value::list(vec![default; len as usize]));
                 }
                 "fill" => {
                     if args.len() != 2 {
@@ -2782,7 +2787,7 @@ impl<'a> Interpreter<'a> {
                             return Err(self.runtime_error(span, "iterator is exhausted"));
                         };
                         *index += 1;
-                        self.clone_initialized_value(value, span, "iterator")
+                        Ok(self.clone_value(value))
                     }
                     IteratorState::Range { current, step, .. } => {
                         let value = *current;
@@ -3253,7 +3258,7 @@ impl<'a> Interpreter<'a> {
                 })?;
                 items.get(index).map_or_else(
                     || Err(self.runtime_error(span, format!("list index {} out of bounds", index))),
-                    |value| self.clone_initialized_value(value, span, "index access"),
+                    |value| Ok(self.clone_value(value)),
                 )
             }
             Value::Tuple(items) => {
@@ -3262,7 +3267,7 @@ impl<'a> Interpreter<'a> {
                 })?;
                 items.get(index).map_or_else(
                     || Err(self.runtime_error(span, format!("tuple index {} out of bounds", index))),
-                    |value| self.clone_initialized_value(value, span, "index access"),
+                    |value| Ok(self.clone_value(value)),
                 )
             }
             other => self.invoke_method(other, "[]", vec![Value::Int(index)], span),
@@ -3582,45 +3587,12 @@ impl<'a> Interpreter<'a> {
         )
     }
 
-    fn uninitialized_array_error(&self, span: Option<Span>, context: &str) -> Diagnostic {
-        self.runtime_error(
-            span,
-            format!("{context} read an uninitialized array element"),
-        )
+    pub(crate) fn clone_value(&self, value: &Value) -> Value {
+        value.clone()
     }
 
-    pub(crate) fn ensure_initialized_value(
-        &self,
-        value: &Value,
-        span: Option<Span>,
-        context: &str,
-    ) -> Result<(), Diagnostic> {
-        match value {
-            Value::Uninitialized => Err(self.uninitialized_array_error(span, context)),
-            _ => Ok(()),
-        }
-    }
-
-    pub(crate) fn clone_initialized_value(
-        &self,
-        value: &Value,
-        span: Option<Span>,
-        context: &str,
-    ) -> Result<Value, Diagnostic> {
-        self.ensure_initialized_value(value, span, context)?;
-        Ok(value.clone())
-    }
-
-    pub(crate) fn clone_initialized_values(
-        &self,
-        values: &[Value],
-        span: Option<Span>,
-        context: &str,
-    ) -> Result<Vec<Value>, Diagnostic> {
-        values
-            .iter()
-            .map(|value| self.clone_initialized_value(value, span, context))
-            .collect()
+    pub(crate) fn clone_values(&self, values: &[Value]) -> Vec<Value> {
+        values.iter().map(|value| self.clone_value(value)).collect()
     }
 
     pub(crate) fn ensure_observable_value(
@@ -3629,7 +3601,6 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
         context: &str,
     ) -> Result<(), Diagnostic> {
-        self.ensure_initialized_value(value, span, context)?;
         match value {
             Value::Tuple(items) => {
                 for item in items {
@@ -3686,7 +3657,6 @@ impl Value {
         context: &str,
     ) -> Result<bool, Diagnostic> {
         match self {
-            Value::Uninitialized => Err(in_.uninitialized_array_error(span, context)),
             Value::Bool(value) => Ok(*value),
             _ => Err(in_.runtime_error(
                 span,
@@ -3702,7 +3672,6 @@ impl Value {
         context: &str,
     ) -> Result<i64, Diagnostic> {
         match self {
-            Value::Uninitialized => Err(in_.uninitialized_array_error(span, context)),
             Value::Int(value) => Ok(*value),
             _ => Err(in_.runtime_error(
                 span,
@@ -3718,7 +3687,6 @@ impl Value {
         context: &str,
     ) -> Result<f64, Diagnostic> {
         match self {
-            Value::Uninitialized => Err(in_.uninitialized_array_error(span, context)),
             Value::Int(value) => Ok(*value as f64),
             Value::Float(value) => Ok(*value),
             _ => Err(in_.runtime_error(
@@ -3820,7 +3788,7 @@ pub(crate) fn map_put_entry(entries: &mut Vec<(Value, Value)>, key: Value, value
 
 fn iterator_values(
     iterator: &Rc<RefCell<IteratorState>>,
-    span: Option<Span>,
+    _span: Option<Span>,
     in_: &Interpreter<'_>,
 ) -> Result<Vec<Value>, Diagnostic> {
     let mut state = iterator.borrow().clone();
@@ -3833,7 +3801,7 @@ fn iterator_values(
                     break;
                 };
                 *index += 1;
-                out.push(in_.clone_initialized_value(value, span, "iteration")?);
+                out.push(in_.clone_value(value));
             }
             IteratorState::Range { current, end, step } => {
                 let done = if *step >= 0 {
@@ -3861,11 +3829,11 @@ pub(crate) fn iterable_values(
     match value {
         Value::List(items) => {
             let items = items.borrow();
-            in_.clone_initialized_values(&items, span, "iteration")
+            Ok(in_.clone_values(&items))
         }
         Value::Set(items) => {
             let items = items.borrow();
-            in_.clone_initialized_values(&items, span, "iteration")
+            Ok(in_.clone_values(&items))
         }
         Value::Iterator(iterator) => iterator_values(&iterator, span, in_),
         Value::Map(entries) => entries
@@ -3873,8 +3841,8 @@ pub(crate) fn iterable_values(
             .iter()
             .map(|(key, value)| {
                 Ok(Value::Tuple(vec![
-                    in_.clone_initialized_value(key, span, "iteration")?,
-                    in_.clone_initialized_value(value, span, "iteration")?,
+                    in_.clone_value(key),
+                    in_.clone_value(value),
                 ]))
             })
             .collect(),
@@ -4598,9 +4566,7 @@ mod tests {
 
             impl Vec {
                 def new(left Int, right Int) {
-                    this.items = Array.ofLength(2)
-                    this.items[0] := left
-                    this.items[1] := right
+                    this.items = Array(left, right)
                 }
 
                 def [](index Int) Int = this.items[index]
@@ -4625,13 +4591,21 @@ mod tests {
                 left Vec = Vec(5, 6)
                 OS.println((left + Vec(1, 2))[1])
                 OS.println((-left)[0])
+
+                ints = Array.ofInt(2)
+                floats = Array.ofFloat(1)
+                bools = Array.ofBool(1)
+                strs = Array.ofStr(1)
+                runes = Array.ofRune(1)
+                nul Rune = "\0".expectRuneAt(0)
+                OS.println(ints[0], floats[0], bools[0], strs[0], runes[0] == nul)
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "5\n3\n2\n8\n-5\n");
+        assert_eq!(run.output, "5\n3\n2\n8\n-5\n0 0.0 false  true\n");
         assert_eq!(run.return_value, None);
     }
 

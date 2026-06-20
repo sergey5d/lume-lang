@@ -12,6 +12,7 @@
 # zip 5 b
 # zipIndex 6 2
 # assigned 9 10
+# defaults 0.0 false  1
 # filled 7 7
 # generated 0 4
 # size 3
@@ -37,9 +38,13 @@ def main() Unit {
     let (zippedValue, zippedLabel) = pairs[1]
     let (indexedValue, indexedPos) = indexed[2]
 
-    assigned = Array.ofLength(2)
+    assigned = Array.ofInt(2)
     assigned[0] := 9
     assigned[1] := 10
+    defaultFloats = Array.ofFloat(1)
+    defaultBools = Array.ofBool(1)
+    defaultStrs = Array.ofStr(1)
+    defaultRunes = Array.ofRune(1)
     filled = Array.fill(2, 7)
     generated = Array.generate(3, idx -> idx * 2)
 
@@ -52,6 +57,7 @@ def main() Unit {
     OS.println("zip " + zippedValue + " " + zippedLabel)
     OS.println("zipIndex " + indexedValue + " " + indexedPos)
     OS.println("assigned " + assigned[0] + " " + assigned[1])
+    OS.println("defaults " + defaultFloats[0] + " " + defaultBools[0] + " " + defaultStrs[0] + " " + defaultRunes.size())
     OS.println("filled " + filled[0] + " " + filled[1])
     OS.println("generated " + generated[0] + " " + generated[2])
     OS.println("size " + values.size())

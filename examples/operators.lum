@@ -10,9 +10,7 @@ class Vec {
 
 impl Vec {
     def new(left Int, right Int) {
-        this.items = Array.ofLength(2)
-        this.items[0] := left
-        this.items[1] := right
+        this.items = Array(left, right)
     }
 
     def [](index Int) Int = this.items[index]

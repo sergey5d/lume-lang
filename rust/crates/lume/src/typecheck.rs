@@ -137,6 +137,10 @@ impl Ty {
         Self::named("Str")
     }
 
+    fn rune() -> Self {
+        Self::named("Rune")
+    }
+
     fn unit() -> Self {
         Self::named("Unit")
     }
@@ -2912,11 +2916,11 @@ impl<'a> Checker<'a> {
         };
 
         match (type_name.as_str(), name.as_str()) {
-            ("Array", "ofLength") => {
+            ("Array", factory @ ("ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune")) => {
                 if args.len() != 1 {
                     self.add_error(
                         "invalid_argument_count",
-                        format!("Array.ofLength expects 1 argument, got {}", args.len()),
+                        format!("Array.{factory} expects 1 argument, got {}", args.len()),
                         span,
                     );
                 }
@@ -2927,10 +2931,21 @@ impl<'a> Checker<'a> {
                         &Ty::int(),
                         arg.span,
                         "invalid_argument_type",
-                        format!("Array.ofLength expects Int length, got '{}'", ty.describe()),
+                        format!(
+                            "Array.{factory} expects Int capacity, got '{}'",
+                            ty.describe()
+                        ),
                     );
                 }
-                Some(Ty::Named("Array".to_string(), vec![Ty::Unknown]))
+                let item_ty = match factory {
+                    "ofInt" => Ty::int(),
+                    "ofFloat" => Ty::float(),
+                    "ofBool" => Ty::bool(),
+                    "ofStr" => Ty::str(),
+                    "ofRune" => Ty::rune(),
+                    _ => unreachable!(),
+                };
+                Some(Ty::Named("Array".to_string(), vec![item_ty]))
             }
             ("Array", "fill") => {
                 if args.len() != 2 {
@@ -6118,6 +6133,23 @@ def main() Option[Int] {
 def main() Unit {
     whole Option[Int] = Int.parse("7")
     decimal Option[Float] = Float.parse("1.2")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_array_primitive_static_helpers() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    ints Array[Int] = Array.ofInt(3)
+    floats Array[Float] = Array.ofFloat(3)
+    bools Array[Bool] = Array.ofBool(3)
+    texts Array[Str] = Array.ofStr(3)
+    runes Array[Rune] = Array.ofRune(3)
 }
 "#,
         );

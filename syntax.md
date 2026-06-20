@@ -722,21 +722,18 @@ List literal:
 Array construction:
 
 ```txt
-values Array[Int] = Array.ofLength(3)
-values[0] := 1
-```
+ints Array[Int] = Array.ofInt(3)       # [0, 0, 0]
+floats Array[Float] = Array.ofFloat(3) # [0.0, 0.0, 0.0]
+bools Array[Bool] = Array.ofBool(3)    # [false, false, false]
+texts Array[Str] = Array.ofStr(3)      # ["", "", ""]
+runes Array[Rune] = Array.ofRune(3)    # default NUL rune values
 
-`Array.ofLength(n)` allocates storage with uninitialized elements. You can assign into
-those slots, but reading a slot before writing it is a runtime error.
-
-Use `Array.fill` or `Array.generate` when you want a fully initialized array:
-
-```txt
 filled Array[Int] = Array.fill(3, 7)
 generated Array[Int] = Array.generate(3, idx -> idx * 2)
 ```
 
-Use `Array.generate` when each slot should be produced independently.
+Arrays always contain initialized values. Use `Array.generate` when each slot
+should be produced independently.
 
 Array elements can also be constructed directly:
 
