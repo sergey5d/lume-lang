@@ -325,6 +325,10 @@ fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: 
                 rewrite_expr_for_runtime(value, module, graph);
             }
         }
+        ast::Stmt::Defer(stmt) => match &mut stmt.action {
+            ast::DeferAction::Call(expr) => rewrite_expr_for_runtime(expr, module, graph),
+            ast::DeferAction::Block(block) => rewrite_block_for_runtime(block, module, graph),
+        },
         ast::Stmt::LetElse(stmt) => {
             for clause in &mut stmt.clauses {
                 rewrite_pattern_for_runtime(&mut clause.pattern, module);
@@ -4731,14 +4735,19 @@ mod tests {
     fn runs_match_for_yield_and_try() {
         let program = lower_inline(
             r#"
+            def countItems(items [Int]) Option[Int] {
+                count = try Some(items.size())
+                Some(count)
+            }
+
             def main() Int {
                 items = for item <- [1, 2, 3] yield {
                     item + 1
                 }
 
-                count = try Some(items.size())
+                count = countItems(items).orPanic()
 
-                total Int = 0
+                var total Int = 0
                 for item <- items {
                     total += item
                 }
@@ -4860,7 +4869,7 @@ $name
             def main() Unit {
                 word Str = "apple"
                 first Rune = word.expectRuneAt(0)
-                let Some(second) = word.runeAt(1)
+                expect second <- word.runeAt(1)
                 missing = word.runeAt(9)
 
                 OS.println(first)
@@ -4955,8 +4964,8 @@ $name
                 }
 
                 OS.println(mappedEmpty.size())
-                OS.println(mapped.contains(6))
-                OS.println(mapped.contains(7))
+                OS.println(mapped.get(0).getOr(0))
+                OS.println(mapped.get(1).getOr(0))
                 OS.println(mapped.size())
             }
             "#,
@@ -4964,7 +4973,7 @@ $name
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "0\ntrue\ntrue\n2\n");
+        assert_eq!(run.output, "0\n6\n7\n2\n");
     }
 
     fn collect_header_parity_failures(include_failures: bool) -> (Vec<String>, Vec<String>) {
@@ -5284,8 +5293,8 @@ $name
             def main() Unit {
                 amount Amount = Amount { 42, "hello" }
                 pair PairBox = PairBox { 5, 9 }
-                values = List(MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3))
-                partialMapped List[Option[Int]] = values.map(partial {
+                values [MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3)]
+                partialMapped List[Option[Int]] = values.map(value -> partial value {
                     case SomeX(x) => x + 1
                 })
 
@@ -5671,6 +5680,78 @@ $name
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "left\n");
+    }
+
+    #[test]
+    fn runs_defer_in_lifo_order_on_scope_exit() {
+        let program = lower_inline(
+            r#"
+            def cleanup(label Str) Unit {
+                OS.println(label)
+            }
+
+            def main() Unit {
+                {
+                    defer cleanup("first")
+                    defer {
+                        OS.println("second")
+                    }
+                    OS.println("body")
+                }
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "body\nsecond\nfirst\n");
+    }
+
+    #[test]
+    fn runs_defer_before_return_and_freezes_return_value() {
+        let program = lower_inline(
+            r#"
+            def compute() Int {
+                var current Int = 1
+                defer {
+                    current := 2
+                    OS.println("cleanup", current)
+                }
+                return current
+            }
+
+            def main() Unit {
+                OS.println(compute())
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "cleanup 2\n1\n");
+    }
+
+    #[test]
+    fn runs_defer_on_continue() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                for value <- [1, 2] {
+                    defer {
+                        OS.println("defer", value)
+                    }
+                    if value == 1 {
+                        continue
+                    }
+                    OS.println("body", value)
+                }
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "defer 1\nbody 2\ndefer 2\n");
     }
 
     #[test]

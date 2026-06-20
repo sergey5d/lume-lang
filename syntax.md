@@ -763,6 +763,7 @@ Main statement forms:
 - `match`
 - `for`
 - `while`
+- `defer`
 - `return`
 - `break`
 - `continue`
@@ -777,6 +778,25 @@ Standalone nested blocks are valid expression statements:
     OS.println("xxx")
 }
 ```
+
+## `defer`
+
+`defer` registers cleanup for the current lexical scope. Deferred actions run in
+LIFO order when that scope exits normally, and they also run on `return`,
+`break`, and `continue`.
+
+Supported forms:
+
+```txt
+defer cleanup()
+
+defer {
+    OS.println("closing")
+}
+```
+
+Only a call expression or a block is allowed after `defer`. Deferred blocks may
+not contain `return`, `break`, or `continue`.
 
 ## `if`
 

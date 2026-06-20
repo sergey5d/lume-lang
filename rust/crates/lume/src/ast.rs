@@ -246,6 +246,7 @@ pub enum Stmt {
     PatternBinding(PatternBindingStmt),
     ExpectCondition(ExpectConditionStmt),
     Assignment(AssignmentStmt),
+    Defer(DeferStmt),
     If(IfStmt),
     Match(MatchStmt),
     While(WhileStmt),
@@ -265,6 +266,7 @@ impl Stmt {
             Stmt::PatternBinding(stmt) => stmt.span,
             Stmt::ExpectCondition(stmt) => stmt.span,
             Stmt::Assignment(stmt) => stmt.span,
+            Stmt::Defer(stmt) => stmt.span,
             Stmt::If(stmt) => stmt.span,
             Stmt::Match(stmt) => stmt.span,
             Stmt::While(stmt) => stmt.span,
@@ -334,6 +336,20 @@ pub struct AssignmentStmt {
     pub operator: AssignOp,
     pub values: Vec<Expr>,
     pub span: Span,
+}
+
+/// A `defer` statement that runs a call or block when the current scope exits.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeferStmt {
+    pub action: DeferAction,
+    pub span: Span,
+}
+
+/// The deferred action recorded by a `defer` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeferAction {
+    Call(Expr),
+    Block(Block),
 }
 
 /// An `if` statement, including `if let` pattern bindings.

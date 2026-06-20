@@ -1402,6 +1402,10 @@ impl<'a> Resolver<'a> {
                 self.loop_depth -= 1;
                 self.pop_scope();
             }
+            Stmt::Defer(stmt) => match &stmt.action {
+                crate::ast::DeferAction::Call(expr) => self.resolve_expr(expr),
+                crate::ast::DeferAction::Block(block) => self.resolve_block(block),
+            },
             Stmt::LetElse(stmt) => self.resolve_let_else(stmt),
             Stmt::Return(return_stmt) => {
                 if let Some(value) = &return_stmt.value {

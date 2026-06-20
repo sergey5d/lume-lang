@@ -50,6 +50,7 @@ impl<'a> Parser<'a> {
                 let stmt = self.parse_binding_stmt_after_var()?;
                 Some(Stmt::Binding(stmt))
             }
+            TokenKind::Keyword(Keyword::Defer) => self.parse_defer_stmt().map(Stmt::Defer),
             TokenKind::Keyword(Keyword::If) => self.parse_if_stmt().map(Stmt::If),
             TokenKind::Keyword(Keyword::While) => self.parse_while_stmt().map(Stmt::While),
             TokenKind::Keyword(Keyword::For) => {
@@ -103,6 +104,38 @@ impl<'a> Parser<'a> {
             bindings,
             values,
             destructure: None,
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_defer_stmt(&mut self) -> Option<DeferStmt> {
+        let start = self.consume_keyword(Keyword::Defer, "expected 'defer'")?;
+        if self.at(TokenKind::LBrace) {
+            let block = self.parse_block()?;
+            return Some(DeferStmt {
+                action: DeferAction::Block(block.clone()),
+                span: start.cover(block.span),
+            });
+        }
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected call expression or block on same line after \"defer\"",
+            );
+            return None;
+        }
+        let expr = self.parse_expr()?;
+        if !matches!(expr, Expr::Call { .. }) {
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_defer_target",
+                "defer expects a call expression or block",
+                expr.span(),
+            ));
+            return None;
+        }
+        let end = expr.span();
+        Some(DeferStmt {
+            action: DeferAction::Call(expr),
             span: start.cover(end),
         })
     }

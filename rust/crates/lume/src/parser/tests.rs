@@ -885,6 +885,64 @@ def run(value Option[Int]) Int {
 }
 
 #[test]
+fn parses_defer_call_and_block_statements() {
+    let result = parse(
+        r#"
+def run() Unit {
+    defer cleanup()
+    defer {
+        OS.println("later")
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => {
+            match &block.statements[0] {
+                Stmt::Defer(stmt) => {
+                    assert!(matches!(stmt.action, DeferAction::Call(Expr::Call { .. })));
+                }
+                other => panic!("expected defer statement, got {other:#?}"),
+            }
+            match &block.statements[1] {
+                Stmt::Defer(stmt) => {
+                    assert!(matches!(stmt.action, DeferAction::Block(_)));
+                }
+                other => panic!("expected defer statement, got {other:#?}"),
+            }
+        }
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
+fn rejects_non_call_defer_target() {
+    let result = parse(
+        r#"
+def run() Unit {
+    value = 1
+    defer value
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "invalid_defer_target"
+                && diag.message.contains("call expression or block")),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_grouped_option_extract_shorthand() {
     let result = parse(
         r#"

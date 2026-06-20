@@ -76,6 +76,7 @@ pub enum Stmt {
     Binding(BindingStmt),
     PatternBinding(PatternBindingStmt),
     Assignment(AssignmentStmt),
+    Defer(DeferStmt),
     If(IfStmt),
     Match(MatchStmt),
     While(WhileStmt),
@@ -94,6 +95,7 @@ impl Stmt {
             Stmt::Binding(stmt) => stmt.span,
             Stmt::PatternBinding(stmt) => stmt.span,
             Stmt::Assignment(stmt) => stmt.span,
+            Stmt::Defer(stmt) => stmt.span,
             Stmt::If(stmt) => stmt.span,
             Stmt::Match(stmt) => stmt.span,
             Stmt::While(stmt) => stmt.span,
@@ -130,6 +132,18 @@ pub struct AssignmentStmt {
     pub operator: AssignOp,
     pub values: Vec<Expr>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeferStmt {
+    pub action: DeferAction,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeferAction {
+    Call(Expr),
+    Block(Block),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -72,6 +72,13 @@ pub fn desugar_stmt(stmt: &ast::Stmt) -> core::Stmt {
             values: stmt.values.iter().map(desugar_expr).collect(),
             span: stmt.span,
         }),
+        ast::Stmt::Defer(stmt) => core::Stmt::Defer(core::DeferStmt {
+            action: match &stmt.action {
+                ast::DeferAction::Call(expr) => core::DeferAction::Call(desugar_expr(expr)),
+                ast::DeferAction::Block(block) => core::DeferAction::Block(desugar_block(block)),
+            },
+            span: stmt.span,
+        }),
         ast::Stmt::If(stmt) => core::Stmt::If(core::IfStmt {
             condition: stmt.condition.as_ref().map(desugar_expr),
             condition_clauses: stmt

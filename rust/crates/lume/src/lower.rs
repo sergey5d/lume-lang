@@ -603,12 +603,14 @@ struct FunctionLowerer<'a> {
     functions: &'a HashMap<String, ir::FunctionId>,
     case_fields: &'a HashMap<String, Vec<String>>,
     scopes: Vec<HashMap<String, ir::LocalId>>,
+    defer_scopes: Vec<Vec<core::DeferStmt>>,
     capture_sources: HashMap<String, CaptureSource>,
     capture_locals: HashMap<String, ir::LocalId>,
     closure_captures: Vec<ir::Operand>,
     this_local: Option<ir::LocalId>,
     loop_exits: Vec<ir::BlockId>,
     loop_continues: Vec<ir::BlockId>,
+    loop_scope_depths: Vec<usize>,
     current_block: Option<ir::BlockId>,
 }
 
@@ -686,12 +688,14 @@ impl<'a> FunctionLowerer<'a> {
             functions,
             case_fields,
             scopes: vec![HashMap::new()],
+            defer_scopes: vec![Vec::new()],
             capture_sources: HashMap::new(),
             capture_locals: HashMap::new(),
             closure_captures: Vec::new(),
             this_local: None,
             loop_exits: Vec::new(),
             loop_continues: Vec::new(),
+            loop_scope_depths: Vec::new(),
             current_block: Some(entry),
         };
         if let Some(first) = this.function().locals.first() {
@@ -757,12 +761,7 @@ impl<'a> FunctionLowerer<'a> {
             CallableBody::Expr(expr) => Some(self.lower_expr(expr)),
             CallableBody::Block(block) => self.lower_block_value(block),
         };
-        if let Some(block) = self.current_block_mut() {
-            block.set_terminator(ir::Terminator {
-                span: Some(span),
-                kind: ir::TerminatorKind::Return(result),
-            });
-        }
+        self.emit_function_return(result, span);
     }
 
     fn lower_block_value(&mut self, block: &Block) -> Option<ir::Operand> {
@@ -799,6 +798,10 @@ impl<'a> FunctionLowerer<'a> {
                 break;
             }
         }
+        if self.current_block.is_some() {
+            tail = tail.map(|value| self.freeze_operand(value, block.span));
+            self.emit_current_scope_defers();
+        }
         self.pop_scope();
         tail
     }
@@ -810,6 +813,9 @@ impl<'a> FunctionLowerer<'a> {
             if self.current_block.is_none() {
                 break;
             }
+        }
+        if self.current_block.is_some() {
+            self.emit_current_scope_defers();
         }
         self.pop_scope();
     }
@@ -927,33 +933,39 @@ impl<'a> FunctionLowerer<'a> {
                     });
                 }
             }
+            Stmt::Defer(stmt) => self.register_defer(stmt),
             Stmt::LetElse(stmt) => self.lower_let_else_stmt(stmt),
             Stmt::If(stmt) => self.lower_if_stmt(stmt),
             Stmt::While(stmt) => self.lower_while_stmt(stmt),
             Stmt::For(stmt) => self.lower_for_stmt(stmt),
             Stmt::Return(ret) => {
                 let value = ret.value.as_ref().map(|expr| self.lower_expr(expr));
-                self.terminate(ir::Terminator {
-                    span: Some(ret.span),
-                    kind: ir::TerminatorKind::Return(value),
-                });
+                self.emit_function_return(value, ret.span);
             }
             Stmt::Break(stmt) => {
                 if let Some(exit) = self.loop_exits.last().copied() {
-                    self.terminate(ir::Terminator {
-                        span: Some(stmt.span),
-                        kind: ir::TerminatorKind::Goto(exit),
-                    });
+                    let preserved_depth = self.loop_scope_depths.last().copied().unwrap_or(0);
+                    self.emit_defers_from_scope_depth(preserved_depth);
+                    if self.current_block.is_some() {
+                        self.terminate(ir::Terminator {
+                            span: Some(stmt.span),
+                            kind: ir::TerminatorKind::Goto(exit),
+                        });
+                    }
                 } else {
                     self.invariant("break should be rejected before lowering", stmt.span);
                 }
             }
             Stmt::Continue(stmt) => {
                 if let Some(target) = self.loop_continues.last().copied() {
-                    self.terminate(ir::Terminator {
-                        span: Some(stmt.span),
-                        kind: ir::TerminatorKind::Goto(target),
-                    });
+                    let preserved_depth = self.loop_scope_depths.last().copied().unwrap_or(0);
+                    self.emit_defers_from_scope_depth(preserved_depth);
+                    if self.current_block.is_some() {
+                        self.terminate(ir::Terminator {
+                            span: Some(stmt.span),
+                            kind: ir::TerminatorKind::Goto(target),
+                        });
+                    }
                 } else {
                     self.invariant("continue should be rejected before lowering", stmt.span);
                 }
@@ -1004,6 +1016,30 @@ impl<'a> FunctionLowerer<'a> {
                 value: closure,
             },
         });
+    }
+
+    fn register_defer(&mut self, stmt: &core::DeferStmt) {
+        if self.defer_scopes.is_empty() {
+            self.defer_scopes.push(Vec::new());
+        }
+        if let Some(scope) = self.defer_scopes.last_mut() {
+            scope.push(stmt.clone());
+        }
+    }
+
+    fn lower_defer_action(&mut self, action: &core::DeferAction) {
+        match action {
+            core::DeferAction::Call(expr) => {
+                let value = self.lower_expr(expr);
+                self.push_statement(ir::Statement {
+                    span: Some(expr.span()),
+                    kind: ir::StatementKind::Eval {
+                        value: ir::RValue::Use(value),
+                    },
+                });
+            }
+            core::DeferAction::Block(block) => self.lower_block_statements(block),
+        }
     }
 
     fn lower_nested_function_decl(&mut self, function: &FunctionDecl) -> ir::RValue {
@@ -1498,7 +1534,7 @@ impl<'a> FunctionLowerer<'a> {
             .lower_block_value(&stmt.else_block)
             .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
         if self.current_block.is_some() {
-            self.terminate(ir::Terminator::ret(Some(value)));
+            self.emit_function_return(Some(value), stmt.else_block.span);
         }
 
         self.current_block = Some(continue_block);
@@ -1515,7 +1551,7 @@ impl<'a> FunctionLowerer<'a> {
             .lower_block_value(&stmt.else_block)
             .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
         if self.current_block.is_some() {
-            self.terminate(ir::Terminator::ret(Some(value)));
+            self.emit_function_return(Some(value), stmt.else_block.span);
         }
 
         self.current_block = Some(continue_block);
@@ -1733,6 +1769,7 @@ impl<'a> FunctionLowerer<'a> {
 
         self.loop_exits.push(exit_block);
         self.loop_continues.push(cond_block);
+        self.loop_scope_depths.push(self.scopes.len());
         self.current_block = Some(body_block);
         self.lower_block_statements(&stmt.body);
         if self.current_block.is_some() {
@@ -1740,6 +1777,7 @@ impl<'a> FunctionLowerer<'a> {
         }
         self.loop_exits.pop();
         self.loop_continues.pop();
+        self.loop_scope_depths.pop();
 
         self.current_block = Some(exit_block);
     }
@@ -1751,6 +1789,7 @@ impl<'a> FunctionLowerer<'a> {
             self.terminate(ir::Terminator::goto(body_block));
             self.loop_exits.push(exit_block);
             self.loop_continues.push(body_block);
+            self.loop_scope_depths.push(self.scopes.len());
             self.current_block = Some(body_block);
             self.lower_block_statements(&stmt.body);
             if self.current_block.is_some() {
@@ -1758,6 +1797,7 @@ impl<'a> FunctionLowerer<'a> {
             }
             self.loop_exits.pop();
             self.loop_continues.pop();
+            self.loop_scope_depths.pop();
             self.current_block = Some(exit_block);
             return;
         }
@@ -1789,6 +1829,7 @@ impl<'a> FunctionLowerer<'a> {
             self.terminate(ir::Terminator::goto(body_block));
             self.loop_exits.push(exit_block);
             self.loop_continues.push(body_block);
+            self.loop_scope_depths.push(self.scopes.len());
             self.current_block = Some(body_block);
             let yielded = self
                 .lower_block_value(yield_body)
@@ -1812,6 +1853,7 @@ impl<'a> FunctionLowerer<'a> {
             }
             self.loop_exits.pop();
             self.loop_continues.pop();
+            self.loop_scope_depths.pop();
             self.current_block = Some(exit_block);
             return ir::Operand::Copy(Box::new(ir::Place::Local(result)));
         }
@@ -1996,6 +2038,7 @@ impl<'a> FunctionLowerer<'a> {
 
         self.loop_exits.push(exit_block);
         self.loop_continues.push(cond_block);
+        self.loop_scope_depths.push(self.scopes.len());
         self.current_block = Some(body_block);
         self.push_scope();
         let item = self.emit_temp_from_rvalue(
@@ -2045,6 +2088,7 @@ impl<'a> FunctionLowerer<'a> {
         }
         self.loop_exits.pop();
         self.loop_continues.pop();
+        self.loop_scope_depths.pop();
         self.current_block = Some(exit_block);
     }
 
@@ -2729,6 +2773,57 @@ impl<'a> FunctionLowerer<'a> {
         ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
     }
 
+    fn freeze_operand(&mut self, value: ir::Operand, span: Span) -> ir::Operand {
+        match value {
+            ir::Operand::Const(_) => value,
+            other => {
+                self.emit_temp_from_rvalue(ir::RValue::Use(other), ir::Type::Unknown, Some(span))
+            }
+        }
+    }
+
+    fn emit_function_return(&mut self, value: Option<ir::Operand>, span: Span) {
+        let value = value.map(|value| self.freeze_operand(value, span));
+        self.emit_defers_from_scope_depth(0);
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator {
+                span: Some(span),
+                kind: ir::TerminatorKind::Return(value),
+            });
+        }
+    }
+
+    fn emit_current_scope_defers(&mut self) {
+        if self.current_block.is_none() {
+            return;
+        }
+        let Some(defers) = self.defer_scopes.last().cloned() else {
+            return;
+        };
+        for defer_stmt in defers.iter().rev() {
+            self.lower_defer_action(&defer_stmt.action);
+            if self.current_block.is_none() {
+                break;
+            }
+        }
+    }
+
+    fn emit_defers_from_scope_depth(&mut self, preserved_depth: usize) {
+        if self.current_block.is_none() {
+            return;
+        }
+        let start = preserved_depth.min(self.defer_scopes.len());
+        for depth in (start..self.defer_scopes.len()).rev() {
+            let defers = self.defer_scopes[depth].clone();
+            for defer_stmt in defers.iter().rev() {
+                self.lower_defer_action(&defer_stmt.action);
+                if self.current_block.is_none() {
+                    return;
+                }
+            }
+        }
+    }
+
     fn combine_conditions(&mut self, conditions: Vec<ir::Operand>, span: Span) -> ir::Operand {
         let mut iter = conditions.into_iter();
         let Some(first) = iter.next() else {
@@ -2920,9 +3015,10 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         self.current_block = Some(failure_block);
-        self.terminate(ir::Terminator::ret(Some(ir::Operand::Copy(Box::new(
-            ir::Place::Local(source_local),
-        )))));
+        self.emit_function_return(
+            Some(ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))),
+            span,
+        );
 
         let join_used = self.block_has_predecessor(join_block);
         self.current_block = if join_used { Some(join_block) } else { None };
@@ -3587,6 +3683,7 @@ impl<'a> FunctionLowerer<'a> {
     fn current_scope(&mut self) -> &mut HashMap<String, ir::LocalId> {
         if self.scopes.is_empty() {
             self.scopes.push(HashMap::new());
+            self.defer_scopes.push(Vec::new());
         }
         self.scopes.last_mut().expect("scope")
     }
@@ -3594,16 +3691,19 @@ impl<'a> FunctionLowerer<'a> {
     fn root_scope(&mut self) -> &mut HashMap<String, ir::LocalId> {
         if self.scopes.is_empty() {
             self.scopes.push(HashMap::new());
+            self.defer_scopes.push(Vec::new());
         }
         self.scopes.first_mut().expect("root scope")
     }
 
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
+        self.defer_scopes.push(Vec::new());
     }
 
     fn pop_scope(&mut self) {
         self.scopes.pop();
+        self.defer_scopes.pop();
     }
 
     fn invariant(&mut self, message: impl Into<String>, span: Span) {

@@ -612,6 +612,7 @@ struct Checker<'a> {
     current_owner: Option<TypeSig>,
     current_method: Option<String>,
     loop_depth: usize,
+    defer_depth: usize,
     globals: HashMap<String, ValueInfo>,
 }
 
@@ -627,6 +628,7 @@ impl<'a> Checker<'a> {
             current_owner: None,
             current_method: None,
             loop_depth: 0,
+            defer_depth: 0,
             globals: HashMap::new(),
         }
     }
@@ -690,6 +692,7 @@ impl<'a> Checker<'a> {
 
     fn check_function(&mut self, function: &FunctionDecl) {
         let previous_return = self.current_return.clone();
+        let previous_defer_depth = self.defer_depth;
         self.push_type_params(function.type_params.iter().map(|param| param.name.as_str()));
         let expected_return = function
             .return_type
@@ -697,6 +700,7 @@ impl<'a> Checker<'a> {
             .map(|ty| self.ty_from_type_ref(ty))
             .unwrap_or(Ty::Unknown);
         self.current_return = expected_return.clone();
+        self.defer_depth = 0;
         self.push_scope();
         for param in &function.params {
             let ty = param
@@ -722,6 +726,7 @@ impl<'a> Checker<'a> {
         self.pop_scope();
         self.pop_type_params();
         self.current_return = previous_return;
+        self.defer_depth = previous_defer_depth;
     }
 
     fn check_type_decl(&mut self, decl: &TypeDecl) {
@@ -911,6 +916,7 @@ impl<'a> Checker<'a> {
         let previous_return = self.current_return.clone();
         let previous_owner = self.current_owner.clone();
         let previous_method = self.current_method.clone();
+        let previous_defer_depth = self.defer_depth;
         self.push_type_params(method.type_params.iter().map(|param| param.name.as_str()));
         let expected_return = method
             .return_type
@@ -918,6 +924,7 @@ impl<'a> Checker<'a> {
             .map(|ty| self.ty_from_type_ref(ty))
             .unwrap_or(Ty::Unknown);
         self.current_return = expected_return.clone();
+        self.defer_depth = 0;
         self.current_owner = Some(owner.clone());
         self.current_method = Some(method.name.clone());
         self.push_scope();
@@ -951,6 +958,7 @@ impl<'a> Checker<'a> {
         self.current_return = previous_return;
         self.current_owner = previous_owner;
         self.current_method = previous_method;
+        self.defer_depth = previous_defer_depth;
     }
 
     fn owner_self_ty(&self, owner: &TypeSig) -> Ty {
@@ -1156,6 +1164,21 @@ impl<'a> Checker<'a> {
                 }
                 for value in &stmt.values {
                     self.check_field_initializer_expr(value, owner, initialized_fields);
+                }
+            }
+            Stmt::Defer(stmt) => {
+                self.add_error(
+                    "invalid_field_initializer",
+                    "field initializer block cannot contain 'defer'; move cleanup logic to 'new()'",
+                    stmt.span,
+                );
+                match &stmt.action {
+                    crate::ast::DeferAction::Call(expr) => {
+                        self.check_field_initializer_expr(expr, owner, initialized_fields);
+                    }
+                    crate::ast::DeferAction::Block(block) => {
+                        self.check_field_initializer_block(block, owner, initialized_fields);
+                    }
                 }
             }
             Stmt::If(stmt) => {
@@ -1543,6 +1566,10 @@ impl<'a> Checker<'a> {
                 self.check_assignment(assignment);
                 Ty::unit()
             }
+            Stmt::Defer(stmt) => {
+                self.check_defer_stmt(stmt);
+                Ty::unit()
+            }
             Stmt::If(stmt) => {
                 let _ = self.check_if_stmt_value(stmt, &Ty::unit());
                 Ty::unit()
@@ -1579,6 +1606,13 @@ impl<'a> Checker<'a> {
                 Ty::unit()
             }
             Stmt::Return(return_stmt) => {
+                if self.defer_depth > 0 {
+                    self.add_error(
+                        "invalid_defer_control_flow",
+                        "defer block cannot contain 'return'",
+                        return_stmt.span,
+                    );
+                }
                 let expected = self.current_return.clone();
                 let actual = return_stmt
                     .value
@@ -1599,6 +1633,13 @@ impl<'a> Checker<'a> {
                 actual
             }
             Stmt::Break(break_stmt) => {
+                if self.defer_depth > 0 {
+                    self.add_error(
+                        "invalid_defer_control_flow",
+                        "defer block cannot contain 'break'",
+                        break_stmt.span,
+                    );
+                }
                 if self.loop_depth == 0 {
                     self.add_error(
                         "invalid_break",
@@ -1609,6 +1650,13 @@ impl<'a> Checker<'a> {
                 Ty::unit()
             }
             Stmt::Continue(continue_stmt) => {
+                if self.defer_depth > 0 {
+                    self.add_error(
+                        "invalid_defer_control_flow",
+                        "defer block cannot contain 'continue'",
+                        continue_stmt.span,
+                    );
+                }
                 if self.loop_depth == 0 {
                     self.add_error(
                         "invalid_continue",
@@ -1635,6 +1683,27 @@ impl<'a> Checker<'a> {
                 );
                 self.check_function(function);
                 Ty::unit()
+            }
+        }
+    }
+
+    fn check_defer_stmt(&mut self, stmt: &crate::ast::DeferStmt) {
+        if self.current_return == Ty::Unknown {
+            self.add_error(
+                "invalid_defer",
+                "defer used outside callable body",
+                stmt.span,
+            );
+            return;
+        }
+        match &stmt.action {
+            crate::ast::DeferAction::Call(expr) => {
+                let _ = self.check_expr(expr);
+            }
+            crate::ast::DeferAction::Block(block) => {
+                self.defer_depth += 1;
+                let _ = self.check_block_against(block, &Ty::unit());
+                self.defer_depth -= 1;
             }
         }
     }
@@ -6883,6 +6952,46 @@ def main() Unit {
                 .diagnostics
                 .iter()
                 .any(|diag| diag.code == "discarded_expression"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_defer_call_and_block() {
+        let program = parse_inline(
+            r#"
+def cleanup() Unit {}
+
+def main() Unit {
+    defer cleanup()
+    defer {
+        OS.println("later")
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_control_flow_inside_defer_block() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    defer {
+        return ()
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_defer_control_flow"
+                    && diag.message.contains("defer block cannot contain 'return'")
+            }),
             "{:#?}",
             result.diagnostics
         );
