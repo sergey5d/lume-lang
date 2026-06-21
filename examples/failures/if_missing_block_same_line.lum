@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# expected end of expression, got IDENT\("OS" @ .*?\)
+# expected '\{' after if condition
 
 def main() Int {
     if true OS.println("haha")

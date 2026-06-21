@@ -700,7 +700,7 @@ impl<'a> Parser<'a> {
                 None,
             )
         };
-        let then_block = self.parse_then_stmt_body_block("if")?;
+        let then_block = self.parse_if_body_block()?;
         let else_branch = if self.match_keyword(Keyword::Else) {
             if self.at(TokenKind::Newline) {
                 self.error_at_current(

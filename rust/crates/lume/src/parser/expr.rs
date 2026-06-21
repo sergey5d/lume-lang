@@ -221,7 +221,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_if_expr(&mut self, start: Span) -> Option<Expr> {
         let condition = self.parse_expr_without_trailing_block_call()?;
-        let then_block = self.parse_then_expr_body_block("if")?;
+        let then_block = self.parse_if_body_block()?;
         if !self.match_keyword(Keyword::Else) {
             return Some(self.wrap_if_without_else(start, condition, then_block));
         }
@@ -635,31 +635,6 @@ impl<'a> Parser<'a> {
         Some((updates, start.cover(end)))
     }
 
-    pub(super) fn parse_then_stmt_body_block(&mut self, owner: &'static str) -> Option<Block> {
-        if self.at(TokenKind::LBrace) {
-            return self.parse_block();
-        }
-        if !self.at_keyword(Keyword::Then) {
-            self.error_at_current(
-                "unexpected_token",
-                format!(
-                    "expected end of expression, got {}",
-                    self.next_significant_token_string()
-                ),
-            );
-            return None;
-        }
-        self.consume_keyword(Keyword::Then, "expected 'then'")?;
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "unexpected_token",
-                format!("{owner} then-body must stay on the same line unless it uses '{{ ... }}'"),
-            );
-            return None;
-        }
-        self.parse_block_or_inline_stmt_body(owner)
-    }
-
     pub(super) fn parse_block_or_inline_stmt_body(&mut self, owner: &'static str) -> Option<Block> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
@@ -686,29 +661,17 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub(super) fn parse_then_expr_body_block(&mut self, owner: &'static str) -> Option<Block> {
+    pub(super) fn parse_if_body_block(&mut self) -> Option<Block> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
         }
-        if !self.at_keyword(Keyword::Then) {
-            self.error_at_current(
-                "unexpected_token",
-                format!(
-                    "expected end of expression, got {}",
-                    self.next_significant_token_string()
-                ),
-            );
-            return None;
-        }
-        self.consume_keyword(Keyword::Then, "expected 'then'")?;
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "unexpected_token",
-                format!("{owner} then-body must stay on the same line unless it uses '{{ ... }}'"),
-            );
-            return None;
-        }
-        self.parse_block_or_inline_expr_body(owner)
+        let message = if self.at(TokenKind::Identifier) && self.current().lexeme == "then" {
+            "'then' is unsupported; use 'if condition { ... }'"
+        } else {
+            "expected '{' after if condition"
+        };
+        self.error_at_current("unexpected_token", message);
+        None
     }
 
     pub(super) fn parse_block_or_inline_expr_body(&mut self, owner: &'static str) -> Option<Block> {

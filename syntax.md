@@ -1455,7 +1455,9 @@ a = 1 +
 def value() Int =
     1 + 2
 
-if flag then return 1
+if flag {
+    return 1
+}
 ```
 
 - For dot chaining, the rule is stricter than Scala:

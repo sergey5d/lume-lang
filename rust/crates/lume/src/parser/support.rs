@@ -204,7 +204,7 @@ impl<'a> Parser<'a> {
                     }
                     bracket_depth -= 1;
                 }
-                TokenKind::AndAnd | TokenKind::Keyword(Keyword::Then) | TokenKind::Newline
+                TokenKind::AndAnd | TokenKind::Newline
                     if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 =>
                 {
                     break;
@@ -314,7 +314,6 @@ impl<'a> Parser<'a> {
             TokenKind::String => "STRING",
             TokenKind::Keyword(Keyword::Case) => "CASE",
             TokenKind::Keyword(Keyword::If) => "IF",
-            TokenKind::Keyword(Keyword::Then) => "THEN",
             TokenKind::Keyword(Keyword::Else) => "ELSE",
             TokenKind::Keyword(Keyword::Match) => "MATCH",
             TokenKind::Keyword(Keyword::Partial) => "PARTIAL",
