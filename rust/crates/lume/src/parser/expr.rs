@@ -63,26 +63,11 @@ impl<'a> Parser<'a> {
         let checkpoint = self.checkpoint();
         if self.at(TokenKind::Identifier) {
             if let Some((name, start)) = self.expect_identifier("expected lambda parameter") {
-                let mut ty = None;
-                let ty_checkpoint = self.checkpoint();
-                if self.can_start_type_ref() {
-                    if let Some(primary) = self.parse_primary_type_ref() {
-                        if self.at(TokenKind::Arrow) {
-                            ty = Some(primary);
-                        } else {
-                            self.restore(ty_checkpoint);
-                            ty = self.parse_type_ref();
-                        }
-                    } else {
-                        self.restore(ty_checkpoint);
-                    }
-                }
                 if self.match_token(TokenKind::Arrow) {
-                    let end = ty.as_ref().map(TypeRef::span).unwrap_or(start);
                     let param = LambdaParam {
                         name,
-                        ty,
-                        span: start.cover(end),
+                        ty: None,
+                        span: start,
                     };
                     let body = match self.parse_lambda_body() {
                         Some(body) => body,
@@ -97,6 +82,39 @@ impl<'a> Parser<'a> {
                         body,
                         span: start.cover(end),
                     });
+                }
+
+                let ty_checkpoint = self.checkpoint();
+                if self.can_start_type_ref() {
+                    if let Some(ty) = self.parse_primary_type_ref() {
+                        if self.match_token(TokenKind::Arrow) {
+                            let ty_span = ty.span();
+                            self.diagnostics.push(Diagnostic::error(
+                                "invalid_lambda_params",
+                                "typed single-parameter lambdas must use parentheses; write '(x T) -> ...'",
+                                start.cover(ty_span),
+                            ));
+                            let param = LambdaParam {
+                                name,
+                                ty: Some(ty),
+                                span: start.cover(ty_span),
+                            };
+                            let body = match self.parse_lambda_body() {
+                                Some(body) => body,
+                                None => {
+                                    self.restore(checkpoint);
+                                    return None;
+                                }
+                            };
+                            let end = body.span();
+                            return Some(Expr::Lambda {
+                                params: vec![param],
+                                body,
+                                span: start.cover(end),
+                            });
+                        }
+                    }
+                    self.restore(ty_checkpoint);
                 }
             }
             self.restore(checkpoint);
@@ -123,16 +141,22 @@ impl<'a> Parser<'a> {
             }
         }
         self.skip_newlines();
-        if self
-            .consume(TokenKind::RParen, "expected ')' after lambda parameters")
-            .is_none()
-        {
+        let Some(close) = self.consume(TokenKind::RParen, "expected ')' after lambda parameters")
+        else {
             self.restore(checkpoint);
             return None;
-        }
+        };
         if !self.match_token(TokenKind::Arrow) {
             self.restore(checkpoint);
             return None;
+        }
+        let typed_count = params.iter().filter(|param| param.ty.is_some()).count();
+        if typed_count > 0 && typed_count < params.len() {
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_lambda_params",
+                "lambda parameters must be either all typed or all untyped",
+                start.cover(close),
+            ));
         }
         let Some(body) = self.parse_lambda_body() else {
             self.restore(checkpoint);

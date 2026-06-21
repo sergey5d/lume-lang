@@ -1358,6 +1358,23 @@ fn parses_lambda_expression() {
 }
 
 #[test]
+fn parses_supported_lambda_parameter_forms() {
+    let result = parse(
+        r#"
+def main() Unit {
+    empty = () -> 0
+    bare = x -> x
+    one = (x) -> x
+    pair = (x, y) -> x + y
+    typed = (x Int) -> x + 1
+    typedPair = (x Int, y Int) -> x + y
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
 fn parses_trailing_block_lambda_call_syntax() {
     let result = parse(
         r#"
@@ -1589,7 +1606,7 @@ def apply(f Int -> Int) Unit {}
 }
 
 #[test]
-fn parses_single_param_typed_lambda_without_parens() {
+fn rejects_single_param_typed_lambda_without_parens() {
     let result = parse(
         r#"
 def main() Unit {
@@ -1597,7 +1614,37 @@ def main() Unit {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_lambda_params"
+                && diag
+                    .message
+                    .contains("typed single-parameter lambdas must use parentheses")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_mixed_typed_and_untyped_lambda_params() {
+    let result = parse(
+        r#"
+def main() Unit {
+    value = (left Int, right) -> left + right
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_lambda_params"
+                && diag
+                    .message
+                    .contains("lambda parameters must be either all typed or all untyped")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]

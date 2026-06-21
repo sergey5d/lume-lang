@@ -560,6 +560,9 @@ mod tests {
             .filter(|token| token.kind == TokenKind::String)
             .map(|token| token.lexeme.as_str())
             .collect();
-        assert_eq!(strings, vec!["raw\"$name\\n\"", "raw\"\"\"$name\n\\n\"\"\""]);
+        assert_eq!(
+            strings,
+            vec!["raw\"$name\\n\"", "raw\"\"\"$name\n\\n\"\"\""]
+        );
     }
 }

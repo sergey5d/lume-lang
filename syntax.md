@@ -489,6 +489,22 @@ impl Person {
 
 ## Lambdas
 
+Accepted lambda parameter forms are deliberately small:
+
+```txt
+() -> expr
+x -> expr
+(x) -> expr
+(x, y) -> expr
+(x Int) -> expr
+(x Int, y Int) -> expr
+```
+
+Typed single-parameter lambdas must use parentheses, so write
+`(x Int) -> x + 1`, not `x Int -> x + 1`. Parenthesized parameter lists
+must also be either fully typed or fully untyped; `(x Int, y) -> ...` is
+invalid.
+
 Single-parameter lambda:
 
 ```txt

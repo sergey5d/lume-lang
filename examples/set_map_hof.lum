@@ -33,7 +33,7 @@ def main() Unit {
     filtered = seen.filter(item -> item > 1)
     OS.println("filtered " + filtered.contains(2) + " " + filtered.size())
 
-    setTotal = seen.fold(0, (acc Int, item) -> acc + item)
+    setTotal = seen.fold(0, (acc Int, item Int) -> acc + item)
     OS.println("setFold " + setTotal)
 
     setReduced = seen.reduce((left, right) -> left + right)

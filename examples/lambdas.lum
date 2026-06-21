@@ -1,4 +1,5 @@
 # EXPECT:
+# 4
 # 14
 # 24
 # 34
@@ -23,6 +24,9 @@ impl Adder {
 def main() Int {
     adder Adder = Adder { 5 }
 
+    emptyLambda = () -> 4
+    OS.println(emptyLambda())
+
     lambda (Int) -> Int = x ->
        adder.add(x)
 
@@ -36,7 +40,7 @@ def main() Int {
     }
     OS.println(lambda3(29))
 
-    lambda4 = x Int -> {
+    lambda4 = (x Int) -> {
         adder.add(x)
     }
     OS.println(lambda4(40))
