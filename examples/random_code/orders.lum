@@ -100,7 +100,7 @@ impl OrderManager {
         }
     }
 
-    def testOrders() [Str] = {
+    def testOrders() [Str] {
 
         orders = [
             "1234, BUY, BTC, 10, NEW",

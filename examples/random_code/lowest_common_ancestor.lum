@@ -19,7 +19,7 @@ def find(
     valQ Int,
     foundPNode Option[TreeNode],
     foundQNode Option[TreeNode]
-) { foundP Option[TreeNode], foundQ Option[TreeNode], ancestor Option[TreeNode] } = {
+) { foundP Option[TreeNode], foundQ Option[TreeNode], ancestor Option[TreeNode] } {
 
     let Some(current) = node else {
         return { foundP: foundPNode, foundQ: foundQNode, ancestor: None }

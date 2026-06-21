@@ -36,7 +36,7 @@ impl<'a> Parser<'a> {
         owner: &'static str,
     ) -> Option<RefutableClause> {
         let (pattern, operator) = self.parse_refutable_pattern_head(owner)?;
-        if self.at(TokenKind::Newline) {
+        if operator != "=" && self.at(TokenKind::Newline) {
             self.error_at_current(
                 "expected_expression",
                 format!("expected expression on same line after \"{operator}\""),
@@ -57,7 +57,7 @@ impl<'a> Parser<'a> {
         owner: &'static str,
     ) -> Option<RefutableClause> {
         let (pattern, operator) = self.parse_refutable_pattern_head(owner)?;
-        if self.at(TokenKind::Newline) {
+        if operator != "=" && self.at(TokenKind::Newline) {
             self.error_at_current(
                 "expected_expression",
                 format!("expected expression on same line after \"{operator}\""),

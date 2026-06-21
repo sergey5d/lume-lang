@@ -604,6 +604,16 @@ impl<'a> Parser<'a> {
             return self.parse_block().map(CallableBody::Block);
         }
         self.consume(TokenKind::Eq, "expected '=' or '{' before callable body")?;
+        self.skip_newlines();
+        if self.at(TokenKind::LBrace) && !self.looks_like_brace_record_literal(false) {
+            let block = self.parse_block()?;
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_callable_body",
+                "block callable bodies omit '='; use 'def name(...) { ... }'",
+                block.span,
+            ));
+            return Some(CallableBody::Block(block));
+        }
         let expr = self.parse_expr()?;
         Some(CallableBody::Expr(expr))
     }

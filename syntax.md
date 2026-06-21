@@ -360,7 +360,7 @@ def describe(user { name Str, age Int }) Str =
 Positional construction also works for shaped parameters and shaped return values:
 
 ```txt
-def makeUser() { name Str, age Int } = {
+def makeUser() { name Str, age Int } {
     return { "Ada", 10 }
 }
 
@@ -1426,11 +1426,16 @@ Newline continuation:
   - `:=`
   - `+=`, `-=`, `*=`, `/=`, `%=`
   - `<-`
-- Body-introducing forms are intentionally looser:
-  - `def ... =` may start its body on the next line
+- Callable bodies have two forms:
+  - `def name(...) { ... }` for block bodies
+  - `def name(...) = expr` for expression bodies
+  - `def name(...) = { ... }` is invalid when `{ ... }` is a statement block; omit `=`
+- `=` may start its expression on the same line or the next indented line:
+  - `a =` followed by a newline is valid
+  - `def value() Int =` followed by a newline is valid for expression bodies
   - inline-body introducers such as `else` and `yield` may take a same-line body without braces
   - if that body moves to the next line, a `{ ... }` block is required
-- So this is invalid:
+- So this is valid:
 
 ```txt
 a =

@@ -698,6 +698,97 @@ fn parses_single_expression_function_body() {
 }
 
 #[test]
+fn parses_same_line_if_expression_function_body() {
+    let result = parse(
+        r#"
+def pick(flag Bool) Int = if flag { 5 } else { 6 }
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Expr(Expr::If { .. }) => {}
+            other => panic!("expected if expr body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_newline_after_equals_before_callable_expression_body() {
+    let result = parse(
+        r#"
+def pick(flag Bool) Int =
+    if flag { 5 } else { 6 }
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Expr(Expr::If { .. }) => {}
+            other => panic!("expected if expr body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_newline_after_equals_before_binding_value() {
+    let result = parse(
+        r#"
+def run() Unit {
+    value =
+        5
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn rejects_equals_before_block_callable_body() {
+    let result = parse(
+        r#"
+def run() Unit = {
+    OS.println("old block form")
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_callable_body"
+                && diag
+                    .message
+                    .contains("block callable bodies omit '='")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn allows_equals_before_record_expression_callable_body() {
+    let result = parse(
+        r#"
+def user() { name Str, age Int } = { name: "Ada", age: 10 }
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Expr(Expr::RecordLiteral { fields, .. }) => {
+                assert_eq!(fields.len(), 2);
+            }
+            other => panic!("expected record literal expr body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_if_expression_and_calls() {
     let result = parse(
         r#"

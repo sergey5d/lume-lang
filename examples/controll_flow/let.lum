@@ -20,7 +20,7 @@ def plusThree(value Option[Int]) Option[Int] {
     Some(item + 3)
 }
 
-def pairwise(left Option[Int], right Option[Str]) { count Int, label Str } = {
+def pairwise(left Option[Int], right Option[Str]) { count Int, label Str } {
     let Some(count) = left else {
         return { count: 0, label: "no-left" }
     }

@@ -4,8 +4,12 @@
 # picked 5
 # picked2 7
 # picked3 9
+# pickedMultiline 5
 # binding 7
 # 0
+
+def pickMultiline(flag Bool) Int =
+    if flag { 5 } else { 6 }
 
 def main() Int {
     if true {
@@ -37,6 +41,7 @@ def main() Int {
         9
     }
     OS.println("picked3 " + picked3)
+    OS.println("pickedMultiline " + pickMultiline(true))
 
     values = [7]
     if let Some(value) = values.get(0) {

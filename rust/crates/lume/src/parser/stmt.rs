@@ -83,13 +83,6 @@ impl<'a> Parser<'a> {
         let start = self.consume_keyword(Keyword::Var, "expected 'var'")?;
         let bindings = self.parse_binding_list(true)?;
         self.consume(TokenKind::Eq, "expected '=' after bindings")?;
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                "expected expression on same line after \"=\"",
-            );
-            return None;
-        }
         let values = self.parse_expr_list()?;
         if bindings.len() > 1 && values.len() == 1 {
             self.error_at_current(
@@ -152,13 +145,6 @@ impl<'a> Parser<'a> {
                     "expected '}' after destructuring bindings",
                 )?;
                 self.consume(TokenKind::Eq, "expected '=' after destructuring bindings")?;
-                if self.at(TokenKind::Newline) {
-                    self.error_at_current(
-                        "expected_expression",
-                        "expected expression on same line after \"=\"",
-                    );
-                    return None;
-                }
                 let values = self.parse_expr_list()?;
                 if values.len() != 1 {
                     self.error_at_current(
@@ -204,13 +190,6 @@ impl<'a> Parser<'a> {
                 "expected ')' after destructuring bindings",
             )?;
             self.consume(TokenKind::Eq, "expected '=' after destructuring bindings")?;
-            if self.at(TokenKind::Newline) {
-                self.error_at_current(
-                    "expected_expression",
-                    "expected expression on same line after \"=\"",
-                );
-                return None;
-            }
             let values = self.parse_expr_list()?;
             if values.len() != 1 {
                 self.error_at_current(
@@ -236,13 +215,6 @@ impl<'a> Parser<'a> {
         {
             if let Some(bindings) = self.parse_binding_list(false) {
                 if self.match_token(TokenKind::Eq) {
-                    if self.at(TokenKind::Newline) {
-                        self.error_at_current(
-                            "expected_expression",
-                            "expected expression on same line after \"=\"",
-                        );
-                        return None;
-                    }
                     let values = self.parse_expr_list()?;
                     if self.match_keyword(Keyword::Else) {
                         if bindings.len() == 1 && bindings[0].ty.is_some() && values.len() == 1 {
@@ -276,7 +248,7 @@ impl<'a> Parser<'a> {
         self.restore(checkpoint);
 
         let (pattern, operator) = self.parse_refutable_pattern_head("let")?;
-        if self.at(TokenKind::Newline) {
+        if operator != "=" && self.at(TokenKind::Newline) {
             self.error_at_current(
                 "expected_expression",
                 format!("expected expression on same line after \"{operator}\""),
@@ -350,7 +322,7 @@ impl<'a> Parser<'a> {
                     span: start.cover(end),
                 }));
             };
-            if self.at(TokenKind::Newline) {
+            if operator != "=" && self.at(TokenKind::Newline) {
                 self.error_at_current(
                     "expected_expression",
                     format!("expected expression on same line after \"{operator}\""),
@@ -403,13 +375,6 @@ impl<'a> Parser<'a> {
         };
         if !self.match_token(TokenKind::Eq) {
             self.restore(checkpoint);
-            return None;
-        }
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                "expected expression on same line after \"=\"",
-            );
             return None;
         }
         let Some(values) = self.parse_expr_list() else {
@@ -650,7 +615,7 @@ impl<'a> Parser<'a> {
             self.restore(checkpoint);
             return None;
         };
-        if self.at(TokenKind::Newline) {
+        if !matches!(operator, AssignOp::Assign) && self.at(TokenKind::Newline) {
             self.error_at_current(
                 "expected_expression",
                 format!(

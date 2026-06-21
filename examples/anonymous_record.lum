@@ -15,7 +15,7 @@
 def describe(user { name Str, age Int }) Str =
     user.name + " is " + user.age
 
-def makeCounter(base Int) { count Int, next Int } = {
+def makeCounter(base Int) { count Int, next Int } {
     return { base, base + 1 }
 }
 

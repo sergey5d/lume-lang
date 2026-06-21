@@ -4,6 +4,8 @@
 # size 4
 # match 20
 # def 7
+# split 5
+# split def 5
 # if 11
 # for 5
 # match stmt 9
@@ -13,7 +15,13 @@ def helper() Int =
     3 +
         4
 
+def splitValue() Int =
+    5
+
 def main() Unit {
+    split =
+        5
+
     sum Int = 1 +
         2
 
@@ -78,6 +86,8 @@ def main() Unit {
     OS.println("size", size)
     OS.println("match", matched)
     OS.println("def", helperValue)
+    OS.println("split", split)
+    OS.println("split def", splitValue())
     OS.println("if", fromIf)
     OS.println("for", fromFor)
     OS.println("match stmt", fromMatchStmt)

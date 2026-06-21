@@ -87,7 +87,7 @@ def main() Int {
 
 	def x(term Int) = OS.println("xexe" + term)
 
-	def lala() = {
+	def lala() {
 	    OS.println("lala")
 	}
 
