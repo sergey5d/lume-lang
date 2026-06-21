@@ -1,0 +1,71 @@
+# EXPECT:
+# zero 10
+# bare 11
+# paren 12
+# pair 13
+# typed 14
+# typedPair 15
+# block 16
+# trailing 4
+# inlineZero 20
+# inlineBare 21
+# inlineParen 22
+# inlinePair 23
+# inlineTyped 24
+# inlineTypedPair 25
+# inlineMapBare 11
+# inlineMapParen 22
+# inlineMapTyped 33
+
+class LambdaRunner {
+}
+
+impl LambdaRunner {
+    def zero(f () -> Int) Int = f()
+
+    def one(f (Int) -> Int, value Int) Int = f(value)
+
+    def two(f (Int, Int) -> Int, left Int, right Int) Int = f(left, right)
+}
+
+def main() Unit {
+    zero = () -> 10
+    bare = x -> x + 1
+    paren = (x) -> x + 2
+    pair = (x, y) -> x + y
+    typed = (x Int) -> x + 4
+    typedPair = (x Int, y Int) -> x + y + 5
+    block = (x Int) -> {
+        next = x + 6
+        next
+    }
+
+    OS.println("zero " + zero())
+    OS.println("bare " + bare(10))
+    OS.println("paren " + paren(10))
+    OS.println("pair " + pair(6, 7))
+    OS.println("typed " + typed(10))
+    OS.println("typedPair " + typedPair(4, 6))
+    OS.println("block " + block(10))
+
+    values = List(1, 2, 3)
+    doubled = values.map {
+        item -> item * 2
+    }
+    OS.println("trailing " + doubled.get(1).getOr(0))
+
+    runner = LambdaRunner {}
+    OS.println("inlineZero " + runner.zero(() -> 20))
+    OS.println("inlineBare " + runner.one(x -> x + 1, 20))
+    OS.println("inlineParen " + runner.one((x) -> x + 2, 20))
+    OS.println("inlinePair " + runner.two((x, y) -> x + y, 11, 12))
+    OS.println("inlineTyped " + runner.one((x Int) -> x + 4, 20))
+    OS.println("inlineTypedPair " + runner.two((x Int, y Int) -> x + y, 12, 13))
+
+    inlineMapBare = values.map(x -> x + 10)
+    inlineMapParen = values.map((x) -> x + 20)
+    inlineMapTyped = values.map((x Int) -> x + 30)
+    OS.println("inlineMapBare " + inlineMapBare.get(0).getOr(0))
+    OS.println("inlineMapParen " + inlineMapParen.get(1).getOr(0))
+    OS.println("inlineMapTyped " + inlineMapTyped.get(2).getOr(0))
+}
