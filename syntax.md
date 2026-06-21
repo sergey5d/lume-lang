@@ -51,18 +51,25 @@ example `value -> value + 1`.
 
 ## Strings
 
-Ordinary string literals use double quotes:
+String literals have interpreted and raw forms:
 
 ```txt
 "hello"
+"""hello
+world"""
+raw"hello"
+raw"""hello
+world"""
 ```
 
-String interpolation is supported in any string:
+Interpreted strings support escapes and interpolation:
 
 ```txt
 "hello $name"
 "next ${count + 1}"
 "money \$5"
+"""hello $name
+next ${count + 1}"""
 ```
 
 Rules:
@@ -72,20 +79,16 @@ Rules:
 - `\$` inserts a literal dollar sign
 - `Str.size()` returns the string length as `Int`
 
-Multiline strings use triple quotes:
+Raw strings preserve their contents without escapes or interpolation:
 
 ```txt
-"""
-hello
-world
-"""
+raw"$name\n"
+raw"""$name
+\n"""
 ```
 
-Rules:
-
-- multiline strings preserve their contents exactly, including a leading newline
-- multiline strings do not interpolate
-- `"""` strings must not be empty
+Multiline strings use triple quotes and preserve their line breaks. Use
+`raw"""..."""` when `$` and `\` should remain literal.
 
 ## OS / Printing
 

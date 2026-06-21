@@ -1,15 +1,43 @@
 # EXPECT:
+# regular:
 # hello world
 # next 3
 # money $5
 # mix world-4
+# multiline:
+# hello world
+# count 3
+#
+# escaped
+#
+# raw-single:$name\n
+# raw-multi:
+# hello $name
+# \nraw
+# done
 
-def main() {
+def main() Unit {
     name Str = "world"
     count Int = 2
 
+    OS.println("regular:")
     OS.println("hello $name")
     OS.println("next ${count + 1}")
     OS.println("money \$${count + 3}")
     OS.println("mix $name-${count + 2}")
+
+    text Str = """hello $name
+count ${count + 1}
+\nescaped
+"""
+    rawSingle Str = raw"$name\n"
+    rawMulti Str = raw"""hello $name
+\nraw"""
+
+    OS.println("multiline:")
+    OS.println(text)
+    OS.println("raw-single:" + rawSingle)
+    OS.println("raw-multi:")
+    OS.println(rawMulti)
+    OS.println("done")
 }

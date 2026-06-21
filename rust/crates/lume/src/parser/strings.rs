@@ -2,21 +2,30 @@ use super::*;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_string_expr(&mut self, token: Token) -> Option<Expr> {
-        if is_multiline_string(&token.lexeme) {
+        let Some(literal) = string_literal(&token.lexeme) else {
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_string_literal",
+                "invalid string literal",
+                token.span,
+            ));
+            return None;
+        };
+
+        if literal.is_raw {
             return Some(Expr::String {
                 raw: token.lexeme,
                 span: token.span,
             });
         }
 
-        if !string_has_interpolation(&token.lexeme) {
+        if !string_has_interpolation(literal.body) {
             return Some(Expr::String {
                 raw: token.lexeme,
                 span: token.span,
             });
         }
 
-        let parts = match parse_interpolated_string_parts(&token.lexeme) {
+        let parts = match parse_interpolated_string_parts(literal.body) {
             Ok(parts) => parts,
             Err(message) => {
                 self.diagnostics.push(Diagnostic::error(
@@ -84,18 +93,32 @@ impl<'a> Parser<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct StringLiteral<'a> {
+    is_raw: bool,
+    body: &'a str,
+}
+
 #[derive(Debug, Clone)]
 struct InterpolatedStringPart {
     is_literal: bool,
     text: String,
 }
 
-fn is_multiline_string(raw: &str) -> bool {
-    raw.starts_with("\"\"\"") && raw.ends_with("\"\"\"")
+fn string_literal(raw: &str) -> Option<StringLiteral<'_>> {
+    let (is_raw, quoted) = raw
+        .strip_prefix("raw")
+        .map_or((false, raw), |quoted| (true, quoted));
+    let body = if quoted.starts_with("\"\"\"") && quoted.ends_with("\"\"\"") && quoted.len() >= 6 {
+        &quoted[3..quoted.len() - 3]
+    } else {
+        quoted.strip_prefix('"')?.strip_suffix('"')?
+    };
+    Some(StringLiteral { is_raw, body })
 }
 
-fn string_has_interpolation(raw: &str) -> bool {
-    let mut chars = raw.chars().peekable();
+fn string_has_interpolation(body: &str) -> bool {
+    let mut chars = body.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch != '$' {
             continue;
@@ -147,12 +170,7 @@ fn encode_string_literal(value: &str) -> String {
     raw
 }
 
-fn parse_interpolated_string_parts(raw: &str) -> Result<Vec<InterpolatedStringPart>, String> {
-    let body = raw
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .ok_or_else(|| "expected regular string literal".to_string())?;
-
+fn parse_interpolated_string_parts(body: &str) -> Result<Vec<InterpolatedStringPart>, String> {
     let runes: Vec<char> = body.chars().collect();
     let mut parts = Vec::new();
     let mut literal = String::new();

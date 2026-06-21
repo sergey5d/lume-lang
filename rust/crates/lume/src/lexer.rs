@@ -190,6 +190,10 @@ impl<'a> Lexer<'a> {
 
     fn lex_string(&mut self) {
         let start = self.mark();
+        self.lex_string_from(start);
+    }
+
+    fn lex_string_from(&mut self, start: Mark) {
         if self.peek_n(0) == Some('"') && self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"')
         {
             self.lex_multiline_string(start);
@@ -284,6 +288,10 @@ impl<'a> Lexer<'a> {
             self.bump();
         }
         let lexeme = self.slice(start.byte, self.byte_index);
+        if lexeme == "raw" && self.peek() == Some('"') {
+            self.lex_string_from(start);
+            return;
+        }
         let kind = match lexeme.as_str() {
             "as" => TokenKind::Keyword(Keyword::As),
             "break" => TokenKind::Keyword(Keyword::Break),
@@ -524,7 +532,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "use model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nspread Str... = \"\"\"\nhello\n\"\"\"\npi = 1.25\n",
+            "use model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nspread Str... = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -532,5 +540,26 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
         assert!(kinds.contains(&TokenKind::Ellipsis));
         assert!(kinds.contains(&TokenKind::Float));
+        assert!(
+            result
+                .tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::String && token.lexeme == "raw\"$name\\n\"")
+        );
+    }
+
+    #[test]
+    fn lexes_raw_strings_as_single_string_tokens() {
+        let result = lex(&source(
+            "single = raw\"$name\\n\"\nmulti = raw\"\"\"$name\n\\n\"\"\"\n",
+        ));
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let strings: Vec<&str> = result
+            .tokens
+            .iter()
+            .filter(|token| token.kind == TokenKind::String)
+            .map(|token| token.lexeme.as_str())
+            .collect();
+        assert_eq!(strings, vec!["raw\"$name\\n\"", "raw\"\"\"$name\n\\n\"\"\""]);
     }
 }

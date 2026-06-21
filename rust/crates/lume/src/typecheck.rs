@@ -5715,7 +5715,7 @@ fn format_help_expr(expr: &Expr) -> String {
     match expr {
         Expr::Identifier { name, .. } => name.clone(),
         Expr::Integer { raw, .. } | Expr::Float { raw, .. } => raw.clone(),
-        Expr::String { raw, .. } if raw.starts_with('"') => raw.clone(),
+        Expr::String { raw, .. } if raw.starts_with('"') || raw.starts_with("raw\"") => raw.clone(),
         Expr::String { raw, .. } => format!("{raw:?}"),
         Expr::Bool { value, .. } => value.to_string(),
         Expr::Unit { .. } => "()".to_string(),

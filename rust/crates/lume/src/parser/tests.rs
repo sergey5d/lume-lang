@@ -759,9 +759,7 @@ def run() Unit = {
     assert!(
         result.diagnostics.iter().any(|diag| {
             diag.code == "invalid_callable_body"
-                && diag
-                    .message
-                    .contains("block callable bodies omit '='")
+                && diag.message.contains("block callable bodies omit '='")
         }),
         "{:#?}",
         result.diagnostics
@@ -1628,10 +1626,10 @@ def run(name Str, count Int) Str {
 }
 
 #[test]
-fn keeps_multiline_string_as_literal() {
+fn parses_multiline_string_interpolation_as_binary_concat() {
     let result = parse(
         r#"
-def run() Str {
+def run(name Str) Str {
     return """
 hello
 $name
@@ -1646,10 +1644,45 @@ $name
         Item::Function(function) => match &function.body {
             CallableBody::Block(block) => match &block.statements[0] {
                 Stmt::Return(ret) => {
-                    assert!(matches!(ret.value, Some(Expr::String { .. })));
+                    assert!(matches!(ret.value, Some(Expr::Binary { .. })));
                 }
                 other => panic!("expected return statement, got {other:#?}"),
             },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
+fn keeps_raw_strings_as_literals() {
+    let result = parse(
+        r#"
+def run() Unit {
+    rawSingle = raw"$name\n"
+    rawMulti = raw"""
+$name
+\n
+"""
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => {
+                assert!(matches!(
+                    &block.statements[0],
+                    Stmt::Binding(binding)
+                        if matches!(&binding.values[0], Expr::String { raw, .. } if raw.starts_with("raw\""))
+                ));
+                assert!(matches!(
+                    &block.statements[1],
+                    Stmt::Binding(binding)
+                        if matches!(&binding.values[0], Expr::String { raw, .. } if raw.starts_with("raw\"\"\""))
+                ));
+            }
             other => panic!("expected block body, got {other:#?}"),
         },
         other => panic!("expected function, got {other:#?}"),

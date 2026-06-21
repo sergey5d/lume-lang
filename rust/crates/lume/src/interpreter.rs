@@ -3976,13 +3976,20 @@ fn default_span() -> Span {
 }
 
 fn decode_string_literal(raw: &str) -> String {
-    let body = if raw.starts_with("\"\"\"") && raw.ends_with("\"\"\"") && raw.len() >= 6 {
-        &raw[3..raw.len() - 3]
+    let (is_raw, quoted) = raw
+        .strip_prefix("raw")
+        .map_or((false, raw), |quoted| (true, quoted));
+    let body = if quoted.starts_with("\"\"\"") && quoted.ends_with("\"\"\"") && quoted.len() >= 6 {
+        &quoted[3..quoted.len() - 3]
     } else {
-        raw.strip_prefix('"')
+        quoted
+            .strip_prefix('"')
             .and_then(|value| value.strip_suffix('"'))
-            .unwrap_or(raw)
+            .unwrap_or(quoted)
     };
+    if is_raw {
+        return body.to_string();
+    }
     decode_string_contents(body)
 }
 
@@ -4814,8 +4821,13 @@ hello
 $name
 \n
 """
+                rawSingle Str = raw"$name\n"
+                rawMulti Str = raw"""$name
+\n"""
                 OS.println("hello $name ${count + 1} \$done")
                 OS.println(text)
+                OS.println(rawSingle)
+                OS.println(rawMulti)
                 OS.printf("fmt %d\n", 7)
                 OS.stdout.printf("pair %s %d\n", "left", 9)
             }
@@ -4826,7 +4838,7 @@ $name
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(
             run.output,
-            "hello world 7 $done\n\nhello\n$name\n\n\n\nfmt 7\npair left 9\n"
+            "hello world 7 $done\n\nhello\nworld\n\n\n\n$name\\n\n$name\n\\n\nfmt 7\npair left 9\n"
         );
     }
 
