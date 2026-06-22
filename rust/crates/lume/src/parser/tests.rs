@@ -1375,6 +1375,52 @@ def main() Unit {
 }
 
 #[test]
+fn parses_destructured_lambda_parameter_forms() {
+    let tuple = parse_expr_only("let (x Int, y Int) -> x + y");
+    match tuple {
+        Expr::Lambda { params, .. } => {
+            assert_eq!(params.len(), 1);
+            let destructure = params[0].destructure.as_ref().expect("tuple destructure");
+            assert_eq!(destructure.kind, DestructureKind::Tuple);
+            assert_eq!(destructure.bindings.len(), 2);
+            assert_eq!(destructure.bindings[0].name, "x");
+            assert_eq!(destructure.bindings[1].name, "y");
+        }
+        other => panic!("expected tuple-destructuring lambda, got {other:#?}"),
+    }
+
+    let record = parse_expr_only("let { name, age } -> name");
+    match record {
+        Expr::Lambda { params, .. } => {
+            assert_eq!(params.len(), 1);
+            let destructure = params[0].destructure.as_ref().expect("record destructure");
+            assert_eq!(destructure.kind, DestructureKind::Record);
+            assert_eq!(destructure.bindings.len(), 2);
+            assert_eq!(destructure.bindings[0].field_name.as_deref(), Some("name"));
+            assert_eq!(destructure.bindings[1].field_name.as_deref(), Some("age"));
+        }
+        other => panic!("expected record-destructuring lambda, got {other:#?}"),
+    }
+
+    let mixed = parse_expr_only("(name, let (x, y), let { age }) -> x + y");
+    match mixed {
+        Expr::Lambda { params, .. } => {
+            assert_eq!(params.len(), 3);
+            assert!(params[0].destructure.is_none());
+            assert_eq!(
+                params[1].destructure.as_ref().expect("tuple").kind,
+                DestructureKind::Tuple
+            );
+            assert_eq!(
+                params[2].destructure.as_ref().expect("record").kind,
+                DestructureKind::Record
+            );
+        }
+        other => panic!("expected mixed lambda params, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_trailing_block_lambda_call_syntax() {
     let result = parse(
         r#"

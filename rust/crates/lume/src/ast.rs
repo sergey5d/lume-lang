@@ -712,7 +712,15 @@ pub enum ElseExprBranch {
 pub struct LambdaParam {
     pub name: String,
     pub ty: Option<TypeRef>,
+    pub destructure: Option<LambdaParamDestructure>,
     pub span: Span,
+}
+
+/// A `let (...)` or `let { ... }` destructured lambda parameter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LambdaParamDestructure {
+    pub kind: DestructureKind,
+    pub bindings: Vec<Binding>,
 }
 
 /// The body of a lambda expression.

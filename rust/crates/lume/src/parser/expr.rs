@@ -61,12 +61,37 @@ impl<'a> Parser<'a> {
 
     pub(super) fn try_parse_lambda_expr(&mut self) -> Option<Expr> {
         let checkpoint = self.checkpoint();
+        if self.match_keyword(Keyword::Let) {
+            let start = self.previous_span();
+            let Some(param) = self.parse_lambda_destructure_param(start, 0) else {
+                self.restore(checkpoint);
+                return None;
+            };
+            if !self.match_token(TokenKind::Arrow) {
+                self.restore(checkpoint);
+                return None;
+            }
+            let body = match self.parse_lambda_body() {
+                Some(body) => body,
+                None => {
+                    self.restore(checkpoint);
+                    return None;
+                }
+            };
+            let end = body.span();
+            return Some(Expr::Lambda {
+                params: vec![param],
+                body,
+                span: start.cover(end),
+            });
+        }
         if self.at(TokenKind::Identifier) {
             if let Some((name, start)) = self.expect_identifier("expected lambda parameter") {
                 if self.match_token(TokenKind::Arrow) {
                     let param = LambdaParam {
                         name,
                         ty: None,
+                        destructure: None,
                         span: start,
                     };
                     let body = match self.parse_lambda_body() {
@@ -97,6 +122,7 @@ impl<'a> Parser<'a> {
                             let param = LambdaParam {
                                 name,
                                 ty: Some(ty),
+                                destructure: None,
                                 span: start.cover(ty_span),
                             };
                             let body = match self.parse_lambda_body() {
@@ -127,13 +153,13 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         self.skip_newlines();
         if !self.at(TokenKind::RParen) {
-            let Some(param) = self.parse_lambda_param() else {
+            let Some(param) = self.parse_lambda_param(params.len()) else {
                 self.restore(checkpoint);
                 return None;
             };
             params.push(param);
             while self.match_token(TokenKind::Comma) {
-                let Some(param) = self.parse_lambda_param() else {
+                let Some(param) = self.parse_lambda_param(params.len()) else {
                     self.restore(checkpoint);
                     return None;
                 };
@@ -150,8 +176,15 @@ impl<'a> Parser<'a> {
             self.restore(checkpoint);
             return None;
         }
-        let typed_count = params.iter().filter(|param| param.ty.is_some()).count();
-        if typed_count > 0 && typed_count < params.len() {
+        let simple_params = params
+            .iter()
+            .filter(|param| param.destructure.is_none())
+            .collect::<Vec<_>>();
+        let typed_count = simple_params
+            .iter()
+            .filter(|param| param.ty.is_some())
+            .count();
+        if typed_count > 0 && typed_count < simple_params.len() {
             self.diagnostics.push(Diagnostic::error(
                 "invalid_lambda_params",
                 "lambda parameters must be either all typed or all untyped",
@@ -170,7 +203,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub(super) fn parse_lambda_param(&mut self) -> Option<LambdaParam> {
+    pub(super) fn parse_lambda_param(&mut self, index: usize) -> Option<LambdaParam> {
+        if self.match_keyword(Keyword::Let) {
+            let start = self.previous_span();
+            return self.parse_lambda_destructure_param(start, index);
+        }
         let (name, start) = self.expect_identifier("expected lambda parameter")?;
         let ty = if self.can_start_type_ref() {
             Some(self.parse_type_ref()?)
@@ -181,6 +218,41 @@ impl<'a> Parser<'a> {
         Some(LambdaParam {
             name,
             ty,
+            destructure: None,
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_lambda_destructure_param(
+        &mut self,
+        start: Span,
+        index: usize,
+    ) -> Option<LambdaParam> {
+        let (kind, bindings, end) = if self.match_token(TokenKind::LParen) {
+            let bindings = self.parse_binding_list(false)?;
+            let end = self.consume(
+                TokenKind::RParen,
+                "expected ')' after lambda tuple destructuring parameter",
+            )?;
+            (DestructureKind::Tuple, bindings, end)
+        } else if self.match_token(TokenKind::LBrace) {
+            let bindings = self.parse_brace_destructure_binding_list(false)?;
+            let end = self.consume(
+                TokenKind::RBrace,
+                "expected '}' after lambda class destructuring parameter",
+            )?;
+            (DestructureKind::Record, bindings, end)
+        } else {
+            self.error_at_current(
+                "expected_lambda_param",
+                "expected '(' or '{' after 'let' in lambda parameter",
+            );
+            return None;
+        };
+        Some(LambdaParam {
+            name: format!("$lambda_param{index}"),
+            ty: None,
+            destructure: Some(LambdaParamDestructure { kind, bindings }),
             span: start.cover(end),
         })
     }

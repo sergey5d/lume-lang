@@ -44,7 +44,15 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt(false).map(Stmt::Match),
             TokenKind::Keyword(Keyword::Partial) => self.parse_match_stmt(true).map(Stmt::Match),
-            TokenKind::Keyword(Keyword::Let) => self.parse_let_stmt(),
+            TokenKind::Keyword(Keyword::Let) => {
+                let checkpoint = self.checkpoint();
+                if let Some(expr) = self.try_parse_lambda_expr() {
+                    let span = expr.span();
+                    return Some(Stmt::Expr(ExprStmt { expr, span }));
+                }
+                self.restore(checkpoint);
+                self.parse_let_stmt()
+            }
             TokenKind::Keyword(Keyword::Expect) => self.parse_expect_stmt(),
             TokenKind::Keyword(Keyword::Var) => {
                 let stmt = self.parse_binding_stmt_after_var()?;

@@ -599,6 +599,13 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
                 if let Some(ty) = &mut param.ty {
                     rewrite_type_ref_for_runtime(ty, module);
                 }
+                if let Some(destructure) = &mut param.destructure {
+                    for binding in &mut destructure.bindings {
+                        if let Some(ty) = &mut binding.ty {
+                            rewrite_type_ref_for_runtime(ty, module);
+                        }
+                    }
+                }
             }
             match body {
                 ast::LambdaBody::Expr(expr) => rewrite_expr_for_runtime(expr, module, graph),

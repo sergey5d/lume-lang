@@ -20,12 +20,12 @@ def main() Unit {
     words = [str]
     sizes = words.map(word -> word.size())
     pairs = List(("a", 1), ("bb", 2))
-    pairMapped = pairs.map((key, value) -> key.size() + value)
-    pairIgnored = pairs.map((_, value) -> value * 2)
+    pairMapped = pairs.map(let (key, value) -> key.size() + value)
+    pairIgnored = pairs.map(let (_, value) -> value * 2)
     entries = Map("a": 1, "bbb": 2)
     mapMapped = entries.map((key, value) -> key.size() + value)
     tuple4s = List((1, 2, 3, 4), (4, 5, 6, 7))
-    tuple4Mapped = tuple4s.map((first, _, third, _) -> first + third)
+    tuple4Mapped = tuple4s.map(let (first, _, third, _) -> first + third)
 
     OS.println(mapped.get(0).getOr(0))
     OS.println(mapped.get(1).getOr(0))

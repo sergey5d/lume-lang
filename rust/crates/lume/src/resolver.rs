@@ -1773,15 +1773,7 @@ impl<'a> Resolver<'a> {
             Expr::Lambda { params, body, .. } => {
                 self.push_scope();
                 for param in params {
-                    self.resolve_type_ref(param.ty.as_ref());
-                    self.define_value(
-                        param.name.as_str(),
-                        param.span,
-                        false,
-                        "duplicate_parameter",
-                        format!("duplicate parameter '{}'", param.name),
-                        false,
-                    );
+                    self.resolve_lambda_param(param);
                 }
                 match body {
                     LambdaBody::Expr(expr) => self.resolve_expr(expr),
@@ -1791,6 +1783,32 @@ impl<'a> Resolver<'a> {
             }
             Expr::Group { inner, .. } => self.resolve_expr(inner),
         }
+    }
+
+    fn resolve_lambda_param(&mut self, param: &crate::ast::LambdaParam) {
+        self.resolve_type_ref(param.ty.as_ref());
+        if let Some(destructure) = &param.destructure {
+            for binding in &destructure.bindings {
+                self.resolve_type_ref(binding.ty.as_ref());
+                self.define_value(
+                    binding.name.as_str(),
+                    binding.span,
+                    false,
+                    "duplicate_parameter",
+                    format!("duplicate parameter '{}'", binding.name),
+                    false,
+                );
+            }
+            return;
+        }
+        self.define_value(
+            param.name.as_str(),
+            param.span,
+            false,
+            "duplicate_parameter",
+            format!("duplicate parameter '{}'", param.name),
+            false,
+        );
     }
 
     fn resolve_else_expr_branch(&mut self, branch: &ElseExprBranch) {

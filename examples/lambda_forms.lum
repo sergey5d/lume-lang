@@ -16,6 +16,13 @@
 # inlineMapBare 11
 # inlineMapParen 22
 # inlineMapTyped 33
+# tupleMap 5
+# userMap Ada is 37
+# tupleMethod 7
+# userMethod Bob is 40
+# withIndex 3: 15
+# combine item: 9
+# twoDestructured 10
 
 class LambdaRunner {
 }
@@ -26,6 +33,21 @@ impl LambdaRunner {
     def one(f (Int) -> Int, value Int) Int = f(value)
 
     def two(f (Int, Int) -> Int, left Int, right Int) Int = f(left, right)
+
+    def tupleOne(f ((Int, Int)) -> Int, pair (Int, Int)) Int = f(pair)
+
+    def userOne(f (User) -> Str, user User) Str = f(user)
+
+    def withIndex(f ((Int, Int), Int) -> Str, pair (Int, Int), index Int) Str = f(pair, index)
+
+    def combine(f (Str, (Int, Int)) -> Str, name Str, pair (Int, Int)) Str = f(name, pair)
+
+    def twoTuples(f ((Int, Int), (Int, Int)) -> Int, left (Int, Int), right (Int, Int)) Int = f(left, right)
+}
+
+class User {
+    name Str
+    age Int
 }
 
 def main() Unit {
@@ -68,4 +90,23 @@ def main() Unit {
     OS.println("inlineMapBare " + inlineMapBare.get(0).getOr(0))
     OS.println("inlineMapParen " + inlineMapParen.get(1).getOr(0))
     OS.println("inlineMapTyped " + inlineMapTyped.get(2).getOr(0))
+
+    pairs = List((2, 3), (4, 5))
+    tupleSums = pairs.map {
+        let (x Int, y Int) -> x + y
+    }
+    OS.println("tupleMap " + tupleSums.get(0).getOr(0))
+
+    users = List(User { name: "Ada", age: 37 })
+    userLabels = users.map {
+        let { name, age } -> "$name is $age"
+    }
+    OS.println("userMap " + userLabels.get(0).getOr(""))
+
+    bob User = User { name: "Bob", age: 40 }
+    OS.println("tupleMethod " + runner.tupleOne(let (x, y) -> x + y, (3, 4)))
+    OS.println("userMethod " + runner.userOne(let { name, age } -> "$name is $age", bob))
+    OS.println("withIndex " + runner.withIndex((let (x, y), index) -> "$index: ${x + y}", (7, 8), 3))
+    OS.println("combine " + runner.combine((name, let (x, y)) -> "$name: ${x + y}", "item", (4, 5)))
+    OS.println("twoDestructured " + runner.twoTuples((let (a, b), let (x, y)) -> a + b + x + y, (1, 2), (3, 4)))
 }

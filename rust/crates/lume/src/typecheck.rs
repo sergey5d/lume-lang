@@ -2764,28 +2764,16 @@ impl<'a> Checker<'a> {
             Ty::Function(params, ret) => (Some(params.clone()), Some(ret.as_ref().clone())),
             _ => (None, None),
         };
-        let external_params = expected_params
-            .clone()
-            .unwrap_or_else(|| vec![Ty::Unknown; params.len()]);
-        let destructured_external = matches!(&expected_params, Some(params_hint) if params_hint.len() == 1 && params.len() != 1);
         let hinted_params = match expected_params {
             Some(ref params_hint) if params_hint.len() == params.len() => params_hint.clone(),
-            Some(ref params_hint) if destructured_external => {
-                self.destructure_slots(&params_hint[0], params.len(), DestructureKind::Tuple)
-            }
             _ => vec![Ty::Unknown; params.len()],
         };
 
         self.push_scope();
         let mut param_types = Vec::new();
         for (index, param) in params.iter().enumerate() {
-            let ty = param
-                .ty
-                .as_ref()
-                .map(|ty| self.ty_from_type_ref(ty))
-                .unwrap_or_else(|| hinted_params.get(index).cloned().unwrap_or(Ty::Unknown));
-            param_types.push(ty.clone());
-            self.define_local(&param.name, ty, false);
+            let hint = hinted_params.get(index).cloned().unwrap_or(Ty::Unknown);
+            param_types.push(self.check_lambda_param(param, hint));
         }
         let ret = match body {
             LambdaBody::Expr(expr) => expected_ret
@@ -2810,10 +2798,87 @@ impl<'a> Checker<'a> {
         } else {
             ret
         };
-        if destructured_external {
-            Ty::Function(external_params, Box::new(ret))
-        } else {
-            Ty::Function(param_types, Box::new(ret))
+        Ty::Function(param_types, Box::new(ret))
+    }
+
+    fn check_lambda_param(&mut self, param: &crate::ast::LambdaParam, hint: Ty) -> Ty {
+        if let Some(destructure) = &param.destructure {
+            let ty = param
+                .ty
+                .as_ref()
+                .map(|ty| self.ty_from_type_ref(ty))
+                .unwrap_or_else(|| {
+                    if !matches!(hint, Ty::Unknown) {
+                        hint
+                    } else {
+                        self.infer_destructured_lambda_param_type(destructure)
+                    }
+                });
+            self.check_destructure_source(
+                &ty,
+                destructure.kind,
+                destructure.bindings.len(),
+                param.span,
+            );
+            let slot_types = if destructure.kind == DestructureKind::Record {
+                self.record_binding_slot_types(&ty, &destructure.bindings, param.span)
+            } else {
+                self.destructure_slots(&ty, destructure.bindings.len(), destructure.kind)
+            };
+            for (index, binding) in destructure.bindings.iter().enumerate() {
+                let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
+                let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
+                let local_ty = explicit.unwrap_or(inferred);
+                self.define_local(&binding.name, local_ty, false);
+            }
+            return ty;
+        }
+
+        let ty = param
+            .ty
+            .as_ref()
+            .map(|ty| self.ty_from_type_ref(ty))
+            .unwrap_or(hint);
+        self.define_local(&param.name, ty.clone(), false);
+        ty
+    }
+
+    fn infer_destructured_lambda_param_type(
+        &mut self,
+        destructure: &crate::ast::LambdaParamDestructure,
+    ) -> Ty {
+        match destructure.kind {
+            DestructureKind::Tuple => Ty::Tuple(
+                destructure
+                    .bindings
+                    .iter()
+                    .map(|binding| {
+                        binding
+                            .ty
+                            .as_ref()
+                            .map(|ty| self.ty_from_type_ref(ty))
+                            .unwrap_or(Ty::Unknown)
+                    })
+                    .collect(),
+            ),
+            DestructureKind::Record => Ty::Record(
+                destructure
+                    .bindings
+                    .iter()
+                    .map(|binding| {
+                        let name = binding
+                            .field_name
+                            .clone()
+                            .unwrap_or_else(|| binding.name.clone());
+                        let ty = binding
+                            .ty
+                            .as_ref()
+                            .map(|ty| self.ty_from_type_ref(ty))
+                            .unwrap_or(Ty::Unknown);
+                        (name, ty)
+                    })
+                    .collect(),
+            ),
         }
     }
 
@@ -5789,19 +5854,6 @@ fn infer_type_subst(expected: &Ty, actual: &Ty, subst: &mut HashMap<String, Ty>)
                         expected_params.iter().zip(actual_params.iter())
                     {
                         infer_type_subst(expected_param, actual_param, subst);
-                    }
-                } else if expected_params.len() == 1 && actual_params.len() != 1 {
-                    let expected_slots = match &expected_params[0] {
-                        Ty::Tuple(items) => items.clone(),
-                        Ty::Record(fields) => fields.iter().map(|(_, ty)| ty.clone()).collect(),
-                        _ => Vec::new(),
-                    };
-                    if expected_slots.len() == actual_params.len() {
-                        for (expected_param, actual_param) in
-                            expected_slots.iter().zip(actual_params.iter())
-                        {
-                            infer_type_subst(expected_param, actual_param, subst);
-                        }
                     }
                 }
                 infer_type_subst(expected_ret, actual_ret, subst);

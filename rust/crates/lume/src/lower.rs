@@ -1084,14 +1084,7 @@ impl<'a> FunctionLowerer<'a> {
             ir::Function::new(nested_name, ir::FunctionKind::Lambda, ir::Type::Unknown);
         nested.span = Some(span);
         for param in params {
-            nested.add_param(
-                param.name.clone(),
-                param
-                    .ty
-                    .as_ref()
-                    .map(lower_type_ref)
-                    .unwrap_or(ir::Type::Unknown),
-            );
+            nested.add_param(param.name.clone(), lower_lambda_param_type(param));
         }
         let function_id = self.program.add_function(nested);
         let capture_sources = self.visible_capture_sources(None);
@@ -1107,7 +1100,10 @@ impl<'a> FunctionLowerer<'a> {
             .with_capture_sources(capture_sources);
             for (index, param) in params.iter().enumerate() {
                 if let Some(local_id) = lowerer.function().params.get(index).copied() {
-                    if param.name != "_" {
+                    if let Some(destructure) = &param.destructure {
+                        let value = ir::Operand::Copy(Box::new(ir::Place::Local(local_id)));
+                        lowerer.bind_lambda_destructure_param(destructure, value);
+                    } else if param.name != "_" {
                         lowerer.bind_existing(&param.name, local_id);
                     }
                 }
@@ -2104,6 +2100,45 @@ impl<'a> FunctionLowerer<'a> {
                     self.bind_loop_binding(local, field_value);
                 }
             }
+        }
+    }
+
+    fn bind_lambda_destructure_param(
+        &mut self,
+        destructure: &ast::LambdaParamDestructure,
+        item: ir::Operand,
+    ) {
+        let field_names = (destructure.kind == DestructureKind::Record)
+            .then(|| self.destructure_field_names_from_bindings(&destructure.bindings));
+        for (index, binding) in destructure.bindings.iter().enumerate() {
+            if binding.name == "_" {
+                continue;
+            }
+            let field_value = self.emit_temp_from_rvalue(
+                ir::RValue::Field {
+                    base: item.clone(),
+                    name: field_names
+                        .as_ref()
+                        .and_then(|fields| fields.get(index).cloned())
+                        .unwrap_or_else(|| format!("_{}", index + 1)),
+                },
+                ir::Type::Unknown,
+                Some(binding.span),
+            );
+            let ty = binding
+                .ty
+                .as_ref()
+                .map(lower_type_ref)
+                .unwrap_or(ir::Type::Unknown);
+            let local_id = self.add_local(binding.name.clone(), ty, false, ir::LocalKind::Binding);
+            self.current_scope().insert(binding.name.clone(), local_id);
+            self.push_statement(ir::Statement {
+                span: Some(binding.span),
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Local(local_id),
+                    value: ir::RValue::Use(field_value),
+                },
+            });
         }
     }
 
@@ -3594,6 +3629,47 @@ fn lower_type_ref(reference: &TypeRef) -> ir::Type {
             params: params.iter().map(lower_type_ref).collect(),
             ret: Box::new(lower_type_ref(ret)),
         },
+    }
+}
+
+fn lower_lambda_param_type(param: &core::LambdaParam) -> ir::Type {
+    if let Some(ty) = &param.ty {
+        return lower_type_ref(ty);
+    }
+    let Some(destructure) = &param.destructure else {
+        return ir::Type::Unknown;
+    };
+    match destructure.kind {
+        DestructureKind::Tuple => ir::Type::Tuple(
+            destructure
+                .bindings
+                .iter()
+                .map(|binding| {
+                    binding
+                        .ty
+                        .as_ref()
+                        .map(lower_type_ref)
+                        .unwrap_or(ir::Type::Unknown)
+                })
+                .collect(),
+        ),
+        DestructureKind::Record => ir::Type::Record(
+            destructure
+                .bindings
+                .iter()
+                .map(|binding| ir::NamedType {
+                    name: binding
+                        .field_name
+                        .clone()
+                        .unwrap_or_else(|| binding.name.clone()),
+                    ty: binding
+                        .ty
+                        .as_ref()
+                        .map(lower_type_ref)
+                        .unwrap_or(ir::Type::Unknown),
+                })
+                .collect(),
+        ),
     }
 }
 

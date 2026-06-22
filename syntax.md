@@ -498,12 +498,15 @@ x -> expr
 (x, y) -> expr
 (x Int) -> expr
 (x Int, y Int) -> expr
+let (x, y) -> expr
+let { name, age } -> expr
 ```
 
 Typed single-parameter lambdas must use parentheses, so write
 `(x Int) -> x + 1`, not `x Int -> x + 1`. Parenthesized parameter lists
 must also be either fully typed or fully untyped; `(x Int, y) -> ...` is
-invalid.
+invalid. Plain `(x, y) -> ...` always means two parameters; use `let (x, y)
+-> ...` when one tuple parameter should be destructured.
 
 Single-parameter lambda:
 
@@ -526,15 +529,39 @@ Multi-parameter lambda:
 Tuple-destructuring lambda in a one-argument function context:
 
 ```txt
-pairs.map((key, value) -> key + value)
-pairs.map((key, _) -> key)
+pairs.map(let (key, value) -> key + value)
+pairs.map(let (key, _) -> key)
+```
+
+Class or anonymous-record destructuring lambda:
+
+```txt
+users.map { let { name, age } ->
+    "$name is $age"
+}
+```
+
+Destructured parameters can also appear inside multi-parameter lambdas:
+
+```txt
+pairs.mapWithIndex { (let (x, y), index) ->
+    "$index: ${x + y}"
+}
+
+source.combine { (name, let (x, y)) ->
+    "$name: ${x + y}"
+}
+
+source.combine { (let (a, b), let (x, y)) ->
+    a + b + x + y
+}
 ```
 
 Rules:
 
-- if a lambda is expected to take one argument and that argument is a tuple, `(a, b) -> ...` destructures that tuple into separate names
-- the same syntax still means a normal multi-parameter lambda when the contextual function type expects multiple arguments
 - `_` inside an explicit lambda parameter list means "ignore this parameter slot"
+- `let (x, y)` destructures one tuple parameter
+- `let { name, age }` destructures one class or anonymous-record parameter by field name
 
 Block lambda:
 
