@@ -1461,26 +1461,17 @@ Newline continuation:
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
   - bitwise operators: `|`, `&`
+  - unary prefixes: unary `-`, `!`, `try`
+  - runtime type check keyword: `is`
   - match arrow: `=>`
   - separators / chaining markers: `,`, `.`
-- Continuation is also allowed inside unmatched delimiters:
-  - `(...)`
-  - `{...}`
-  - `[...]`
-- Assignment-style operators require a right-hand side on the same line:
-  - `=`
-  - `:=`
-  - `+=`, `-=`, `*=`, `/=`, `%=`
-  - `<-`
+- Delimited forms allow layout after opening delimiters and after commas, but they do not make leading operators valid by themselves.
+- Binding/callable `=` may start its expression on the same line or the next indented line.
 - Callable bodies have two forms:
   - `def name(...) { ... }` for block bodies
   - `def name(...) = expr` for expression bodies
   - `def name(...) = { ... }` is invalid when `{ ... }` is a statement block; omit `=`
-- `=` may start its expression on the same line or the next indented line:
-  - `a =` followed by a newline is valid
-  - `def value() Int =` followed by a newline is valid for expression bodies
-  - inline-body introducers such as `else` and `yield` may take a same-line body without braces
-  - if that body moves to the next line, a `{ ... }` block is required
+- Inline-body introducers such as `else` and `yield` may take a same-line body without braces; if that body moves to the next line, a `{ ... }` block is required.
 - So this is valid:
 
 ```txt
@@ -1493,6 +1484,13 @@ a =
 ```txt
 a = 1 +
     2
+```
+
+- but this is invalid:
+
+```txt
+a = 1
+    + 2
 ```
 
 - and this also stays valid:
@@ -1509,6 +1507,15 @@ if flag {
 - For dot chaining, the rule is stricter than Scala:
   - allow newline after `.`
   - do not rely on newline before `.`
+
+```txt
+size = "hello".
+    size()
+
+# invalid
+size = "hello"
+    .size()
+```
 
 ## Visibility
 

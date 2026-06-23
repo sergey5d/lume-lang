@@ -799,10 +799,10 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_colon_expr(&mut self) -> Option<Expr> {
         let mut expr = self.parse_or_expr()?;
         loop {
-            self.skip_newlines();
             if !self.match_token(TokenKind::Colon) {
                 break;
             }
+            self.skip_newlines();
             let right = self.parse_or_expr()?;
             let span = expr.span().cover(right.span());
             expr = Expr::Binary {
@@ -846,8 +846,8 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_equality_expr(&mut self) -> Option<Expr> {
         let mut expr = self.parse_comparison_expr()?;
         loop {
-            self.skip_newlines();
             if self.match_token(TokenKind::EqEq) {
+                self.skip_newlines();
                 let right = self.parse_comparison_expr()?;
                 let span = expr.span().cover(right.span());
                 expr = Expr::Binary {
@@ -859,6 +859,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.match_token(TokenKind::NotEq) {
+                self.skip_newlines();
                 let right = self.parse_comparison_expr()?;
                 let span = expr.span().cover(right.span());
                 expr = Expr::Binary {
@@ -870,6 +871,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.match_keyword(Keyword::Is) {
+                self.skip_newlines();
                 let target = self.parse_type_ref()?;
                 let span = expr.span().cover(target.span());
                 expr = Expr::Is {
@@ -927,7 +929,6 @@ impl<'a> Parser<'a> {
     {
         let mut expr = parse_operand(self)?;
         loop {
-            self.skip_newlines();
             let mut matched = None;
             for (kind, op) in operators {
                 if self.match_token(*kind) {
@@ -938,6 +939,7 @@ impl<'a> Parser<'a> {
             let Some(op) = matched else {
                 break;
             };
+            self.skip_newlines();
             let right = parse_operand(self)?;
             let span = expr.span().cover(right.span());
             expr = Expr::Binary {
@@ -953,6 +955,7 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_unary_expr(&mut self) -> Option<Expr> {
         if self.match_keyword(Keyword::Try) {
             let start = self.previous_span();
+            self.skip_newlines();
             let value = self.parse_unary_expr()?;
             let span = start.cover(value.span());
             return Some(Expr::Try {
@@ -962,6 +965,7 @@ impl<'a> Parser<'a> {
         }
         if self.match_token(TokenKind::Bang) {
             let start = self.previous_span();
+            self.skip_newlines();
             let expr = self.parse_unary_expr()?;
             let span = start.cover(expr.span());
             return Some(Expr::Unary {
@@ -972,6 +976,7 @@ impl<'a> Parser<'a> {
         }
         if self.match_token(TokenKind::Minus) {
             let start = self.previous_span();
+            self.skip_newlines();
             let expr = self.parse_unary_expr()?;
             let span = start.cover(expr.span());
             return Some(Expr::Unary {
@@ -1134,7 +1139,6 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_primary_expr(&mut self) -> Option<Expr> {
-        self.skip_newlines();
         if self.can_start_type_ref() && self.is_anonymous_interface_expr_start() {
             return self.parse_anonymous_interface_expr();
         }
@@ -1326,12 +1330,14 @@ impl<'a> Parser<'a> {
         let mut items = Vec::new();
         if !self.at(TokenKind::RBracket) {
             items.push(self.parse_expr()?);
+            self.skip_newlines();
             while self.match_token(TokenKind::Comma) {
                 self.skip_newlines();
                 if self.at(TokenKind::RBracket) {
                     break;
                 }
                 items.push(self.parse_expr()?);
+                self.skip_newlines();
             }
         }
         let end = self.consume(TokenKind::RBracket, "expected ']' after list literal")?;

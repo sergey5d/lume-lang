@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*expected expression.*
+
+def main() Unit {
+    value Int = 1
+        + 2
+}
