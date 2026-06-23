@@ -9,7 +9,7 @@ pub(super) enum ForClauseTarget {
 }
 
 impl<'a> Parser<'a> {
-    fn match_case_body_is_omitted(&self) -> bool {
+    fn at_match_case_body_boundary(&self) -> bool {
         matches!(
             self.next_significant_token().kind,
             TokenKind::Keyword(Keyword::Case) | TokenKind::RBrace | TokenKind::Eof
@@ -880,18 +880,22 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_match_case_body(&mut self) -> Option<MatchCaseBody> {
-        if self.match_case_body_is_omitted() {
-            return Some(MatchCaseBody::Expr(self.unit_expr(self.previous_span())));
+        self.skip_newlines();
+        if self.at_match_case_body_boundary() {
+            self.error_at_current(
+                "expected_match_case_body",
+                "expected match case body; use '()' for Unit or '{}' for an empty block",
+            );
+            return None;
         }
 
-        self.skip_newlines();
         if self.at(TokenKind::LBrace) {
             return self.parse_block().map(MatchCaseBody::Block);
         }
 
         let checkpoint = self.checkpoint();
         if let Some(expr) = self.parse_expr() {
-            if self.match_case_body_is_omitted() {
+            if self.at_match_case_body_boundary() {
                 return Some(MatchCaseBody::Expr(expr));
             }
         }

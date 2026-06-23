@@ -2,10 +2,6 @@ use super::stmt::ForClauseTarget;
 use super::*;
 
 impl<'a> Parser<'a> {
-    pub(super) fn unit_expr(&self, span: Span) -> Expr {
-        Expr::Unit { span }
-    }
-
     fn wrap_if_without_else(&self, start: Span, condition: Expr, then_block: Block) -> Expr {
         let span = start.cover(then_block.span);
         Expr::Block {

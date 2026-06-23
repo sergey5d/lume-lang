@@ -1294,7 +1294,7 @@ def run(flag Bool) Unit = match flag {
 }
 
 #[test]
-fn parses_empty_match_case_body_as_unit_expr() {
+fn rejects_omitted_match_case_body() {
     let result = parse(
         r#"
 def run(flag Bool) Unit = match flag {
@@ -1303,19 +1303,14 @@ def run(flag Bool) Unit = match flag {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    let function = match &program.items[0] {
-        Item::Function(function) => function,
-        other => panic!("expected function, got {other:#?}"),
-    };
-    match &function.body {
-        CallableBody::Expr(Expr::Match { cases, .. }) => match &cases[0].body {
-            MatchCaseBody::Expr(Expr::Unit { .. }) => {}
-            other => panic!("expected implicit unit match arm, got {other:#?}"),
-        },
-        other => panic!("expected match expression body, got {other:#?}"),
-    }
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "expected_match_case_body"),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]

@@ -1298,6 +1298,19 @@ values.map(value -> partial value {
 
 Every `match` and `partial` branch must start with `case`.
 
+Every case must have an explicit body after `=>`: an expression, `()` for Unit, or a block such as `{}`.
+
+```txt
+match value {
+    case Skip => ()
+    case Empty => {}
+    case Log(message) => {
+        OS.println(message)
+    }
+    case Other(message) => OS.println(message)
+}
+```
+
 If no case matches, `partial` returns `None`.
 
 Supported pattern families:

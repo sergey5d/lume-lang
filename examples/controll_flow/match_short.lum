@@ -2,6 +2,12 @@
 # pair 5-9
 # 14
 # worker 7
+# after unit
+# after empty block
+# block body
+# after block
+# expression body 3
+# after expression
 # 0
 
 class PairBox {
@@ -20,6 +26,24 @@ impl Worker {
     def doWork() Int = 7
 }
 
+def printBodyShape(value Int) {
+    match value {
+        case 0 => ()
+        case 1 => {}
+        case 2 => {
+            OS.println("block body")
+        }
+        case _ => OS.println("expression body " + value)
+    }
+
+    match value {
+        case 0 => OS.println("after unit")
+        case 1 => OS.println("after empty block")
+        case 2 => OS.println("after block")
+        case _ => OS.println("after expression")
+    }
+}
+
 def main() Int {
     pair PairBox = PairBox { 5, 9 }
 
@@ -36,6 +60,11 @@ def main() Int {
     match workerLike {
         case worker Worker => OS.println("worker " + worker.doWork())
     }
+
+    printBodyShape(0)
+    printBodyShape(1)
+    printBodyShape(2)
+    printBodyShape(3)
 
     0
 }
