@@ -57,15 +57,10 @@ pub enum TokenKind {
     Comma,
     Dot,
     Colon,
-    ColonPlus,
-    ColonMinus,
-    ColonColon,
     At,
     Ellipsis,
     Plus,
-    PlusPlus,
     Minus,
-    MinusMinus,
     Star,
     Slash,
     Percent,
@@ -350,16 +345,16 @@ impl<'a> Lexer<'a> {
             ',' => Some(TokenKind::Comma),
             '.' if self.take('.') && self.take('.') => Some(TokenKind::Ellipsis),
             '.' => Some(TokenKind::Dot),
-            ':' if self.take('+') => Some(TokenKind::ColonPlus),
-            ':' if self.take('-') => Some(TokenKind::ColonMinus),
-            ':' if self.take(':') => Some(TokenKind::ColonColon),
+            ':' if self.take('+') => return self.unsupported_operator(start, ":+"),
+            ':' if self.take('-') => return self.unsupported_operator(start, ":-"),
+            ':' if self.take(':') => return self.unsupported_operator(start, "::"),
             ':' if self.take('=') => Some(TokenKind::ColonAssign),
             ':' => Some(TokenKind::Colon),
             '@' => Some(TokenKind::At),
-            '+' if self.take('+') => Some(TokenKind::PlusPlus),
+            '+' if self.take('+') => return self.unsupported_operator(start, "++"),
             '+' if self.take('=') => Some(TokenKind::PlusEq),
             '+' => Some(TokenKind::Plus),
-            '-' if self.take('-') => Some(TokenKind::MinusMinus),
+            '-' if self.take('-') => return self.unsupported_operator(start, "--"),
             '-' if self.take('>') => Some(TokenKind::Arrow),
             '-' if self.take('=') => Some(TokenKind::MinusEq),
             '-' => Some(TokenKind::Minus),
@@ -393,6 +388,15 @@ impl<'a> Lexer<'a> {
         self.error(
             "unexpected_character",
             format!("unexpected character '{}'", ch),
+            start,
+            self.mark(),
+        );
+    }
+
+    fn unsupported_operator(&mut self, start: Mark, operator: &'static str) {
+        self.error(
+            "unsupported_operator",
+            format!("operator '{operator}' is reserved and not currently supported"),
             start,
             self.mark(),
         );
@@ -527,6 +531,25 @@ mod tests {
         let result = lex(&source("value = \"oops\n"));
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(result.diagnostics[0].code, "unterminated_string");
+    }
+
+    #[test]
+    fn rejects_reserved_symbolic_collection_operators() {
+        let result = lex(&source("a :+ b\nc :- d\ne :: f\ng ++ h\ni -- j\n"));
+        let messages = result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code, diag.message.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(messages.len(), 5);
+        for operator in [":+", ":-", "::", "++", "--"] {
+            assert!(
+                messages.iter().any(|(code, message)| {
+                    *code == "unsupported_operator" && message.contains(operator)
+                }),
+                "{messages:#?}"
+            );
+        }
     }
 
     #[test]

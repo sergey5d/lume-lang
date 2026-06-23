@@ -36,6 +36,19 @@ fn parse_expr_only(src: &str) -> Expr {
     expr
 }
 
+fn assert_lexes_unsupported_operator(src: &str, operator: &str) {
+    let file = SourceFile::new("test.lum", src);
+    let lexed = lex(&file);
+    assert!(
+        lexed
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "unsupported_operator" && diag.message.contains(operator)),
+        "expected unsupported operator rejection for {operator}, got {:#?}",
+        lexed.diagnostics
+    );
+}
+
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
@@ -256,7 +269,7 @@ impl Counter {
 }
 
 #[test]
-fn rejects_removed_symbolic_operator_methods() {
+fn rejects_removed_symbolic_operator_methods_at_lexer() {
     for operator in ["++", "--", ":+", ":-", "::"] {
         let source = format!(
             r#"
@@ -267,20 +280,12 @@ impl Vec {{
 }}
 "#
         );
-        let result = parse(&source);
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diag| diag.code == "expected_identifier"),
-            "expected callable name rejection for {operator}, got {:#?}",
-            result.diagnostics
-        );
+        assert_lexes_unsupported_operator(&source, operator);
     }
 }
 
 #[test]
-fn rejects_removed_symbolic_infix_operators() {
+fn rejects_removed_symbolic_infix_operators_at_lexer() {
     for operator in ["++", "--", ":+", ":-", "::"] {
         let source = format!(
             r#"
@@ -291,11 +296,7 @@ def main() Unit {{
 }}
 "#
         );
-        let result = parse(&source);
-        assert!(
-            !result.diagnostics.is_empty(),
-            "expected infix operator rejection for {operator}"
-        );
+        assert_lexes_unsupported_operator(&source, operator);
     }
 }
 

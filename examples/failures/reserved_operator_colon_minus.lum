@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*operator ':-' is reserved and not currently supported.*
+
+def main() Unit {
+    value = items :- 3
+}
