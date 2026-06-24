@@ -551,21 +551,21 @@ class, or anonymous-record value, name the parameter normally and destructure it
 inside the body:
 
 ```txt
-pairs.mapWithIndex { (pair, index) ->
+pairs.mapWithIndex((pair, index) -> {
     let (x, y) = pair
     "$index: ${x + y}"
-}
+})
 
-source.combine { (name, pair) ->
+source.combine((name, pair) -> {
     let (x, y) = pair
     "$name: ${x + y}"
-}
+})
 
-source.combine { (left, right) ->
+source.combine((left, right) -> {
     let (a, b) = left
     let (x, y) = right
     a + b + x + y
-}
+})
 ```
 
 Rules:
@@ -583,16 +583,26 @@ Block lambda:
 }
 ```
 
-Trailing block-lambda call syntax is also allowed when passing a lambda as an argument:
+Trailing block-lambda call syntax is also allowed when passing a lambda as an argument. The lambda head must start on the same line as the opening `{`:
 
 ```txt
 items.map { x -> x + 1 }
 
-items.forEach {
-    x ->
-        next = x + 1
-        println(next)
+items.repeat { () -> 5 }
+
+items.zipMap { (left, right) -> left + right }
+
+items.forEach { x ->
+    next = x + 1
+    println(next)
 }
+
+items.map { (x Int) ->
+    x + 1
+}
+
+items.zipMap { (left,
+    right) -> left + right }
 ```
 
 Trailing brace call syntax is only for lambda arguments. Ordinary arguments,

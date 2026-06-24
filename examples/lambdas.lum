@@ -59,9 +59,7 @@ def main() Int {
     doubledV4 = seen.map(item ->
         item * 2
     )
-    doubledV5 = seen.map {
-        item -> item * 2
-    }
+    doubledV5 = seen.map { item -> item * 2 }
 
     println("map 1 " + doubled.contains(4) + " " + doubled.size())
     println("map 2 " + doubledV2.contains(4) + " " + doubledV2.size())

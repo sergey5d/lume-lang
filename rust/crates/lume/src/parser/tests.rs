@@ -1457,9 +1457,7 @@ def main() Unit {
 fn parses_trailing_block_lambda_call_syntax() {
     let result = parse(
         r#"
-def make() Unit = values.map {
-    value -> value + 5
-}
+def make() Unit = values.map { value -> value + 5 }
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -1498,10 +1496,9 @@ def make() Unit = values.map {
 fn parses_trailing_block_lambda_with_multiline_body() {
     let result = parse(
         r#"
-def make() Unit = values.forEach {
-    value ->
-        plusOne = value + 1
-        println(plusOne)
+def make() Unit = values.forEach { value ->
+    plusOne = value + 1
+    println(plusOne)
 }
 "#,
     );
@@ -1543,6 +1540,62 @@ def make() Unit = values.forEach {
         }
         other => panic!("expected trailing block call expression, got {other:#?}"),
     }
+}
+
+#[test]
+fn parses_trailing_block_lambda_with_typed_single_param() {
+    let result = parse(
+        r#"
+def make() Unit = values.map { (value Int) -> value + 5 }
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn rejects_trailing_block_lambda_head_on_next_line() {
+    let result = parse(
+        r#"
+def make() Unit = values.map {
+    value -> value + 5
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_trailing_lambda" && diag.message.contains("same line as '{'")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn parses_trailing_block_lambda_with_zero_or_multiple_params() {
+    let zero = parse(
+        r#"
+def make() Unit = values.map { () -> 5 }
+"#,
+    );
+    assert!(zero.diagnostics.is_empty(), "{:#?}", zero.diagnostics);
+
+    let multi = parse(
+        r#"
+def make() Unit = values.map { (left, right) -> left + right }
+"#,
+    );
+    assert!(multi.diagnostics.is_empty(), "{:#?}", multi.diagnostics);
+}
+
+#[test]
+fn parses_trailing_block_lambda_when_parameter_list_starts_on_opening_line() {
+    let result = parse(
+        r#"
+def make() Unit = values.map { (left,
+    right) -> left + right }
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]

@@ -160,6 +160,7 @@ impl<'a> Parser<'a> {
             };
             params.push(param);
             while self.match_token(TokenKind::Comma) {
+                self.skip_newlines();
                 let Some(param) = self.parse_lambda_param(params.len()) else {
                     self.restore(checkpoint);
                     return None;
@@ -1060,18 +1061,16 @@ impl<'a> Parser<'a> {
             }
             if self.allow_trailing_block_call && self.at(TokenKind::LBrace) {
                 let start = expr.span();
+                let open_span = self.current_span();
                 let checkpoint = self.checkpoint();
                 let mut lambda_probe = self.checkpoint();
                 lambda_probe.index += 1;
-                while self
+                let lambda_head_can_start = self
                     .tokens
                     .get(lambda_probe.index)
-                    .is_some_and(|token| token.kind == TokenKind::Newline)
-                {
-                    lambda_probe.index += 1;
-                }
+                    .is_some_and(|token| token.span.start_pos.line == open_span.start_pos.line);
                 self.restore(lambda_probe);
-                let prefers_block = self.try_parse_lambda_expr().is_some();
+                let prefers_block = lambda_head_can_start && self.try_parse_lambda_expr().is_some();
                 self.restore(checkpoint);
                 let arg = if !prefers_block
                     && (self.looks_like_brace_record_literal(true)
@@ -1080,6 +1079,7 @@ impl<'a> Parser<'a> {
                     self.parse_brace_record_literal_expr()?
                 } else {
                     let block = self.parse_block()?;
+                    self.validate_trailing_lambda_block(&block, open_span);
                     Expr::Block {
                         span: block.span,
                         body: block,
@@ -1101,6 +1101,26 @@ impl<'a> Parser<'a> {
             break;
         }
         Some(expr)
+    }
+
+    fn validate_trailing_lambda_block(&mut self, block: &Block, open_span: Span) {
+        let [
+            Stmt::Expr(ExprStmt {
+                expr: Expr::Lambda { span, .. },
+                ..
+            }),
+        ] = block.statements.as_slice()
+        else {
+            return;
+        };
+
+        if span.start_pos.line != open_span.start_pos.line {
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_trailing_lambda",
+                "trailing lambda parameters must start on the same line as '{'",
+                *span,
+            ));
+        }
     }
 
     pub(super) fn parse_call_args(&mut self) -> Option<Vec<CallArg>> {

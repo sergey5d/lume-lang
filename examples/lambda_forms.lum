@@ -71,9 +71,7 @@ def main() Unit {
     println("block " + block(10))
 
     values = List(1, 2, 3)
-    doubled = values.map {
-        item -> item * 2
-    }
+    doubled = values.map { item -> item * 2 }
     println("trailing " + doubled.get(1).getOr(0))
 
     runner = LambdaRunner {}
@@ -99,11 +97,9 @@ def main() Unit {
     println("tupleMap " + tupleSums.get(0).getOr(0))
 
     users = List(User { name: "Ada", age: 37 })
-    userLabels = users.map {
-        userValue -> {
-            let { name, age } = userValue
-            "$name is $age"
-        }
+    userLabels = users.map { userValue ->
+        let { name, age } = userValue
+        "$name is $age"
     }
     println("userMap " + userLabels.get(0).getOr(""))
 

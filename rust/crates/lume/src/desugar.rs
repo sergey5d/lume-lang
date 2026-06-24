@@ -517,9 +517,7 @@ mod tests {
     fn desugars_trailing_block_lambda_arg_to_plain_lambda() {
         let function = parse_function(
             r#"
-def make() Unit = values.map {
-    value -> value + 5
-}
+def make() Unit = values.map { value -> value + 5 }
 "#,
         );
         let core = desugar_function_decl(&function);

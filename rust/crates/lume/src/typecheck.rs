@@ -6220,9 +6220,7 @@ def main() Option[Order] {
             r#"
 def main() Unit {
     items = List(1, 2, 3)
-    mapped = items.map {
-        item -> item + 1
-    }
+    mapped = items.map { item -> item + 1 }
     OS.println(mapped.size())
 }
 "#,

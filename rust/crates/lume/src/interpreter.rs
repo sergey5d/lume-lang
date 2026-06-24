@@ -4941,14 +4941,10 @@ $name
             r#"
             def main() Unit {
                 empty [Int] = []
-                mappedEmpty = empty.map {
-                    value -> value + 5
-                }
+                mappedEmpty = empty.map { value -> value + 5 }
 
                 values [Int] = [1, 2]
-                mapped = values.map {
-                    value -> value + 5
-                }
+                mapped = values.map { value -> value + 5 }
 
                 OS.println(mappedEmpty.size())
                 OS.println(mapped.get(0).getOr(0))
@@ -5555,10 +5551,9 @@ $name
             r#"
             def main() Unit {
                 items = [1, 2, 3]
-                items.forEach {
-                    item ->
-                        plusOne = item + 1
-                        OS.println(plusOne)
+                items.forEach { item ->
+                    plusOne = item + 1
+                    OS.println(plusOne)
                 }
             }
             "#,
