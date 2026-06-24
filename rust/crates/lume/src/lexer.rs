@@ -73,6 +73,7 @@ pub enum TokenKind {
     Arrow,
     FatArrow,
     LeftArrow,
+    ColonLess,
     ColonAssign,
     EqEq,
     NotEq,
@@ -348,6 +349,7 @@ impl<'a> Lexer<'a> {
             ':' if self.take('+') => return self.unsupported_operator(start, ":+"),
             ':' if self.take('-') => return self.unsupported_operator(start, ":-"),
             ':' if self.take(':') => return self.unsupported_operator(start, "::"),
+            ':' if self.take('<') => Some(TokenKind::ColonLess),
             ':' if self.take('=') => Some(TokenKind::ColonAssign),
             ':' => Some(TokenKind::Colon),
             '@' => Some(TokenKind::At),
@@ -555,12 +557,13 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "use model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nspread Str... = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "use model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nspread Str... = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::As)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
+        assert!(kinds.contains(&TokenKind::ColonLess));
         assert!(kinds.contains(&TokenKind::Ellipsis));
         assert!(kinds.contains(&TokenKind::Float));
         assert!(

@@ -1372,6 +1372,106 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn check_record_update(
+        &mut self,
+        base: &Ty,
+        updates: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) {
+        match base {
+            Ty::Named(name, args) => {
+                let Some(sig) = self.lookup_any_type(name) else {
+                    for update in updates {
+                        self.check_expr(&update.value);
+                    }
+                    return;
+                };
+                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
+                    self.add_error(
+                        "invalid_record_update",
+                        "update requires a class, record, or anonymous record value",
+                        span,
+                    );
+                    for update in updates {
+                        self.check_expr(&update.value);
+                    }
+                    return;
+                }
+                if sig.kind == TypeKind::Class && sig.fields.iter().any(|field| field.hidden) {
+                    self.add_error(
+                        "invalid_record_update",
+                        "class update requires a class without private fields",
+                        span,
+                    );
+                }
+                let subst = sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                let fields = sig
+                    .fields
+                    .iter()
+                    .filter(|field| !field.hidden)
+                    .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
+                    .collect::<Vec<_>>();
+                self.check_record_update_fields(&fields, updates);
+            }
+            Ty::Record(fields) => self.check_record_update_fields(fields, updates),
+            Ty::Unknown => {
+                for update in updates {
+                    self.check_expr(&update.value);
+                }
+            }
+            _ => {
+                self.add_error(
+                    "invalid_record_update",
+                    "update requires a class, record, or anonymous record value",
+                    span,
+                );
+                for update in updates {
+                    self.check_expr(&update.value);
+                }
+            }
+        }
+    }
+
+    fn check_record_update_fields(
+        &mut self,
+        fields: &[(String, Ty)],
+        updates: &[crate::ast::CallArg],
+    ) {
+        for update in updates {
+            let Some(name) = update.name.as_deref() else {
+                self.check_expr(&update.value);
+                continue;
+            };
+            let Some((_, expected)) = fields.iter().find(|(field, _)| field == name) else {
+                self.add_error(
+                    "invalid_record_update",
+                    format!("update field '{}' does not exist on left-hand shape", name),
+                    update.span,
+                );
+                self.check_expr(&update.value);
+                continue;
+            };
+            let actual = self.check_expr_against(&update.value, expected);
+            self.require_assignable(
+                &actual,
+                expected,
+                update.span,
+                "invalid_record_update",
+                format!(
+                    "update field '{}' expects '{}', got '{}'",
+                    name,
+                    expected.describe(),
+                    actual.describe()
+                ),
+            );
+        }
+    }
+
     fn check_block(&mut self, block: &Block) -> Ty {
         self.check_block_against(block, &Ty::Unknown)
     }
@@ -2589,32 +2689,7 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let base = self.check_expr(receiver);
-                match &base {
-                    Ty::Named(name, _) => {
-                        if let Some(sig) = self.lookup_any_type(name) {
-                            if sig.kind == TypeKind::Class
-                                && sig.fields.iter().any(|field| field.hidden)
-                            {
-                                self.add_error(
-                                    "invalid_record_update",
-                                    "class update requires a class without private fields",
-                                    *span,
-                                );
-                            }
-                        }
-                    }
-                    Ty::Unknown => {}
-                    _ => {
-                        self.add_error(
-                            "invalid_record_update",
-                            "update requires a class or anonymous record value",
-                            *span,
-                        );
-                    }
-                }
-                for update in updates {
-                    self.check_expr(&update.value);
-                }
+                self.check_record_update(&base, updates, *span);
                 base
             }
             Expr::RecordLiteral { fields, values, .. } => {

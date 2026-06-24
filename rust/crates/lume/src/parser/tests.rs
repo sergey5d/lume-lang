@@ -549,7 +549,7 @@ fn rejects_equals_in_named_record_literal_fields() {
 
 #[test]
 fn parses_colon_record_update_fields() {
-    match parse_expr_only("value with { amount: 42, label: value.label }") {
+    match parse_expr_only("value :< { amount: 42, label: value.label }") {
         Expr::RecordUpdate { updates, .. } => {
             assert_eq!(updates.len(), 2);
             assert_eq!(updates[0].name.as_deref(), Some("amount"));
@@ -561,7 +561,7 @@ fn parses_colon_record_update_fields() {
 
 #[test]
 fn rejects_equals_in_record_update_fields() {
-    let result = parse(r#"def run(value Amount) Unit = value with { amount = 42 }"#);
+    let result = parse(r#"def run(value Amount) Unit = value :< { amount = 42 }"#);
     assert!(
         result.diagnostics.iter().any(|diag| {
             diag.code == "unexpected_token"

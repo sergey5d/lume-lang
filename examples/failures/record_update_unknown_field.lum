@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*update field 'missing' does not exist on left-hand shape.*
+
+class Amount {
+    amount Int
+}
+
+def main() Unit {
+    value = Amount { 10 }
+    updated = value :< { missing: 42 }
+}

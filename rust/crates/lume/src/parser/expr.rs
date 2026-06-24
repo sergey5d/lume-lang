@@ -712,7 +712,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_record_update_args(&mut self) -> Option<(Vec<CallArg>, Span)> {
-        let start = self.consume(TokenKind::LBrace, "expected '{' after 'with'")?;
+        let start = self.consume(TokenKind::LBrace, "expected '{' after ':<'")?;
         self.skip_newlines();
         let mut updates = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
@@ -1038,7 +1038,7 @@ impl<'a> Parser<'a> {
                 };
                 continue;
             }
-            if self.match_keyword(Keyword::With) {
+            if self.match_token(TokenKind::ColonLess) {
                 let start = expr.span();
                 let (updates, end) = self.parse_record_update_args()?;
                 expr = Expr::RecordUpdate {

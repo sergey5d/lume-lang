@@ -309,7 +309,7 @@ values[1] := values[0] + 4
 Record update:
 
 ```txt
-updated = value with {
+updated = value :< {
     age: 42
     name: "Bob"
 }
@@ -1463,7 +1463,8 @@ Other operators / constructs:
 - `<-` for `for` iteration and success-case extraction in `if let`, `let ... else`, and `expect`
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases
-- `with` for interface implementation, generic bounds, and record update
+- `with` for interface implementation and generic bounds
+- `:<` for class, record, and anonymous-record update
 
 Examples:
 

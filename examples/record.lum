@@ -50,9 +50,9 @@ a2 = a1.multiple(a1)
 amountAmount = a1.amount
 amountDescr = a1.description
 
-a3 = a2 with { amount: 101, description: a2.description + " updated" }
+a3 = a2 :< { amount: 101, description: a2.description + " updated" }
 
-a4 = a3 with { amount: 102 } with { count: 7 }
+a4 = a3 :< { amount: 102 } :< { count: 7 }
 
 def main() Unit {
     println(amountAmount)

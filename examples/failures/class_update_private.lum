@@ -8,5 +8,5 @@ class SecretAmount {
 
 def main() Unit {
     value = SecretAmount { 10 }
-    updated = value with { amount: 42 }
+    updated = value :< { amount: 42 }
 }
