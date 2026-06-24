@@ -25,6 +25,6 @@ def useBox(value Box[Int]) Int = value.value
 
 def main() Int {
     mapper Mapper = Mapper {}
-    OS.println(pick(3) + mapper.pick(4))
+    println(pick(3) + mapper.pick(4))
     0
 }

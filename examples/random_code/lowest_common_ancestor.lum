@@ -85,8 +85,8 @@ def main() Unit {
     let Some(ancestor) = result.ancestor else OS.panic("missing ancestor")
     let Some(foundP) = result.foundP else OS.panic("missing foundP")
     let Some(foundQ) = result.foundQ else OS.panic("missing foundQ")
-    OS.println("lca ${ancestor.val}")
-    OS.println("found p ${foundP.val}")
-    OS.println("found q ${foundQ.val}")
-    OS.println("missing ${missing.isEmpty()}")
+    println("lca ${ancestor.val}")
+    println("found p ${foundP.val}")
+    println("found q ${foundQ.val}")
+    println("missing ${missing.isEmpty()}")
 }

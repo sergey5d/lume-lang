@@ -12,6 +12,6 @@ impl Adder {
 
 def main() Int {
     adder Adder = Adder { 5 }
-    OS.println(adder.add(7))
+    println(adder.add(7))
     0
 }

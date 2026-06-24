@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*let destructuring lambda parameters are only allowed as the single lambda parameter.*
+
+def main() Unit {
+    mapper = (let (x, y), index) -> x + y + index
+}

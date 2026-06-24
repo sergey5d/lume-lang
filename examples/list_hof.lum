@@ -22,14 +22,14 @@ def main() Int {
     hasBig Bool = items.exists((item Int) -> item > 2)
     allPositive Bool = items.forAll((item Int) -> item > 0)
 
-    doubled.forEach((item Int) -> OS.println("item " + item))
+    doubled.forEach((item Int) -> println("item " + item))
 
-    OS.println("doubled " + doubled.get(0).getOr(0) + " " + doubled.get(2).getOr(0))
-    OS.println("expanded " + expanded.get(0).getOr(0) + " " + expanded.get(5).getOr(0))
-    OS.println("filtered " + filtered.get(0).getOr(0) + " " + filtered.get(1).getOr(0))
-    OS.println("fold " + total)
-    OS.println("reduce " + reduced.getOr(0))
-    OS.println("exists " + hasBig)
-    OS.println("forAll " + allPositive)
+    println("doubled " + doubled.get(0).getOr(0) + " " + doubled.get(2).getOr(0))
+    println("expanded " + expanded.get(0).getOr(0) + " " + expanded.get(5).getOr(0))
+    println("filtered " + filtered.get(0).getOr(0) + " " + filtered.get(1).getOr(0))
+    println("fold " + total)
+    println("reduce " + reduced.getOr(0))
+    println("exists " + hasBig)
+    println("forAll " + allPositive)
     0
 }

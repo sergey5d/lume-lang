@@ -3,7 +3,7 @@
 
 def main() Int {
     if false {
-        OS.println("no")
-    } else if true OS.println("haha")
+        println("no")
+    } else if true println("haha")
     0
 }

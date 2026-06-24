@@ -26,7 +26,7 @@ def main() Unit {
     let Some(second) = extracted.get(1) else return ()
     let Some(third) = extracted.get(2) else return ()
 
-    OS.println("first " + first.getOr(0))
-    OS.println("second " + second.isEmpty())
-    OS.println("third " + third.getOr(0))
+    println("first " + first.getOr(0))
+    println("second " + second.isEmpty())
+    println("third " + third.getOr(0))
 }

@@ -61,14 +61,14 @@ impl Slots {
 
 def main() Unit {
     profile = Profile("Ada", 2)
-    OS.println("profile", profile.name, profile.visitCount(), profile.isActive())
+    println("profile", profile.name, profile.visitCount(), profile.isActive())
 
     profile.bump()
-    OS.println("profile bumped", profile.visitCount())
+    println("profile bumped", profile.visitCount())
 
     stock = Stock(7)
-    OS.println("stock", stock.value())
+    println("stock", stock.value())
 
     slots = Slots(10, 20)
-    OS.println("slots", slots.left(), slots.right())
+    println("slots", slots.left(), slots.right())
 }

@@ -5,12 +5,12 @@
 
 def basic() Unit {
     OS.print("start ")
-    defer OS.println("done")
+    defer println("done")
     OS.print("middle ")
 }
 
 def lifo() Unit {
-    defer OS.println("outer")
+    defer println("outer")
     defer OS.print("inner ")
     OS.print("body ")
 }

@@ -8,6 +8,6 @@ def main() Int {
         case 5 => "exact value"
         case _ => "miss"
     }
-    OS.println(exactValue)
+    println(exactValue)
     0
 }

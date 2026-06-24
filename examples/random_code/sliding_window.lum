@@ -83,6 +83,6 @@ def main() Unit {
     for request <- requests {
         allowed = bucket.allow(request.time, request.cost)
         # Show whether the request passed and how much window usage remains live.
-        OS.println("time", request.time, "cost", request.cost, "allowed", allowed, "usage", bucket.currentUsage())
+        println("time", request.time, "cost", request.cost, "allowed", allowed, "usage", bucket.currentUsage())
     }
 }

@@ -25,10 +25,10 @@ def groupedIf(value Option[Int]) Int {
 }
 
 def main() Unit {
-    OS.println("grouped let ${groupedLet(Some(2))}")
-    OS.println("grouped let fail ${groupedLet(None)}")
-    OS.println("grouped if ${groupedIf(Some(4))}")
+    println("grouped let ${groupedLet(Some(2))}")
+    println("grouped let fail ${groupedLet(None)}")
+    println("grouped if ${groupedIf(Some(4))}")
     if let Some(a) = Some(3) && let Ok(b) = Ok(5) && b == 5 {
-        OS.println("chained if let ${a + b}")
+        println("chained if let ${a + b}")
     }
 }

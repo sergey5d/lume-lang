@@ -2,5 +2,5 @@
 # .*block callable bodies omit '='.*
 
 def main() Unit = {
-    OS.println("old block form")
+    println("old block form")
 }

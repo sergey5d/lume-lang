@@ -19,7 +19,7 @@ def main() Unit {
         1 + 7
     }
     {
-        OS.println("xxx")
+        println("xxx")
     }
     var v = {
         a = 5
@@ -52,10 +52,10 @@ def main() Unit {
         }
     }
 
-    OS.println(a1)
-    OS.println(v)
-    OS.println(branch)
-    OS.println(yielded.get(0).getOr(0))
-    OS.println(yielded.get(1).getOr(0))
-    OS.println(matched)
+    println(a1)
+    println(v)
+    println(branch)
+    println(yielded.get(0).getOr(0))
+    println(yielded.get(1).getOr(0))
+    println(matched)
 }

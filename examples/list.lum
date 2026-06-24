@@ -39,8 +39,8 @@ def main() Unit {
     hasBig = items.exists(item -> item > 3)
     allPositive = items.forAll(item -> item > 0)
 
-    items.forEach(item -> OS.println("each " + item))
-    OS.println("index " + items[0] + " " + items[3])
+    items.forEach(item -> println("each " + item))
+    println("index " + items[0] + " " + items[3])
 
     sorted = [3, 1, 4, 2]
     sorted.sort(Descending)
@@ -57,19 +57,19 @@ def main() Unit {
     let (zipValue, zipLabel) = zippedPair
     let (indexedValue, indexedPos) = indexedPair
 
-    OS.println("mapped " + mapped.get(0).getOr(0) + " " + mapped.get(3).getOr(0))
-    OS.println("expanded " + expanded.get(0).getOr(0) + " " + expanded.get(7).getOr(0))
-    OS.println("filtered " + filtered.get(0).getOr(0) + " " + filtered.get(1).getOr(0))
-    OS.println("fold " + total)
-    OS.println("reduce " + reduced.getOr(0))
-    OS.println("exists " + hasBig)
-    OS.println("forAll " + allPositive)
-    OS.println("sorted " + sorted.get(0).getOr(0) + " " + sorted.get(3).getOr(0))
-    OS.println("zip " + zipValue + " " + zipLabel)
-    OS.println("zipIndex " + indexedValue + " " + indexedPos)
-    OS.println("get " + items.get(1).getOr(0))
-    OS.println("head " + head)
-    OS.println("tail " + tailItems.get(0).getOr(0) + " " + tailItems.get(2).getOr(0))
-    OS.println("remove " + removed + " " + items.size())
-    OS.println("size " + items.size())
+    println("mapped " + mapped.get(0).getOr(0) + " " + mapped.get(3).getOr(0))
+    println("expanded " + expanded.get(0).getOr(0) + " " + expanded.get(7).getOr(0))
+    println("filtered " + filtered.get(0).getOr(0) + " " + filtered.get(1).getOr(0))
+    println("fold " + total)
+    println("reduce " + reduced.getOr(0))
+    println("exists " + hasBig)
+    println("forAll " + allPositive)
+    println("sorted " + sorted.get(0).getOr(0) + " " + sorted.get(3).getOr(0))
+    println("zip " + zipValue + " " + zipLabel)
+    println("zipIndex " + indexedValue + " " + indexedPos)
+    println("get " + items.get(1).getOr(0))
+    println("head " + head)
+    println("tail " + tailItems.get(0).getOr(0) + " " + tailItems.get(2).getOr(0))
+    println("remove " + removed + " " + items.size())
+    println("size " + items.size())
 }

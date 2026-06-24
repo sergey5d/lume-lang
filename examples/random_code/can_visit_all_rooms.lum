@@ -49,7 +49,7 @@ def main() Int {
         List(0)
     )
 
-    OS.println(canVisitAllRooms(reachable))
-    OS.println(canVisitAllRooms(blocked))
+    println(canVisitAllRooms(reachable))
+    println(canVisitAllRooms(blocked))
     0
 }

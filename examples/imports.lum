@@ -8,6 +8,6 @@ use model/user
 
 def main() Unit {
     person = user.Person { name: "Ada", age: 36 }
-    OS.println(util.greet(person.name()))
-    OS.println(person.age())
+    println(util.greet(person.name()))
+    println(person.age())
 }

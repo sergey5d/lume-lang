@@ -37,6 +37,6 @@ def main() Unit {
 
     extracted List[Int] = pages.flatMap(page -> expandPage(page))
 
-    OS.println("count " + extracted.size())
-    extracted.forEach(item -> OS.println("item " + item))
+    println("count " + extracted.size())
+    extracted.forEach(item -> println("item " + item))
 }

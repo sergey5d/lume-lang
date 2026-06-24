@@ -35,7 +35,7 @@ impl Amount {
     }
 
     def reportAmount() {
-        OS.println("amount:", this.amount)
+        println("amount:", this.amount)
     }
 
     def hop() Str = "Hop-hop"
@@ -55,15 +55,15 @@ a3 = a2 with { amount: 101, description: a2.description + " updated" }
 a4 = a3 with { amount: 102 } with { count: 7 }
 
 def main() Unit {
-    OS.println(amountAmount)
-    OS.println(amountDescr)
-    OS.println(a1.count)
-    OS.println(a2.amount, a2.description)
-    OS.println(a2.count)
-    OS.println(a3.amount, a3.description)
-    OS.println(a3.count)
-    OS.println(a4.amount, a4.description)
-    OS.println(a4.count)
-    OS.println(a1.hop())
-    OS.println(a1.jump(3))
+    println(amountAmount)
+    println(amountDescr)
+    println(a1.count)
+    println(a2.amount, a2.description)
+    println(a2.count)
+    println(a3.amount, a3.description)
+    println(a3.count)
+    println(a4.amount, a4.description)
+    println(a4.count)
+    println(a1.hop())
+    println(a1.jump(3))
 }

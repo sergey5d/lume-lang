@@ -87,20 +87,20 @@ def main() Unit {
     aFromAlt A = A(maturity = 21)
     bManual B = B(5, "Bobby")
 
-    OS.println("brace named", named.name, named.age, named.city)
-    OS.println("brace positional", positional.name, positional.age, positional.city)
-    OS.println(
+    println("brace named", named.name, named.age, named.city)
+    println("brace positional", positional.name, positional.age, positional.city)
+    println(
         "brace hidden",
         hiddenDefault.name,
         hiddenDefault.age,
         hiddenDefault.scoreValue()
     )
-    OS.println(
+    println(
         "brace hidden-third",
         hiddenThird.name,
         hiddenThird.level,
         hiddenThird.bonusValue()
     )
-    OS.println("ctor alt", aFromAlt.trueAge(), aFromAlt.trueName())
-    OS.println("ctor manual", bManual.trueAge(), bManual.trueName())
+    println("ctor alt", aFromAlt.trueAge(), aFromAlt.trueName())
+    println("ctor manual", bManual.trueAge(), bManual.trueName())
 }

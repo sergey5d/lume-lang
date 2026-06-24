@@ -3,6 +3,6 @@
 
 def main() Int {
     if true
-        OS.println("haha")
+        println("haha")
     0
 }

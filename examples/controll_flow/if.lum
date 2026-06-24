@@ -7,17 +7,17 @@
 
 def main() Int {
     if true {
-        OS.println("then")
+        println("then")
     } else {
-        OS.println("else")
+        println("else")
     }
 
     if false {
-        OS.println("nope")
+        println("nope")
     } else if true {
-        OS.println("else-if")
+        println("else-if")
     } else {
-        OS.println("also nope")
+        println("also nope")
     }
 
     picked = if false {
@@ -25,13 +25,13 @@ def main() Int {
     } else {
         5
     }
-    OS.println("picked " + picked)
+    println("picked " + picked)
 
     values = [7]
     if let Some(value) = values.get(0) {
-        OS.println("binding " + value)
+        println("binding " + value)
     } else {
-        OS.println("binding none")
+        println("binding none")
     }
 
     0

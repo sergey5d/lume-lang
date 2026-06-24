@@ -4,7 +4,7 @@
 def main() Int {
     item = 1
     for item <- [1, 2, 3] {
-        OS.println(item)
+        println(item)
     }
     item
 }

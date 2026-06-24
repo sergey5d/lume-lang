@@ -29,8 +29,8 @@ def main() Unit {
     left Outcome = Outcome.Left("bad")
     right Outcome = Outcome.Right(7)
 
-    OS.println(left.describe())
-    OS.println(right.describe())
-    OS.println(left.tag)
-    OS.println(right.tag)
+    println(left.describe())
+    println(right.describe())
+    println(left.tag)
+    println(right.tag)
 }

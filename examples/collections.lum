@@ -9,12 +9,12 @@ def main() Int {
 		item + 1
 	}
 	let Some(first) = items.get(0) else return 0
-	OS.println("found " + first)
+	println("found " + first)
 
 	var total Int = 0
 	for item <- items {
 		total += item
 	}
-	OS.println("sum " + total)
+	println("sum " + total)
 	0
 }

@@ -202,6 +202,11 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_lambda_param(&mut self, index: usize) -> Option<LambdaParam> {
         if self.match_keyword(Keyword::Let) {
             let start = self.previous_span();
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_lambda_params",
+                "let destructuring lambda parameters are only allowed as the single lambda parameter; write 'let (...) -> ...' or destructure inside the lambda body",
+                start,
+            ));
             return self.parse_lambda_destructure_param(start, index);
         }
         let (name, start) = self.expect_identifier("expected lambda parameter")?;

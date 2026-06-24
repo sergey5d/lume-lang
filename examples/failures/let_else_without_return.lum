@@ -11,5 +11,5 @@ enum MaybeInt {
 def main() Unit {
     value MaybeInt = MaybeInt.NoneX
     let SomeX(item) = value else ()
-    OS.println(item)
+    println(item)
 }

@@ -8,6 +8,6 @@ use model/pubdemo
 use model/pubdemo/{prefix}
 
 def main() Unit {
-    OS.println(pubdemo.greet("Ada"))
-    OS.println(prefix + "!")
+    println(pubdemo.greet("Ada"))
+    println(prefix + "!")
 }

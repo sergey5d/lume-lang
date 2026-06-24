@@ -1397,23 +1397,44 @@ fn parses_destructured_lambda_parameter_forms() {
         }
         other => panic!("expected record-destructuring lambda, got {other:#?}"),
     }
+}
 
-    let mixed = parse_expr_only("(name, let (x, y), let { age }) -> x + y");
-    match mixed {
-        Expr::Lambda { params, .. } => {
-            assert_eq!(params.len(), 3);
-            assert!(params[0].destructure.is_none());
-            assert_eq!(
-                params[1].destructure.as_ref().expect("tuple").kind,
-                DestructureKind::Tuple
-            );
-            assert_eq!(
-                params[2].destructure.as_ref().expect("record").kind,
-                DestructureKind::Record
-            );
-        }
-        other => panic!("expected mixed lambda params, got {other:#?}"),
-    }
+#[test]
+fn rejects_parenthesized_let_destructuring_lambda_param() {
+    let result = parse(
+        r#"
+def main() Unit {
+    mapper = (let (x, y)) -> x + y
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "invalid_lambda_params"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_let_destructuring_inside_multi_parameter_lambdas() {
+    let result = parse(
+        r#"
+def main() Unit {
+    mapper = (let (x, y), index) -> x + y + index
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "invalid_lambda_params"),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]

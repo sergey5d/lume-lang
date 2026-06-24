@@ -62,51 +62,61 @@ def main() Unit {
         next
     }
 
-    OS.println("zero " + zero())
-    OS.println("bare " + bare(10))
-    OS.println("paren " + paren(10))
-    OS.println("pair " + pair(6, 7))
-    OS.println("typed " + typed(10))
-    OS.println("typedPair " + typedPair(4, 6))
-    OS.println("block " + block(10))
+    println("zero " + zero())
+    println("bare " + bare(10))
+    println("paren " + paren(10))
+    println("pair " + pair(6, 7))
+    println("typed " + typed(10))
+    println("typedPair " + typedPair(4, 6))
+    println("block " + block(10))
 
     values = List(1, 2, 3)
     doubled = values.map {
         item -> item * 2
     }
-    OS.println("trailing " + doubled.get(1).getOr(0))
+    println("trailing " + doubled.get(1).getOr(0))
 
     runner = LambdaRunner {}
-    OS.println("inlineZero " + runner.zero(() -> 20))
-    OS.println("inlineBare " + runner.one(x -> x + 1, 20))
-    OS.println("inlineParen " + runner.one((x) -> x + 2, 20))
-    OS.println("inlinePair " + runner.two((x, y) -> x + y, 11, 12))
-    OS.println("inlineTyped " + runner.one((x Int) -> x + 4, 20))
-    OS.println("inlineTypedPair " + runner.two((x Int, y Int) -> x + y, 12, 13))
+    println("inlineZero " + runner.zero(() -> 20))
+    println("inlineBare " + runner.one(x -> x + 1, 20))
+    println("inlineParen " + runner.one((x) -> x + 2, 20))
+    println("inlinePair " + runner.two((x, y) -> x + y, 11, 12))
+    println("inlineTyped " + runner.one((x Int) -> x + 4, 20))
+    println("inlineTypedPair " + runner.two((x Int, y Int) -> x + y, 12, 13))
 
     inlineMapBare = values.map(x -> x + 10)
     inlineMapParen = values.map((x) -> x + 20)
     inlineMapTyped = values.map((x Int) -> x + 30)
-    OS.println("inlineMapBare " + inlineMapBare.get(0).getOr(0))
-    OS.println("inlineMapParen " + inlineMapParen.get(1).getOr(0))
-    OS.println("inlineMapTyped " + inlineMapTyped.get(2).getOr(0))
+    println("inlineMapBare " + inlineMapBare.get(0).getOr(0))
+    println("inlineMapParen " + inlineMapParen.get(1).getOr(0))
+    println("inlineMapTyped " + inlineMapTyped.get(2).getOr(0))
 
     pairs = List((2, 3), (4, 5))
-    tupleSums = pairs.map {
-        let (x Int, y Int) -> x + y
+    tupleSums = pairs.map { let (x Int, y Int) ->
+        x + y
     }
-    OS.println("tupleMap " + tupleSums.get(0).getOr(0))
+    println("tupleMap " + tupleSums.get(0).getOr(0))
 
     users = List(User { name: "Ada", age: 37 })
     userLabels = users.map {
         let { name, age } -> "$name is $age"
     }
-    OS.println("userMap " + userLabels.get(0).getOr(""))
+    println("userMap " + userLabels.get(0).getOr(""))
 
     bob User = User { name: "Bob", age: 40 }
-    OS.println("tupleMethod " + runner.tupleOne(let (x, y) -> x + y, (3, 4)))
-    OS.println("userMethod " + runner.userOne(let { name, age } -> "$name is $age", bob))
-    OS.println("withIndex " + runner.withIndex((let (x, y), index) -> "$index: ${x + y}", (7, 8), 3))
-    OS.println("combine " + runner.combine((name, let (x, y)) -> "$name: ${x + y}", "item", (4, 5)))
-    OS.println("twoDestructured " + runner.twoTuples((let (a, b), let (x, y)) -> a + b + x + y, (1, 2), (3, 4)))
+    println("tupleMethod " + runner.tupleOne(let (x, y) -> x + y, (3, 4)))
+    println("userMethod " + runner.userOne(let { name, age } -> "$name is $age", bob))
+    println("withIndex " + runner.withIndex((tupleValue, index) -> {
+        let (x, y) = tupleValue
+        "$index: ${x + y}"
+    }, (7, 8), 3))
+    println("combine " + runner.combine((name, tupleInput) -> {
+        let (x, y) = tupleInput
+        "$name: ${x + y}"
+    }, "item", (4, 5)))
+    println("twoDestructured " + runner.twoTuples((left, right) -> {
+        let (a, b) = left
+        let (x, y) = right
+        a + b + x + y
+    }, (1, 2), (3, 4)))
 }

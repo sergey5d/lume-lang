@@ -31,7 +31,7 @@ def describePair(value PairBox) Int =
     }
 
 def main() Unit {
-    OS.println(describeFlag(BoolBox.Wrap(true)))
-    OS.println(describeFlag(BoolBox.Wrap(false)))
-    OS.println(describePair(PairBox.Full((4, 5))))
+    println(describeFlag(BoolBox.Wrap(true)))
+    println(describeFlag(BoolBox.Wrap(false)))
+    println(describePair(PairBox.Full((4, 5))))
 }

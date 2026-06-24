@@ -4,6 +4,6 @@
 def main() Unit {
     value Option[Int] = Some(1)
     if Some(item) = value {
-        OS.println(item)
+        println(item)
     }
 }

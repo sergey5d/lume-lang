@@ -9,12 +9,12 @@ def main() Int {
     var total Int = 0
 
     for item <- [1, 2, 3] {
-        OS.println("item " + item)
+        println("item " + item)
     }
     for item <- [1, 2, 3] {
         total += item
     }
 
-    OS.println("total " + total)
+    println("total " + total)
     0
 }

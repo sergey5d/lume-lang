@@ -27,9 +27,9 @@ impl Rabbit {
 
 def main() Unit {
     rabbit = Rabbit {}
-    OS.println(rabbit.hop())
-    OS.println(rabbit.jump(3))
-    OS.println(rabbit is Acrobat)
-    OS.println(rabbit is Hopper)
-    OS.println(rabbit is Jumper)
+    println(rabbit.hop())
+    println(rabbit.jump(3))
+    println(rabbit is Acrobat)
+    println(rabbit is Hopper)
+    println(rabbit is Jumper)
 }

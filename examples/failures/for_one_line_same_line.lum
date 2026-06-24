@@ -3,6 +3,6 @@
 
 def main() Int {
     values List[Int] = [1, 2, 3]
-    for value <- values OS.println(value)
+    for value <- values println(value)
     0
 }

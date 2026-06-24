@@ -32,9 +32,9 @@ def main() Int {
     b1 B = A.create(5)
     b2 B = A.create("string of strings")
 
-    OS.println("value", A.value())
-    OS.println("test", A.test(5))
-    OS.println("b1", b1.size)
-    OS.println("b2", b2.size)
+    println("value", A.value())
+    println("test", A.test(5))
+    println("b1", b1.size)
+    println("b2", b2.size)
     0
 }

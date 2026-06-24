@@ -13,14 +13,14 @@ def main() Int {
 
     def double(value Int) Int = value * 2
 
-    OS.println(add(2, 3))
-    OS.println(double(8))
+    println(add(2, 3))
+    println(double(8))
 
     def combine(value Int) Int {
         def bump(amount Int) Int = amount + 1
         add(bump(value), double(5))
     }
 
-    OS.println(combine(10))
+    println(combine(10))
     0
 }

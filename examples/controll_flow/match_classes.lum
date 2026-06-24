@@ -27,7 +27,7 @@ class PairBox {
 
 def main() Int {
     workerLike WorkerLike = Worker {}
-    OS.println(match workerLike {
+    println(match workerLike {
        case worker Worker => worker.doWork()
        case _ Other => 100
        case _ => 0

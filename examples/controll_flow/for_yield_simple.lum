@@ -11,9 +11,9 @@ def main() Int {
 	}
 
 	for item <- items {
-		OS.println("yield " + item)
+		println("yield " + item)
 	}
 
-	OS.println("size " + items.size())
+	println("size " + items.size())
 	0
 }

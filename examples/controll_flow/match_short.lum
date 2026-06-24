@@ -31,16 +31,16 @@ def printBodyShape(value Int) {
         case 0 => ()
         case 1 => {}
         case 2 => {
-            OS.println("block body")
+            println("block body")
         }
-        case _ => OS.println("expression body " + value)
+        case _ => println("expression body " + value)
     }
 
     match value {
-        case 0 => OS.println("after unit")
-        case 1 => OS.println("after empty block")
-        case 2 => OS.println("after block")
-        case _ => OS.println("after expression")
+        case 0 => println("after unit")
+        case 1 => println("after empty block")
+        case 2 => println("after block")
+        case _ => println("after expression")
     }
 }
 
@@ -48,17 +48,17 @@ def main() Int {
     pair PairBox = PairBox { 5, 9 }
 
     match pair {
-        case PairBox(left, right) => OS.println("pair " + left + "-" + right)
+        case PairBox(left, right) => println("pair " + left + "-" + right)
     }
 
     picked = match pair {
         case PairBox(left, right) => left + right
     }
-    OS.println(picked)
+    println(picked)
 
     workerLike WorkerLike = Worker {}
     match workerLike {
-        case worker Worker => OS.println("worker " + worker.doWork())
+        case worker Worker => println("worker " + worker.doWork())
     }
 
     printBodyShape(0)

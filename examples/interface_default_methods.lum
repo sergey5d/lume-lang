@@ -28,6 +28,6 @@ def main() Unit {
     greeter Greeter = OverrideBox {}
     prefer = PreferFirst {}
 
-    OS.println("override", greeter.greet())
-    OS.println("conflict", prefer.choose())
+    println("override", greeter.greet())
+    println("conflict", prefer.choose())
 }

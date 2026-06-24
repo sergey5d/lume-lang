@@ -81,10 +81,10 @@ def main() Unit {
         name: "Liam", age: 8
     }
 
-    OS.println("class", user.name, user.age)
-    OS.println("public", person.name, person.age, person.city)
-    OS.println("vars", point.x, point.y)
-    OS.println("full", fullPerson.name, fullPerson.age, fullPerson.city)
-    OS.println("mixed", profile.name, profile.age, profile.scoreValue())
-    OS.println("mixed3", profile3.name, profile3.age, profile3.scoreValue())
+    println("class", user.name, user.age)
+    println("public", person.name, person.age, person.city)
+    println("vars", point.x, point.y)
+    println("full", fullPerson.name, fullPerson.age, fullPerson.city)
+    println("mixed", profile.name, profile.age, profile.scoreValue())
+    println("mixed3", profile3.name, profile3.age, profile3.scoreValue())
 }

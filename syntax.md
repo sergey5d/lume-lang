@@ -541,18 +541,25 @@ users.map { let { name, age } ->
 }
 ```
 
-Destructured parameters can also appear inside multi-parameter lambdas:
+`let` destructuring is only allowed as the whole head of a one-parameter
+lambda, such as `let (x, y) -> ...`. It is not allowed inside parenthesized
+parameter lists. In a multi-parameter lambda, name the parameter normally and
+destructure it inside the body:
 
 ```txt
-pairs.mapWithIndex { (let (x, y), index) ->
+pairs.mapWithIndex { (pair, index) ->
+    let (x, y) = pair
     "$index: ${x + y}"
 }
 
-source.combine { (name, let (x, y)) ->
+source.combine { (name, pair) ->
+    let (x, y) = pair
     "$name: ${x + y}"
 }
 
-source.combine { (let (a, b), let (x, y)) ->
+source.combine { (left, right) ->
+    let (a, b) = left
+    let (x, y) = right
     a + b + x + y
 }
 ```
@@ -562,6 +569,7 @@ Rules:
 - `_` inside an explicit lambda parameter list means "ignore this parameter slot"
 - `let (x, y)` destructures one tuple parameter
 - `let { name, age }` destructures one class or anonymous-record parameter by field name
+- `let` destructuring is not allowed inside parenthesized lambda parameter lists
 
 Block lambda:
 

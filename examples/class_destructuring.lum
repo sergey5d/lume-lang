@@ -49,51 +49,51 @@ impl SecretUser {
 
 def main() Int {
     let { value Int as e, label Str as f } = Box { 9, "boxed" }
-    OS.println("class", e, f)
+    println("class", e, f)
 
     let { value as inferredClassLeft, label as inferredClassRight } = Box { 12, "class" }
-    OS.println("class inferred", inferredClassLeft, inferredClassRight)
+    println("class inferred", inferredClassLeft, inferredClassRight)
 
     let { value Int as mixedClassLeft, label as mixedClassRight } = Box { 13, "typed" }
-    OS.println("class mixed", mixedClassLeft, mixedClassRight)
+    println("class mixed", mixedClassLeft, mixedClassRight)
 
     let { value as classPairLeft, label as classPairRight } = Box { 24, "class-pair" }
-    OS.println("class pair", classPairLeft, classPairRight)
+    println("class pair", classPairLeft, classPairRight)
 
     let { label as skippedOnlyClassValue } = Box { 25, "class-only" }
-    OS.println("class skip only", skippedOnlyClassValue)
+    println("class skip only", skippedOnlyClassValue)
 
     let { value Int as skippedClassLeft, label Str as skippedClassRight } = Crate { 16, "drop", "class-skip" }
-    OS.println("class skip", skippedClassLeft, skippedClassRight)
+    println("class skip", skippedClassLeft, skippedClassRight)
 
     let { name as publicName, location as publicLocation } = SecretUser("Sergey", "secret", "Tampa")
-    OS.println("hidden named", publicName, publicLocation)
+    println("hidden named", publicName, publicLocation)
 
     users = List(
         SecretUser("Sergey", "secret-1", "Tampa"),
         SecretUser("Ada", "secret-2", "London"),
     )
     for { name as userName, location as userLocation } <- users {
-        OS.println("for named plain", userName, userLocation)
+        println("for named plain", userName, userLocation)
     }
 
     user User = User { name: "Sergey", location: "Tampa", age: 37 }
 
     let { name, location } = user
-    OS.println("named", name, location)
+    println("named", name, location)
 
     for { location as loc, name as loopName } <- users {
-        OS.println("for named", loopName, loc)
+        println("for named", loopName, loc)
     }
 
     let { name as nameAgain } = user
-    OS.println("named same", nameAgain)
+    println("named same", nameAgain)
 
     let { location as loc, name as nam } = user
-    OS.println("named alias", loc, nam)
+    println("named alias", loc, nam)
 
     let { name as userName } = user
-    OS.println("partial", userName)
+    println("partial", userName)
 
     0
 }

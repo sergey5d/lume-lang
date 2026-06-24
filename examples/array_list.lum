@@ -62,7 +62,7 @@ def main() Int {
         sum := sum + item
     }
 
-    OS.println("size " + values.size())
-    OS.println("sum " + sum)
+    println("size " + values.size())
+    println("sum " + sum)
     0
 }

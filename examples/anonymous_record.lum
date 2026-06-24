@@ -45,22 +45,22 @@ def main() Unit {
     age = 14
     contextual { name Str, age Int } = { name, age }
 
-    OS.println(describe(full))
-    OS.println(describe(smaller))
-    OS.println(inferred.count)
-    OS.println(mixed.a + mixed.b + mixed.c)
-    OS.println(mixedShape.name + "-" + mixedShape.age)
-    OS.println(describe({ "Cara", 14 }))
+    println(describe(full))
+    println(describe(smaller))
+    println(inferred.count)
+    println(mixed.a + mixed.b + mixed.c)
+    println(mixedShape.name + "-" + mixedShape.age)
+    println(describe({ "Cara", 14 }))
     counter = makeCounter(5)
-    OS.println(counter.count + counter.next)
-    OS.println(positional.name + " " + positional.age)
-    OS.println(contextual.name + " " + contextual.age)
-    OS.println(narrow.name + " " + narrow.age)
+    println(counter.count + counter.next)
+    println(positional.name + " " + positional.age)
+    println(contextual.name + " " + contextual.age)
+    println(narrow.name + " " + narrow.age)
     typedCounter { count Int, next Int } = makeCounter(5)
-    OS.println(typedCounter.next)
+    println(typedCounter.next)
     typedAnon = {
         name Str: "Ada"
         age Int: 42
     }
-    OS.println("typed", typedAnon.name, typedAnon.age)
+    println("typed", typedAnon.name, typedAnon.age)
 }

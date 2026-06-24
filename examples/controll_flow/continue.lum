@@ -18,14 +18,14 @@ def main() Int {
         if current == 4 {
             break
         }
-        OS.println("while " + current)
+        println("while " + current)
     }
 
     for item <- [10, 20, 30] {
         if item == 20 {
             continue
         }
-        OS.println("for " + item)
+        println("for " + item)
     }
 
     doubled = for item <- [1, 2, 3] yield {
@@ -36,7 +36,7 @@ def main() Int {
     }
 
     for value <- doubled {
-        OS.println("yielded " + value)
+        println("yielded " + value)
     }
 
     0

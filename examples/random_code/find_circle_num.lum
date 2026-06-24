@@ -119,11 +119,11 @@ def main() Int {
     uf2 = findCircleNumUnion(connected2)
     dfs2 = findCircleNumTraversal(connected2)
 
-    OS.println("uf " + uf1)
-    OS.println("dfs " + dfs1)
-    OS.println("same " + (uf1 == dfs1))
-    OS.println("uf2 " + uf2)
-    OS.println("dfs2 " + dfs2)
-    OS.println("same2 " + (uf2 == dfs2))
+    println("uf " + uf1)
+    println("dfs " + dfs1)
+    println("same " + (uf1 == dfs1))
+    println("uf2 " + uf2)
+    println("dfs2 " + dfs2)
+    println("same2 " + (uf2 == dfs2))
     0
 }

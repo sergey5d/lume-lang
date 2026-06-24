@@ -18,6 +18,6 @@ impl single Color {
 
 def main() Unit {
     color Color = Color.Red
-    OS.println(color.label())
-    OS.println(Color.palette())
+    println(color.label())
+    println(Color.palette())
 }

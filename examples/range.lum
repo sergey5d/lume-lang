@@ -21,29 +21,29 @@
 def main() Unit {
     var total Int = 0
     for item <- Range(1, 4) {
-        OS.println("range", item)
+        println("range", item)
         total := total + item
     }
-    OS.println("total", total)
+    println("total", total)
 
     var multiplied = 1
     for item <- Range(10, 14) {
-        OS.println("another range", item)
+        println("another range", item)
         multiplied *= item
     }
-    OS.println("another multiplied", multiplied)
+    println("another multiplied", multiplied)
 
     var descendingTotal = 0
     for item <- Range(5, 1) {
-        OS.println("descending", item)
+        println("descending", item)
         descendingTotal += item
     }
-    OS.println("descending total", descendingTotal)
+    println("descending total", descendingTotal)
 
     var steppedTotal = 0
     for item <- Range(10, 4, -2) {
-        OS.println("stepped", item)
+        println("stepped", item)
         steppedTotal += item
     }
-    OS.println("stepped total", steppedTotal)
+    println("stepped total", steppedTotal)
 }

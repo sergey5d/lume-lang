@@ -81,15 +81,15 @@ def main() Unit {
         fromFor +
         fromMatchStmt
 
-    OS.println("sum", sum)
-    OS.println("grouped", grouped)
-    OS.println("size", size)
-    OS.println("match", matched)
-    OS.println("def", helperValue)
-    OS.println("split", split)
-    OS.println("split def", splitValue())
-    OS.println("if", fromIf)
-    OS.println("for", fromFor)
-    OS.println("match stmt", fromMatchStmt)
-    OS.println("total", total)
+    println("sum", sum)
+    println("grouped", grouped)
+    println("size", size)
+    println("match", matched)
+    println("def", helperValue)
+    println("split", split)
+    println("split def", splitValue())
+    println("if", fromIf)
+    println("for", fromFor)
+    println("match stmt", fromMatchStmt)
+    println("total", total)
 }

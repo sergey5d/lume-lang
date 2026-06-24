@@ -66,5 +66,5 @@ def main() Unit {
 
     path = firstPath("apple", "rat", words)
     pathText = path.map(found -> renderPath(found)).getOr("no match")
-    OS.println(pathText)
+    println(pathText)
 }

@@ -30,7 +30,7 @@ def main() Int {
     box.bump()
     box.bump()
     box.bump()
-    OS.println("box " + box.total())
+    println("box " + box.total())
 
     box2 = CounterBox {}
     box2.bump()
@@ -40,8 +40,8 @@ def main() Int {
     box2.bump()
     box2.bump()
     box2.bump()
-    OS.println("box2 " + box2.total())
+    println("box2 " + box2.total())
 
-    OS.println("single " + Greeter.greet(2))
+    println("single " + Greeter.greet(2))
     0
 }

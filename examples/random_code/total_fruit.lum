@@ -81,14 +81,14 @@ def totalFruit(fruits [Int]) Int {
 }
 
 def main() Int {
-    OS.println("sample1", totalFruit(List(1, 2, 1)))
-    OS.println("sample2", totalFruit(List(0, 1, 2, 2)))
-    OS.println("sample3", totalFruit(List(1, 2, 3, 2, 2)))
-    OS.println("sample4", totalFruit(List(3, 3, 3, 1, 2, 1, 1, 2, 3, 3, 4)))
-    OS.println("sameType", totalFruit(List(7, 7, 7)))
+    println("sample1", totalFruit(List(1, 2, 1)))
+    println("sample2", totalFruit(List(0, 1, 2, 2)))
+    println("sample3", totalFruit(List(1, 2, 3, 2, 2)))
+    println("sample4", totalFruit(List(3, 3, 3, 1, 2, 1, 1, 2, 3, 3, 4)))
+    println("sameType", totalFruit(List(7, 7, 7)))
 
     empty List[Int] = []
-    OS.println("empty", totalFruit(empty))
+    println("empty", totalFruit(empty))
 
     0
 }

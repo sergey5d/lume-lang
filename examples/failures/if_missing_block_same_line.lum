@@ -2,6 +2,6 @@
 # expected '\{' after if condition
 
 def main() Int {
-    if true OS.println("haha")
+    if true println("haha")
     0
 }

@@ -14,14 +14,14 @@ interface Closer {
 def main() Unit {
     handler = Reader with Closer {
         def read() Str = "x"
-        def close() Unit = OS.println("closed")
+        def close() Unit = println("closed")
     }
 
     soloReader = Reader {
         def read() Str = "solo"
     }
 
-    OS.println(handler.read())
+    println(handler.read())
     handler.close()
-    OS.println(soloReader.read())
+    println(soloReader.read())
 }

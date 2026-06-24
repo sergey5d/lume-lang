@@ -23,11 +23,11 @@ def main() Int {
     valueB AliasB = AliasB {}
     named Named = value
 
-    OS.println(named.label())
-    OS.println(aliasA.label())
-    OS.println(valueB.label())
-    OS.println(bump(4) + things.C.bump(5))
-    OS.println(printN(12))
-    OS.println(print(100))
+    println(named.label())
+    println(aliasA.label())
+    println(valueB.label())
+    println(bump(4) + things.C.bump(5))
+    println(printN(12))
+    println(print(100))
     return 0
 }

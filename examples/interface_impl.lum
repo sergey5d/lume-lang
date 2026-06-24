@@ -21,7 +21,7 @@ impl Rabbit {
 def main() Int {
     rabbit Hopper = Rabbit {}
     jumper Jumper = Rabbit {}
-    OS.println(rabbit.hop())
-    OS.println(jumper.jump(2))
+    println(rabbit.hop())
+    println(jumper.jump(2))
     0
 }

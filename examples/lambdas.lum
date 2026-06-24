@@ -25,32 +25,32 @@ def main() Int {
     adder Adder = Adder { 5 }
 
     emptyLambda = () -> 4
-    OS.println(emptyLambda())
+    println(emptyLambda())
 
     lambda (Int) -> Int = x ->
        adder.add(x)
 
-    OS.println(lambda(9))
+    println(lambda(9))
 
     lambda2 = (x Int) -> adder.add(x)
-    OS.println(lambda2(19))
+    println(lambda2(19))
 
     lambda3 (Int) -> Int = x -> {
         adder.add(x)
     }
-    OS.println(lambda3(29))
+    println(lambda3(29))
 
     lambda4 = (x Int) -> {
         adder.add(x)
     }
-    OS.println(lambda4(40))
+    println(lambda4(40))
 
     lambda5 (Int, Int) -> Int = (left, right) ->
         adder.add(left + right)
-    OS.println(lambda5(20, 31))
+    println(lambda5(20, 31))
 
     lambda6 = (left Int, right Int) -> adder.add(left + right)
-    OS.println(lambda6(30, 31))
+    println(lambda6(30, 31))
 
     seen = Set(1, 2, 3)
     doubled = seen.map((item Int) -> item * 2)
@@ -63,10 +63,10 @@ def main() Int {
         item -> item * 2
     }
 
-    OS.println("map 1 " + doubled.contains(4) + " " + doubled.size())
-    OS.println("map 2 " + doubledV2.contains(4) + " " + doubledV2.size())
-    OS.println("map 3 " + doubledV3.contains(4) + " " + doubledV3.size())
-    OS.println("map 4 " + doubledV4.contains(4) + " " + doubledV4.size())
-    OS.println("map 5 " + doubledV5.contains(4) + " " + doubledV5.size())
+    println("map 1 " + doubled.contains(4) + " " + doubled.size())
+    println("map 2 " + doubledV2.contains(4) + " " + doubledV2.size())
+    println("map 3 " + doubledV3.contains(4) + " " + doubledV3.size())
+    println("map 4 " + doubledV4.contains(4) + " " + doubledV4.size())
+    println("map 5 " + doubledV5.contains(4) + " " + doubledV5.size())
     0
 }

@@ -20,11 +20,11 @@ def main() Unit {
     name Str = "world"
     count Int = 2
 
-    OS.println("regular:")
-    OS.println("hello $name")
-    OS.println("next ${count + 1}")
-    OS.println("money \$${count + 3}")
-    OS.println("mix $name-${count + 2}")
+    println("regular:")
+    println("hello $name")
+    println("next ${count + 1}")
+    println("money \$${count + 3}")
+    println("mix $name-${count + 2}")
 
     text Str = """hello $name
 count ${count + 1}
@@ -34,10 +34,10 @@ count ${count + 1}
     rawMulti Str = raw"""hello $name
 \nraw"""
 
-    OS.println("multiline:")
-    OS.println(text)
-    OS.println("raw-single:" + rawSingle)
-    OS.println("raw-multi:")
-    OS.println(rawMulti)
-    OS.println("done")
+    println("multiline:")
+    println(text)
+    println("raw-single:" + rawSingle)
+    println("raw-multi:")
+    println(rawMulti)
+    println("done")
 }
