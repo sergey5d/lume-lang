@@ -498,15 +498,12 @@ x -> expr
 (x, y) -> expr
 (x Int) -> expr
 (x Int, y Int) -> expr
-let (x, y) -> expr
-let { name, age } -> expr
 ```
 
 Typed single-parameter lambdas must use parentheses, so write
 `(x Int) -> x + 1`, not `x Int -> x + 1`. Parenthesized parameter lists
 must also be either fully typed or fully untyped; `(x Int, y) -> ...` is
-invalid. Plain `(x, y) -> ...` always means two parameters; use `let (x, y)
--> ...` when one tuple parameter should be destructured.
+invalid. Plain `(x, y) -> ...` always means two parameters.
 
 Single-parameter lambda:
 
@@ -526,25 +523,32 @@ Multi-parameter lambda:
 (left Int, right Int) -> left + right
 ```
 
-Tuple-destructuring lambda in a one-argument function context:
+Tuple-destructuring inside a one-argument lambda:
 
 ```txt
-pairs.map(let (key, value) -> key + value)
-pairs.map(let (key, _) -> key)
+pairs.map(pair -> {
+    let (key, value) = pair
+    key + value
+})
+
+pairs.map(pair -> {
+    let (key, _) = pair
+    key
+})
 ```
 
-Class or anonymous-record destructuring lambda:
+Class or anonymous-record destructuring inside a lambda:
 
 ```txt
-users.map { let { name, age } ->
+users.map { user ->
+    let { name, age } = user
     "$name is $age"
 }
 ```
 
-`let` destructuring is only allowed as the whole head of a one-parameter
-lambda, such as `let (x, y) -> ...`. It is not allowed inside parenthesized
-parameter lists. In a multi-parameter lambda, name the parameter normally and
-destructure it inside the body:
+Lambda parameters cannot use `let` destructuring. If a lambda receives a tuple,
+class, or anonymous-record value, name the parameter normally and destructure it
+inside the body:
 
 ```txt
 pairs.mapWithIndex { (pair, index) ->
@@ -567,9 +571,8 @@ source.combine { (left, right) ->
 Rules:
 
 - `_` inside an explicit lambda parameter list means "ignore this parameter slot"
-- `let (x, y)` destructures one tuple parameter
-- `let { name, age }` destructures one class or anonymous-record parameter by field name
-- `let` destructuring is not allowed inside parenthesized lambda parameter lists
+- tuple, class, and anonymous-record values are destructured inside the lambda body with normal `let`
+- `let` destructuring is not allowed in lambda parameter lists
 
 Block lambda:
 

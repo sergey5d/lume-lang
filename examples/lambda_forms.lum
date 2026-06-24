@@ -92,20 +92,30 @@ def main() Unit {
     println("inlineMapTyped " + inlineMapTyped.get(2).getOr(0))
 
     pairs = List((2, 3), (4, 5))
-    tupleSums = pairs.map { let (x Int, y Int) ->
+    tupleSums = pairs.map { pairValue ->
+        let (x Int, y Int) = pairValue
         x + y
     }
     println("tupleMap " + tupleSums.get(0).getOr(0))
 
     users = List(User { name: "Ada", age: 37 })
     userLabels = users.map {
-        let { name, age } -> "$name is $age"
+        userValue -> {
+            let { name, age } = userValue
+            "$name is $age"
+        }
     }
     println("userMap " + userLabels.get(0).getOr(""))
 
     bob User = User { name: "Bob", age: 40 }
-    println("tupleMethod " + runner.tupleOne(let (x, y) -> x + y, (3, 4)))
-    println("userMethod " + runner.userOne(let { name, age } -> "$name is $age", bob))
+    println("tupleMethod " + runner.tupleOne(pairValue -> {
+        let (x, y) = pairValue
+        x + y
+    }, (3, 4)))
+    println("userMethod " + runner.userOne(userValue -> {
+        let { name, age } = userValue
+        "$name is $age"
+    }, bob))
     println("withIndex " + runner.withIndex((tupleValue, index) -> {
         let (x, y) = tupleValue
         "$index: ${x + y}"

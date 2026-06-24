@@ -2,5 +2,5 @@
 # .*lambda parameters cannot use 'let' destructuring.*
 
 def main() Unit {
-    mapper = (let (x, y), index) -> x + y + index
+    mapper = let (x, y) -> x + y
 }

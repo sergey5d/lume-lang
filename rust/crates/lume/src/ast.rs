@@ -716,7 +716,7 @@ pub struct LambdaParam {
     pub span: Span,
 }
 
-/// A `let (...)` or `let { ... }` destructured lambda parameter.
+/// A recovered destructured lambda parameter used only for diagnostics.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LambdaParamDestructure {
     pub kind: DestructureKind,

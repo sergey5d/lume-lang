@@ -67,6 +67,11 @@ impl<'a> Parser<'a> {
                 self.restore(checkpoint);
                 return None;
             }
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_lambda_params",
+                "lambda parameters cannot use 'let' destructuring; name the parameter and destructure inside the lambda body",
+                param.span,
+            ));
             let body = match self.parse_lambda_body() {
                 Some(body) => body,
                 None => {
@@ -204,7 +209,7 @@ impl<'a> Parser<'a> {
             let start = self.previous_span();
             self.diagnostics.push(Diagnostic::error(
                 "invalid_lambda_params",
-                "let destructuring lambda parameters are only allowed as the single lambda parameter; write 'let (...) -> ...' or destructure inside the lambda body",
+                "lambda parameters cannot use 'let' destructuring; name the parameter and destructure inside the lambda body",
                 start,
             ));
             return self.parse_lambda_destructure_param(start, index);

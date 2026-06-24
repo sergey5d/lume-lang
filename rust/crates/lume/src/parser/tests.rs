@@ -1371,32 +1371,42 @@ def main() Unit {
 }
 
 #[test]
-fn parses_destructured_lambda_parameter_forms() {
-    let tuple = parse_expr_only("let (x Int, y Int) -> x + y");
-    match tuple {
-        Expr::Lambda { params, .. } => {
-            assert_eq!(params.len(), 1);
-            let destructure = params[0].destructure.as_ref().expect("tuple destructure");
-            assert_eq!(destructure.kind, DestructureKind::Tuple);
-            assert_eq!(destructure.bindings.len(), 2);
-            assert_eq!(destructure.bindings[0].name, "x");
-            assert_eq!(destructure.bindings[1].name, "y");
-        }
-        other => panic!("expected tuple-destructuring lambda, got {other:#?}"),
-    }
+fn rejects_destructured_lambda_parameter_forms() {
+    let tuple = parse(
+        r#"
+def main() Unit {
+    mapper = let (x Int, y Int) -> x + y
+}
+"#,
+    );
+    assert!(
+        tuple.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_lambda_params"
+                && diag
+                    .message
+                    .contains("lambda parameters cannot use 'let' destructuring")
+        }),
+        "{:#?}",
+        tuple.diagnostics
+    );
 
-    let record = parse_expr_only("let { name, age } -> name");
-    match record {
-        Expr::Lambda { params, .. } => {
-            assert_eq!(params.len(), 1);
-            let destructure = params[0].destructure.as_ref().expect("record destructure");
-            assert_eq!(destructure.kind, DestructureKind::Record);
-            assert_eq!(destructure.bindings.len(), 2);
-            assert_eq!(destructure.bindings[0].field_name.as_deref(), Some("name"));
-            assert_eq!(destructure.bindings[1].field_name.as_deref(), Some("age"));
-        }
-        other => panic!("expected record-destructuring lambda, got {other:#?}"),
-    }
+    let record = parse(
+        r#"
+def main() Unit {
+    mapper = let { name, age } -> name
+}
+"#,
+    );
+    assert!(
+        record.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_lambda_params"
+                && diag
+                    .message
+                    .contains("lambda parameters cannot use 'let' destructuring")
+        }),
+        "{:#?}",
+        record.diagnostics
+    );
 }
 
 #[test]
@@ -1412,7 +1422,10 @@ def main() Unit {
         result
             .diagnostics
             .iter()
-            .any(|diag| diag.code == "invalid_lambda_params"),
+            .any(|diag| diag.code == "invalid_lambda_params"
+                && diag
+                    .message
+                    .contains("lambda parameters cannot use 'let' destructuring")),
         "{:#?}",
         result.diagnostics
     );
@@ -1431,7 +1444,10 @@ def main() Unit {
         result
             .diagnostics
             .iter()
-            .any(|diag| diag.code == "invalid_lambda_params"),
+            .any(|diag| diag.code == "invalid_lambda_params"
+                && diag
+                    .message
+                    .contains("lambda parameters cannot use 'let' destructuring")),
         "{:#?}",
         result.diagnostics
     );

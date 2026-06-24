@@ -1,6 +1,11 @@
 # FAIL_REGEX:
 # .*lambda parameters cannot use 'let' destructuring.*
 
+class User {
+    name Str
+    age Int
+}
+
 def main() Unit {
-    mapper = (let (x, y), index) -> x + y + index
+    mapper = let { name, age } -> name
 }
