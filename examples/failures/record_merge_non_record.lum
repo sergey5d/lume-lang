@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*record merge operands must be record-shaped values.*
+
+def main() Unit {
+    items = [1, 2]
+    value = items :+ 3
+}

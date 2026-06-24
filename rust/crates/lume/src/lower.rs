@@ -3630,6 +3630,7 @@ fn map_assign_op(op: AssignOp) -> Option<ir::BinaryOp> {
 fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
     match op {
         AstBinaryOp::Or => Some(ir::BinaryOp::Or),
+        AstBinaryOp::RecordMerge => Some(ir::BinaryOp::RecordMerge),
         AstBinaryOp::And => Some(ir::BinaryOp::And),
         AstBinaryOp::BitOr => Some(ir::BinaryOp::BitOr),
         AstBinaryOp::BitAnd => Some(ir::BinaryOp::BitAnd),

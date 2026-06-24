@@ -806,15 +806,19 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_colon_expr(&mut self) -> Option<Expr> {
         let mut expr = self.parse_or_expr()?;
         loop {
-            if !self.match_token(TokenKind::Colon) {
+            let op = if self.match_token(TokenKind::Colon) {
+                BinaryOp::Colon
+            } else if self.match_token(TokenKind::ColonPlus) {
+                BinaryOp::RecordMerge
+            } else {
                 break;
-            }
+            };
             self.skip_newlines();
             let right = self.parse_or_expr()?;
             let span = expr.span().cover(right.span());
             expr = Expr::Binary {
                 left: Box::new(expr),
-                op: BinaryOp::Colon,
+                op,
                 right: Box::new(right),
                 span,
             };

@@ -1465,6 +1465,7 @@ Other operators / constructs:
 - `=>` for match cases
 - `with` for interface implementation and generic bounds
 - `:<` for class, record, and anonymous-record update
+- `:+` for record-shape merge; the left and right shapes must have distinct field names
 
 Examples:
 
@@ -1475,6 +1476,14 @@ for item <- items {
 (Int) -> Str
 SomeX(x) => x
 class Box[T] with Named
+```
+
+Record merge:
+
+```txt
+named = { name: "Ada" }
+located = { location: "Tampa" }
+user = named :+ located
 ```
 
 Operator declarations use symbolic `def` forms on interfaces, classes, and enums:
@@ -1494,11 +1503,12 @@ Current operator overloading constraints:
 - Not allowed to overload:
   - logical operators: `&&`, `||`, `!`
   - equality operators: `==`, `!=`
-  - symbolic collection/custom forms: `:+`, `:-`, `++`, `--`, `::`
+  - symbolic collection/custom forms: `:-`, `++`, `--`, `::`
 - Comparison operators are intended to work through `Ordering[T]` rather than custom operator declarations.
 - Equality is intended to work through `Eq[T]` rather than custom operator declarations.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
-- The spellings `:+`, `:-`, `++`, `--`, and `::` are removed from the language surface and currently produce `unsupported_operator` lexer diagnostics.
+- `:+` is a built-in record merge operator only, not an overloadable collection/custom operator.
+- The spellings `:-`, `++`, `--`, and `::` are removed from the language surface and currently produce `unsupported_operator` lexer diagnostics.
 
 Newline continuation:
 

@@ -298,7 +298,7 @@ impl User {
 
 #[test]
 fn rejects_removed_symbolic_operator_methods_at_lexer() {
-    for operator in ["++", "--", ":+", ":-", "::"] {
+    for operator in ["++", "--", ":-", "::"] {
         let source = format!(
             r#"
 class Vec {{}}
@@ -314,7 +314,7 @@ impl Vec {{
 
 #[test]
 fn rejects_removed_symbolic_infix_operators_at_lexer() {
-    for operator in ["++", "--", ":+", ":-", "::"] {
+    for operator in ["++", "--", ":-", "::"] {
         let source = format!(
             r#"
 def main() Unit {{
@@ -556,6 +556,17 @@ fn parses_colon_record_update_fields() {
             assert_eq!(updates[1].name.as_deref(), Some("label"));
         }
         other => panic!("expected record update, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_record_merge_operator() {
+    match parse_expr_only("left :+ right") {
+        Expr::Binary {
+            op: BinaryOp::RecordMerge,
+            ..
+        } => {}
+        other => panic!("expected record merge binary expr, got {other:#?}"),
     }
 }
 

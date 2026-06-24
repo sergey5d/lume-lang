@@ -751,6 +751,7 @@ pub enum UnaryOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Colon,
+    RecordMerge,
     Or,
     And,
     BitOr,

@@ -1,0 +1,20 @@
+# EXPECT:
+# Ada 42 Tampa
+# Bob 7
+
+class Label {
+    label Str
+}
+
+def main() Unit {
+    named = { name: "Ada" }
+    located = { age: 42, location: "Tampa" }
+    user = named :+ located
+
+    label = Label { "Bob" }
+    counted = { count: 7 }
+    labeledCount = label :+ counted
+
+    println(user.name, user.age, user.location)
+    println(labeledCount.label, labeledCount.count)
+}

@@ -2546,6 +2546,62 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    fn record_merge_value(
+        &mut self,
+        left: Value,
+        right: Value,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let mut merged = self.record_merge_runtime_fields(left, "left", span)?;
+        let right_fields = self.record_merge_runtime_fields(right, "right", span)?;
+        for (name, value) in right_fields {
+            if merged.iter().any(|(field, _)| field == &name) {
+                return Err(self.runtime_error(
+                    span,
+                    format!("record merge field '{}' exists on both operands", name),
+                ));
+            }
+            merged.push((name, value));
+        }
+        Ok(Value::Record(Rc::new(RefCell::new(merged))))
+    }
+
+    fn record_merge_runtime_fields(
+        &mut self,
+        value: Value,
+        side: &str,
+        span: Option<Span>,
+    ) -> Result<Vec<(String, Value)>, Diagnostic> {
+        match value {
+            Value::Record(fields) => Ok(fields.borrow().clone()),
+            Value::Aggregate(object) if object.borrow().case_name.is_none() => {
+                let object = object.borrow();
+                if object.fields.is_empty() {
+                    return Err(self.runtime_error(
+                        span,
+                        format!(
+                            "record merge operands must be record-shaped values; {side} operand is {}",
+                            object.type_name
+                        ),
+                    ));
+                }
+                Ok(object
+                    .field_names
+                    .iter()
+                    .cloned()
+                    .zip(object.fields.iter().cloned())
+                    .collect())
+            }
+            other => Err(self.runtime_error(
+                span,
+                format!(
+                    "record merge operands must be record-shaped values; {side} operand is {}",
+                    other.render()
+                ),
+            )),
+        }
+    }
+
     fn construct_enum_case(
         &mut self,
         explicit_enum: Option<&str>,
@@ -3399,6 +3455,7 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match op {
+            ir::BinaryOp::RecordMerge => self.record_merge_value(left, right, span),
             ir::BinaryOp::Add => match (&left, &right) {
                 (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs + rhs)),
                 (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs + rhs)),

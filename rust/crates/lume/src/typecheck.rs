@@ -1472,6 +1472,107 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn record_merge_shape_fields(
+        &mut self,
+        ty: &Ty,
+        side: &str,
+        span: crate::source::Span,
+    ) -> Option<Vec<(String, Ty)>> {
+        match ty {
+            Ty::Record(fields) => Some(fields.clone()),
+            Ty::Named(name, args) => {
+                let Some(sig) = self.lookup_any_type(name) else {
+                    self.add_error(
+                        "invalid_record_merge",
+                        format!(
+                            "record merge operands must be record-shaped values; {side} operand has type '{}'",
+                            ty.describe()
+                        ),
+                        span,
+                    );
+                    return None;
+                };
+                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) || sig.fields.is_empty()
+                {
+                    self.add_error(
+                        "invalid_record_merge",
+                        format!(
+                            "record merge operands must be record-shaped values; {side} operand has type '{}'",
+                            ty.describe()
+                        ),
+                        span,
+                    );
+                    return None;
+                }
+                if sig.fields.iter().any(|field| field.hidden) {
+                    self.add_error(
+                        "invalid_record_merge",
+                        format!(
+                            "record merge cannot use type '{}' because it has hidden fields",
+                            sig.name
+                        ),
+                        span,
+                    );
+                    return None;
+                }
+                let subst = sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                Some(
+                    sig.fields
+                        .iter()
+                        .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
+                        .collect(),
+                )
+            }
+            Ty::Unknown => None,
+            _ => {
+                self.add_error(
+                    "invalid_record_merge",
+                    format!(
+                        "record merge operands must be record-shaped values; {side} operand has type '{}'",
+                        ty.describe()
+                    ),
+                    span,
+                );
+                None
+            }
+        }
+    }
+
+    fn check_record_merge_expr(&mut self, left: &Ty, right: &Ty, span: crate::source::Span) -> Ty {
+        let Some(left_fields) = self.record_merge_shape_fields(left, "left", span) else {
+            return Ty::Unknown;
+        };
+        let Some(right_fields) = self.record_merge_shape_fields(right, "right", span) else {
+            return Ty::Unknown;
+        };
+
+        let left_names = left_fields
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<HashSet<_>>();
+        let mut has_overlap = false;
+        for (name, _) in &right_fields {
+            if left_names.contains(name.as_str()) {
+                has_overlap = true;
+                self.add_error(
+                    "invalid_record_merge",
+                    format!("record merge field '{}' exists on both operands", name),
+                    span,
+                );
+            }
+        }
+        if has_overlap {
+            return Ty::Unknown;
+        }
+
+        Ty::Record(left_fields.into_iter().chain(right_fields).collect())
+    }
+
     fn check_block(&mut self, block: &Block) -> Ty {
         self.check_block_against(block, &Ty::Unknown)
     }
@@ -4229,6 +4330,7 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
     ) -> Ty {
         match op {
+            BinaryOp::RecordMerge => self.check_record_merge_expr(left, right, span),
             BinaryOp::Add => {
                 if left.is_str() || right.is_str() {
                     Ty::str()

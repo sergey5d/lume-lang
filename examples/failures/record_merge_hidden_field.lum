@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*record merge cannot use type 'SecretName' because it has hidden fields.*
+
+class SecretName {
+    name Str
+    hidden secret Str = "hidden"
+}
+
+def main() Unit {
+    left = SecretName { "Ada" }
+    right = { age: 42 }
+    value = left :+ right
+}
