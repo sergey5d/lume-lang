@@ -16,7 +16,10 @@ class TokenBucket {
 }
 
 impl TokenBucket {
-    def new(capacity Int, refillPerTick Int) {
+    new {
+        capacity Int
+        refillPerTick Int
+    } {
         this.capacity = capacity
         this.refillPerTick = refillPerTick
         # Token buckets usually start full so they allow an initial burst.
@@ -59,7 +62,7 @@ impl TokenBucket {
 
 def main() Unit {
     # Capacity 5, refilling 1 token per tick.
-    bucket = TokenBucket(5, 1)
+    bucket = TokenBucket { 5, 1 }
 
     # Each pair is (time, request cost).
     requests List[(Int, Int)] = List(

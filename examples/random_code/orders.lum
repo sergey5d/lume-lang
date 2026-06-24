@@ -116,7 +116,7 @@ impl OrderManager {
 
 def main() {
 
-    manager = OrderManager()
+    manager = OrderManager {}
 
     orders = manager.testOrders()
 

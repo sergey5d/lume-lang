@@ -17,7 +17,8 @@ class Service {
 
 impl Service {
     @Route(path = "/health")
-    def new() {
+    new {
+    } {
         this.name = "ok"
     }
 
@@ -27,5 +28,5 @@ impl Service {
 }
 
 def main() Unit {
-    println(Service().health())
+    println(Service {}.health())
 }

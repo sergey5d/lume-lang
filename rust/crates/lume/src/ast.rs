@@ -178,6 +178,7 @@ pub struct TypeParam {
 pub struct Param {
     pub name: String,
     pub ty: Option<TypeRef>,
+    pub initializer: Option<Expr>,
     pub variadic: bool,
     pub span: Span,
 }

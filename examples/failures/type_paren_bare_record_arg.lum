@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# no_matching_overload at .*: constructor syntax for 'MixedProfile' does not accept anonymous record arguments in '\(\.\.\.\)'; use 'MixedProfile \{ \.\.\. \}'
+# class 'MixedProfile' uses brace construction; write 'MixedProfile \{ \.\.\. \}'
 
 class MixedProfile {
     name Str

@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# no_matching_overload at .*: class 'Target' does not have an implicit '()' constructor; use 'Target { ... }' or define 'new'
+# class 'Target' uses brace construction; write 'Target \{ \.\.\. \}'
 
 class Source {
     name Str

@@ -5,7 +5,9 @@ class Counter {
 }
 
 impl Counter {
-    def new(count Int) {
+    new {
+        count Int
+    } {
         this.count = count
     }
 
@@ -18,6 +20,6 @@ impl Counter {
 seed Int = 1
 
 def run() Int {
-    c Counter = Counter(seed)
+    c Counter = Counter { seed }
     return c.bump(2)
 }

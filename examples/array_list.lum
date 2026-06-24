@@ -1,7 +1,9 @@
-# SKIP: generic class construction is not supported at call sites yet
+# SKIP
+#
+# Generic class construction is not supported at call sites yet.
 #
 # Intended future example for a generic list-backed list once calls like
-# ArrayList[Int](5) and ArrayListIterator[T](...) are supported.
+# ArrayList[Int] { 5 } and ArrayListIterator[T] { ... } are supported.
 
 class ArrayListIterator[T] with Iterator[T] {
     hidden var items List[T]
@@ -10,7 +12,10 @@ class ArrayListIterator[T] with Iterator[T] {
 }
 
 impl ArrayListIterator[T] {
-    def new(items List[T], limit Int) {
+    new {
+        items List[T]
+        limit Int
+    } {
         this.items = items
         this.limit = limit
     }
@@ -30,7 +35,9 @@ class ArrayList[T] with Iterable[T] {
 }
 
 impl ArrayList[T] {
-    def new(capacity Int) {
+    new {
+        capacity Int
+    } {
         this.items = List()
     }
 
@@ -48,11 +55,11 @@ impl ArrayList[T] {
 
     def size() Int = this.count
 
-    def iterator() Iterator[T] = ArrayListIterator[T](items = this.items, limit = this.count)
+    def iterator() Iterator[T] = ArrayListIterator[T] { items: this.items, limit: this.count }
 }
 
 def main() Int {
-    values ArrayList[Int] = ArrayList[Int](5)
+    values ArrayList[Int] = ArrayList[Int] { 5 }
     values.append(10)
     values.append(20)
     values.append(30)

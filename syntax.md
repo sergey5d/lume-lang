@@ -384,10 +384,11 @@ settings Settings = Settings {}
 ```
 
 Rules for field-based class construction:
-- `Type(...)` is never synthesized from fields
-- `Type(...)` only works when the target class defines `new(...)` or the target is a builtin constructor form such as `List(...)`
-- `Type { ... }` is the structural construction form
-- any explicit `new(...)` disables structural brace construction for that class
+- user classes are always constructed with `Type { ... }`, never `Type(...)`
+- builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` still use parentheses
+- `Type { ... }` is the structural construction form when no explicit `new` exists
+- explicit `new` constructors use the same `Type { ... }` call syntax
+- any explicit `new` disables implicit structural field construction for that class
 - `Type {}` works when the visible construction shape has no required fields
 - named braces check only visible public fields
 - in named braces, public fields without initializers are required
@@ -400,7 +401,7 @@ Rules for field-based class construction:
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
-- `Type({ ... })` is not supported; class structural construction must use `Type { ... }`
+- `Type({ ... })` is not supported; class construction must use `Type { ... }`
 
 Anonymous record shapes are structural:
 - field names and field types must match at compile time
@@ -464,10 +465,14 @@ impl Counter {
 }
 ```
 
-Constructors currently use `def new(...)`.
+Constructors use a dedicated `new` block inside `impl`.
 
-- `new(...)` declares a constructor
-- `new(...)` inside another constructor delegates to another constructor of the same class
+- `new { params } { body }` declares a block-bodied constructor
+- `new { params } = expression` declares an expression-bodied constructor
+- constructor parameters use `name Type`, with optional trailing defaults such as `age Int = 0`
+- `hidden new { params } { body }` declares a private constructor
+- `new { ... }` inside another constructor delegates to another constructor of the same class
+- class call sites always use braces: `Person { "Ada", 10 }`, not `Person("Ada", 10)`
 - `this` is the instance receiver
 - instance fields on classes, enums, and singles must be accessed through `this.`, for example `this.age`
 
@@ -478,12 +483,17 @@ class Person {
 }
 
 impl Person {
-    def new(age Int, name Str) {
+    new {
+        age Int
+        name Str
+    } {
         this.age = age
         this.name = name
     }
 
-    def new(age Int) = new(age, "unknown")
+    new {
+        age Int
+    } = new { age, "unknown" }
 }
 ```
 
@@ -791,7 +801,7 @@ format(prefix = "item", value = 5)
 Methods are called explicitly:
 
 ```txt
-adder Adder = Adder(5)
+adder Adder = Adder { 5 }
 adder.add(7)
 ```
 
@@ -830,7 +840,7 @@ Array elements can also be constructed directly:
 
 ```txt
 values Array[Int] = Array(1, 2, 3)
-boxes Array[Box] = Array(Box(1), Box(2))
+boxes Array[Box] = Array(Box { 1 }, Box { 2 })
 takeArray(Array(4, 5, 6))
 ```
 
@@ -1469,8 +1479,8 @@ class Box[T] with Named
 Operator declarations use symbolic `def` forms on interfaces, classes, and enums:
 
 ```txt
-def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
-def -() Vec = Vec(-this[0], -this[1])
+def +(other Vec) Vec = Vec { this[0] + other[0], this[1] + other[1] }
+def -() Vec = Vec { -this[0], -this[1] }
 def [](index Int) Int = this.items[index]
 ```
 

@@ -13,7 +13,9 @@ class DisjointSet {
 
 impl DisjointSet {
 
-    def new(size Int) {
+    new {
+        size Int
+    } {
         this.arr = Array.generate(size, i -> i)
     }
 
@@ -46,7 +48,7 @@ impl DisjointSet {
 }
 
 def findCircleNumUnion(isConnected List[List[Int]]) Int {
-    set = DisjointSet(isConnected.size())
+    set = DisjointSet { isConnected.size() }
 
     for i <- Range(0, isConnected.size()) {
         row = isConnected[i]

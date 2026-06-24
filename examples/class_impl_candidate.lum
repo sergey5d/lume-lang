@@ -16,7 +16,10 @@ hidden class Person with Named, Aged {
 
 impl Person {
 
-    def new(firstName Str, lastName Str) {
+    new {
+        firstName Str
+        lastName Str
+    } {
         this.firstName = firstName
         this.lastName = lastName
         this.age = 18

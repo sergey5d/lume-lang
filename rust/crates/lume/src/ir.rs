@@ -192,6 +192,7 @@ pub struct Function {
     pub name: String,
     pub type_params: Vec<String>,
     pub params: Vec<LocalId>,
+    pub param_defaults: Vec<Option<Constant>>,
     pub locals: Vec<Local>,
     pub return_ty: Type,
     pub blocks: Vec<BasicBlock>,
@@ -209,6 +210,7 @@ impl Function {
             name: name.into(),
             type_params: Vec::new(),
             params: Vec::new(),
+            param_defaults: Vec::new(),
             locals: Vec::new(),
             return_ty,
             blocks: vec![BasicBlock::new(entry)],
@@ -222,7 +224,14 @@ impl Function {
     pub fn add_param(&mut self, name: impl Into<String>, ty: Type) -> LocalId {
         let id = self.add_local(name, ty, false, LocalKind::Param);
         self.params.push(id);
+        self.param_defaults.push(None);
         id
+    }
+
+    pub fn set_param_default(&mut self, index: usize, default: Option<Constant>) {
+        if let Some(slot) = self.param_defaults.get_mut(index) {
+            *slot = default;
+        }
     }
 
     // add_local reserves a named slot in the function frame. The returned id is

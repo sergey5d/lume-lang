@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# no_matching_overload at .*: constructor syntax for 'SecretBadge' does not accept anonymous record arguments in '\(\.\.\.\)'; use 'SecretBadge \{ \.\.\. \}'
+# class 'SecretBadge' uses brace construction; write 'SecretBadge \{ \.\.\. \}'
 
 class SecretBadge {
     name Str
@@ -7,7 +7,9 @@ class SecretBadge {
 }
 
 impl SecretBadge {
-    def new(name Str) {
+    new {
+        name Str
+    } {
         this.name = name
         this.code = 99
     }

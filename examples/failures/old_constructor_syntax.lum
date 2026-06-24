@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*constructors use .*replace .*def new.*
+
+class User {
+    name Str
+}
+
+impl User {
+    def new(name Str) {
+        this.name = name
+    }
+}
+
+def main() Unit = ()

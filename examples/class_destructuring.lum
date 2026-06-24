@@ -40,7 +40,11 @@ class SecretUser {
 }
 
 impl SecretUser {
-    def new(name Str, token Str, location Str) {
+    new {
+        name Str
+        token Str
+        location Str
+    } {
         this.name = name
         this.token = token
         this.location = location
@@ -66,12 +70,12 @@ def main() Int {
     let { value Int as skippedClassLeft, label Str as skippedClassRight } = Crate { 16, "drop", "class-skip" }
     println("class skip", skippedClassLeft, skippedClassRight)
 
-    let { name as publicName, location as publicLocation } = SecretUser("Sergey", "secret", "Tampa")
+    let { name as publicName, location as publicLocation } = SecretUser { "Sergey", "secret", "Tampa" }
     println("hidden named", publicName, publicLocation)
 
     users = List(
-        SecretUser("Sergey", "secret-1", "Tampa"),
-        SecretUser("Ada", "secret-2", "London"),
+        SecretUser { "Sergey", "secret-1", "Tampa" },
+        SecretUser { "Ada", "secret-2", "London" },
     )
     for { name as userName, location as userLocation } <- users {
         println("for named plain", userName, userLocation)

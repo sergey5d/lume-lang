@@ -10,8 +10,8 @@ use crate::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
         ElseBranch, ElseExprBranch, Expr, ForBinding, FunctionDecl, IfConditionClause, IfStmt,
         ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase, MatchCaseBody, MatchStmt,
-        MethodDecl, Pattern, PatternBindingKind, PatternBindingStmt, Program, Stmt, TypeDecl,
-        TypeKind, TypeMember, TypeRef, Visibility,
+        MethodDecl, Param, Pattern, PatternBindingKind, PatternBindingStmt, Program, Stmt,
+        TypeDecl, TypeKind, TypeMember, TypeRef, Visibility,
     },
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, collect_module_order,
@@ -232,6 +232,7 @@ struct ParamSig {
     name: String,
     ty: Ty,
     variadic: bool,
+    has_initializer: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -714,6 +715,9 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .map(|value| self.ty_from_type_ref(value))
                 .unwrap_or(Ty::Unknown);
+            if let Some(initializer) = &param.initializer {
+                self.check_param_initializer(param, &ty, initializer);
+            }
             self.define_local(&param.name, ty, false);
         }
         let actual = self.check_callable_body(&function.body);
@@ -935,12 +939,16 @@ impl<'a> Checker<'a> {
         self.current_method = Some(method.name.clone());
         self.push_scope();
         self.define_local("this", self.owner_self_ty(owner), false);
+        self.check_default_param_order(&method.params, method.name == "new");
         for param in &method.params {
             let ty = param
                 .ty
                 .as_ref()
                 .map(|value| self.ty_from_type_ref(value))
                 .unwrap_or(Ty::Unknown);
+            if let Some(initializer) = &param.initializer {
+                self.check_param_initializer(param, &ty, initializer);
+            }
             self.define_local(&param.name, ty, false);
         }
         if let Some(body) = &method.body {
@@ -976,6 +984,48 @@ impl<'a> Checker<'a> {
                 .map(|name| Ty::TypeParam(name.clone()))
                 .collect(),
         )
+    }
+
+    fn check_default_param_order(&mut self, params: &[Param], is_constructor: bool) {
+        let mut seen_default = false;
+        for param in params {
+            if param.initializer.is_some() {
+                seen_default = true;
+            } else if seen_default {
+                self.add_error(
+                    "invalid_constructor_default",
+                    if is_constructor {
+                        "constructor parameters without defaults cannot follow defaulted parameters"
+                    } else {
+                        "parameters without defaults cannot follow defaulted parameters"
+                    },
+                    param.span,
+                );
+            }
+        }
+    }
+
+    fn check_param_initializer(&mut self, param: &Param, expected: &Ty, initializer: &Expr) {
+        let actual = self.check_expr_against(initializer, expected);
+        self.require_assignable(
+            &actual,
+            expected,
+            initializer.span(),
+            "invalid_argument_type",
+            format!(
+                "default value for '{}' has type '{}' but expects '{}'",
+                param.name,
+                actual.describe(),
+                expected.describe()
+            ),
+        );
+        if infer_literal_type(initializer).is_none() {
+            self.add_error(
+                "invalid_constructor_default",
+                "constructor parameter defaults must be literal constants for now",
+                initializer.span(),
+            );
+        }
     }
 
     fn check_field_initializer_expr(
@@ -2891,6 +2941,7 @@ impl<'a> Checker<'a> {
     ) -> Ty {
         if uses_brace_syntax
             && !self.brace_call_uses_structural_construction(callee)
+            && !self.brace_call_targets_current_constructor(callee)
             && !trailing_brace_call_has_lambda_arg(args)
         {
             self.add_error(
@@ -2940,6 +2991,7 @@ impl<'a> Checker<'a> {
                         name: String::new(),
                         ty,
                         variadic: false,
+                        has_initializer: false,
                     })
                     .collect::<Vec<_>>();
                 self.check_signature_call(&sig_params, &ret, &normalized_args, span)
@@ -3320,7 +3372,10 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
     ) -> Ty {
         let arrangement = arrange_param_args(params, args);
-        let min_required = params.iter().filter(|param| !param.variadic).count();
+        let min_required = params
+            .iter()
+            .filter(|param| !param.variadic && !param.has_initializer)
+            .count();
         let max_allowed = if params.last().is_some_and(|param| param.variadic) {
             usize::MAX
         } else {
@@ -3416,6 +3471,7 @@ impl<'a> Checker<'a> {
                             &owner,
                             args,
                             span,
+                            uses_brace_syntax,
                             structural_record_arg,
                             parenthesized_record_arg,
                         )
@@ -3431,6 +3487,7 @@ impl<'a> Checker<'a> {
                         &sig,
                         args,
                         span,
+                        uses_brace_syntax,
                         structural_record_arg,
                         parenthesized_record_arg,
                     ));
@@ -3440,6 +3497,7 @@ impl<'a> Checker<'a> {
                         &sig,
                         args,
                         span,
+                        uses_brace_syntax,
                         structural_record_arg,
                         parenthesized_record_arg,
                     ));
@@ -3449,6 +3507,7 @@ impl<'a> Checker<'a> {
                         &sig,
                         args,
                         span,
+                        uses_brace_syntax,
                         structural_record_arg,
                         parenthesized_record_arg,
                     ));
@@ -3467,6 +3526,7 @@ impl<'a> Checker<'a> {
                             &sig,
                             args,
                             span,
+                            uses_brace_syntax,
                             structural_record_arg,
                             parenthesized_record_arg,
                         ));
@@ -3476,6 +3536,7 @@ impl<'a> Checker<'a> {
                             &sig,
                             args,
                             span,
+                            uses_brace_syntax,
                             structural_record_arg,
                             parenthesized_record_arg,
                         ));
@@ -3625,6 +3686,7 @@ impl<'a> Checker<'a> {
         sig: &TypeSig,
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
+        uses_brace_syntax: bool,
         structural_record_arg: bool,
         parenthesized_record_arg: bool,
     ) -> Ty {
@@ -3635,6 +3697,18 @@ impl<'a> Checker<'a> {
                 .map(|name| Ty::TypeParam(name.clone()))
                 .collect(),
         );
+
+        if sig.kind == TypeKind::Class && !uses_brace_syntax {
+            self.add_error(
+                "no_matching_overload",
+                format!(
+                    "class '{}' uses brace construction; write '{} {{ ... }}'",
+                    sig.name, sig.name
+                ),
+                span,
+            );
+            return ret;
+        }
 
         if parenthesized_record_arg {
             self.add_error(
@@ -3648,30 +3722,18 @@ impl<'a> Checker<'a> {
             return ret;
         }
 
+        let explicit_constructor_args;
+        let args = if structural_record_arg && sig.methods.contains_key("new") {
+            explicit_constructor_args = brace_record_constructor_args(args).unwrap_or_default();
+            explicit_constructor_args.as_slice()
+        } else {
+            args
+        };
+
         if structural_record_arg {
-            if let Some(constructors) = sig.methods.get("new") {
-                if constructors
-                    .iter()
-                    .all(|ctor| ctor.visibility == Visibility::Hidden)
-                {
-                    let help = self.hidden_constructor_factory_help(&sig.name, args);
-                    self.diagnostics
-                        .push(typecheck_diagnostics::hidden_field_constructor(
-                            span, &sig.name, help,
-                        ));
-                } else {
-                    self.add_error(
-                        "no_matching_overload",
-                        format!(
-                            "class '{}' cannot use brace-based construction because it defines explicit constructors",
-                            sig.name
-                        ),
-                        span,
-                    );
-                }
-                return ret;
+            if !sig.methods.contains_key("new") {
+                return self.check_record_constructor_conversion(sig, &ret, &args[0].value, span);
             }
-            return self.check_record_constructor_conversion(sig, &ret, &args[0].value, span);
         }
 
         if let Some(overloads) = sig.methods.get("new") {
@@ -3690,7 +3752,7 @@ impl<'a> Checker<'a> {
                         ty: param.ty.clone(),
                         mutable: false,
                         hidden: false,
-                        has_initializer: false,
+                        has_initializer: param.has_initializer,
                     })
                     .collect::<Vec<_>>();
                 return self.check_constructor_signature(&params, &ret, args, span);
@@ -3701,14 +3763,11 @@ impl<'a> Checker<'a> {
                 .cloned()
                 .collect::<Vec<_>>();
             if self.choose_overload(&hidden, args).is_some() {
-                self.add_error(
-                    "private_access",
-                    format!(
-                        "cannot access private constructor of class '{}' outside class '{}'",
-                        sig.name, sig.name
-                    ),
-                    span,
-                );
+                let help = self.hidden_constructor_factory_help(&sig.name, args);
+                self.diagnostics
+                    .push(typecheck_diagnostics::hidden_field_constructor(
+                        span, &sig.name, help,
+                    ));
                 return ret;
             }
             self.add_error(
@@ -3730,7 +3789,7 @@ impl<'a> Checker<'a> {
         self.add_error(
             "no_matching_overload",
             format!(
-                "class '{}' does not have an implicit '()' constructor; use '{} {{ ... }}' or define 'new'",
+                "class '{}' cannot be constructed with empty braces; use '{} {{ ... }}' or define 'new'",
                 sig.name, sig.name
             ),
             span,
@@ -3988,14 +4047,38 @@ impl<'a> Checker<'a> {
 
     fn normalize_trailing_brace_call_args(
         &self,
-        _callee: &Expr,
+        callee: &Expr,
         args: &[crate::ast::CallArg],
-        _uses_brace_syntax: bool,
+        uses_brace_syntax: bool,
     ) -> Vec<crate::ast::CallArg> {
+        if uses_brace_syntax
+            && (self.brace_call_targets_explicit_constructor(callee)
+                || self.brace_call_targets_current_constructor(callee))
+        {
+            if let Some(args) = brace_record_constructor_args(args) {
+                return args;
+            }
+        }
         args.to_vec()
     }
 
     fn brace_call_uses_structural_construction(&self, callee: &Expr) -> bool {
+        self.brace_call_type_sig(callee)
+            .is_some_and(|sig| sig.kind == TypeKind::Class)
+    }
+
+    fn brace_call_targets_explicit_constructor(&self, callee: &Expr) -> bool {
+        self.brace_call_type_sig(callee)
+            .is_some_and(|sig| sig.kind == TypeKind::Class && sig.methods.contains_key("new"))
+    }
+
+    fn brace_call_targets_current_constructor(&self, callee: &Expr) -> bool {
+        matches!(callee, Expr::Identifier { name, .. } if name == "new")
+            && self.current_method.as_deref() == Some("new")
+            && self.current_owner.is_some()
+    }
+
+    fn brace_call_type_sig(&self, callee: &Expr) -> Option<TypeSig> {
         let class_sig = match callee {
             Expr::Identifier { name, .. } => self
                 .lookup_type_local(name)
@@ -4010,7 +4093,7 @@ impl<'a> Checker<'a> {
             _ => None,
         };
 
-        class_sig.is_some_and(|sig| sig.kind == TypeKind::Class)
+        class_sig
     }
 
     fn static_member_value_type(&self, receiver: &Expr, name: &str, expected: &Ty) -> Option<Ty> {
@@ -4584,6 +4667,7 @@ impl<'a> Checker<'a> {
                                     name: param.name,
                                     ty: substitute_type(&param.ty, &subst),
                                     variadic: param.variadic,
+                                    has_initializer: param.has_initializer,
                                 })
                                 .collect(),
                             ret: substitute_type(&method.ret, &subst),
@@ -5372,6 +5456,7 @@ fn function_sig_from_function(
                     .map(|ty| convert_type_ref(ty, &type_params))
                     .unwrap_or(Ty::Unknown),
                 variadic: param.variadic,
+                has_initializer: param.initializer.is_some(),
             })
             .collect(),
         ret: function
@@ -5402,6 +5487,7 @@ fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -
                     .map(|ty| convert_type_ref(ty, &type_params))
                     .unwrap_or(Ty::Unknown),
                 variadic: param.variadic,
+                has_initializer: param.initializer.is_some(),
             })
             .collect(),
         ret: method
@@ -5545,6 +5631,7 @@ fn convert_type_ref(reference: &TypeRef, type_params: &HashSet<String>) -> Ty {
 
 fn infer_literal_type(expr: &Expr) -> Option<Ty> {
     match expr {
+        Expr::Group { inner, .. } => infer_literal_type(inner),
         Expr::Integer { .. } => Some(Ty::int()),
         Expr::Float { .. } => Some(Ty::float()),
         Expr::String { .. } => Some(Ty::str()),
@@ -5628,7 +5715,9 @@ fn arrange_param_args<'a>(
     let missing_required = params
         .iter()
         .enumerate()
-        .filter(|(index, param)| !param.variadic && slots[*index].is_empty())
+        .filter(|(index, param)| {
+            !param.variadic && !param.has_initializer && slots[*index].is_empty()
+        })
         .count();
 
     ArgArrangement {
@@ -5695,6 +5784,35 @@ fn has_single_record_literal_arg(args: &[crate::ast::CallArg]) -> bool {
             value: Expr::RecordLiteral { .. },
             ..
         }]
+    )
+}
+
+fn brace_record_constructor_args(args: &[crate::ast::CallArg]) -> Option<Vec<crate::ast::CallArg>> {
+    let [
+        crate::ast::CallArg {
+            name: None,
+            value: Expr::RecordLiteral { fields, values, .. },
+            ..
+        },
+    ] = args
+    else {
+        return None;
+    };
+
+    if !fields.is_empty() {
+        return Some(fields.clone());
+    }
+
+    Some(
+        values
+            .iter()
+            .map(|value| crate::ast::CallArg {
+                name: None,
+                ty: None,
+                span: value.span(),
+                value: value.clone(),
+            })
+            .collect(),
     )
 }
 
@@ -6072,7 +6190,7 @@ def main() Int {
     }
 
     #[test]
-    fn rejects_implicit_paren_class_constructor_without_new() {
+    fn rejects_parenthesized_class_constructor_call() {
         let program = parse_inline(
             r#"
 class User {
@@ -6086,16 +6204,17 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(
-            result.diagnostics.iter().any(|diag| diag
-                .message
-                .contains("does not have an implicit '()' constructor")),
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("uses brace construction")),
             "{:#?}",
             result.diagnostics
         );
     }
 
     #[test]
-    fn allows_implicit_empty_paren_constructor_when_all_fields_initialized() {
+    fn allows_implicit_empty_brace_constructor_when_all_fields_initialized() {
         let program = parse_inline(
             r#"
 class OrderManager {
@@ -6105,7 +6224,7 @@ class OrderManager {
 }
 
 def main() Unit {
-    _ OrderManager = OrderManager()
+    _ OrderManager = OrderManager {}
 }
 "#,
         );
@@ -6504,7 +6623,7 @@ def main(source Either[Int, Int]) Either[Str, Str] {
     }
 
     #[test]
-    fn rejects_brace_construction_when_explicit_new_exists() {
+    fn allows_brace_call_when_explicit_new_exists() {
         let program = parse_inline(
             r#"
 class User {
@@ -6512,7 +6631,9 @@ class User {
 }
 
 impl User {
-    def new(name Str) {
+    new {
+        name Str
+    } {
         this.name = name
     }
 }
@@ -6523,14 +6644,36 @@ def main() Unit {
 "#,
         );
         let result = check_program(&program);
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diag| diag.message.contains("cannot use brace-based construction")),
-            "{:#?}",
-            result.diagnostics
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_defaulted_constructor_parameters() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+    age Int
+}
+
+impl User {
+    new {
+        name Str
+        age Int = 0
+    } {
+        this.name = name
+        this.age = age
+    }
+}
+
+def main() Unit {
+    _ User = User { "Ada" }
+    _ User = User { age: 12, name: "Ben" }
+}
+"#,
         );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]
@@ -6542,13 +6685,15 @@ class User {
 }
 
 impl User {
-    hidden def new(name Str) {
+    hidden new {
+        name Str
+    } {
         this.name = name
     }
 }
 
 impl single User {
-    def create(name Str) User = User(name)
+    def create(name Str) User = User { name: name }
 }
 
 def main() Unit {
@@ -6584,14 +6729,17 @@ class Counter {
 }
 
 impl Counter {
-    def new(count Int, name Str) {
+    new {
+        count Int
+        name Str
+    } {
         this.count = count
         this.name = name
     }
 }
 
 def main() Unit {
-    _ Counter = Counter(1, "Ada")
+    _ Counter = Counter { 1, "Ada" }
 }
 "#,
         );
@@ -6608,7 +6756,9 @@ class Counter {
 }
 
 impl Counter {
-    def new(count Int) {
+    new {
+        count Int
+    } {
         this.count := count
     }
 }
@@ -6642,9 +6792,10 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(
-            result.diagnostics.iter().any(|diag| diag
-                .message
-                .contains("does not accept anonymous record arguments in '(...)'")),
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("uses brace construction")),
             "{:#?}",
             result.diagnostics
         );
@@ -6846,7 +6997,11 @@ class SecretUser {
 }
 
 impl SecretUser {
-    def new(name Str, token Str, location Str) {
+    new {
+        name Str
+        token Str
+        location Str
+    } {
         this.name = name
         this.token = token
         this.location = location
@@ -6854,7 +7009,7 @@ impl SecretUser {
 }
 
 def main() Str {
-    let { location, name } = SecretUser("Sergey", "secret", "Tampa")
+    let { location, name } = SecretUser { "Sergey", "secret", "Tampa" }
     return name + " from " + location
 }
 "#,

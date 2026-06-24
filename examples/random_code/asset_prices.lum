@@ -21,7 +21,8 @@ class AssetPrices {
 }
 
 impl AssetPrices {
-    def new() {
+    new {
+    } {
         this.asset2PriceMap = this.makePrices()
     }
 
@@ -108,7 +109,7 @@ def main() {
         case None => ()
     }
 
-    prices = AssetPrices()
+    prices = AssetPrices {}
 
     results = prices.findPrice("XTZ", "USD", Set("XTZ"), [])
 

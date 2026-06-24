@@ -1221,6 +1221,21 @@ impl<'a> Interpreter<'a> {
         if function.params.len() == 1 && args.len() > 1 {
             return Ok(vec![Value::Tuple(args)]);
         }
+        if args.len() < function.params.len()
+            && function.param_defaults[args.len()..]
+                .iter()
+                .all(Option::is_some)
+        {
+            let mut normalized = args;
+            for default in &function.param_defaults[normalized.len()..] {
+                let value = default
+                    .as_ref()
+                    .map(|constant| self.constant_value(constant))
+                    .unwrap_or(Value::Unit);
+                normalized.push(value);
+            }
+            return Ok(normalized);
+        }
         Err(self.runtime_error(
             span,
             format!(
@@ -2174,11 +2189,37 @@ impl<'a> Interpreter<'a> {
 
         if structural {
             if has_explicit_constructor {
+                let constructor_args = match args.as_slice() {
+                    [Value::Record(values)] => values
+                        .borrow()
+                        .iter()
+                        .map(|(_, value)| value.clone())
+                        .collect::<Vec<_>>(),
+                    [Value::Tuple(values)] => values.clone(),
+                    _ => {
+                        return Err(self.runtime_error(
+                            span,
+                            format!(
+                                "brace construction for '{}' expects named or positional constructor fields",
+                                type_name
+                            ),
+                        ));
+                    }
+                };
+                if let Some(init) =
+                    self.find_method_overload_for_kind(type_name, ty.kind, "new", &constructor_args)
+                {
+                    let receiver = object.clone();
+                    let _ =
+                        self.call_function(init, Some(receiver), None, constructor_args, span)?;
+                    return Ok(Some(object));
+                }
                 return Err(self.runtime_error(
                     span,
                     format!(
-                        "class '{}' cannot use brace-based construction because it defines explicit constructors",
-                        type_name
+                        "no constructor overload for class '{}' matches {} arguments",
+                        type_name,
+                        constructor_args.len()
                     ),
                 ));
             }
@@ -2239,7 +2280,7 @@ impl<'a> Interpreter<'a> {
         Err(self.runtime_error(
             span,
             format!(
-                "class '{}' does not have an implicit '()' constructor; use '{} {{ ... }}' or define 'new'",
+                "class '{}' cannot be constructed with empty braces; use '{} {{ ... }}' or define 'new'",
                 type_name, type_name
             ),
         ))
@@ -3111,8 +3152,14 @@ impl<'a> Interpreter<'a> {
             let Some(function) = self.program.function(*candidate) else {
                 continue;
             };
+            let default_suffix_matches = args.len() <= function.params.len()
+                && function.param_defaults[args.len()..]
+                    .iter()
+                    .all(Option::is_some);
             let mut score = if function.params.len() == args.len() {
                 10
+            } else if default_suffix_matches {
+                8
             } else if function.params.len() == 1 && args.len() > 1 {
                 let Some(local) = function.locals.get(function.params[0].0) else {
                     continue;
@@ -3133,8 +3180,8 @@ impl<'a> Interpreter<'a> {
                 continue;
             };
 
-            if function.params.len() == args.len() {
-                for (param, arg) in function.params.iter().zip(args) {
+            if function.params.len() >= args.len() {
+                for (param, arg) in function.params.iter().take(args.len()).zip(args) {
                     let Some(local) = function.locals.get(param.0) else {
                         continue;
                     };
@@ -4541,7 +4588,9 @@ mod tests {
             }
 
             impl Counter {
-                def new(count Int) {
+                new {
+                    count Int
+                } {
                     this.count = count
                 }
 
@@ -4554,7 +4603,7 @@ mod tests {
             seed Int = 1
 
             def run() Int {
-                c Counter = Counter(seed)
+                c Counter = Counter { seed }
                 return c.bump(2)
             }
             "#,
@@ -4588,6 +4637,39 @@ mod tests {
     }
 
     #[test]
+    fn runs_defaulted_constructor_parameters() {
+        let program = lower_inline(
+            r#"
+            class User {
+                name Str
+                age Int
+            }
+
+            impl User {
+                new {
+                    name Str
+                    age Int = 0
+                } {
+                    this.name = name
+                    this.age = age
+                }
+            }
+
+            def main() Unit {
+                ada User = User { "Ada" }
+                ben User = User { age: 12, name: "Ben" }
+                OS.println(ada.name, ada.age)
+                OS.println(ben.name, ben.age)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "Ada 0\nBen 12\n");
+    }
+
+    #[test]
     fn runs_collection_methods_and_core_operator_methods() {
         let program = lower_inline(
             r#"
@@ -4596,13 +4678,16 @@ mod tests {
             }
 
             impl Vec {
-                def new(left Int, right Int) {
+                new {
+                    left Int
+                    right Int
+                } {
                     this.items = Array(left, right)
                 }
 
                 def [](index Int) Int = this.items[index]
-                def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
-                def -() Vec = Vec(-this[0], -this[1])
+                def +(other Vec) Vec = Vec { this[0] + other[0], this[1] + other[1] }
+                def -() Vec = Vec { -this[0], -this[1] }
             }
 
             def main() Unit {
@@ -4619,8 +4704,8 @@ mod tests {
                 pairs.put("b", 2)
                 OS.println(pairs.size())
 
-                left Vec = Vec(5, 6)
-                OS.println((left + Vec(1, 2))[1])
+                left Vec = Vec { 5, 6 }
+                OS.println((left + Vec { 1, 2 })[1])
                 OS.println((-left)[0])
 
                 ints = Array.ofInt(2)
@@ -4659,7 +4744,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_implicit_empty_paren_constructor_when_all_fields_initialized() {
+    fn runs_implicit_empty_brace_constructor_when_all_fields_initialized() {
         let program = lower_inline(
             r#"
             class OrderManager {
@@ -4675,7 +4760,7 @@ mod tests {
             }
 
             def main() Int {
-                manager = OrderManager()
+                manager = OrderManager {}
                 return manager.current() + manager.queued() + manager.entries()
             }
             "#,
@@ -4762,7 +4847,11 @@ mod tests {
             }
 
             impl SecretUser {
-                def new(name Str, token Str, location Str) {
+                new {
+                    name Str
+                    token Str
+                    location Str
+                } {
                     this.name = name
                     this.token = token
                     this.location = location
@@ -4771,8 +4860,8 @@ mod tests {
 
             def main() Unit {
                 users = List(
-                    SecretUser("Sergey", "secret-1", "Tampa"),
-                    SecretUser("Ada", "secret-2", "London"),
+                    SecretUser { "Sergey", "secret-1", "Tampa" },
+                    SecretUser { "Ada", "secret-2", "London" },
                 )
 
                 for { name as userName, location as userLocation } <- users {
@@ -5351,13 +5440,14 @@ $name
             }
 
             impl Portfolio {
-                def new() {
+                new {
+                } {
                     this.total = this.assetCount + 1
                 }
             }
 
             def main() Unit {
-                portfolio = Portfolio()
+                portfolio = Portfolio {}
                 OS.println(portfolio.assets.makeStr("-"))
                 OS.println(portfolio.assetCount)
                 OS.println(portfolio.total)

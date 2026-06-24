@@ -16,7 +16,10 @@ class SlidingWindowLimiter {
 }
 
 impl SlidingWindowLimiter {
-    def new(capacity Int, windowSize Int) {
+    new {
+        capacity Int
+        windowSize Int
+    } {
         this.capacity = capacity
         this.windowSize = windowSize
         this.accepted = []
@@ -67,7 +70,7 @@ impl SlidingWindowLimiter {
 
 def main() Unit {
     # Capacity 5 over a 5-tick sliding window.
-    bucket = SlidingWindowLimiter(5, 5)
+    bucket = SlidingWindowLimiter { 5, 5 }
 
     # Each request carries named fields instead of a positional tuple.
     requests List[{ time Int, cost Int }] = List(

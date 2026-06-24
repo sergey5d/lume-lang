@@ -394,7 +394,7 @@ impl<'a> Lowerer<'a> {
         if let Some((this_name, this_ty)) = this_local {
             function.add_local(this_name, this_ty, false, ir::LocalKind::Capture);
         }
-        for param in params {
+        for (index, param) in params.iter().enumerate() {
             function.add_param(
                 param.name.clone(),
                 param
@@ -402,6 +402,13 @@ impl<'a> Lowerer<'a> {
                     .as_ref()
                     .map(lower_type_ref)
                     .unwrap_or(ir::Type::Unknown),
+            );
+            function.set_param_default(
+                index,
+                param
+                    .initializer
+                    .as_ref()
+                    .and_then(|initializer| lower_field_initializer_constant(Some(initializer))),
             );
         }
         self.program.add_function(function)
@@ -3249,11 +3256,49 @@ impl<'a> FunctionLowerer<'a> {
 
     fn normalize_trailing_brace_call_args(
         &self,
-        _callee: &Expr,
+        callee: &Expr,
         args: &[core::CallArg],
-        _style: core::CallStyle,
+        style: core::CallStyle,
     ) -> Vec<core::CallArg> {
+        if style == core::CallStyle::Brace
+            && (self.brace_call_targets_explicit_constructor(callee)
+                || self.brace_call_targets_current_constructor(callee))
+        {
+            if let Some(args) = brace_record_constructor_args(args) {
+                return args;
+            }
+        }
         args.to_vec()
+    }
+
+    fn brace_call_targets_explicit_constructor(&self, callee: &Expr) -> bool {
+        let Some(path) = expr_path(callee) else {
+            return false;
+        };
+        if path.len() != 1 {
+            return false;
+        }
+        self.program
+            .types
+            .iter()
+            .find(|ty| ty.name == path[0] && ty.kind == ast::TypeKind::Class)
+            .is_some_and(|ty| {
+                ty.methods.iter().copied().any(|id| {
+                    self.program
+                        .function(id)
+                        .is_some_and(|function| function.name == "new")
+                })
+            })
+    }
+
+    fn brace_call_targets_current_constructor(&self, callee: &Expr) -> bool {
+        let Some(path) = expr_path(callee) else {
+            return false;
+        };
+        path.len() == 1
+            && path[0] == "new"
+            && self.function().name == "new"
+            && matches!(self.function().kind, ir::FunctionKind::Method { .. })
     }
 
     fn reorder_call_args<'b>(
@@ -3888,6 +3933,35 @@ fn call_uses_structural_record_arg(args: &[core::CallArg], style: core::CallStyl
                 ..
             }]
         )
+}
+
+fn brace_record_constructor_args(args: &[core::CallArg]) -> Option<Vec<core::CallArg>> {
+    let [
+        core::CallArg {
+            name: None,
+            value: Expr::RecordLiteral { fields, values, .. },
+            ..
+        },
+    ] = args
+    else {
+        return None;
+    };
+
+    if !fields.is_empty() {
+        return Some(fields.clone());
+    }
+
+    Some(
+        values
+            .iter()
+            .map(|value| core::CallArg {
+                name: None,
+                ty: None,
+                span: value.span(),
+                value: value.clone(),
+            })
+            .collect(),
+    )
 }
 
 fn param_names_from_function(function: &ir::Function) -> Vec<String> {

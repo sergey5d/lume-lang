@@ -253,7 +253,9 @@ class Counter {
 }
 
 impl Counter {
-    def new(count Int) {
+    new {
+        count Int
+    } {
         this.count = count
     }
 
@@ -266,6 +268,32 @@ impl Counter {
     assert_eq!(program.items.len(), 2);
     assert!(matches!(program.items[0], Item::Type(_)));
     assert!(matches!(program.items[1], Item::Impl(_)));
+}
+
+#[test]
+fn parses_expression_bodied_constructor() {
+    let result = parse(
+        r#"
+class User {
+    name Str
+}
+
+impl User {
+    new {
+        name Str
+    } = new { name }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Impl(block) = &program.items[1] else {
+        panic!("expected impl block");
+    };
+    assert!(matches!(
+        block.methods[0].body,
+        Some(CallableBody::Expr(Expr::Call { .. }))
+    ));
 }
 
 #[test]
@@ -1776,6 +1804,59 @@ def main() Unit {
         }),
         "{:#?}",
         result.diagnostics
+    );
+}
+
+#[test]
+fn parses_newline_continuation_after_operator_or_dot() {
+    let result = parse(
+        r#"
+def main() Unit {
+    sum Int = 1 +
+        2
+    size Int = "haha".
+        size()
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn rejects_newline_continuation_before_operator_or_dot() {
+    let leading_operator = parse(
+        r#"
+def main() Unit {
+    sum Int = 1
+        + 2
+}
+"#,
+    );
+    assert!(
+        leading_operator
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "expected_expression"),
+        "{:#?}",
+        leading_operator.diagnostics
+    );
+
+    let leading_dot = parse(
+        r#"
+def main() Unit {
+    value Str = "haha"
+    size Int = value
+        .size()
+}
+"#,
+    );
+    assert!(
+        leading_dot
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "expected_expression"),
+        "{:#?}",
+        leading_dot.diagnostics
     );
 }
 

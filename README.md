@@ -56,7 +56,9 @@ class Counter {
 }
 
 impl Counter {
-    def new(count Int) {
+    new {
+        count Int
+    } {
         this.count = count
     }
 
@@ -67,7 +69,7 @@ impl Counter {
 }
 
 def main() Int {
-    counter Counter = Counter(1)
+    counter Counter = Counter { 1 }
     counter.inc()
 }
 ```

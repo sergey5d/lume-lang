@@ -17,7 +17,10 @@ class Profile {
 }
 
 impl Profile {
-    def new(name Str, visits Int) {
+    new {
+        name Str
+        visits Int
+    } {
         this.name = name
         this.visits = 0
         this.visits = visits
@@ -38,7 +41,9 @@ class Stock {
 }
 
 impl Stock {
-    def new(count Int) {
+    new {
+        count Int
+    } {
         this.count = count
     }
 
@@ -50,7 +55,10 @@ class Slots {
 }
 
 impl Slots {
-    def new(left Int, right Int) {
+    new {
+        left Int
+        right Int
+    } {
         this.items = Array(left, right)
     }
 
@@ -60,15 +68,15 @@ impl Slots {
 }
 
 def main() Unit {
-    profile = Profile("Ada", 2)
+    profile = Profile { "Ada", 2 }
     println("profile", profile.name, profile.visitCount(), profile.isActive())
 
     profile.bump()
     println("profile bumped", profile.visitCount())
 
-    stock = Stock(7)
+    stock = Stock { 7 }
     println("stock", stock.value())
 
-    slots = Slots(10, 20)
+    slots = Slots { 10, 20 }
     println("slots", slots.left(), slots.right())
 }

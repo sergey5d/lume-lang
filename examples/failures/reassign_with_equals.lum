@@ -12,5 +12,5 @@ impl Counter {
 }
 
 def main() Unit {
-    Counter().bump()
+    Counter {}.bump()
 }

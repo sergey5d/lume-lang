@@ -11,7 +11,8 @@
 # - positional braces follow public field order
 # - trailing public defaults may be omitted
 # - hidden defaulted fields may trail public fields and stay out of the shape
-# - any explicit `new` disables brace-based construction for that class
+# - explicit `new` uses the same brace call syntax as structural construction
+# - explicit `new` can define defaulted trailing parameters
 
 class Profile {
     name Str
@@ -42,12 +43,17 @@ class A {
 }
 
 impl A {
-    def new(age Int, name Str) {
+    new {
+        age Int
+        name Str
+    } {
         this.age = age
         this.name = name
     }
 
-    def new(maturity Int) = new(maturity - 15, "5")
+    new {
+        maturity Int
+    } = new { maturity - 15, "5" }
 
     def trueAge() Int = this.age
 
@@ -63,7 +69,10 @@ class B {
 }
 
 impl B {
-    def new(age Int, name Str) {
+    new {
+        age Int
+        name Str = "Bobby"
+    } {
         this.age = age
         this.name = name
         this.unassigned = 1.1
@@ -84,8 +93,8 @@ def main() Unit {
     hiddenDefault Profile = Profile { "Liam", 8 }
     hiddenThird HiddenTail = HiddenTail { "Ada", 4 }
 
-    aFromAlt A = A(maturity = 21)
-    bManual B = B(5, "Bobby")
+    aFromAlt A = A { maturity: 21 }
+    bManual B = B { 5 }
 
     println("brace named", named.name, named.age, named.city)
     println("brace positional", positional.name, positional.age, positional.city)

@@ -53,6 +53,7 @@ impl<'a> Parser<'a> {
                 params.push(Param {
                     name,
                     ty,
+                    initializer: None,
                     variadic,
                     span: start.cover(end),
                 });

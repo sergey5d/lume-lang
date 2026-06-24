@@ -495,7 +495,19 @@ impl<'a> Parser<'a> {
             }
             let annotations = self.parse_annotations()?;
             let visibility = self.parse_visibility();
-            let method = self.parse_method_decl(annotations, visibility, false)?;
+            let method = if self.at(TokenKind::Identifier) && self.current().lexeme == "new" {
+                self.parse_constructor_decl(annotations, visibility)?
+            } else {
+                let method = self.parse_method_decl(annotations, visibility, false)?;
+                if method.name == "new" {
+                    self.diagnostics.push(Diagnostic::error(
+                        "old_constructor_syntax",
+                        "constructors use `new { params } { body }`; replace `def new(...)` with `new { ... } { ... }`",
+                        method.span,
+                    ));
+                }
+                method
+            };
             methods.push(method);
             self.skip_newlines();
         }
@@ -506,6 +518,75 @@ impl<'a> Parser<'a> {
             methods,
             span: start.cover(end),
         })
+    }
+
+    pub(super) fn parse_constructor_decl(
+        &mut self,
+        annotations: Vec<Annotation>,
+        visibility: Visibility,
+    ) -> Option<MethodDecl> {
+        let (name, start) = self.expect_identifier("expected constructor name")?;
+        if name != "new" {
+            self.error_at_current("expected_constructor", "expected 'new'");
+            return None;
+        }
+        let params = self.parse_constructor_param_block()?;
+        let body = self.parse_callable_body()?;
+        let end = body.span();
+        Some(MethodDecl {
+            annotations,
+            visibility,
+            name,
+            type_params: Vec::new(),
+            params,
+            return_type: None,
+            body: Some(body),
+            span: start.cover(end),
+        })
+    }
+
+    fn parse_constructor_param_block(&mut self) -> Option<Vec<Param>> {
+        self.consume(
+            TokenKind::LBrace,
+            "expected '{' before constructor parameters",
+        )?;
+        let mut params = Vec::new();
+        self.skip_newlines();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            let (name, start) = self.expect_identifier("expected constructor parameter name")?;
+            let ty = if self.can_start_type_ref() {
+                Some(self.parse_type_ref()?)
+            } else {
+                self.error_at_current("expected_type", "expected constructor parameter type");
+                return None;
+            };
+            let initializer = if self.match_token(TokenKind::Eq) {
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
+            let end = initializer
+                .as_ref()
+                .map(Expr::span)
+                .or_else(|| ty.as_ref().map(TypeRef::span))
+                .unwrap_or(start);
+            params.push(Param {
+                name,
+                ty,
+                initializer,
+                variadic: false,
+                span: start.cover(end),
+            });
+            self.skip_newlines();
+            if self.match_token(TokenKind::Comma) {
+                self.skip_newlines();
+            }
+        }
+        self.consume(
+            TokenKind::RBrace,
+            "expected '}' after constructor parameters",
+        )?;
+        Some(params)
     }
 
     pub(super) fn parse_method_decl(
