@@ -469,7 +469,7 @@ Constructors currently use `def new(...)`.
 - `new(...)` declares a constructor
 - `new(...)` inside another constructor delegates to another constructor of the same class
 - `this` is the instance receiver
-- instance fields must be accessed through `this.`, for example `this.age`
+- instance fields on classes, enums, and singles must be accessed through `this.`, for example `this.age`
 
 ```txt
 class Person {
