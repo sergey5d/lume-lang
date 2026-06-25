@@ -6,6 +6,6 @@ class Box[T] {
 }
 
 def main() Option[Int] =
-    partial Box(7) {
+    partial match Box(7) {
         case _ Box[Int] => 1
     }

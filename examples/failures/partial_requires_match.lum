@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*expected 'match' after 'partial'.*
+
+def main() Option[Int] =
+    partial Some(1) {
+        case Some(x) => x
+    }

@@ -3,12 +3,16 @@
 # profile bumped 3
 # stock 7
 # slots 10 20
+# account Ada 10
+# account Bob 11
+# account Eve 0
 
 # Constructor rule summary:
 # - direct `this.field = ...` inside `new` means constructor initialization
 # - constructor setup may write the same mutable field more than once with `=`
 # - later field mutation uses `:=`
 # - nested writes through an initialized field still use `:=`
+# - constructor parameters and constructor-call fields may be comma separated
 
 class Profile {
     name Str = "unknown"
@@ -67,6 +71,20 @@ impl Slots {
     def right() Int = this.items[1]
 }
 
+class Account {
+    name Str
+    age Int
+}
+
+impl Account {
+    new { name Str, age Int = 0 } {
+        this.name = name
+        this.age = age
+    }
+
+    def label() Str = this.name + " " + this.age
+}
+
 def main() Unit {
     profile = Profile { "Ada", 2 }
     println("profile", profile.name, profile.visitCount(), profile.isActive())
@@ -79,4 +97,11 @@ def main() Unit {
 
     slots = Slots { 10, 20 }
     println("slots", slots.left(), slots.right())
+
+    namedAccount = Account { name: "Ada", age: 10 }
+    positionalAccount = Account { "Bob", 11 }
+    defaultAccount = Account { name: "Eve" }
+    println("account", namedAccount.label())
+    println("account", positionalAccount.label())
+    println("account", defaultAccount.label())
 }

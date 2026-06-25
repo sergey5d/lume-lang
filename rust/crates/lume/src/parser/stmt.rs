@@ -811,7 +811,9 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_match_stmt(&mut self, partial: bool) -> Option<MatchStmt> {
         let start = if partial {
-            self.consume_keyword(Keyword::Partial, "expected 'partial'")?
+            let start = self.consume_keyword(Keyword::Partial, "expected 'partial'")?;
+            self.consume_keyword(Keyword::Match, "expected 'match' after 'partial'")?;
+            start
         } else {
             self.consume_keyword(Keyword::Match, "expected 'match'")?
         };

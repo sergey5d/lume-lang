@@ -2,5 +2,5 @@
 # expected end of expression, got CASE\("case" @ .*?\)
 
 def main() Option[Int] =
-    partial Some(1)
+    partial match Some(1)
         case Some(x) => x

@@ -5423,7 +5423,7 @@ $name
                 amount Amount = Amount { 42, "hello" }
                 pair PairBox = PairBox { 5, 9 }
                 values [MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3)]
-                partialMapped List[Option[Int]] = values.map(value -> partial value {
+                partialMapped List[Option[Int]] = values.map(value -> partial match value {
                     case SomeX(x) => x + 1
                 })
 

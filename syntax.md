@@ -635,10 +635,10 @@ options.map(value -> match value {
 })
 ```
 
-The same idea applies to `partial`:
+The same idea applies to `partial match`:
 
 ```txt
-options.map(value -> partial value {
+options.map(value -> partial match value {
     case SomeX(x) => x + 1
 })
 ```
@@ -1309,10 +1309,10 @@ result = match value {
 }
 ```
 
-Partial expression form:
+Partial match expression form:
 
 ```txt
-result Option[Int] = partial value {
+result Option[Int] = partial match value {
     case SomeX(x) => x
 }
 ```
@@ -1320,14 +1320,14 @@ result Option[Int] = partial value {
 Partial mapped through an explicit lambda:
 
 ```txt
-values.map(value -> partial value {
+values.map(value -> partial match value {
     case SomeX(x) => x + 1
 })
 ```
 
-`match` and `partial` always require a block of cases. Inline `match value: ...` shorthand is not supported.
+`match` and `partial match` always require a block of cases. Inline `match value: ...` shorthand is not supported.
 
-Every `match` and `partial` branch must start with `case`.
+Every `match` and `partial match` branch must start with `case`.
 
 Every case must have an explicit body after `=>`: an expression, `()` for Unit, or a block such as `{}`.
 
@@ -1342,7 +1342,7 @@ match value {
 }
 ```
 
-If no case matches, `partial` returns `None`.
+If no case matches, `partial match` returns `None`.
 
 Supported pattern families:
 
@@ -1368,7 +1368,7 @@ Generic arguments inside runtime type patterns are intentionally rejected for no
 Current notes:
 
 - enum exhaustiveness is checked
-- `partial` skips exhaustiveness checking and wraps the result in `Option[...]`
+- `partial match` skips exhaustiveness checking and wraps the result in `Option[...]`
 - bare singleton enum cases should still be written in qualified form when needed, for example `MaybeInt.NoneX`
 
 ## Destructuring

@@ -22,7 +22,7 @@ def main() Unit {
         case SomeX(x) => x + 1
         case NoneX => 0
     })
-    partialMapped List[Option[Int]] = options.map(value -> partial value {
+    partialMapped List[Option[Int]] = options.map(value -> partial match value {
         case SomeX(x) => x + 1
     })
 

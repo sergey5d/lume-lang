@@ -38,7 +38,7 @@ impl<'a> Parser<'a> {
         }
         if self.at_keyword(Keyword::Partial) {
             let start = self.consume_keyword(Keyword::Partial, "expected 'partial'")?;
-            return self.parse_match_expr_after_keyword(start, true);
+            return self.parse_partial_match_expr_after_partial(start);
         }
         if self.at_keyword(Keyword::For) {
             let start = self.consume_keyword(Keyword::For, "expected 'for'")?;
@@ -371,6 +371,11 @@ impl<'a> Parser<'a> {
             cases,
             span: start.cover(end),
         })
+    }
+
+    fn parse_partial_match_expr_after_partial(&mut self, start: Span) -> Option<Expr> {
+        self.consume_keyword(Keyword::Match, "expected 'match' after 'partial'")?;
+        self.parse_match_expr_after_keyword(start, true)
     }
 
     pub(super) fn parse_for_yield_expr_after_start(&mut self, start: Span) -> Option<Expr> {
@@ -1242,7 +1247,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Keyword(Keyword::Partial) => {
                 let start = self.consume_keyword(Keyword::Partial, "expected 'partial'")?;
-                self.parse_match_expr_after_keyword(start, true)
+                self.parse_partial_match_expr_after_partial(start)
             }
             TokenKind::Keyword(Keyword::For) => {
                 let start = self.consume_keyword(Keyword::For, "expected 'for'")?;

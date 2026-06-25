@@ -94,11 +94,11 @@
       "patterns": [
         {
           "name": "keyword.control.lume",
-          "match": "\\b(?:if|then|else|for|while|yield|partial|match|unwrap|return|break|continue|expect|is|try)\\b"
+          "match": "\\b(?:if|else|for|while|yield|partial|match|return|break|continue|expect|is|try|defer)\\b"
         },
         {
           "name": "keyword.declaration.lume",
-          "match": "\\b(?:def|class|record|enum|interface|object|impl|use|module|with|hidden|public|case|var|let)\\b"
+          "match": "\\b(?:def|new|class|record|enum|interface|object|single|impl|use|module|with|hidden|public|case|var|let)\\b"
         }
       ]
     },
@@ -122,7 +122,7 @@
       "patterns": [
         {
           "name": "meta.control.shorthand.lume",
-          "begin": "\\b(if|then|else|for|yield|match|partial|unwrap)\\b",
+          "begin": "\\b(if|else|for|yield)\\b",
           "beginCaptures": {
             "1": {
               "name": "keyword.control.lume"
@@ -183,6 +183,10 @@
         {
           "name": "keyword.operator.assignment.lume",
           "match": "<-|:=|="
+        },
+        {
+          "name": "keyword.operator.record.lume",
+          "match": ":<|:\\+"
         },
         {
           "name": "keyword.operator.comparison.lume",
