@@ -456,6 +456,16 @@ fn standalone_single_sig(name: &str) -> TypeSig {
     }
 }
 
+fn type_kind_label(kind: TypeKind) -> &'static str {
+    match kind {
+        TypeKind::Class => "class",
+        TypeKind::Record => "shape",
+        TypeKind::Object => "single",
+        TypeKind::Interface => "interface",
+        TypeKind::Enum => "enum",
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct World {
     modules: HashMap<PathBuf, ModuleInfo>,
@@ -748,6 +758,28 @@ impl<'a> Checker<'a> {
         for member in &decl.members {
             match member {
                 TypeMember::Field(field) => {
+                    if decl.kind == TypeKind::Record {
+                        if field.visibility == Visibility::Hidden {
+                            self.add_error(
+                                "invalid_shape_field",
+                                format!(
+                                    "shape '{}' cannot declare hidden field '{}'",
+                                    decl.name, field.name
+                                ),
+                                field.span,
+                            );
+                        }
+                        if field.mutable {
+                            self.add_error(
+                                "invalid_shape_field",
+                                format!(
+                                    "shape '{}' cannot declare mutable field '{}'",
+                                    decl.name, field.name
+                                ),
+                                field.span,
+                            );
+                        }
+                    }
                     if decl.kind == TypeKind::Enum {
                         if field.visibility == Visibility::Hidden {
                             self.add_error(
@@ -917,6 +949,17 @@ impl<'a> Checker<'a> {
         };
         self.push_type_params(type_sig.type_params.iter().map(String::as_str));
         for method in &block.methods {
+            if type_sig.kind == TypeKind::Record && method.name == "new" {
+                self.add_error(
+                    "invalid_shape_constructor",
+                    format!(
+                        "shape '{}' cannot declare custom constructors; use brace construction",
+                        type_sig.name
+                    ),
+                    method.span,
+                );
+                continue;
+            }
             self.check_method(method, &type_sig);
         }
         self.pop_type_params();
@@ -3874,12 +3917,13 @@ impl<'a> Checker<'a> {
                 .collect(),
         );
 
-        if sig.kind == TypeKind::Class && !uses_brace_syntax {
+        if matches!(sig.kind, TypeKind::Class | TypeKind::Record) && !uses_brace_syntax {
+            let label = type_kind_label(sig.kind);
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "class '{}' uses brace construction; write '{} {{ ... }}'",
-                    sig.name, sig.name
+                    "{} '{}' uses brace construction; write '{} {{ ... }}'",
+                    label, sig.name, sig.name
                 ),
                 span,
             );
@@ -3898,8 +3942,14 @@ impl<'a> Checker<'a> {
             return ret;
         }
 
+        let constructor_overloads = if sig.kind == TypeKind::Record {
+            None
+        } else {
+            sig.methods.get("new")
+        };
+
         let explicit_constructor_args;
-        let args = if structural_record_arg && sig.methods.contains_key("new") {
+        let args = if structural_record_arg && constructor_overloads.is_some() {
             explicit_constructor_args = brace_record_constructor_args(args).unwrap_or_default();
             explicit_constructor_args.as_slice()
         } else {
@@ -3907,12 +3957,12 @@ impl<'a> Checker<'a> {
         };
 
         if structural_record_arg {
-            if !sig.methods.contains_key("new") {
+            if constructor_overloads.is_none() {
                 return self.check_record_constructor_conversion(sig, &ret, &args[0].value, span);
             }
         }
 
-        if let Some(overloads) = sig.methods.get("new") {
+        if let Some(overloads) = constructor_overloads {
             let can_access_hidden = self.can_access_hidden_constructor(sig);
             let visible = overloads
                 .iter()
@@ -3949,7 +3999,8 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "no constructor overload for class '{}' matches {} arguments",
+                    "no constructor overload for {} '{}' matches {} arguments",
+                    type_kind_label(sig.kind),
                     sig.name,
                     args.len()
                 ),
@@ -3965,8 +4016,15 @@ impl<'a> Checker<'a> {
         self.add_error(
             "no_matching_overload",
             format!(
-                "class '{}' cannot be constructed with empty braces; use '{} {{ ... }}' or define 'new'",
-                sig.name, sig.name
+                "{} '{}' cannot be constructed with empty braces; use '{} {{ ... }}'{}",
+                type_kind_label(sig.kind),
+                sig.name,
+                sig.name,
+                if sig.kind == TypeKind::Record {
+                    ""
+                } else {
+                    " or define 'new'"
+                }
             ),
             span,
         );
@@ -4240,7 +4298,7 @@ impl<'a> Checker<'a> {
 
     fn brace_call_uses_structural_construction(&self, callee: &Expr) -> bool {
         self.brace_call_type_sig(callee)
-            .is_some_and(|sig| sig.kind == TypeKind::Class)
+            .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Record))
     }
 
     fn brace_call_targets_explicit_constructor(&self, callee: &Expr) -> bool {
@@ -5114,13 +5172,15 @@ impl<'a> Checker<'a> {
     ) -> Ty {
         let named_error = || {
             format!(
-                "class '{}' requires named brace fields that match the visible class shape",
+                "{} '{}' requires named brace fields that match the visible shape",
+                type_kind_label(sig.kind),
                 sig.name
             )
         };
         let positional_error = || {
             format!(
-                "class '{}' positional brace construction must match the public field order and may omit only trailing defaulted fields",
+                "{} '{}' positional brace construction must match the public field order and may omit only trailing defaulted fields",
+                type_kind_label(sig.kind),
                 sig.name
             )
         };
@@ -5136,7 +5196,8 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "class '{}' cannot be built from an anonymous record because it has private fields without initializers",
+                    "{} '{}' cannot be built from an anonymous record because it has private fields without initializers",
+                    type_kind_label(sig.kind),
                     sig.name
                 ),
                 span,
@@ -5160,7 +5221,8 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "no_matching_overload",
                     format!(
-                        "class '{}' named brace construction expects {}..{} visible fields, got {}",
+                        "{} '{}' named brace construction expects {}..{} visible fields, got {}",
+                        type_kind_label(sig.kind),
                         sig.name,
                         required_visible,
                         visible_fields.len(),
@@ -5180,8 +5242,10 @@ impl<'a> Checker<'a> {
                     self.add_error(
                         "no_matching_overload",
                         format!(
-                            "class '{}' has no visible field '{}' for named brace construction",
-                            sig.name, name
+                            "{} '{}' has no visible field '{}' for named brace construction",
+                            type_kind_label(sig.kind),
+                            sig.name,
+                            name
                         ),
                         arg.span,
                     );
@@ -5192,8 +5256,9 @@ impl<'a> Checker<'a> {
                     self.add_error(
                         "invalid_argument_type",
                         format!(
-                            "field '{}' in class '{}' expects '{}' but got '{}'",
+                            "field '{}' in {} '{}' expects '{}' but got '{}'",
                             field.name,
+                            type_kind_label(sig.kind),
                             sig.name,
                             field.ty.describe(),
                             actual.describe()
@@ -5215,8 +5280,10 @@ impl<'a> Checker<'a> {
                     self.add_error(
                         "no_matching_overload",
                         format!(
-                            "class '{}' named brace construction is missing required field '{}'",
-                            sig.name, field.name
+                            "{} '{}' named brace construction is missing required field '{}'",
+                            type_kind_label(sig.kind),
+                            sig.name,
+                            field.name
                         ),
                         span,
                     );
@@ -5235,7 +5302,8 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "class '{}' cannot use positional brace construction because private defaulted fields must come after all public fields",
+                    "{} '{}' cannot use positional brace construction because private defaulted fields must come after all public fields",
+                    type_kind_label(sig.kind),
                     sig.name
                 ),
                 span,
@@ -5258,8 +5326,9 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "invalid_argument_type",
                     format!(
-                        "positional field '{}' in class '{}' expects '{}' but got '{}'",
+                        "positional field '{}' in {} '{}' expects '{}' but got '{}'",
                         field.name,
+                        type_kind_label(sig.kind),
                         sig.name,
                         field.ty.describe(),
                         actual.describe()

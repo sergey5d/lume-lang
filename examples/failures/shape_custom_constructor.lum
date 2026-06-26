@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*shape 'Point' cannot declare custom constructors; use brace construction.*
+
+shape Point {
+    x Int
+}
+
+impl Point {
+    new {
+        x Int
+    } {
+        this.x = x
+    }
+}

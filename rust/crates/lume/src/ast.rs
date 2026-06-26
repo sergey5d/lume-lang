@@ -81,7 +81,7 @@ pub enum ImplTargetKind {
     Single,
 }
 
-/// A `class`, `record`, `object`, `interface`, or `enum` declaration.
+/// A `class`, `shape`, `object`, `interface`, or `enum` declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDecl {
     pub annotations: Vec<Annotation>,

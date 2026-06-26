@@ -383,6 +383,27 @@ tail HiddenTail = HiddenTail { "Ada", 4 }
 settings Settings = Settings {}
 ```
 
+Named shapes are data-only named records:
+- fields are always public and read-only
+- fields are declared in the `shape` body
+- methods are declared with `impl ShapeName { ... }`
+- custom `new` constructors are not allowed
+- construction always uses the field shape with `ShapeName { ... }`
+
+```txt
+shape Point {
+    x Int
+    y Int
+}
+
+impl Point {
+    def sum() Int = this.x + this.y
+}
+
+origin = Point { 0, 0 }
+named = Point { x: 3, y: 4 }
+```
+
 Rules for field-based class construction:
 - user classes are always constructed with `Type { ... }`, never `Type(...)`
 - builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` still use parentheses
@@ -1581,7 +1602,7 @@ Supported today:
 - `public` on top-level immutable bindings
 - `hidden` on top-level `def`
 - `hidden` on top-level `interface`
-- `hidden` on top-level `class` / `single` / `enum`
+- `hidden` on top-level `class` / `shape` / `single` / `enum`
 - `hidden` on fields
 - `hidden` on methods
 

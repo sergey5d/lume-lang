@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*shape 'SecretPoint' cannot declare hidden field 'x'.*
+
+shape SecretPoint {
+    hidden x Int
+    y Int
+}

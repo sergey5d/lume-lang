@@ -1,0 +1,28 @@
+# EXPECT:
+# origin 3 4 7
+# named 5 6 11
+# moved 7 9 16
+
+shape Point {
+    x Int
+    y Int
+}
+
+impl Point {
+    def sum() Int = this.x + this.y
+
+    def move(dx Int, dy Int) Point = Point {
+        x: this.x + dx
+        y: this.y + dy
+    }
+}
+
+def main() Unit {
+    origin = Point { 3, 4 }
+    named = Point { x: 5, y: 6 }
+    moved = origin.move(4, 5)
+
+    println("origin", origin.x, origin.y, origin.sum())
+    println("named", named.x, named.y, named.sum())
+    println("moved", moved.x, moved.y, moved.sum())
+}

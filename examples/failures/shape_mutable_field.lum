@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*shape 'CounterShape' cannot declare mutable field 'count'.*
+
+shape CounterShape {
+    var count Int
+}

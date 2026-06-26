@@ -105,6 +105,7 @@ impl<'a> Parser<'a> {
                 Some(Item::Function(function))
             }
             TokenKind::Keyword(Keyword::Class)
+            | TokenKind::Keyword(Keyword::Shape)
             | TokenKind::Keyword(Keyword::Object)
             | TokenKind::Keyword(Keyword::Single)
             | TokenKind::Keyword(Keyword::Interface)
@@ -122,7 +123,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Record) => {
                 self.error_at_current(
                     "unexpected_record_decl",
-                    "named 'record' declarations were removed; use 'class'",
+                    "named 'record' declarations were removed; use 'shape' for data-only named shapes or 'class' for general types",
                 );
                 None
             }
@@ -314,6 +315,11 @@ impl<'a> Parser<'a> {
                 self.advance();
                 (TypeKind::Class, span)
             }
+            TokenKind::Keyword(Keyword::Shape) => {
+                let span = self.current_span();
+                self.advance();
+                (TypeKind::Record, span)
+            }
             TokenKind::Keyword(Keyword::Object) => {
                 let span = self.current_span();
                 self.advance();
@@ -337,7 +343,7 @@ impl<'a> Parser<'a> {
             _ => {
                 self.error_at_current(
                     "expected_type_decl",
-                    "expected class, single, interface, or enum",
+                    "expected class, shape, single, interface, or enum",
                 );
                 return None;
             }
@@ -382,21 +388,26 @@ impl<'a> Parser<'a> {
                     TypeKind::Enum => "public is not allowed on enum members",
                     TypeKind::Class => "public is not allowed on class members",
                     TypeKind::Object => "public is not allowed on object members",
-                    TypeKind::Record => unreachable!("named records are no longer parsed"),
+                    TypeKind::Record => "public is not allowed on shape members",
                 };
                 self.error_at_current("unexpected_visibility", message);
                 return None;
             }
             match self.current_kind() {
                 TokenKind::Keyword(Keyword::Def) => {
-                    if kind == TypeKind::Object {
-                        self.error_at_current(
-                            "unexpected_method_decl",
-                            format!(
-                                "single '{}' cannot declare methods in its body; use 'impl single {}'",
-                                name, name
-                            ),
-                        );
+                    let body_method_error = match kind {
+                        TypeKind::Object => Some(format!(
+                            "single '{}' cannot declare methods in its body; use 'impl single {}'",
+                            name, name
+                        )),
+                        TypeKind::Record => Some(format!(
+                            "shape '{}' cannot declare methods in its body; use 'impl {}'",
+                            name, name
+                        )),
+                        _ => None,
+                    };
+                    if let Some(message) = body_method_error {
+                        self.error_at_current("unexpected_method_decl", message);
                         return None;
                     }
                     let method = self.parse_method_decl(
