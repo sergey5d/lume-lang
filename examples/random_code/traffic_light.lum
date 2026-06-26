@@ -1,0 +1,98 @@
+
+enum Side {
+    case NS
+    case EW
+}
+
+impl Side {
+    def reverse() Side {
+        this match {
+            case NS => EW
+            case EW => NS
+        }
+    }
+}
+
+def await(side Side, timeout Int) Int {
+    return 1
+}
+
+def set_light() {
+}
+
+class TrafficControl {
+
+    var side Side = NS
+
+    var passedNS Int = 0
+    var passedEW Int = 0
+
+    def inc(time Int) {
+        if this.side == NS {
+            this.passedNS += time
+        } else {
+            this.passedEW += time
+        }
+    }
+
+    def getPassed() Int {
+        if this.side == NS {
+            this.passedNS
+        } else {
+            this.passedEW
+        }
+    }
+
+    def reverseAndZero() {
+        this.side := this.side.reverse()
+        this.passedNS := 0
+        this.passedEW := 0
+    }
+}
+
+def doProcess() {
+
+    min Int = 10
+    max Int = 1000
+
+    control = TrafficControl{}
+
+    var tryTime = min
+
+    while true {
+
+        if control.getPassed() + 1 >= max {
+            set_light()
+            control.reverseAndZero()
+            continue
+        }
+
+        passedBeforeAwait = control.getPassed()
+
+        tryTime := 
+            if passedBeforeAwait >= min { 
+                1 
+            } else {
+                min - passedBeforeAwait 
+            }
+        
+        passedInTry = await(control.side, tryTime)
+
+        control.inc(passedInTry)
+
+        if passedInTry == tryTime {
+
+            passedOther = await(control.side.reverse(), 1)
+
+            if passedOther == 1 {
+                control.inc(passedOther)
+            } else {
+                set_light()
+                control.reverseAndZero()
+            }
+        } else {
+            set_light()
+            control.reverseAndZero()
+        } 
+    }
+}
