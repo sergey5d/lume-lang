@@ -302,9 +302,9 @@ Open questions:
 - whether anonymous record -> class should be contextual-only based on the expected type
 - how strict constructor matching should be
 - whether anonymous record -> tuple should exist at all
-- anonymous records use brace construction for both explicit named fields and contextual positional values
+- anonymous records use braces for named fields and `shape(...)` for contextual positional values
   - `{ count: count, label: label }`
-  - positional brace construction like `{ 1, "x" }` is also allowed when a target anonymous-record shape is known from context
+  - positional construction like `shape(1, "x")` is allowed when a target anonymous-record shape is known from context
 - whether explicit tuple projection should use a builtin like `tuple(instance)`
 
 ### Anonymous-Record Binding From String Templates
@@ -364,10 +364,10 @@ The current constructor surface is:
 - `new { params } = expression` declares expression-bodied explicit constructors
 - `hidden new { params } { body }` can hide an explicit constructor
 - any explicit `new` suppresses implicit structural field construction
-- class call sites always use `Type { ... }`
-- `Type { ... }` is structural construction when no explicit constructor exists
-- `Type { ... }` calls explicit `new` when constructors exist
-- `Type(...)` is not a user-class construction form; parentheses remain for builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)`
+- braces are named constructor arguments: `Type { field: value }`
+- parentheses are positional constructor arguments: `Type(value)`
+- both forms resolve through the same available `new`/field construction shape
+- named parenthesized arguments remain possible, same as method calls, but braces are the preferred named-construction surface
 
 Still open:
 - whether same-named `single` declarations should act as privileged factory companions

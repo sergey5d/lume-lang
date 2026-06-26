@@ -608,7 +608,6 @@ impl<'a> Parser<'a> {
         let end = self.consume(TokenKind::RBrace, "expected '}' after record literal")?;
         let has_named = entries.iter().any(|entry| entry.name.is_some());
         let mut fields = Vec::new();
-        let mut values = Vec::new();
         if has_named {
             for entry in entries {
                 if let Some(name) = entry.name {
@@ -628,10 +627,43 @@ impl<'a> Parser<'a> {
                 return None;
             }
         } else {
-            values = entries.into_iter().map(|entry| entry.value).collect();
+            if !entries.is_empty() {
+                self.diagnostics.push(Diagnostic::error(
+                    "positional_brace_construction",
+                    "braces are for named fields; use 'shape(...)' for positional anonymous shapes or 'Type(...)' for positional constructors",
+                    start.cover(end),
+                ));
+                return None;
+            }
         }
         Some(Expr::RecordLiteral {
             fields,
+            values: Vec::new(),
+            span: start.cover(end),
+        })
+    }
+
+    fn parse_positional_shape_literal_expr(&mut self) -> Option<Expr> {
+        let start = self.consume_keyword(Keyword::Shape, "expected 'shape'")?;
+        self.consume(TokenKind::LParen, "expected '(' after 'shape'")?;
+        let args = self.parse_call_args()?;
+        let end = self.consume(TokenKind::RParen, "expected ')' after shape arguments")?;
+
+        let mut values = Vec::new();
+        for arg in args {
+            if arg.name.is_some() {
+                self.diagnostics.push(Diagnostic::error(
+                    "invalid_shape_constructor",
+                    "shape(...) accepts positional arguments only; use '{ field: value }' for named anonymous shape construction",
+                    arg.span,
+                ));
+                continue;
+            }
+            values.push(arg.value);
+        }
+
+        Some(Expr::RecordLiteral {
+            fields: Vec::new(),
             values,
             span: start.cover(end),
         })
@@ -1241,6 +1273,7 @@ impl<'a> Parser<'a> {
                 self.error_at_current("unexpected_token", message);
                 None
             }
+            TokenKind::Keyword(Keyword::Shape) => self.parse_positional_shape_literal_expr(),
             TokenKind::Keyword(Keyword::Match) => {
                 let start = self.consume_keyword(Keyword::Match, "expected 'match'")?;
                 self.parse_match_expr_after_keyword(start, false)

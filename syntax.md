@@ -321,10 +321,10 @@ Anonymous record literal:
 user = { name: "Ada", age: 10 }
 ```
 
-Positional anonymous record construction is also allowed when the target shape is already known:
+Positional anonymous record construction uses `shape(...)` when the target shape is already known:
 
 ```txt
-user { name Str, age Int } = { "Ada", 10 }
+user { name Str, age Int } = shape("Ada", 10)
 ```
 
 Multiline anonymous record literal:
@@ -364,22 +364,22 @@ Positional construction also works for shaped parameters and shaped return value
 
 ```txt
 def makeUser() { name Str, age Int } {
-    return { "Ada", 10 }
+    return shape("Ada", 10)
 }
 
-describe({ "Cara", 14 })
+describe(shape("Cara", 14))
 ```
 
-Named classes use the same brace construction surface:
+Named classes use braces for named construction and parentheses for positional construction:
 
 ```txt
 user User = User { name: "Ada", age: 10 }
-person Person = Person { "Ben", 12, "NYC" }
+person Person = Person("Ben", 12, "NYC")
 profile MixedProfile = MixedProfile {
     name: "Liam"
     age: 8
 }
-tail HiddenTail = HiddenTail { "Ada", 4 }
+tail HiddenTail = HiddenTail("Ada", 4)
 settings Settings = Settings {}
 ```
 
@@ -388,7 +388,8 @@ Named shapes are data-only named records:
 - fields are declared in the `shape` body
 - methods are declared with `impl ShapeName { ... }`
 - custom `new` constructors are not allowed
-- construction always uses the field shape with `ShapeName { ... }`
+- named construction uses `ShapeName { field: value }`
+- positional construction uses `ShapeName(...)`
 
 ```txt
 shape Point {
@@ -400,15 +401,18 @@ impl Point {
     def sum() Int = this.x + this.y
 }
 
-origin = Point { 0, 0 }
+origin = Point(0, 0)
 named = Point { x: 3, y: 4 }
 ```
 
 Rules for field-based class construction:
-- user classes are always constructed with `Type { ... }`, never `Type(...)`
-- builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` still use parentheses
-- `Type { ... }` is the structural construction form when no explicit `new` exists
-- explicit `new` constructors use the same `Type { ... }` call syntax
+- braces are named constructor arguments: `Type { field: value }`
+- parentheses are positional constructor arguments: `Type(value)`
+- parenthesized constructor calls may use named arguments, same as methods, but this is usually not needed
+- `Type { value }` is not valid; use `Type(value)`
+- anonymous shapes use `{ field: value }` for named construction and `shape(value)` for positional construction
+- builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` use parentheses
+- `Type { ... }` and `Type(...)` both resolve through the available `new`/field construction shape
 - any explicit `new` disables implicit structural field construction for that class
 - `Type {}` works when the visible construction shape has no required fields
 - named braces check only visible public fields
@@ -416,13 +420,13 @@ Rules for field-based class construction:
 - in named braces, public fields with initializers are optional
 - in named braces, hidden fields are never part of the accepted shape
 - hidden fields without initializers block structural construction entirely
-- positional braces follow declared public-field order
-- positional braces may omit only a trailing suffix of public fields that already have initializers
-- positional braces are rejected when a hidden initialized field appears before a later public field
+- positional construction follows declared public-field order
+- positional construction may omit only a trailing suffix of public fields that already have initializers
+- positional construction is rejected when a hidden initialized field appears before a later public field
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
-- `Type({ ... })` is not supported; class construction must use `Type { ... }`
+- `Type({ ... })` is not supported; use named fields or positional values directly
 
 Anonymous record shapes are structural:
 - field names and field types must match at compile time
@@ -430,10 +434,12 @@ Anonymous record shapes are structural:
 - missing fields are rejected
 - defaults are not part of the shape syntax
 - construction uses plain `{ ... }` in expression position
-- ordinary calls may still accept anonymous records in parentheses, for example `describe({ "Cara", 14 })`
+- named anonymous construction uses `{ field: value }`
+- positional anonymous construction uses `shape(value)` when a target anonymous record shape is known from context
+- ordinary calls may still accept named anonymous records in parentheses, for example `describe({ name: "Cara", age: 14 })`
 - named fields inside construction braces use `field: value`
 - named fields may carry an explicit initializer type as `field Type: value`
-- `{ value1, value2 }` is positional and requires an anonymous record shape from context
+- `shape(value1, value2)` is positional and requires an anonymous record shape from context
 - single-expression braces like `{ value }` are still block expressions, not anonymous records
 - inside `{ ... }`, fields may be separated by commas, newlines, or a mix of both
 
@@ -492,8 +498,9 @@ Constructors use a dedicated `new` block inside `impl`.
 - `new { params } = expression` declares an expression-bodied constructor
 - constructor parameters use `name Type`, with optional trailing defaults such as `age Int = 0`
 - `hidden new { params } { body }` declares a private constructor
-- `new { ... }` inside another constructor delegates to another constructor of the same class
-- class call sites always use braces: `Person { "Ada", 10 }`, not `Person("Ada", 10)`
+- `new(...)` inside another constructor delegates positionally to another constructor of the same class
+- class call sites use braces for named arguments, for example `Person { name: "Ada", age: 10 }`
+- class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
 - `this` is the instance receiver
 - instance fields on classes, enums, and singles must be accessed through `this.`, for example `this.age`
 
@@ -514,7 +521,7 @@ impl Person {
 
     new {
         age Int
-    } = new { age, "unknown" }
+    } = new(age, "unknown")
 }
 ```
 
@@ -641,6 +648,7 @@ including enum constructor payloads, must still use parentheses:
 
 ```txt
 maybeOrder = Some(Order { id: 7 })
+namedMaybeOrder = Some { value: Order { id: 7 } }
 ```
 
 If the body after `->` starts on the next line, it may be either:
@@ -822,7 +830,7 @@ format(prefix = "item", value = 5)
 Methods are called explicitly:
 
 ```txt
-adder Adder = Adder { 5 }
+adder Adder = Adder(5)
 adder.add(7)
 ```
 
@@ -861,7 +869,7 @@ Array elements can also be constructed directly:
 
 ```txt
 values Array[Int] = Array(1, 2, 3)
-boxes Array[Box] = Array(Box { 1 }, Box { 2 })
+boxes Array[Box] = Array(Box(1), Box(2))
 takeArray(Array(4, 5, 6))
 ```
 
@@ -1409,7 +1417,7 @@ let { value Int, label Str } = { value: 7, label: "world" }
 Class destructuring also uses braces:
 
 ```txt
-let { left Int, right Str } = Box { 9, "boxed" }
+let { left Int, right Str } = Box(9, "boxed")
 ```
 
 Aliases use `as`:
@@ -1510,8 +1518,8 @@ user = named :+ located
 Operator declarations use symbolic `def` forms on interfaces, classes, and enums:
 
 ```txt
-def +(other Vec) Vec = Vec { this[0] + other[0], this[1] + other[1] }
-def -() Vec = Vec { -this[0], -this[1] }
+def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
+def -() Vec = Vec(-this[0], -this[1])
 def [](index Int) Int = this.items[index]
 ```
 

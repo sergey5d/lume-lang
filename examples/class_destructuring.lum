@@ -52,30 +52,30 @@ impl SecretUser {
 }
 
 def main() Int {
-    let { value Int as e, label Str as f } = Box { 9, "boxed" }
+    let { value Int as e, label Str as f } = Box(9, "boxed")
     println("class", e, f)
 
-    let { value as inferredClassLeft, label as inferredClassRight } = Box { 12, "class" }
+    let { value as inferredClassLeft, label as inferredClassRight } = Box(12, "class")
     println("class inferred", inferredClassLeft, inferredClassRight)
 
-    let { value Int as mixedClassLeft, label as mixedClassRight } = Box { 13, "typed" }
+    let { value Int as mixedClassLeft, label as mixedClassRight } = Box(13, "typed")
     println("class mixed", mixedClassLeft, mixedClassRight)
 
-    let { value as classPairLeft, label as classPairRight } = Box { 24, "class-pair" }
+    let { value as classPairLeft, label as classPairRight } = Box(24, "class-pair")
     println("class pair", classPairLeft, classPairRight)
 
-    let { label as skippedOnlyClassValue } = Box { 25, "class-only" }
+    let { label as skippedOnlyClassValue } = Box(25, "class-only")
     println("class skip only", skippedOnlyClassValue)
 
-    let { value Int as skippedClassLeft, label Str as skippedClassRight } = Crate { 16, "drop", "class-skip" }
+    let { value Int as skippedClassLeft, label Str as skippedClassRight } = Crate(16, "drop", "class-skip")
     println("class skip", skippedClassLeft, skippedClassRight)
 
-    let { name as publicName, location as publicLocation } = SecretUser { "Sergey", "secret", "Tampa" }
+    let { name as publicName, location as publicLocation } = SecretUser("Sergey", "secret", "Tampa")
     println("hidden named", publicName, publicLocation)
 
     users = List(
-        SecretUser { "Sergey", "secret-1", "Tampa" },
-        SecretUser { "Ada", "secret-2", "London" },
+        SecretUser("Sergey", "secret-1", "Tampa"),
+        SecretUser("Ada", "secret-2", "London"),
     )
     for { name as userName, location as userLocation } <- users {
         println("for named plain", userName, userLocation)

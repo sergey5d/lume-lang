@@ -58,7 +58,7 @@ def main() Unit {
         age: userRecord.age
     }
 
-    person Person = Person { "Ben", 12 }
+    person Person = Person("Ben", 12)
 
     pointRecord = {
         x: 3, y: 4

@@ -2896,6 +2896,16 @@ impl<'a> Checker<'a> {
                     }
                     Ty::Record(actual_fields)
                 } else {
+                    for value in values {
+                        self.check_expr(value);
+                    }
+                    if !values.is_empty() {
+                        self.add_error(
+                            "missing_shape_context",
+                            "shape(...) requires an expected anonymous shape type",
+                            expr.span(),
+                        );
+                    }
                     Ty::Record(Vec::new())
                 }
             }
@@ -3161,6 +3171,7 @@ impl<'a> Checker<'a> {
         if uses_brace_syntax
             && !self.brace_call_uses_structural_construction(callee)
             && !self.brace_call_targets_current_constructor(callee)
+            && !self.brace_call_targets_enum_case(callee)
             && !trailing_brace_call_has_lambda_arg(args)
         {
             self.add_error(
@@ -3917,25 +3928,12 @@ impl<'a> Checker<'a> {
                 .collect(),
         );
 
-        if matches!(sig.kind, TypeKind::Class | TypeKind::Record) && !uses_brace_syntax {
-            let label = type_kind_label(sig.kind);
-            self.add_error(
-                "no_matching_overload",
-                format!(
-                    "{} '{}' uses brace construction; write '{} {{ ... }}'",
-                    label, sig.name, sig.name
-                ),
-                span,
-            );
-            return ret;
-        }
-
         if parenthesized_record_arg {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "constructor syntax for '{}' does not accept anonymous record arguments in '(...)'; use '{} {{ ... }}'",
-                    sig.name, sig.name
+                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use named arguments or positional values directly",
+                    sig.name
                 ),
                 span,
             );
@@ -4009,17 +4007,29 @@ impl<'a> Checker<'a> {
             return ret;
         }
 
-        if args.is_empty() && sig.fields.iter().all(|field| field.has_initializer) {
-            return ret;
+        if matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
+            if uses_brace_syntax {
+                self.add_error(
+                    "no_matching_overload",
+                    format!(
+                        "{} '{}' brace construction requires named fields",
+                        type_kind_label(sig.kind),
+                        sig.name
+                    ),
+                    span,
+                );
+                return ret;
+            }
+            return self.check_positional_record_constructor_conversion(sig, &ret, args, span);
         }
 
         self.add_error(
             "no_matching_overload",
             format!(
-                "{} '{}' cannot be constructed with empty braces; use '{} {{ ... }}'{}",
+                "{} '{}' cannot be constructed with {} arguments{}",
                 type_kind_label(sig.kind),
                 sig.name,
-                sig.name,
+                args.len(),
                 if sig.kind == TypeKind::Record {
                     ""
                 } else {
@@ -4287,7 +4297,8 @@ impl<'a> Checker<'a> {
     ) -> Vec<crate::ast::CallArg> {
         if uses_brace_syntax
             && (self.brace_call_targets_explicit_constructor(callee)
-                || self.brace_call_targets_current_constructor(callee))
+                || self.brace_call_targets_current_constructor(callee)
+                || self.brace_call_targets_enum_case(callee))
         {
             if let Some(args) = brace_record_constructor_args(args) {
                 return args;
@@ -4310,6 +4321,27 @@ impl<'a> Checker<'a> {
         matches!(callee, Expr::Identifier { name, .. } if name == "new")
             && self.current_method.as_deref() == Some("new")
             && self.current_owner.is_some()
+    }
+
+    fn brace_call_targets_enum_case(&self, callee: &Expr) -> bool {
+        match callee {
+            Expr::Identifier { name, .. } => {
+                self.world.lookup_enum_case(self.module, name).is_some()
+            }
+            Expr::Member { receiver, name, .. } => {
+                let Expr::Identifier {
+                    name: type_name, ..
+                } = receiver.as_ref()
+                else {
+                    return false;
+                };
+                self.lookup_type_local(type_name)
+                    .or_else(|| self.world.lookup_imported_type(self.module, type_name))
+                    .or_else(|| self.world.ambient.types.get(type_name).cloned())
+                    .is_some_and(|sig| sig.enum_cases.contains_key(name))
+            }
+            _ => false,
+        }
     }
 
     fn brace_call_type_sig(&self, callee: &Expr) -> Option<TypeSig> {
@@ -5170,24 +5202,22 @@ impl<'a> Checker<'a> {
         expr: &Expr,
         span: crate::source::Span,
     ) -> Ty {
-        let named_error = || {
-            format!(
-                "{} '{}' requires named brace fields that match the visible shape",
-                type_kind_label(sig.kind),
-                sig.name
-            )
-        };
-        let positional_error = || {
-            format!(
-                "{} '{}' positional brace construction must match the public field order and may omit only trailing defaulted fields",
-                type_kind_label(sig.kind),
-                sig.name
-            )
-        };
-
         let Expr::RecordLiteral { fields, values, .. } = expr else {
             return materialize_type(ret);
         };
+        if !values.is_empty() {
+            self.add_error(
+                "positional_brace_construction",
+                format!(
+                    "{} '{}' uses named brace construction; write '{}(...)' for positional construction",
+                    type_kind_label(sig.kind),
+                    sig.name,
+                    sig.name
+                ),
+                span,
+            );
+            return materialize_type(ret);
+        }
         if sig
             .fields
             .iter()
@@ -5211,98 +5241,112 @@ impl<'a> Checker<'a> {
             .filter(|field| !field.hidden)
             .collect::<Vec<_>>();
 
-        if !fields.is_empty() {
-            let required_visible = visible_fields
-                .iter()
-                .filter(|field| !field.has_initializer)
-                .count();
+        let required_visible = visible_fields
+            .iter()
+            .filter(|field| !field.has_initializer)
+            .count();
 
-            if fields.len() < required_visible || fields.len() > visible_fields.len() {
+        if fields.len() < required_visible || fields.len() > visible_fields.len() {
+            self.add_error(
+                "no_matching_overload",
+                format!(
+                    "{} '{}' named brace construction expects {}..{} visible fields, got {}",
+                    type_kind_label(sig.kind),
+                    sig.name,
+                    required_visible,
+                    visible_fields.len(),
+                    fields.len()
+                ),
+                span,
+            );
+            return materialize_type(ret);
+        }
+
+        for arg in fields {
+            let Some(name) = arg.name.as_deref() else {
                 self.add_error(
                     "no_matching_overload",
                     format!(
-                        "{} '{}' named brace construction expects {}..{} visible fields, got {}",
+                        "{} '{}' requires named brace fields that match the visible shape",
+                        type_kind_label(sig.kind),
+                        sig.name
+                    ),
+                    span,
+                );
+                return materialize_type(ret);
+            };
+            let Some(field) = visible_fields.iter().find(|field| field.name == name) else {
+                self.add_error(
+                    "no_matching_overload",
+                    format!(
+                        "{} '{}' has no visible field '{}' for named brace construction",
                         type_kind_label(sig.kind),
                         sig.name,
-                        required_visible,
-                        visible_fields.len(),
-                        fields.len()
+                        name
+                    ),
+                    arg.span,
+                );
+                return materialize_type(ret);
+            };
+            let actual = self.check_expr_against(&arg.value, &field.ty);
+            if !self.is_assignable(&actual, &field.ty) {
+                self.add_error(
+                    "invalid_argument_type",
+                    format!(
+                        "field '{}' in {} '{}' expects '{}' but got '{}'",
+                        field.name,
+                        type_kind_label(sig.kind),
+                        sig.name,
+                        field.ty.describe(),
+                        actual.describe()
+                    ),
+                    arg.span,
+                );
+                return materialize_type(ret);
+            }
+        }
+
+        for field in &visible_fields {
+            if field.has_initializer {
+                continue;
+            }
+            if !fields
+                .iter()
+                .any(|arg| arg.name.as_deref() == Some(field.name.as_str()))
+            {
+                self.add_error(
+                    "no_matching_overload",
+                    format!(
+                        "{} '{}' named brace construction is missing required field '{}'",
+                        type_kind_label(sig.kind),
+                        sig.name,
+                        field.name
                     ),
                     span,
                 );
                 return materialize_type(ret);
             }
-
-            for arg in fields {
-                let Some(name) = arg.name.as_deref() else {
-                    self.add_error("no_matching_overload", named_error(), span);
-                    return materialize_type(ret);
-                };
-                let Some(field) = visible_fields.iter().find(|field| field.name == name) else {
-                    self.add_error(
-                        "no_matching_overload",
-                        format!(
-                            "{} '{}' has no visible field '{}' for named brace construction",
-                            type_kind_label(sig.kind),
-                            sig.name,
-                            name
-                        ),
-                        arg.span,
-                    );
-                    return materialize_type(ret);
-                };
-                let actual = self.check_expr_against(&arg.value, &field.ty);
-                if !self.is_assignable(&actual, &field.ty) {
-                    self.add_error(
-                        "invalid_argument_type",
-                        format!(
-                            "field '{}' in {} '{}' expects '{}' but got '{}'",
-                            field.name,
-                            type_kind_label(sig.kind),
-                            sig.name,
-                            field.ty.describe(),
-                            actual.describe()
-                        ),
-                        arg.span,
-                    );
-                    return materialize_type(ret);
-                }
-            }
-
-            for field in &visible_fields {
-                if field.has_initializer {
-                    continue;
-                }
-                if !fields
-                    .iter()
-                    .any(|arg| arg.name.as_deref() == Some(field.name.as_str()))
-                {
-                    self.add_error(
-                        "no_matching_overload",
-                        format!(
-                            "{} '{}' named brace construction is missing required field '{}'",
-                            type_kind_label(sig.kind),
-                            sig.name,
-                            field.name
-                        ),
-                        span,
-                    );
-                    return materialize_type(ret);
-                }
-            }
-
-            return materialize_type(ret);
         }
 
-        if sig.fields.iter().enumerate().any(|(index, field)| {
-            field.hidden
-                && field.has_initializer
-                && sig.fields[index + 1..].iter().any(|later| !later.hidden)
-        }) {
+        materialize_type(ret)
+    }
+
+    fn check_positional_record_constructor_conversion(
+        &mut self,
+        sig: &TypeSig,
+        ret: &Ty,
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) -> Ty {
+        if sig
+            .fields
+            .iter()
+            .any(|field| field.hidden && !field.has_initializer)
+        {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' cannot use positional brace construction because private defaulted fields must come after all public fields",
+                    "{} '{}' cannot use positional construction because it has private fields without initializers",
                     type_kind_label(sig.kind),
                     sig.name
                 ),
@@ -5311,17 +5355,63 @@ impl<'a> Checker<'a> {
             return materialize_type(ret);
         }
 
-        if values.len() > visible_fields.len()
-            || visible_fields[values.len()..]
-                .iter()
-                .any(|field| !field.has_initializer)
+        let uses_named_args = args.iter().any(|arg| arg.name.is_some());
+        if !uses_named_args
+            && sig.fields.iter().enumerate().any(|(index, field)| {
+                field.hidden
+                    && field.has_initializer
+                    && sig.fields[index + 1..].iter().any(|later| !later.hidden)
+            })
         {
-            self.add_error("no_matching_overload", positional_error(), span);
+            self.add_error(
+                "no_matching_overload",
+                format!(
+                    "{} '{}' cannot use positional construction because private defaulted fields must come after all public fields",
+                    type_kind_label(sig.kind),
+                    sig.name
+                ),
+                span,
+            );
             return materialize_type(ret);
         }
 
-        for (value, field) in values.iter().zip(visible_fields.iter()) {
-            let actual = self.check_expr_against(value, &field.ty);
+        let visible_fields = sig
+            .fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if uses_named_args {
+            return self.check_constructor_signature(&visible_fields, ret, args, span);
+        }
+
+        if args.len() > visible_fields.len()
+            || visible_fields[args.len()..]
+                .iter()
+                .any(|field| !field.has_initializer)
+        {
+            let required_visible = visible_fields
+                .iter()
+                .filter(|field| !field.has_initializer)
+                .count();
+            self.add_error(
+                "invalid_argument_count",
+                format!(
+                    "{} '{}' positional construction expects {}..{} arguments, got {}",
+                    type_kind_label(sig.kind),
+                    sig.name,
+                    required_visible,
+                    visible_fields.len(),
+                    args.len()
+                ),
+                span,
+            );
+            return materialize_type(ret);
+        }
+
+        for (arg, field) in args.iter().zip(visible_fields.iter()) {
+            let actual = self.check_expr_against(&arg.value, &field.ty);
             if !self.is_assignable(&actual, &field.ty) {
                 self.add_error(
                     "invalid_argument_type",
@@ -5333,7 +5423,7 @@ impl<'a> Checker<'a> {
                         field.ty.describe(),
                         actual.describe()
                     ),
-                    value.span(),
+                    arg.span,
                 );
                 return materialize_type(ret);
             }
@@ -6045,21 +6135,11 @@ fn brace_record_constructor_args(args: &[crate::ast::CallArg]) -> Option<Vec<cra
         return None;
     };
 
-    if !fields.is_empty() {
+    if values.is_empty() {
         return Some(fields.clone());
     }
 
-    Some(
-        values
-            .iter()
-            .map(|value| crate::ast::CallArg {
-                name: None,
-                ty: None,
-                span: value.span(),
-                value: value.clone(),
-            })
-            .collect(),
-    )
+    None
 }
 
 fn trailing_brace_call_has_lambda_arg(args: &[crate::ast::CallArg]) -> bool {
@@ -6436,7 +6516,7 @@ def main() Int {
     }
 
     #[test]
-    fn rejects_parenthesized_class_constructor_call() {
+    fn allows_parenthesized_class_constructor_call() {
         let program = parse_inline(
             r#"
 class User {
@@ -6449,14 +6529,7 @@ def main() Unit {
 "#,
         );
         let result = check_program(&program);
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diag| diag.message.contains("uses brace construction")),
-            "{:#?}",
-            result.diagnostics
-        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]
@@ -6479,7 +6552,7 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_brace_class_construction_with_trailing_defaults() {
+    fn allows_positional_class_construction_with_trailing_defaults() {
         let program = parse_inline(
             r#"
 class User {
@@ -6494,7 +6567,7 @@ impl User {
 }
 
 def main() Int {
-    user User = User { "Ada", 10 }
+    user User = User("Ada", 10)
     return user.scoreValue()
 }
 "#,
@@ -6552,7 +6625,7 @@ def main() Option[Order] {
     }
 
     #[test]
-    fn rejects_trailing_brace_call_for_non_lambda_argument() {
+    fn allows_named_brace_enum_constructor_payload() {
         let program = parse_inline(
             r#"
 class Order {
@@ -6561,10 +6634,25 @@ class Order {
 
 def main() Option[Order] {
     Some {
-        Order {
+        value: Order {
             quantity: 7
         }
     }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_trailing_brace_call_for_non_lambda_argument() {
+        let program = parse_inline(
+            r#"
+def wrap(value Int) Int = value
+
+def main() Int {
+    wrap { value: 7 }
 }
 "#,
         );
@@ -6627,7 +6715,7 @@ impl Counter {
 }
 
 def main() Int {
-    counter Counter = Counter { 5 }
+    counter Counter = Counter(5)
     return counter.twice(2)
 }
 "#,
@@ -6885,7 +6973,7 @@ impl User {
 }
 
 def main() Unit {
-    _ User = User { "Ada" }
+    _ User = User("Ada")
 }
 "#,
         );
@@ -6913,7 +7001,7 @@ impl User {
 }
 
 def main() Unit {
-    _ User = User { "Ada" }
+    _ User = User("Ada")
     _ User = User { age: 12, name: "Ben" }
 }
 "#,
@@ -6985,7 +7073,7 @@ impl Counter {
 }
 
 def main() Unit {
-    _ Counter = Counter { 1, "Ada" }
+    _ Counter = Counter(1, "Ada")
 }
 "#,
         );
@@ -7038,10 +7126,9 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diag| diag.message.contains("uses brace construction")),
+            result.diagnostics.iter().any(|diag| diag
+                .message
+                .contains("does not accept anonymous shape arguments")),
             "{:#?}",
             result.diagnostics
         );
@@ -7091,7 +7178,7 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_positional_braces_when_private_default_breaks_public_order() {
+    fn rejects_positional_construction_when_private_default_breaks_public_order() {
         let program = parse_inline(
             r#"
 class Broken {
@@ -7101,7 +7188,7 @@ class Broken {
 }
 
 def main() Unit {
-    _ Broken = Broken { "Ada", 10 }
+    _ Broken = Broken("Ada", 10)
 }
 "#,
         );
@@ -7174,7 +7261,7 @@ class Box {
 }
 
 def main() Unit {
-    let (a, b) = Box { 1, "x" }
+    let (a, b) = Box(1, "x")
 }
 "#,
         );
@@ -7255,7 +7342,7 @@ impl SecretUser {
 }
 
 def main() Str {
-    let { location, name } = SecretUser { "Sergey", "secret", "Tampa" }
+    let { location, name } = SecretUser("Sergey", "secret", "Tampa")
     return name + " from " + location
 }
 "#,
@@ -7322,7 +7409,7 @@ class Box {
 }
 
 def main() Unit {
-    pair (Int, Str) = Box { 1, "x" }
+    pair (Int, Str) = Box(1, "x")
 }
 "#,
         );
@@ -7349,7 +7436,7 @@ class Box {
 }
 
 def main() Unit {
-    box Box = Box { 1, "x" }
+    box Box = Box(1, "x")
     match box {
         case (a, b) => OS.println(a, b)
     }

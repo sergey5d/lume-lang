@@ -45,7 +45,7 @@ def printBodyShape(value Int) {
 }
 
 def main() Int {
-    pair PairBox = PairBox { 5, 9 }
+    pair PairBox = PairBox(5, 9)
 
     match pair {
         case PairBox(left, right) => println("pair " + left + "-" + right)

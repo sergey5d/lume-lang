@@ -2195,12 +2195,11 @@ impl<'a> Interpreter<'a> {
                         .iter()
                         .map(|(_, value)| value.clone())
                         .collect::<Vec<_>>(),
-                    [Value::Tuple(values)] => values.clone(),
                     _ => {
                         return Err(self.runtime_error(
                             span,
                             format!(
-                                "brace construction for '{}' expects named or positional constructor fields",
+                                "brace construction for '{}' expects named constructor fields",
                                 type_name
                             ),
                         ));
@@ -2230,15 +2229,11 @@ impl<'a> Interpreter<'a> {
                     self.apply_named_record_constructor(&object, &ty, &values, span)?;
                     return Ok(Some(object));
                 }
-                [Value::Tuple(values)] => {
-                    self.apply_positional_record_constructor(&object, &ty, values, span)?;
-                    return Ok(Some(object));
-                }
                 _ => {
                     return Err(self.runtime_error(
                         span,
                         format!(
-                            "brace-based construction for '{}' expects named or positional record fields",
+                            "brace-based construction for '{}' expects named record fields",
                             type_name
                         ),
                     ));
@@ -2250,8 +2245,8 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "constructor syntax for '{}' does not accept anonymous record arguments in '(...)'; use '{} {{ ... }}'",
-                    type_name, type_name
+                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use named arguments or positional values directly",
+                    type_name
                 ),
             ));
         }
@@ -2273,17 +2268,8 @@ impl<'a> Interpreter<'a> {
             ));
         }
 
-        if args.is_empty() && ty.fields.iter().all(|field| field.has_initializer) {
-            return Ok(Some(object));
-        }
-
-        Err(self.runtime_error(
-            span,
-            format!(
-                "class '{}' cannot be constructed with empty braces; use '{} {{ ... }}' or define 'new'",
-                type_name, type_name
-            ),
-        ))
+        self.apply_positional_record_constructor(&object, &ty, &args, span)?;
+        Ok(Some(object))
     }
 
     fn apply_named_record_constructor(
@@ -2373,7 +2359,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' cannot use positional brace construction because it has private fields without initializers",
+                    "class '{}' cannot use positional construction because it has private fields without initializers",
                     ty.name
                 ),
             ));
@@ -2387,7 +2373,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' cannot use positional brace construction because private defaulted fields must come after all public fields",
+                    "class '{}' cannot use positional construction because private defaulted fields must come after all public fields",
                     ty.name
                 ),
             ));
@@ -2406,7 +2392,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' positional brace construction must match the public field order and may omit only trailing defaulted fields",
+                    "class '{}' positional construction must match the public field order and may omit only trailing defaulted fields",
                     ty.name
                 ),
             ));
@@ -4660,7 +4646,7 @@ mod tests {
             seed Int = 1
 
             def run() Int {
-                c Counter = Counter { seed }
+                c Counter = Counter(seed)
                 return c.bump(2)
             }
             "#,
@@ -4713,7 +4699,7 @@ mod tests {
             }
 
             def main() Unit {
-                ada User = User { "Ada" }
+                ada User = User("Ada")
                 ben User = User { age: 12, name: "Ben" }
                 OS.println(ada.name, ada.age)
                 OS.println(ben.name, ben.age)
@@ -4743,8 +4729,8 @@ mod tests {
                 }
 
                 def [](index Int) Int = this.items[index]
-                def +(other Vec) Vec = Vec { this[0] + other[0], this[1] + other[1] }
-                def -() Vec = Vec { -this[0], -this[1] }
+                def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
+                def -() Vec = Vec(-this[0], -this[1])
             }
 
             def main() Unit {
@@ -4761,8 +4747,8 @@ mod tests {
                 pairs.put("b", 2)
                 OS.println(pairs.size())
 
-                left Vec = Vec { 5, 6 }
-                OS.println((left + Vec { 1, 2 })[1])
+                left Vec = Vec(5, 6)
+                OS.println((left + Vec(1, 2))[1])
                 OS.println((-left)[0])
 
                 ints = Array.ofInt(2)
@@ -4917,8 +4903,8 @@ mod tests {
 
             def main() Unit {
                 users = List(
-                    SecretUser { "Sergey", "secret-1", "Tampa" },
-                    SecretUser { "Ada", "secret-2", "London" },
+                    SecretUser("Sergey", "secret-1", "Tampa"),
+                    SecretUser("Ada", "secret-2", "London"),
                 )
 
                 for { name as userName, location as userLocation } <- users {
@@ -5420,8 +5406,8 @@ $name
             }
 
             def main() Unit {
-                amount Amount = Amount { 42, "hello" }
-                pair PairBox = PairBox { 5, 9 }
+                amount Amount = Amount(42, "hello")
+                pair PairBox = PairBox(5, 9)
                 values [MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3)]
                 partialMapped List[Option[Int]] = values.map(value -> partial match value {
                     case SomeX(x) => x + 1
@@ -5464,7 +5450,7 @@ $name
                 }
             }
 
-            a1 = Amount { 10, "description", 5 }
+            a1 = Amount(10, "description", 5)
             a2 = a1.multiple(a1)
             a3 = a2 :< { amount: 101, description: a2.description + " updated" }
             a4 = a3 :< { amount: 102 } :< { count: 7 }
@@ -5545,12 +5531,12 @@ $name
             }
 
             def main() Unit {
-                apple = Apple { 12 }
+                apple = Apple(12)
                 OS.println(match MaybeApple.SomeX(apple) {
                     case SomeX(Apple(size)) => "apple " + size
                     case MaybeApple.NoneX => "apple none"
                 })
-                amount = Amount { 13, "cad" }
+                amount = Amount(13, "cad")
                 OS.println(match MaybeAmount.SomeX(amount) {
                     case SomeX(Amount(count, label)) => "amount " + count + " " + label
                     case MaybeAmount.NoneX => "amount none"
@@ -5596,7 +5582,7 @@ $name
             }
 
             def main() Unit {
-                pair Pair = Pair { 5, 9 }
+                pair Pair = Pair(5, 9)
                 let Pair(item, other) = pair
                 OS.println("let", item + other)
 
@@ -5613,7 +5599,7 @@ $name
                     OS.println("known yield", result)
                 }
 
-                pairs = List(Pair { 1, 10 }, Pair { 2, 20 }, Pair { 3, 30 })
+                pairs = List(Pair(1, 10), Pair(2, 20), Pair(3, 30))
 
                 for Pair(left, right) <- pairs {
                     OS.println("for", left, right)

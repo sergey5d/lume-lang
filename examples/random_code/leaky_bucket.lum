@@ -60,7 +60,7 @@ impl LeakyBucket {
 
 def main() Unit {
     # Capacity 5, leaking 1 unit per tick.
-    bucket = LeakyBucket { 5, 1 }
+    bucket = LeakyBucket(5, 1)
 
     # Each pair is (time, request cost).
     requests List[(Int, Int)] = List(

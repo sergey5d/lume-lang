@@ -69,12 +69,11 @@ def doProcess() {
 
         passedBeforeAwait = control.getPassed()
 
-        tryTime := 
-            if passedBeforeAwait >= min { 
-                1 
-            } else {
-                min - passedBeforeAwait 
-            }
+        tryTime := if passedBeforeAwait >= min {
+            1
+        } else {
+            min - passedBeforeAwait
+        }
         
         passedInTry = await(control.side, tryTime)
 

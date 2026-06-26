@@ -18,7 +18,7 @@ impl Point {
 }
 
 def main() Unit {
-    origin = Point { 3, 4 }
+    origin = Point(3, 4)
     named = Point { x: 5, y: 6 }
     moved = origin.move(4, 5)
 

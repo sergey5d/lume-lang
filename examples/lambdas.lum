@@ -22,7 +22,7 @@ impl Adder {
 }
 
 def main() Int {
-    adder Adder = Adder { 5 }
+    adder Adder = Adder(5)
 
     emptyLambda = () -> 4
     println(emptyLambda())

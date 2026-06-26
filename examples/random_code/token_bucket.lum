@@ -62,7 +62,7 @@ impl TokenBucket {
 
 def main() Unit {
     # Capacity 5, refilling 1 token per tick.
-    bucket = TokenBucket { 5, 1 }
+    bucket = TokenBucket(5, 1)
 
     # Each pair is (time, request cost).
     requests List[(Int, Int)] = List(

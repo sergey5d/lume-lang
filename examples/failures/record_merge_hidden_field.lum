@@ -7,7 +7,7 @@ class SecretName {
 }
 
 def main() Unit {
-    left = SecretName { "Ada" }
+    left = SecretName("Ada")
     right = { age: 42 }
     value = left :+ right
 }

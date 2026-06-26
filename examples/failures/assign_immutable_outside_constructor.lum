@@ -19,6 +19,6 @@ impl Counter {
 }
 
 def main() Int {
-    counter Counter = Counter { 1 }
+    counter Counter = Counter(1)
     counter.bump()
 }

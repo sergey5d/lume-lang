@@ -43,9 +43,9 @@ impl Cursor {
     } {
         this.term = term
         this.documents = documents
-        this.current = Location { -1, -1 }
+        this.current = Location(-1, -1)
         this.valid = false
-        this.seek(Location { -1, -1 })
+        this.seek(Location(-1, -1))
     }
 
     def isValid() Bool = this.valid
@@ -54,7 +54,7 @@ impl Cursor {
 
     def advance() Unit {
         if this.valid {
-            this.seek(Location { this.current.docId, this.current.position + 1 })
+            this.seek(Location(this.current.docId, this.current.position + 1))
         }
     }
 
@@ -76,7 +76,7 @@ impl Cursor {
 
             while pos < docTerms.size() && !found {
                 if docTerms[pos] == this.term {
-                    this.current := Location { docId, pos }
+                    this.current := Location(docId, pos)
                     this.valid := true
                     found := true
                 }
@@ -91,7 +91,7 @@ impl Cursor {
         }
 
         if !found {
-            this.current := Location { -1, -1 }
+            this.current := Location(-1, -1)
             this.valid := false
         }
     }
@@ -109,8 +109,8 @@ def toBeOrNotToBe() Unit {
 
     println("to be or not to be:")
 
-    c1 = Cursor { "to", documents }
-    c2 = Cursor { "be", documents }
+    c1 = Cursor("to", documents)
+    c2 = Cursor("be", documents)
     
     var loc1 = c1.get()
     var loc2 = c2.get()
@@ -123,9 +123,9 @@ def toBeOrNotToBe() Unit {
         loc2 := c2.get()
 
         if loc1.docId > loc2.docId {
-            c2.seek(Location { loc1.docId, 0 })
+            c2.seek(Location(loc1.docId, 0))
         } else if loc1.docId < loc2.docId {
-            c1.seek(Location { loc2.docId, 0 })
+            c1.seek(Location(loc2.docId, 0))
         } else {
 
             currDocId = loc1.docId
@@ -154,7 +154,7 @@ def toBeOrNotToBe() Unit {
             if !failed && c2Stack.isEmpty() && loc1.docId > c1Orig.docId {
                 result.append(c1Orig.docId)
             } else {
-                c1.seek(Location { loc2.docId, 0 })
+                c1.seek(Location(loc2.docId, 0))
             }
         }
     }
@@ -179,8 +179,8 @@ def toBeOrNotToBe2() Unit {
 
     println("to be or not to be v2:")
 
-    c1 = Cursor { "to", documents }
-    c2 = Cursor { "be", documents }
+    c1 = Cursor("to", documents)
+    c2 = Cursor("be", documents)
     
     def advanceContiniously(c Cursor) { begin Int, count Int, docId Int } {
         var counter = 1
@@ -198,14 +198,14 @@ def toBeOrNotToBe2() Unit {
             c.advance()
             loc := c.get()
         }
-        { begin, counter, docId }
+        shape(begin, counter, docId)
     }
 
     def alignDocs(doc1 Int, doc2 Int) {
         if doc1 > doc2 {
-            c2.seek(Location { doc1, 0 })
+            c2.seek(Location(doc1, 0))
         } else if doc1 < doc2 {
-            c1.seek(Location { doc2, 0 })
+            c1.seek(Location(doc2, 0))
         }
     }
 
@@ -275,8 +275,8 @@ def toBeOrNotToBe3() Unit {
 
     println("to be or not to be v3:")
 
-    toCursor = Cursor { "to", documents }
-    beCursor = Cursor { "be", documents }
+    toCursor = Cursor("to", documents)
+    beCursor = Cursor("be", documents)
 
     def collectPositions(cursor Cursor, docId Int) List[Int] {
         positions List[Int] = []
@@ -386,7 +386,7 @@ def main() Int {
         "dog"
     )
 
-    cursor = Cursor { "cat", documents }
+    cursor = Cursor("cat", documents)
 
     println("valid0 " + cursor.isValid())
     loc0 = cursor.get()

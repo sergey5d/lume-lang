@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# class 'MixedProfile' uses brace construction; write 'MixedProfile \{ \.\.\. \}'
+# constructor syntax for 'MixedProfile' does not accept anonymous shape arguments in '\(\.\.\.\)'; use named arguments or positional values directly
 
 class MixedProfile {
     name Str

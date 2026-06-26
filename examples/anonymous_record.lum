@@ -16,7 +16,7 @@ def describe(user { name Str, age Int }) Str =
     user.name + " is " + user.age
 
 def makeCounter(base Int) { count Int, next Int } {
-    return { base, base + 1 }
+    return shape(base, base + 1)
 }
 
 def main() Unit {
@@ -40,17 +40,17 @@ def main() Unit {
         age: 10
     }
     narrow { name Str, age Int } = full
-    positional { name Str, age Int } = { "Ben", 12 }
+    positional { name Str, age Int } = shape("Ben", 12)
     name = "Cara"
     age = 14
-    contextual { name Str, age Int } = { name, age }
+    contextual { name Str, age Int } = shape(name, age)
 
     println(describe(full))
     println(describe(smaller))
     println(inferred.count)
     println(mixed.a + mixed.b + mixed.c)
     println(mixedShape.name + "-" + mixedShape.age)
-    println(describe({ "Cara", 14 }))
+    println(describe(shape("Cara", 14)))
     counter = makeCounter(5)
     println(counter.count + counter.next)
     println(positional.name + " " + positional.age)

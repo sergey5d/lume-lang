@@ -448,23 +448,23 @@ fn parses_record_literal_forms() {
         other => panic!("expected typed record literal, got {other:#?}"),
     }
 
-    match parse_expr_only("{ name, age }") {
+    match parse_expr_only("shape(name, age)") {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(fields.is_empty());
             assert_eq!(values.len(), 2);
         }
-        other => panic!("expected record literal, got {other:#?}"),
+        other => panic!("expected positional shape literal, got {other:#?}"),
     }
 
-    match parse_expr_only(r#"{ 1, "x" }"#) {
+    match parse_expr_only(r#"shape(1, "x")"#) {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(fields.is_empty());
             assert_eq!(values.len(), 2);
         }
-        other => panic!("expected record literal, got {other:#?}"),
+        other => panic!("expected positional shape literal, got {other:#?}"),
     }
 
-    match parse_expr_only("Person { name, age }") {
+    match parse_expr_only("Person { name: name, age: age }") {
         Expr::Call {
             args,
             uses_brace_syntax,
@@ -474,8 +474,8 @@ fn parses_record_literal_forms() {
             assert!(uses_brace_syntax);
             match &args[0].value {
                 Expr::RecordLiteral { fields, values, .. } => {
-                    assert!(fields.is_empty());
-                    assert_eq!(values.len(), 2);
+                    assert_eq!(fields.len(), 2);
+                    assert!(values.is_empty());
                 }
                 other => panic!("expected record literal call arg, got {other:#?}"),
             }
@@ -502,21 +502,14 @@ fn parses_record_literal_forms() {
         other => panic!("expected call, got {other:#?}"),
     }
 
-    match parse_expr_only("Box { 5 }") {
+    match parse_expr_only("Box(5)") {
         Expr::Call {
             args,
             uses_brace_syntax,
             ..
         } => {
             assert_eq!(args.len(), 1);
-            assert!(uses_brace_syntax);
-            match &args[0].value {
-                Expr::RecordLiteral { fields, values, .. } => {
-                    assert!(fields.is_empty());
-                    assert_eq!(values.len(), 1);
-                }
-                other => panic!("expected single-value record literal call arg, got {other:#?}"),
-            }
+            assert!(!uses_brace_syntax);
         }
         other => panic!("expected call, got {other:#?}"),
     }

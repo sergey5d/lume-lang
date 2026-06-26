@@ -87,21 +87,21 @@ class FlagRecord {
 }
 
 def main() Unit {
-    apple11 = Apple { 11 }
+    apple11 = Apple(11)
     appleBox = AppleBox { apple: apple11 }
     classInClass = match appleBox {
         case AppleBox(Apple(size)) => "class in class " + size
     }
     println(classInClass)
 
-    amount3 = Amount { 3, "usd" }
+    amount3 = Amount(3, "usd")
     amountBox = AmountBox { amount: amount3 }
     recordInClass = match amountBox {
         case AmountBox(Amount(count, label)) => "record in class " + count + " " + label
     }
     println(recordInClass)
 
-    apple7 = Apple { 7 }
+    apple7 = Apple(7)
     appleRecord = AppleRecord { apple: apple7 }
     classInRecord = match appleRecord {
         case AppleRecord(Apple(size)) => "class in record " + size
@@ -124,13 +124,13 @@ def main() Unit {
     }
     println(tupleInClass)
 
-    apple6 = Apple { 6 }
+    apple6 = Apple(6)
     classInTuple = match (apple6, 9) {
         case (Apple(size), tail) => "class in tuple " + size + " " + tail
     }
     println(classInTuple)
 
-    amount8 = Amount { 8, "eur" }
+    amount8 = Amount(8, "eur")
     recordInTuple = match (amount8, 0) {
         case (Amount(count, label), _) => "record in tuple " + count + " " + label
     }
@@ -149,14 +149,14 @@ def main() Unit {
     }
     println(enumInEnum)
 
-    apple12 = Apple { 12 }
+    apple12 = Apple(12)
     classInEnum = match MaybeApple.SomeX(apple12) {
         case SomeX(Apple(size)) => "class in enum " + size
         case MaybeApple.NoneX => "class in enum none"
     }
     println(classInEnum)
 
-    amount13 = Amount { 13, "cad" }
+    amount13 = Amount(13, "cad")
     recordInEnum = match MaybeAmount.SomeX(amount13) {
         case SomeX(Amount(count, label)) => "record in enum " + count + " " + label
         case MaybeAmount.NoneX => "record in enum none"

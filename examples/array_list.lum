@@ -3,7 +3,7 @@
 # Generic class construction is not supported at call sites yet.
 #
 # Intended future example for a generic list-backed list once calls like
-# ArrayList[Int] { 5 } and ArrayListIterator[T] { ... } are supported.
+# ArrayList[Int](5) and ArrayListIterator[T] { ... } are supported.
 
 class ArrayListIterator[T] with Iterator[T] {
     hidden var items List[T]
@@ -59,7 +59,7 @@ impl ArrayList[T] {
 }
 
 def main() Int {
-    values ArrayList[Int] = ArrayList[Int] { 5 }
+    values ArrayList[Int] = ArrayList[Int](5)
     values.append(10)
     values.append(20)
     values.append(30)

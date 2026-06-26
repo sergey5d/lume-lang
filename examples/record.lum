@@ -43,7 +43,7 @@ impl Amount {
     def jump(steps Int) Str = "Jump " + steps + " steps"
 }
 
-a1 = Amount { 10, "description", 5 }
+a1 = Amount(10, "description", 5)
 
 a2 = a1.multiple(a1)
 

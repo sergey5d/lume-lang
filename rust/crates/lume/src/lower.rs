@@ -3262,7 +3262,8 @@ impl<'a> FunctionLowerer<'a> {
     ) -> Vec<core::CallArg> {
         if style == core::CallStyle::Brace
             && (self.brace_call_targets_explicit_constructor(callee)
-                || self.brace_call_targets_current_constructor(callee))
+                || self.brace_call_targets_current_constructor(callee)
+                || self.brace_call_targets_enum_case(callee))
         {
             if let Some(args) = brace_record_constructor_args(args) {
                 return args;
@@ -3299,6 +3300,24 @@ impl<'a> FunctionLowerer<'a> {
             && path[0] == "new"
             && self.function().name == "new"
             && matches!(self.function().kind, ir::FunctionKind::Method { .. })
+    }
+
+    fn brace_call_targets_enum_case(&self, callee: &Expr) -> bool {
+        let Some(path) = expr_path(callee) else {
+            return false;
+        };
+        match path.as_slice() {
+            [case_name] => self.program.types.iter().any(|ty| {
+                ty.kind == ast::TypeKind::Enum
+                    && ty.enum_cases.iter().any(|case| case.name == *case_name)
+            }),
+            [type_name, case_name] => self.program.types.iter().any(|ty| {
+                ty.kind == ast::TypeKind::Enum
+                    && ty.name == *type_name
+                    && ty.enum_cases.iter().any(|case| case.name == *case_name)
+            }),
+            _ => false,
+        }
     }
 
     fn reorder_call_args<'b>(
@@ -3948,21 +3967,11 @@ fn brace_record_constructor_args(args: &[core::CallArg]) -> Option<Vec<core::Cal
         return None;
     };
 
-    if !fields.is_empty() {
+    if values.is_empty() {
         return Some(fields.clone());
     }
 
-    Some(
-        values
-            .iter()
-            .map(|value| core::CallArg {
-                name: None,
-                ty: None,
-                span: value.span(),
-                value: value.clone(),
-            })
-            .collect(),
-    )
+    None
 }
 
 fn param_names_from_function(function: &ir::Function) -> Vec<String> {
@@ -4185,7 +4194,7 @@ mod tests {
 
                 def add(value Int) Int = plus(value)
 
-                current = Amount { 1, "a" }
+                current = Amount(1, "a")
                 updated = current :< { amount: add(inc(1)) }
                 return updated.amount
             }

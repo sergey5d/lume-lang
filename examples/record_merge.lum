@@ -11,7 +11,7 @@ def main() Unit {
     located = { age: 42, location: "Tampa" }
     user = named :+ located
 
-    label = Label { "Bob" }
+    label = Label("Bob")
     counted = { count: 7 }
     labeledCount = label :+ counted
 

@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# class 'SecretBadge' uses brace construction; write 'SecretBadge \{ \.\.\. \}'
+# constructor syntax for 'SecretBadge' does not accept anonymous shape arguments in '\(\.\.\.\)'; use named arguments or positional values directly
 
 class SecretBadge {
     name Str

@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# class 'Target' uses brace construction; write 'Target \{ \.\.\. \}'
+# class 'Target' positional construction expects 2\.\.2 arguments, got 1
 
 class Source {
     name Str

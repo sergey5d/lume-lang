@@ -33,7 +33,7 @@ def main() Int {
        case _ => 0
     })
 
-    pair PairBox = PairBox { 4, 9 }
+    pair PairBox = PairBox(4, 9)
     result = match pair {
        case PairBox(left, right) => left + right
     }

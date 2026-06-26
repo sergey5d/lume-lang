@@ -86,20 +86,20 @@ impl Account {
 }
 
 def main() Unit {
-    profile = Profile { "Ada", 2 }
+    profile = Profile("Ada", 2)
     println("profile", profile.name, profile.visitCount(), profile.isActive())
 
     profile.bump()
     println("profile bumped", profile.visitCount())
 
-    stock = Stock { 7 }
+    stock = Stock(7)
     println("stock", stock.value())
 
-    slots = Slots { 10, 20 }
+    slots = Slots(10, 20)
     println("slots", slots.left(), slots.right())
 
     namedAccount = Account { name: "Ada", age: 10 }
-    positionalAccount = Account { "Bob", 11 }
+    positionalAccount = Account("Bob", 11)
     defaultAccount = Account { name: "Eve" }
     println("account", namedAccount.label())
     println("account", positionalAccount.label())

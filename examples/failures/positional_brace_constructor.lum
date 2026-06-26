@@ -1,14 +1,10 @@
 # FAIL_REGEX:
 # braces are for named fields; use 'shape\(\.\.\.\)' for positional anonymous shapes or 'Type\(\.\.\.\)' for positional constructors
 
-class Order {
-    id Int
+class Box {
+    value Int
 }
 
-def main() Option[Order] {
-    Some {
-        Order {
-            id: 7
-        }
-    }
+def main() Unit {
+    _ Box = Box { 1 }
 }

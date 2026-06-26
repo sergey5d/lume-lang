@@ -1,17 +1,17 @@
 # EXPECT:
 # brace named Sammy 15 NYC
-# brace positional Ben 12 Paris
-# brace hidden Liam 8 5
-# brace hidden-third Ada 4 7
+# positional Ben 12 Paris
+# positional hidden Liam 8 5
+# positional hidden-third Ada 4 7
 # ctor alt 6 5
 # ctor manual 5 Bobby
 
 # Class construction rules in one place:
-# - classes without explicit `new` use brace construction
-# - positional braces follow public field order
+# - classes without explicit `new` support named braces and positional parentheses
+# - positional construction follows public field order
 # - trailing public defaults may be omitted
 # - hidden defaulted fields may trail public fields and stay out of the shape
-# - explicit `new` uses the same brace call syntax as structural construction
+# - explicit `new` supports named braces and positional parentheses
 # - explicit `new` can define defaulted trailing parameters
 
 class Profile {
@@ -53,7 +53,7 @@ impl A {
 
     new {
         maturity Int
-    } = new { maturity - 15, "5" }
+    } = new(maturity - 15, "5")
 
     def trueAge() Int = this.age
 
@@ -89,23 +89,23 @@ def main() Unit {
         name: "Sammy"
         age: 15
     }
-    positional Profile = Profile { "Ben", 12, "Paris" }
-    hiddenDefault Profile = Profile { "Liam", 8 }
-    hiddenThird HiddenTail = HiddenTail { "Ada", 4 }
+    positional Profile = Profile("Ben", 12, "Paris")
+    hiddenDefault Profile = Profile("Liam", 8)
+    hiddenThird HiddenTail = HiddenTail("Ada", 4)
 
     aFromAlt A = A { maturity: 21 }
-    bManual B = B { 5 }
+    bManual B = B(5)
 
     println("brace named", named.name, named.age, named.city)
-    println("brace positional", positional.name, positional.age, positional.city)
+    println("positional", positional.name, positional.age, positional.city)
     println(
-        "brace hidden",
+        "positional hidden",
         hiddenDefault.name,
         hiddenDefault.age,
         hiddenDefault.scoreValue()
     )
     println(
-        "brace hidden-third",
+        "positional hidden-third",
         hiddenThird.name,
         hiddenThird.level,
         hiddenThird.bonusValue()
