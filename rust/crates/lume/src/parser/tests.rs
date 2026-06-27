@@ -1080,7 +1080,7 @@ def run(value Option[Int]) Int {
 }
 
 #[test]
-fn parses_plain_let_option_extract_shorthand() {
+fn rejects_plain_let_option_extract_shorthand() {
     let result = parse(
         r#"
 def run(value Option[Int]) Int {
@@ -1089,27 +1089,40 @@ def run(value Option[Int]) Int {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    let function = match &program.items[0] {
-        Item::Function(function) => function,
-        other => panic!("expected function, got {other:#?}"),
-    };
-    match &function.body {
-        CallableBody::Block(block) => match &block.statements[0] {
-            Stmt::PatternBinding(stmt) => match &stmt.pattern {
-                Pattern::Extract { inner, .. } => {
-                    assert_eq!(stmt.kind, PatternBindingKind::Let);
-                    assert!(
-                        matches!(inner.as_ref(), Pattern::Binding { name, .. } if name == "item")
-                    );
-                }
-                other => panic!("expected extract shorthand pattern, got {other:#?}"),
-            },
-            other => panic!("expected pattern binding statement, got {other:#?}"),
-        },
-        other => panic!("expected block body, got {other:#?}"),
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "refutable_let_extract"
+                && diag
+                    .message
+                    .contains("plain 'let ... <- value' is refutable")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_grouped_plain_let_option_extract_shorthand() {
+    let result = parse(
+        r#"
+def run(value Option[Int]) Int {
+    let {
+        item <- value
     }
+    return item
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "refutable_let_extract"
+                && diag
+                    .message
+                    .contains("plain 'let ... <- value' is refutable")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]

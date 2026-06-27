@@ -8844,12 +8844,10 @@ def main(
     knownOption = Some(4)
     widenedOption Option[Int] = Some(5)
     let Some(optionItem) = optionValue
-    let resultItem <- resultValue
     let {
-        eitherItem <- eitherValue
+        Some(knownItem) = knownOption
     }
-    let knownItem <- knownOption
-    let widenedItem <- widenedOption
+    let Some(widenedItem) = widenedOption
     return 0
 }
 "#,
@@ -8863,7 +8861,7 @@ def main(
                     && diag.message.contains("use 'let ... else ...' instead")
             })
             .count();
-        assert_eq!(matches, 5, "{:#?}", result.diagnostics);
+        assert_eq!(matches, 3, "{:#?}", result.diagnostics);
     }
 
     #[test]
@@ -8871,7 +8869,7 @@ def main(
         let program = parse_inline(
             r#"
 def main(value) Int {
-    let item <- value
+    let item <- value else return 0
     return 0
 }
 "#,
