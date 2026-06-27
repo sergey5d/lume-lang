@@ -1,12 +1,18 @@
 # EXPECT:
 # ok
 
-class Tag {
-    name Str
+annotation Tag {
+    name Str = "default"
 }
 
-class Route {
+annotation Route {
     path Str
+}
+
+routePath Str = "/health"
+
+single Routes {
+    health Str = "/health"
 }
 
 @Tag { name: "service" }
@@ -16,14 +22,14 @@ class Service {
 }
 
 impl Service {
-    @Route { path: "/health" }
+    @Route { path: routePath }
     new {
     } {
         this.name = "ok"
     }
 
-    @Route("/health")
-    @Tag("health")
+    @Route { path: Routes.health }
+    @Tag { name: "health" }
     def health() Str = this.name
 }
 

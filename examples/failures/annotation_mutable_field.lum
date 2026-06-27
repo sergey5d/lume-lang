@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*annotation 'Route' cannot declare mutable field 'method'.*
+
+annotation Route {
+    var method Str = "GET"
+}

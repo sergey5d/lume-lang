@@ -484,6 +484,31 @@ impl single Counter {
 }
 
 #[test]
+fn parses_annotation_decl_with_default_field_values() {
+    let result = parse(
+        r#"
+annotation Route {
+    path Str
+    method Str = "GET"
+}
+
+@Route { path: "/health" }
+def health() Str = "ok"
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Type(decl) => {
+            assert_eq!(decl.kind, TypeKind::Annotation);
+            assert_eq!(decl.name, "Route");
+            assert_eq!(decl.members.len(), 2);
+        }
+        other => panic!("expected annotation type, got {other:#?}"),
+    }
+}
+
+#[test]
 fn rejects_methods_in_single_body() {
     let result = parse(
         r#"

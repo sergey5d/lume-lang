@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*annotation arguments must be literals or stable constants.*
+
+var routePath Str = "/mutable"
+
+annotation Route {
+    path Str
+}
+
+@Route { path: routePath }
+def main() Unit {}

@@ -67,6 +67,7 @@ pub enum Visibility {
 /// The surface category of a type declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TypeKind {
+    Annotation,
     Class,
     Record,
     Single,
@@ -81,7 +82,7 @@ pub enum ImplTargetKind {
     Single,
 }
 
-/// A `class`, `shape`, `single`, `interface`, or `enum` declaration.
+/// An `annotation`, `class`, `shape`, `single`, `interface`, or `enum` declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDecl {
     pub annotations: Vec<Annotation>,

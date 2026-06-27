@@ -1,0 +1,7 @@
+module annotation_values
+
+routePath Str = "/from-module"
+
+single Routes {
+    health Str = "/from-single"
+}

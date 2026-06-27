@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*annotation 'Route' cannot be constructed as a value.*
+
+annotation Route {
+    path Str
+}
+
+def main() Unit {
+    route = Route("/health")
+}

@@ -68,7 +68,7 @@ use model/things/Console/{print as write}
 ## Example
 
 This longer example is a compact tour of the current surface syntax: interfaces,
-shapes, classes, `impl`, `single`, enums, constructors, varargs, named and
+annotations, shapes, classes, `impl`, `single`, enums, constructors, varargs, named and
 positional construction, destructuring, `let` / `expect`, `try`, `match`,
 `partial match`, lambdas, `for`, `for ... yield`, `while`, `continue`, `defer`,
 shape update, and shape merge.

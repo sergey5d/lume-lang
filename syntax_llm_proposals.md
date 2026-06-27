@@ -9,6 +9,7 @@ for what works today.
 The language is strongest when it keeps one obvious form for each major idea:
 
 - `class` for nominal instance types
+- `annotation` for data-only metadata shapes
 - `single` for singleton namespaces/values
 - `enum` for tagged sums
 - `interface` for contracts

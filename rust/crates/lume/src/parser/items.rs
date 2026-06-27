@@ -104,7 +104,8 @@ impl<'a> Parser<'a> {
                 let function = self.parse_function_decl(annotations, visibility)?;
                 Some(Item::Function(function))
             }
-            TokenKind::Keyword(Keyword::Class)
+            TokenKind::Keyword(Keyword::Annotation)
+            | TokenKind::Keyword(Keyword::Class)
             | TokenKind::Keyword(Keyword::Shape)
             | TokenKind::Keyword(Keyword::Single)
             | TokenKind::Keyword(Keyword::Interface)
@@ -332,6 +333,11 @@ impl<'a> Parser<'a> {
         visibility: Visibility,
     ) -> Option<TypeDecl> {
         let (kind, start) = match self.current_kind() {
+            TokenKind::Keyword(Keyword::Annotation) => {
+                let span = self.current_span();
+                self.advance();
+                (TypeKind::Annotation, span)
+            }
             TokenKind::Keyword(Keyword::Class) => {
                 let span = self.current_span();
                 self.advance();
@@ -360,7 +366,7 @@ impl<'a> Parser<'a> {
             _ => {
                 self.error_at_current(
                     "expected_type_decl",
-                    "expected class, shape, single, interface, or enum",
+                    "expected annotation, class, shape, single, interface, or enum",
                 );
                 return None;
             }
@@ -401,6 +407,9 @@ impl<'a> Parser<'a> {
             let member_visibility = self.parse_visibility();
             if member_visibility == Visibility::Public {
                 let message = match kind {
+                    TypeKind::Annotation => {
+                        "public is not allowed on annotation fields; annotation fields are public by default"
+                    }
                     TypeKind::Interface => "public is not allowed inside interfaces",
                     TypeKind::Enum => "public is not allowed on enum members",
                     TypeKind::Class => "public is not allowed on class members",
@@ -413,6 +422,10 @@ impl<'a> Parser<'a> {
             match self.current_kind() {
                 TokenKind::Keyword(Keyword::Def) => {
                     let body_method_error = match kind {
+                        TypeKind::Annotation => Some(format!(
+                            "annotation '{}' cannot declare methods; annotations are data-only metadata shapes",
+                            name
+                        )),
                         TypeKind::Single => Some(format!(
                             "single '{}' cannot declare methods in its body; use 'impl single {}'",
                             name, name

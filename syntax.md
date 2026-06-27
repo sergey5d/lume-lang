@@ -138,25 +138,49 @@ Built-in `OS` methods are available implicitly in every file, so `print(...)`, `
 
 ## Top-Level Declarations
 
-Annotations use `@` followed by a constructor expression, typically for a class type. They are parsed and attached to declarations and members as metadata.
+Annotations are declared with `annotation`. They are shape-like metadata types:
+- only public immutable fields are allowed
+- fields may have default values
+- methods and custom constructors are not allowed
 
 Examples:
 
 ```txt
-class Route {
+annotation Route {
     path Str
+    method Str = "GET"
 }
+
+routePath Str = "/status"
+
+single Routes {
+    health Str = "/health"
+}
+
+@Route { path: routePath }
+def status() Str = "ok"
 
 @Route { path: "/health" }
 def health() Str = "ok"
 
-@Route("/health")
+@Route { path: Routes.health }
+def healthFromSingle() Str = "ok"
+
+@Route { path: "/health", method: "POST" }
 def health2() Str = "ok"
 ```
 
+Annotation arguments are compile-time metadata values. They may only be literals, aggregate literals made from allowed values, or stable constants:
+
+- immutable top-level constants, including imported constants
+- immutable fields on `single` values, such as `Routes.health`
+- immutable constants through a module alias, such as `routes.healthPath`
+
+Calls, indexing, arithmetic, mutable globals, and mutable singleton fields are rejected in annotation arguments.
+
 Supported targets currently include:
 
-- top-level `def`, `interface`, `class`, `shape`, `single`, `enum`
+- top-level `def`, `annotation`, `interface`, `class`, `shape`, `single`, `enum`
 - fields
 - methods
 - interface methods
@@ -173,6 +197,7 @@ module app
 Top-level forms:
 
 - `def`
+- `annotation`
 - `interface`
 - `class`
 - `shape`
@@ -181,6 +206,7 @@ Top-level forms:
 - `public def`
 - `public name Type = expr`
 - `hidden def`
+- `hidden annotation`
 - `hidden interface`
 - `hidden class`
 - `hidden shape`
@@ -194,6 +220,11 @@ def greet(name Str) Str = "hello, " + name
 
 interface Named {
     def label() Str
+}
+
+annotation Route {
+    path Str
+    method Str = "GET"
 }
 
 class Box[T] {

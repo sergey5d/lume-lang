@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*annotation 'Route' cannot declare hidden field 'path'.*
+
+annotation Route {
+    hidden path Str
+}

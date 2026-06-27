@@ -459,6 +459,7 @@ fn standalone_single_sig(name: &str) -> TypeSig {
 
 fn type_kind_label(kind: TypeKind) -> &'static str {
     match kind {
+        TypeKind::Annotation => "annotation",
         TypeKind::Class => "class",
         TypeKind::Record => "shape",
         TypeKind::Single => "single",
@@ -782,6 +783,28 @@ impl<'a> Checker<'a> {
         for member in &decl.members {
             match member {
                 TypeMember::Field(field) => {
+                    if decl.kind == TypeKind::Annotation {
+                        if field.visibility == Visibility::Hidden {
+                            self.add_error(
+                                "invalid_annotation_field",
+                                format!(
+                                    "annotation '{}' cannot declare hidden field '{}'",
+                                    decl.name, field.name
+                                ),
+                                field.span,
+                            );
+                        }
+                        if field.mutable {
+                            self.add_error(
+                                "invalid_annotation_field",
+                                format!(
+                                    "annotation '{}' cannot declare mutable field '{}'",
+                                    decl.name, field.name
+                                ),
+                                field.span,
+                            );
+                        }
+                    }
                     if decl.kind == TypeKind::Record {
                         if field.visibility == Visibility::Hidden {
                             self.add_error(
@@ -828,6 +851,16 @@ impl<'a> Checker<'a> {
                     }
                 }
                 TypeMember::Method(method) => {
+                    if decl.kind == TypeKind::Annotation {
+                        self.add_error(
+                            "invalid_annotation_method",
+                            format!(
+                                "annotation '{}': annotations cannot declare methods",
+                                decl.name
+                            ),
+                            method.span,
+                        );
+                    }
                     if decl.kind == TypeKind::Interface && method.name == "new" {
                         self.add_error(
                             "invalid_interface_method",
@@ -929,6 +962,17 @@ impl<'a> Checker<'a> {
                     );
                     return;
                 };
+                if type_sig.kind == TypeKind::Annotation {
+                    self.add_error(
+                        "invalid_annotation_impl",
+                        format!(
+                            "annotation '{}' cannot have impl methods; annotations are data-only metadata shapes",
+                            target_name
+                        ),
+                        block.span,
+                    );
+                    return;
+                }
                 if type_sig.kind == TypeKind::Interface || type_sig.kind == TypeKind::Single {
                     self.add_error(
                         "unknown_impl_target",
@@ -4378,6 +4422,18 @@ impl<'a> Checker<'a> {
 
         self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
 
+        if sig.kind == TypeKind::Annotation {
+            self.add_error(
+                "invalid_annotation_construction",
+                format!(
+                    "annotation '{}' cannot be constructed as a value; use '@{} {{ ... }}' as metadata",
+                    sig.name, sig.name
+                ),
+                span,
+            );
+            return ret;
+        }
+
         let constructor_overloads = if sig.kind == TypeKind::Record {
             None
         } else {
@@ -7640,6 +7696,67 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_annotation_decl_with_default_field_values() {
+        let program = parse_inline(
+            r#"
+annotation Route {
+    path Str
+    method Str = "GET"
+}
+
+@Route { path: "/health" }
+def health() Str = "ok"
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_annotation_mutable_hidden_fields_and_impls() {
+        let program = parse_inline(
+            r#"
+annotation Route {
+    hidden path Str
+    var method Str = "GET"
+}
+
+impl Route {
+    def path() Str = "nope"
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_annotation_field"
+                    && diag.message.contains("hidden field 'path'")),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_annotation_field"
+                    && diag.message.contains("mutable field 'method'")),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_annotation_impl"
+                    && diag.message.contains("cannot have impl methods")),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

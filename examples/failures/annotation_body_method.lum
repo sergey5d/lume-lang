@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*annotation 'Route' cannot declare methods.*
+
+annotation Route {
+    path Str
+
+    def label() Str = path
+}

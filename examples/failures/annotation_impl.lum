@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*annotation 'Route' cannot have impl methods.*
+
+annotation Route {
+    path Str
+}
+
+impl Route {
+    def path() Str = "nope"
+}

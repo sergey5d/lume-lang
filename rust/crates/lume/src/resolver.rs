@@ -238,6 +238,9 @@ impl SymbolKind {
             SymbolKind::Parameter(ParameterKind::Method(TypeKind::Class)) => {
                 "class method parameter"
             }
+            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Annotation)) => {
+                "annotation method parameter"
+            }
             SymbolKind::Parameter(ParameterKind::Method(TypeKind::Record)) => {
                 "shape method parameter"
             }
@@ -250,6 +253,9 @@ impl SymbolKind {
             }
             SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Class)) => {
                 "class constructor parameter"
+            }
+            SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Annotation)) => {
+                "annotation constructor parameter"
             }
             SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Record)) => {
                 "shape constructor parameter"
@@ -289,12 +295,14 @@ struct TypeInfo {
 #[derive(Debug, Clone, Copy)]
 struct SymbolicField {
     name: &'static str,
+    mutable: bool,
 }
 
 impl SymbolicField {
-    fn from_binding(name: &str) -> Self {
+    fn from_field(field: &crate::ast::FieldDecl) -> Self {
         Self {
-            name: Box::leak(name.to_string().into_boxed_str()),
+            name: Box::leak(field.name.to_string().into_boxed_str()),
+            mutable: field.mutable,
         }
     }
 }
@@ -302,7 +310,7 @@ impl SymbolicField {
 #[derive(Debug, Clone, Default)]
 struct ModuleNamespace {
     functions: HashMap<String, crate::source::Span>,
-    globals: HashMap<String, crate::source::Span>,
+    globals: HashMap<String, Symbol>,
     types: HashMap<String, TypeInfo>,
     singles: HashMap<String, TypeInfo>,
 }
@@ -810,7 +818,7 @@ fn summarize_type(decl: &TypeDecl) -> TypeInfo {
     for member in &decl.members {
         match member {
             TypeMember::Field(field) => {
-                fields.push(SymbolicField::from_binding(field.name.as_str()));
+                fields.push(SymbolicField::from_field(field));
             }
             TypeMember::Method(method) => {
                 methods.insert(
@@ -908,7 +916,6 @@ impl<'a> Resolver<'a> {
         for item in &self.module.program.items {
             match item {
                 crate::ast::Item::Function(function) => {
-                    self.resolve_annotations(&function.annotations);
                     if let Some(previous) = self.functions.get(&function.name) {
                         self.add_duplicate(
                             "duplicate_function",
@@ -921,7 +928,6 @@ impl<'a> Resolver<'a> {
                     }
                 }
                 crate::ast::Item::Type(decl) => {
-                    self.resolve_annotations(&decl.annotations);
                     let info = summarize_type(decl);
                     let previous = if decl.kind == TypeKind::Single {
                         self.singles.get(&decl.name).map(|info| info.span)
@@ -1029,11 +1035,7 @@ impl<'a> Resolver<'a> {
                         (decl.visibility == Visibility::Public).then_some((name, decl.span))
                     })
                     .collect(),
-                globals: decls
-                    .globals
-                    .into_iter()
-                    .map(|(name, sym)| (name, sym.span))
-                    .collect(),
+                globals: decls.globals.into_iter().collect(),
                 types: decls.types,
                 singles: decls.singles,
             };
@@ -1137,11 +1139,101 @@ impl<'a> Resolver<'a> {
 
     fn resolve_annotations(&mut self, annotations: &[Annotation]) {
         for annotation in annotations {
+            self.validate_annotation_expr(&annotation.value);
             self.resolve_expr(&annotation.value);
         }
     }
 
+    fn validate_annotation_expr(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Call { callee, args, .. } => {
+                if member_segments(callee).is_none() {
+                    self.add_error(
+                        "invalid_annotation",
+                        "annotation must name an annotation type",
+                        callee.span(),
+                    );
+                }
+                for arg in args {
+                    self.validate_annotation_value(&arg.value);
+                }
+            }
+            Expr::Identifier { .. } | Expr::Member { .. } => {}
+            Expr::Group { inner, .. } => self.validate_annotation_expr(inner),
+            _ => self.add_error(
+                "invalid_annotation",
+                "annotation must be a name or a call with literal/static arguments",
+                expr.span(),
+            ),
+        }
+    }
+
+    fn validate_annotation_value(&mut self, expr: &Expr) {
+        if !self.is_annotation_static_value(expr) {
+            self.add_error(
+                "invalid_annotation_value",
+                "annotation arguments must be literals or stable constants",
+                expr.span(),
+            );
+        }
+    }
+
+    fn is_annotation_static_value(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Integer { .. }
+            | Expr::Float { .. }
+            | Expr::String { .. }
+            | Expr::Bool { .. }
+            | Expr::Unit { .. } => true,
+            Expr::Group { inner, .. } => self.is_annotation_static_value(inner),
+            Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => items
+                .iter()
+                .all(|item| self.is_annotation_static_value(item)),
+            Expr::RecordLiteral { fields, values, .. } => {
+                fields
+                    .iter()
+                    .all(|field| self.is_annotation_static_value(&field.value))
+                    && values
+                        .iter()
+                        .all(|value| self.is_annotation_static_value(value))
+            }
+            Expr::Identifier { name, .. } => self
+                .lookup_global_value(name)
+                .is_some_and(|symbol| !symbol.mutable),
+            Expr::Member { .. } => self.is_stable_annotation_member(expr),
+            _ => false,
+        }
+    }
+
+    fn is_stable_annotation_member(&self, expr: &Expr) -> bool {
+        let Some(segments) = member_segments(expr) else {
+            return false;
+        };
+        match segments.as_slice() {
+            [owner_name, member_name] => {
+                if let Some(namespace) = self.modules_by_alias.get(owner_name) {
+                    namespace
+                        .globals
+                        .get(member_name)
+                        .is_some_and(|symbol| !symbol.mutable)
+                } else {
+                    self.lookup_single_info(owner_name)
+                        .and_then(|info| info.fields.iter().find(|field| field.name == member_name))
+                        .is_some_and(|field| !field.mutable)
+                }
+            }
+            [module_name, single_name, field_name] => self
+                .modules_by_alias
+                .get(module_name)
+                .and_then(|namespace| namespace.singles.get(single_name))
+                .and_then(|info| info.fields.iter().find(|field| field.name == field_name))
+                .is_some_and(|field| !field.mutable),
+            _ => false,
+        }
+    }
+
     fn resolve_function(&mut self, function: &FunctionDecl) {
+        self.resolve_annotations(&function.annotations);
         self.push_type_scope();
         for param in &function.type_params {
             self.define_type_param(param);
@@ -1167,6 +1259,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_type_decl(&mut self, decl: &TypeDecl) {
+        self.resolve_annotations(&decl.annotations);
         self.push_type_scope();
         for param in &decl.type_params {
             self.define_type_param(param);
@@ -2244,6 +2337,12 @@ impl<'a> Resolver<'a> {
             .or_else(|| self.imported_values.get(name).copied())
     }
 
+    fn lookup_single_info(&self, name: &str) -> Option<&TypeInfo> {
+        self.singles
+            .get(name)
+            .or_else(|| self.imported_singles.get(name))
+    }
+
     fn lookup_outer(&self, name: &str) -> Option<Symbol> {
         if self.scopes.len() > 1 {
             for scope in self.scopes[..self.scopes.len() - 1].iter().rev() {
@@ -2456,11 +2555,13 @@ impl<'a> Resolver<'a> {
             }
             [module, single_name, member] => {
                 let single = namespace.singles.get(single_name)?;
-                if single.methods.contains_key(member) {
+                if single.methods.contains_key(member)
+                    || single.fields.iter().any(|field| field.name == member)
+                {
                     None
                 } else {
                     Some(format!(
-                        "single '{}.{}' has no visible member '{}'",
+                        "single '{}.{}' has no visible field or method '{}'",
                         module, single_name, member
                     ))
                 }
@@ -2512,6 +2613,7 @@ fn arity_label(arity: usize) -> &'static str {
 
 fn field_label(kind: TypeKind) -> &'static str {
     match kind {
+        TypeKind::Annotation => "annotation field",
         TypeKind::Class => "class field",
         TypeKind::Record => "shape field",
         TypeKind::Single => "single field",
@@ -2576,6 +2678,65 @@ def main() Int {
                 .iter()
                 .any(|diag| diag.code == "undefined_name" && diag.message.contains("missing")),
             "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_annotation_literals_and_stable_constants() {
+        let program = parse_inline(
+            r#"
+routePath Str = "/health"
+
+annotation Route {
+    path Str
+}
+
+single Config {
+    path Str = "/config"
+}
+
+@Route { path: "/literal" }
+@Route { path: routePath }
+@Route { path: Config.path }
+def main() Unit {}
+"#,
+        );
+        let result = resolve_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_runtime_annotation_values() {
+        let program = parse_inline(
+            r#"
+var mutablePath Str = "/mutable"
+
+annotation Route {
+    path Str
+}
+
+single Config {
+    var path Str = "/config"
+}
+
+def makePath() Str = "/runtime"
+
+@Route { path: mutablePath }
+@Route { path: Config.path }
+@Route { path: makePath() }
+def main() Unit {}
+"#,
+        );
+        let result = resolve_program(&program);
+        let invalid_values = result
+            .diagnostics
+            .iter()
+            .filter(|diag| diag.code == "invalid_annotation_value")
+            .count();
+        assert_eq!(
+            invalid_values, 3,
+            "expected mutable global, mutable single field, and call to be rejected: {:#?}",
             result.diagnostics
         );
     }
