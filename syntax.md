@@ -138,7 +138,7 @@ Built-in `OS` methods are available implicitly in every file, so `print(...)`, `
 
 ## Top-Level Declarations
 
-Annotations use `@` followed by a normal constructor call, typically for a class type. They are parsed and attached to declarations and members as metadata.
+Annotations use `@` followed by a constructor expression, typically for a class type. They are parsed and attached to declarations and members as metadata.
 
 Examples:
 
@@ -147,7 +147,7 @@ class Route {
     path Str
 }
 
-@Route(path = "/health")
+@Route { path: "/health" }
 def health() Str = "ok"
 
 @Route("/health")
@@ -452,7 +452,8 @@ tupled Point = (5, 6)
 Construction rules:
 - braces are named constructor arguments: `Type { field: value }`
 - parentheses are positional constructor arguments: `Type(value)`
-- parenthesized constructor calls may use named arguments, same as methods, but this is usually not needed
+- constructor parentheses accept positional arguments only; use braces for named constructor arguments
+- function and method calls may still use named arguments in parentheses
 - `Type { value }` is not valid; use `Type(value)`
 - anonymous shapes use `{ field: value }` for named construction and tuple values for contextual positional construction
 - builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` use parentheses
@@ -754,12 +755,13 @@ items.zipMap { (left,
     right) -> left + right }
 ```
 
-Trailing brace call syntax is only for lambda arguments. Ordinary arguments,
-including enum constructor payloads, must still use parentheses:
+Trailing brace call syntax on non-constructor calls is only for lambda arguments.
+Constructor braces are named constructor arguments, so enum named payloads use
+braces and enum positional payloads use parentheses:
 
 ```txt
 maybeOrder = Some(Order { id: 7 })
-namedMaybeOrder = Some(value: Order { id: 7 })
+namedMaybeOrder = Some { value: Order { id: 7 } }
 ```
 
 If the body after `->` starts on the next line, it may be either:

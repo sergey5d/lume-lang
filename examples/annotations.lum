@@ -9,14 +9,14 @@ class Route {
     path Str
 }
 
-@Tag(name = "service")
+@Tag { name: "service" }
 class Service {
-    @Tag(name = "field")
+    @Tag { name: "field" }
     name Str
 }
 
 impl Service {
-    @Route(path = "/health")
+    @Route { path: "/health" }
     new {
     } {
         this.name = "ok"

@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# constructor parentheses accept positional arguments only; use braces for named constructor arguments
+
+def main() Unit {
+    _ Option[Int] = Some(value = 5)
+}

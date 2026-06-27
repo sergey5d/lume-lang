@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# constructor syntax for 'SecretBadge' does not accept anonymous shape arguments in '\(\.\.\.\)'; use named arguments or positional values directly
+# constructor syntax for 'SecretBadge' does not accept anonymous shape arguments in '\(\.\.\.\)'; use named brace arguments or positional values directly
 
 class SecretBadge {
     name Str

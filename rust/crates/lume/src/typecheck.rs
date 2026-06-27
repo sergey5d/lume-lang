@@ -3480,6 +3480,23 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn reject_parenthesized_named_constructor_args(
+        &mut self,
+        args: &[crate::ast::CallArg],
+        uses_brace_syntax: bool,
+        span: crate::source::Span,
+    ) -> bool {
+        if uses_brace_syntax || args.iter().all(|arg| arg.name.is_none()) {
+            return false;
+        }
+        self.add_error(
+            "invalid_constructor_call",
+            "constructor parentheses accept positional arguments only; use braces for named constructor arguments",
+            span,
+        );
+        true
+    }
+
     fn check_builtin_static_factory_call(
         &mut self,
         callee: &Expr,
@@ -3938,7 +3955,9 @@ impl<'a> Checker<'a> {
         match callee {
             Expr::Identifier { name, .. } => {
                 if !structural_record_arg {
-                    if let Some(ty) = self.check_builtin_constructor(name, args, span) {
+                    if let Some(ty) =
+                        self.check_builtin_constructor(name, args, span, uses_brace_syntax)
+                    {
                         return Some(ty);
                     }
                 }
@@ -3958,9 +3977,13 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Some(case) = self.world.lookup_enum_case(self.module, name) {
-                    return Some(
-                        self.check_enum_case_constructor_signature(name, &case, args, span),
-                    );
+                    return Some(self.check_enum_case_constructor_signature(
+                        name,
+                        &case,
+                        args,
+                        span,
+                        uses_brace_syntax,
+                    ));
                 }
                 if let Some(sig) = self.lookup_type_local(name) {
                     return Some(self.check_named_type_constructor(
@@ -4034,6 +4057,7 @@ impl<'a> Checker<'a> {
                                 &case,
                                 args,
                                 span,
+                                uses_brace_syntax,
                             ));
                         }
                         if sig.kind == TypeKind::Object {
@@ -4048,6 +4072,7 @@ impl<'a> Checker<'a> {
                                 &case,
                                 args,
                                 span,
+                                uses_brace_syntax,
                             ));
                         }
                     }
@@ -4059,6 +4084,7 @@ impl<'a> Checker<'a> {
                                 &case,
                                 args,
                                 span,
+                                uses_brace_syntax,
                             ));
                         }
                     }
@@ -4074,9 +4100,11 @@ impl<'a> Checker<'a> {
         name: &str,
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
+        uses_brace_syntax: bool,
     ) -> Option<Ty> {
         match name {
             "Range" => {
+                self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
                 if !(args.len() == 2 || args.len() == 3) {
                     self.add_error(
                         "invalid_argument_count",
@@ -4103,6 +4131,7 @@ impl<'a> Checker<'a> {
                 Some(Ty::Named("IntRange".to_string(), Vec::new()))
             }
             "List" => {
+                self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
                 let mut item = Ty::Unknown;
                 for arg in args {
                     item = join_types(&item, &self.check_expr(&arg.value));
@@ -4110,6 +4139,7 @@ impl<'a> Checker<'a> {
                 Some(Ty::Named("List".to_string(), vec![item]))
             }
             "Set" => {
+                self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
                 let mut item = Ty::Unknown;
                 for arg in args {
                     item = join_types(&item, &self.check_expr(&arg.value));
@@ -4117,6 +4147,7 @@ impl<'a> Checker<'a> {
                 Some(Ty::Named("Set".to_string(), vec![item]))
             }
             "Array" => {
+                self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
                 let mut item = Ty::Unknown;
                 for arg in args {
                     item = join_types(&item, &self.check_expr(&arg.value));
@@ -4124,6 +4155,7 @@ impl<'a> Checker<'a> {
                 Some(Ty::Named("Array".to_string(), vec![item]))
             }
             "Map" => {
+                self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
                 let mut key = Ty::Unknown;
                 let mut value = Ty::Unknown;
                 for arg in args {
@@ -4182,13 +4214,15 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use named arguments or positional values directly",
+                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use named brace arguments or positional values directly",
                     sig.name
                 ),
                 span,
             );
             return ret;
         }
+
+        self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
 
         let constructor_overloads = if sig.kind == TypeKind::Record {
             None
@@ -4454,6 +4488,7 @@ impl<'a> Checker<'a> {
         case: &EnumCaseSig,
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
+        uses_brace_syntax: bool,
     ) -> Ty {
         if case.field_count == 0 && args.is_empty() {
             self.add_error(
@@ -4463,6 +4498,7 @@ impl<'a> Checker<'a> {
             );
             return case.result.clone();
         }
+        self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
         self.check_constructor_signature(&case.params, &case.result, args, span)
     }
 

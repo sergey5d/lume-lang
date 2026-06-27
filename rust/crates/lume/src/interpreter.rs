@@ -2279,7 +2279,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use named arguments or positional values directly",
+                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use named brace arguments or positional values directly",
                     type_name
                 ),
             ));
