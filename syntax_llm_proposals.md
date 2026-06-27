@@ -18,7 +18,7 @@ The language is strongest when it keeps one obvious form for each major idea:
 - `Type { field: value }` for named construction
 - `{ field: value }` for anonymous shapes
 - `try` for propagation
-- `expect` for assertive extraction or boolean assertions
+- `expect` for assertive refutable binding or boolean assertions
 - explicit lambdas such as `value -> value + 1`
 
 The main cleanup principle still stands:

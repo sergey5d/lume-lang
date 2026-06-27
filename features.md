@@ -239,17 +239,20 @@ The shorthand body rules are now intentionally narrow:
 
 This keeps the surface compact without turning newlines into implicit structure.
 
-### Refutable Binding
+### Irrefutable and Refutable Binding
 
-The preferred refutable-binding surface is now split into these forms:
-- `if let PATTERN = value { ... }` for testing and binding
+Binding syntax is organized around whether the pattern is irrefutable or
+refutable:
+- `let PATTERN = value` for irrefutable binding
+- `if let PATTERN = value { ... }` for testing and binding with a branch
 - `if let { PATTERN = value ... } { ... }` for multiple sequential refutable bindings in one condition
 - `if let PATTERN = value && let OTHER = next && ready { ... }` for mixed refutable and boolean checks in one condition
-- `let PATTERN = value else { ... }` for extraction with an explicit failure path
+- `let PATTERN = value else { ... }` for refutable binding with an explicit failure path
 - `let { PATTERN = value ... } else { ... }` for multiple sequential refutable bindings sharing one fallback
+- `expect PATTERN = value` for assertive refutable binding that panics on mismatch
 - `PATTERN <- source` as shorthand for the success case inside `if let`, `let ... else`, and `expect`
   `Some(PATTERN)` for `Option`, `Ok(PATTERN)` for `Result`, and `Right(PATTERN)` for `Either`
-  plain `let` does not accept this form; use `let ... else`, `if let`, or `expect`
+  plain `let` accepts this form only when the source expression itself proves the success case, such as `let item <- Some(5)`
 - `value = try source` for propagation from `Option`, `Result`, and `Either`
 
 TODO:

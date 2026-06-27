@@ -1143,9 +1143,20 @@ result = if value > 0 {
 
 Brace-delimited branches are the preferred `if` form. `else` does not require `:`.
 
-## `let ... else` and `try`
+## Irrefutable and Refutable Bindings
 
-Preferred refutable binding form:
+Plain `let` is the irrefutable binding form. Use it when the pattern is known
+to match:
+
+```txt
+pair (Int, Int) = (1, 2)
+let (left, right) = pair
+```
+
+If the pattern can fail, plain `let` is rejected. Use a refutable binding form
+instead.
+
+`let ... else` is the refutable binding form with an explicit fallback path:
 
 ```txt
 let Some(item) = maybeValue else {
@@ -1197,14 +1208,6 @@ let {
 - if the match succeeds, bindings remain visible after the statement
 - if the match fails, the `else` block is evaluated and must exit the current control-flow path, typically with `return`, `break`, `continue`, or a call whose return type is `Never`
 
-Plain pattern `let` is only allowed for irrefutable matches:
-
-```txt
-pair (Int, Int) = (1, 2)
-let (left, right) = pair
-```
-
-If the match can fail, plain `let` is rejected and you must use `let ... else`.
 Success-case extraction shorthand such as `let item <- maybeValue` is accepted
 without `else` only when the source expression itself proves the successful
 case:
@@ -1216,7 +1219,8 @@ maybe Option[Int] = Some(5)
 let item <- maybe          # error: maybe has type Option[Int], so extraction can fail
 ```
 
-An explicit assertive form is also supported:
+`expect` is the assertive refutable binding form. It matches the pattern, binds
+on success, and panics on mismatch:
 
 ```txt
 expect Some(item) = maybeValue
@@ -1228,7 +1232,7 @@ And the matching shorthand:
 expect item <- maybeValue
 ```
 
-Grouped assertive `expect` works the same way:
+Grouped `expect` works the same way:
 
 ```txt
 expect {
@@ -1237,7 +1241,6 @@ expect {
 }
 ```
 
-`expect` matches the pattern, binds on success, and panics on mismatch.
 `expect` is statement-only and does not support `else`; use `let ... else`
 when you want an explicit fallback path.
 
