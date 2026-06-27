@@ -1,0 +1,25 @@
+# FAIL_REGEX:
+# cannot assign value of type 'Pixel'.*type 'Named'
+
+interface Named {
+    def label() Str
+}
+
+shape PointView with Named {
+    x Int
+    y Int
+}
+
+impl PointView {
+    def label() Str = this.x + "," + this.y
+}
+
+class Pixel {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    pixel Pixel = Pixel(9, 10)
+    named Named = pixel
+}

@@ -43,6 +43,7 @@ Run the checked example sweep:
 - Use declarations use `use`, for example `use model/things/{A, B as AliasB}`.
 - Classes construct nominal values with `Type(...)` for positional args and `Type { field: value }` for named args.
 - Anonymous shapes use `{ field: value }`; named `shape` declarations are structural data-only types.
+- Shapes can implement interfaces with `shape Name with Interface`; classes must be explicitly viewed as a shape before using shape-provided interfaces.
 - Constructor declarations live in `impl` blocks as `new { params } { body }` or `new { params } = expr`.
 - Variadic params use list type syntax: `items [Str] vararg`.
 - Field construction and anonymous-shape construction use `field: value`, not `field = value`.

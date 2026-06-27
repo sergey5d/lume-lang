@@ -402,6 +402,7 @@ Named shapes are data-only named records:
 - fields are declared in the `shape` body
 - methods are declared with `impl ShapeName { ... }`
 - custom `new` constructors are not allowed
+- shapes may declare interface bounds with `shape Name with Interface`
 - named construction uses `ShapeName { field: value }`
 - positional construction uses `ShapeName(...)`
 - contextual tuple construction is allowed when the expected type is a known shape
@@ -414,6 +415,19 @@ shape Point {
 
 impl Point {
     def sum() Int = this.x + this.y
+}
+
+interface Named {
+    def label() Str
+}
+
+shape NamedPoint with Named {
+    x Int
+    y Int
+}
+
+impl NamedPoint {
+    def label() Str = this.x + "," + this.y
 }
 
 origin = Point(0, 0)
@@ -462,6 +476,8 @@ Shape conversion rules:
 - tuple-to-shape follows shape field order exactly
 - shape-to-shape assignment is structural by field names and field types
 - class-to-shape is allowed through visible public fields
+- shape-to-interface follows the shape's explicit `with Interface` bounds
+- class-to-interface-through-shape is not automatic; assign the class value to an explicit shape view first
 - hidden class fields are not visible to shape conversion
 - shape-to-class is not implicit; use a class constructor
 - tuple-to-class is not allowed; use a class constructor

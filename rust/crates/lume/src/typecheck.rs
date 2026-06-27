@@ -8072,6 +8072,79 @@ def main() Int {
     }
 
     #[test]
+    fn allows_shape_with_interface_after_explicit_shape_view() {
+        let program = parse_inline(
+            r#"
+interface Named {
+    def label() Str
+}
+
+shape PointView with Named {
+    x Int
+    y Int
+}
+
+impl PointView {
+    def label() Str = this.x + "," + this.y
+}
+
+class Pixel {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    pixel Pixel = Pixel(4, 5)
+    view PointView = pixel
+    named Named = view
+    _ Str = named.label()
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_class_to_interface_through_shape_without_explicit_shape_view() {
+        let program = parse_inline(
+            r#"
+interface Named {
+    def label() Str
+}
+
+shape PointView with Named {
+    x Int
+    y Int
+}
+
+impl PointView {
+    def label() Str = this.x + "," + this.y
+}
+
+class Pixel {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    pixel Pixel = Pixel(4, 5)
+    named Named = pixel
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_binding_type"
+                    && diag.message.contains("cannot assign value of type 'Pixel'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn rejects_tuple_to_class_assignment() {
         let program = parse_inline(
             r#"

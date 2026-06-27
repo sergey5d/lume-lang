@@ -1,0 +1,47 @@
+# EXPECT:
+# point 3,4
+# moved 13,24
+# named 3,4
+# pixel-view 9,10
+# view-is-named true
+# pixel-is-named false
+
+interface Named {
+    def label() Str
+}
+
+shape PointView with Named {
+    x Int
+    y Int
+}
+
+impl PointView {
+    def label() Str = this.x + "," + this.y
+
+    def move(dx Int, dy Int) PointView = PointView {
+        x: this.x + dx
+        y: this.y + dy
+    }
+}
+
+class Pixel {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    point PointView = PointView(3, 4)
+    moved = point.move(10, 20)
+    named Named = point
+
+    pixel Pixel = Pixel(9, 10)
+    view PointView = pixel
+
+    println("point", point.label())
+    println("moved", moved.label())
+    println("named", named.label())
+    println("pixel-view", view.label())
+    println("view-is-named", view is Named)
+    println("pixel-is-named", pixel is Named)
+}
+

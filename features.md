@@ -303,8 +303,10 @@ Shape conversion rules:
 - tuple -> known shape is allowed when the target shape type is explicit or expected
 - tuple -> class is not allowed
 - shape -> shape assignment is structural by field names and types
+- shape -> interface is allowed only through explicit `shape Name with Interface`
 - shape -> class is not implicit
 - class -> shape is allowed through visible public fields
+- class -> interface-through-shape is not automatic; bind the class to the shape view first
 - hidden fields are not visible to shape conversion
 - class -> tuple is not implicit
 - shape -> tuple is not implicit
