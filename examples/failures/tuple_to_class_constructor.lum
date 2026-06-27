@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# tuple values cannot construct class 'User'; use 'User\(\.\.\.\)' or 'User \{ \.\.\. \}'
+
+class User {
+    name Str
+    age Int
+}
+
+def main() Unit {
+    user User = ("Ada", 42)
+}

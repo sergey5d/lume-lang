@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# cannot assign value of type '.*' to binding 'user' of type 'User'
+
+class User {
+    name Str
+    age Int
+}
+
+def main() Unit {
+    data = {
+        name: "Ada"
+        age: 42
+    }
+    user User = data
+}

@@ -288,8 +288,9 @@ The language still needs a final policy for conversions between:
 
 Current intended direction:
 - class -> anonymous record shape is allowed where structural access is explicitly expected
-- tuple -> anonymous record is not allowed
-- anonymous record-shaped class construction should stay explicit through `Type { ... }`
+- tuple -> known shape is allowed when the target shape type is explicit or expected
+- shape -> shape assignment is structural by field names and types
+- shape -> class is not implicit; class construction stays explicit through `Type { ... }` or `Type(...)`
   - when the target class has no explicit `new`, braces use the visible structural shape
   - when the target class has explicit `new`, braces call a matching constructor
 - class -> tuple should stay explicit, if added at all
@@ -299,12 +300,11 @@ Important separation:
 - allowing class values to convert to anonymous records does not automatically mean `match` should destructure them using anonymous-record-shaped patterns
 
 Open questions:
-- whether anonymous record -> class should be contextual-only based on the expected type
 - how strict constructor matching should be
 - whether anonymous record -> tuple should exist at all
-- anonymous records use braces for named fields and `shape(...)` for contextual positional values
+- anonymous records use braces for named fields and tuples for contextual positional values
   - `{ count: count, label: label }`
-  - positional construction like `shape(1, "x")` is allowed when a target anonymous-record shape is known from context
+  - positional construction like `(1, "x")` is allowed when a target shape is known from context
 - whether explicit tuple projection should use a builtin like `tuple(instance)`
 
 ### Anonymous-Record Binding From String Templates

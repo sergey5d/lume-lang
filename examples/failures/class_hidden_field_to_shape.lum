@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# cannot assign value of type 'Secret' to binding 'leak' of type 'Leak'
+
+class Secret {
+    hidden token Str = "hidden"
+}
+
+shape Leak {
+    token Str
+}
+
+def main() Unit {
+    secret Secret = Secret()
+    leak Leak = secret
+}

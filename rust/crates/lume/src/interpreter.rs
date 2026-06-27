@@ -3569,7 +3569,10 @@ impl<'a> Interpreter<'a> {
                 Value::Float(_) => name == "Float" || name == "Float64",
                 Value::Bool(_) => name == "Bool",
                 Value::Unit => name == "Unit",
-                _ => false,
+                other => self
+                    .runtime
+                    .type_by_name_kind(name, crate::ast::TypeKind::Record)
+                    .is_some_and(|ty| self.value_matches_runtime_shape(other, ty)),
             },
             ir::Type::Tuple(items) => match value {
                 Value::Tuple(values) => {
@@ -3586,6 +3589,20 @@ impl<'a> Interpreter<'a> {
                     lookup_named_field(&record.borrow(), &field.name)
                         .is_some_and(|value| self.value_matches_type(&value, &field.ty))
                 }),
+                Value::Tuple(values) => {
+                    values.len() == fields.len()
+                        && values
+                            .iter()
+                            .zip(fields)
+                            .all(|(value, field)| self.value_matches_type(value, &field.ty))
+                }
+                Value::Aggregate(aggregate) => {
+                    let aggregate = aggregate.borrow();
+                    fields.iter().all(|field| {
+                        self.aggregate_visible_named_field_value(&aggregate, &field.name)
+                            .is_some_and(|value| self.value_matches_type(&value, &field.ty))
+                    })
+                }
                 _ => false,
             },
             ir::Type::Function { .. } => matches!(value, Value::Closure(_)),
@@ -3593,8 +3610,129 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    fn value_matches_runtime_shape(&self, value: &Value, ty: &runtime::RuntimeType) -> bool {
+        let visible_fields = ty
+            .fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .collect::<Vec<_>>();
+        match value {
+            Value::Aggregate(aggregate) => {
+                let aggregate = aggregate.borrow();
+                if aggregate.type_name == ty.name && aggregate.kind == crate::ast::TypeKind::Record
+                {
+                    return true;
+                }
+                visible_fields.iter().all(|field| {
+                    self.aggregate_visible_named_field_value(&aggregate, &field.name)
+                        .is_some_and(|value| self.value_matches_type(&value, &field.ty))
+                })
+            }
+            Value::Record(record) => {
+                let record = record.borrow();
+                visible_fields.iter().all(|field| {
+                    lookup_named_field(&record, &field.name)
+                        .is_some_and(|value| self.value_matches_type(&value, &field.ty))
+                })
+            }
+            Value::Tuple(items) => {
+                items.len() == visible_fields.len()
+                    && items
+                        .iter()
+                        .zip(visible_fields.iter())
+                        .all(|(value, field)| self.value_matches_type(value, &field.ty))
+            }
+            _ => false,
+        }
+    }
+
+    fn aggregate_visible_named_field_value(
+        &self,
+        aggregate: &AggregateValue,
+        name: &str,
+    ) -> Option<Value> {
+        let type_id = aggregate.runtime_type_id?;
+        let runtime_type = self.runtime.type_by_id(type_id)?;
+        let fields = if let Some(case_id) = aggregate.case_id {
+            &runtime_type.enum_cases.get(case_id.0)?.fields
+        } else {
+            &runtime_type.fields
+        };
+        let field = fields
+            .iter()
+            .find(|field| !field.hidden && field.name == name)?;
+        aggregate.fields.get(field.slot.0).cloned()
+    }
+
+    fn aggregate_from_shape_values(&self, ty: &runtime::RuntimeType, values: Vec<Value>) -> Value {
+        let visible_fields = ty
+            .fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .collect::<Vec<_>>();
+        let mut fields = self.allocate_runtime_fields(&ty.fields);
+        for (value, field) in values.into_iter().zip(visible_fields) {
+            fields[field.slot.0] = self.coerce_value_to_type(value, &field.ty);
+        }
+        Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
+            runtime_type_id: Some(ty.id),
+            type_name: ty.name.clone(),
+            kind: ty.kind,
+            case_id: None,
+            case_name: None,
+            field_names: ty.fields.iter().map(|field| field.name.clone()).collect(),
+            fields,
+        })))
+    }
+
+    fn coerce_value_to_named_shape(
+        &self,
+        value: Value,
+        ty: &runtime::RuntimeType,
+    ) -> Option<Value> {
+        let visible_fields = ty
+            .fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .collect::<Vec<_>>();
+        match value {
+            Value::Aggregate(aggregate) => {
+                let aggregate_ref = aggregate.borrow();
+                if aggregate_ref.type_name == ty.name
+                    && aggregate_ref.kind == crate::ast::TypeKind::Record
+                {
+                    return Some(Value::Aggregate(aggregate.clone()));
+                }
+                let values = visible_fields
+                    .iter()
+                    .map(|field| {
+                        self.aggregate_visible_named_field_value(&aggregate_ref, &field.name)
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some(self.aggregate_from_shape_values(ty, values))
+            }
+            Value::Record(record) => {
+                let record_ref = record.borrow();
+                let values = visible_fields
+                    .iter()
+                    .map(|field| lookup_named_field(&record_ref, &field.name))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(self.aggregate_from_shape_values(ty, values))
+            }
+            Value::Tuple(items) if items.len() == visible_fields.len() => {
+                Some(self.aggregate_from_shape_values(ty, items))
+            }
+            other => Some(other).filter(|value| self.value_matches_runtime_shape(value, ty)),
+        }
+    }
+
     fn coerce_value_to_type(&self, value: Value, ty: &ir::Type) -> Value {
         match ty {
+            ir::Type::Named { name, .. } => self
+                .runtime
+                .type_by_name_kind(name, crate::ast::TypeKind::Record)
+                .and_then(|ty| self.coerce_value_to_named_shape(value.clone(), ty))
+                .unwrap_or(value),
             ir::Type::Record(fields) => match value {
                 Value::Tuple(items) if items.len() == fields.len() => {
                     Value::Record(Rc::new(RefCell::new(
@@ -3646,6 +3784,33 @@ impl<'a> Interpreter<'a> {
                         )))
                     } else {
                         Value::Record(record.clone())
+                    }
+                }
+                Value::Aggregate(aggregate) => {
+                    let aggregate_ref = aggregate.borrow();
+                    if fields.iter().all(|field| {
+                        self.aggregate_visible_named_field_value(&aggregate_ref, &field.name)
+                            .is_some()
+                    }) {
+                        Value::Record(Rc::new(RefCell::new(
+                            fields
+                                .iter()
+                                .filter_map(|field| {
+                                    self.aggregate_visible_named_field_value(
+                                        &aggregate_ref,
+                                        &field.name,
+                                    )
+                                    .map(|value| {
+                                        (
+                                            field.name.clone(),
+                                            self.coerce_value_to_type(value, &field.ty),
+                                        )
+                                    })
+                                })
+                                .collect(),
+                        )))
+                    } else {
+                        Value::Aggregate(aggregate.clone())
                     }
                 }
                 other => other,

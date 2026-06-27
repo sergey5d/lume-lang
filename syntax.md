@@ -321,10 +321,10 @@ Anonymous record literal:
 user = { name: "Ada", age: 10 }
 ```
 
-Positional anonymous record construction uses `shape(...)` when the target shape is already known:
+Positional anonymous record construction uses a tuple when the target shape is already known:
 
 ```txt
-user { name Str, age Int } = shape("Ada", 10)
+user { name Str, age Int } = ("Ada", 10)
 ```
 
 Multiline anonymous record literal:
@@ -364,10 +364,10 @@ Positional construction also works for shaped parameters and shaped return value
 
 ```txt
 def makeUser() { name Str, age Int } {
-    return shape("Ada", 10)
+    return ("Ada", 10)
 }
 
-describe(shape("Cara", 14))
+describe(("Cara", 14))
 ```
 
 Named classes use braces for named construction and parentheses for positional construction:
@@ -390,6 +390,7 @@ Named shapes are data-only named records:
 - custom `new` constructors are not allowed
 - named construction uses `ShapeName { field: value }`
 - positional construction uses `ShapeName(...)`
+- contextual tuple construction is allowed when the expected type is a known shape
 
 ```txt
 shape Point {
@@ -403,6 +404,7 @@ impl Point {
 
 origin = Point(0, 0)
 named = Point { x: 3, y: 4 }
+tupled Point = (5, 6)
 ```
 
 Rules for field-based class construction:
@@ -410,7 +412,7 @@ Rules for field-based class construction:
 - parentheses are positional constructor arguments: `Type(value)`
 - parenthesized constructor calls may use named arguments, same as methods, but this is usually not needed
 - `Type { value }` is not valid; use `Type(value)`
-- anonymous shapes use `{ field: value }` for named construction and `shape(value)` for positional construction
+- anonymous shapes use `{ field: value }` for named construction and tuple assignment for contextual positional construction
 - builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` use parentheses
 - `Type { ... }` and `Type(...)` both resolve through the available `new`/field construction shape
 - any explicit `new` disables implicit structural field construction for that class
@@ -425,6 +427,9 @@ Rules for field-based class construction:
 - positional construction is rejected when a hidden initialized field appears before a later public field
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
+- tuple values cannot construct classes; write `User(...)` or `User { ... }`
+- tuple values can construct anonymous or named shapes only when the target shape type is known
+- class construction is nominal and constructor-gated; shape construction is structural
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
 - `Type({ ... })` is not supported; use named fields or positional values directly
 
@@ -435,11 +440,11 @@ Anonymous record shapes are structural:
 - defaults are not part of the shape syntax
 - construction uses plain `{ ... }` in expression position
 - named anonymous construction uses `{ field: value }`
-- positional anonymous construction uses `shape(value)` when a target anonymous record shape is known from context
+- positional anonymous construction uses tuple values when a target shape is known from context
 - ordinary calls may still accept named anonymous records in parentheses, for example `describe({ name: "Cara", age: 14 })`
 - named fields inside construction braces use `field: value`
 - named fields may carry an explicit initializer type as `field Type: value`
-- `shape(value1, value2)` is positional and requires an anonymous record shape from context
+- `(value1, value2)` can initialize a known shape positionally
 - single-expression braces like `{ value }` are still block expressions, not anonymous records
 - inside `{ ... }`, fields may be separated by commas, newlines, or a mix of both
 

@@ -1,7 +1,14 @@
 # EXPECT:
 # origin 3 4 7
 # named 5 6 11
+# tupled 8 9 17
+# fromClass 10 11 21
 # moved 7 9 16
+
+class Pixel {
+    x Int
+    y Int
+}
 
 shape Point {
     x Int
@@ -20,9 +27,14 @@ impl Point {
 def main() Unit {
     origin = Point(3, 4)
     named = Point { x: 5, y: 6 }
+    tupled Point = (8, 9)
+    pixel = Pixel(10, 11)
+    fromClass Point = pixel
     moved = origin.move(4, 5)
 
     println("origin", origin.x, origin.y, origin.sum())
     println("named", named.x, named.y, named.sum())
+    println("tupled", tupled.x, tupled.y, tupled.sum())
+    println("fromClass", fromClass.x, fromClass.y, fromClass.sum())
     println("moved", moved.x, moved.y, moved.sum())
 }

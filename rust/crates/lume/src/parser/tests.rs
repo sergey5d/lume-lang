@@ -448,20 +448,18 @@ fn parses_record_literal_forms() {
         other => panic!("expected typed record literal, got {other:#?}"),
     }
 
-    match parse_expr_only("shape(name, age)") {
-        Expr::RecordLiteral { fields, values, .. } => {
-            assert!(fields.is_empty());
-            assert_eq!(values.len(), 2);
+    match parse_expr_only("(name, age)") {
+        Expr::TupleLiteral { items, .. } => {
+            assert_eq!(items.len(), 2);
         }
-        other => panic!("expected positional shape literal, got {other:#?}"),
+        other => panic!("expected tuple literal, got {other:#?}"),
     }
 
-    match parse_expr_only(r#"shape(1, "x")"#) {
-        Expr::RecordLiteral { fields, values, .. } => {
-            assert!(fields.is_empty());
-            assert_eq!(values.len(), 2);
+    match parse_expr_only(r#"(1, "x")"#) {
+        Expr::TupleLiteral { items, .. } => {
+            assert_eq!(items.len(), 2);
         }
-        other => panic!("expected positional shape literal, got {other:#?}"),
+        other => panic!("expected tuple literal, got {other:#?}"),
     }
 
     match parse_expr_only("Person { name: name, age: age }") {

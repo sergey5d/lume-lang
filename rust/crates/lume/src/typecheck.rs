@@ -668,7 +668,28 @@ impl<'a> Checker<'a> {
             let value_types = binding_stmt
                 .values
                 .iter()
-                .map(|expr| self.check_expr(expr))
+                .enumerate()
+                .map(|(index, expr)| {
+                    if binding_stmt.bindings.len() == 1 {
+                        if let Some(expected) = binding_stmt.bindings[0]
+                            .ty
+                            .as_ref()
+                            .map(|ty| self.ty_from_type_ref(ty))
+                        {
+                            return self.check_expr_against(expr, &expected);
+                        }
+                    }
+                    if let Some(expected) = binding_stmt
+                        .bindings
+                        .get(index)
+                        .and_then(|binding| binding.ty.as_ref())
+                        .map(|ty| self.ty_from_type_ref(ty))
+                    {
+                        self.check_expr_against(expr, &expected)
+                    } else {
+                        self.check_expr(expr)
+                    }
+                })
                 .collect::<Vec<_>>();
             let slot_types = self.binding_slot_types(binding_stmt, &value_types);
             for (index, binding) in binding_stmt.bindings.iter().enumerate() {
@@ -2728,6 +2749,112 @@ impl<'a> Checker<'a> {
         self.check_expr_against(expr, &Ty::Unknown)
     }
 
+    fn expected_shape_fields(&self, expected: &Ty) -> Option<(String, Vec<FieldSig>)> {
+        match expected {
+            Ty::Record(fields) => Some((
+                "anonymous shape".to_string(),
+                fields
+                    .iter()
+                    .map(|(name, ty)| FieldSig {
+                        name: name.clone(),
+                        ty: ty.clone(),
+                        mutable: false,
+                        hidden: false,
+                        has_initializer: false,
+                    })
+                    .collect(),
+            )),
+            Ty::Named(name, args) => {
+                let sig = self.lookup_any_type(name)?;
+                if sig.kind != TypeKind::Record {
+                    return None;
+                }
+                let subst = sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                Some((
+                    format!("shape '{}'", sig.name),
+                    sig.fields
+                        .iter()
+                        .filter(|field| !field.hidden)
+                        .map(|field| FieldSig {
+                            name: field.name.clone(),
+                            ty: substitute_type(&field.ty, &subst),
+                            mutable: field.mutable,
+                            hidden: field.hidden,
+                            has_initializer: field.has_initializer,
+                        })
+                        .collect(),
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    fn check_tuple_literal_against_shape(
+        &mut self,
+        items: &[Expr],
+        expected: &Ty,
+        span: crate::source::Span,
+    ) -> Option<Ty> {
+        let Some((label, fields)) = self.expected_shape_fields(expected) else {
+            if let Ty::Named(name, _) = expected {
+                if let Some(sig) = self.lookup_any_type(name) {
+                    if sig.kind == TypeKind::Class {
+                        for item in items {
+                            self.check_expr(item);
+                        }
+                        self.add_error(
+                            "invalid_tuple_shape_conversion",
+                            format!(
+                                "tuple values cannot construct class '{}'; use '{}(...)' or '{} {{ ... }}'",
+                                sig.name, sig.name, sig.name
+                            ),
+                            span,
+                        );
+                        return Some(materialize_type(expected));
+                    }
+                }
+            }
+            return None;
+        };
+
+        if items.len() != fields.len() {
+            self.add_error(
+                "invalid_argument_count",
+                format!(
+                    "tuple construction for {} expects {} values, got {}",
+                    label,
+                    fields.len(),
+                    items.len()
+                ),
+                span,
+            );
+        }
+
+        for (item, field) in items.iter().zip(fields.iter()) {
+            let actual = self.check_expr_against(item, &field.ty);
+            self.require_assignable(
+                &actual,
+                &field.ty,
+                item.span(),
+                "invalid_argument_type",
+                format!(
+                    "tuple field '{}' for {} expects '{}' but got '{}'",
+                    field.name,
+                    label,
+                    field.ty.describe(),
+                    actual.describe()
+                ),
+            );
+        }
+
+        Some(materialize_type(expected))
+    }
+
     fn check_expr_against(&mut self, expr: &Expr, expected: &Ty) -> Ty {
         match expr {
             Expr::Identifier { name, span } => self
@@ -2762,8 +2889,12 @@ impl<'a> Checker<'a> {
                 }
                 Ty::list(item_ty)
             }
-            Expr::TupleLiteral { items, .. } => {
-                Ty::Tuple(items.iter().map(|item| self.check_expr(item)).collect())
+            Expr::TupleLiteral { items, span } => {
+                if let Some(ty) = self.check_tuple_literal_against_shape(items, expected, *span) {
+                    ty
+                } else {
+                    Ty::Tuple(items.iter().map(|item| self.check_expr(item)).collect())
+                }
             }
             Expr::Call {
                 callee,
@@ -2902,7 +3033,7 @@ impl<'a> Checker<'a> {
                     if !values.is_empty() {
                         self.add_error(
                             "missing_shape_context",
-                            "shape(...) requires an expected anonymous shape type",
+                            "positional anonymous shape construction requires an expected shape type; assign a tuple to an explicitly typed shape",
                             expr.span(),
                         );
                     }
@@ -5734,6 +5865,83 @@ impl<'a> Checker<'a> {
         self.is_assignable_inner(actual, expected, &mut seen)
     }
 
+    fn structural_fields_for_type(&self, ty: &Ty) -> Option<Vec<(String, Ty)>> {
+        match ty {
+            Ty::Record(fields) => Some(fields.clone()),
+            Ty::Named(name, args) => {
+                let sig = self.lookup_any_type(name)?;
+                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
+                    return None;
+                }
+                let subst = sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                Some(
+                    sig.fields
+                        .iter()
+                        .filter(|field| !field.hidden)
+                        .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
+                        .collect(),
+                )
+            }
+            _ => None,
+        }
+    }
+
+    fn shape_target_fields(&self, expected: &Ty) -> Option<Vec<(String, Ty)>> {
+        match expected {
+            Ty::Record(fields) => Some(fields.clone()),
+            Ty::Named(name, args) => {
+                let sig = self.lookup_any_type(name)?;
+                if sig.kind != TypeKind::Record {
+                    return None;
+                }
+                let subst = sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                Some(
+                    sig.fields
+                        .iter()
+                        .filter(|field| !field.hidden)
+                        .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
+                        .collect(),
+                )
+            }
+            _ => None,
+        }
+    }
+
+    fn structurally_assignable_to_shape(&self, actual: &Ty, expected: &Ty) -> bool {
+        let Some(expected_fields) = self.shape_target_fields(expected) else {
+            return false;
+        };
+
+        if let Ty::Tuple(items) = actual {
+            return items.len() == expected_fields.len()
+                && items
+                    .iter()
+                    .zip(expected_fields.iter())
+                    .all(|(actual, (_, expected))| self.is_assignable(actual, expected));
+        }
+
+        let Some(actual_fields) = self.structural_fields_for_type(actual) else {
+            return false;
+        };
+
+        expected_fields.iter().all(|(expected_name, expected_ty)| {
+            actual_fields
+                .iter()
+                .find(|(actual_name, _)| actual_name == expected_name)
+                .is_some_and(|(_, actual_ty)| self.is_assignable(actual_ty, expected_ty))
+        })
+    }
+
     fn is_assignable_inner(
         &self,
         actual: &Ty,
@@ -5741,6 +5949,9 @@ impl<'a> Checker<'a> {
         seen: &mut HashSet<(String, String)>,
     ) -> bool {
         if is_assignable(actual, expected) {
+            return true;
+        }
+        if self.structurally_assignable_to_shape(actual, expected) {
             return true;
         }
 
@@ -7420,6 +7631,113 @@ def main() Unit {
                     && diag.message.contains(
                         "cannot assign value of type 'Box' to binding 'pair' of type '(Int, Str)'",
                     )
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_tuple_to_anonymous_shape_assignment() {
+        let program = parse_inline(
+            r#"
+def main() Int {
+    point { x Int, y Int } = (4, 5)
+    point.x + point.y
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_tuple_to_named_shape_assignment() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Int
+}
+
+def main() Int {
+    point Point = (4, 5)
+    point.x + point.y
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_class_to_named_shape_assignment() {
+        let program = parse_inline(
+            r#"
+class Pixel {
+    x Int
+    y Int
+}
+
+shape Point {
+    x Int
+    y Int
+}
+
+def main() Int {
+    pixel Pixel = Pixel(4, 5)
+    point Point = pixel
+    point.x + point.y
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_tuple_to_class_assignment() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+    age Int
+}
+
+def main() Unit {
+    user User = ("Ada", 42)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_tuple_shape_conversion"
+                    && diag
+                        .message
+                        .contains("tuple values cannot construct class 'User'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_tuple_to_shape_with_wrong_field_type() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    point { x Int, y Str } = (4, 5)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_argument_type"
+                    && diag
+                        .message
+                        .contains("tuple field 'y' for anonymous shape expects 'Str' but got 'Int'")
             }),
             "{:#?}",
             result.diagnostics
