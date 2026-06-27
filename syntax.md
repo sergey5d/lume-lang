@@ -32,6 +32,8 @@ Common stdlib/prelude types:
 - `Option[T]`
 - `Iterable[T]`
 - `Iterator[T]`
+- `Type`
+- `TypeKind`
 - `Ordering[T]`
 - `Printer`
 - `OS`
@@ -48,6 +50,48 @@ Function types:
 Function type parameter lists must be parenthesized. Use `(Int) -> Int`,
 not `Int -> Int`. Lambda expressions still use ordinary arrow syntax, for
 example `value -> value + 1`.
+
+## Runtime Metadata
+
+Runtime metadata is exposed through the `Type` hierarchy declared in
+`stdlib/runtime.lum`.
+
+Use `typeOf[T]` to get metadata for a type:
+
+```txt
+userType Type = typeOf[User]
+```
+
+Every value also has a synthetic `runtimeType` field:
+
+```txt
+user User = User { name: "Ada", age: 42 }
+actual Type = user.runtimeType
+```
+
+Common metadata operations:
+
+```txt
+println(typeOf[User].name().orPanic())
+println(typeOf[User].kind())
+
+classType = typeOf[User].asClass().orPanic()
+fields = classType.fields()
+expect Some(nameField) = classType.field("name")
+println(nameField.fieldType().name().orPanic())
+
+enumType = typeOf[Status].asEnum().orPanic()
+expect Some(pendingCase) = enumType.case("Pending")
+println(pendingCase.name())
+```
+
+Rules:
+
+- `typeOf[T]` is a built-in type metadata operator, not an index operation
+- `runtimeType` is available as a read-only synthetic field on values
+- `TypeKind` includes `Class`, `Shape`, `Enum`, `Interface`, `Single`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
+- field, method, parameter, and enum-case metadata are runtime values with methods such as `name()`, `fieldType()`, `params()`, and `returnType()`
+- annotation lookup methods exist on the metadata API, but stored annotation payload lookup is not wired yet
 
 ## Strings
 

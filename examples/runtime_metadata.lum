@@ -1,0 +1,53 @@
+# EXPECT:
+# User
+# User
+# Class
+# 2
+# name
+# Str
+# Int
+# Primitive
+# Status
+# Enum
+# Pending
+
+class User {
+    name Str
+    age Int
+}
+
+enum Status {
+    case Pending
+    case Done {
+        label Str
+    }
+}
+
+def main() Unit {
+    user User = User { name: "Ada", age: 42 }
+
+    declared = typeOf[User]
+    actual = user.runtimeType
+
+    println(declared.name().orPanic())
+    println(actual.qualifiedName().orPanic())
+    println(declared.kind())
+
+    classType = declared.asClass().orPanic()
+    fields = classType.fields()
+    println(fields.size())
+
+    expect Some(nameField) = fields.get(0)
+    expect Some(ageField) = fields.get(1)
+
+    println(nameField.name())
+    println(nameField.fieldType().name().orPanic())
+    println(ageField.fieldType().name().orPanic())
+
+    println(typeOf[Int].kind())
+
+    enumType = typeOf[Status].asEnum().orPanic()
+    println(enumType.name().orPanic())
+    println(enumType.kind())
+    println(enumType.case("Pending").orPanic().name())
+}

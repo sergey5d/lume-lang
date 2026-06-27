@@ -352,6 +352,10 @@ pub enum Expr {
         target: TypeRef,
         span: Span,
     },
+    TypeOf {
+        ty: TypeRef,
+        span: Span,
+    },
     If {
         condition: Box<Expr>,
         then_block: Block,
@@ -402,6 +406,7 @@ impl Expr {
             | Expr::Unary { span, .. }
             | Expr::Binary { span, .. }
             | Expr::Is { span, .. }
+            | Expr::TypeOf { span, .. }
             | Expr::If { span, .. }
             | Expr::Block { span, .. }
             | Expr::Match { span, .. }

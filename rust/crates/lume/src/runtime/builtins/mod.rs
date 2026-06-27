@@ -28,7 +28,11 @@ pub(super) fn builtin_method(
         slot: RuntimeMethodSlot(slot),
         name: name.to_string(),
         target: RuntimeMethodTarget::Builtin(target),
+        param_names: (0..params.len())
+            .map(|index| format!("_{}", index + 1))
+            .collect(),
         params,
+        return_ty: ir::Type::Unknown,
     }
 }
 

@@ -96,9 +96,23 @@ Still open:
 - whether singleton methods should ever be usable directly beyond explicit `use module/Single/*` and builtin `OS` prelude behavior
 - if both a wide module use and a renamed selective use target the same module, the wide use should come first and the `as` use should come after it
 
+### 7. Annotation Targets
+
+Annotations exist as compile-time metadata shapes. They currently attach to declarations and members, with annotation arguments restricted to literals, stable constants, and constant expressions.
+
+Open question:
+- do we want annotations on global functions/method-like top-level `def` declarations as a first-class supported target
+- do we want annotations on global variables/top-level bindings
+- if top-level bindings become annotatable, should that apply only to immutable constants, or also to mutable module state
+- whether annotated globals should affect module export/import metadata, runtime reflection, generated code, or only checker/tooling behavior
+
+Current leaning:
+- global functions are probably useful annotation targets for routing, tests, effects, permissions, and generated bindings
+- immutable top-level constants may be useful too, but mutable globals are more questionable because annotation metadata should describe stable declarations, not changing state
+
 ## Longer-Term Ideas
 
-### 7. Result / Either Style Error Values
+### 8. Result / Either Style Error Values
 
 `Option`, `Result`, `Either`, and `try`-based short-circuit propagation now exist.
 
@@ -124,7 +138,7 @@ Current behavior:
 - `Either[L, ...]` can propagate only into `Either[L2, ...]` when `L` is assignable to `L2`
 - wrapper-style error remapping during `try` is still not implemented
 
-### 8. Smarter Type Narrowing
+### 9. Smarter Type Narrowing
 
 Later improvements could include:
 - better narrowing after `is`
@@ -161,7 +175,7 @@ Main design question:
 - whether this should stay very local and conservative
 - or whether the checker should learn more control-flow-sensitive narrowing over time
 
-### 9. Deferred Cleanup
+### 10. Deferred Cleanup
 
 `defer` is implemented as callable-scoped cleanup.
 
@@ -184,7 +198,7 @@ Open questions:
 - whether runtime errors should also run pending defers
 - whether future async/concurrency features need a stronger cleanup model
 
-### 10. Flow Control Composition
+### 11. Flow Control Composition
 
 Possible future surface:
 

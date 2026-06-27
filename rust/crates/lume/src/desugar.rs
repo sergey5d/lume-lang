@@ -319,6 +319,10 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             target: target.clone(),
             span: *span,
         },
+        ast::Expr::TypeOf { ty, span } => core::Expr::TypeOf {
+            ty: ty.clone(),
+            span: *span,
+        },
         ast::Expr::If {
             condition,
             then_block,

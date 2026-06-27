@@ -567,6 +567,9 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
             rewrite_expr_for_runtime(left, module, graph);
             rewrite_type_ref_for_runtime(target, module);
         }
+        ast::Expr::TypeOf { ty, .. } => {
+            rewrite_type_ref_for_runtime(ty, module);
+        }
         ast::Expr::If {
             condition,
             then_block,
@@ -744,6 +747,38 @@ pub(crate) enum Value {
     Aggregate(Rc<RefCell<AggregateValue>>),
     Iterator(Rc<RefCell<IteratorState>>),
     Closure(Rc<ClosureValue>),
+    RuntimeType(RuntimeTypeValue),
+    RuntimeField {
+        owner: runtime::RuntimeTypeId,
+        case_id: Option<runtime::RuntimeEnumCaseId>,
+        slot: runtime::RuntimeFieldSlot,
+    },
+    RuntimeMethod {
+        owner: runtime::RuntimeTypeId,
+        slot: runtime::RuntimeMethodSlot,
+    },
+    RuntimeParam {
+        owner: runtime::RuntimeTypeId,
+        method_slot: runtime::RuntimeMethodSlot,
+        index: usize,
+    },
+    RuntimeEnumCase {
+        owner: runtime::RuntimeTypeId,
+        case_id: runtime::RuntimeEnumCaseId,
+    },
+}
+
+#[derive(Clone)]
+pub(crate) enum RuntimeTypeValue {
+    Runtime(runtime::RuntimeTypeId),
+    Primitive(String),
+    Tuple(Vec<ir::Type>),
+    Function {
+        params: Vec<ir::Type>,
+        ret: Box<ir::Type>,
+    },
+    AnonymousShape(Vec<ir::NamedType>),
+    Unknown,
 }
 
 impl Value {
@@ -874,6 +909,46 @@ impl Value {
             }
             Value::Iterator(_) => "<iterator>".to_string(),
             Value::Closure(_) => "<closure>".to_string(),
+            Value::RuntimeType(runtime_type) => format!("type {}", runtime_type.render()),
+            Value::RuntimeField { .. } => "<field>".to_string(),
+            Value::RuntimeMethod { .. } => "<method>".to_string(),
+            Value::RuntimeParam { .. } => "<param>".to_string(),
+            Value::RuntimeEnumCase { .. } => "<enum-case>".to_string(),
+        }
+    }
+}
+
+impl RuntimeTypeValue {
+    fn render(&self) -> String {
+        match self {
+            RuntimeTypeValue::Runtime(_) => "<runtime>".to_string(),
+            RuntimeTypeValue::Primitive(name) => name.clone(),
+            RuntimeTypeValue::Tuple(items) => format!(
+                "({})",
+                items
+                    .iter()
+                    .map(render_ir_type)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            RuntimeTypeValue::Function { params, ret } => format!(
+                "({}) -> {}",
+                params
+                    .iter()
+                    .map(render_ir_type)
+                    .collect::<Vec<_>>()
+                    .join(","),
+                render_ir_type(ret)
+            ),
+            RuntimeTypeValue::AnonymousShape(fields) => format!(
+                "{{{}}}",
+                fields
+                    .iter()
+                    .map(|field| format!("{} {}", field.name, render_ir_type(&field.ty)))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            RuntimeTypeValue::Unknown => "<unknown>".to_string(),
         }
     }
 }
@@ -1431,6 +1506,9 @@ impl<'a> Interpreter<'a> {
                 let operand = self.eval_operand_ref(frame, operand, span)?;
                 Ok(Value::Bool(self.value_matches_type(&operand, ty)))
             }
+            ir::RValue::TypeOf { ty } => {
+                Ok(Value::RuntimeType(self.runtime_type_value_for_ir_type(ty)))
+            }
             ir::RValue::Closure { function, captures } => {
                 Ok(Value::Closure(Rc::new(ClosureValue {
                     function: *function,
@@ -1593,6 +1671,70 @@ impl<'a> Interpreter<'a> {
         self.builtin_enum_variant("Either", "Right", &["value"], vec![value])
     }
 
+    fn runtime_type_value_for_ir_type(&self, ty: &ir::Type) -> RuntimeTypeValue {
+        match ty {
+            ir::Type::Unknown => RuntimeTypeValue::Unknown,
+            ir::Type::Never => RuntimeTypeValue::Primitive("Never".to_string()),
+            ir::Type::Unit => RuntimeTypeValue::Primitive("Unit".to_string()),
+            ir::Type::Bool => RuntimeTypeValue::Primitive("Bool".to_string()),
+            ir::Type::Int => RuntimeTypeValue::Primitive("Int".to_string()),
+            ir::Type::Float => RuntimeTypeValue::Primitive("Float".to_string()),
+            ir::Type::Str => self
+                .runtime
+                .type_id_by_name_kind("Str", crate::ast::TypeKind::Class)
+                .map(RuntimeTypeValue::Runtime)
+                .unwrap_or_else(|| RuntimeTypeValue::Primitive("Str".to_string())),
+            ir::Type::Named { name, .. } if is_primitive_type_name(name) => {
+                RuntimeTypeValue::Primitive(name.clone())
+            }
+            ir::Type::Named { name, .. } => self
+                .runtime
+                .type_id_by_name_any_kind(name)
+                .map(RuntimeTypeValue::Runtime)
+                .unwrap_or_else(|| RuntimeTypeValue::Primitive(name.clone())),
+            ir::Type::Tuple(items) => RuntimeTypeValue::Tuple(items.clone()),
+            ir::Type::Record(fields) => RuntimeTypeValue::AnonymousShape(fields.clone()),
+            ir::Type::Function { params, ret } => RuntimeTypeValue::Function {
+                params: params.clone(),
+                ret: ret.clone(),
+            },
+            ir::Type::TypeParam(name) => RuntimeTypeValue::Primitive(name.clone()),
+        }
+    }
+
+    fn runtime_type_value_for_value(&self, value: &Value) -> RuntimeTypeValue {
+        match value {
+            Value::Int(_) => RuntimeTypeValue::Primitive("Int".to_string()),
+            Value::Float(_) => RuntimeTypeValue::Primitive("Float".to_string()),
+            Value::Bool(_) => RuntimeTypeValue::Primitive("Bool".to_string()),
+            Value::Unit => RuntimeTypeValue::Primitive("Unit".to_string()),
+            Value::Rune(_) => RuntimeTypeValue::Primitive("Rune".to_string()),
+            Value::Tuple(items) => RuntimeTypeValue::Tuple(vec![ir::Type::Unknown; items.len()]),
+            Value::Record(_) => RuntimeTypeValue::AnonymousShape(Vec::new()),
+            Value::Closure(_) => RuntimeTypeValue::Function {
+                params: Vec::new(),
+                ret: Box::new(ir::Type::Unknown),
+            },
+            Value::RuntimeType(_) => self.runtime_type_value_for_ir_type(&ir::Type::named("Type")),
+            Value::RuntimeField { .. } => {
+                self.runtime_type_value_for_ir_type(&ir::Type::named("Field"))
+            }
+            Value::RuntimeMethod { .. } => {
+                self.runtime_type_value_for_ir_type(&ir::Type::named("Method"))
+            }
+            Value::RuntimeParam { .. } => {
+                self.runtime_type_value_for_ir_type(&ir::Type::named("Param"))
+            }
+            Value::RuntimeEnumCase { .. } => {
+                self.runtime_type_value_for_ir_type(&ir::Type::named("EnumCase"))
+            }
+            _ => self
+                .runtime_type_id_for_value(value)
+                .map(RuntimeTypeValue::Runtime)
+                .unwrap_or(RuntimeTypeValue::Unknown),
+        }
+    }
+
     fn runtime_type_id_for_value(&self, value: &Value) -> Option<runtime::RuntimeTypeId> {
         match value {
             Value::List(_) => self
@@ -1625,6 +1767,12 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Option<Value>, Diagnostic> {
+        if let Some(value) =
+            self.try_invoke_metadata_method(receiver.clone(), method, args.clone(), span)?
+        {
+            return Ok(Some(value));
+        }
+
         let Some(type_id) = self.runtime_type_id_for_value(&receiver) else {
             return Ok(None);
         };
@@ -1683,6 +1831,547 @@ impl<'a> Interpreter<'a> {
         }
 
         best
+    }
+
+    fn try_invoke_metadata_method(
+        &mut self,
+        receiver: Value,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+        let value = match receiver {
+            Value::RuntimeType(runtime_type) => {
+                self.invoke_runtime_type_metadata_method(runtime_type, method, args, span)?
+            }
+            Value::RuntimeField {
+                owner,
+                case_id,
+                slot,
+            } => {
+                self.invoke_runtime_field_metadata_method(owner, case_id, slot, method, args, span)?
+            }
+            Value::RuntimeMethod { owner, slot } => {
+                self.invoke_runtime_method_metadata_method(owner, slot, method, args, span)?
+            }
+            Value::RuntimeParam {
+                owner,
+                method_slot,
+                index,
+            } => self.invoke_runtime_param_metadata_method(
+                owner,
+                method_slot,
+                index,
+                method,
+                args,
+                span,
+            )?,
+            Value::RuntimeEnumCase { owner, case_id } => {
+                self.invoke_runtime_enum_case_metadata_method(owner, case_id, method, args, span)?
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(value))
+    }
+
+    fn invoke_runtime_type_metadata_method(
+        &mut self,
+        runtime_type: RuntimeTypeValue,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        match method {
+            "annotation" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.option_none())
+            }
+            "hasAnnotation" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(Value::Bool(false))
+            }
+            "name" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self
+                    .runtime_type_name(&runtime_type)
+                    .map(Value::String)
+                    .map(|value| self.option_some(value))
+                    .unwrap_or_else(|| self.option_none()))
+            }
+            "qualifiedName" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self
+                    .runtime_type_qualified_name(&runtime_type)
+                    .map(Value::String)
+                    .map(|value| self.option_some(value))
+                    .unwrap_or_else(|| self.option_none()))
+            }
+            "kind" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.runtime_type_kind_value(&runtime_type))
+            }
+            "asClass" => self.runtime_type_cast_value(runtime_type, "Class", method, args, span),
+            "asShape" => self.runtime_type_cast_value(runtime_type, "Shape", method, args, span),
+            "asEnum" => self.runtime_type_cast_value(runtime_type, "Enum", method, args, span),
+            "asInterface" => {
+                self.runtime_type_cast_value(runtime_type, "Interface", method, args, span)
+            }
+            "asSingle" => self.runtime_type_cast_value(runtime_type, "Single", method, args, span),
+            "asAnnotation" => {
+                self.runtime_type_cast_value(runtime_type, "Annotation", method, args, span)
+            }
+            "fields" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.runtime_type_fields_value(&runtime_type))
+            }
+            "methods" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.runtime_type_methods_value(&runtime_type))
+            }
+            "field" => {
+                self.expect_metadata_arity(method, &args, 1, span)?;
+                let name = self.expect_metadata_string_arg(method, &args[0], span)?;
+                Ok(self.runtime_type_field_value(&runtime_type, &name))
+            }
+            "method" => {
+                self.expect_metadata_arity(method, &args, 1, span)?;
+                let name = self.expect_metadata_string_arg(method, &args[0], span)?;
+                Ok(self.runtime_type_method_value(&runtime_type, &name))
+            }
+            "cases" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.runtime_type_enum_cases_value(&runtime_type))
+            }
+            "case" => {
+                self.expect_metadata_arity(method, &args, 1, span)?;
+                let name = self.expect_metadata_string_arg(method, &args[0], span)?;
+                Ok(self.runtime_type_enum_case_value(&runtime_type, &name))
+            }
+            _ => Err(self.unknown_metadata_method(method, span)),
+        }
+    }
+
+    fn invoke_runtime_field_metadata_method(
+        &mut self,
+        owner: runtime::RuntimeTypeId,
+        case_id: Option<runtime::RuntimeEnumCaseId>,
+        slot: runtime::RuntimeFieldSlot,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        match method {
+            "annotation" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.option_none())
+            }
+            "hasAnnotation" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(Value::Bool(false))
+            }
+            "name" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(Value::String(
+                    self.runtime_field_metadata(owner, case_id, slot)
+                        .map(|field| field.name.clone())
+                        .unwrap_or_default(),
+                ))
+            }
+            "fieldType" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                let ty = self
+                    .runtime_field_metadata(owner, case_id, slot)
+                    .map(|field| field.ty.clone())
+                    .unwrap_or(ir::Type::Unknown);
+                Ok(Value::RuntimeType(self.runtime_type_value_for_ir_type(&ty)))
+            }
+            _ => Err(self.unknown_metadata_method(method, span)),
+        }
+    }
+
+    fn invoke_runtime_method_metadata_method(
+        &mut self,
+        owner: runtime::RuntimeTypeId,
+        slot: runtime::RuntimeMethodSlot,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        match method {
+            "annotation" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.option_none())
+            }
+            "hasAnnotation" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(Value::Bool(false))
+            }
+            "name" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(Value::String(
+                    self.runtime_method_metadata(owner, slot)
+                        .map(|method| method.name.clone())
+                        .unwrap_or_default(),
+                ))
+            }
+            "params" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                let count = self
+                    .runtime_method_metadata(owner, slot)
+                    .map(|method| method.params.len())
+                    .unwrap_or(0);
+                Ok(Value::list(
+                    (0..count)
+                        .map(|index| Value::RuntimeParam {
+                            owner,
+                            method_slot: slot,
+                            index,
+                        })
+                        .collect(),
+                ))
+            }
+            "returnType" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                let ty = self
+                    .runtime_method_metadata(owner, slot)
+                    .map(|method| method.return_ty.clone())
+                    .unwrap_or(ir::Type::Unknown);
+                Ok(Value::RuntimeType(self.runtime_type_value_for_ir_type(&ty)))
+            }
+            _ => Err(self.unknown_metadata_method(method, span)),
+        }
+    }
+
+    fn invoke_runtime_param_metadata_method(
+        &mut self,
+        owner: runtime::RuntimeTypeId,
+        method_slot: runtime::RuntimeMethodSlot,
+        index: usize,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        match method {
+            "name" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(Value::String(
+                    self.runtime_method_metadata(owner, method_slot)
+                        .and_then(|method| method.param_names.get(index))
+                        .cloned()
+                        .unwrap_or_default(),
+                ))
+            }
+            "paramType" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                let ty = self
+                    .runtime_method_metadata(owner, method_slot)
+                    .and_then(|method| method.params.get(index))
+                    .cloned()
+                    .unwrap_or(ir::Type::Unknown);
+                Ok(Value::RuntimeType(self.runtime_type_value_for_ir_type(&ty)))
+            }
+            _ => Err(self.unknown_metadata_method(method, span)),
+        }
+    }
+
+    fn invoke_runtime_enum_case_metadata_method(
+        &mut self,
+        owner: runtime::RuntimeTypeId,
+        case_id: runtime::RuntimeEnumCaseId,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        match method {
+            "annotation" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.option_none())
+            }
+            "hasAnnotation" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(Value::Bool(false))
+            }
+            "name" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(Value::String(
+                    self.runtime_enum_case_metadata(owner, case_id)
+                        .map(|case| case.name.clone())
+                        .unwrap_or_default(),
+                ))
+            }
+            "fields" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(Value::list(
+                    self.runtime_enum_case_metadata(owner, case_id)
+                        .map(|case| {
+                            case.fields
+                                .iter()
+                                .map(|field| Value::RuntimeField {
+                                    owner,
+                                    case_id: Some(case_id),
+                                    slot: field.slot,
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                ))
+            }
+            _ => Err(self.unknown_metadata_method(method, span)),
+        }
+    }
+
+    fn runtime_type_cast_value(
+        &self,
+        runtime_type: RuntimeTypeValue,
+        expected_kind: &str,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        self.expect_metadata_arity(method, &args, 0, span)?;
+        if self.runtime_type_kind_case(&runtime_type) == expected_kind {
+            Ok(self.option_some(Value::RuntimeType(runtime_type)))
+        } else {
+            Ok(self.option_none())
+        }
+    }
+
+    fn runtime_type_name(&self, runtime_type: &RuntimeTypeValue) -> Option<String> {
+        match runtime_type {
+            RuntimeTypeValue::Runtime(type_id) => {
+                self.runtime.type_by_id(*type_id).map(|ty| ty.name.clone())
+            }
+            RuntimeTypeValue::Primitive(name) => Some(name.clone()),
+            RuntimeTypeValue::Unknown => Some("Unknown".to_string()),
+            RuntimeTypeValue::Tuple(_)
+            | RuntimeTypeValue::Function { .. }
+            | RuntimeTypeValue::AnonymousShape(_) => None,
+        }
+    }
+
+    fn runtime_type_qualified_name(&self, runtime_type: &RuntimeTypeValue) -> Option<String> {
+        self.runtime_type_name(runtime_type)
+    }
+
+    fn runtime_type_kind_case(&self, runtime_type: &RuntimeTypeValue) -> &'static str {
+        match runtime_type {
+            RuntimeTypeValue::Runtime(type_id) => self
+                .runtime
+                .type_by_id(*type_id)
+                .map(|ty| match ty.kind {
+                    crate::ast::TypeKind::Annotation => "Annotation",
+                    crate::ast::TypeKind::Class => "Class",
+                    crate::ast::TypeKind::Record => "Shape",
+                    crate::ast::TypeKind::Single => "Single",
+                    crate::ast::TypeKind::Interface => "Interface",
+                    crate::ast::TypeKind::Enum => "Enum",
+                })
+                .unwrap_or("Primitive"),
+            RuntimeTypeValue::Primitive(_) | RuntimeTypeValue::Unknown => "Primitive",
+            RuntimeTypeValue::Tuple(_) => "Tuple",
+            RuntimeTypeValue::Function { .. } => "Function",
+            RuntimeTypeValue::AnonymousShape(_) => "AnonymousShape",
+        }
+    }
+
+    fn runtime_type_kind_value(&self, runtime_type: &RuntimeTypeValue) -> Value {
+        self.builtin_enum_variant(
+            "TypeKind",
+            self.runtime_type_kind_case(runtime_type),
+            &[],
+            Vec::new(),
+        )
+    }
+
+    fn runtime_type_fields_value(&self, runtime_type: &RuntimeTypeValue) -> Value {
+        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+            return Value::list(Vec::new());
+        };
+        let fields = self
+            .runtime
+            .type_by_id(*type_id)
+            .map(|ty| {
+                ty.fields
+                    .iter()
+                    .map(|field| Value::RuntimeField {
+                        owner: *type_id,
+                        case_id: None,
+                        slot: field.slot,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Value::list(fields)
+    }
+
+    fn runtime_type_methods_value(&self, runtime_type: &RuntimeTypeValue) -> Value {
+        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+            return Value::list(Vec::new());
+        };
+        let methods = self
+            .runtime
+            .type_by_id(*type_id)
+            .map(|ty| {
+                ty.methods
+                    .iter()
+                    .map(|method| Value::RuntimeMethod {
+                        owner: *type_id,
+                        slot: method.slot,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Value::list(methods)
+    }
+
+    fn runtime_type_field_value(&self, runtime_type: &RuntimeTypeValue, name: &str) -> Value {
+        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+            return self.option_none();
+        };
+        self.runtime
+            .type_by_id(*type_id)
+            .and_then(|ty| ty.fields.iter().find(|field| field.name == name))
+            .map(|field| {
+                self.option_some(Value::RuntimeField {
+                    owner: *type_id,
+                    case_id: None,
+                    slot: field.slot,
+                })
+            })
+            .unwrap_or_else(|| self.option_none())
+    }
+
+    fn runtime_type_method_value(&self, runtime_type: &RuntimeTypeValue, name: &str) -> Value {
+        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+            return self.option_none();
+        };
+        self.runtime
+            .type_by_id(*type_id)
+            .and_then(|ty| ty.methods.iter().find(|method| method.name == name))
+            .map(|method| {
+                self.option_some(Value::RuntimeMethod {
+                    owner: *type_id,
+                    slot: method.slot,
+                })
+            })
+            .unwrap_or_else(|| self.option_none())
+    }
+
+    fn runtime_type_enum_cases_value(&self, runtime_type: &RuntimeTypeValue) -> Value {
+        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+            return Value::list(Vec::new());
+        };
+        let cases = self
+            .runtime
+            .type_by_id(*type_id)
+            .map(|ty| {
+                ty.enum_cases
+                    .iter()
+                    .map(|case| Value::RuntimeEnumCase {
+                        owner: *type_id,
+                        case_id: case.id,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Value::list(cases)
+    }
+
+    fn runtime_type_enum_case_value(&self, runtime_type: &RuntimeTypeValue, name: &str) -> Value {
+        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+            return self.option_none();
+        };
+        self.runtime
+            .type_by_id(*type_id)
+            .and_then(|ty| ty.enum_cases.iter().find(|case| case.name == name))
+            .map(|case| {
+                self.option_some(Value::RuntimeEnumCase {
+                    owner: *type_id,
+                    case_id: case.id,
+                })
+            })
+            .unwrap_or_else(|| self.option_none())
+    }
+
+    fn runtime_field_metadata(
+        &self,
+        owner: runtime::RuntimeTypeId,
+        case_id: Option<runtime::RuntimeEnumCaseId>,
+        slot: runtime::RuntimeFieldSlot,
+    ) -> Option<&runtime::RuntimeField> {
+        match case_id {
+            Some(case_id) => self
+                .runtime
+                .type_by_id(owner)?
+                .enum_cases
+                .get(case_id.0)?
+                .fields
+                .get(slot.0),
+            None => self.runtime.type_by_id(owner)?.fields.get(slot.0),
+        }
+    }
+
+    fn runtime_method_metadata(
+        &self,
+        owner: runtime::RuntimeTypeId,
+        slot: runtime::RuntimeMethodSlot,
+    ) -> Option<&runtime::RuntimeMethod> {
+        self.runtime.type_by_id(owner)?.methods.get(slot.0)
+    }
+
+    fn runtime_enum_case_metadata(
+        &self,
+        owner: runtime::RuntimeTypeId,
+        case_id: runtime::RuntimeEnumCaseId,
+    ) -> Option<&runtime::RuntimeEnumCase> {
+        self.runtime.type_by_id(owner)?.enum_cases.get(case_id.0)
+    }
+
+    fn expect_metadata_arity(
+        &self,
+        method: &str,
+        args: &[Value],
+        expected: usize,
+        span: Option<Span>,
+    ) -> Result<(), Diagnostic> {
+        if args.len() == expected {
+            return Ok(());
+        }
+        Err(self.runtime_error(
+            span,
+            format!(
+                "metadata method '{}' expects {} arguments, got {}",
+                method,
+                expected,
+                args.len()
+            ),
+        ))
+    }
+
+    fn expect_metadata_string_arg(
+        &self,
+        method: &str,
+        value: &Value,
+        span: Option<Span>,
+    ) -> Result<String, Diagnostic> {
+        match value {
+            Value::String(value) => Ok(value.clone()),
+            other => Err(self.runtime_error(
+                span,
+                format!(
+                    "metadata method '{}' expects Str argument, got {}",
+                    method,
+                    other.render()
+                ),
+            )),
+        }
+    }
+
+    fn unknown_metadata_method(&self, method: &str, span: Option<Span>) -> Diagnostic {
+        self.runtime_error(
+            span,
+            format!("metadata method '{}' is not available", method),
+        )
     }
 
     fn read_place(
@@ -3373,6 +4062,10 @@ impl<'a> Interpreter<'a> {
     }
 
     fn get_member(&self, base: Value, name: &str, span: Option<Span>) -> Result<Value, Diagnostic> {
+        if name == "runtimeType" {
+            return Ok(Value::RuntimeType(self.runtime_type_value_for_value(&base)));
+        }
+
         match base {
             Value::Aggregate(aggregate) => {
                 if matches!(name, "stdout" | "stderr")
@@ -3705,6 +4398,20 @@ impl<'a> Interpreter<'a> {
                 Value::Float(_) => name == "Float" || name == "Float64",
                 Value::Bool(_) => name == "Bool",
                 Value::Unit => name == "Unit",
+                Value::RuntimeType(runtime_type) => match name.as_str() {
+                    "Type" | "Annotated" => true,
+                    "ClassType" => self.runtime_type_kind_case(runtime_type) == "Class",
+                    "ShapeType" => self.runtime_type_kind_case(runtime_type) == "Shape",
+                    "EnumType" => self.runtime_type_kind_case(runtime_type) == "Enum",
+                    "InterfaceType" => self.runtime_type_kind_case(runtime_type) == "Interface",
+                    "SingleType" => self.runtime_type_kind_case(runtime_type) == "Single",
+                    "AnnotationType" => self.runtime_type_kind_case(runtime_type) == "Annotation",
+                    _ => false,
+                },
+                Value::RuntimeField { .. } => name == "Field" || name == "Annotated",
+                Value::RuntimeMethod { .. } => name == "Method" || name == "Annotated",
+                Value::RuntimeParam { .. } => name == "Param",
+                Value::RuntimeEnumCase { .. } => name == "EnumCase" || name == "Annotated",
                 other => self
                     .runtime
                     .type_by_name_kind(name, crate::ast::TypeKind::Record)
@@ -4667,6 +5374,60 @@ fn value_as_f64(value: &Value) -> Option<f64> {
         Value::Int(number) => Some(*number as f64),
         Value::Float(number) => Some(*number),
         _ => None,
+    }
+}
+
+fn is_primitive_type_name(name: &str) -> bool {
+    matches!(
+        name,
+        "Bool" | "Float" | "Float64" | "Int" | "Int64" | "Never" | "Rune" | "Unit"
+    )
+}
+
+fn render_ir_type(ty: &ir::Type) -> String {
+    match ty {
+        ir::Type::Unknown => "<unknown>".to_string(),
+        ir::Type::Never => "Never".to_string(),
+        ir::Type::Unit => "Unit".to_string(),
+        ir::Type::Bool => "Bool".to_string(),
+        ir::Type::Int => "Int".to_string(),
+        ir::Type::Float => "Float".to_string(),
+        ir::Type::Str => "Str".to_string(),
+        ir::Type::Named { name, args } if args.is_empty() => name.clone(),
+        ir::Type::Named { name, args } => format!(
+            "{}[{}]",
+            name,
+            args.iter()
+                .map(render_ir_type)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        ir::Type::Tuple(items) => format!(
+            "({})",
+            items
+                .iter()
+                .map(render_ir_type)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        ir::Type::Record(fields) => format!(
+            "{{{}}}",
+            fields
+                .iter()
+                .map(|field| format!("{} {}", field.name, render_ir_type(&field.ty)))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        ir::Type::Function { params, ret } => format!(
+            "({}) -> {}",
+            params
+                .iter()
+                .map(render_ir_type)
+                .collect::<Vec<_>>()
+                .join(","),
+            render_ir_type(ret)
+        ),
+        ir::Type::TypeParam(name) => name.clone(),
     }
 }
 

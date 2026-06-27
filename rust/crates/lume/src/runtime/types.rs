@@ -43,7 +43,9 @@ pub struct RuntimeMethod {
     pub slot: RuntimeMethodSlot,
     pub name: String,
     pub(crate) target: RuntimeMethodTarget,
+    pub param_names: Vec<String>,
     pub params: Vec<ir::Type>,
+    pub return_ty: ir::Type,
 }
 
 /// A runtime method can either jump into lowered IR or invoke a builtin host
@@ -210,11 +212,19 @@ impl RuntimeProgram {
                     .filter_map(|local_id| function.locals.get(local_id.0))
                     .map(|local| local.ty.clone())
                     .collect();
+                let param_names = function
+                    .params
+                    .iter()
+                    .filter_map(|local_id| function.locals.get(local_id.0))
+                    .map(|local| local.name.clone())
+                    .collect();
                 Some(RuntimeMethod {
                     slot: RuntimeMethodSlot(index),
                     name: function.name.clone(),
                     target: RuntimeMethodTarget::Ir(*function_id),
+                    param_names,
                     params,
+                    return_ty: function.return_ty.clone(),
                 })
             })
             .collect()
@@ -289,6 +299,19 @@ impl RuntimeProgram {
 
     pub fn type_id_by_name_kind(&self, name: &str, kind: TypeKind) -> Option<RuntimeTypeId> {
         self.by_name_kind.get(&(name.to_string(), kind)).copied()
+    }
+
+    pub fn type_id_by_name_any_kind(&self, name: &str) -> Option<RuntimeTypeId> {
+        [
+            TypeKind::Class,
+            TypeKind::Record,
+            TypeKind::Enum,
+            TypeKind::Interface,
+            TypeKind::Single,
+            TypeKind::Annotation,
+        ]
+        .into_iter()
+        .find_map(|kind| self.type_id_by_name_kind(name, kind))
     }
 
     pub fn field_index(

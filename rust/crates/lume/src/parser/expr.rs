@@ -1027,7 +1027,10 @@ impl<'a> Parser<'a> {
             }
             if self.match_token(TokenKind::Dot) {
                 self.skip_newlines();
-                let (name, end) = if self.at(TokenKind::Keyword(Keyword::Expect)) {
+                let (name, end) = if self.at(TokenKind::Keyword(Keyword::Annotation))
+                    || self.at(TokenKind::Keyword(Keyword::Expect))
+                    || self.at(TokenKind::Keyword(Keyword::Case))
+                {
                     let token = self.current().clone();
                     self.advance();
                     (token.lexeme, token.span)
@@ -1044,6 +1047,16 @@ impl<'a> Parser<'a> {
             }
             if self.match_token(TokenKind::LBracket) {
                 let start = expr.span();
+                if matches!(expr, Expr::Identifier { ref name, .. } if name == "typeOf") {
+                    let ty = self.parse_type_ref()?;
+                    let end =
+                        self.consume(TokenKind::RBracket, "expected ']' after typeOf type")?;
+                    expr = Expr::TypeOf {
+                        ty,
+                        span: start.cover(end),
+                    };
+                    continue;
+                }
                 let index = self.parse_expr()?;
                 let end = self.consume(TokenKind::RBracket, "expected ']' after index")?;
                 expr = Expr::Index {

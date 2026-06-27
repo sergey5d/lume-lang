@@ -1944,6 +1944,9 @@ impl<'a> Resolver<'a> {
                 self.resolve_expr(left);
                 self.resolve_type_ref(Some(target));
             }
+            Expr::TypeOf { ty, .. } => {
+                self.resolve_type_ref(Some(ty));
+            }
             Expr::If {
                 condition,
                 then_block,

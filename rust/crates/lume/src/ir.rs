@@ -559,6 +559,9 @@ pub enum RValue {
         operand: Operand,
         ty: Type,
     },
+    TypeOf {
+        ty: Type,
+    },
     Closure {
         function: FunctionId,
         captures: Vec<Operand>,

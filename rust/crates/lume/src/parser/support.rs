@@ -101,6 +101,11 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::Identifier) {
             return self.expect_identifier(message);
         }
+        if self.at_keyword(Keyword::Annotation) || self.at_keyword(Keyword::Case) {
+            let token = self.current().clone();
+            self.advance();
+            return Some((token.lexeme, token.span));
+        }
         if self.match_token(TokenKind::LBracket) {
             let start = self.previous_span();
             let end = self.consume(TokenKind::RBracket, "expected ']' in operator name")?;

@@ -2867,6 +2867,7 @@ impl<'a> FunctionLowerer<'a> {
             | Expr::Index { .. }
             | Expr::RecordUpdate { .. }
             | Expr::Is { .. }
+            | Expr::TypeOf { .. }
             | Expr::Lambda { .. } => self.lower_expr_from_rvalue(expr),
             Expr::Placeholder { span } => {
                 self.add_error(
@@ -3156,6 +3157,9 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Is { left, target, .. } => Some(ir::RValue::TypeTest {
                 operand: self.lower_expr(left),
                 ty: lower_type_ref(target),
+            }),
+            Expr::TypeOf { ty, .. } => Some(ir::RValue::TypeOf {
+                ty: lower_type_ref(ty),
             }),
             Expr::Lambda { params, body, span } => {
                 Some(self.lower_lambda_rvalue(params, body, *span))

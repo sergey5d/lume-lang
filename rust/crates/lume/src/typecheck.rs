@@ -121,6 +121,10 @@ impl Ty {
         Self::Named("Option".to_string(), vec![item])
     }
 
+    fn runtime_type() -> Self {
+        Self::named("Type")
+    }
+
     fn bool() -> Self {
         Self::named("Bool")
     }
@@ -1353,6 +1357,7 @@ impl<'a> Checker<'a> {
             Expr::Is { left, .. } => {
                 self.check_field_initializer_expr(left, owner, initialized_fields);
             }
+            Expr::TypeOf { .. } => {}
             Expr::If {
                 condition,
                 then_block,
@@ -3230,6 +3235,9 @@ impl<'a> Checker<'a> {
                     return ty;
                 }
                 let receiver_ty = self.check_expr(receiver);
+                if name == "runtimeType" {
+                    return Ty::runtime_type();
+                }
                 self.member_type(&receiver_ty, name).unwrap_or_else(|| {
                     self.add_error(
                         "unknown_member",
@@ -3429,6 +3437,10 @@ impl<'a> Checker<'a> {
                 self.check_expr(left);
                 self.ty_from_type_ref(target);
                 Ty::bool()
+            }
+            Expr::TypeOf { ty, .. } => {
+                self.ty_from_type_ref(ty);
+                Ty::runtime_type()
             }
             Expr::If {
                 condition,
