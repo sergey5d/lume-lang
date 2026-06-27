@@ -6,6 +6,7 @@
 # account Ada 10
 # account Bob 11
 # account Eve 0
+# path 3 usr
 
 # Constructor rule summary:
 # - direct `this.field = ...` inside `new` means constructor initialization
@@ -13,6 +14,7 @@
 # - later field mutation uses `:=`
 # - nested writes through an initialized field still use `:=`
 # - constructor parameters and constructor-call fields may be comma separated
+# - a trailing `[T] vararg` constructor parameter receives positional varargs as `[T]`
 
 class Profile {
     name Str = "unknown"
@@ -85,6 +87,22 @@ impl Account {
     def label() Str = this.name + " " + this.age
 }
 
+class Path {
+    segments [Str]
+}
+
+impl Path {
+    new {
+        segments [Str] vararg
+    } {
+        this.segments = segments
+    }
+
+    def size() Int = this.segments.size()
+
+    def firstOr(value Str) Str = this.segments.get(0).getOr(value)
+}
+
 def main() Unit {
     profile = Profile("Ada", 2)
     println("profile", profile.name, profile.visitCount(), profile.isActive())
@@ -104,4 +122,7 @@ def main() Unit {
     println("account", namedAccount.label())
     println("account", positionalAccount.label())
     println("account", defaultAccount.label())
+
+    path Path = Path("usr", "local", "bin")
+    println("path", path.size(), path.firstOr("?"))
 }

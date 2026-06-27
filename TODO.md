@@ -33,17 +33,17 @@ enum MyConstant {
 
 ## Syntax Follow-Ups
 
-- Keep tuple conversion separate from anonymous-record conversion.
-  - Current intended rule:
-    - class/anonymous-record shape -> tuple is not implicit
+- Consider explicit tuple projection syntax.
+  - Settled rule:
+    - tuple -> known shape is allowed
+    - class/shape -> tuple is not implicit
   - Open question:
-    - whether to add an explicit `tuple(instance)` construct later for class/anonymous-record projection
-    - whether anonymous record -> tuple should remain unsupported, or use the same explicit `tuple(instance)` surface later
+    - whether to add an explicit `tuple(instance)` construct later for class/shape projection
 
-- Consider explicit anonymous-record-to-class conversion syntax such as `anon as User`.
+- Consider explicit shape-to-class conversion syntax such as `anon as User`.
   - Goal:
-    - keep `Type { ... }` as construction syntax
-    - avoid treating `Type(class { ... })` or `Type(recordValue)` as implicit nominal conversion
+    - keep class construction nominal through `Type { ... }` and `Type(...)`
+    - avoid treating a matching shape or tuple as an implicit class value
 
 - Consider optional trailing messages for `expect` via comma syntax.
   - Candidate shapes:

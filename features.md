@@ -281,35 +281,64 @@ Current leaning:
 
 ### Product Type Conversion Surface
 
-The language still needs a final policy for conversions between:
+The settled policy for product-like values separates nominal construction from
+structural shape conversion.
+
+Product categories:
 - classes
-- anonymous records
+- named shapes
+- anonymous shapes
 - tuples
 
-Current intended direction:
-- class -> anonymous record shape is allowed where structural access is explicitly expected
+Construction rules:
+- classes are nominal and constructor-gated
+- class construction must name the class: `User(...)` or `User { name: value }`
+- braces are named construction: `Type { field: value }`
+- parentheses are positional construction: `Type(value)`
+- braces never mean positional construction
+- anonymous named construction uses `{ field: value }`
+- `shape(...)` expression syntax is not part of the language
+
+Shape conversion rules:
 - tuple -> known shape is allowed when the target shape type is explicit or expected
+- tuple -> class is not allowed
 - shape -> shape assignment is structural by field names and types
-- shape -> class is not implicit; class construction stays explicit through `Type { ... }` or `Type(...)`
-  - when the target class has no explicit `new`, braces use the visible structural shape
-  - when the target class has explicit `new`, braces call a matching constructor
-- class -> tuple should stay explicit, if added at all
+- shape -> class is not implicit
+- class -> shape is allowed through visible public fields
+- hidden fields are not visible to shape conversion
+- class -> tuple is not implicit
+- shape -> tuple is not implicit
+
+Examples:
+
+```txt
+shape Point {
+    x Int
+    y Int
+}
+
+class Pixel {
+    x Int
+    y Int
+}
+
+point Point = (1, 2)           # tuple -> named shape
+anon { x Int, y Int } = (1, 2) # tuple -> anonymous shape
+fromClass Point = Pixel(1, 2)  # class -> shape through visible fields
+same Point = { x: 1, y: 2 }    # anonymous shape -> named shape
+
+user User = ("Ada", 10)        # invalid: tuple -> class
+user User = { name: "Ada" }    # invalid: shape -> class
+```
 
 Important separation:
-- value conversion is a different design area from pattern destructuring
-- allowing class values to convert to anonymous records does not automatically mean `match` should destructure them using anonymous-record-shaped patterns
+- value conversion is different from pattern destructuring
+- allowing class values to convert to shapes does not automatically mean `match` should destructure them using anonymous-shape patterns
+- if class/shape projection to tuples is ever added, it should be explicit, for example through a future `tuple(value)` helper
 
-Open questions:
-- how strict constructor matching should be
-- whether anonymous record -> tuple should exist at all
-- anonymous records use braces for named fields and tuples for contextual positional values
-  - `{ count: count, label: label }`
-  - positional construction like `(1, "x")` is allowed when a target shape is known from context
-- whether explicit tuple projection should use a builtin like `tuple(instance)`
+### Anonymous-Shape Binding From String Templates
 
-### Anonymous-Record Binding From String Templates
-
-One possible future feature is anonymous-record binding from interpolated-looking string templates, where a template shape declares the fields to extract.
+One possible future feature is anonymous-shape binding from interpolated-looking string templates, where a template shape declares the fields to extract.
 
 Example direction:
 
@@ -337,7 +366,7 @@ Open questions:
 - how field types would be inferred
 - whether all extracted fields should default to `Str`
 - how escaping and delimiter ambiguity should work
-- whether the result should be an anonymous record or a named type when a context type is available
+- whether the result should be an anonymous shape or a named type when a context type is available
 - whether failure should produce `Option`, `Result`, or a runtime error
 
 ### Match Totality / Partial Match Behavior
@@ -366,8 +395,13 @@ The current constructor surface is:
 - any explicit `new` suppresses implicit structural field construction
 - braces are named constructor arguments: `Type { field: value }`
 - parentheses are positional constructor arguments: `Type(value)`
+- braces cannot be used for positional arguments: `Type { value }` is invalid
 - both forms resolve through the same available `new`/field construction shape
 - named parenthesized arguments remain possible, same as method calls, but braces are the preferred named-construction surface
+- tuple values are not constructor calls; they can only initialize known shapes
+- explicit constructors may end with one variadic list parameter such as `items [T] vararg`
+- `[T] vararg` receives extra positional constructor arguments as `[T]` inside the constructor body
+- named arguments cannot target a variadic constructor parameter
 
 Still open:
 - whether same-named `single` declarations should act as privileged factory companions

@@ -395,14 +395,12 @@ impl<'a> Lowerer<'a> {
             function.add_local(this_name, this_ty, false, ir::LocalKind::Capture);
         }
         for (index, param) in params.iter().enumerate() {
-            function.add_param(
-                param.name.clone(),
-                param
-                    .ty
-                    .as_ref()
-                    .map(lower_type_ref)
-                    .unwrap_or(ir::Type::Unknown),
-            );
+            let runtime_ty = param
+                .ty
+                .as_ref()
+                .map(lower_type_ref)
+                .unwrap_or(ir::Type::Unknown);
+            function.add_param(param.name.clone(), runtime_ty);
             function.set_param_default(
                 index,
                 param
@@ -410,6 +408,7 @@ impl<'a> Lowerer<'a> {
                     .as_ref()
                     .and_then(|initializer| lower_field_initializer_constant(Some(initializer))),
             );
+            function.set_param_variadic(index, param.variadic);
         }
         self.program.add_function(function)
     }
@@ -1038,15 +1037,14 @@ impl<'a> FunctionLowerer<'a> {
                 .unwrap_or(ir::Type::Unknown),
         );
         nested.span = Some(function.span);
-        for param in &function.params {
-            nested.add_param(
-                param.name.clone(),
-                param
-                    .ty
-                    .as_ref()
-                    .map(lower_type_ref)
-                    .unwrap_or(ir::Type::Unknown),
-            );
+        for (index, param) in function.params.iter().enumerate() {
+            let runtime_ty = param
+                .ty
+                .as_ref()
+                .map(lower_type_ref)
+                .unwrap_or(ir::Type::Unknown);
+            nested.add_param(param.name.clone(), runtime_ty);
+            nested.set_param_variadic(index, param.variadic);
         }
         let function_id = self.program.add_function(nested);
         let capture_sources = self.visible_capture_sources(Some(&function.name));
@@ -1139,15 +1137,14 @@ impl<'a> FunctionLowerer<'a> {
             return_type.map(lower_type_ref).unwrap_or(ir::Type::Unknown),
         );
         nested.span = Some(span);
-        for param in params {
-            nested.add_param(
-                param.name.clone(),
-                param
-                    .ty
-                    .as_ref()
-                    .map(lower_type_ref)
-                    .unwrap_or(ir::Type::Unknown),
-            );
+        for (index, param) in params.iter().enumerate() {
+            let runtime_ty = param
+                .ty
+                .as_ref()
+                .map(lower_type_ref)
+                .unwrap_or(ir::Type::Unknown);
+            nested.add_param(param.name.clone(), runtime_ty);
+            nested.set_param_variadic(index, param.variadic);
         }
         let function_id = self.program.add_function(nested);
         let capture_sources = self.visible_capture_sources(None);

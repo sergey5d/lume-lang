@@ -571,6 +571,7 @@ impl<'a> Parser<'a> {
                 self.error_at_current("expected_type", "expected constructor parameter type");
                 return None;
             };
+            let variadic = self.match_keyword(Keyword::Vararg);
             let initializer = if self.match_token(TokenKind::Eq) {
                 Some(self.parse_expr()?)
             } else {
@@ -579,13 +580,14 @@ impl<'a> Parser<'a> {
             let end = initializer
                 .as_ref()
                 .map(Expr::span)
+                .or_else(|| variadic.then(|| self.previous_span()))
                 .or_else(|| ty.as_ref().map(TypeRef::span))
                 .unwrap_or(start);
             params.push(Param {
                 name,
                 ty,
                 initializer,
-                variadic: false,
+                variadic,
                 span: start.cover(end),
             });
             self.skip_newlines();

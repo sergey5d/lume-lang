@@ -193,6 +193,7 @@ pub struct Function {
     pub type_params: Vec<String>,
     pub params: Vec<LocalId>,
     pub param_defaults: Vec<Option<Constant>>,
+    pub param_variadic: Vec<bool>,
     pub locals: Vec<Local>,
     pub return_ty: Type,
     pub blocks: Vec<BasicBlock>,
@@ -211,6 +212,7 @@ impl Function {
             type_params: Vec::new(),
             params: Vec::new(),
             param_defaults: Vec::new(),
+            param_variadic: Vec::new(),
             locals: Vec::new(),
             return_ty,
             blocks: vec![BasicBlock::new(entry)],
@@ -225,12 +227,19 @@ impl Function {
         let id = self.add_local(name, ty, false, LocalKind::Param);
         self.params.push(id);
         self.param_defaults.push(None);
+        self.param_variadic.push(false);
         id
     }
 
     pub fn set_param_default(&mut self, index: usize, default: Option<Constant>) {
         if let Some(slot) = self.param_defaults.get_mut(index) {
             *slot = default;
+        }
+    }
+
+    pub fn set_param_variadic(&mut self, index: usize, variadic: bool) {
+        if let Some(slot) = self.param_variadic.get_mut(index) {
+            *slot = variadic;
         }
     }
 

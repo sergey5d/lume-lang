@@ -315,19 +315,30 @@ updated = value :< {
 }
 ```
 
-Anonymous record literal:
+## Construction
+
+Braces are for named fields and named arguments:
 
 ```txt
 user = { name: "Ada", age: 10 }
+user User = User { name: "Ada", age: 10 }
+maybe = Some { value: 5 }
 ```
 
-Positional anonymous record construction uses a tuple when the target shape is already known:
+Parentheses are for positional construction and calls:
 
 ```txt
-user { name Str, age Int } = ("Ada", 10)
+user User = User("Ada", 10)
+maybe = Some(5)
 ```
 
-Multiline anonymous record literal:
+Zero-payload enum cases are bare values, not calls:
+
+```txt
+none = None
+```
+
+Anonymous shapes use plain braces for named construction:
 
 ```txt
 user = {
@@ -336,7 +347,7 @@ user = {
 }
 ```
 
-Inferred field type from a local value:
+Anonymous shape fields may infer their type from the initializer:
 
 ```txt
 a = 1
@@ -345,7 +356,7 @@ b = {
 }
 ```
 
-Mixed separators are also valid:
+Fields in construction braces may be separated by commas, newlines, or both:
 
 ```txt
 user = { name: "Ada",
@@ -353,16 +364,19 @@ user = { name: "Ada",
 }
 ```
 
-Anonymous record shape type:
+Anonymous shape type:
 
 ```txt
 def describe(user { name Str, age Int }) Str =
     user.name + " is " + user.age
 ```
 
-Positional construction also works for shaped parameters and shaped return values:
+Tuple-to-shape construction is contextual. The target shape must be known from
+an annotation, parameter type, or return type:
 
 ```txt
+user { name Str, age Int } = ("Ada", 10)
+
 def makeUser() { name Str, age Int } {
     return ("Ada", 10)
 }
@@ -370,7 +384,7 @@ def makeUser() { name Str, age Int } {
 describe(("Cara", 14))
 ```
 
-Named classes use braces for named construction and parentheses for positional construction:
+Tuples do not construct classes. Classes must name their constructor target:
 
 ```txt
 user User = User { name: "Ada", age: 10 }
@@ -407,12 +421,12 @@ named = Point { x: 3, y: 4 }
 tupled Point = (5, 6)
 ```
 
-Rules for field-based class construction:
+Construction rules:
 - braces are named constructor arguments: `Type { field: value }`
 - parentheses are positional constructor arguments: `Type(value)`
 - parenthesized constructor calls may use named arguments, same as methods, but this is usually not needed
 - `Type { value }` is not valid; use `Type(value)`
-- anonymous shapes use `{ field: value }` for named construction and tuple assignment for contextual positional construction
+- anonymous shapes use `{ field: value }` for named construction and tuple values for contextual positional construction
 - builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` use parentheses
 - `Type { ... }` and `Type(...)` both resolve through the available `new`/field construction shape
 - any explicit `new` disables implicit structural field construction for that class
@@ -425,6 +439,10 @@ Rules for field-based class construction:
 - positional construction follows declared public-field order
 - positional construction may omit only a trailing suffix of public fields that already have initializers
 - positional construction is rejected when a hidden initialized field appears before a later public field
+- explicit constructors may use one trailing variadic list parameter such as `items [T] vararg`
+- a variadic constructor parameter receives the extra positional arguments as `[T]`
+- named arguments cannot target a variadic constructor parameter
+- variadic constructor parameters cannot have defaults or follow defaulted parameters
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
 - tuple values cannot construct classes; write `User(...)` or `User { ... }`
@@ -432,23 +450,48 @@ Rules for field-based class construction:
 - class construction is nominal and constructor-gated; shape construction is structural
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
 - `Type({ ... })` is not supported; use named fields or positional values directly
+- `shape(...)` expression syntax is not supported; use tuple-to-shape construction instead
 
-Anonymous record shapes are structural:
+Shape conversion rules:
 - field names and field types must match at compile time
 - extra fields are allowed when passing a value to a narrower shape
 - missing fields are rejected
 - defaults are not part of the shape syntax
-- construction uses plain `{ ... }` in expression position
-- named anonymous construction uses `{ field: value }`
-- positional anonymous construction uses tuple values when a target shape is known from context
-- ordinary calls may still accept named anonymous records in parentheses, for example `describe({ name: "Cara", age: 14 })`
+- tuple-to-shape is allowed only when the target shape is known
+- tuple-to-shape follows shape field order exactly
+- shape-to-shape assignment is structural by field names and field types
+- class-to-shape is allowed through visible public fields
+- hidden class fields are not visible to shape conversion
+- shape-to-class is not implicit; use a class constructor
+- tuple-to-class is not allowed; use a class constructor
+- ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
 - named fields inside construction braces use `field: value`
 - named fields may carry an explicit initializer type as `field Type: value`
-- `(value1, value2)` can initialize a known shape positionally
-- single-expression braces like `{ value }` are still block expressions, not anonymous records
-- inside `{ ... }`, fields may be separated by commas, newlines, or a mix of both
+- single-expression braces like `{ value }` are still block expressions, not anonymous shapes
 
-Typed anonymous record fields:
+Examples:
+
+```txt
+shape Point {
+    x Int
+    y Int
+}
+
+class Pixel {
+    x Int
+    y Int
+}
+
+point Point = (1, 2)                # tuple -> named shape
+anon { x Int, y Int } = (1, 2)      # tuple -> anonymous shape
+fromClass Point = Pixel(1, 2)       # class -> shape
+named Point = { x: 1, y: 2 }        # anonymous shape -> named shape
+
+user User = ("Ada", 10)             # invalid: tuple -> class
+user User = { name: "Ada", age: 10 } # invalid: shape -> class
+```
+
+Typed anonymous shape fields:
 
 ```txt
 user = {
@@ -485,6 +528,16 @@ Generic bounds:
 def sort[T with Ordering[T]](value T) T = value
 ```
 
+Function and method parameters may end with one variadic list parameter:
+
+```txt
+def println(value [Str] vararg) Unit
+def printf(format Str, value [Str] vararg) Unit
+```
+
+The parameter is available as `[T]` inside the body, and call sites pass the
+extra values positionally.
+
 Objects and enums can declare methods inline. Classes and records attach behavior through top-level `impl` blocks:
 
 ```txt
@@ -502,6 +555,7 @@ Constructors use a dedicated `new` block inside `impl`.
 - `new { params } { body }` declares a block-bodied constructor
 - `new { params } = expression` declares an expression-bodied constructor
 - constructor parameters use `name Type`, with optional trailing defaults such as `age Int = 0`
+- constructor parameters may end with one variadic list parameter such as `items [Str] vararg`
 - `hidden new { params } { body }` declares a private constructor
 - `new(...)` inside another constructor delegates positionally to another constructor of the same class
 - class call sites use braces for named arguments, for example `Person { name: "Ada", age: 10 }`
@@ -528,6 +582,26 @@ impl Person {
         age Int
     } = new(age, "unknown")
 }
+```
+
+Variadic constructor parameters collect positional arguments into a `[T]`
+inside the constructor body:
+
+```txt
+class Path {
+    segments [Str]
+}
+
+impl Path {
+    new {
+        segments [Str] vararg
+    } {
+        this.segments = segments
+    }
+}
+
+path Path = Path("usr", "local", "bin")
+empty Path = Path()
 ```
 
 ## Lambdas
@@ -580,7 +654,7 @@ pairs.map(pair -> {
 })
 ```
 
-Class or anonymous-record destructuring inside a lambda:
+Class or anonymous-shape destructuring inside a lambda:
 
 ```txt
 users.map { user ->
@@ -590,7 +664,7 @@ users.map { user ->
 ```
 
 Lambda parameters cannot use `let` destructuring. If a lambda receives a tuple,
-class, or anonymous-record value, name the parameter normally and destructure it
+class, or anonymous-shape value, name the parameter normally and destructure it
 inside the body:
 
 ```txt
@@ -614,7 +688,7 @@ source.combine((left, right) -> {
 Rules:
 
 - `_` inside an explicit lambda parameter list means "ignore this parameter slot"
-- tuple, class, and anonymous-record values are destructured inside the lambda body with normal `let`
+- tuple, class, and anonymous-shape values are destructured inside the lambda body with normal `let`
 - `let` destructuring is not allowed in lambda parameter lists
 
 Block lambda:
@@ -1440,7 +1514,7 @@ fieldName as localName
 fieldName Type as localName
 ```
 
-Brace destructuring for classes and anonymous records matches by field name.
+Brace destructuring for classes and anonymous shapes matches by field name.
 That means:
 
 - field order on the left does not matter
@@ -1498,7 +1572,7 @@ Other operators / constructs:
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases
 - `with` for interface implementation and generic bounds
-- `:<` for class, record, and anonymous-record update
+- `:<` for class, shape, and anonymous-shape update
 - `:+` for record-shape merge; the left and right shapes must have distinct field names
 
 Examples:

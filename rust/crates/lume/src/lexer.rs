@@ -36,6 +36,7 @@ pub enum Keyword {
     Try,
     Use,
     Var,
+    Vararg,
     While,
     With,
     Yield,
@@ -322,6 +323,7 @@ impl<'a> Lexer<'a> {
             "true" => TokenKind::Keyword(Keyword::True),
             "try" => TokenKind::Keyword(Keyword::Try),
             "var" => TokenKind::Keyword(Keyword::Var),
+            "vararg" => TokenKind::Keyword(Keyword::Vararg),
             "while" => TokenKind::Keyword(Keyword::While),
             "with" => TokenKind::Keyword(Keyword::With),
             "yield" => TokenKind::Keyword(Keyword::Yield),
@@ -560,15 +562,15 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "use model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = left :+ right\nspread Str... = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "use model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = left :+ right\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::As)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
+        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Vararg)));
         assert!(kinds.contains(&TokenKind::ColonPlus));
         assert!(kinds.contains(&TokenKind::ColonLess));
-        assert!(kinds.contains(&TokenKind::Ellipsis));
         assert!(kinds.contains(&TokenKind::Float));
         assert!(
             result

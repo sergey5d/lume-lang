@@ -249,6 +249,7 @@ struct FieldSig {
     mutable: bool,
     hidden: bool,
     has_initializer: bool,
+    variadic: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -740,15 +741,17 @@ impl<'a> Checker<'a> {
         self.current_return = expected_return.clone();
         self.defer_depth = 0;
         self.push_scope();
+        self.check_param_list_rules(&function.params, false);
         for param in &function.params {
-            let ty = param
+            let elem_ty = param
                 .ty
                 .as_ref()
                 .map(|value| self.ty_from_type_ref(value))
                 .unwrap_or(Ty::Unknown);
             if let Some(initializer) = &param.initializer {
-                self.check_param_initializer(param, &ty, initializer);
+                self.check_param_initializer(param, &elem_ty, initializer);
             }
+            let ty = self.param_local_type(param, elem_ty);
             self.define_local(&param.name, ty, false);
         }
         let actual = self.check_callable_body(&function.body);
@@ -1003,16 +1006,17 @@ impl<'a> Checker<'a> {
         self.current_method = Some(method.name.clone());
         self.push_scope();
         self.define_local("this", self.owner_self_ty(owner), false);
-        self.check_default_param_order(&method.params, method.name == "new");
+        self.check_param_list_rules(&method.params, method.name == "new");
         for param in &method.params {
-            let ty = param
+            let elem_ty = param
                 .ty
                 .as_ref()
                 .map(|value| self.ty_from_type_ref(value))
                 .unwrap_or(Ty::Unknown);
             if let Some(initializer) = &param.initializer {
-                self.check_param_initializer(param, &ty, initializer);
+                self.check_param_initializer(param, &elem_ty, initializer);
             }
+            let ty = self.param_local_type(param, elem_ty);
             self.define_local(&param.name, ty, false);
         }
         if let Some(body) = &method.body {
@@ -1050,12 +1054,63 @@ impl<'a> Checker<'a> {
         )
     }
 
-    fn check_default_param_order(&mut self, params: &[Param], is_constructor: bool) {
+    fn param_local_type(&self, _param: &Param, ty: Ty) -> Ty {
+        ty
+    }
+
+    fn check_param_list_rules(&mut self, params: &[Param], is_constructor: bool) {
         let mut seen_default = false;
-        for param in params {
+        for (index, param) in params.iter().enumerate() {
+            if param.variadic && index + 1 != params.len() {
+                self.add_error(
+                    "invalid_variadic_param",
+                    if is_constructor {
+                        "variadic constructor parameter must be last"
+                    } else {
+                        "variadic parameter must be last"
+                    },
+                    param.span,
+                );
+            }
+            if param.variadic && seen_default {
+                self.add_error(
+                    "invalid_variadic_param",
+                    if is_constructor {
+                        "variadic constructor parameter cannot follow defaulted parameters"
+                    } else {
+                        "variadic parameter cannot follow defaulted parameters"
+                    },
+                    param.span,
+                );
+            }
+            if param.variadic && param.initializer.is_some() {
+                self.add_error(
+                    "invalid_variadic_param",
+                    if is_constructor {
+                        "variadic constructor parameter cannot have a default value"
+                    } else {
+                        "variadic parameter cannot have a default value"
+                    },
+                    param.span,
+                );
+            }
+            if param.variadic {
+                let is_list_type = param.ty.as_ref().is_some_and(is_list_type_ref);
+                if !is_list_type {
+                    self.add_error(
+                        "invalid_variadic_param",
+                        if is_constructor {
+                            "variadic constructor parameter must use a list type like '[T] vararg'"
+                        } else {
+                            "variadic parameter must use a list type like '[T] vararg'"
+                        },
+                        param.span,
+                    );
+                }
+            }
             if param.initializer.is_some() {
                 seen_default = true;
-            } else if seen_default {
+            } else if seen_default && !param.variadic {
                 self.add_error(
                     "invalid_constructor_default",
                     if is_constructor {
@@ -2761,6 +2816,7 @@ impl<'a> Checker<'a> {
                         mutable: false,
                         hidden: false,
                         has_initializer: false,
+                        variadic: false,
                     })
                     .collect(),
             )),
@@ -2786,6 +2842,7 @@ impl<'a> Checker<'a> {
                             mutable: field.mutable,
                             hidden: field.hidden,
                             has_initializer: field.has_initializer,
+                            variadic: false,
                         })
                         .collect(),
                 ))
@@ -3742,6 +3799,13 @@ impl<'a> Checker<'a> {
         } else {
             params.len()
         };
+        if arrangement.named_variadic > 0 {
+            self.add_error(
+                "invalid_variadic_argument",
+                "named arguments cannot target variadic parameters; pass the values positionally",
+                span,
+            );
+        }
         if arrangement.overflow > 0
             || arrangement.missing_required > 0
             || args.len() < min_required
@@ -3771,8 +3835,9 @@ impl<'a> Checker<'a> {
                 .get(index)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
-            let raw_expected = param.ty.clone();
             for arg in slot {
+                let raw_expected =
+                    call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
                 let expected = substitute_type(&raw_expected, &subst);
                 let actual = self.check_expr_against(&arg.value, &expected);
                 infer_type_subst(&expected, &actual, &mut subst);
@@ -4108,6 +4173,7 @@ impl<'a> Checker<'a> {
                         mutable: false,
                         hidden: false,
                         has_initializer: param.has_initializer,
+                        variadic: param.variadic,
                     })
                     .collect::<Vec<_>>();
                 return self.check_constructor_signature(&params, &ret, args, span);
@@ -4181,18 +4247,37 @@ impl<'a> Checker<'a> {
     ) -> Ty {
         if args.iter().all(|arg| arg.name.is_none()) {
             let arrangement = arrange_constructor_args(params, args);
-            let min_required = params.iter().filter(|param| !param.has_initializer).count();
+            let min_required = params
+                .iter()
+                .filter(|param| !param.variadic && !param.has_initializer)
+                .count();
+            let max_allowed = if params.last().is_some_and(|param| param.variadic) {
+                usize::MAX
+            } else {
+                params.len()
+            };
+            if arrangement.named_variadic > 0 {
+                self.add_error(
+                    "invalid_variadic_argument",
+                    "named arguments cannot target variadic constructor parameters; pass the values positionally",
+                    span,
+                );
+            }
             if arrangement.overflow > 0
                 || arrangement.missing_required > 0
                 || args.len() < min_required
-                || args.len() > params.len()
+                || args.len() > max_allowed
             {
                 self.add_error(
                     "invalid_argument_count",
                     format!(
                         "call expects {}..{} arguments, got {}",
                         min_required,
-                        params.len(),
+                        if max_allowed == usize::MAX {
+                            "many".to_string()
+                        } else {
+                            max_allowed.to_string()
+                        },
                         args.len()
                     ),
                     span,
@@ -4207,10 +4292,12 @@ impl<'a> Checker<'a> {
                     .map(Vec::as_slice)
                     .unwrap_or(&[])
                 {
-                    let expected = substitute_type(&param.ty, &subst);
+                    let raw_expected =
+                        call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
+                    let expected = substitute_type(&raw_expected, &subst);
                     let actual = self.check_expr_against(&arg.value, &expected);
                     infer_type_subst(&expected, &actual, &mut subst);
-                    checked_args.push((arg.span, actual, param.ty.clone(), String::new()));
+                    checked_args.push((arg.span, actual, raw_expected, String::new()));
                 }
             }
             for (arg_span, actual, raw_expected, _) in checked_args {
@@ -4231,14 +4318,33 @@ impl<'a> Checker<'a> {
         }
 
         let arrangement = arrange_constructor_args(params, args);
+        if arrangement.named_variadic > 0 {
+            self.add_error(
+                "invalid_variadic_argument",
+                "named arguments cannot target variadic constructor parameters; pass the values positionally",
+                span,
+            );
+        }
         if arrangement.overflow > 0 || arrangement.missing_required > 0 {
-            let min_required = params.iter().filter(|param| !param.has_initializer).count();
+            let min_required = params
+                .iter()
+                .filter(|param| !param.variadic && !param.has_initializer)
+                .count();
+            let max_allowed = if params.last().is_some_and(|param| param.variadic) {
+                usize::MAX
+            } else {
+                params.len()
+            };
             self.add_error(
                 "invalid_argument_count",
                 format!(
                     "call expects {}..{} arguments, got {}",
                     min_required,
-                    params.len(),
+                    if max_allowed == usize::MAX {
+                        "many".to_string()
+                    } else {
+                        max_allowed.to_string()
+                    },
                     args.len()
                 ),
                 span,
@@ -4253,7 +4359,9 @@ impl<'a> Checker<'a> {
                 .map(Vec::as_slice)
                 .unwrap_or(&[])
             {
-                let expected = substitute_type(&param.ty, &subst);
+                let raw_expected =
+                    call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
+                let expected = substitute_type(&raw_expected, &subst);
                 let actual = self.check_expr_against(&arg.value, &expected);
                 infer_type_subst(&expected, &actual, &mut subst);
                 checked_args.push((arg.span, actual, expected, param.name.clone()));
@@ -5276,8 +5384,10 @@ impl<'a> Checker<'a> {
                             .position(|candidate| std::ptr::eq(candidate, *arg))
                             .unwrap_or(0);
                         let actual = &arg_types[arg_index];
+                        let expected =
+                            call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
                         if !matches!(actual, Ty::Unknown) {
-                            if self.is_assignable(actual, &param.ty) {
+                            if self.is_assignable(actual, &expected) {
                                 score += 2;
                             } else {
                                 return None;
@@ -6070,6 +6180,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                 mutable: field.mutable,
                 hidden: field.visibility == Visibility::Hidden,
                 has_initializer: field.initializer.is_some(),
+                variadic: false,
             }),
             TypeMember::Method(method) => {
                 methods
@@ -6099,6 +6210,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                         mutable: field.mutable,
                         hidden: field.visibility == Visibility::Hidden,
                         has_initializer: false,
+                        variadic: false,
                     })
                     .collect::<Vec<_>>();
                 enum_cases.insert(
@@ -6195,6 +6307,26 @@ fn type_ref_named_name(reference: &TypeRef) -> Option<&str> {
     }
 }
 
+fn is_list_type_ref(reference: &TypeRef) -> bool {
+    matches!(reference, TypeRef::Named { name, args, .. } if name == "List" && args.len() == 1)
+}
+
+fn variadic_arg_ty(ty: &Ty) -> Option<Ty> {
+    match ty {
+        Ty::Named(name, args) if name == "List" && args.len() == 1 => args.first().cloned(),
+        Ty::Unknown => Some(Ty::Unknown),
+        _ => None,
+    }
+}
+
+fn call_arg_expected_ty(variadic: bool, param_ty: &Ty, is_named_arg: bool) -> Ty {
+    if variadic && !is_named_arg {
+        variadic_arg_ty(param_ty).unwrap_or(Ty::Unknown)
+    } else {
+        param_ty.clone()
+    }
+}
+
 fn impl_target_type_params(reference: &TypeRef) -> Vec<String> {
     match reference {
         TypeRef::Named { args, .. } => args
@@ -6211,6 +6343,7 @@ fn impl_target_type_params(reference: &TypeRef) -> Vec<String> {
 struct ArgArrangement<'a> {
     slots: Vec<Vec<&'a crate::ast::CallArg>>,
     overflow: usize,
+    named_variadic: usize,
     missing_required: usize,
 }
 
@@ -6221,10 +6354,13 @@ fn arrange_param_args<'a>(
     let mut slots = vec![Vec::new(); params.len()];
     let mut positional_index = 0usize;
     let mut overflow = 0usize;
+    let mut named_variadic = 0usize;
     for arg in args {
         if let Some(name) = &arg.name {
             if let Some(index) = params.iter().position(|param| param.name == *name) {
-                if params[index].variadic || slots[index].is_empty() {
+                if params[index].variadic {
+                    named_variadic += 1;
+                } else if slots[index].is_empty() {
                     slots[index].push(arg);
                 } else {
                     overflow += 1;
@@ -6270,6 +6406,7 @@ fn arrange_param_args<'a>(
     ArgArrangement {
         slots,
         overflow,
+        named_variadic,
         missing_required,
     }
 }
@@ -6281,10 +6418,13 @@ fn arrange_constructor_args<'a>(
     let mut slots = vec![Vec::new(); params.len()];
     let mut positional_index = 0usize;
     let mut overflow = 0usize;
+    let mut named_variadic = 0usize;
     for arg in args {
         if let Some(name) = &arg.name {
             if let Some(index) = params.iter().position(|param| param.name == *name) {
-                if slots[index].is_empty() {
+                if params[index].variadic {
+                    named_variadic += 1;
+                } else if slots[index].is_empty() {
                     slots[index].push(arg);
                 } else {
                     overflow += 1;
@@ -6295,12 +6435,25 @@ fn arrange_constructor_args<'a>(
             continue;
         }
 
-        while positional_index < params.len() && !slots[positional_index].is_empty() {
+        while positional_index < params.len()
+            && !params[positional_index].variadic
+            && !slots[positional_index].is_empty()
+        {
             positional_index += 1;
         }
-        if positional_index < params.len() {
+        if params.last().is_some_and(|param| param.variadic)
+            && positional_index >= params.len().saturating_sub(1)
+        {
+            if let Some(slot) = slots.last_mut() {
+                slot.push(arg);
+            } else {
+                overflow += 1;
+            }
+        } else if positional_index < params.len() {
             slots[positional_index].push(arg);
-            positional_index += 1;
+            if !params[positional_index].variadic {
+                positional_index += 1;
+            }
         } else {
             overflow += 1;
         }
@@ -6309,12 +6462,15 @@ fn arrange_constructor_args<'a>(
     let missing_required = params
         .iter()
         .enumerate()
-        .filter(|(index, param)| !param.has_initializer && slots[*index].is_empty())
+        .filter(|(index, param)| {
+            !param.variadic && !param.has_initializer && slots[*index].is_empty()
+        })
         .count();
 
     ArgArrangement {
         slots,
         overflow,
+        named_variadic,
         missing_required,
     }
 }
@@ -7219,6 +7375,160 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_variadic_constructor_parameters() {
+        let program = parse_inline(
+            r#"
+class Path {
+    segments [Str]
+}
+
+impl Path {
+    new {
+        segments [Str] vararg
+    } {
+        this.segments = segments
+    }
+}
+
+def main() Unit {
+    _ Path = Path()
+    _ Path = Path("usr", "local", "bin")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_variadic_constructor_parameter_not_last() {
+        let program = parse_inline(
+            r#"
+class Bad {
+    items [Int]
+    suffix Int
+}
+
+impl Bad {
+    new {
+        items [Int] vararg
+        suffix Int
+    } {
+        this.items = items
+        this.suffix = suffix
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_variadic_param"
+                    && diag
+                        .message
+                        .contains("variadic constructor parameter must be last")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_variadic_constructor_parameter_after_default() {
+        let program = parse_inline(
+            r#"
+class Bad {
+    items [Int]
+}
+
+impl Bad {
+    new {
+        prefix Int = 0
+        items [Int] vararg
+    } {
+        this.items = items
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_variadic_param"
+                    && diag.message.contains(
+                        "variadic constructor parameter cannot follow defaulted parameters",
+                    )
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_variadic_constructor_parameter_without_list_type() {
+        let program = parse_inline(
+            r#"
+class Bad {
+    items [Int]
+}
+
+impl Bad {
+    new {
+        items Int vararg
+    } {
+        this.items = items
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_variadic_param"
+                    && diag
+                        .message
+                        .contains("variadic constructor parameter must use a list type")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_named_argument_for_variadic_constructor_parameter() {
+        let program = parse_inline(
+            r#"
+class Path {
+    segments [Str]
+}
+
+impl Path {
+    new {
+        segments [Str] vararg
+    } {
+        this.segments = segments
+    }
+}
+
+def main() Unit {
+    _ Path = Path { segments: ["usr"] }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_variadic_argument"
+                    && diag
+                        .message
+                        .contains("named arguments cannot target variadic")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

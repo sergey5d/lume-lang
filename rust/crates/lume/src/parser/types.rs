@@ -44,18 +44,21 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
-                let variadic = self.match_token(TokenKind::Ellipsis);
-                let end = if variadic {
-                    self.previous_span()
-                } else {
-                    ty.as_ref().map(TypeRef::span).unwrap_or(start)
-                };
+                let variadic = self.match_keyword(Keyword::Vararg);
+                let span = start.cover(
+                    if variadic {
+                        Some(self.previous_span())
+                    } else {
+                        ty.as_ref().map(TypeRef::span)
+                    }
+                    .unwrap_or(start),
+                );
                 params.push(Param {
                     name,
                     ty,
                     initializer: None,
                     variadic,
-                    span: start.cover(end),
+                    span,
                 });
                 self.skip_newlines();
                 if !self.match_token(TokenKind::Comma) {

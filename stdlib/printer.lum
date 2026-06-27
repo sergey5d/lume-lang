@@ -3,7 +3,7 @@
 # INTERPRETER
 
 interface Printer {
-    def print(value Str...) Unit
-    def println(value Str...) Unit
-    def printf(format Str, value Str...) Unit
+    def print(value [Str] vararg) Unit
+    def println(value [Str] vararg) Unit
+    def printf(format Str, value [Str] vararg) Unit
 }

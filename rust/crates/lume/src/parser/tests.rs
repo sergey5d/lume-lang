@@ -297,6 +297,52 @@ impl User {
 }
 
 #[test]
+fn parses_variadic_constructor_parameter() {
+    let result = parse(
+        r#"
+class Path {
+    segments [Str]
+}
+
+impl Path {
+    new {
+        segments [Str] vararg
+    } {
+        this.segments = segments
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Impl(block) = &program.items[1] else {
+        panic!("expected impl block");
+    };
+    assert_eq!(block.methods[0].params.len(), 1);
+    assert!(block.methods[0].params[0].variadic);
+}
+
+#[test]
+fn rejects_ellipsis_constructor_parameter() {
+    let result = parse(
+        r#"
+class Path {
+    segments [Str]
+}
+
+impl Path {
+    new {
+        segments Str...
+    } {
+        this.segments = segments
+    }
+}
+"#,
+    );
+    assert!(!result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
 fn rejects_removed_symbolic_operator_methods_at_lexer() {
     for operator in ["++", "--", ":-", "::"] {
         let source = format!(

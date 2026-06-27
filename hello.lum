@@ -15,7 +15,7 @@ class Adder {
     	this.base + 4
     }
 
-	def alterThemAll(items Int...) {
+	def alterThemAll(items [Int] vararg) {
     	for item <- items {
     	    increased = item + 5
     	    OS.println("increased!", increased)

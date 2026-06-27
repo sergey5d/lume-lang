@@ -1208,6 +1208,28 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Vec<Value>, Diagnostic> {
+        if let Some(variadic_index) = function.param_variadic.iter().position(|value| *value) {
+            if args.len() < variadic_index {
+                return Err(self.runtime_error(
+                    span,
+                    format!(
+                        "function '{}' expects at least {} arguments, got {}",
+                        function.name,
+                        variadic_index,
+                        args.len()
+                    ),
+                ));
+            }
+            let mut normalized = args
+                .iter()
+                .take(variadic_index)
+                .cloned()
+                .collect::<Vec<_>>();
+            normalized.push(Value::list(
+                args.into_iter().skip(variadic_index).collect::<Vec<_>>(),
+            ));
+            return Ok(normalized);
+        }
         if args.len() == function.params.len() {
             return Ok(args);
         }
@@ -1245,6 +1267,18 @@ impl<'a> Interpreter<'a> {
                 args.len()
             ),
         ))
+    }
+
+    fn variadic_element_type<'t>(
+        &'t self,
+        function: &'t ir::Function,
+        index: usize,
+    ) -> Option<&'t ir::Type> {
+        let local = function.locals.get(function.params.get(index)?.0)?;
+        match &local.ty {
+            ir::Type::Named { name, args } if name == "List" && args.len() == 1 => args.first(),
+            _ => None,
+        }
     }
 
     fn eval_rvalue(
@@ -3194,6 +3228,44 @@ impl<'a> Interpreter<'a> {
             let Some(function) = self.program.function(*candidate) else {
                 continue;
             };
+            if let Some(variadic_index) = function.param_variadic.iter().position(|value| *value) {
+                if args.len() < variadic_index {
+                    continue;
+                }
+                let Some(variadic_elem) = self.variadic_element_type(function, variadic_index)
+                else {
+                    continue;
+                };
+                let mut score = 9 + args.len() as i32;
+                let mut matches = true;
+                for (index, arg) in args.iter().enumerate() {
+                    let param_ty = if index < variadic_index {
+                        let Some(local) = function
+                            .params
+                            .get(index)
+                            .and_then(|param| function.locals.get(param.0))
+                        else {
+                            matches = false;
+                            break;
+                        };
+                        &local.ty
+                    } else {
+                        variadic_elem
+                    };
+                    if !self.value_matches_type(arg, param_ty) {
+                        matches = false;
+                        break;
+                    }
+                    if !matches!(param_ty, ir::Type::Unknown | ir::Type::TypeParam(_)) {
+                        score += 2;
+                    }
+                }
+                if matches && score > best_score {
+                    best = Some(*candidate);
+                    best_score = score;
+                }
+                continue;
+            }
             let default_suffix_matches = args.len() <= function.params.len()
                 && function.param_defaults[args.len()..]
                     .iter()
@@ -4875,6 +4947,39 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "Ada 0\nBen 12\n");
+    }
+
+    #[test]
+    fn runs_variadic_constructor_parameters() {
+        let program = lower_inline(
+            r#"
+            class Path {
+                segments [Str]
+            }
+
+            impl Path {
+                new {
+                    segments [Str] vararg
+                } {
+                    this.segments = segments
+                }
+
+                def size() Int = this.segments.size()
+
+                def firstOr(value Str) Str = this.segments.get(0).getOr(value)
+            }
+
+            def run() Str {
+                empty Path = Path()
+                path Path = Path("usr", "local", "bin")
+                return empty.size() + ":" + path.size() + ":" + path.firstOr("?")
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.return_value.as_deref(), Some("0:3:usr"));
     }
 
     #[test]
