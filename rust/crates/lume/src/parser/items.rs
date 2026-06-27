@@ -152,6 +152,24 @@ impl<'a> Parser<'a> {
                     );
                     return None;
                 }
+                if self.at_keyword(Keyword::Var) {
+                    if !annotations.is_empty() {
+                        self.error_at_current(
+                            "unexpected_annotation",
+                            "annotations are not supported on bindings yet",
+                        );
+                        return None;
+                    }
+                    if visibility != Visibility::Default {
+                        self.error_at_current(
+                            "unexpected_visibility",
+                            "visibility modifiers are only valid on declarations",
+                        );
+                        return None;
+                    }
+                    let stmt = self.parse_binding_stmt_after_var()?;
+                    return Some(Item::Statement(Stmt::Binding(stmt)));
+                }
                 if self.is_binding_start() {
                     if !annotations.is_empty() {
                         self.error_at_current(
@@ -160,21 +178,22 @@ impl<'a> Parser<'a> {
                         );
                         return None;
                     }
-                    let mut stmt = self.try_parse_binding_stmt()?;
-                    if visibility == Visibility::Public
-                        && stmt
-                            .bindings
-                            .iter()
-                            .any(|binding| binding.name == "_" || binding.mutable)
-                    {
-                        self.error_at_current(
-                            "unexpected_visibility",
-                            "'public' is only supported for immutable named top-level bindings",
-                        );
-                        return None;
+                    if let Some(mut stmt) = self.try_parse_binding_stmt() {
+                        if visibility == Visibility::Public
+                            && stmt
+                                .bindings
+                                .iter()
+                                .any(|binding| binding.name == "_" || binding.mutable)
+                        {
+                            self.error_at_current(
+                                "unexpected_visibility",
+                                "'public' is only supported for immutable named top-level bindings",
+                            );
+                            return None;
+                        }
+                        stmt.visibility = visibility;
+                        return Some(Item::Statement(Stmt::Binding(stmt)));
                     }
-                    stmt.visibility = visibility;
-                    return Some(Item::Statement(Stmt::Binding(stmt)));
                 }
                 if !annotations.is_empty() {
                     self.error_at_current(
@@ -194,7 +213,11 @@ impl<'a> Parser<'a> {
                     );
                     return None;
                 }
-                self.parse_stmt().map(Item::Statement)
+                self.error_at_current(
+                    "unexpected_top_level_statement",
+                    "top-level statements are not allowed; move executable code into a function such as 'def main() { ... }'",
+                );
+                None
             }
         }
     }

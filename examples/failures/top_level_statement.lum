@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*top-level statements are not allowed.*
+
+if true {
+    println("nope")
+}

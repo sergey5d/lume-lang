@@ -227,6 +227,8 @@ enum OptionX[T] {
 }
 ```
 
+Arbitrary statements such as `if`, `for`, `match`, `defer`, `expect`, or expression statements are not valid at top level. Put executable code inside a function such as `def main() { ... }`.
+
 ## Variable Declarations
 
 Immutable local binding:

@@ -73,6 +73,63 @@ fn collect_lum_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
+fn parses_top_level_bindings() {
+    let result = parse(
+        r#"
+seed Int = 1
+var counter Int = 0
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    assert_eq!(program.items.len(), 2);
+    assert!(matches!(
+        &program.items[0],
+        Item::Statement(Stmt::Binding(_))
+    ));
+    assert!(matches!(
+        &program.items[1],
+        Item::Statement(Stmt::Binding(_))
+    ));
+}
+
+#[test]
+fn rejects_top_level_control_flow_statements() {
+    let result = parse(
+        r#"
+if true {
+    println("nope")
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "unexpected_top_level_statement"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_top_level_expression_statements() {
+    let result = parse(
+        r#"
+println("nope")
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "unexpected_top_level_statement"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_function_with_range_loop() {
     let result = parse(
         r#"
