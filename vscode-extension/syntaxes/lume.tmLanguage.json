@@ -16,6 +16,9 @@
       "include": "#controlShorthand"
     },
     {
+      "include": "#annotations"
+    },
+    {
       "include": "#keywords"
     },
     {
@@ -99,6 +102,22 @@
         {
           "name": "keyword.declaration.lume",
           "match": "\\b(?:def|new|annotation|class|shape|record|enum|interface|single|impl|use|module|with|hidden|public|case|var|vararg|let)\\b"
+        }
+      ]
+    },
+    "annotations": {
+      "patterns": [
+        {
+          "name": "meta.annotation.lume",
+          "match": "(@)\\s*([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.annotation.lume"
+            },
+            "2": {
+              "name": "entity.name.type.annotation.lume"
+            }
+          }
         }
       ]
     },

@@ -1,0 +1,16 @@
+# FAIL_REGEX:
+# .*annotation arguments must be literals or stable constants.*
+
+annotation Route {
+    path Str
+}
+
+single Routes {
+}
+
+impl single Routes {
+    def health() Str = "/health"
+}
+
+@Route { path: Routes.health() }
+def main() Unit {}

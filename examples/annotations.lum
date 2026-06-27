@@ -7,12 +7,17 @@ annotation Tag {
 
 annotation Route {
     path Str
+    method Str = "GET"
 }
 
 routePath Str = "/health"
 
 single Routes {
     health Str = "/health"
+}
+
+single LocalRoutes {
+    status Str = "/status"
 }
 
 @Tag { name: "service" }
@@ -31,6 +36,9 @@ impl Service {
     @Route { path: Routes.health }
     @Tag { name: "health" }
     def health() Str = this.name
+
+    @Route { path: LocalRoutes.status, method: "POST" }
+    def status() Str = "status"
 }
 
 def main() Unit {
