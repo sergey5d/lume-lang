@@ -6,6 +6,8 @@
 # account Ada 10
 # account Bob 11
 # account Eve 0
+# account Nia 0
+# account unknown 12
 # path 3 usr
 
 # Constructor rule summary:
@@ -14,6 +16,8 @@
 # - later field mutation uses `:=`
 # - nested writes through an initialized field still use `:=`
 # - constructor parameters and constructor-call fields may be comma separated
+# - `new(...)` delegates to another constructor positionally
+# - `new { field: value }` delegates to another constructor by named fields
 # - a trailing `[T] vararg` constructor parameter receives positional varargs as `[T]`
 
 class Profile {
@@ -84,6 +88,13 @@ impl Account {
         this.age = age
     }
 
+    new { label Str } = new {
+        name: label
+        age: 0
+    }
+
+    new { years Int } = new("unknown", years)
+
     def label() Str = this.name + " " + this.age
 }
 
@@ -119,9 +130,13 @@ def main() Unit {
     namedAccount = Account { name: "Ada", age: 10 }
     positionalAccount = Account("Bob", 11)
     defaultAccount = Account { name: "Eve" }
+    namedDelegatedAccount = Account { label: "Nia" }
+    positionalDelegatedAccount = Account { years: 12 }
     println("account", namedAccount.label())
     println("account", positionalAccount.label())
     println("account", defaultAccount.label())
+    println("account", namedDelegatedAccount.label())
+    println("account", positionalDelegatedAccount.label())
 
     path Path = Path("usr", "local", "bin")
     println("path", path.size(), path.firstOr("?"))

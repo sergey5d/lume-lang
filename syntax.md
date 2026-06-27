@@ -596,6 +596,7 @@ Constructors use a dedicated `new` block inside `impl`.
 - constructor parameters may end with one variadic list parameter such as `items [Str] vararg`
 - `hidden new { params } { body }` declares a private constructor
 - `new(...)` inside another constructor delegates positionally to another constructor of the same class
+- `new { field: value }` inside another constructor delegates with named constructor arguments to another constructor of the same class
 - class call sites use braces for named arguments, for example `Person { name: "Ada", age: 10 }`
 - class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
 - `this` is the instance receiver
@@ -620,6 +621,13 @@ impl Person {
     new {
         age Int
     } = new(age, "unknown")
+
+    new {
+        name Str
+    } = new {
+        age: 0
+        name: name
+    }
 }
 ```
 
