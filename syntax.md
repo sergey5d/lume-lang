@@ -156,7 +156,7 @@ def health2() Str = "ok"
 
 Supported targets currently include:
 
-- top-level `def`, `class`, `single`, `enum`, `interface`
+- top-level `def`, `interface`, `class`, `shape`, `single`, `enum`
 - fields
 - methods
 - interface methods
@@ -175,6 +175,7 @@ Top-level forms:
 - `def`
 - `interface`
 - `class`
+- `shape`
 - `single`
 - `enum`
 - `public def`
@@ -182,6 +183,7 @@ Top-level forms:
 - `hidden def`
 - `hidden interface`
 - `hidden class`
+- `hidden shape`
 - `hidden single`
 - `hidden enum`
 
@@ -196,6 +198,16 @@ interface Named {
 
 class Box[T] {
     value T
+}
+
+shape Point {
+    x Int
+    y Int
+}
+
+hidden shape InternalPoint {
+    x Int
+    y Int
 }
 
 single Counter {
@@ -470,9 +482,9 @@ Construction rules:
 - in named braces, public fields without initializers are required
 - in named braces, public fields with initializers are optional
 - in named braces, hidden fields are never part of the accepted shape
-- hidden fields without initializers block structural construction entirely
+- hidden fields without initializers suppress implicit field constructors; define `new` to initialize them
 - positional construction follows declared public-field order
-- positional construction may omit only a trailing suffix of public fields that already have initializers
+- public fields may be omitted from positional construction only when the omitted fields form a trailing suffix and all have initializers
 - positional construction is rejected when a hidden initialized field appears before a later public field
 - explicit constructors may use one trailing variadic list parameter such as `items [T] vararg`
 - a variadic constructor parameter receives the extra positional arguments as `[T]`
@@ -596,6 +608,7 @@ Constructors use a dedicated `new` block inside `impl`.
 - constructor parameters use `name Type`, with optional trailing defaults such as `age Int = 0`
 - constructor parameters may end with one variadic list parameter such as `items [Str] vararg`
 - `hidden new { params } { body }` declares a private constructor
+- each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
 - `new(...)` inside another constructor delegates positionally to another constructor of the same class
 - `new { field: value }` inside another constructor delegates with named constructor arguments to another constructor of the same class
 - class call sites use braces for named arguments, for example `Person { name: "Ada", age: 10 }`

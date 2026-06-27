@@ -1034,6 +1034,7 @@ impl<'a> Checker<'a> {
                 ),
             );
         }
+        self.check_constructor_initializes_required_fields(method, owner);
 
         self.pop_scope();
         self.pop_type_params();
@@ -1041,6 +1042,62 @@ impl<'a> Checker<'a> {
         self.current_owner = previous_owner;
         self.current_method = previous_method;
         self.defer_depth = previous_defer_depth;
+    }
+
+    fn check_constructor_initializes_required_fields(
+        &mut self,
+        method: &MethodDecl,
+        owner: &TypeSig,
+    ) {
+        if method.name != "new" || !matches!(owner.kind, TypeKind::Class | TypeKind::Single) {
+            return;
+        }
+        let required_fields = owner
+            .fields
+            .iter()
+            .filter(|field| !field.has_initializer)
+            .collect::<Vec<_>>();
+        if required_fields.is_empty() {
+            return;
+        }
+        let Some(body) = &method.body else {
+            self.report_constructor_missing_fields(owner, &required_fields, method.span);
+            return;
+        };
+        if constructor_body_delegates(body) {
+            return;
+        }
+        let assigned = constructor_assigned_fields(body, owner, method);
+        let missing = required_fields
+            .into_iter()
+            .filter(|field| !assigned.contains(&field.name))
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            self.report_constructor_missing_fields(owner, &missing, method.span);
+        }
+    }
+
+    fn report_constructor_missing_fields(
+        &mut self,
+        owner: &TypeSig,
+        fields: &[&FieldSig],
+        span: crate::source::Span,
+    ) {
+        let names = fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>()
+            .join("', '");
+        self.add_error(
+            "uninitialized_field",
+            format!(
+                "constructor 'new' for {} '{}' must initialize field '{}' or delegate to another constructor",
+                type_kind_label(owner.kind),
+                owner.name,
+                names
+            ),
+            span,
+        );
     }
 
     fn owner_self_ty(&self, owner: &TypeSig) -> Ty {
@@ -5537,17 +5594,18 @@ impl<'a> Checker<'a> {
             );
             return materialize_type(ret);
         }
-        if sig
+        if let Some(field) = sig
             .fields
             .iter()
-            .any(|field| field.hidden && !field.has_initializer)
+            .find(|field| field.hidden && !field.has_initializer)
         {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' cannot be built from an anonymous record because it has private fields without initializers",
+                    "{} '{}' has no implicit named-field constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
                     type_kind_label(sig.kind),
-                    sig.name
+                    sig.name,
+                    field.name
                 ),
                 span,
             );
@@ -5657,17 +5715,18 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
     ) -> Ty {
-        if sig
+        if let Some(field) = sig
             .fields
             .iter()
-            .any(|field| field.hidden && !field.has_initializer)
+            .find(|field| field.hidden && !field.has_initializer)
         {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' cannot use positional construction because it has private fields without initializers",
+                    "{} '{}' has no implicit positional constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
                     type_kind_label(sig.kind),
-                    sig.name
+                    sig.name,
+                    field.name
                 ),
                 span,
             );
@@ -6166,6 +6225,91 @@ impl<'a> Checker<'a> {
             let bound_ty = substitute_type(bound, &subst);
             self.is_assignable_inner(&bound_ty, expected, seen)
         })
+    }
+}
+
+fn constructor_body_delegates(body: &CallableBody) -> bool {
+    match body {
+        CallableBody::Expr(expr) => is_constructor_delegation_expr(expr),
+        CallableBody::Block(block) => block.statements.iter().any(constructor_stmt_delegates),
+    }
+}
+
+fn constructor_stmt_delegates(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Expr(stmt) => is_constructor_delegation_expr(&stmt.expr),
+        Stmt::Return(stmt) => stmt
+            .value
+            .as_ref()
+            .is_some_and(is_constructor_delegation_expr),
+        _ => false,
+    }
+}
+
+fn is_constructor_delegation_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call { callee, .. } => {
+            matches!(callee.as_ref(), Expr::Identifier { name, .. } if name == "new")
+        }
+        Expr::Group { inner, .. } => is_constructor_delegation_expr(inner),
+        _ => false,
+    }
+}
+
+fn constructor_assigned_fields(
+    body: &CallableBody,
+    owner: &TypeSig,
+    method: &MethodDecl,
+) -> HashSet<String> {
+    let CallableBody::Block(block) = body else {
+        return HashSet::new();
+    };
+    let param_names = method
+        .params
+        .iter()
+        .map(|param| param.name.as_str())
+        .collect::<HashSet<_>>();
+    let owner_fields = owner
+        .fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect::<HashSet<_>>();
+    let mut assigned = HashSet::new();
+    for statement in &block.statements {
+        let Stmt::Assignment(statement) = statement else {
+            continue;
+        };
+        if statement.operator != AssignOp::Assign {
+            continue;
+        }
+        for target in &statement.targets {
+            if let Some(name) = constructor_assigned_field(target, &owner_fields, &param_names) {
+                assigned.insert(name.to_string());
+            }
+        }
+    }
+    assigned
+}
+
+fn constructor_assigned_field<'a>(
+    target: &'a Expr,
+    owner_fields: &HashSet<&str>,
+    param_names: &HashSet<&str>,
+) -> Option<&'a str> {
+    match target {
+        Expr::Member { receiver, name, .. }
+            if matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "this")
+                && owner_fields.contains(name.as_str()) =>
+        {
+            Some(name.as_str())
+        }
+        Expr::Identifier { name, .. }
+            if owner_fields.contains(name.as_str()) && !param_names.contains(name.as_str()) =>
+        {
+            Some(name.as_str())
+        }
+        Expr::Group { inner, .. } => constructor_assigned_field(inner, owner_fields, param_names),
+        _ => None,
     }
 }
 
@@ -6999,6 +7143,98 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_implicit_constructors_when_hidden_field_lacks_initializer() {
+        let program = parse_inline(
+            r#"
+class SecretUser {
+    name Str
+    hidden token Str
+}
+
+def main() Unit {
+    _ SecretUser = SecretUser { name: "Ada" }
+    _ SecretUser = SecretUser("Ada")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.message.contains(
+                    "no implicit named-field constructor because hidden field 'token' has no initializer",
+                )
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.message.contains(
+                    "no implicit positional constructor because hidden field 'token' has no initializer",
+                )
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_explicit_constructor_when_hidden_field_lacks_initializer() {
+        let program = parse_inline(
+            r#"
+class SecretUser {
+    name Str
+    hidden token Str
+}
+
+impl SecretUser {
+    new {
+        name Str
+    } {
+        this.name = name
+        this.token = "secret"
+    }
+}
+
+def main() Unit {
+    _ SecretUser = SecretUser { name: "Ada" }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_explicit_constructor_that_leaves_required_field_uninitialized() {
+        let program = parse_inline(
+            r#"
+class SecretUser {
+    name Str
+    hidden token Str
+}
+
+impl SecretUser {
+    new {
+        name Str
+    } {
+        this.name = name
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "uninitialized_field"
+                    && diag.message.contains("must initialize field 'token'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

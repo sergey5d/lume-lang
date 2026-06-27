@@ -2347,16 +2347,16 @@ impl<'a> Interpreter<'a> {
         values: &[(String, Value)],
         span: Option<Span>,
     ) -> Result<(), Diagnostic> {
-        if ty
+        if let Some(field) = ty
             .fields
             .iter()
-            .any(|field| field.hidden && !field.has_initializer)
+            .find(|field| field.hidden && !field.has_initializer)
         {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' cannot be built from an anonymous record because it has private fields without initializers",
-                    ty.name
+                    "class '{}' has no implicit named-field constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
+                    ty.name, field.name
                 ),
             ));
         }
@@ -2419,16 +2419,16 @@ impl<'a> Interpreter<'a> {
         values: &[Value],
         span: Option<Span>,
     ) -> Result<(), Diagnostic> {
-        if ty
+        if let Some(field) = ty
             .fields
             .iter()
-            .any(|field| field.hidden && !field.has_initializer)
+            .find(|field| field.hidden && !field.has_initializer)
         {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' cannot use positional construction because it has private fields without initializers",
-                    ty.name
+                    "class '{}' has no implicit positional constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
+                    ty.name, field.name
                 ),
             ));
         }
