@@ -346,6 +346,12 @@ user User = User("Ada", 10)
 maybe = Some(5)
 ```
 
+Braces are also the named constructor form for enum payload cases:
+
+```txt
+maybe = Some { value: 5 }
+```
+
 Zero-payload enum cases are bare values, not calls:
 
 ```txt
@@ -921,7 +927,8 @@ Enum cases are data-only:
 - cases may not declare methods
 - there is no `impl Enum.Case { ... }` form
 - zero-payload cases are values and are written without call syntax, for example `None`
-- payload cases use call syntax, for example `Some(value)`
+- payload cases use positional constructor syntax, for example `Some(value)`
+- payload cases may also use named constructor braces, for example `Some { value: value }`
 - `None()`-style calls for zero-payload cases are invalid
 
 Behavior for enums belongs on the enum itself, either inline or in `impl Enum { ... }` blocks, and case-specific behavior should be expressed with `match`.

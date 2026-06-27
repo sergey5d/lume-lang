@@ -48,7 +48,7 @@ Run the checked example sweep:
 - Variadic params use list type syntax: `items [Str] vararg`.
 - Field construction and anonymous-shape construction use `field: value`, not `field = value`.
 - Assignment uses `=` for first binding / constructor field initialization and `:=` for reassignment.
-- Enum payload cases use call syntax, for example `Status.Ready(3)`; zero-payload cases are bare, for example `Status.Empty`.
+- Enum payload cases use positional or named constructor syntax, for example `Status.Ready(3)` or `Status.Ready { value: 3 }`; zero-payload cases are bare, for example `Status.Empty`.
 - `let`, `expect`, and `if let` support `<-` extraction from `Option`, `Result`, and `Either`.
 - `match` is exhaustive; `partial match` returns `Option[...]`.
 - `for`, `for ... yield`, `while`, `break`, `continue`, and callable-scoped `defer` are supported.
