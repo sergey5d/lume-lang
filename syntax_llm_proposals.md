@@ -33,7 +33,6 @@ These older surfaces should stay out of new examples and docs:
 
 - `import`; use `use`
 - named `record` declarations; use `shape` for structural data or `class` for nominal types
-- `object`; use `single`
 - anonymous `class { ... }` / `record { ... }`; use plain `{ ... }`
 - named fields with `=` inside construction; use `field: value`
 - language-level `unwrap` forms; use `let ... else`, `expect`, or `try`
@@ -68,7 +67,6 @@ These still feel like strong surface choices:
 Notes:
 
 - `case` makes `match` blocks easier to scan.
-- `single` is clearer than `object` for singleton declarations.
 - `public` and `hidden` are readable visibility markers.
 - `expect` is a better assertive word than reviving `unwrap` syntax.
 

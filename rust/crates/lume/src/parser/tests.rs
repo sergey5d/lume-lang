@@ -417,7 +417,7 @@ impl single Counter {
     let program = result.program.expect("program");
     assert_eq!(program.items.len(), 2);
     match &program.items[0] {
-        Item::Type(decl) => assert_eq!(decl.kind, TypeKind::Object),
+        Item::Type(decl) => assert_eq!(decl.kind, TypeKind::Single),
         other => panic!("expected singleton type, got {other:#?}"),
     }
     match &program.items[1] {

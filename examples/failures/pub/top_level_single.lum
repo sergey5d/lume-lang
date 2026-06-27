@@ -1,6 +1,6 @@
 # FAIL:
 # 'public' is only supported for top-level functions and immutable bindings
 
-public object MathBox {
+public single MathBox {
     value Int = 1
 }

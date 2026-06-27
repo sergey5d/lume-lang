@@ -279,7 +279,7 @@ struct ModuleInfo {
     symbol_imports: HashMap<String, ImportedSymbol>,
     functions: HashMap<String, Vec<FunctionSig>>,
     types: HashMap<String, TypeSig>,
-    objects: HashMap<String, TypeSig>,
+    singles: HashMap<String, TypeSig>,
     global_binding_stmts: Vec<crate::ast::BindingStmt>,
 }
 
@@ -293,7 +293,7 @@ impl ModuleInfo {
             symbol_imports: module.symbol_imports.clone(),
             functions: HashMap::new(),
             types: HashMap::new(),
-            objects: HashMap::new(),
+            singles: HashMap::new(),
             global_binding_stmts: Vec::new(),
         };
         info.collect_items();
@@ -309,7 +309,7 @@ impl ModuleInfo {
             symbol_imports: HashMap::new(),
             functions: HashMap::new(),
             types: HashMap::new(),
-            objects: HashMap::new(),
+            singles: HashMap::new(),
             global_binding_stmts: Vec::new(),
         };
         info.collect_items();
@@ -328,8 +328,8 @@ impl ModuleInfo {
                 }
                 Item::Type(decl) => {
                     let sig = type_sig_from_decl(decl);
-                    if decl.kind == TypeKind::Object {
-                        self.objects.insert(decl.name.clone(), sig);
+                    if decl.kind == TypeKind::Single {
+                        self.singles.insert(decl.name.clone(), sig);
                     } else {
                         self.types.insert(decl.name.clone(), sig);
                     }
@@ -355,7 +355,7 @@ impl ModuleInfo {
         let target = match block.target_kind {
             ImplTargetKind::Instance => self.types.get_mut(target_name),
             ImplTargetKind::Single => {
-                if !self.objects.contains_key(target_name) {
+                if !self.singles.contains_key(target_name) {
                     if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
                         return;
                     }
@@ -365,9 +365,9 @@ impl ModuleInfo {
                         .cloned()
                         .map(|base| synthetic_single_sig_from_type(&base))
                         .unwrap_or_else(|| standalone_single_sig(target_name));
-                    self.objects.insert(target_name.to_string(), sig);
+                    self.singles.insert(target_name.to_string(), sig);
                 }
-                self.objects.get_mut(target_name)
+                self.singles.get_mut(target_name)
             }
         };
         if let Some(sig) = target {
@@ -385,7 +385,7 @@ impl ModuleInfo {
 struct AmbientInfo {
     functions: HashMap<String, Vec<FunctionSig>>,
     types: HashMap<String, TypeSig>,
-    objects: HashMap<String, TypeSig>,
+    singles: HashMap<String, TypeSig>,
     enum_cases: HashMap<String, EnumCaseSig>,
 }
 
@@ -416,12 +416,12 @@ impl AmbientInfo {
                 }
                 ambient.types.insert(name, sig);
             }
-            for (name, sig) in module.objects {
-                ambient.objects.insert(name, sig);
+            for (name, sig) in module.singles {
+                ambient.singles.insert(name, sig);
             }
         }
 
-        if let Some(os) = ambient.objects.get("OS") {
+        if let Some(os) = ambient.singles.get("OS") {
             for builtin in ["print", "println", "printf", "panic"] {
                 if let Some(sigs) = os.methods.get(builtin) {
                     ambient.functions.insert(builtin.to_string(), sigs.clone());
@@ -435,7 +435,7 @@ impl AmbientInfo {
 
 fn synthetic_single_sig_from_type(base: &TypeSig) -> TypeSig {
     TypeSig {
-        kind: TypeKind::Object,
+        kind: TypeKind::Single,
         name: base.name.clone(),
         type_params: Vec::new(),
         with_bounds: Vec::new(),
@@ -447,7 +447,7 @@ fn synthetic_single_sig_from_type(base: &TypeSig) -> TypeSig {
 
 fn standalone_single_sig(name: &str) -> TypeSig {
     TypeSig {
-        kind: TypeKind::Object,
+        kind: TypeKind::Single,
         name: name.to_string(),
         type_params: Vec::new(),
         with_bounds: Vec::new(),
@@ -461,7 +461,7 @@ fn type_kind_label(kind: TypeKind) -> &'static str {
     match kind {
         TypeKind::Class => "class",
         TypeKind::Record => "shape",
-        TypeKind::Object => "single",
+        TypeKind::Single => "single",
         TypeKind::Interface => "interface",
         TypeKind::Enum => "enum",
     }
@@ -551,9 +551,9 @@ impl World {
             return None;
         }
         let source = self.modules.get(&imported.module_path)?;
-        if let Some(object_name) = imported.object_name.as_deref() {
-            let object = source.objects.get(object_name)?;
-            return object.methods.get(&imported.original_name).cloned();
+        if let Some(single_name) = imported.single_name.as_deref() {
+            let single = source.singles.get(single_name)?;
+            return single.methods.get(&imported.original_name).cloned();
         }
         source.functions.get(&imported.original_name).cloned()
     }
@@ -567,10 +567,10 @@ impl World {
                 .types
                 .get(&imported.original_name)
                 .cloned(),
-            ImportedKind::Object => self
+            ImportedKind::Single => self
                 .modules
                 .get(&imported.module_path)?
-                .objects
+                .singles
                 .get(&imported.original_name)
                 .cloned(),
             _ => None,
@@ -929,7 +929,7 @@ impl<'a> Checker<'a> {
                     );
                     return;
                 };
-                if type_sig.kind == TypeKind::Interface || type_sig.kind == TypeKind::Object {
+                if type_sig.kind == TypeKind::Interface || type_sig.kind == TypeKind::Single {
                     self.add_error(
                         "unknown_impl_target",
                         format!("unknown impl target '{}'", target_name),
@@ -940,8 +940,8 @@ impl<'a> Checker<'a> {
                 type_sig
             }
             ImplTargetKind::Single => {
-                if let Some(object_sig) = self.lookup_object_local(target_name) {
-                    object_sig
+                if let Some(single_sig) = self.lookup_single_local(target_name) {
+                    single_sig
                 } else if let Some(base_sig) = self.lookup_type_local(target_name) {
                     if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
                         self.add_error(
@@ -1091,17 +1091,6 @@ impl<'a> Checker<'a> {
                         "variadic constructor parameter cannot follow defaulted parameters"
                     } else {
                         "variadic parameter cannot follow defaulted parameters"
-                    },
-                    param.span,
-                );
-            }
-            if param.variadic && param.initializer.is_some() {
-                self.add_error(
-                    "invalid_variadic_param",
-                    if is_constructor {
-                        "variadic constructor parameter cannot have a default value"
-                    } else {
-                        "variadic parameter cannot have a default value"
                     },
                     param.span,
                 );
@@ -3870,13 +3859,6 @@ impl<'a> Checker<'a> {
         } else {
             params.len()
         };
-        if arrangement.named_variadic > 0 {
-            self.add_error(
-                "invalid_variadic_argument",
-                "named arguments cannot target variadic parameters; pass the values positionally",
-                span,
-            );
-        }
         if arrangement.overflow > 0
             || arrangement.missing_required > 0
             || args.len() < min_required
@@ -4034,7 +4016,7 @@ impl<'a> Checker<'a> {
                             parenthesized_record_arg,
                         ));
                     }
-                    if let Some(sig) = module_info.objects.get(&member).cloned() {
+                    if let Some(sig) = module_info.singles.get(&member).cloned() {
                         return Some(self.check_named_type_constructor(
                             &sig,
                             args,
@@ -4060,7 +4042,7 @@ impl<'a> Checker<'a> {
                                 uses_brace_syntax,
                             ));
                         }
-                        if sig.kind == TypeKind::Object {
+                        if sig.kind == TypeKind::Single {
                             return None;
                         }
                     }
@@ -4344,13 +4326,6 @@ impl<'a> Checker<'a> {
             } else {
                 params.len()
             };
-            if arrangement.named_variadic > 0 {
-                self.add_error(
-                    "invalid_variadic_argument",
-                    "named arguments cannot target variadic constructor parameters; pass the values positionally",
-                    span,
-                );
-            }
             if arrangement.overflow > 0
                 || arrangement.missing_required > 0
                 || args.len() < min_required
@@ -4406,13 +4381,6 @@ impl<'a> Checker<'a> {
         }
 
         let arrangement = arrange_constructor_args(params, args);
-        if arrangement.named_variadic > 0 {
-            self.add_error(
-                "invalid_variadic_argument",
-                "named arguments cannot target variadic constructor parameters; pass the values positionally",
-                span,
-            );
-        }
         if arrangement.overflow > 0 || arrangement.missing_required > 0 {
             let min_required = params
                 .iter()
@@ -4698,7 +4666,7 @@ impl<'a> Checker<'a> {
         else {
             return None;
         };
-        if let Some(sig) = self.lookup_any_object(type_name) {
+        if let Some(sig) = self.lookup_any_single(type_name) {
             if let Some(methods) = self.method_sigs_for_type(&sig, name) {
                 let first = methods.first()?;
                 return Some(Ty::Function(
@@ -4707,7 +4675,7 @@ impl<'a> Checker<'a> {
                 ));
             }
         }
-        let sig = self.lookup_any_non_object_type(type_name)?;
+        let sig = self.lookup_any_non_single_type(type_name)?;
         if let Some(case) = sig.enum_cases.get(name) {
             if case.params.is_empty() {
                 return Some(self.materialize_enum_case_result_against(&case.result, expected));
@@ -4723,10 +4691,10 @@ impl<'a> Checker<'a> {
         else {
             return None;
         };
-        if let Some(sig) = self.lookup_any_object(type_name) {
+        if let Some(sig) = self.lookup_any_single(type_name) {
             return self.method_sigs_for_type(&sig, name);
         }
-        let sig = self.lookup_any_non_object_type(type_name)?;
+        let sig = self.lookup_any_non_single_type(type_name)?;
         self.method_sigs_for_type(&sig, name)
     }
 
@@ -4735,8 +4703,8 @@ impl<'a> Checker<'a> {
         class_name: &str,
         args: &[crate::ast::CallArg],
     ) -> Option<String> {
-        let object = self.lookup_any_object(class_name)?;
-        self.method_sigs_for_type(&object, "create")?;
+        let single = self.lookup_any_single(class_name)?;
+        self.method_sigs_for_type(&single, "create")?;
         let args = format_factory_help_args(args)?;
         Some(format!("use {class_name}.create({args})"))
     }
@@ -5012,7 +4980,7 @@ impl<'a> Checker<'a> {
         match path {
             [case_name] => self.world.lookup_enum_case(self.module, case_name),
             [type_name, case_name] => self
-                .lookup_any_non_object_type(type_name)
+                .lookup_any_non_single_type(type_name)
                 .and_then(|sig| sig.enum_cases.get(case_name).cloned()),
             [module_alias, type_name, case_name] => self
                 .world
@@ -5047,7 +5015,7 @@ impl<'a> Checker<'a> {
                         .types
                         .get(name)
                         .cloned()
-                        .or_else(|| module.objects.get(name).cloned())
+                        .or_else(|| module.singles.get(name).cloned())
                 }),
             _ => None,
         }?;
@@ -5331,7 +5299,7 @@ impl<'a> Checker<'a> {
                     .collect(),
             ));
         }
-        if let Some(sig) = module.objects.get(&member) {
+        if let Some(sig) = module.singles.get(&member) {
             return Some(Ty::Named(
                 sig.name.clone(),
                 sig.type_params
@@ -5843,7 +5811,7 @@ impl<'a> Checker<'a> {
                     .collect(),
             ));
         }
-        if let Some(sig) = self.world.ambient.objects.get(name) {
+        if let Some(sig) = self.world.ambient.singles.get(name) {
             return Some(Ty::Named(
                 sig.name.clone(),
                 sig.type_params
@@ -5878,11 +5846,11 @@ impl<'a> Checker<'a> {
             .types
             .get(name)
             .cloned()
-            .or_else(|| self.module.objects.get(name).cloned())
+            .or_else(|| self.module.singles.get(name).cloned())
     }
 
-    fn lookup_object_local(&self, name: &str) -> Option<TypeSig> {
-        self.module.objects.get(name).cloned()
+    fn lookup_single_local(&self, name: &str) -> Option<TypeSig> {
+        self.module.singles.get(name).cloned()
     }
 
     fn lookup_unique_module_type(&self, name: &str) -> Option<TypeSig> {
@@ -5895,7 +5863,7 @@ impl<'a> Checker<'a> {
                     .types
                     .get(name)
                     .cloned()
-                    .or_else(|| module.objects.get(name).cloned())
+                    .or_else(|| module.singles.get(name).cloned())
             })
             .collect::<Vec<_>>();
         if matches.len() == 1 {
@@ -5905,12 +5873,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn lookup_unique_module_object(&self, name: &str) -> Option<TypeSig> {
+    fn lookup_unique_module_single(&self, name: &str) -> Option<TypeSig> {
         let mut matches = self
             .world
             .modules
             .values()
-            .filter_map(|module| module.objects.get(name).cloned())
+            .filter_map(|module| module.singles.get(name).cloned())
             .collect::<Vec<_>>();
         if matches.len() == 1 {
             matches.pop()
@@ -5919,21 +5887,21 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn lookup_any_object(&self, name: &str) -> Option<TypeSig> {
-        self.lookup_object_local(name)
+    fn lookup_any_single(&self, name: &str) -> Option<TypeSig> {
+        self.lookup_single_local(name)
             .or_else(|| {
                 self.module.symbol_imports.get(name).and_then(|imported| {
-                    (imported.kind == ImportedKind::Object)
+                    (imported.kind == ImportedKind::Single)
                         .then(|| self.world.modules.get(&imported.module_path))
                         .flatten()
-                        .and_then(|module| module.objects.get(&imported.original_name).cloned())
+                        .and_then(|module| module.singles.get(&imported.original_name).cloned())
                 })
             })
-            .or_else(|| self.lookup_unique_module_object(name))
-            .or_else(|| self.world.ambient.objects.get(name).cloned())
+            .or_else(|| self.lookup_unique_module_single(name))
+            .or_else(|| self.world.ambient.singles.get(name).cloned())
     }
 
-    fn lookup_any_non_object_type(&self, name: &str) -> Option<TypeSig> {
+    fn lookup_any_non_single_type(&self, name: &str) -> Option<TypeSig> {
         self.module
             .types
             .get(name)
@@ -5967,7 +5935,7 @@ impl<'a> Checker<'a> {
             .or_else(|| self.world.lookup_imported_type(self.module, name))
             .or_else(|| self.lookup_unique_module_type(name))
             .or_else(|| self.world.ambient.types.get(name).cloned())
-            .or_else(|| self.world.ambient.objects.get(name).cloned())
+            .or_else(|| self.world.ambient.singles.get(name).cloned())
     }
 
     fn resolve_named_type(&self, name: &str, args: Vec<Ty>) -> Ty {
@@ -6406,6 +6374,12 @@ fn infer_literal_type(expr: &Expr) -> Option<Ty> {
         Expr::String { .. } => Some(Ty::str()),
         Expr::Bool { .. } => Some(Ty::bool()),
         Expr::Unit { .. } => Some(Ty::unit()),
+        Expr::ListLiteral { items, .. } => {
+            let item = items.iter().fold(Ty::Unknown, |acc, item| {
+                join_types(&acc, &infer_literal_type(item).unwrap_or(Ty::Unknown))
+            });
+            Some(Ty::Named("List".to_string(), vec![item]))
+        }
         _ => None,
     }
 }
@@ -6453,7 +6427,6 @@ fn impl_target_type_params(reference: &TypeRef) -> Vec<String> {
 struct ArgArrangement<'a> {
     slots: Vec<Vec<&'a crate::ast::CallArg>>,
     overflow: usize,
-    named_variadic: usize,
     missing_required: usize,
 }
 
@@ -6464,13 +6437,10 @@ fn arrange_param_args<'a>(
     let mut slots = vec![Vec::new(); params.len()];
     let mut positional_index = 0usize;
     let mut overflow = 0usize;
-    let mut named_variadic = 0usize;
     for arg in args {
         if let Some(name) = &arg.name {
             if let Some(index) = params.iter().position(|param| param.name == *name) {
-                if params[index].variadic {
-                    named_variadic += 1;
-                } else if slots[index].is_empty() {
+                if slots[index].is_empty() {
                     slots[index].push(arg);
                 } else {
                     overflow += 1;
@@ -6491,7 +6461,11 @@ fn arrange_param_args<'a>(
             && positional_index >= params.len().saturating_sub(1)
         {
             if let Some(slot) = slots.last_mut() {
-                slot.push(arg);
+                if slot.first().is_some_and(|arg| arg.name.is_some()) {
+                    overflow += 1;
+                } else {
+                    slot.push(arg);
+                }
             } else {
                 overflow += 1;
             }
@@ -6516,7 +6490,6 @@ fn arrange_param_args<'a>(
     ArgArrangement {
         slots,
         overflow,
-        named_variadic,
         missing_required,
     }
 }
@@ -6528,13 +6501,10 @@ fn arrange_constructor_args<'a>(
     let mut slots = vec![Vec::new(); params.len()];
     let mut positional_index = 0usize;
     let mut overflow = 0usize;
-    let mut named_variadic = 0usize;
     for arg in args {
         if let Some(name) = &arg.name {
             if let Some(index) = params.iter().position(|param| param.name == *name) {
-                if params[index].variadic {
-                    named_variadic += 1;
-                } else if slots[index].is_empty() {
+                if slots[index].is_empty() {
                     slots[index].push(arg);
                 } else {
                     overflow += 1;
@@ -6555,7 +6525,11 @@ fn arrange_constructor_args<'a>(
             && positional_index >= params.len().saturating_sub(1)
         {
             if let Some(slot) = slots.last_mut() {
-                slot.push(arg);
+                if slot.first().is_some_and(|arg| arg.name.is_some()) {
+                    overflow += 1;
+                } else {
+                    slot.push(arg);
+                }
             } else {
                 overflow += 1;
             }
@@ -6580,7 +6554,6 @@ fn arrange_constructor_args<'a>(
     ArgArrangement {
         slots,
         overflow,
-        named_variadic,
         missing_required,
     }
 }
@@ -7540,6 +7513,34 @@ impl Path {
 def main() Unit {
     _ Path = Path()
     _ Path = Path("usr", "local", "bin")
+    _ Path = Path { segments: ["etc", "hosts"] }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_defaulted_variadic_constructor_parameters() {
+        let program = parse_inline(
+            r#"
+class Path {
+    segments [Str]
+}
+
+impl Path {
+    new {
+        segments [Str] vararg = ["tmp"]
+    } {
+        this.segments = segments
+    }
+}
+
+def main() Unit {
+    _ Path = Path()
+    _ Path = Path("usr")
+    _ Path = Path { segments: ["etc"] }
 }
 "#,
         );
@@ -7695,7 +7696,7 @@ impl Bad {
     }
 
     #[test]
-    fn rejects_named_argument_for_variadic_constructor_parameter() {
+    fn allows_named_argument_for_variadic_constructor_parameter() {
         let program = parse_inline(
             r#"
 class Path {
@@ -7716,16 +7717,7 @@ def main() Unit {
 "#,
         );
         let result = check_program(&program);
-        assert!(
-            result.diagnostics.iter().any(|diag| {
-                diag.code == "invalid_variadic_argument"
-                    && diag
-                        .message
-                        .contains("named arguments cannot target variadic")
-            }),
-            "{:#?}",
-            result.diagnostics
-        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]
@@ -8815,7 +8807,7 @@ def main() Unit {
             "examples/record_destructuring.lum",
             "examples/class_destructuring.lum",
             "examples/enums.lum",
-            "examples/enum_object_same_name.lum",
+            "examples/enum_single_same_name.lum",
             "examples/imports.lum",
             "examples/interface_default_methods.lum",
             "examples/list_hof.lum",

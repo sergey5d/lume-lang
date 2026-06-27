@@ -477,8 +477,9 @@ Construction rules:
 - explicit constructors may use one trailing variadic list parameter such as `items [T] vararg`
 - a variadic constructor parameter receives the extra positional arguments as `[T]`
 - only one variadic parameter is allowed
-- named arguments cannot target a variadic constructor parameter
-- variadic constructor parameters cannot have defaults or follow defaulted parameters
+- named constructor arguments can target a variadic constructor parameter by passing a `[T]` value
+- variadic constructor parameters may have a default `[T]` value
+- variadic constructor parameters cannot follow defaulted parameters
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
 - tuple values cannot construct classes; write `User(...)` or `User { ... }`
@@ -641,13 +642,14 @@ class Path {
 
 impl Path {
     new {
-        segments [Str] vararg
+        segments [Str] vararg = ["tmp"]
     } {
         this.segments = segments
     }
 }
 
 path Path = Path("usr", "local", "bin")
+named Path = Path { segments: ["etc", "hosts"] }
 empty Path = Path()
 ```
 

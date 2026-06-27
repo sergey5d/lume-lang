@@ -9,6 +9,8 @@
 # account Nia 0
 # account unknown 12
 # path 3 usr
+# path named 2 etc
+# path default 1 default
 
 # Constructor rule summary:
 # - direct `this.field = ...` inside `new` means constructor initialization
@@ -19,6 +21,8 @@
 # - `new(...)` delegates to another constructor positionally
 # - `new { field: value }` delegates to another constructor by named fields
 # - a trailing `[T] vararg` constructor parameter receives positional varargs as `[T]`
+# - named constructor calls can pass a vararg as a single `[T]` value
+# - defaulted varargs are used when the vararg is omitted
 
 class Profile {
     name Str = "unknown"
@@ -104,7 +108,7 @@ class Path {
 
 impl Path {
     new {
-        segments [Str] vararg
+        segments [Str] vararg = ["default"]
     } {
         this.segments = segments
     }
@@ -140,4 +144,8 @@ def main() Unit {
 
     path Path = Path("usr", "local", "bin")
     println("path", path.size(), path.firstOr("?"))
+    namedPath Path = Path { segments: ["etc", "hosts"] }
+    println("path named", namedPath.size(), namedPath.firstOr("?"))
+    defaultPath Path = Path()
+    println("path default", defaultPath.size(), defaultPath.firstOr("?"))
 }

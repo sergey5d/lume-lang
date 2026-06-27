@@ -399,12 +399,13 @@ The current constructor surface is:
 - parentheses are positional constructor arguments: `Type(value)`
 - braces cannot be used for positional arguments: `Type { value }` is invalid
 - both forms resolve through the same available `new`/field construction shape
-- named parenthesized arguments remain possible, same as method calls, but braces are the preferred named-construction surface
+- constructor parentheses are positional only; named constructor arguments use braces
 - tuple values are not constructor calls; they can only initialize known shapes
 - explicit constructors may end with one variadic list parameter such as `items [T] vararg`
 - `[T] vararg` receives extra positional constructor arguments as `[T]` inside the constructor body
 - only one variadic parameter is allowed
-- named arguments cannot target a variadic constructor parameter
+- named constructor arguments can target a variadic constructor parameter by passing a `[T]` value
+- variadic constructor parameters may have a default `[T]` value
 
 Still open:
 - whether same-named `single` declarations should act as privileged factory companions

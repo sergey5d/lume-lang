@@ -117,7 +117,7 @@ pub(crate) struct LoadedModule {
 #[derive(Debug, Clone)]
 pub(crate) struct ImportedSymbol {
     pub(crate) original_name: String,
-    pub(crate) object_name: Option<String>,
+    pub(crate) single_name: Option<String>,
     pub(crate) kind: ImportedKind,
     pub(crate) module_path: PathBuf,
 }
@@ -128,7 +128,7 @@ pub(crate) enum ImportedKind {
     Value,
     Type,
     Interface,
-    Object,
+    Single,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -175,7 +175,7 @@ impl AmbientRegistry {
                     }
                 }
             }
-            for (name, info) in decls.objects {
+            for (name, info) in decls.singles {
                 registry.values.insert(name.clone());
                 registry.types.insert(name, info);
             }
@@ -195,7 +195,7 @@ struct TopLevelDecls {
     functions: HashMap<String, DeclSpan>,
     globals: HashMap<String, Symbol>,
     types: HashMap<String, TypeInfo>,
-    objects: HashMap<String, TypeInfo>,
+    singles: HashMap<String, TypeInfo>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -241,7 +241,7 @@ impl SymbolKind {
             SymbolKind::Parameter(ParameterKind::Method(TypeKind::Record)) => {
                 "shape method parameter"
             }
-            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Object)) => {
+            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Single)) => {
                 "single method parameter"
             }
             SymbolKind::Parameter(ParameterKind::Method(TypeKind::Enum)) => "enum method parameter",
@@ -254,7 +254,7 @@ impl SymbolKind {
             SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Record)) => {
                 "shape constructor parameter"
             }
-            SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Object)) => {
+            SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Single)) => {
                 "single constructor parameter"
             }
             SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Enum)) => {
@@ -304,7 +304,7 @@ struct ModuleNamespace {
     functions: HashMap<String, crate::source::Span>,
     globals: HashMap<String, crate::source::Span>,
     types: HashMap<String, TypeInfo>,
-    objects: HashMap<String, TypeInfo>,
+    singles: HashMap<String, TypeInfo>,
 }
 
 pub(crate) fn load_module(
@@ -353,7 +353,7 @@ pub(crate) fn load_module(
         if !module.dependencies.contains(&child_abs) {
             module.dependencies.push(child_abs.clone());
         }
-        if import.object_name.is_none() && import.symbols.is_empty() && !import.wildcard {
+        if import.single_name.is_none() && import.symbols.is_empty() && !import.wildcard {
             let alias = module_alias(&import.path);
             if let Some(existing) = import_paths.get(&alias) {
                 if existing != &import.path {
@@ -390,26 +390,26 @@ pub(crate) fn load_module(
                 .is_some_and(|module| module.name == current)
         });
         let mut symbols = import.symbols.clone();
-        if let Some(object_name) = import.object_name.as_deref() {
+        if let Some(single_name) = import.single_name.as_deref() {
             if import.wildcard {
-                symbols = exported_object_members(child, object_name, same_module);
+                symbols = exported_single_members(child, single_name, same_module);
             }
         } else if import.wildcard {
             symbols = exported_symbols(child, same_module);
         }
 
         for symbol in symbols {
-            let resolved = if let Some(object_name) = import.object_name.as_deref() {
-                resolve_imported_object_member(
+            let resolved = if let Some(single_name) = import.single_name.as_deref() {
+                resolve_imported_single_member(
                     child,
-                    object_name,
+                    single_name,
                     symbol.name.as_str(),
                     same_module,
                 )
                 .ok_or_else(|| {
                     format!(
-                        "use '{}' has no visible member '{}' on object '{}'",
-                        import.path, symbol.name, object_name
+                        "use '{}' has no visible member '{}' on single '{}'",
+                        import.path, symbol.name, single_name
                     )
                 })?
             } else {
@@ -433,7 +433,7 @@ pub(crate) fn load_module(
             if let Some(existing) = module.symbol_imports.get(&local_name) {
                 if existing.module_path != resolved.module_path
                     || existing.original_name != resolved.original_name
-                    || existing.object_name != resolved.object_name
+                    || existing.single_name != resolved.single_name
                 {
                     return Err(format!("duplicate used symbol '{}'", local_name));
                 }
@@ -580,7 +580,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
             });
         }
     }
-    for (name, info) in decls.objects {
+    for (name, info) in decls.singles {
         if info.visibility != Visibility::Hidden || same_module {
             out.push(ImportSymbol {
                 name,
@@ -592,13 +592,13 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
     out
 }
 
-fn exported_object_members(
+fn exported_single_members(
     module: &LoadedModule,
-    object_name: &str,
+    single_name: &str,
     same_module: bool,
 ) -> Vec<ImportSymbol> {
     let decls = collect_top_level_decls(&module.program);
-    let Some(info) = decls.objects.get(object_name) else {
+    let Some(info) = decls.singles.get(single_name) else {
         return Vec::new();
     };
     if info.visibility == Visibility::Hidden && !same_module {
@@ -627,7 +627,7 @@ fn resolve_imported_symbol(
         if decl.visibility == Visibility::Public {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
-                object_name: None,
+                single_name: None,
                 kind: ImportedKind::Function,
                 module_path: module.path.clone(),
             });
@@ -637,7 +637,7 @@ fn resolve_imported_symbol(
         if !symbol.mutable {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
-                object_name: None,
+                single_name: None,
                 kind: ImportedKind::Value,
                 module_path: module.path.clone(),
             });
@@ -647,7 +647,7 @@ fn resolve_imported_symbol(
         if info.visibility != Visibility::Hidden || same_module {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
-                object_name: None,
+                single_name: None,
                 kind: if info.kind == TypeKind::Interface {
                     ImportedKind::Interface
                 } else {
@@ -657,12 +657,12 @@ fn resolve_imported_symbol(
             });
         }
     }
-    if let Some(info) = decls.objects.get(name) {
+    if let Some(info) = decls.singles.get(name) {
         if info.visibility != Visibility::Hidden || same_module {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
-                object_name: None,
-                kind: ImportedKind::Object,
+                single_name: None,
+                kind: ImportedKind::Single,
                 module_path: module.path.clone(),
             });
         }
@@ -670,14 +670,14 @@ fn resolve_imported_symbol(
     None
 }
 
-fn resolve_imported_object_member(
+fn resolve_imported_single_member(
     module: &LoadedModule,
-    object_name: &str,
+    single_name: &str,
     member_name: &str,
     same_module: bool,
 ) -> Option<ImportedSymbol> {
     let decls = collect_top_level_decls(&module.program);
-    let info = decls.objects.get(object_name)?;
+    let info = decls.singles.get(single_name)?;
     if info.visibility == Visibility::Hidden && !same_module {
         return None;
     }
@@ -687,7 +687,7 @@ fn resolve_imported_object_member(
     }
     Some(ImportedSymbol {
         original_name: member_name.to_string(),
-        object_name: Some(object_name.to_string()),
+        single_name: Some(single_name.to_string()),
         kind: ImportedKind::Function,
         module_path: module.path.clone(),
     })
@@ -708,8 +708,8 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
             }
             crate::ast::Item::Type(decl) => {
                 let info = summarize_type(decl);
-                if decl.kind == TypeKind::Object {
-                    decls.objects.insert(decl.name.clone(), info);
+                if decl.kind == TypeKind::Single {
+                    decls.singles.insert(decl.name.clone(), info);
                 } else {
                     decls.types.insert(decl.name.clone(), info);
                 }
@@ -734,7 +734,7 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
     }
     for item in &program.items {
         if let crate::ast::Item::Impl(block) = item {
-            merge_impl_decl_into_infos(&mut decls.types, &mut decls.objects, block);
+            merge_impl_decl_into_infos(&mut decls.types, &mut decls.singles, block);
         }
     }
     decls
@@ -742,7 +742,7 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
 
 fn synthetic_single_type_info(target: &TypeInfo) -> TypeInfo {
     TypeInfo {
-        kind: TypeKind::Object,
+        kind: TypeKind::Single,
         visibility: target.visibility,
         arity: 0,
         span: target.span,
@@ -754,7 +754,7 @@ fn synthetic_single_type_info(target: &TypeInfo) -> TypeInfo {
 
 fn standalone_single_type_info(span: crate::source::Span) -> TypeInfo {
     TypeInfo {
-        kind: TypeKind::Object,
+        kind: TypeKind::Single,
         visibility: Visibility::Default,
         arity: 0,
         span,
@@ -766,7 +766,7 @@ fn standalone_single_type_info(span: crate::source::Span) -> TypeInfo {
 
 fn merge_impl_decl_into_infos(
     types: &mut HashMap<String, TypeInfo>,
-    objects: &mut HashMap<String, TypeInfo>,
+    singles: &mut HashMap<String, TypeInfo>,
     block: &ImplBlock,
 ) {
     let Some(target_name) = type_ref_name(&block.target) else {
@@ -775,7 +775,7 @@ fn merge_impl_decl_into_infos(
     let target = match block.target_kind {
         ImplTargetKind::Instance => types.get_mut(target_name),
         ImplTargetKind::Single => {
-            if !objects.contains_key(target_name) {
+            if !singles.contains_key(target_name) {
                 if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
                     return;
                 }
@@ -784,9 +784,9 @@ fn merge_impl_decl_into_infos(
                     .cloned()
                     .map(|target_type| synthetic_single_type_info(&target_type))
                     .unwrap_or_else(|| standalone_single_type_info(block.span));
-                objects.insert(target_name.to_string(), info);
+                singles.insert(target_name.to_string(), info);
             }
-            objects.get_mut(target_name)
+            singles.get_mut(target_name)
         }
     };
     let Some(target) = target else {
@@ -847,12 +847,12 @@ struct Resolver<'a> {
     globals: HashMap<String, Symbol>,
     functions: HashMap<String, crate::source::Span>,
     types: HashMap<String, TypeInfo>,
-    objects: HashMap<String, TypeInfo>,
+    singles: HashMap<String, TypeInfo>,
     enum_case_values: HashMap<String, crate::source::Span>,
     imported_values: HashMap<String, Symbol>,
     imported_functions: HashMap<String, crate::source::Span>,
     imported_types: HashMap<String, TypeInfo>,
-    imported_objects: HashMap<String, TypeInfo>,
+    imported_singles: HashMap<String, TypeInfo>,
     modules_by_alias: HashMap<String, ModuleNamespace>,
     field_hint_scopes: Vec<FieldHintScope>,
     method_hint_scopes: Vec<HashSet<String>>,
@@ -877,12 +877,12 @@ impl<'a> Resolver<'a> {
             globals: HashMap::new(),
             functions: HashMap::new(),
             types: HashMap::new(),
-            objects: HashMap::new(),
+            singles: HashMap::new(),
             enum_case_values: HashMap::new(),
             imported_values: HashMap::new(),
             imported_functions: HashMap::new(),
             imported_types: HashMap::new(),
-            imported_objects: HashMap::new(),
+            imported_singles: HashMap::new(),
             modules_by_alias: HashMap::new(),
             field_hint_scopes: Vec::new(),
             method_hint_scopes: Vec::new(),
@@ -923,8 +923,8 @@ impl<'a> Resolver<'a> {
                 crate::ast::Item::Type(decl) => {
                     self.resolve_annotations(&decl.annotations);
                     let info = summarize_type(decl);
-                    let previous = if decl.kind == TypeKind::Object {
-                        self.objects.get(&decl.name).map(|info| info.span)
+                    let previous = if decl.kind == TypeKind::Single {
+                        self.singles.get(&decl.name).map(|info| info.span)
                     } else {
                         self.types.get(&decl.name).map(|info| info.span)
                     };
@@ -936,8 +936,8 @@ impl<'a> Resolver<'a> {
                             previous,
                         );
                     } else {
-                        if decl.kind == TypeKind::Object {
-                            self.objects.insert(decl.name.clone(), info);
+                        if decl.kind == TypeKind::Single {
+                            self.singles.insert(decl.name.clone(), info);
                         } else {
                             if decl.kind == TypeKind::Enum {
                                 for member in &decl.members {
@@ -985,7 +985,7 @@ impl<'a> Resolver<'a> {
                 }
             }
             ImplTargetKind::Single => {
-                if !self.objects.contains_key(target_name) {
+                if !self.singles.contains_key(target_name) {
                     if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
                         return;
                     }
@@ -995,9 +995,9 @@ impl<'a> Resolver<'a> {
                         .cloned()
                         .map(|target_type| synthetic_single_type_info(&target_type))
                         .unwrap_or_else(|| standalone_single_type_info(block.span));
-                    self.objects.insert(target_name.to_string(), info);
+                    self.singles.insert(target_name.to_string(), info);
                 }
-                let Some(target) = self.objects.get_mut(target_name) else {
+                let Some(target) = self.singles.get_mut(target_name) else {
                     return;
                 };
                 for method in &block.methods {
@@ -1035,7 +1035,7 @@ impl<'a> Resolver<'a> {
                     .map(|(name, sym)| (name, sym.span))
                     .collect(),
                 types: decls.types,
-                objects: decls.objects,
+                singles: decls.singles,
             };
             self.modules_by_alias.insert(alias.clone(), namespace);
         }
@@ -1047,10 +1047,10 @@ impl<'a> Resolver<'a> {
             let decls = collect_top_level_decls(&module.program);
             match symbol.kind {
                 ImportedKind::Function => {
-                    let span = if let Some(object_name) = symbol.object_name.as_deref() {
+                    let span = if let Some(single_name) = symbol.single_name.as_deref() {
                         decls
-                            .objects
-                            .get(object_name)
+                            .singles
+                            .get(single_name)
                             .and_then(|info| info.methods.get(&symbol.original_name))
                             .map(|decl| decl.span)
                     } else {
@@ -1073,9 +1073,9 @@ impl<'a> Resolver<'a> {
                         self.imported_types.insert(local_name.clone(), info.clone());
                     }
                 }
-                ImportedKind::Object => {
-                    if let Some(info) = decls.objects.get(&symbol.original_name) {
-                        self.imported_objects
+                ImportedKind::Single => {
+                    if let Some(info) = decls.singles.get(&symbol.original_name) {
+                        self.imported_singles
                             .insert(local_name.clone(), info.clone());
                     }
                 }
@@ -1271,14 +1271,14 @@ impl<'a> Resolver<'a> {
         let target_name = type_ref_name(&block.target);
         let target_fields = target_name.and_then(|name| match block.target_kind {
             ImplTargetKind::Instance => self.types.get(name).cloned(),
-            ImplTargetKind::Single => self.objects.get(name).cloned(),
+            ImplTargetKind::Single => self.singles.get(name).cloned(),
         });
 
         self.push_scope();
         if let Some(info) = &target_fields {
             self.push_field_hints(info.kind, info.fields.iter().map(|field| field.name));
         } else {
-            self.push_field_hints(TypeKind::Object, std::iter::empty());
+            self.push_field_hints(TypeKind::Single, std::iter::empty());
         }
         self.push_method_hints(
             target_fields
@@ -1336,7 +1336,7 @@ impl<'a> Resolver<'a> {
                         }
                     }
                     ImplTargetKind::Single => {
-                        if let Some(info) = self.objects.get(name) {
+                        if let Some(info) = self.singles.get(name) {
                             if args.len() != info.arity {
                                 self.add_error(
                                     "invalid_type_arity",
@@ -2262,11 +2262,11 @@ impl<'a> Resolver<'a> {
         self.lookup_value(name).is_some()
             || self.functions.contains_key(name)
             || self.types.contains_key(name)
-            || self.objects.contains_key(name)
+            || self.singles.contains_key(name)
             || self.enum_case_values.contains_key(name)
             || self.imported_functions.contains_key(name)
             || self.imported_types.contains_key(name)
-            || self.imported_objects.contains_key(name)
+            || self.imported_singles.contains_key(name)
             || self.modules_by_alias.contains_key(name)
             || self.ambient.values.contains(name)
             || self.ambient.types.contains_key(name)
@@ -2329,7 +2329,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn method_parameter_kind(&self, is_constructor: bool) -> ParameterKind {
-        let owner_kind = self.current_receiver_kind().unwrap_or(TypeKind::Object);
+        let owner_kind = self.current_receiver_kind().unwrap_or(TypeKind::Single);
         if is_constructor {
             ParameterKind::Constructor(owner_kind)
         } else {
@@ -2444,7 +2444,7 @@ impl<'a> Resolver<'a> {
                 if namespace.functions.contains_key(member)
                     || namespace.globals.contains_key(member)
                     || namespace.types.contains_key(member)
-                    || namespace.objects.contains_key(member)
+                    || namespace.singles.contains_key(member)
                 {
                     None
                 } else {
@@ -2454,19 +2454,19 @@ impl<'a> Resolver<'a> {
                     ))
                 }
             }
-            [module, object_name, member] => {
-                let object = namespace.objects.get(object_name)?;
-                if object.methods.contains_key(member) {
+            [module, single_name, member] => {
+                let single = namespace.singles.get(single_name)?;
+                if single.methods.contains_key(member) {
                     None
                 } else {
                     Some(format!(
-                        "object '{}.{}' has no visible member '{}'",
-                        module, object_name, member
+                        "single '{}.{}' has no visible member '{}'",
+                        module, single_name, member
                     ))
                 }
             }
             _ => Some(format!(
-                "module '{}' access is only supported for direct members and object methods",
+                "module '{}' access is only supported for direct members and single methods",
                 segments.first().unwrap_or(&"<unknown>".to_string())
             )),
         }
@@ -2514,7 +2514,7 @@ fn field_label(kind: TypeKind) -> &'static str {
     match kind {
         TypeKind::Class => "class field",
         TypeKind::Record => "shape field",
-        TypeKind::Object => "single field",
+        TypeKind::Single => "single field",
         TypeKind::Interface => "interface field",
         TypeKind::Enum => "enum field",
     }

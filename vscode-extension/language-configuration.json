@@ -21,7 +21,7 @@
   ],
   "folding": {
     "markers": {
-      "start": "^\\s*(def|new|partial|class|shape|record|enum|interface|object|single|impl|if|for|while|match|defer)\\b.*\\{\\s*$",
+      "start": "^\\s*(def|new|partial|class|shape|record|enum|interface|single|impl|if|for|while|match|defer)\\b.*\\{\\s*$",
       "end": "^\\s*}\\s*(else\\b.*)?$"
     }
   }

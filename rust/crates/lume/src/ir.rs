@@ -476,6 +476,7 @@ pub enum Constant {
     Int(i64),
     Float(f64),
     String(String),
+    List(Vec<Constant>),
 }
 
 /// The callable target of a lowered call expression.

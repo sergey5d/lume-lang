@@ -16,7 +16,7 @@ impl<'a> Parser<'a> {
         let (segments, mut span) = self.parse_import_segments("expected use path")?;
         let mut import = ImportDecl {
             path: String::new(),
-            object_name: None,
+            single_name: None,
             wildcard: false,
             symbols: Vec::new(),
             span: start,
@@ -45,7 +45,7 @@ impl<'a> Parser<'a> {
                             self.expect_identifier("expected use symbol, '*', or '{' after '/'")?;
                         if self.match_token(TokenKind::Slash) {
                             import.path = segments.join("/");
-                            import.object_name = Some(name);
+                            import.single_name = Some(name);
                             if self.match_token(TokenKind::Star) {
                                 import.wildcard = true;
                                 span = span.cover(self.previous_span());
@@ -56,7 +56,7 @@ impl<'a> Parser<'a> {
                             } else {
                                 self.error_at_current(
                                     "unexpected_token",
-                                    "expected object member use '*', or '{'",
+                                    "expected single member use '*', or '{'",
                                 );
                                 return None;
                             }
@@ -106,7 +106,6 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Keyword(Keyword::Class)
             | TokenKind::Keyword(Keyword::Shape)
-            | TokenKind::Keyword(Keyword::Object)
             | TokenKind::Keyword(Keyword::Single)
             | TokenKind::Keyword(Keyword::Interface)
             | TokenKind::Keyword(Keyword::Enum) => {
@@ -320,15 +319,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 (TypeKind::Record, span)
             }
-            TokenKind::Keyword(Keyword::Object) => {
-                let span = self.current_span();
-                self.advance();
-                (TypeKind::Object, span)
-            }
             TokenKind::Keyword(Keyword::Single) => {
                 let span = self.current_span();
                 self.advance();
-                (TypeKind::Object, span)
+                (TypeKind::Single, span)
             }
             TokenKind::Keyword(Keyword::Interface) => {
                 let span = self.current_span();
@@ -387,7 +381,7 @@ impl<'a> Parser<'a> {
                     TypeKind::Interface => "public is not allowed inside interfaces",
                     TypeKind::Enum => "public is not allowed on enum members",
                     TypeKind::Class => "public is not allowed on class members",
-                    TypeKind::Object => "public is not allowed on object members",
+                    TypeKind::Single => "public is not allowed on single members",
                     TypeKind::Record => "public is not allowed on shape members",
                 };
                 self.error_at_current("unexpected_visibility", message);
@@ -396,7 +390,7 @@ impl<'a> Parser<'a> {
             match self.current_kind() {
                 TokenKind::Keyword(Keyword::Def) => {
                     let body_method_error = match kind {
-                        TypeKind::Object => Some(format!(
+                        TypeKind::Single => Some(format!(
                             "single '{}' cannot declare methods in its body; use 'impl single {}'",
                             name, name
                         )),

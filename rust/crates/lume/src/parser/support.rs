@@ -12,7 +12,6 @@ impl<'a> Parser<'a> {
                 | TokenKind::Keyword(Keyword::Class)
                 | TokenKind::Keyword(Keyword::Record)
                 | TokenKind::Keyword(Keyword::Shape)
-                | TokenKind::Keyword(Keyword::Object)
                 | TokenKind::Keyword(Keyword::Single)
                 | TokenKind::Keyword(Keyword::Interface)
                 | TokenKind::Keyword(Keyword::Enum)
@@ -325,7 +324,6 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Class) => "CLASS",
             TokenKind::Keyword(Keyword::Record) => "RECORD",
             TokenKind::Keyword(Keyword::Shape) => "SHAPE",
-            TokenKind::Keyword(Keyword::Object) => "OBJECT",
             TokenKind::Keyword(Keyword::Single) => "SINGLE",
             TokenKind::Keyword(Keyword::Interface) => "INTERFACE",
             TokenKind::Keyword(Keyword::Enum) => "ENUM",

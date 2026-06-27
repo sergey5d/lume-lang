@@ -692,8 +692,8 @@ fn rewritten_imported_symbol_path(module: &LoadedModule, name: &str) -> Option<V
 }
 
 fn imported_symbol_path(symbol: &crate::resolver::ImportedSymbol) -> Vec<String> {
-    if let Some(object_name) = &symbol.object_name {
-        vec![object_name.clone(), symbol.original_name.clone()]
+    if let Some(single_name) = &symbol.single_name {
+        vec![single_name.clone(), symbol.original_name.clone()]
     } else {
         vec![symbol.original_name.clone()]
     }
@@ -926,20 +926,20 @@ pub(crate) struct Interpreter<'a> {
     runtime: runtime::RuntimeProgram,
     globals: Vec<Value>,
     globals_ready: bool,
-    object_singletons: Vec<Option<Value>>,
+    singletons: Vec<Option<Value>>,
     output: String,
 }
 
 impl<'a> Interpreter<'a> {
     fn new(program: &'a ir::Program) -> Self {
         let runtime = runtime::RuntimeProgram::from_ir(program);
-        let object_singleton_count = runtime.types.len();
+        let singleton_count = runtime.types.len();
         let mut interpreter = Self {
             program,
             runtime,
             globals: Vec::new(),
             globals_ready: false,
-            object_singletons: vec![None; object_singleton_count],
+            singletons: vec![None; singleton_count],
             output: String::new(),
         };
         interpreter.globals = interpreter
@@ -1209,7 +1209,11 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Vec<Value>, Diagnostic> {
         if let Some(variadic_index) = function.param_variadic.iter().position(|value| *value) {
-            if args.len() < variadic_index {
+            if args.len() < variadic_index
+                && !function.param_defaults[args.len()..variadic_index]
+                    .iter()
+                    .all(Option::is_some)
+            {
                 return Err(self.runtime_error(
                     span,
                     format!(
@@ -1225,9 +1229,35 @@ impl<'a> Interpreter<'a> {
                 .take(variadic_index)
                 .cloned()
                 .collect::<Vec<_>>();
-            normalized.push(Value::list(
-                args.into_iter().skip(variadic_index).collect::<Vec<_>>(),
-            ));
+            for default in &function.param_defaults[normalized.len()..variadic_index] {
+                let value = default
+                    .as_ref()
+                    .map(|constant| self.constant_value(constant))
+                    .unwrap_or(Value::Unit);
+                normalized.push(value);
+            }
+            let Some(variadic_local) = function
+                .params
+                .get(variadic_index)
+                .and_then(|param| function.locals.get(param.0))
+            else {
+                return Ok(normalized);
+            };
+            if args.len() == variadic_index {
+                let value = function.param_defaults[variadic_index]
+                    .as_ref()
+                    .map(|constant| self.constant_value(constant))
+                    .unwrap_or_else(|| Value::list(Vec::new()));
+                normalized.push(value);
+                return Ok(normalized);
+            }
+            if args.len() == function.params.len()
+                && self.value_matches_type(&args[variadic_index], &variadic_local.ty)
+            {
+                normalized.push(args[variadic_index].clone());
+                return Ok(normalized);
+            }
+            normalized.push(Value::list(args.into_iter().skip(variadic_index).collect()));
             return Ok(normalized);
         }
         if args.len() == function.params.len() {
@@ -1443,6 +1473,9 @@ impl<'a> Interpreter<'a> {
             ir::Constant::Int(value) => Value::Int(*value),
             ir::Constant::Float(value) => Value::Float(*value),
             ir::Constant::String(value) => Value::String(decode_string_literal(value)),
+            ir::Constant::List(items) => {
+                Value::list(items.iter().map(|item| self.constant_value(item)).collect())
+            }
         }
     }
 
@@ -2014,7 +2047,7 @@ impl<'a> Interpreter<'a> {
         if let Some(value) = self.lookup_runtime_value(frame, name) {
             return Ok(Some(value));
         }
-        if let Some(value) = self.lookup_object_singleton(name, span)? {
+        if let Some(value) = self.lookup_singleton(name, span)? {
             return Ok(Some(value));
         }
         if name == "None" {
@@ -2054,7 +2087,7 @@ impl<'a> Interpreter<'a> {
             }
         }
         if args.is_empty() {
-            if let Some(value) = self.lookup_object_singleton(name, span)? {
+            if let Some(value) = self.lookup_singleton(name, span)? {
                 return Ok(value);
             }
         }
@@ -2081,7 +2114,7 @@ impl<'a> Interpreter<'a> {
         let member = &path[1];
 
         if type_name == "OS" && matches!(member.as_str(), "stdout" | "stderr") && args.is_empty() {
-            return self.lookup_object_singleton("OS", span);
+            return self.lookup_singleton("OS", span);
         }
 
         if self
@@ -2198,14 +2231,14 @@ impl<'a> Interpreter<'a> {
             .find(|ty| {
                 ty.name == type_name
                     && ty.kind != crate::ast::TypeKind::Enum
-                    && ty.kind != crate::ast::TypeKind::Object
+                    && ty.kind != crate::ast::TypeKind::Single
             })
             .cloned()
         else {
             return Ok(None);
         };
 
-        let object = Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
+        let instance = Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
             runtime_type_id: Some(ty.id),
             type_name: type_name.to_string(),
             kind: ty.kind,
@@ -2216,7 +2249,8 @@ impl<'a> Interpreter<'a> {
         })));
 
         if let Some(field_init) = ty.field_init {
-            let _ = self.call_function(field_init, Some(object.clone()), None, Vec::new(), span)?;
+            let _ =
+                self.call_function(field_init, Some(instance.clone()), None, Vec::new(), span)?;
         }
 
         let has_explicit_constructor = ty.methods.iter().any(|method| method.name == "new");
@@ -2242,10 +2276,10 @@ impl<'a> Interpreter<'a> {
                 if let Some(init) =
                     self.find_method_overload_for_kind(type_name, ty.kind, "new", &constructor_args)
                 {
-                    let receiver = object.clone();
+                    let receiver = instance.clone();
                     let _ =
                         self.call_function(init, Some(receiver), None, constructor_args, span)?;
-                    return Ok(Some(object));
+                    return Ok(Some(instance));
                 }
                 return Err(self.runtime_error(
                     span,
@@ -2260,8 +2294,8 @@ impl<'a> Interpreter<'a> {
             match args.as_slice() {
                 [Value::Record(values)] => {
                     let values = values.borrow();
-                    self.apply_named_record_constructor(&object, &ty, &values, span)?;
-                    return Ok(Some(object));
+                    self.apply_named_record_constructor(&instance, &ty, &values, span)?;
+                    return Ok(Some(instance));
                 }
                 _ => {
                     return Err(self.runtime_error(
@@ -2286,9 +2320,9 @@ impl<'a> Interpreter<'a> {
         }
 
         if let Some(init) = self.find_method_overload_for_kind(type_name, ty.kind, "new", &args) {
-            let receiver = object.clone();
+            let receiver = instance.clone();
             let _ = self.call_function(init, Some(receiver), None, args, span)?;
-            return Ok(Some(object));
+            return Ok(Some(instance));
         }
 
         if has_explicit_constructor {
@@ -2302,13 +2336,13 @@ impl<'a> Interpreter<'a> {
             ));
         }
 
-        self.apply_positional_record_constructor(&object, &ty, &args, span)?;
-        Ok(Some(object))
+        self.apply_positional_record_constructor(&instance, &ty, &args, span)?;
+        Ok(Some(instance))
     }
 
     fn apply_named_record_constructor(
         &mut self,
-        object: &Value,
+        instance: &Value,
         ty: &runtime::RuntimeType,
         values: &[(String, Value)],
         span: Option<Span>,
@@ -2346,8 +2380,8 @@ impl<'a> Interpreter<'a> {
             ));
         }
 
-        let mut aggregate = match object {
-            Value::Aggregate(object) => object.borrow_mut(),
+        let mut aggregate = match instance {
+            Value::Aggregate(value) => value.borrow_mut(),
             _ => unreachable!(),
         };
         for (name, value) in values {
@@ -2380,7 +2414,7 @@ impl<'a> Interpreter<'a> {
 
     fn apply_positional_record_constructor(
         &mut self,
-        object: &Value,
+        instance: &Value,
         ty: &runtime::RuntimeType,
         values: &[Value],
         span: Option<Span>,
@@ -2432,8 +2466,8 @@ impl<'a> Interpreter<'a> {
             ));
         }
 
-        let mut aggregate = match object {
-            Value::Aggregate(object) => object.borrow_mut(),
+        let mut aggregate = match instance {
+            Value::Aggregate(value) => value.borrow_mut(),
             _ => unreachable!(),
         };
         for (value, field) in values.iter().zip(visible_fields.iter()) {
@@ -2536,27 +2570,28 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Value::Record(Rc::new(RefCell::new(next))))
             }
-            Value::Aggregate(object) if object.borrow().case_name.is_none() => {
-                let object = object.borrow();
-                let mut next = object.fields.clone();
+            Value::Aggregate(instance) if instance.borrow().case_name.is_none() => {
+                let instance = instance.borrow();
+                let mut next = instance.fields.clone();
                 for (name, value) in updates {
-                    if let Some(index) = object.field_names.iter().position(|field| field == &name)
+                    if let Some(index) =
+                        instance.field_names.iter().position(|field| field == &name)
                     {
                         next[index] = value;
                     } else {
                         return Err(self.runtime_error(
                             span,
-                            format!("object '{}' has no field '{}'", object.type_name, name),
+                            format!("value '{}' has no field '{}'", instance.type_name, name),
                         ));
                     }
                 }
                 Ok(Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
-                    runtime_type_id: object.runtime_type_id,
-                    type_name: object.type_name.clone(),
-                    kind: object.kind,
-                    case_id: object.case_id,
-                    case_name: object.case_name.clone(),
-                    field_names: object.field_names.clone(),
+                    runtime_type_id: instance.runtime_type_id,
+                    type_name: instance.type_name.clone(),
+                    kind: instance.kind,
+                    case_id: instance.case_id,
+                    case_name: instance.case_name.clone(),
+                    field_names: instance.field_names.clone(),
                     fields: next,
                 }))))
             }
@@ -2594,22 +2629,22 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Vec<(String, Value)>, Diagnostic> {
         match value {
             Value::Record(fields) => Ok(fields.borrow().clone()),
-            Value::Aggregate(object) if object.borrow().case_name.is_none() => {
-                let object = object.borrow();
-                if object.fields.is_empty() {
+            Value::Aggregate(instance) if instance.borrow().case_name.is_none() => {
+                let instance = instance.borrow();
+                if instance.fields.is_empty() {
                     return Err(self.runtime_error(
                         span,
                         format!(
                             "record merge operands must be record-shaped values; {side} operand is {}",
-                            object.type_name
+                            instance.type_name
                         ),
                     ));
                 }
-                Ok(object
+                Ok(instance
                     .field_names
                     .iter()
                     .cloned()
-                    .zip(object.fields.iter().cloned())
+                    .zip(instance.fields.iter().cloned())
                     .collect())
             }
             other => Err(self.runtime_error(
@@ -3139,18 +3174,18 @@ impl<'a> Interpreter<'a> {
         self.runtime.type_by_name_kind(name, kind)
     }
 
-    fn lookup_object_singleton(
+    fn lookup_singleton(
         &mut self,
         name: &str,
         span: Option<Span>,
     ) -> Result<Option<Value>, Diagnostic> {
         let Some(ty) = self
-            .lookup_type_by_kind(name, crate::ast::TypeKind::Object)
+            .lookup_type_by_kind(name, crate::ast::TypeKind::Single)
             .cloned()
         else {
             return Ok(None);
         };
-        if let Some(existing) = &self.object_singletons[ty.id.0] {
+        if let Some(existing) = &self.singletons[ty.id.0] {
             return Ok(Some(existing.clone()));
         }
         let field_values = self.allocate_runtime_fields(&ty.fields);
@@ -3167,11 +3202,11 @@ impl<'a> Interpreter<'a> {
             let _ = self.call_function(field_init, Some(value.clone()), None, Vec::new(), span)?;
         }
         if let Some(init) =
-            self.find_method_overload_for_kind(&ty.name, crate::ast::TypeKind::Object, "new", &[])
+            self.find_method_overload_for_kind(&ty.name, crate::ast::TypeKind::Single, "new", &[])
         {
             let _ = self.call_function(init, Some(value.clone()), None, Vec::new(), span)?;
         }
-        self.object_singletons[ty.id.0] = Some(value.clone());
+        self.singletons[ty.id.0] = Some(value.clone());
         Ok(Some(value))
     }
 
@@ -3229,7 +3264,11 @@ impl<'a> Interpreter<'a> {
                 continue;
             };
             if let Some(variadic_index) = function.param_variadic.iter().position(|value| *value) {
-                if args.len() < variadic_index {
+                if args.len() < variadic_index
+                    && !function.param_defaults[args.len()..variadic_index]
+                        .iter()
+                        .all(Option::is_some)
+                {
                     continue;
                 }
                 let Some(variadic_elem) = self.variadic_element_type(function, variadic_index)
@@ -3238,8 +3277,29 @@ impl<'a> Interpreter<'a> {
                 };
                 let mut score = 9 + args.len() as i32;
                 let mut matches = true;
+                let packed_variadic = if args.len() == function.params.len() {
+                    function
+                        .params
+                        .get(variadic_index)
+                        .and_then(|param| function.locals.get(param.0))
+                        .is_some_and(|local| {
+                            self.value_matches_type(&args[variadic_index], &local.ty)
+                        })
+                } else {
+                    false
+                };
                 for (index, arg) in args.iter().enumerate() {
                     let param_ty = if index < variadic_index {
+                        let Some(local) = function
+                            .params
+                            .get(index)
+                            .and_then(|param| function.locals.get(param.0))
+                        else {
+                            matches = false;
+                            break;
+                        };
+                        &local.ty
+                    } else if packed_variadic && index == variadic_index {
                         let Some(local) = function
                             .params
                             .get(index)
@@ -3331,7 +3391,7 @@ impl<'a> Interpreter<'a> {
                                 aggregate.type_name, case_name, name
                             )
                         } else {
-                            format!("object '{}' has no field '{}'", aggregate.type_name, name)
+                            format!("value '{}' has no field '{}'", aggregate.type_name, name)
                         },
                     )
                 })
@@ -3393,13 +3453,13 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<(), Diagnostic> {
         match base {
-            Value::Aggregate(object) if object.borrow().case_name.is_none() => {
-                let mut object = object.borrow_mut();
-                if let Some(index) = object.field_names.iter().position(|field| field == name) {
-                    object.fields[index] = value;
+            Value::Aggregate(instance) if instance.borrow().case_name.is_none() => {
+                let mut instance = instance.borrow_mut();
+                if let Some(index) = instance.field_names.iter().position(|field| field == name) {
+                    instance.fields[index] = value;
                     Ok(())
                 } else {
-                    Err(self.runtime_error(span, format!("object field '{}' does not exist", name)))
+                    Err(self.runtime_error(span, format!("field '{}' does not exist", name)))
                 }
             }
             Value::Record(fields) => set_named_field(&mut fields.borrow_mut(), name, value)
@@ -3632,7 +3692,11 @@ impl<'a> Interpreter<'a> {
                     if aggregate.kind == crate::ast::TypeKind::Enum {
                         aggregate.type_name == *name
                     } else {
-                        self.object_matches_named_type(&aggregate.type_name, aggregate.kind, name)
+                        self.aggregate_matches_named_type(
+                            &aggregate.type_name,
+                            aggregate.kind,
+                            name,
+                        )
                     }
                 }
                 Value::String(_) => name == "Str",
@@ -3891,7 +3955,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn object_matches_named_type(
+    fn aggregate_matches_named_type(
         &self,
         type_name: &str,
         kind: crate::ast::TypeKind,
@@ -6147,7 +6211,7 @@ $name
     }
 
     #[test]
-    fn run_path_executes_symbol_and_object_import_forms() {
+    fn run_path_executes_symbol_and_single_import_forms() {
         let path = repo_root().join("examples/import_forms.lum");
         let run = run_path(path, None).expect("run use forms");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);

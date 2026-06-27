@@ -333,16 +333,16 @@ impl<'a> Lowerer<'a> {
         let Some(target_name) = named_type_name(&block.target) else {
             return;
         };
-        let key = (target_name.to_string(), ast::TypeKind::Object);
+        let key = (target_name.to_string(), ast::TypeKind::Single);
         if self.type_ids.contains_key(&key) {
             return;
         }
 
         // `impl single Name` can attach singleton methods to an explicit
         // `single Name { ... }` declaration or synthesize an empty companion.
-        let mut ty = ir::TypeDef::new(ast::TypeKind::Object, target_name.to_string());
+        let mut ty = ir::TypeDef::new(ast::TypeKind::Single, target_name.to_string());
         if let Some(base_decl) = self.source.items.iter().find_map(|item| match item {
-            Item::Type(decl) if decl.name == target_name && decl.kind != ast::TypeKind::Object => {
+            Item::Type(decl) if decl.name == target_name && decl.kind != ast::TypeKind::Single => {
                 Some(decl)
             }
             _ => None,
@@ -364,10 +364,10 @@ impl<'a> Lowerer<'a> {
         match target_kind {
             ImplTargetKind::Single => self
                 .type_ids
-                .get(&(target_name.to_string(), ast::TypeKind::Object))
+                .get(&(target_name.to_string(), ast::TypeKind::Single))
                 .copied(),
             ImplTargetKind::Instance => self.type_ids.iter().find_map(|((name, kind), id)| {
-                (name == target_name && *kind != ast::TypeKind::Object).then_some(*id)
+                (name == target_name && *kind != ast::TypeKind::Single).then_some(*id)
             }),
         }
     }
@@ -3350,7 +3350,7 @@ impl<'a> FunctionLowerer<'a> {
                     ty.name == *name
                         && matches!(
                             ty.kind,
-                            ast::TypeKind::Class | ast::TypeKind::Record | ast::TypeKind::Object
+                            ast::TypeKind::Class | ast::TypeKind::Record | ast::TypeKind::Single
                         )
                 }) {
                     if let Some(params) = self.constructor_param_names(type_def, args) {
@@ -3382,7 +3382,7 @@ impl<'a> FunctionLowerer<'a> {
                     return Some(vec!["text".to_string()]);
                 }
                 if let Some(params) =
-                    self.method_param_names_for_kind(owner, ast::TypeKind::Object, member, args)
+                    self.method_param_names_for_kind(owner, ast::TypeKind::Single, member, args)
                 {
                     return Some(params);
                 }
@@ -3795,6 +3795,11 @@ fn lower_field_initializer_constant(initializer: Option<&ast::Expr>) -> Option<i
         ast::Expr::String { raw, .. } => Some(ir::Constant::String(raw.clone())),
         ast::Expr::Bool { value, .. } => Some(ir::Constant::Bool(*value)),
         ast::Expr::Unit { .. } => Some(ir::Constant::Unit),
+        ast::Expr::ListLiteral { items, .. } => items
+            .iter()
+            .map(|item| lower_field_initializer_constant(Some(item)))
+            .collect::<Option<Vec<_>>>()
+            .map(ir::Constant::List),
         _ => None,
     }
 }
@@ -3827,7 +3832,7 @@ fn is_named_runtime_value_path(program: &ir::Program, path: &[String]) -> bool {
         return true;
     }
 
-    if object_type_exists(program, &path[0]) {
+    if single_type_exists(program, &path[0]) {
         return true;
     }
 
@@ -3851,7 +3856,7 @@ fn is_named_runtime_callee_path(program: &ir::Program, path: &[String]) -> bool 
             || unique_bare_enum_case_exists(program, &path[0]);
     }
     explicit_enum_case_exists(program, &path[0], &path[1])
-        || object_type_exists(program, &path[0])
+        || single_type_exists(program, &path[0])
         || builtin_callable_root_name(&path[0])
         || declared_type_exists(program, &path[0])
 }
@@ -3877,11 +3882,11 @@ fn builtin_callable_root_name(name: &str) -> bool {
     )
 }
 
-fn object_type_exists(program: &ir::Program, name: &str) -> bool {
+fn single_type_exists(program: &ir::Program, name: &str) -> bool {
     program
         .types
         .iter()
-        .any(|ty| ty.kind == ast::TypeKind::Object && ty.name == name)
+        .any(|ty| ty.kind == ast::TypeKind::Single && ty.name == name)
 }
 
 fn builtin_zero_arg_value_name(name: &str) -> bool {

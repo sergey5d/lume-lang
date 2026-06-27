@@ -45,7 +45,7 @@ Run the checked example sweep:
 - Anonymous shapes use `{ field: value }`; named `shape` declarations are structural data-only types.
 - Shapes can implement interfaces with `shape Name with Interface`; classes must be explicitly viewed as a shape before using shape-provided interfaces.
 - Constructor declarations live in `impl` blocks as `new { params } { body }` or `new { params } = expr`.
-- Variadic params use list type syntax: `items [Str] vararg`.
+- Variadic params use list type syntax: `items [Str] vararg`; constructor varargs can also be passed by name as a list.
 - Field construction and anonymous-shape construction use `field: value`, not `field = value`.
 - Assignment uses `=` for first binding / constructor field initialization and `:=` for reassignment.
 - Enum payload cases use positional or named constructor syntax, for example `Status.Ready(3)` or `Status.Ready { value: 3 }`; zero-payload cases are bare, for example `Status.Empty`.
@@ -174,9 +174,11 @@ def main() Unit {
     Log.headline("syntax tour")
 
     project = Project("Lume", Point(3, 4), "parser", "runtime", "docs")
+    named = Project { name: "Named", origin: Point(1, 2), tags: ["docs"] }
     empty = Project { name: "Empty", origin: Point(0, 0) }
 
     report(project)
+    report(named)
     println("empty", describe(empty.status()))
 
     expect project.tagCount() == 3

@@ -1,0 +1,6 @@
+# FAIL:
+# public is not allowed on single members
+
+single Counter {
+    public def next() Int = 1
+}

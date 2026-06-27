@@ -26,7 +26,7 @@ pub struct ModuleDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportDecl {
     pub path: String,
-    pub object_name: Option<String>,
+    pub single_name: Option<String>,
     pub wildcard: bool,
     pub symbols: Vec<ImportSymbol>,
     pub span: Span,
@@ -69,7 +69,7 @@ pub enum Visibility {
 pub enum TypeKind {
     Class,
     Record,
-    Object,
+    Single,
     Interface,
     Enum,
 }
@@ -81,7 +81,7 @@ pub enum ImplTargetKind {
     Single,
 }
 
-/// A `class`, `shape`, `object`, `interface`, or `enum` declaration.
+/// A `class`, `shape`, `single`, `interface`, or `enum` declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDecl {
     pub annotations: Vec<Annotation>,
