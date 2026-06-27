@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*annotation arguments must be literals or stable constants.*
+# .*annotation arguments must be literals, stable constants, or constant expressions.*
 
 annotation Route {
     path Str

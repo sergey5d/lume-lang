@@ -1172,7 +1172,7 @@ impl<'a> Resolver<'a> {
         if !self.is_annotation_static_value(expr) {
             self.add_error(
                 "invalid_annotation_value",
-                "annotation arguments must be literals or stable constants",
+                "annotation arguments must be literals, stable constants, or constant expressions",
                 expr.span(),
             );
         }
@@ -1201,6 +1201,14 @@ impl<'a> Resolver<'a> {
                 .lookup_global_value(name)
                 .is_some_and(|symbol| !symbol.mutable),
             Expr::Member { .. } => self.is_stable_annotation_member(expr),
+            Expr::Unary { expr, .. } => self.is_annotation_static_value(expr),
+            Expr::Binary {
+                left, op, right, ..
+            } => {
+                is_annotation_constant_binary_op(*op)
+                    && self.is_annotation_static_value(left)
+                    && self.is_annotation_static_value(right)
+            }
             _ => false,
         }
     }
@@ -1217,17 +1225,28 @@ impl<'a> Resolver<'a> {
                         .get(member_name)
                         .is_some_and(|symbol| !symbol.mutable)
                 } else {
-                    self.lookup_single_info(owner_name)
+                    self.lookup_type(owner_name).is_some_and(|info| {
+                        info.kind == TypeKind::Enum && info.enum_cases.contains_key(member_name)
+                    }) || self
+                        .lookup_single_info(owner_name)
                         .and_then(|info| info.fields.iter().find(|field| field.name == member_name))
                         .is_some_and(|field| !field.mutable)
                 }
             }
-            [module_name, single_name, field_name] => self
-                .modules_by_alias
-                .get(module_name)
-                .and_then(|namespace| namespace.singles.get(single_name))
-                .and_then(|info| info.fields.iter().find(|field| field.name == field_name))
-                .is_some_and(|field| !field.mutable),
+            [module_name, single_name, field_name] => {
+                self.modules_by_alias
+                    .get(module_name)
+                    .and_then(|namespace| namespace.singles.get(single_name))
+                    .and_then(|info| info.fields.iter().find(|field| field.name == field_name))
+                    .is_some_and(|field| !field.mutable)
+                    || self
+                        .modules_by_alias
+                        .get(module_name)
+                        .and_then(|namespace| namespace.types.get(single_name))
+                        .is_some_and(|info| {
+                            info.kind == TypeKind::Enum && info.enum_cases.contains_key(field_name)
+                        })
+            }
             _ => false,
         }
     }
@@ -2554,20 +2573,33 @@ impl<'a> Resolver<'a> {
                 }
             }
             [module, single_name, member] => {
-                let single = namespace.singles.get(single_name)?;
-                if single.methods.contains_key(member)
-                    || single.fields.iter().any(|field| field.name == member)
-                {
-                    None
-                } else {
-                    Some(format!(
+                if let Some(single) = namespace.singles.get(single_name) {
+                    if single.methods.contains_key(member)
+                        || single.fields.iter().any(|field| field.name == member)
+                    {
+                        return None;
+                    }
+                    return Some(format!(
                         "single '{}.{}' has no visible field or method '{}'",
                         module, single_name, member
-                    ))
+                    ));
                 }
+                if let Some(ty) = namespace.types.get(single_name) {
+                    if ty.kind == TypeKind::Enum && ty.enum_cases.contains_key(member) {
+                        return None;
+                    }
+                    return Some(format!(
+                        "type '{}.{}' has no visible enum case '{}'",
+                        module, single_name, member
+                    ));
+                }
+                Some(format!(
+                    "module '{}' has no visible member '{}'",
+                    module, single_name
+                ))
             }
             _ => Some(format!(
-                "module '{}' access is only supported for direct members and single methods",
+                "module '{}' access is only supported for direct members, single members, and enum cases",
                 segments.first().unwrap_or(&"<unknown>".to_string())
             )),
         }
@@ -2584,6 +2616,27 @@ fn member_segments(expr: &Expr) -> Option<Vec<String>> {
         }
         _ => None,
     }
+}
+
+fn is_annotation_constant_binary_op(op: crate::ast::BinaryOp) -> bool {
+    matches!(
+        op,
+        crate::ast::BinaryOp::Or
+            | crate::ast::BinaryOp::And
+            | crate::ast::BinaryOp::BitOr
+            | crate::ast::BinaryOp::BitAnd
+            | crate::ast::BinaryOp::Eq
+            | crate::ast::BinaryOp::NotEq
+            | crate::ast::BinaryOp::Less
+            | crate::ast::BinaryOp::LessEq
+            | crate::ast::BinaryOp::Greater
+            | crate::ast::BinaryOp::GreaterEq
+            | crate::ast::BinaryOp::Add
+            | crate::ast::BinaryOp::Sub
+            | crate::ast::BinaryOp::Mul
+            | crate::ast::BinaryOp::Div
+            | crate::ast::BinaryOp::Mod
+    )
 }
 
 fn type_ref_name(reference: &TypeRef) -> Option<&str> {
@@ -2692,6 +2745,17 @@ annotation Route {
     path Str
 }
 
+enum RouteKind {
+    case Public
+}
+
+annotation Metadata {
+    kind RouteKind
+    path Str
+    score Int
+    nested { name Str, value Int }
+}
+
 single Config {
     path Str = "/config"
 }
@@ -2699,6 +2763,12 @@ single Config {
 @Route { path: "/literal" }
 @Route { path: routePath }
 @Route { path: Config.path }
+@Metadata {
+    kind: RouteKind.Public,
+    path: "/literal" + routePath,
+    score: 1 + 2,
+    nested: { name: Config.path, value: 1 }
+}
 def main() Unit {}
 "#,
         );

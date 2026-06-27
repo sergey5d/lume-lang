@@ -1,13 +1,9 @@
 # FAIL_REGEX:
 # .*annotation arguments must be literals, stable constants, or constant expressions.*
 
-annotation Route {
-    path Str
+annotation Flag {
+    value Int
 }
 
-single Routes {
-    var health Str = "/mutable"
-}
-
-@Route { path: Routes.health }
+@Flag { value: { 1 } }
 def main() Unit {}

@@ -1,13 +1,13 @@
 # FAIL_REGEX:
 # .*annotation arguments must be literals, stable constants, or constant expressions.*
 
-annotation Route {
-    path Str
+class User {
+    name Str
 }
 
-single Routes {
-    var health Str = "/mutable"
+annotation Owner {
+    value User
 }
 
-@Route { path: Routes.health }
+@Owner { value: User("Ada") }
 def main() Unit {}

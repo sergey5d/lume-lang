@@ -1,11 +1,15 @@
 # FAIL_REGEX:
 # .*annotation arguments must be literals, stable constants, or constant expressions.*
 
-var routePath Str = "/mutable"
+class Config {
+    path Str = "/ordinary-object"
+}
+
+config Config = Config {}
 
 annotation Route {
     path Str
 }
 
-@Route { path: routePath }
+@Route { path: config.path }
 def main() Unit {}

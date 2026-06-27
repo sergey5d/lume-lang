@@ -10,6 +10,23 @@ annotation Route {
     method Str = "GET"
 }
 
+enum RouteVisibility {
+    case Public
+    case Internal
+}
+
+annotation Metadata {
+    text Str
+    code Int
+    enabled Bool
+    disabled Bool
+    visibility RouteVisibility
+    joinedPath Str
+    total Int
+    tags [Str]
+    nested { name Str, value Int }
+}
+
 routePath Str = "/health"
 
 single Routes {
@@ -20,6 +37,21 @@ single LocalRoutes {
     status Str = "/status"
 }
 
+single AnnotationConstants {
+    label Str = "from-single"
+}
+
+@Metadata {
+    text: "literal",
+    code: 123,
+    enabled: true,
+    disabled: false,
+    visibility: RouteVisibility.Public,
+    joinedPath: "/api" + "/health",
+    total: 1 + 2,
+    tags: ["a", "b"],
+    nested: { name: AnnotationConstants.label, value: 1 }
+}
 @Tag { name: "service" }
 class Service {
     @Tag { name: "field" }

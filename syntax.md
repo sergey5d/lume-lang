@@ -151,6 +151,22 @@ annotation Route {
     method Str = "GET"
 }
 
+enum RouteVisibility {
+    case Public
+    case Internal
+}
+
+annotation Metadata {
+    text Str
+    code Int
+    enabled Bool
+    visibility RouteVisibility
+    joinedPath Str
+    total Int
+    tags [Str]
+    nested { name Str, value Int }
+}
+
 routePath Str = "/status"
 
 single Routes {
@@ -168,15 +184,29 @@ def healthFromSingle() Str = "ok"
 
 @Route { path: "/health", method: "POST" }
 def health2() Str = "ok"
+
+@Metadata {
+    text: "literal",
+    code: 123,
+    enabled: true,
+    visibility: RouteVisibility.Public,
+    joinedPath: "/api" + "/health",
+    total: 1 + 2,
+    tags: ["a", "b"],
+    nested: { name: Routes.health, value: 1 }
+}
+def richMetadata() Str = "ok"
 ```
 
-Annotation arguments are compile-time metadata values. They may only be literals, aggregate literals made from allowed values, or stable constants:
+Annotation arguments are compile-time metadata values. They may only be literals, stable constants, aggregate literals made from allowed values, or constant expressions composed from allowed values:
 
 - immutable top-level constants, including imported constants
 - immutable fields on `single` values, such as `Routes.health`
 - immutable constants through a module alias, such as `routes.healthPath`
+- enum cases, such as `RouteVisibility.Public`
+- arithmetic, comparison, boolean, and string-concatenation expressions whose operands are also annotation-safe
 
-Calls, indexing, arithmetic, mutable globals, and mutable singleton fields are rejected in annotation arguments.
+Calls, constructors, indexing, mutable globals, mutable singleton fields, ordinary object field reads, `try`, `for ... yield`, `match`, `if`, lambdas, and blocks are rejected in annotation arguments.
 
 Supported targets currently include:
 

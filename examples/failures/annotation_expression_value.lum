@@ -1,9 +1,0 @@
-# FAIL_REGEX:
-# .*annotation arguments must be literals or stable constants.*
-
-annotation Route {
-    path Str
-}
-
-@Route { path: "/api" + "/health" }
-def main() Unit {}
