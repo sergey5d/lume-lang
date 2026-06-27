@@ -414,7 +414,7 @@ Mitigation:
 Touches:
 
 - call args
-- record updates
+- shape updates
 - match/partial shorthand
 - trailing block behavior
 

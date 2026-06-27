@@ -17,7 +17,7 @@ The current supported surface includes:
 - guards attached to top-level cases
 - type-pattern reasoning/checking stays top-level only
 - do not support destructuring classes into tuples
-- do not support destructuring classes into anonymous-record shapes yet
+- do not support destructuring classes into anonymous-shape patterns yet
 - guards do not contribute coverage
 - nested singleton enum cases stay qualified, for example `Wrap(InnerFlag.On)`
 
@@ -44,15 +44,15 @@ match value {
 
 Future feature to discuss later:
 
-- allow anonymous records to participate in destructuring patterns
-  - for example matching a class against an anonymous-record-shaped pattern
+- allow anonymous shapes to participate in destructuring patterns
+  - for example matching a class against an anonymous-shape pattern
   - this is explicitly not part of the first nested-pattern implementation
 
 Clarification:
 
 - this note is about pattern destructuring only
 - expression-level value conversion rules are separate
-- so even if class values later become compatible with anonymous-record-shaped expectations in ordinary expressions, that does not by itself imply anonymous-record-shaped `match` patterns should work
+- so even if class values later become compatible with anonymous-shape expectations in ordinary expressions, that does not by itself imply anonymous-shape `match` patterns should work
 
 ## Main Improvement Areas
 

@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*expected expression.*
+
+def main() Unit {
+    user = { age: 41 }
+    updated = user
+        :< { age: 42 }
+}

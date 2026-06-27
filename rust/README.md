@@ -32,7 +32,7 @@ The Rust implementation now has these real building blocks:
 - a lowering pass that maps declarations plus Core bodies into IR
 - a real IR interpreter that executes lowered multi-module programs with
   globals, user-defined types/methods, `match`, `for`, `for ... yield`,
-  `try`, `expect`, closures, record updates, use declarations, and the stdlib/runtime helpers
+  `try`, `expect`, closures, shape updates, use declarations, and the stdlib/runtime helpers
   needed by the checked-in examples
 - a repo-wide Rust parity test that runs non-skipped `examples/*.lum` files and
   validates `# EXPECT:`, `# FAIL:`, and `# FAIL_REGEX:` headers

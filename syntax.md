@@ -129,9 +129,9 @@ Meaning:
   use one symbol with a local alias
 - `use module/sub/{A, B as D, C}`
   use a selected symbol set
-- `use module/sub/Object/*`
+- `use module/sub/SingletonName/*`
   use all visible singleton methods unqualified
-- `use module/sub/Object/{printLn as printN, print}`
+- `use module/sub/SingletonName/{printLn as printN, print}`
   use selected visible singleton methods from a singleton
 
 Built-in `OS` methods are available implicitly in every file, so `print(...)`, `println(...)`, `printf(...)`, and `panic(...)` work without writing `use OS/*`. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
@@ -260,7 +260,7 @@ single Greeter {
 }
 ```
 
-Public fields, records, and enums still require explicit field types.
+Public class fields, shape fields, enum fields, and singleton fields still require explicit field types.
 
 ## Assignment and Update
 
@@ -306,7 +306,7 @@ values[0] := 1
 values[1] := values[0] + 4
 ```
 
-Record update:
+Shape update:
 
 ```txt
 updated = value :< {
@@ -322,7 +322,6 @@ Braces are for named fields and named arguments:
 ```txt
 user = { name: "Ada", age: 10 }
 user User = User { name: "Ada", age: 10 }
-maybe = Some { value: 5 }
 ```
 
 Parentheses are for positional construction and calls:
@@ -397,7 +396,7 @@ tail HiddenTail = HiddenTail("Ada", 4)
 settings Settings = Settings {}
 ```
 
-Named shapes are data-only named records:
+Named shapes are data-only structural field views:
 - fields are always public and read-only
 - fields are declared in the `shape` body
 - methods are declared with `impl ShapeName { ... }`
@@ -555,7 +554,7 @@ def printf(format Str, value [Str] vararg) Unit
 The parameter is available as `[T]` inside the body, and call sites pass the
 extra values positionally.
 
-Objects and enums can declare methods inline. Classes and records attach behavior through top-level `impl` blocks:
+Enums can declare methods inline. Classes, shapes, and singles attach behavior through top-level `impl` blocks:
 
 ```txt
 class Counter {
@@ -744,7 +743,7 @@ including enum constructor payloads, must still use parentheses:
 
 ```txt
 maybeOrder = Some(Order { id: 7 })
-namedMaybeOrder = Some { value: Order { id: 7 } }
+namedMaybeOrder = Some(value: Order { id: 7 })
 ```
 
 If the body after `->` starts on the next line, it may be either:
@@ -791,7 +790,7 @@ Rules:
 - value-producing tail forms currently include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
 
-## Classes, Objects, Interfaces, Enums
+## Classes, Shapes, Singles, Interfaces, Enums
 
 Class:
 
@@ -1504,7 +1503,7 @@ Tuple destructuring:
 let (left Int, right Str) = (5, "hello")
 ```
 
-Anonymous record / class-shape destructuring uses braces:
+Anonymous-shape and class destructuring use braces:
 
 ```txt
 let { value Int, label Str } = { value: 7, label: "world" }
@@ -1590,7 +1589,7 @@ Other operators / constructs:
 - `=>` for match cases
 - `with` for interface implementation and generic bounds
 - `:<` for class, shape, and anonymous-shape update
-- `:+` for record-shape merge; the left and right shapes must have distinct field names
+- `:+` for shape merge; the left and right shapes must have distinct field names
 
 Examples:
 
@@ -1603,7 +1602,7 @@ SomeX(x) => x
 class Box[T] with Named
 ```
 
-Record merge:
+Shape merge:
 
 ```txt
 named = { name: "Ada" }
@@ -1632,7 +1631,7 @@ Current operator overloading constraints:
 - Comparison operators are intended to work through `Ordering[T]` rather than custom operator declarations.
 - Equality is intended to work through `Eq[T]` rather than custom operator declarations.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
-- `:+` is a built-in record merge operator only, not an overloadable collection/custom operator.
+- `:+` is a built-in shape merge operator only, not an overloadable collection/custom operator.
 - The spellings `:-`, `++`, `--`, and `::` are removed from the language surface and currently produce `unsupported_operator` lexer diagnostics.
 
 Newline continuation:
@@ -1642,6 +1641,7 @@ Newline continuation:
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
   - bitwise operators: `|`, `&`
+  - shape/update operators: `:<`, `:+`
   - unary prefixes: unary `-`, `!`, `try`
   - runtime type check keyword: `is`
   - match arrow: `=>`
@@ -1665,6 +1665,12 @@ a =
 ```txt
 a = 1 +
     2
+
+updated = user :<
+    { age: 42 }
+
+merged = a :+
+    b
 ```
 
 - but this is invalid:

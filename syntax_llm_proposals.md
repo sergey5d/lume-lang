@@ -14,9 +14,9 @@ The language is strongest when it keeps one obvious form for each major idea:
 - `interface` for contracts
 - `impl Type { ... }` and `impl single Name { ... }` for behavior
 - `use` for module imports
-- `def new(...)` for explicit constructors
-- `Type { ... }` for structural class construction
-- `{ field: value }` for anonymous records
+- `new { params } { body }` for explicit constructors
+- `Type { field: value }` for named construction
+- `{ field: value }` for anonymous shapes
 - `try` for propagation
 - `expect` for assertive extraction or boolean assertions
 - explicit lambdas such as `value -> value + 1`
@@ -32,13 +32,13 @@ The main cleanup principle still stands:
 These older surfaces should stay out of new examples and docs:
 
 - `import`; use `use`
-- named `record` declarations; use `class`
+- named `record` declarations; use `shape` for structural data or `class` for nominal types
 - `object`; use `single`
 - anonymous `class { ... }` / `record { ... }`; use plain `{ ... }`
 - named fields with `=` inside construction; use `field: value`
 - language-level `unwrap` forms; use `let ... else`, `expect`, or `try`
 - placeholder expression lambdas like `_ + 1`; use `x -> x + 1`
-- class-to-tuple destructuring; use class/anonymous-record brace destructuring
+- class-to-tuple destructuring; use class/anonymous-shape brace destructuring
 - `Type({ ... })` nominal conversion; use explicit construction or a future `anon as Type` form if adopted
 
 ## Keep
@@ -132,7 +132,9 @@ class NamedUser {
 }
 
 impl NamedUser {
-    def new(name Str) {
+    new {
+        name Str
+    } {
         this.name = name
         this.age = 0
     }
@@ -145,7 +147,7 @@ Open questions:
 
 - should same-named `single` factories get any privileged access?
 - do we need more explicit syntax for hiding generated construction paths?
-- should anonymous-record-to-class conversion use `anon as User` later?
+- should anonymous-shape-to-class conversion use `anon as User` later?
 
 ### 4. Pattern-Lambda Sugar
 
@@ -197,7 +199,9 @@ class Person {
 }
 
 impl Person {
-    def new(name Str) {
+    new {
+        name Str
+    } {
         this.name = name
         this.age = 0
     }

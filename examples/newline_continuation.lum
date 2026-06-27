@@ -9,6 +9,8 @@
 # if 11
 # for 5
 # match stmt 9
+# update Ada 42
+# merge Ada Tampa
 # total 76
 
 def helper() Int =
@@ -69,6 +71,15 @@ def main() Unit {
         }
     }
 
+    user = { name: "Ada", age: 41 }
+    updated = user :<
+        { age: 42 }
+
+    named = { name: "Ada" }
+    located = { location: "Tampa" }
+    merged = named :+
+        located
+
     helperValue Int = helper()
 
     total Int = sum +
@@ -91,5 +102,7 @@ def main() Unit {
     println("if", fromIf)
     println("for", fromFor)
     println("match stmt", fromMatchStmt)
+    println("update", updated.name, updated.age)
+    println("merge", merged.name, merged.location)
     println("total", total)
 }

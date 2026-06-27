@@ -1864,6 +1864,13 @@ def main() Unit {
         2
     size Int = "haha".
         size()
+    user = { name: "Ada", age: 41 }
+    updated = user :<
+        { age: 42 }
+    named = { name: "Ada" }
+    located = { location: "Tampa" }
+    merged = named :+
+        located
 }
 "#,
     );
@@ -1905,6 +1912,43 @@ def main() Unit {
             .any(|diag| diag.code == "expected_expression"),
         "{:#?}",
         leading_dot.diagnostics
+    );
+
+    let leading_record_update = parse(
+        r#"
+def main() Unit {
+    user = { age: 41 }
+    updated = user
+        :< { age: 42 }
+}
+"#,
+    );
+    assert!(
+        leading_record_update
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "expected_expression"),
+        "{:#?}",
+        leading_record_update.diagnostics
+    );
+
+    let leading_shape_merge = parse(
+        r#"
+def main() Unit {
+    named = { name: "Ada" }
+    located = { location: "Tampa" }
+    merged = named
+        :+ located
+}
+"#,
+    );
+    assert!(
+        leading_shape_merge
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "expected_expression"),
+        "{:#?}",
+        leading_shape_merge.diagnostics
     );
 }
 

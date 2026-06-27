@@ -1055,6 +1055,7 @@ impl<'a> Parser<'a> {
             }
             if self.match_token(TokenKind::ColonLess) {
                 let start = expr.span();
+                self.skip_newlines();
                 let (updates, end) = self.parse_record_update_args()?;
                 expr = Expr::RecordUpdate {
                     receiver: Box::new(expr),

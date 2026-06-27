@@ -1,7 +1,7 @@
-# Class Shape Notes
+# Class And Shape Notes
 
-This note captures the current class-shape direction and the tradeoffs around
-keeping data shape separate from behavior.
+This note captures the current class / shape direction and the tradeoffs around
+keeping data declarations separate from behavior.
 
 ## Current Shape
 
@@ -15,7 +15,10 @@ class A with SomeInterface {
 }
 
 impl A {
-    def new(age Int, name Str) {
+    new {
+        age Int
+        name Str
+    } {
         this.age = age
         this.name = name
     }
@@ -28,9 +31,10 @@ impl A {
 Mental model:
 
 - `class` declares storage, fields, and implemented interfaces
-- `impl Type { ... }` declares constructors and instance behavior
+- `shape` declares a structural, read-only field view
+- `impl Type { ... }` declares constructors and instance behavior for classes and shapes
 - `impl single Name { ... }` declares singleton behavior
-- constructors are ordinary `def new(...)` methods
+- constructors are dedicated `new { params } { body }` declarations
 - field access inside methods should use `this.field`
 
 ## Why Prefer `impl`
@@ -49,8 +53,8 @@ and behavior can grow without burying the fields:
 
 ```txt
 impl Account {
-    def deposit(amount Int) {
-        this.balance += amount
+    def deposit(amount Int) Unit {
+        this.balance := this.balance + amount
     }
 
     def currentBalance() Int = this.balance
@@ -72,7 +76,7 @@ Tradeoffs:
 
 ## Constructors
 
-Constructors use `def new(...)`:
+Constructors use dedicated `new` blocks:
 
 ```txt
 class Person {
@@ -81,7 +85,9 @@ class Person {
 }
 
 impl Person {
-    def new(name Str) {
+    new {
+        name Str
+    } {
         this.name = name
         this.age = 0
     }
@@ -90,10 +96,11 @@ impl Person {
 
 Current constructor rules:
 
-- if a class has no explicit `new`, eligible structural construction uses `Type { ... }`
-- if any explicit `new` exists, structural brace construction is suppressed
-- `Type(...)` is for explicit `new(...)` and builtin constructor forms
-- `hidden def new(...)` hides a constructor from outside callers
+- if a class has no explicit `new`, eligible field construction uses `Type { field: value }` and `Type(value)`
+- if any explicit `new` exists, implicit field constructors are suppressed
+- `Type(...)` is positional construction through the available `new` / field construction shape
+- `Type { field: value }` is named construction through the available `new` / field construction shape
+- `hidden new { ... } { ... }` hides a constructor from outside callers
 
 ## Open Questions
 

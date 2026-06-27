@@ -71,7 +71,7 @@ This longer example is a compact tour of the current surface syntax: interfaces,
 shapes, classes, `impl`, `single`, enums, constructors, varargs, named and
 positional construction, destructuring, `let` / `expect`, `try`, `match`,
 `partial match`, lambdas, `for`, `for ... yield`, `while`, `continue`, `defer`,
-record update, and shape merge.
+shape update, and shape merge.
 
 ```txt
 interface Named {

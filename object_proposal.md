@@ -64,7 +64,7 @@ Open questions:
 - can `single User` access hidden fields of class `User`?
 - does same-name privilege make construction clearer, or does it add hidden magic?
 - should this stay an ordinary factory namespace with no special hidden-field access?
-- should explicit `def new(...)` remain the only way to initialize hidden fields?
+- should explicit `new { ... } { ... }` remain the only way to initialize hidden fields?
 
 ## Current Leaning
 

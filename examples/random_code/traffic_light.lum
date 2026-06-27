@@ -79,20 +79,6 @@ def doProcess() {
 
         control.inc(passedInTry)
 
-        applicable = modadic if passedInTry == tryTime {
-            passedOther = await(control.side.reverse(), 1)
-        }
-
-        applicable2 = moadic if passedOther == 1 {
-                control.inc(passedOther)
-            } else {
-                set_light()
-                control.reverseAndZero()
-            }
-
-
-        applicable | applicable2
-
         if passedInTry == tryTime {
 
             passedOther = await(control.side.reverse(), 1)
