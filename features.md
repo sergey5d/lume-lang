@@ -401,6 +401,7 @@ The current constructor surface is:
 - tuple values are not constructor calls; they can only initialize known shapes
 - explicit constructors may end with one variadic list parameter such as `items [T] vararg`
 - `[T] vararg` receives extra positional constructor arguments as `[T]` inside the constructor body
+- only one variadic parameter is allowed
 - named arguments cannot target a variadic constructor parameter
 
 Still open:

@@ -1,4 +1,5 @@
-# FAIL_REGEX: variadic constructor parameter must use a list type
+# FAIL_REGEX:
+# variadic constructor parameter must use a list type.*
 
 class Bad {
     items [Int]
@@ -11,4 +12,3 @@ impl Bad {
         this.items = items
     }
 }
-

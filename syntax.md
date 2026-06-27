@@ -441,6 +441,7 @@ Construction rules:
 - positional construction is rejected when a hidden initialized field appears before a later public field
 - explicit constructors may use one trailing variadic list parameter such as `items [T] vararg`
 - a variadic constructor parameter receives the extra positional arguments as `[T]`
+- only one variadic parameter is allowed
 - named arguments cannot target a variadic constructor parameter
 - variadic constructor parameters cannot have defaults or follow defaulted parameters
 - mutable vs immutable field differences do not matter for structural shape matching

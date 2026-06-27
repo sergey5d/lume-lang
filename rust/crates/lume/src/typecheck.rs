@@ -1060,7 +1060,19 @@ impl<'a> Checker<'a> {
 
     fn check_param_list_rules(&mut self, params: &[Param], is_constructor: bool) {
         let mut seen_default = false;
+        let mut seen_variadic = false;
         for (index, param) in params.iter().enumerate() {
+            if param.variadic && seen_variadic {
+                self.add_error(
+                    "invalid_variadic_param",
+                    if is_constructor {
+                        "only one variadic constructor parameter is allowed"
+                    } else {
+                        "only one variadic parameter is allowed"
+                    },
+                    param.span,
+                );
+            }
             if param.variadic && index + 1 != params.len() {
                 self.add_error(
                     "invalid_variadic_param",
@@ -1107,6 +1119,7 @@ impl<'a> Checker<'a> {
                         param.span,
                     );
                 }
+                seen_variadic = true;
             }
             if param.initializer.is_some() {
                 seen_default = true;
@@ -7430,6 +7443,59 @@ impl Bad {
                     && diag
                         .message
                         .contains("variadic constructor parameter must be last")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_multiple_variadic_constructor_parameters() {
+        let program = parse_inline(
+            r#"
+class Bad {
+    left [Int]
+    right [Int]
+}
+
+impl Bad {
+    new {
+        left [Int] vararg
+        right [Int] vararg
+    } {
+        this.left = left
+        this.right = right
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_variadic_param"
+                    && diag
+                        .message
+                        .contains("only one variadic constructor parameter is allowed")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_multiple_variadic_function_parameters() {
+        let program = parse_inline(
+            r#"
+def bad(left [Int] vararg, right [Int] vararg) Unit = ()
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_variadic_param"
+                    && diag
+                        .message
+                        .contains("only one variadic parameter is allowed")
             }),
             "{:#?}",
             result.diagnostics
