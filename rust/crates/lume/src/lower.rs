@@ -2788,22 +2788,30 @@ impl<'a> FunctionLowerer<'a> {
             return ir::Operand::Const(ir::Constant::Unit);
         }
         match expr {
-            Expr::Identifier { name, span } => self.lookup_value(name).unwrap_or_else(|| {
-                let path = vec![name.clone()];
-                if is_named_runtime_value_path(self.program, &path) {
-                    return self.emit_temp_from_rvalue(
-                        ir::RValue::NamedValue { path },
-                        ir::Type::Unknown,
-                        Some(*span),
+            Expr::Identifier { name, span } => self
+                .lookup_scoped_or_captured_value(name)
+                .unwrap_or_else(|| {
+                    if let Some(place) = self.lookup_implicit_field_place(name) {
+                        return ir::Operand::Copy(Box::new(place));
+                    }
+                    if let Some(place) = self.lookup_global_place(name) {
+                        return ir::Operand::Copy(Box::new(place));
+                    }
+                    let path = vec![name.clone()];
+                    if is_named_runtime_value_path(self.program, &path) {
+                        return self.emit_temp_from_rvalue(
+                            ir::RValue::NamedValue { path },
+                            ir::Type::Unknown,
+                            Some(*span),
+                        );
+                    }
+                    self.add_error(
+                        "lower_invariant",
+                        format!("value '{}' should resolve before lowering", name),
+                        *span,
                     );
-                }
-                self.add_error(
-                    "lower_invariant",
-                    format!("value '{}' should resolve before lowering", name),
-                    *span,
-                );
-                ir::Operand::Const(ir::Constant::Unit)
-            }),
+                    ir::Operand::Const(ir::Constant::Unit)
+                }),
             Expr::Integer { raw, .. } => raw
                 .parse::<i64>()
                 .map(ir::Constant::Int)
@@ -3487,16 +3495,20 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_place(&mut self, expr: &Expr) -> Option<ir::Place> {
         match expr {
-            Expr::Identifier { name, span } => self.lookup_place(name).or_else(|| {
-                self.invariant(
-                    format!(
-                        "assignment target '{}' should resolve before lowering",
-                        name
-                    ),
-                    *span,
-                );
-                None
-            }),
+            Expr::Identifier { name, span } => self
+                .lookup_scoped_or_captured_place(name)
+                .or_else(|| self.lookup_implicit_field_place(name))
+                .or_else(|| self.lookup_global_place(name))
+                .or_else(|| {
+                    self.invariant(
+                        format!(
+                            "assignment target '{}' should resolve before lowering",
+                            name
+                        ),
+                        *span,
+                    );
+                    None
+                }),
             Expr::Member { receiver, name, .. } => Some(ir::Place::Field {
                 base: Box::new(self.lower_expr(receiver)),
                 name: name.clone(),
@@ -3523,18 +3535,56 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lookup_place(&mut self, name: &str) -> Option<ir::Place> {
+        self.lookup_scoped_or_captured_place(name)
+            .or_else(|| self.lookup_global_place(name))
+    }
+
+    fn lookup_scoped_or_captured_value(&mut self, name: &str) -> Option<ir::Operand> {
+        self.lookup_scoped_or_captured_place(name)
+            .map(|place| ir::Operand::Copy(Box::new(place)))
+    }
+
+    fn lookup_scoped_or_captured_place(&mut self, name: &str) -> Option<ir::Place> {
         for scope in self.scopes.iter().rev() {
             if let Some(local) = scope.get(name).copied() {
                 return Some(ir::Place::Local(local));
             }
         }
-        if let Some(global) = self.globals.get(name).copied() {
-            return Some(ir::Place::Global(global));
-        }
         if let Some(local) = self.capture_local(name) {
             return Some(ir::Place::Local(local));
         }
         None
+    }
+
+    fn lookup_global_place(&self, name: &str) -> Option<ir::Place> {
+        self.globals.get(name).copied().map(ir::Place::Global)
+    }
+
+    fn lookup_implicit_field_place(&mut self, name: &str) -> Option<ir::Place> {
+        let this_ty = if let Some(this_local) = self.this_local {
+            self.function().locals.get(this_local.0)?.ty.clone()
+        } else {
+            self.capture_sources.get("this")?.ty.clone()
+        };
+        let ir::Type::Named {
+            name: type_name, ..
+        } = this_ty
+        else {
+            return None;
+        };
+        self.program
+            .types
+            .iter()
+            .find(|ty| ty.name == type_name && ty.fields.iter().any(|field| field.name == name))?;
+        let this_local = if let Some(this_local) = self.this_local {
+            this_local
+        } else {
+            self.capture_local("this")?
+        };
+        Some(ir::Place::Field {
+            base: Box::new(ir::Operand::Copy(Box::new(ir::Place::Local(this_local)))),
+            name: name.to_string(),
+        })
     }
 
     fn capture_local(&mut self, name: &str) -> Option<ir::LocalId> {

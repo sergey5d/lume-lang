@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*binding 'value' shadows an existing variable; use a different name.*
+# .*binding 'value' shadows a local binding; use a different name.*
 
 def main() Int {
     value = 1

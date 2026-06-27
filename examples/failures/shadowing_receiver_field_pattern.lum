@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*binding 'count' shadows a class field; use a different name.*
+
+class Counter {
+    count Int
+}
+
+impl Counter {
+    def bad() Int {
+        let Some(count) = Some(1) else return this.count
+        this.count
+    }
+}
+
+def main() Unit {}

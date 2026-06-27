@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*binding 'value' shadows a class method parameter; use a different name.*
+
+class Box {
+    value Int
+}
+
+impl Box {
+    def bad(value Int) Int {
+        value = 2
+        this.value
+    }
+}
+
+def main() Unit {}

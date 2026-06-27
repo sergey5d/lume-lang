@@ -1,0 +1,20 @@
+# FAIL_REGEX:
+# .*class field 'count' is shadowed, use 'this.count'.*
+
+class Counter {
+    var count Int
+}
+
+impl Counter {
+    new {
+        count Int
+    } {
+        this.count = count
+    }
+
+    def bad(count Int) Unit {
+        count := count + 1
+    }
+}
+
+def main() Unit {}

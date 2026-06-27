@@ -3,8 +3,6 @@
 
 def main() Int {
     value = 1
-    if true {
-        value Int = 2
-    }
+    value = 2
     value
 }

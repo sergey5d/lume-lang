@@ -208,6 +208,71 @@ struct DeclSpan {
 struct Symbol {
     span: crate::source::Span,
     mutable: bool,
+    kind: SymbolKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SymbolKind {
+    Binding,
+    GlobalBinding,
+    Parameter(ParameterKind),
+    This,
+    EnumCase,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ParameterKind {
+    Function,
+    Lambda,
+    Method(TypeKind),
+    Constructor(TypeKind),
+}
+
+impl SymbolKind {
+    fn shadow_label(self) -> &'static str {
+        match self {
+            SymbolKind::Binding => "local binding",
+            SymbolKind::GlobalBinding => "global binding",
+            SymbolKind::Parameter(ParameterKind::Function) => "function parameter",
+            SymbolKind::Parameter(ParameterKind::Lambda) => "lambda parameter",
+            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Class)) => {
+                "class method parameter"
+            }
+            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Record)) => {
+                "shape method parameter"
+            }
+            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Object)) => {
+                "single method parameter"
+            }
+            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Enum)) => "enum method parameter",
+            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Interface)) => {
+                "interface method parameter"
+            }
+            SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Class)) => {
+                "class constructor parameter"
+            }
+            SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Record)) => {
+                "shape constructor parameter"
+            }
+            SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Object)) => {
+                "single constructor parameter"
+            }
+            SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Enum)) => {
+                "enum constructor parameter"
+            }
+            SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Interface)) => {
+                "interface constructor parameter"
+            }
+            SymbolKind::This => "'this' receiver",
+            SymbolKind::EnumCase => "enum case",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct FieldHintScope {
+    owner_kind: TypeKind,
+    fields: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -659,6 +724,7 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
                         Symbol {
                             span: local.span,
                             mutable: local.mutable,
+                            kind: SymbolKind::GlobalBinding,
                         },
                     );
                 }
@@ -788,7 +854,7 @@ struct Resolver<'a> {
     imported_types: HashMap<String, TypeInfo>,
     imported_objects: HashMap<String, TypeInfo>,
     modules_by_alias: HashMap<String, ModuleNamespace>,
-    field_hint_scopes: Vec<HashSet<String>>,
+    field_hint_scopes: Vec<FieldHintScope>,
     method_hint_scopes: Vec<HashSet<String>>,
     loop_depth: usize,
     current_constructor: bool,
@@ -1047,6 +1113,7 @@ impl<'a> Resolver<'a> {
                     Symbol {
                         span: local.span,
                         mutable: local.mutable,
+                        kind: SymbolKind::GlobalBinding,
                     },
                 );
             }
@@ -1088,6 +1155,7 @@ impl<'a> Resolver<'a> {
                 param.name.as_str(),
                 param.span,
                 false,
+                SymbolKind::Parameter(ParameterKind::Function),
                 "duplicate_parameter",
                 format!("duplicate parameter '{}'", param.name),
                 true,
@@ -1128,15 +1196,19 @@ impl<'a> Resolver<'a> {
         }
 
         self.push_scope();
-        self.push_field_hints(decl.members.iter().filter_map(|member| match member {
-            TypeMember::Field(field) => Some(field.name.as_str()),
-            _ => None,
-        }));
+        self.push_field_hints(
+            decl.kind,
+            decl.members.iter().filter_map(|member| match member {
+                TypeMember::Field(field) => Some(field.name.as_str()),
+                _ => None,
+            }),
+        );
         if decl.kind != TypeKind::Enum {
             self.define_value(
                 "this",
                 decl.span,
                 false,
+                SymbolKind::This,
                 "duplicate_binding",
                 "duplicate binding 'this'".to_string(),
                 true,
@@ -1156,6 +1228,7 @@ impl<'a> Resolver<'a> {
                         case.name.as_str(),
                         case.span,
                         false,
+                        SymbolKind::EnumCase,
                         "duplicate_binding",
                         format!("duplicate binding '{}'", case.name),
                         false,
@@ -1174,6 +1247,7 @@ impl<'a> Resolver<'a> {
                                 field.name.as_str(),
                                 field.span,
                                 field.mutable,
+                                SymbolKind::Binding,
                                 "duplicate_binding",
                                 format!("duplicate binding '{}'", field.name),
                                 true,
@@ -1201,11 +1275,11 @@ impl<'a> Resolver<'a> {
         });
 
         self.push_scope();
-        self.push_field_hints(
-            target_fields
-                .iter()
-                .flat_map(|info| info.fields.iter().map(|field| field.name)),
-        );
+        if let Some(info) = &target_fields {
+            self.push_field_hints(info.kind, info.fields.iter().map(|field| field.name));
+        } else {
+            self.push_field_hints(TypeKind::Object, std::iter::empty());
+        }
         self.push_method_hints(
             target_fields
                 .iter()
@@ -1308,6 +1382,7 @@ impl<'a> Resolver<'a> {
                 "this",
                 span,
                 false,
+                SymbolKind::This,
                 "duplicate_binding",
                 "duplicate binding 'this'".to_string(),
                 true,
@@ -1328,12 +1403,14 @@ impl<'a> Resolver<'a> {
         self.resolve_type_ref(method.return_type.as_ref());
         self.push_scope();
         self.define_implicit_this(Some(method.span));
+        let param_kind = self.method_parameter_kind(is_constructor);
         for param in &method.params {
             self.resolve_type_ref(param.ty.as_ref());
             self.define_value(
                 param.name.as_str(),
                 param.span,
                 false,
+                SymbolKind::Parameter(param_kind),
                 "duplicate_parameter",
                 format!("duplicate parameter '{}'", param.name),
                 is_constructor,
@@ -1433,10 +1510,11 @@ impl<'a> Resolver<'a> {
             }
             Stmt::Expr(ExprStmt { expr, .. }) => self.resolve_expr(expr),
             Stmt::LocalFunction(function) => {
-                self.define_value(
+                self.define_local_value(
                     function.name.as_str(),
                     function.span,
                     false,
+                    SymbolKind::Binding,
                     "duplicate_binding",
                     format!("duplicate binding '{}'", function.name),
                     false,
@@ -1460,6 +1538,7 @@ impl<'a> Resolver<'a> {
                 param.name.as_str(),
                 param.span,
                 false,
+                SymbolKind::Parameter(ParameterKind::Function),
                 "duplicate_parameter",
                 format!("duplicate parameter '{}'", param.name),
                 false,
@@ -1603,16 +1682,27 @@ impl<'a> Resolver<'a> {
     fn resolve_assignment_target(&mut self, target: &Expr, operator: AssignOp) {
         match target {
             Expr::Identifier { name, span } => {
-                if let Some(symbol) = self.lookup_value(name) {
+                if let Some(symbol) = self.lookup_scoped_value(name) {
+                    if !symbol.mutable {
+                        self.add_error(
+                            "assign_immutable",
+                            self.assign_immutable_message(name),
+                            *span,
+                        );
+                    } else if operator == AssignOp::Reassign {
+                        // plain reassign is allowed in the Rust resolver for now;
+                        // operator-shape validation stays a later typecheck concern.
+                    }
+                } else if self.is_field_hint(name) {
+                    // Bare field assignment is resolved later once the checker knows
+                    // the receiver type and constructor context.
+                } else if let Some(symbol) = self.lookup_global_value(name) {
                     if !symbol.mutable {
                         self.add_error(
                             "assign_immutable",
                             format!("cannot assign to immutable binding '{}'", name),
                             *span,
                         );
-                    } else if operator == AssignOp::Reassign {
-                        // plain reassign is allowed in the Rust resolver for now;
-                        // operator-shape validation stays a later typecheck concern.
                     }
                 } else {
                     self.add_error("undefined_name", self.undefined_value_message(name), *span);
@@ -1638,6 +1728,9 @@ impl<'a> Resolver<'a> {
     fn resolve_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::Identifier { name, span } => {
+                if self.lookup_scoped_value(name).is_some() || self.is_field_hint(name) {
+                    return;
+                }
                 if !self.is_name_defined(name) {
                     self.add_error("undefined_name", self.undefined_value_message(name), *span);
                 }
@@ -1794,6 +1887,7 @@ impl<'a> Resolver<'a> {
                     binding.name.as_str(),
                     binding.span,
                     false,
+                    SymbolKind::Parameter(ParameterKind::Lambda),
                     "duplicate_parameter",
                     format!("duplicate parameter '{}'", binding.name),
                     false,
@@ -1805,6 +1899,7 @@ impl<'a> Resolver<'a> {
             param.name.as_str(),
             param.span,
             false,
+            SymbolKind::Parameter(ParameterKind::Lambda),
             "duplicate_parameter",
             format!("duplicate parameter '{}'", param.name),
             false,
@@ -1824,10 +1919,11 @@ impl<'a> Resolver<'a> {
             Pattern::Extract { inner, .. } => self.resolve_pattern(inner),
             Pattern::Binding { name, span } => {
                 if name != "_" {
-                    self.define_value(
+                    self.define_local_value(
                         name,
                         *span,
                         false,
+                        SymbolKind::Binding,
                         "duplicate_binding",
                         format!("duplicate binding '{}'", name),
                         false,
@@ -1838,10 +1934,11 @@ impl<'a> Resolver<'a> {
                 self.resolve_type_pattern_ref(target);
                 if let Some(name) = name {
                     if name != "_" {
-                        self.define_value(
+                        self.define_local_value(
                             name,
                             *span,
                             false,
+                            SymbolKind::Binding,
                             "duplicate_binding",
                             format!("duplicate binding '{}'", name),
                             false,
@@ -2005,10 +2102,11 @@ impl<'a> Resolver<'a> {
     }
 
     fn define_binding(&mut self, binding: &Binding, code: &'static str) {
-        self.define_value(
+        self.define_local_value(
             binding.name.as_str(),
             binding.span,
             binding.mutable,
+            SymbolKind::Binding,
             code,
             format!("duplicate binding '{}'", binding.name),
             false,
@@ -2036,11 +2134,28 @@ impl<'a> Resolver<'a> {
 
     // define_value centralizes duplicate and outer-shadow checks so the many
     // binding forms in the language behave consistently.
+    fn define_local_value(
+        &mut self,
+        name: &str,
+        span: crate::source::Span,
+        mutable: bool,
+        kind: SymbolKind,
+        code: &'static str,
+        message: String,
+        allow_outer_shadow: bool,
+    ) {
+        if self.reject_receiver_field_shadow(name, span) {
+            return;
+        }
+        self.define_value(name, span, mutable, kind, code, message, allow_outer_shadow);
+    }
+
     fn define_value(
         &mut self,
         name: &str,
         span: crate::source::Span,
         mutable: bool,
+        kind: SymbolKind,
         code: &'static str,
         message: String,
         allow_outer_shadow: bool,
@@ -2057,10 +2172,7 @@ impl<'a> Resolver<'a> {
             if code == "duplicate_binding" {
                 self.add_duplicate(
                     "shadowing_binding",
-                    format!(
-                        "binding '{}' shadows an existing variable; use a different name",
-                        name
-                    ),
+                    shadowing_binding_message(name, previous.kind.shadow_label()),
                     span,
                     previous.span,
                 );
@@ -2073,26 +2185,59 @@ impl<'a> Resolver<'a> {
             if let Some(previous) = self.lookup_outer(name) {
                 self.add_duplicate(
                     "shadowing_binding",
-                    format!(
-                        "binding '{}' shadows an existing variable; use a different name",
-                        name
-                    ),
+                    shadowing_binding_message(name, previous.kind.shadow_label()),
                     span,
                     previous.span,
                 );
                 return;
             }
         }
-        self.current_scope()
-            .insert(name.to_string(), Symbol { span, mutable });
+        self.current_scope().insert(
+            name.to_string(),
+            Symbol {
+                span,
+                mutable,
+                kind,
+            },
+        );
     }
 
-    fn lookup_value(&self, name: &str) -> Option<Symbol> {
+    fn reject_receiver_field_shadow(&mut self, name: &str, span: crate::source::Span) -> bool {
+        if self.lookup_scoped_value(name).is_some() {
+            return false;
+        }
+        let Some(label) = self.field_hint_label(name) else {
+            return false;
+        };
+        self.add_error(
+            "shadowing_binding",
+            format!(
+                "binding '{}' shadows {} {}; use a different name, or write 'this.{}' to access the field",
+                name,
+                article_for(label),
+                label,
+                name
+            ),
+            span,
+        );
+        true
+    }
+
+    fn lookup_scoped_value(&self, name: &str) -> Option<Symbol> {
         for scope in self.scopes.iter().rev() {
             if let Some(symbol) = scope.get(name) {
                 return Some(*symbol);
             }
         }
+        None
+    }
+
+    fn lookup_value(&self, name: &str) -> Option<Symbol> {
+        self.lookup_scoped_value(name)
+            .or_else(|| self.lookup_global_value(name))
+    }
+
+    fn lookup_global_value(&self, name: &str) -> Option<Symbol> {
         self.globals
             .get(name)
             .copied()
@@ -2127,9 +2272,15 @@ impl<'a> Resolver<'a> {
             || self.ambient.types.contains_key(name)
     }
 
-    fn push_field_hints<'b>(&mut self, fields: impl Iterator<Item = &'b str>) {
-        self.field_hint_scopes
-            .push(fields.map(|name| name.to_string()).collect());
+    fn push_field_hints<'b>(
+        &mut self,
+        owner_kind: TypeKind,
+        fields: impl Iterator<Item = &'b str>,
+    ) {
+        self.field_hint_scopes.push(FieldHintScope {
+            owner_kind,
+            fields: fields.map(|name| name.to_string()).collect(),
+        });
     }
 
     fn pop_field_hints(&mut self) {
@@ -2157,13 +2308,48 @@ impl<'a> Resolver<'a> {
                 .any(|scope| scope.contains(name))
     }
 
-    fn undefined_value_message(&self, name: &str) -> String {
-        if self
-            .field_hint_scopes
+    fn is_field_hint(&self, name: &str) -> bool {
+        self.field_hint_label(name).is_some()
+    }
+
+    fn field_hint_label(&self, name: &str) -> Option<&'static str> {
+        self.field_hint_scopes
             .iter()
             .rev()
-            .any(|scope| scope.contains(name))
-        {
+            .find(|scope| scope.fields.contains(name))
+            .map(|scope| field_label(scope.owner_kind))
+    }
+
+    fn current_receiver_kind(&self) -> Option<TypeKind> {
+        self.field_hint_scopes
+            .iter()
+            .rev()
+            .map(|scope| scope.owner_kind)
+            .next()
+    }
+
+    fn method_parameter_kind(&self, is_constructor: bool) -> ParameterKind {
+        let owner_kind = self.current_receiver_kind().unwrap_or(TypeKind::Object);
+        if is_constructor {
+            ParameterKind::Constructor(owner_kind)
+        } else {
+            ParameterKind::Method(owner_kind)
+        }
+    }
+
+    fn assign_immutable_message(&self, name: &str) -> String {
+        if let Some(label) = self.field_hint_label(name) {
+            format!(
+                "cannot assign to immutable binding '{}'; {} '{}' is shadowed, use 'this.{}' to access it",
+                name, label, name, name
+            )
+        } else {
+            format!("cannot assign to immutable binding '{}'", name)
+        }
+    }
+
+    fn undefined_value_message(&self, name: &str) -> String {
+        if self.is_field_hint(name) {
             format!(
                 "undefined name '{}'; if you meant the field, write 'this.{}'",
                 name, name
@@ -2321,6 +2507,33 @@ fn arity_label(arity: usize) -> &'static str {
         1 => "1",
         2 => "2",
         _ => "multiple",
+    }
+}
+
+fn field_label(kind: TypeKind) -> &'static str {
+    match kind {
+        TypeKind::Class => "class field",
+        TypeKind::Record => "shape field",
+        TypeKind::Object => "single field",
+        TypeKind::Interface => "interface field",
+        TypeKind::Enum => "enum field",
+    }
+}
+
+fn shadowing_binding_message(name: &str, target_label: &str) -> String {
+    format!(
+        "binding '{}' shadows {} {}; use a different name",
+        name,
+        article_for(target_label),
+        target_label
+    )
+}
+
+fn article_for(label: &str) -> &'static str {
+    if label.starts_with("enum") || label.starts_with("interface") {
+        "an"
+    } else {
+        "a"
     }
 }
 

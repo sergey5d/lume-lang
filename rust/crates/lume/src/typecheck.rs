@@ -2725,7 +2725,46 @@ impl<'a> Checker<'a> {
     fn assignment_target_type(&mut self, target: &Expr, operator: AssignOp) -> Ty {
         match target {
             Expr::Identifier { name, span } => {
-                if let Some(value) = self.lookup_value(name) {
+                if let Some(value) = self.lookup_scoped_value(name) {
+                    if operator == AssignOp::Assign {
+                        self.add_error(
+                            "unexpected_token",
+                            "use ':=' for reassignment; '=' is only for bindings and constructor initialization",
+                            *span,
+                        );
+                    } else if !value.mutable {
+                        self.add_error(
+                            "assign_immutable",
+                            format!("cannot assign to immutable binding '{}'", name),
+                            *span,
+                        );
+                    }
+                    value.ty
+                } else if let Some(field) = self.lookup_implicit_field(name) {
+                    let can_initialize = self.current_method.as_deref() == Some("new");
+                    if operator == AssignOp::Assign {
+                        if !can_initialize {
+                            self.add_error(
+                                "unexpected_token",
+                                "use ':=' for reassignment; '=' is only for bindings and constructor initialization",
+                                *span,
+                            );
+                        }
+                    } else if can_initialize {
+                        self.add_error(
+                            "unexpected_token",
+                            "use '=' for field initialization in constructors; reassignment operators are only for mutation after construction",
+                            *span,
+                        );
+                    } else if !field.mutable {
+                        self.add_error(
+                            "assign_immutable",
+                            format!("cannot reassign immutable field '{}'", name),
+                            *span,
+                        );
+                    }
+                    field.ty
+                } else if let Some(value) = self.lookup_global_value(name) {
                     if operator == AssignOp::Assign {
                         self.add_error(
                             "unexpected_token",
@@ -2928,8 +2967,10 @@ impl<'a> Checker<'a> {
     fn check_expr_against(&mut self, expr: &Expr, expected: &Ty) -> Ty {
         match expr {
             Expr::Identifier { name, span } => self
-                .lookup_value(name)
+                .lookup_scoped_value(name)
                 .map(|value| value.ty)
+                .or_else(|| self.lookup_implicit_field(name).map(|field| field.ty))
+                .or_else(|| self.lookup_global_value(name).map(|value| value.ty))
                 .or_else(|| self.lookup_function_type(name))
                 .or_else(|| self.lookup_bare_enum_case_value_type(name, expected))
                 .or_else(|| self.lookup_named_constructor_type(name))
@@ -5267,15 +5308,33 @@ impl<'a> Checker<'a> {
     }
 
     fn lookup_value(&self, name: &str) -> Option<ValueInfo> {
+        self.lookup_scoped_value(name)
+            .or_else(|| self.lookup_global_value(name))
+    }
+
+    fn lookup_scoped_value(&self, name: &str) -> Option<ValueInfo> {
         for scope in self.scopes.iter().rev() {
             if let Some(value) = scope.get(name) {
                 return Some(value.clone());
             }
         }
+        None
+    }
+
+    fn lookup_global_value(&self, name: &str) -> Option<ValueInfo> {
         self.globals
             .get(name)
             .cloned()
             .or_else(|| self.world.lookup_imported_global(self.module, name))
+    }
+
+    fn lookup_implicit_field(&self, name: &str) -> Option<FieldSig> {
+        self.current_owner
+            .as_ref()?
+            .fields
+            .iter()
+            .find(|field| field.name == name)
+            .cloned()
     }
 
     fn undefined_value_message(&self, name: &str) -> String {
@@ -5420,8 +5479,10 @@ impl<'a> Checker<'a> {
     fn probe_expr_type(&self, expr: &Expr) -> Ty {
         match expr {
             Expr::Identifier { name, .. } => self
-                .lookup_value(name)
+                .lookup_scoped_value(name)
                 .map(|value| value.ty)
+                .or_else(|| self.lookup_implicit_field(name).map(|field| field.ty))
+                .or_else(|| self.lookup_global_value(name).map(|value| value.ty))
                 .or_else(|| self.lookup_function_type(name))
                 .or_else(|| self.lookup_named_constructor_type(name))
                 .unwrap_or(Ty::Unknown),
@@ -7097,6 +7158,40 @@ impl Counter {
 def main() Int {
     counter Counter = Counter(5)
     return counter.twice(2)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_bare_field_access_inside_impls_when_not_shadowed() {
+        let program = parse_inline(
+            r#"
+class Counter {
+    var count Int
+}
+
+impl Counter {
+    new {
+        initial Int
+    } {
+        this.count = initial
+    }
+
+    def value() Int = count
+
+    def bump() Unit {
+        count := count + 1
+    }
+
+    def shadow(count Int) Int = this.count + count
+}
+
+def main() Unit {
+    counter = Counter(5)
+    counter.bump()
 }
 "#,
         );

@@ -1,0 +1,17 @@
+# FAIL_REGEX:
+# .*binding 'code' shadows an enum field; use a different name.*
+
+enum Color {
+    code Str
+
+    def bad() Str {
+        code = "shadow"
+        this.code
+    }
+
+    case Red {
+        code = "red"
+    }
+}
+
+def main() Unit {}

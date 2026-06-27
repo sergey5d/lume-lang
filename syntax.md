@@ -289,13 +289,28 @@ Constructor field initialization:
 this.value = value
 ```
 
-Inside `new`, direct writes to `this.field` use `=` even for `var` fields or
-fields that already have defaults. `:=` and compound assignment are for
-post-construction mutation.
+Inside `new`, direct writes to fields use `=` even for `var` fields or fields
+that already have defaults. Constructor initialization should use `this.field`
+because a bare `name = value` statement is a local binding. `:=` and compound
+assignment are for post-construction mutation. Field reads and reassignments may
+be bare when no local binding with the same name is in scope; use `this.field`
+when a parameter/local shadows the field or when explicit receiver access reads
+better.
+
+Receiver field scope rules:
+
+- Parameters may shadow receiver fields.
+- Local bindings may not shadow parameters.
+- Local bindings may not shadow receiver fields.
+- Local bindings may not shadow another live local binding.
+- Local bindings in disjoint scopes may reuse the same name.
+- Unqualified field access is allowed only when no parameter/local with that name is in scope.
+- `this.field` is always available inside instance methods and constructors.
 
 Member reassignment:
 
 ```txt
+count := count + 1
 this.count := this.count + 1
 ```
 
@@ -577,7 +592,8 @@ Constructors use a dedicated `new` block inside `impl`.
 - class call sites use braces for named arguments, for example `Person { name: "Ada", age: 10 }`
 - class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
 - `this` is the instance receiver
-- instance fields on classes, enums, and singles must be accessed through `this.`, for example `this.age`
+- instance fields on classes, enums, and singles may be accessed bare when they are not shadowed
+- use `this.field` when a parameter/local shadows a field, for example `this.age`
 
 ```txt
 class Person {

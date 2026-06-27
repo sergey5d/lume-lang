@@ -1,0 +1,67 @@
+# EXPECT:
+# initial 5
+# bumped 6
+# plus 16
+# shadow 16
+# lambda 7
+# enum red
+# scope first 1
+# scope second 2
+
+class Counter {
+    var count Int
+}
+
+impl Counter {
+    new {
+        initial Int
+    } {
+        this.count = initial
+    }
+
+    def value() Int = count
+
+    def bump() Unit {
+        count := count + 1
+    }
+
+    def plus(delta Int) Int = count + delta
+
+    def shadow(count Int) Int = this.count + count
+
+    def lambdaValue() Int {
+        reader = () -> count + 1
+        reader()
+    }
+}
+
+enum Color {
+    code Str
+
+    def label() Str = code
+
+    case Red {
+        code = "red"
+    }
+}
+
+def main() Unit {
+    counter = Counter(5)
+    println("initial", counter.value())
+    counter.bump()
+    println("bumped", counter.value())
+    println("plus", counter.plus(10))
+    println("shadow", counter.shadow(10))
+    println("lambda", counter.lambdaValue())
+    println("enum", Red.label())
+
+    if true {
+        reused = 1
+        println("scope first", reused)
+    }
+
+    if true {
+        reused = 2
+        println("scope second", reused)
+    }
+}
