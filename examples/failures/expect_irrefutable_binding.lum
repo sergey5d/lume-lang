@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*expect binding is irrefutable; use 'let' instead.*
+
+def main() Unit {
+    expect item <- Some(5)
+    println(item)
+}

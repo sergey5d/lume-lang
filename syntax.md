@@ -1226,6 +1226,14 @@ on success, and panics on mismatch:
 expect Some(item) = maybeValue
 ```
 
+If the binding is irrefutable, use `let` instead. That includes patterns that
+are irrefutable from the value type and patterns whose source expression visibly
+proves success:
+
+```txt
+expect item <- Some(5)     # error: use let item <- Some(5)
+```
+
 And the matching shorthand:
 
 ```txt

@@ -249,7 +249,7 @@ refutable:
 - `if let PATTERN = value && let OTHER = next && ready { ... }` for mixed refutable and boolean checks in one condition
 - `let PATTERN = value else { ... }` for refutable binding with an explicit failure path
 - `let { PATTERN = value ... } else { ... }` for multiple sequential refutable bindings sharing one fallback
-- `expect PATTERN = value` for assertive refutable binding that panics on mismatch
+- `expect PATTERN = value` for assertive refutable binding that panics on mismatch; if the binding is irrefutable, use `let`
 - `PATTERN <- source` as shorthand for the success case inside `if let`, `let ... else`, and `expect`
   `Some(PATTERN)` for `Option`, `Ok(PATTERN)` for `Result`, and `Right(PATTERN)` for `Either`
   plain `let` accepts this form only when the source expression itself proves the success case, such as `let item <- Some(5)`

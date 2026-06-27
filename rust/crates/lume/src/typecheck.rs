@@ -2182,6 +2182,13 @@ impl<'a> Checker<'a> {
                         &clause.value,
                         clause.pattern.span(),
                     );
+                } else if matches!(stmt.kind, PatternBindingKind::Expect) {
+                    self.require_refutable_expect_pattern(
+                        &clause.pattern,
+                        &value_ty,
+                        &clause.value,
+                        clause.pattern.span(),
+                    );
                 }
                 self.bind_pattern(&clause.pattern, &value_ty);
             }
@@ -2190,6 +2197,13 @@ impl<'a> Checker<'a> {
         let value_ty = self.check_expr(&stmt.value);
         if matches!(stmt.kind, PatternBindingKind::Let) {
             self.require_safe_let_pattern(
+                &stmt.pattern,
+                &value_ty,
+                &stmt.value,
+                stmt.pattern.span(),
+            );
+        } else if matches!(stmt.kind, PatternBindingKind::Expect) {
+            self.require_refutable_expect_pattern(
                 &stmt.pattern,
                 &value_ty,
                 &stmt.value,
@@ -2343,6 +2357,24 @@ impl<'a> Checker<'a> {
                     "plain 'let' pattern may fail for value of type '{}'; use 'let ... else ...' instead",
                     scrutinee.describe()
                 ),
+                span,
+            );
+        }
+    }
+
+    fn require_refutable_expect_pattern(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee: &Ty,
+        source: &Expr,
+        span: crate::source::Span,
+    ) {
+        if self.pattern_is_irrefutable(pattern, scrutinee)
+            || self.source_expr_proves_pattern_match(pattern, source)
+        {
+            self.add_error(
+                "irrefutable_expect_binding",
+                "expect binding is irrefutable; use 'let' instead",
                 span,
             );
         }
@@ -7608,6 +7640,31 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_irrefutable_expect_binding() {
+        let program = parse_inline(
+            r#"
+def main(value Option[Int]) Unit {
+    pair (Int, Int) = (1, 2)
+    expect (left, right) = pair
+    expect item <- Some(5)
+    expect Some(other) = Some(6)
+    expect Some(stillRefutable) = value
+}
+"#,
+        );
+        let result = check_program(&program);
+        let matches = result
+            .diagnostics
+            .iter()
+            .filter(|diag| {
+                diag.code == "irrefutable_expect_binding"
+                    && diag.message.contains("use 'let' instead")
+            })
+            .count();
+        assert_eq!(matches, 3, "{:#?}", result.diagnostics);
     }
 
     #[test]
