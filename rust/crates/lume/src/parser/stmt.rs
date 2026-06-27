@@ -182,17 +182,6 @@ impl<'a> Parser<'a> {
                     span: start.cover(end),
                 }));
             }
-            if let Some(clause) = clauses
-                .iter()
-                .find(|clause| matches!(&clause.pattern, Pattern::Extract { .. }))
-            {
-                self.diagnostics.push(Diagnostic::error(
-                    "refutable_let_extract",
-                    "plain 'let ... <- value' is refutable; use 'let ... <- value else ...', 'if let ... <- value', or 'expect ... <- value'",
-                    clause.span,
-                ));
-                return None;
-            }
             return Some(Stmt::PatternBinding(PatternBindingStmt {
                 kind: PatternBindingKind::Let,
                 clauses,
@@ -285,14 +274,6 @@ impl<'a> Parser<'a> {
                 else_block,
                 span: start.cover(end),
             }));
-        }
-        if operator == "<-" {
-            self.diagnostics.push(Diagnostic::error(
-                "refutable_let_extract",
-                "plain 'let ... <- value' is refutable; use 'let ... <- value else ...', 'if let ... <- value', or 'expect ... <- value'",
-                pattern.span().cover(value.span()),
-            ));
-            return None;
         }
         let end = value.span();
         Some(Stmt::PatternBinding(PatternBindingStmt {

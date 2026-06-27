@@ -1205,8 +1205,16 @@ let (left, right) = pair
 ```
 
 If the match can fail, plain `let` is rejected and you must use `let ... else`.
-That includes success-case extraction shorthand such as `let item <- maybeValue`,
-which is always treated as refutable.
+Success-case extraction shorthand such as `let item <- maybeValue` is accepted
+without `else` only when the source expression itself proves the successful
+case:
+
+```txt
+let item <- Some(5)        # ok: source is visibly Some
+
+maybe Option[Int] = Some(5)
+let item <- maybe          # error: maybe has type Option[Int], so extraction can fail
+```
 
 An explicit assertive form is also supported:
 

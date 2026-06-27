@@ -12,6 +12,7 @@
 # expectEither 55
 # expectGroup 18
 # ifLet 89
+# plainKnownExtract 124
 
 def letElseOption(value Option[Int]) Int {
     let item <- value else return 0
@@ -68,6 +69,11 @@ def ifLetValue(value Option[Int]) Int {
     return -1
 }
 
+def plainKnownExtract(value Int) Int {
+    let item <- Some(value)
+    item + 1
+}
+
 def main() Unit {
     println("letElseOptionSome " + letElseOption(Some(5)))
     println("letElseOptionNone " + letElseOption(None))
@@ -82,4 +88,5 @@ def main() Unit {
     println("expectEither " + expectEither(Right(55)))
     println("expectGroup " + expectGroup(Some(5), Ok(6), Right(7)))
     println("ifLet " + ifLetValue(Some(89)))
+    println("plainKnownExtract " + plainKnownExtract(123))
 }

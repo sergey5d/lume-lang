@@ -2179,6 +2179,7 @@ impl<'a> Checker<'a> {
                     self.require_safe_let_pattern(
                         &clause.pattern,
                         &value_ty,
+                        &clause.value,
                         clause.pattern.span(),
                     );
                 }
@@ -2188,7 +2189,12 @@ impl<'a> Checker<'a> {
         }
         let value_ty = self.check_expr(&stmt.value);
         if matches!(stmt.kind, PatternBindingKind::Let) {
-            self.require_safe_let_pattern(&stmt.pattern, &value_ty, stmt.pattern.span());
+            self.require_safe_let_pattern(
+                &stmt.pattern,
+                &value_ty,
+                &stmt.value,
+                stmt.pattern.span(),
+            );
         }
         self.bind_pattern(&stmt.pattern, &value_ty);
     }
@@ -2325,9 +2331,12 @@ impl<'a> Checker<'a> {
         &mut self,
         pattern: &Pattern,
         scrutinee: &Ty,
+        source: &Expr,
         span: crate::source::Span,
     ) {
-        if !self.pattern_is_irrefutable(pattern, scrutinee) {
+        if !self.pattern_is_irrefutable(pattern, scrutinee)
+            && !self.source_expr_proves_pattern_match(pattern, source)
+        {
             self.add_error(
                 "refutable_let_pattern",
                 format!(
@@ -2336,6 +2345,80 @@ impl<'a> Checker<'a> {
                 ),
                 span,
             );
+        }
+    }
+
+    fn source_expr_proves_pattern_match(&self, pattern: &Pattern, source: &Expr) -> bool {
+        match (pattern, source) {
+            (pattern, Expr::Group { inner, .. }) => {
+                self.source_expr_proves_pattern_match(pattern, inner)
+            }
+            (Pattern::Wildcard { .. } | Pattern::Binding { .. }, _) => true,
+            (Pattern::Extract { inner, .. }, source) => {
+                let Some((path, args)) = self.constructor_expr_parts(source) else {
+                    return false;
+                };
+                path.last()
+                    .is_some_and(|name| matches!(name.as_str(), "Some" | "Ok" | "Right"))
+                    && args.len() == 1
+                    && self.source_expr_proves_pattern_match(inner, args[0])
+            }
+            (Pattern::Tuple { elements, .. }, Expr::TupleLiteral { items, .. })
+                if elements.len() == items.len() =>
+            {
+                elements
+                    .iter()
+                    .zip(items.iter())
+                    .all(|(pattern, item)| self.source_expr_proves_pattern_match(pattern, item))
+            }
+            (Pattern::Constructor { path, args, .. }, source) => {
+                let Some((source_path, source_args)) = self.constructor_expr_parts(source) else {
+                    return false;
+                };
+                source_path.as_slice() == path.as_slice()
+                    && source_args.len() == args.len()
+                    && args
+                        .iter()
+                        .zip(source_args.iter())
+                        .all(|(pattern, item)| self.source_expr_proves_pattern_match(pattern, item))
+            }
+            (Pattern::Literal { value, .. }, source) => self.literal_exprs_equal(value, source),
+            (Pattern::Type { .. }, _) => false,
+            _ => false,
+        }
+    }
+
+    fn constructor_expr_parts<'b>(&self, source: &'b Expr) -> Option<(Vec<String>, Vec<&'b Expr>)> {
+        match source {
+            Expr::Group { inner, .. } => self.constructor_expr_parts(inner),
+            Expr::Call { callee, args, .. } => {
+                let path = expr_path_for_known_value(callee)?;
+                if self.lookup_case_by_path(&path).is_none()
+                    && self.lookup_destructured_type_pattern(&path).is_none()
+                {
+                    return None;
+                }
+                Some((path, args.iter().map(|arg| &arg.value).collect()))
+            }
+            other => {
+                let path = expr_path_for_known_value(other)?;
+                let case = self.lookup_case_by_path(&path)?;
+                case.params.is_empty().then_some((path, Vec::new()))
+            }
+        }
+    }
+
+    fn literal_exprs_equal(&self, left: &Expr, right: &Expr) -> bool {
+        match (left, right) {
+            (left, Expr::Group { inner, .. }) => self.literal_exprs_equal(left, inner),
+            (Expr::Unit { .. }, Expr::Unit { .. }) => true,
+            (Expr::Bool { value: left, .. }, Expr::Bool { value: right, .. }) => left == right,
+            (Expr::Integer { raw: left, .. }, Expr::Integer { raw: right, .. }) => {
+                left.parse::<i64>().ok() == right.parse::<i64>().ok()
+            }
+            (Expr::Float { raw: left, .. }, Expr::Float { raw: right, .. }) => left == right,
+            (Expr::String { raw: left, .. }, Expr::String { raw: right, .. }) => left == right,
+            _ => false,
         }
     }
 
@@ -8833,6 +8916,25 @@ def main() Int {
     }
 
     #[test]
+    fn allows_plain_let_extract_when_source_is_known_success_case() {
+        let program = parse_inline(
+            r#"
+def main(seed Int) Int {
+    let item <- Some(seed)
+    let resultItem <- Ok(item)
+    let eitherItem <- Right(resultItem)
+    let {
+        grouped <- Some(eitherItem)
+    }
+    return grouped
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
     fn rejects_refutable_plain_let_patterns_without_else() {
         let program = parse_inline(
             r#"
@@ -8844,10 +8946,13 @@ def main(
     knownOption = Some(4)
     widenedOption Option[Int] = Some(5)
     let Some(optionItem) = optionValue
+    let optionExtract <- optionValue
     let {
         Some(knownItem) = knownOption
+        resultExtract <- resultValue
+        eitherExtract <- eitherValue
     }
-    let Some(widenedItem) = widenedOption
+    let widenedItem <- widenedOption
     return 0
 }
 "#,
@@ -8861,7 +8966,7 @@ def main(
                     && diag.message.contains("use 'let ... else ...' instead")
             })
             .count();
-        assert_eq!(matches, 3, "{:#?}", result.diagnostics);
+        assert_eq!(matches, 6, "{:#?}", result.diagnostics);
     }
 
     #[test]

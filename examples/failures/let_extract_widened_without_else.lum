@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*plain 'let' pattern may fail for value of type 'Option\[Int\]'; use 'let \.\.\. else \.\.\.' instead.*
+
+def main() Int {
+    value Option[Int] = Some(5)
+    let item <- value
+    item
+}
