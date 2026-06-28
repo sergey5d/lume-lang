@@ -17,10 +17,10 @@
 # - constructor setup may write the same mutable field more than once with `=`
 # - later field mutation uses `:=`
 # - nested writes through an initialized field still use `:=`
-# - constructor parameters and constructor-call fields may be comma separated
+# - constructor shape fields and constructor-call fields may be comma separated
 # - `new(...)` delegates to another constructor positionally
 # - `new { field: value }` delegates to another constructor by named fields
-# - a trailing `[T] vararg` constructor parameter receives positional varargs as `[T]`
+# - a trailing `[T] vararg` constructor shape field receives positional varargs as `[T]`
 # - named constructor calls can pass a vararg as a single `[T]` value
 # - defaulted varargs are used when the vararg is omitted
 

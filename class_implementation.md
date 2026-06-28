@@ -34,7 +34,7 @@ Mental model:
 - `shape` declares a structural, read-only field view
 - `impl Type { ... }` declares constructors and instance behavior for classes and shapes
 - `impl single Name { ... }` declares singleton behavior
-- constructors are dedicated `new { params } { body }` declarations
+- constructors are dedicated `new { ... } { body }` declarations, where `new { ... }` is the constructor input shape
 - field access inside methods should use `this.field`
 
 ## Why Prefer `impl`

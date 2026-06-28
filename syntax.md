@@ -61,7 +61,7 @@ firstName = userOpt
     .->profileOpt()
     .->users.head()
     .->name()
-    .->first
+    .first
 ```
 
 Each `.->` starts a lifted segment. Normal `.`, calls, and indexes after it stay
@@ -82,6 +82,8 @@ profileOpt()
 users.head()
 name().first
 ```
+
+Use `.->first` only when `first` itself must start a new lifted segment.
 
 Each segment is typechecked against the successful value inside the current
 container. If a segment returns a plain value, `.->` lowers to `map`:
@@ -669,12 +671,12 @@ Construction rules:
 - positional construction follows declared public-field order
 - public fields may be omitted from positional construction only when the omitted fields form a trailing suffix and all have initializers
 - positional construction is rejected when a hidden initialized field appears before a later public field
-- explicit constructors may use one trailing variadic list parameter such as `items [T] vararg`
-- a variadic constructor parameter receives the extra positional arguments as `[T]`
-- only one variadic parameter is allowed
-- named constructor arguments can target a variadic constructor parameter by passing a `[T]` value
-- variadic constructor parameters may have a default `[T]` value
-- variadic constructor parameters cannot follow defaulted parameters
+- explicit constructors may use one trailing variadic constructor shape field such as `items [T] vararg`
+- a variadic constructor shape field receives the extra positional arguments as `[T]`
+- only one variadic constructor shape field is allowed
+- named constructor arguments can target a variadic constructor shape field by passing a `[T]` value
+- variadic constructor shape fields may have a default `[T]` value
+- variadic constructor shape fields cannot follow defaulted shape fields
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
 - tuple values cannot construct classes; write `User(...)` or `User { ... }`
@@ -786,14 +788,14 @@ impl Counter {
 
 Constructors use a dedicated `new` block inside `impl`.
 
-- `new { params } { body }` declares a block-bodied constructor
-- `new { params } = expression` declares an expression-bodied constructor
-- constructor parameters use `name Type`, with optional trailing defaults such as `age Int = 0`
-- the constructor parameter block is the constructor shape accepted by call sites
-- `Type { field: value }` constructs by matching that shape by field name
-- `Type(value)` constructs by filling that same shape by declaration order
-- constructor parameters may end with one variadic list parameter such as `items [Str] vararg`
-- `hidden new { params } { body }` declares a private constructor
+- `new { ... }` declares the constructor input shape
+- `new { ... } { body }` declares a block-bodied constructor
+- `new { ... } = expression` declares an expression-bodied constructor
+- constructor shape fields use `name Type`, with optional trailing defaults such as `age Int = 0`
+- `Type { field: value }` constructs by matching the constructor input shape by field name
+- `Type(value)` constructs by filling the same constructor input shape positionally by declaration order
+- constructor shape fields may end with one variadic list field such as `items [Str] vararg`
+- `hidden new { ... } { body }` declares a private constructor
 - each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
 - `new(...)` inside another constructor delegates positionally to another constructor of the same class
 - `new { field: value }` inside another constructor delegates with named constructor arguments to another constructor of the same class
@@ -831,7 +833,7 @@ impl Person {
 }
 ```
 
-Variadic constructor parameters collect positional arguments into a `[T]`
+Variadic constructor shape fields collect positional arguments into a `[T]`
 inside the constructor body:
 
 ```txt

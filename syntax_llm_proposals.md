@@ -15,7 +15,7 @@ The language is strongest when it keeps one obvious form for each major idea:
 - `interface` for contracts
 - `impl Type { ... }` and `impl single Name { ... }` for behavior
 - `use` for module imports
-- `new { params } { body }` for explicit constructors
+- `new { ... } { body }` for explicit constructors, where `new { ... }` declares the constructor input shape
 - `Type { field: value }` for named construction
 - `{ field: value }` for anonymous shapes
 - `try` for propagation
