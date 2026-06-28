@@ -546,7 +546,7 @@ class Box {
 }
 
 #[test]
-fn parses_record_literal_forms() {
+fn parses_shape_literal_forms() {
     match parse_expr_only(r#"{ name: "Ana", age: 10 }"#) {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(values.is_empty());
@@ -555,7 +555,7 @@ fn parses_record_literal_forms() {
             assert_eq!(fields[1].name.as_deref(), Some("age"));
             assert!(fields[0].ty.is_none());
         }
-        other => panic!("expected named record literal, got {other:#?}"),
+        other => panic!("expected named shape literal, got {other:#?}"),
     }
 
     match parse_expr_only(r#"{ name Str: "Ana", age Int: 10 }"#) {
@@ -573,7 +573,7 @@ fn parses_record_literal_forms() {
                 Some(TypeRef::Named { ref name, .. }) if name == "Int"
             ));
         }
-        other => panic!("expected typed record literal, got {other:#?}"),
+        other => panic!("expected typed shape literal, got {other:#?}"),
     }
 
     match parse_expr_only("(name, age)") {
@@ -603,7 +603,7 @@ fn parses_record_literal_forms() {
                     assert_eq!(fields.len(), 2);
                     assert!(values.is_empty());
                 }
-                other => panic!("expected record literal call arg, got {other:#?}"),
+                other => panic!("expected shape literal call arg, got {other:#?}"),
             }
         }
         other => panic!("expected call, got {other:#?}"),
@@ -622,7 +622,7 @@ fn parses_record_literal_forms() {
                     assert!(fields.is_empty());
                     assert!(values.is_empty());
                 }
-                other => panic!("expected empty record literal call arg, got {other:#?}"),
+                other => panic!("expected empty shape literal call arg, got {other:#?}"),
             }
         }
         other => panic!("expected call, got {other:#?}"),
@@ -651,14 +651,14 @@ fn parses_record_literal_forms() {
     assert!(
         result.diagnostics.iter().any(|diag| diag
             .message
-            .contains("anonymous record literals use '{ ... }'")),
+            .contains("anonymous shape literals use '{ ... }'")),
         "expected class(...) rejection, got diagnostics: {:#?}",
         result.diagnostics
     );
 }
 
 #[test]
-fn rejects_equals_in_named_record_literal_fields() {
+fn rejects_equals_in_named_shape_literal_fields() {
     let result = parse(r#"def run() Unit = { name = "Ana", age = 10 }"#);
     assert!(
         !result.diagnostics.is_empty(),
@@ -667,37 +667,37 @@ fn rejects_equals_in_named_record_literal_fields() {
 }
 
 #[test]
-fn parses_colon_record_update_fields() {
+fn parses_colon_shape_update_fields() {
     match parse_expr_only("value :< { amount: 42, label: value.label }") {
         Expr::RecordUpdate { updates, .. } => {
             assert_eq!(updates.len(), 2);
             assert_eq!(updates[0].name.as_deref(), Some("amount"));
             assert_eq!(updates[1].name.as_deref(), Some("label"));
         }
-        other => panic!("expected record update, got {other:#?}"),
+        other => panic!("expected shape update, got {other:#?}"),
     }
 }
 
 #[test]
-fn parses_record_merge_operator() {
+fn parses_shape_merge_operator() {
     match parse_expr_only("left :+ right") {
         Expr::Binary {
             op: BinaryOp::RecordMerge,
             ..
         } => {}
-        other => panic!("expected record merge binary expr, got {other:#?}"),
+        other => panic!("expected shape merge binary expr, got {other:#?}"),
     }
 }
 
 #[test]
-fn rejects_equals_in_record_update_fields() {
+fn rejects_equals_in_shape_update_fields() {
     let result = parse(r#"def run(value Amount) Unit = value :< { amount = 42 }"#);
     assert!(
         result.diagnostics.iter().any(|diag| {
             diag.code == "unexpected_token"
                 && diag
                     .message
-                    .contains("expected ':' after record update field name")
+                    .contains("expected ':' after shape update field name")
         }),
         "{:#?}",
         result.diagnostics
@@ -705,7 +705,7 @@ fn rejects_equals_in_record_update_fields() {
 }
 
 #[test]
-fn parses_record_literal_arguments_inside_parens() {
+fn parses_shape_literal_arguments_inside_parens() {
     let result = parse(
         r#"
 class User {
@@ -723,13 +723,13 @@ def run() Unit {
     );
     assert!(
         result.diagnostics.is_empty(),
-        "expected parser to accept record literal call args, got diagnostics: {:#?}",
+        "expected parser to accept shape literal call args, got diagnostics: {:#?}",
         result.diagnostics
     );
 }
 
 #[test]
-fn parses_single_expression_braces_as_block_not_record() {
+fn parses_single_expression_braces_as_block_not_shape() {
     match parse_expr_only("{ value }") {
         Expr::Block { body, .. } => {
             assert_eq!(body.statements.len(), 1);
@@ -926,7 +926,7 @@ def run() Unit = {
 }
 
 #[test]
-fn allows_equals_before_record_expression_callable_body() {
+fn allows_equals_before_shape_expression_callable_body() {
     let result = parse(
         r#"
 def user() { name Str, age Int } = { name: "Ada", age: 10 }
@@ -939,7 +939,7 @@ def user() { name Str, age Int } = { name: "Ada", age: 10 }
             CallableBody::Expr(Expr::RecordLiteral { fields, .. }) => {
                 assert_eq!(fields.len(), 2);
             }
-            other => panic!("expected record literal expr body, got {other:#?}"),
+            other => panic!("expected shape literal expr body, got {other:#?}"),
         },
         other => panic!("expected function, got {other:#?}"),
     }
@@ -1579,7 +1579,7 @@ def main() Unit {
         tuple.diagnostics
     );
 
-    let record = parse(
+    let shape = parse(
         r#"
 def main() Unit {
     mapper = let { name, age } -> name
@@ -1587,14 +1587,14 @@ def main() Unit {
 "#,
     );
     assert!(
-        record.diagnostics.iter().any(|diag| {
+        shape.diagnostics.iter().any(|diag| {
             diag.code == "invalid_lambda_params"
                 && diag
                     .message
                     .contains("lambda parameters cannot use 'let' destructuring")
         }),
         "{:#?}",
-        record.diagnostics
+        shape.diagnostics
     );
 }
 
@@ -1999,7 +1999,7 @@ def main() Unit {
 }
 
 #[test]
-fn parses_newline_continuation_after_operator_or_dot() {
+fn parses_newline_continuation_after_operator_or_postfix_dot() {
     let result = parse(
         r#"
 def main() Unit {
@@ -2007,6 +2007,12 @@ def main() Unit {
         2
     size Int = "haha".
         size()
+    leadingSize Int = "haha"
+        .size()
+    lifted = userOpt
+        .->profileOpt()
+        .->name()
+        .first
     user = { name: "Ada", age: 41 }
     updated = user :<
         { age: 42 }
@@ -2021,7 +2027,7 @@ def main() Unit {
 }
 
 #[test]
-fn rejects_newline_continuation_before_operator_or_dot() {
+fn rejects_newline_continuation_before_non_postfix_operators() {
     let leading_operator = parse(
         r#"
 def main() Unit {
@@ -2039,25 +2045,7 @@ def main() Unit {
         leading_operator.diagnostics
     );
 
-    let leading_dot = parse(
-        r#"
-def main() Unit {
-    value Str = "haha"
-    size Int = value
-        .size()
-}
-"#,
-    );
-    assert!(
-        leading_dot
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "expected_expression"),
-        "{:#?}",
-        leading_dot.diagnostics
-    );
-
-    let leading_record_update = parse(
+    let leading_shape_update = parse(
         r#"
 def main() Unit {
     user = { age: 41 }
@@ -2067,12 +2055,12 @@ def main() Unit {
 "#,
     );
     assert!(
-        leading_record_update
+        leading_shape_update
             .diagnostics
             .iter()
             .any(|diag| diag.code == "expected_expression"),
         "{:#?}",
-        leading_record_update.diagnostics
+        leading_shape_update.diagnostics
     );
 
     let leading_shape_merge = parse(

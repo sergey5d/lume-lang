@@ -6,6 +6,8 @@
 # Ada
 # Ada
 # Ada
+# Ada
+# Ada
 
 class UserBox {
     userValue User
@@ -29,6 +31,8 @@ class Profile {
     nameValue Name
 
     def primaryName() Name = this.nameValue
+
+    def name() Name = this.nameValue
 
     def nameOpt() Option[Name] = Some(this.nameValue)
 
@@ -74,6 +78,18 @@ def main() Unit {
     # Normal dots after .-> stay inside the current lifted segment.
     displayName Option[Str] = optionSource.->profile().primaryName().display()
     println(displayName.orPanic())
+
+    lineLeadingDisplayName Option[Str] = optionSource
+        .->profile()
+        .primaryName()
+        .display()
+    println(lineLeadingDisplayName.orPanic())
+
+    lineLeadingFirstName Option[Str] = optionSource
+        .->profileOpt()
+        .->name()
+        .first
+    println(lineLeadingFirstName.orPanic())
 
     # This becomes: userBoxOpt.flatMap(x -> x.user().profile().nameOpt()).map(y -> y.first)
     userBoxOpt Option[UserBox] = Some(UserBox { userValue: user })

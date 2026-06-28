@@ -215,7 +215,7 @@ pub struct TupleTypeField {
     pub span: Span,
 }
 
-/// One field inside a record type.
+/// One field inside an anonymous shape type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordTypeField {
     pub name: String,

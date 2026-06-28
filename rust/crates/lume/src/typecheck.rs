@@ -1615,8 +1615,8 @@ impl<'a> Checker<'a> {
                 };
                 if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
                     self.add_error(
-                        "invalid_record_update",
-                        "update requires a class, record, or anonymous record value",
+                        "invalid_shape_update",
+                        "shape update requires a class, shape, or anonymous shape value",
                         span,
                     );
                     for update in updates {
@@ -1626,7 +1626,7 @@ impl<'a> Checker<'a> {
                 }
                 if sig.kind == TypeKind::Class && sig.fields.iter().any(|field| field.hidden) {
                     self.add_error(
-                        "invalid_record_update",
+                        "invalid_shape_update",
                         "class update requires a class without private fields",
                         span,
                     );
@@ -1653,8 +1653,8 @@ impl<'a> Checker<'a> {
             }
             _ => {
                 self.add_error(
-                    "invalid_record_update",
-                    "update requires a class, record, or anonymous record value",
+                    "invalid_shape_update",
+                    "shape update requires a class, shape, or anonymous shape value",
                     span,
                 );
                 for update in updates {
@@ -1676,7 +1676,7 @@ impl<'a> Checker<'a> {
             };
             let Some((_, expected)) = fields.iter().find(|(field, _)| field == name) else {
                 self.add_error(
-                    "invalid_record_update",
+                    "invalid_shape_update",
                     format!("update field '{}' does not exist on left-hand shape", name),
                     update.span,
                 );
@@ -1688,7 +1688,7 @@ impl<'a> Checker<'a> {
                 &actual,
                 expected,
                 update.span,
-                "invalid_record_update",
+                "invalid_shape_update",
                 format!(
                     "update field '{}' expects '{}', got '{}'",
                     name,
@@ -1710,9 +1710,9 @@ impl<'a> Checker<'a> {
             Ty::Named(name, args) => {
                 let Some(sig) = self.lookup_any_type(name) else {
                     self.add_error(
-                        "invalid_record_merge",
+                        "invalid_shape_merge",
                         format!(
-                            "record merge operands must be record-shaped values; {side} operand has type '{}'",
+                            "shape merge operands must be shape values; {side} operand has type '{}'",
                             ty.describe()
                         ),
                         span,
@@ -1722,9 +1722,9 @@ impl<'a> Checker<'a> {
                 if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) || sig.fields.is_empty()
                 {
                     self.add_error(
-                        "invalid_record_merge",
+                        "invalid_shape_merge",
                         format!(
-                            "record merge operands must be record-shaped values; {side} operand has type '{}'",
+                            "shape merge operands must be shape values; {side} operand has type '{}'",
                             ty.describe()
                         ),
                         span,
@@ -1733,9 +1733,9 @@ impl<'a> Checker<'a> {
                 }
                 if sig.fields.iter().any(|field| field.hidden) {
                     self.add_error(
-                        "invalid_record_merge",
+                        "invalid_shape_merge",
                         format!(
-                            "record merge cannot use type '{}' because it has hidden fields",
+                            "shape merge cannot use type '{}' because it has hidden fields",
                             sig.name
                         ),
                         span,
@@ -1758,9 +1758,9 @@ impl<'a> Checker<'a> {
             Ty::Unknown => None,
             _ => {
                 self.add_error(
-                    "invalid_record_merge",
+                    "invalid_shape_merge",
                     format!(
-                        "record merge operands must be record-shaped values; {side} operand has type '{}'",
+                        "shape merge operands must be shape values; {side} operand has type '{}'",
                         ty.describe()
                     ),
                     span,
@@ -1787,8 +1787,8 @@ impl<'a> Checker<'a> {
             if left_names.contains(name.as_str()) {
                 has_overlap = true;
                 self.add_error(
-                    "invalid_record_merge",
-                    format!("record merge field '{}' exists on both operands", name),
+                    "invalid_shape_merge",
+                    format!("shape merge field '{}' exists on both operands", name),
                     span,
                 );
             }
@@ -2863,7 +2863,7 @@ impl<'a> Checker<'a> {
                 )
             }
             DestructureKind::Record => format!(
-                "brace destructuring requires a class or anonymous record value, got '{}'",
+                "brace destructuring requires a class or anonymous shape value, got '{}'",
                 ty.describe()
             ),
         };
@@ -8327,7 +8327,7 @@ impl Counter {
     }
 
     #[test]
-    fn rejects_parenthesized_anonymous_record_type_construction() {
+    fn rejects_parenthesized_anonymous_shape_type_construction() {
         let program = parse_inline(
             r#"
 class User {
@@ -8350,7 +8350,7 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_typed_anonymous_record_fields() {
+    fn allows_typed_anonymous_shape_fields() {
         let program = parse_inline(
             r#"
 def main() Unit {
@@ -8369,7 +8369,7 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_typed_anonymous_record_field_initializer_mismatch() {
+    fn rejects_typed_anonymous_shape_field_initializer_mismatch() {
         let program = parse_inline(
             r#"
 def main() Unit {
@@ -9048,7 +9048,7 @@ def main() Unit {
     }
 
     #[test]
-    fn materializes_bare_enum_case_in_expected_record_field() {
+    fn materializes_bare_enum_case_in_expected_shape_field() {
         let program = parse_inline(
             r#"
 class Node {
@@ -9329,7 +9329,7 @@ def main() Unit {
         let paths = [
             "examples/classes.lum",
             "examples/tuple_destructuring.lum",
-            "examples/record_destructuring.lum",
+            "examples/shape_destructuring.lum",
             "examples/class_destructuring.lum",
             "examples/enums.lum",
             "examples/enum_single_same_name.lum",

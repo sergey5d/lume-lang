@@ -1,6 +1,6 @@
 # SKIP
 #
-# Legacy class shape from before the class/record grammar switch, kept only as
+# Legacy class shape from before the class/shape grammar switch, kept only as
 # a comparison artifact.
 
 class Person with Named, Aged {

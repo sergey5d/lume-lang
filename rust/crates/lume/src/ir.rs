@@ -568,7 +568,7 @@ pub enum RValue {
     },
 }
 
-/// A named operand used for records, constructors, and enum payload fields.
+/// A named operand used for shapes, constructors, and enum payload fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NamedOperand {
     pub name: String,
@@ -643,7 +643,7 @@ impl Type {
     }
 }
 
-/// A named field inside a lowered record type.
+/// A named field inside a lowered anonymous shape type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NamedType {
     pub name: String,

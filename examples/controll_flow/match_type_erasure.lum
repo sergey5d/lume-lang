@@ -35,7 +35,7 @@ def describeClass(value Worker) {
     }
 }
 
-def describeRecord(value Amount) {
+def describeShape(value Amount) {
     match value {
         case _ Amount => println("class")
     }
@@ -57,7 +57,7 @@ def describeNamedWorker(value Named) {
 def main() Int {
     describeList([1, 2, 3])
     describeClass(Worker("Ada"))
-    describeRecord(Amount(7, "usd"))
+    describeShape(Amount(7, "usd"))
     describeInterface(Worker("Bob"))
     describeNamedWorker(Worker("Zoe"))
     0

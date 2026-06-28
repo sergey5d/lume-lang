@@ -2,6 +2,7 @@
 # sum 3
 # grouped 14
 # size 4
+# leading size 4
 # match 20
 # def 7
 # split 5
@@ -11,7 +12,7 @@
 # match stmt 9
 # update Ada 42
 # merge Ada Tampa
-# total 76
+# total 80
 
 def helper() Int =
     3 +
@@ -41,6 +42,9 @@ def main() Unit {
 
     size Int = "haha".
         size()
+
+    leadingSize Int = "haha"
+        .size()
 
     matched Int = match 2 {
         case 1 =>
@@ -86,6 +90,7 @@ def main() Unit {
         grouped +
         items.size() +
         size +
+        leadingSize +
         matched +
         helperValue +
         fromIf +
@@ -95,6 +100,7 @@ def main() Unit {
     println("sum", sum)
     println("grouped", grouped)
     println("size", size)
+    println("leading size", leadingSize)
     println("match", matched)
     println("def", helperValue)
     println("split", split)

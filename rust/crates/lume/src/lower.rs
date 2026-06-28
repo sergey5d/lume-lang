@@ -4235,7 +4235,7 @@ mod tests {
     }
 
     #[test]
-    fn lowers_local_functions_lambdas_and_record_updates() {
+    fn lowers_local_functions_lambdas_and_shape_updates() {
         let program = parse_inline(
             r#"
             class Amount {

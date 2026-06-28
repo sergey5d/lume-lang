@@ -1,8 +1,0 @@
-# FAIL_REGEX:
-# .*expected expression.*
-
-def main() Unit {
-    value Str = "haha"
-    size Int = value
-        .size()
-}

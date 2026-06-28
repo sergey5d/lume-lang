@@ -169,7 +169,7 @@ impl<'a> Parser<'a> {
             let mut fields = Vec::new();
             if !self.at(TokenKind::RBrace) {
                 loop {
-                    let (name, name_span) = self.expect_identifier("expected record field name")?;
+                    let (name, name_span) = self.expect_identifier("expected shape field name")?;
                     let ty = self.parse_type_ref()?;
                     let span = name_span.cover(ty.span());
                     fields.push(RecordTypeField { name, ty, span });
@@ -180,7 +180,7 @@ impl<'a> Parser<'a> {
                     self.skip_newlines();
                 }
             }
-            let end = self.consume(TokenKind::RBrace, "expected '}' after record type")?;
+            let end = self.consume(TokenKind::RBrace, "expected '}' after anonymous shape type")?;
             return Some(TypeRef::Record {
                 fields,
                 span: start.cover(end),

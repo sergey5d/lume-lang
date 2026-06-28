@@ -1907,8 +1907,8 @@ impl<'a> Resolver<'a> {
                     if let Some(name) = &field.name {
                         if let Some(previous) = seen.get(name) {
                             self.add_duplicate(
-                                "duplicate_record_field",
-                                format!("duplicate record field '{}'", name),
+                                "duplicate_shape_field",
+                                format!("duplicate shape field '{}'", name),
                                 field.span,
                                 *previous,
                             );
@@ -2115,8 +2115,8 @@ impl<'a> Resolver<'a> {
                 for RecordTypeField { name, ty, span } in fields {
                     if let Some(previous) = seen.get(name) {
                         self.add_duplicate(
-                            "duplicate_record_field",
-                            format!("duplicate record field '{}'", name),
+                            "duplicate_shape_field",
+                            format!("duplicate shape field '{}'", name),
                             *span,
                             *previous,
                         );

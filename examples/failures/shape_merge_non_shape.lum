@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*record merge operands must be record-shaped values.*
+# .*shape merge operands must be shape values.*
 
 def main() Unit {
     items = [1, 2]

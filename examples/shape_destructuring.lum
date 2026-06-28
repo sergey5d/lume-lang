@@ -1,0 +1,41 @@
+# EXPECT:
+# class 7 world
+# class inferred 10 infer
+# class mixed 11 partial
+# class pair 22 shape-pair
+# class skip only visible
+# class skip 15 kept
+# 0
+
+class Pair {
+    left Int
+    right Str
+}
+
+class Triple {
+    first Int
+    middle Str
+    last Str
+}
+
+def main() Int {
+    let { left Int as c, right Str as d } = Pair(7, "world")
+    println("class", c, d)
+
+    let { left as inferredShapeLeft, right as inferredShapeRight } = Pair(10, "infer")
+    println("class inferred", inferredShapeLeft, inferredShapeRight)
+
+    let { left Int as mixedShapeLeft, right as mixedShapeRight } = Pair(11, "partial")
+    println("class mixed", mixedShapeLeft, mixedShapeRight)
+
+    let { left as shapePairLeft, right as shapePairRight } = Pair(22, "shape-pair")
+    println("class pair", shapePairLeft, shapePairRight)
+
+    let { right as skippedOnlyShapeValue } = Pair(23, "visible")
+    println("class skip only", skippedOnlyShapeValue)
+
+    let { first Int as skippedShapeLeft, last Str as skippedShapeRight } = Triple(15, "drop", "kept")
+    println("class skip", skippedShapeLeft, skippedShapeRight)
+
+    0
+}

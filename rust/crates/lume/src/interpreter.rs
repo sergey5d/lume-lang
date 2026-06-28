@@ -871,7 +871,7 @@ impl Value {
             Value::Record(fields) => {
                 let fields = fields.borrow();
                 format!(
-                    "record{{{}}}",
+                    "shape{{{}}}",
                     fields
                         .iter()
                         .map(|(name, value)| format!("{name}={}", value.render()))
@@ -2990,7 +2990,7 @@ impl<'a> Interpreter<'a> {
                     return Err(self.runtime_error(
                         span,
                         format!(
-                            "brace-based construction for '{}' expects named record fields",
+                            "brace-based construction for '{}' expects named shape fields",
                             type_name
                         ),
                     ));
@@ -3199,7 +3199,7 @@ impl<'a> Interpreter<'a> {
             }
             _ => Err(self.runtime_error(
                 span,
-                "construct is only implemented for named and record types right now",
+                "construct is only implemented for named and shape types right now",
             )),
         }
     }
@@ -3253,7 +3253,7 @@ impl<'a> Interpreter<'a> {
                         *slot = value;
                     } else {
                         return Err(
-                            self.runtime_error(span, format!("record has no field '{}'", name))
+                            self.runtime_error(span, format!("shape has no field '{}'", name))
                         );
                     }
                 }
@@ -3302,7 +3302,7 @@ impl<'a> Interpreter<'a> {
             if merged.iter().any(|(field, _)| field == &name) {
                 return Err(self.runtime_error(
                     span,
-                    format!("record merge field '{}' exists on both operands", name),
+                    format!("shape merge field '{}' exists on both operands", name),
                 ));
             }
             merged.push((name, value));
@@ -3324,7 +3324,7 @@ impl<'a> Interpreter<'a> {
                     return Err(self.runtime_error(
                         span,
                         format!(
-                            "record merge operands must be record-shaped values; {side} operand is {}",
+                            "shape merge operands must be shape values; {side} operand is {}",
                             instance.type_name
                         ),
                     ));
@@ -3339,7 +3339,7 @@ impl<'a> Interpreter<'a> {
             other => Err(self.runtime_error(
                 span,
                 format!(
-                    "record merge operands must be record-shaped values; {side} operand is {}",
+                    "shape merge operands must be shape values; {side} operand is {}",
                     other.render()
                 ),
             )),
@@ -4090,7 +4090,7 @@ impl<'a> Interpreter<'a> {
                 })
             }
             Value::Record(fields) => lookup_named_field(&fields.borrow(), name)
-                .ok_or_else(|| self.runtime_error(span, format!("record has no field '{}'", name))),
+                .ok_or_else(|| self.runtime_error(span, format!("shape has no field '{}'", name))),
             Value::Tuple(items) => tuple_member(&items, name)
                 .ok_or_else(|| self.runtime_error(span, format!("tuple has no member '{}'", name))),
             _ => Err(self.runtime_error(
@@ -4157,7 +4157,7 @@ impl<'a> Interpreter<'a> {
             }
             Value::Record(fields) => set_named_field(&mut fields.borrow_mut(), name, value)
                 .ok_or_else(|| {
-                    self.runtime_error(span, format!("record field '{}' does not exist", name))
+                    self.runtime_error(span, format!("shape field '{}' does not exist", name))
                 }),
             _ => Err(self.runtime_error(
                 span,
@@ -4605,7 +4605,7 @@ impl<'a> Interpreter<'a> {
                                         field.name.clone(),
                                         self.coerce_value_to_type(
                                             lookup_named_field(&values, &field.name)
-                                                .expect("record field lookup"),
+                                                .expect("shape field lookup"),
                                             &field.ty,
                                         ),
                                     )
@@ -6480,7 +6480,7 @@ $name
     }
 
     #[test]
-    fn runs_match_patterns_for_records_classes_and_partial_enums() {
+    fn runs_match_patterns_for_shapes_classes_and_partial_enums() {
         let program = lower_inline(
             r#"
             class Amount {
@@ -6528,7 +6528,7 @@ $name
     }
 
     #[test]
-    fn runs_global_record_updates_through_synthetic_initializer() {
+    fn runs_global_shape_updates_through_synthetic_initializer() {
         let program = lower_inline(
             r#"
             class Amount {

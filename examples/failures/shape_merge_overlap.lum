@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*record merge field 'name' exists on both operands.*
+# .*shape merge field 'name' exists on both operands.*
 
 def main() Unit {
     left = { name: "Ada", age: 42 }

@@ -544,7 +544,7 @@ impl<'a> Parser<'a> {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let entry = if self.at(TokenKind::Identifier) {
                 let checkpoint = self.checkpoint();
-                let (name, name_span) = self.expect_identifier("expected record field name")?;
+                let (name, name_span) = self.expect_identifier("expected shape field name")?;
                 if self.match_token(TokenKind::Colon) {
                     let value = self.parse_expr()?;
                     RecordEntry {
@@ -610,7 +610,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
         }
-        let end = self.consume(TokenKind::RBrace, "expected '}' after record literal")?;
+        let end = self.consume(TokenKind::RBrace, "expected '}' after anonymous shape")?;
         let has_named = entries.iter().any(|entry| entry.name.is_some());
         let mut fields = Vec::new();
         if has_named {
@@ -626,7 +626,7 @@ impl<'a> Parser<'a> {
                 }
                 self.diagnostics.push(Diagnostic::error(
                     "unexpected_token",
-                    "cannot mix named and positional record fields",
+                    "cannot mix named and positional shape fields",
                     entry.span,
                 ));
                 return None;
@@ -732,10 +732,10 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let mut updates = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let (name, name_span) = self.expect_identifier("expected record field name")?;
+            let (name, name_span) = self.expect_identifier("expected shape field name")?;
             self.consume(
                 TokenKind::Colon,
-                "expected ':' after record update field name",
+                "expected ':' after shape update field name",
             )?;
             let value = self.parse_expr()?;
             updates.push(CallArg {
@@ -750,7 +750,7 @@ impl<'a> Parser<'a> {
             }
             self.skip_newlines();
         }
-        let end = self.consume(TokenKind::RBrace, "expected '}' after record update")?;
+        let end = self.consume(TokenKind::RBrace, "expected '}' after shape update")?;
         Some((updates, start.cover(end)))
     }
 
@@ -1020,13 +1020,7 @@ impl<'a> Parser<'a> {
         let mut chain_segment: Option<(String, Expr)> = None;
         let mut chain_segments = Vec::new();
         loop {
-            if self.at(TokenKind::Newline)
-                && self.at_next(TokenKind::Dot)
-                && self
-                    .tokens
-                    .get(self.index + 2)
-                    .is_some_and(|token| token.kind == TokenKind::Arrow)
-            {
+            if self.at(TokenKind::Newline) && self.at_next(TokenKind::Dot) {
                 self.advance();
                 continue;
             }
@@ -1357,19 +1351,9 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Class) => {
                 let _ = self.consume_keyword(Keyword::Class, "expected 'class'")?;
                 let message = if self.at(TokenKind::LBrace) {
-                    "anonymous record literals now use '{ ... }'; 'class { ... }' was removed"
+                    "anonymous shape literals now use '{ ... }'; 'class { ... }' was removed"
                 } else {
-                    "anonymous record literals use '{ ... }'; 'class(...)' is not supported"
-                };
-                self.error_at_current("unexpected_token", message);
-                None
-            }
-            TokenKind::Keyword(Keyword::Record) => {
-                let _ = self.consume_keyword(Keyword::Record, "expected 'record'")?;
-                let message = if self.at(TokenKind::LBrace) {
-                    "anonymous record literals now use '{ ... }'; 'record { ... }' was removed"
-                } else {
-                    "anonymous record literals use '{ ... }'; 'record(...)' is not supported"
+                    "anonymous shape literals use '{ ... }'; 'class(...)' is not supported"
                 };
                 self.error_at_current("unexpected_token", message);
                 None

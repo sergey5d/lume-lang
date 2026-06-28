@@ -101,7 +101,7 @@
         },
         {
           "name": "keyword.declaration.lume",
-          "match": "\\b(?:def|new|annotation|class|shape|record|enum|interface|single|impl|use|module|with|hidden|public|case|var|vararg|let)\\b"
+          "match": "\\b(?:def|new|annotation|class|shape|enum|interface|single|impl|use|module|with|hidden|public|case|var|vararg|let)\\b"
         }
       ]
     },
@@ -204,7 +204,7 @@
           "match": "<-|:=|="
         },
         {
-          "name": "keyword.operator.record.lume",
+          "name": "keyword.operator.shape.lume",
           "match": ":<|:\\+"
         },
         {

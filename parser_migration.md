@@ -160,12 +160,10 @@ Move:
 - `parse_for_yield_expr_after_start`
 - `parse_for_binding_block`
 - `parse_yield_body_block`
-- `parse_record_literal_expr`
-- `parse_brace_record_literal_expr`
-- `finish_brace_record_literal_expr`
+- shape literal expression parsing helpers
 - `is_anonymous_interface_expr_start`
 - `parse_anonymous_interface_expr`
-- `parse_record_update_args`
+- shape update argument parsing helper
 - `parse_then_stmt_body_block`
 - `parse_block_or_inline_stmt_body`
 - `parse_then_expr_body_block`
@@ -184,7 +182,7 @@ Move:
 - `parse_postfix_expr`
 - `parse_call_args`
 - `parse_primary_expr`
-- `is_bare_record_call_arg_start`
+- bare shape call-argument lookahead helper
 - `parse_list_literal`
 - `parse_group_or_tuple_expr`
 - `parse_expr_list`

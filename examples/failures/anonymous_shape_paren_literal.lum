@@ -1,0 +1,6 @@
+# FAIL:
+# anonymous shape literals use '{ ... }'; 'class(...)' is not supported
+
+def main() Unit {
+    _ = class(1, "x")
+}

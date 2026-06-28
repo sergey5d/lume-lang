@@ -120,13 +120,6 @@ impl<'a> Parser<'a> {
                 let decl = self.parse_type_decl(annotations, visibility)?;
                 Some(Item::Type(decl))
             }
-            TokenKind::Keyword(Keyword::Record) => {
-                self.error_at_current(
-                    "unexpected_record_decl",
-                    "named 'record' declarations were removed; use 'shape' for data-only named shapes or 'class' for general types",
-                );
-                None
-            }
             TokenKind::Keyword(Keyword::Impl) => {
                 if !annotations.is_empty() {
                     self.error_at_current(

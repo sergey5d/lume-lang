@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# invalid_record_update at .*: class update requires a class without private fields
+# invalid_shape_update at .*: class update requires a class without private fields
 
 class SecretAmount {
     amount Int

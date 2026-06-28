@@ -91,7 +91,7 @@ Rules:
 - all non-final lifted segments call `flatMap`
 - the final lifted segment calls `map`
 - the container families are not converted implicitly; `Option` chains stay `Option`, `Result` chains stay `Result`, and `Either` chains stay `Either`
-- unlike ordinary `.`, `.->` may start the next line inside an active expression
+- `.` and `.->` may start the next line inside an active expression
 
 ## Runtime Metadata
 
@@ -1853,7 +1853,7 @@ Current operator overloading constraints:
 Newline continuation:
 
 - Ordinary expressions are no longer broadly newline-insensitive.
-- A newline continues the current expression only when the previous line clearly ends in a continuation form.
+- A newline continues the current expression only when the previous line clearly ends in a continuation form, except postfix chains may continue when the next line starts with `.` or `.->`.
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
   - bitwise operators: `|`, `&`
@@ -1862,7 +1862,7 @@ Newline continuation:
   - runtime type check keyword: `is`
   - match arrow: `=>`
   - separators / chaining markers: `,`, `.`
-- Delimited forms allow layout after opening delimiters and after commas, but they do not make leading operators valid by themselves.
+- Delimited forms allow layout after opening delimiters and after commas, but they do not make leading binary/update operators valid by themselves.
 - Binding/callable `=` may start its expression on the same line or the next indented line.
 - Callable bodies have two forms:
   - `def name(...) { ... }` for block bodies
@@ -1907,17 +1907,19 @@ if flag {
 }
 ```
 
-- For dot chaining, the rule is stricter than Scala:
-  - allow newline after `.`
-  - do not rely on newline before `.`
+- Dot chaining allows both trailing-dot and line-leading postfix styles:
 
 ```txt
 size = "hello".
     size()
 
-# invalid
 size = "hello"
     .size()
+
+name = userOpt
+    .->profileOpt()
+    .->name()
+    .first
 ```
 
 ## Visibility

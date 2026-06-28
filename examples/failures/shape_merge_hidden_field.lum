@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*record merge cannot use type 'SecretName' because it has hidden fields.*
+# .*shape merge cannot use type 'SecretName' because it has hidden fields.*
 
 class SecretName {
     name Str
