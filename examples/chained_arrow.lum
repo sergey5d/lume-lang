@@ -4,6 +4,8 @@
 # Ada
 # Ada
 # Ada
+# Ada
+# Ada
 
 class UserBox {
     userValue User
@@ -77,4 +79,11 @@ def main() Unit {
     userBoxOpt Option[UserBox] = Some(UserBox { userValue: user })
     firstName Option[Str] = userBoxOpt.->user().profile().nameOpt().->first
     println(firstName.orPanic())
+
+    profileSource Option[Profile] = Some(user.profile())
+    let Some(boundName) = profileSource.->nameOpt().->first else return ()
+    println(boundName)
+
+    let extractedName Str <- profileSource.->nameOpt().->first else return ()
+    println(extractedName)
 }
