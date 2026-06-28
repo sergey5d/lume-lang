@@ -96,18 +96,7 @@ Open question:
 The `impl` split reads better for medium and large types, but tiny examples can
 feel a little heavier.
 
-### 2. Single-Line Body Forms
-
-Current direction:
-
-- brace-delimited `if` is preferred
-- `for`, `match`, and `partial` are block-only
-- same-line `else expr` and `yield expr` are valid
-- if a body moves to the next line, use `{ ... }`
-
-This keeps shorthand useful without making newlines do too much hidden work.
-
-### 3. Constructor Surface
+### 2. Constructor Surface
 
 Current direction:
 
@@ -148,30 +137,7 @@ Open questions:
 - do we need more explicit syntax for hiding generated construction paths?
 - should anonymous-shape-to-class conversion use `anon as User` later?
 
-### 4. Pattern-Lambda Sugar
-
-Current explicit style:
-
-```txt
-values.map(value -> match value {
-    case Some(x) => x + 1
-    case None => 0
-})
-```
-
-Possible future shorthand:
-
-```txt
-values.map(match {
-    case Some(x) => x + 1
-    case None => 0
-})
-```
-
-This should stay future-only until there is a clear readability win. It is
-contextual magic, and the explicit lambda is already understandable.
-
-### 5. Symbolic Operators
+### 3. Symbolic Operators
 
 Operator overloading exists, but it should stay conservative.
 

@@ -752,6 +752,9 @@ def add(left Int, right Int) Int {
 }
 ```
 
+Callable block bodies omit `=`. A block expression is valid in ordinary
+expression positions, but not directly after a callable-body `=`.
+
 Generic function:
 
 ```txt
@@ -1021,6 +1024,7 @@ Rules:
 
 - braced blocks may appear as standalone statements or as expressions
 - block expressions evaluate to the value of their last statement
+- block expressions are not valid directly after callable-body `=`; write `def name(...) { ... }` for a callable block body
 - if you want a block value, the last statement must be value-producing
 - value-producing tail forms currently include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
@@ -1471,8 +1475,8 @@ and returns early with the original failure value when the source is empty / err
 `try` is only valid when the enclosing callable returns a compatible propagation
 type:
 - `Option[T]` may propagate from any `Option[...]` return type
-- `Result[T, E]` may propagate from `Result[..., E2]` when `E` is assignable to `E2`
-- `Either[L, R]` may propagate from `Either[L2, ...]` when `L` is assignable to `L2`
+- enclosing `Result[T, E]` may propagate from `Result[..., E2]` when `E2` is assignable to `E`
+- enclosing `Either[L, R]` may propagate from `Either[L2, ...]` when `L2` is assignable to `L`
 
 The success type may differ; the propagated failure side must still be compatible.
 
@@ -1906,7 +1910,7 @@ Newline continuation:
 - Callable bodies have two forms:
   - `def name(...) { ... }` for block bodies
   - `def name(...) = expr` for expression bodies
-  - `def name(...) = { ... }` is invalid when `{ ... }` is a statement block; omit `=`
+  - `def name(...) = { ... }` is invalid even though blocks are expressions elsewhere; callable block bodies omit `=`
 - Inline-body introducers such as `else` and `yield` may take a same-line body without braces; if that body moves to the next line, a `{ ... }` block is required.
 - So this is valid:
 

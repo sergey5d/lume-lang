@@ -123,8 +123,8 @@ Clarification on "failure conversion":
 Current behavior:
 - same-family propagation with a different success type is supported
 - `Option[...]` can propagate only into `Option[...]`
-- `Result[..., E]` can propagate only into `Result[..., E2]` when `E` is assignable to `E2`
-- `Either[L, ...]` can propagate only into `Either[L2, ...]` when `L` is assignable to `L2`
+- `Result[..., SourceE]` can propagate only into `Result[..., TargetE]` when `SourceE` is assignable to `TargetE`
+- `Either[SourceL, ...]` can propagate only into `Either[TargetL, ...]` when `SourceL` is assignable to `TargetL`
 - wrapper-style error remapping during `try` is still not implemented
 
 ### 9. Smarter Type Narrowing
