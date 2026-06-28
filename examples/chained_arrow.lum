@@ -1,0 +1,80 @@
+# EXPECT:
+# Ada
+# Ada
+# Ada
+# Ada
+# Ada
+
+class UserBox {
+    userValue User
+
+    def user() User = this.userValue
+}
+
+class User {
+    profileValue Profile
+
+    def profile() Profile = this.profileValue
+
+    def profileOpt() Option[Profile] = Some(this.profileValue)
+
+    def profileResult() Result[Profile, Int] = Ok(this.profileValue)
+
+    def profileEither() Either[Str, Profile] = Right(this.profileValue)
+}
+
+class Profile {
+    nameValue Name
+
+    def primaryName() Name = this.nameValue
+
+    def nameOpt() Option[Name] = Some(this.nameValue)
+
+    def nameResult() Result[Name, Int] = Ok(this.nameValue)
+
+    def nameEither() Either[Str, Name] = Right(this.nameValue)
+}
+
+class Name {
+    first Str
+
+    def display() Str = this.first
+}
+
+def main() Unit {
+    user = User {
+        profileValue: Profile {
+            nameValue: Name { first: "Ada" }
+        }
+    }
+
+    optionSource Option[User] = Some(user)
+    optionName Option[Str] = optionSource
+        .->profileOpt()
+        .->nameOpt()
+        .->first
+    println(optionName.orPanic())
+
+    resultSource Result[User, Int] = Ok(user)
+    resultName Result[Str, Int] = resultSource
+        .->profileResult()
+        .->nameResult()
+        .->first
+    println(resultName.orPanic())
+
+    eitherSource Either[Str, User] = Right(user)
+    eitherName Either[Str, Str] = eitherSource
+        .->profileEither()
+        .->nameEither()
+        .->first
+    println(eitherName.expectRight())
+
+    # Normal dots after .-> stay inside the current lifted segment.
+    displayName Option[Str] = optionSource.->profile().primaryName().display()
+    println(displayName.orPanic())
+
+    # This becomes: userBoxOpt.flatMap(x -> x.user().profile().nameOpt()).map(y -> y.first)
+    userBoxOpt Option[UserBox] = Some(UserBox { userValue: user })
+    firstName Option[Str] = userBoxOpt.->user().profile().nameOpt().->first
+    println(firstName.orPanic())
+}

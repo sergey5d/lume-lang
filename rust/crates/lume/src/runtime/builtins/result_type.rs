@@ -35,6 +35,15 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(5, "getOr", vec![ir::Type::Unknown], result_get_or),
             builtin_method(6, "isSuccess", Vec::new(), result_is_ok),
             builtin_method(7, "unwrap", Vec::new(), result_or_panic),
+            builtin_method(
+                8,
+                "flatMap",
+                vec![ir::Type::Function {
+                    params: Vec::new(),
+                    ret: Box::new(ir::Type::Unknown),
+                }],
+                result_flat_map,
+            ),
         ],
         enum_cases: vec![
             RuntimeEnumCase {
@@ -115,6 +124,27 @@ fn result_map(
             span,
         )?;
         Ok(interpreter.result_ok(mapped))
+    } else {
+        Ok(receiver)
+    }
+}
+
+fn result_flat_map(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let [callback] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Result.flatMap expects 1 argument"));
+    };
+    let (case_id, first_field) = result_case(&receiver);
+    if case_id == OK_CASE {
+        interpreter.invoke_value(
+            callback.clone(),
+            vec![first_field.expect("Result.Ok payload")],
+            span,
+        )
     } else {
         Ok(receiver)
     }

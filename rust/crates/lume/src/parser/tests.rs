@@ -1777,6 +1777,36 @@ def make() Unit = values.map { (left, right) -> left + right }
 }
 
 #[test]
+fn parses_arrow_chain_as_flatmap_then_map_calls() {
+    fn call_method_name(expr: &Expr) -> &str {
+        let Expr::Call { callee, .. } = expr else {
+            panic!("expected call, got {expr:#?}");
+        };
+        let Expr::Member { name, .. } = callee.as_ref() else {
+            panic!("expected method callee, got {callee:#?}");
+        };
+        name
+    }
+
+    fn call_receiver(expr: &Expr) -> &Expr {
+        let Expr::Call { callee, .. } = expr else {
+            panic!("expected call, got {expr:#?}");
+        };
+        let Expr::Member { receiver, .. } = callee.as_ref() else {
+            panic!("expected method callee, got {callee:#?}");
+        };
+        receiver
+    }
+
+    let expr = parse_expr_only(r#"source.->profileOpt().->nameOpt().->first"#);
+    assert_eq!(call_method_name(&expr), "map");
+    let second = call_receiver(&expr);
+    assert_eq!(call_method_name(second), "flatMap");
+    let first = call_receiver(second);
+    assert_eq!(call_method_name(first), "flatMap");
+}
+
+#[test]
 fn parses_trailing_block_lambda_when_parameter_list_starts_on_opening_line() {
     let result = parse(
         r#"

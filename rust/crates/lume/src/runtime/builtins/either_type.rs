@@ -35,6 +35,15 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(5, "getOr", vec![ir::Type::Unknown], either_get_or),
             builtin_method(6, "isSuccess", Vec::new(), either_is_right),
             builtin_method(7, "unwrap", Vec::new(), either_expect_right),
+            builtin_method(
+                8,
+                "flatMap",
+                vec![ir::Type::Function {
+                    params: Vec::new(),
+                    ret: Box::new(ir::Type::Unknown),
+                }],
+                either_flat_map,
+            ),
         ],
         enum_cases: vec![
             RuntimeEnumCase {
@@ -115,6 +124,27 @@ fn either_map(
             span,
         )?;
         Ok(interpreter.either_right(mapped))
+    } else {
+        Ok(receiver)
+    }
+}
+
+fn either_flat_map(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let [callback] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Either.flatMap expects 1 argument"));
+    };
+    let (case_id, first_field) = either_case(&receiver);
+    if case_id == RIGHT_CASE {
+        interpreter.invoke_value(
+            callback.clone(),
+            vec![first_field.expect("Either.Right payload")],
+            span,
+        )
     } else {
         Ok(receiver)
     }

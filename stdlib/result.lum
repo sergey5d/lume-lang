@@ -29,6 +29,11 @@ enum Result[T, E] {
         case Err(error) => Err(error)
     }
 
+    def flatMap[X](f (T) -> Result[X, E]) Result[X, E] = match this {
+        case Ok(value) => f(value)
+        case Err(error) => Err(error)
+    }
+
     case Ok {
         value T
     }

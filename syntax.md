@@ -51,6 +51,48 @@ Function type parameter lists must be parenthesized. Use `(Int) -> Int`,
 not `Int -> Int`. Lambda expressions still use ordinary arrow syntax, for
 example `value -> value + 1`.
 
+## Lifted Chaining
+
+Use `.->` to chain through values that provide `map` and `flatMap`, such as
+`Option`, `Result`, and `Either`.
+
+```txt
+name = userOpt
+    .->profileOpt()
+    .->nameOpt()
+    .->first
+```
+
+The last `.->` segment is lowered to `map`; earlier `.->` segments are lowered
+to `flatMap`:
+
+```txt
+source.->a().b().->c
+```
+
+is equivalent to:
+
+```txt
+source.flatMap(x -> x.a().b()).map(y -> y.c)
+```
+
+Normal `.` calls can be mixed into a lifted segment:
+
+```txt
+displayName = userOpt.->profile().primaryName().display()
+
+firstName = userBoxOpt.->user().profile().nameOpt().->first
+```
+
+Rules:
+
+- `.->member` starts a lifted chain segment
+- normal `.member` calls after `.->` stay inside the current segment until the next `.->`
+- all non-final lifted segments call `flatMap`
+- the final lifted segment calls `map`
+- the container families are not converted implicitly; `Option` chains stay `Option`, `Result` chains stay `Result`, and `Either` chains stay `Either`
+- unlike ordinary `.`, `.->` may start the next line inside an active expression
+
 ## Runtime Metadata
 
 Runtime metadata is exposed through the `Type` hierarchy declared in

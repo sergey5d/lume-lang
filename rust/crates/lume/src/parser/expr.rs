@@ -1,6 +1,11 @@
 use super::stmt::ForClauseTarget;
 use super::*;
 
+struct ChainSegment {
+    param: String,
+    body: Expr,
+}
+
 impl<'a> Parser<'a> {
     fn wrap_if_without_else(&self, start: Span, condition: Expr, then_block: Block) -> Expr {
         let span = start.cover(then_block.span);
@@ -1012,42 +1017,73 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_postfix_expr(&mut self) -> Option<Expr> {
         let mut expr = self.parse_primary_expr()?;
+        let mut chain_segment: Option<(String, Expr)> = None;
+        let mut chain_segments = Vec::new();
         loop {
+            if self.at(TokenKind::Newline)
+                && self.at_next(TokenKind::Dot)
+                && self
+                    .tokens
+                    .get(self.index + 2)
+                    .is_some_and(|token| token.kind == TokenKind::Arrow)
+            {
+                self.advance();
+                continue;
+            }
             if self.match_token(TokenKind::LParen) {
-                let start = expr.span();
                 let args = self.parse_call_args()?;
                 let end = self.consume(TokenKind::RParen, "expected ')' after arguments")?;
-                expr = Expr::Call {
-                    callee: Box::new(expr),
-                    args,
-                    uses_brace_syntax: false,
-                    span: start.cover(end),
-                };
+                Self::apply_postfix(&mut expr, &mut chain_segment, |target| {
+                    let start = target.span();
+                    Expr::Call {
+                        callee: Box::new(target),
+                        args,
+                        uses_brace_syntax: false,
+                        span: start.cover(end),
+                    }
+                });
                 continue;
             }
             if self.match_token(TokenKind::Dot) {
+                if self.match_token(TokenKind::Arrow) {
+                    if let Some((param, body)) = chain_segment.take() {
+                        chain_segments.push(ChainSegment { param, body });
+                    }
+                    let (name, end) = self.parse_member_name("expected member name after '.->'")?;
+                    let param = format!("__lume_chain{}", chain_segments.len());
+                    let receiver = Expr::Identifier {
+                        name: param.clone(),
+                        span: end,
+                    };
+                    let start = receiver.span();
+                    chain_segment = Some((
+                        param,
+                        Expr::Member {
+                            receiver: Box::new(receiver),
+                            name,
+                            span: start.cover(end),
+                        },
+                    ));
+                    continue;
+                }
                 self.skip_newlines();
-                let (name, end) = if self.at(TokenKind::Keyword(Keyword::Annotation))
-                    || self.at(TokenKind::Keyword(Keyword::Expect))
-                    || self.at(TokenKind::Keyword(Keyword::Case))
-                {
-                    let token = self.current().clone();
-                    self.advance();
-                    (token.lexeme, token.span)
-                } else {
-                    self.expect_identifier("expected member name after '.'")?
-                };
-                let start = expr.span();
-                expr = Expr::Member {
-                    receiver: Box::new(expr),
-                    name,
-                    span: start.cover(end),
-                };
+                let (name, end) = self.parse_member_name("expected member name after '.'")?;
+                Self::apply_postfix(&mut expr, &mut chain_segment, |target| {
+                    let start = target.span();
+                    Expr::Member {
+                        receiver: Box::new(target),
+                        name,
+                        span: start.cover(end),
+                    }
+                });
                 continue;
             }
             if self.match_token(TokenKind::LBracket) {
-                let start = expr.span();
-                if matches!(expr, Expr::Identifier { ref name, .. } if name == "typeOf") {
+                let active = Self::active_postfix_expr(&expr, &chain_segment);
+                let start = active.span();
+                if chain_segment.is_none()
+                    && matches!(expr, Expr::Identifier { ref name, .. } if name == "typeOf")
+                {
                     let ty = self.parse_type_ref()?;
                     let end =
                         self.consume(TokenKind::RBracket, "expected ']' after typeOf type")?;
@@ -1059,37 +1095,38 @@ impl<'a> Parser<'a> {
                 }
                 let index = self.parse_expr()?;
                 let end = self.consume(TokenKind::RBracket, "expected ']' after index")?;
-                expr = Expr::Index {
-                    receiver: Box::new(expr),
+                Self::apply_postfix(&mut expr, &mut chain_segment, |target| Expr::Index {
+                    receiver: Box::new(target),
                     index: Box::new(index),
                     span: start.cover(end),
-                };
+                });
                 continue;
             }
             if self.match_token(TokenKind::ColonLess) {
-                let start = expr.span();
+                let start = Self::active_postfix_expr(&expr, &chain_segment).span();
                 self.skip_newlines();
                 let (updates, end) = self.parse_record_update_args()?;
-                expr = Expr::RecordUpdate {
-                    receiver: Box::new(expr),
+                Self::apply_postfix(&mut expr, &mut chain_segment, |target| Expr::RecordUpdate {
+                    receiver: Box::new(target),
                     updates,
                     span: start.cover(end),
-                };
+                });
                 continue;
             }
             if self.match_keyword(Keyword::Match) {
-                let start = expr.span();
+                let start = Self::active_postfix_expr(&expr, &chain_segment).span();
                 let (cases, end) = self.parse_match_cases()?;
-                expr = Expr::Match {
+                Self::apply_postfix(&mut expr, &mut chain_segment, |target| Expr::Match {
                     partial: false,
-                    value: Box::new(expr),
+                    value: Box::new(target),
                     cases,
                     span: start.cover(end),
-                };
+                });
                 continue;
             }
             if self.allow_trailing_block_call && self.at(TokenKind::LBrace) {
-                let start = expr.span();
+                let active = Self::active_postfix_expr(&expr, &chain_segment);
+                let start = active.span();
                 let open_span = self.current_span();
                 let checkpoint = self.checkpoint();
                 let mut lambda_probe = self.checkpoint();
@@ -1103,7 +1140,7 @@ impl<'a> Parser<'a> {
                 self.restore(checkpoint);
                 let arg = if !prefers_block
                     && (self.looks_like_brace_record_literal(true)
-                        || Self::is_constructor_like_expr(&expr))
+                        || Self::is_constructor_like_expr(active))
                 {
                     self.parse_brace_record_literal_expr()?
                 } else {
@@ -1114,22 +1151,98 @@ impl<'a> Parser<'a> {
                         body: block,
                     }
                 };
-                expr = Expr::Call {
-                    callee: Box::new(expr),
+                let arg_span = arg.span();
+                Self::apply_postfix(&mut expr, &mut chain_segment, |target| Expr::Call {
+                    callee: Box::new(target),
                     args: vec![CallArg {
                         name: None,
                         ty: None,
-                        span: arg.span(),
-                        value: arg.clone(),
+                        span: arg_span,
+                        value: arg,
                     }],
                     uses_brace_syntax: true,
-                    span: start.cover(arg.span()),
-                };
+                    span: start.cover(arg_span),
+                });
                 continue;
             }
             break;
         }
-        Some(expr)
+        if let Some((param, body)) = chain_segment.take() {
+            chain_segments.push(ChainSegment { param, body });
+        }
+        Some(Self::finish_chain_expr(expr, chain_segments))
+    }
+
+    fn parse_member_name(&mut self, message: &'static str) -> Option<(String, Span)> {
+        if self.at(TokenKind::Keyword(Keyword::Annotation))
+            || self.at(TokenKind::Keyword(Keyword::Expect))
+            || self.at(TokenKind::Keyword(Keyword::Case))
+        {
+            let token = self.current().clone();
+            self.advance();
+            Some((token.lexeme, token.span))
+        } else {
+            self.expect_identifier(message)
+        }
+    }
+
+    fn active_postfix_expr<'b>(
+        expr: &'b Expr,
+        chain_segment: &'b Option<(String, Expr)>,
+    ) -> &'b Expr {
+        chain_segment.as_ref().map(|(_, body)| body).unwrap_or(expr)
+    }
+
+    fn apply_postfix<F>(expr: &mut Expr, chain_segment: &mut Option<(String, Expr)>, apply: F)
+    where
+        F: FnOnce(Expr) -> Expr,
+    {
+        if let Some((_, body)) = chain_segment.as_mut() {
+            let placeholder = Expr::Unit { span: body.span() };
+            let target = std::mem::replace(body, placeholder);
+            *body = apply(target);
+        } else {
+            let placeholder = Expr::Unit { span: expr.span() };
+            let target = std::mem::replace(expr, placeholder);
+            *expr = apply(target);
+        }
+    }
+
+    fn finish_chain_expr(mut expr: Expr, segments: Vec<ChainSegment>) -> Expr {
+        let total = segments.len();
+        for (index, segment) in segments.into_iter().enumerate() {
+            let method = if index + 1 == total { "map" } else { "flatMap" };
+            let receiver_span = expr.span();
+            let body_span = segment.body.span();
+            let callee = Expr::Member {
+                receiver: Box::new(expr),
+                name: method.to_string(),
+                span: receiver_span.cover(body_span),
+            };
+            let lambda = Expr::Lambda {
+                params: vec![LambdaParam {
+                    name: segment.param,
+                    ty: None,
+                    destructure: None,
+                    span: body_span,
+                }],
+                body: LambdaBody::Expr(Box::new(segment.body)),
+                span: body_span,
+            };
+            let lambda_span = lambda.span();
+            expr = Expr::Call {
+                callee: Box::new(callee),
+                args: vec![CallArg {
+                    name: None,
+                    ty: None,
+                    value: lambda,
+                    span: lambda_span,
+                }],
+                uses_brace_syntax: false,
+                span: receiver_span.cover(lambda_span),
+            };
+        }
+        expr
     }
 
     fn validate_trailing_lambda_block(&mut self, block: &Block, open_span: Span) {

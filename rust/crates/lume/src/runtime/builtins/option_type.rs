@@ -36,6 +36,15 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(6, "iterator", Vec::new(), option_iterator),
             builtin_method(7, "isSuccess", Vec::new(), option_is_set),
             builtin_method(8, "unwrap", Vec::new(), option_or_panic),
+            builtin_method(
+                9,
+                "flatMap",
+                vec![ir::Type::Function {
+                    params: Vec::new(),
+                    ret: Box::new(ir::Type::Unknown),
+                }],
+                option_flat_map,
+            ),
         ],
         enum_cases: vec![
             RuntimeEnumCase {
@@ -110,6 +119,27 @@ fn option_map(
             span,
         )?;
         Ok(interpreter.option_some(mapped))
+    } else {
+        Ok(interpreter.option_none())
+    }
+}
+
+fn option_flat_map(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let [callback] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Option.flatMap expects 1 argument"));
+    };
+    let (case_id, first_field) = option_case(&receiver);
+    if case_id == SOME_CASE {
+        interpreter.invoke_value(
+            callback.clone(),
+            vec![first_field.expect("Option.Some payload")],
+            span,
+        )
     } else {
         Ok(interpreter.option_none())
     }
