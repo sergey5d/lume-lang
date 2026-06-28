@@ -51,7 +51,7 @@ Function type parameter lists must be parenthesized. Use `(Int) -> Int`,
 not `Int -> Int`. Lambda expressions still use ordinary arrow syntax, for
 example `value -> value + 1`.
 
-## Lifted Access
+## Lifted Access Operator
 
 Use `.->` to continue an access chain inside a lifted value: `Option[T]`,
 `Result[T, E]`, or `Either[E, T]`.

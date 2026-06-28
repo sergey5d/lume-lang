@@ -3518,9 +3518,9 @@ impl<'a> Checker<'a> {
             let Some((family, inner)) = self.unwrap_lifted_type(&current) else {
                 if !matches!(current, Ty::Unknown) {
                     self.add_error(
-                        "invalid_lifted_access",
+                        "invalid_lifted_access_operator",
                         format!(
-                            ".-> requires a lifted receiver, but receiver has type '{}'; use '.' for ordinary member access",
+                            ".-> lifted access operator requires a lifted receiver, but receiver has type '{}'; use '.' for ordinary member access",
                             current.describe()
                         ),
                         segment.span,

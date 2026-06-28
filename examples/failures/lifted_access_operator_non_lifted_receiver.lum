@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*\.-> lifted access operator requires a lifted receiver, but receiver has type 'User'; use '\.' for ordinary member access.*
+
+class User {
+    name Str
+}
+
+def main() Unit {
+    user = User { name: "Ada" }
+    name = user.->name
+}
