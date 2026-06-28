@@ -104,6 +104,13 @@ enum Ty {
     TypeParam(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LiftedFamily {
+    Option,
+    Result { error: Ty },
+    Either { left: Ty },
+}
+
 impl Ty {
     fn named(name: impl Into<String>) -> Self {
         Self::Named(name.into(), Vec::new())
@@ -636,6 +643,7 @@ struct Checker<'a> {
     current_method: Option<String>,
     loop_depth: usize,
     defer_depth: usize,
+    lifted_segment_depth: usize,
     globals: HashMap<String, ValueInfo>,
 }
 
@@ -652,6 +660,7 @@ impl<'a> Checker<'a> {
             current_method: None,
             loop_depth: 0,
             defer_depth: 0,
+            lifted_segment_depth: 0,
             globals: HashMap::new(),
         }
     }
@@ -1345,6 +1354,12 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::AnonymousInterface { .. } | Expr::Lambda { .. } => {}
+            Expr::LiftedChain { base, segments, .. } => {
+                self.check_field_initializer_expr(base, owner, initialized_fields);
+                for segment in segments {
+                    self.check_field_initializer_expr(&segment.body, owner, initialized_fields);
+                }
+            }
             Expr::Try { value, .. }
             | Expr::Unary { expr: value, .. }
             | Expr::Group { inner: value, .. } => {
@@ -3488,8 +3503,138 @@ impl<'a> Checker<'a> {
                 Ty::list(yield_ty)
             }
             Expr::Lambda { params, body, .. } => self.check_lambda_expr(params, body, expected),
+            Expr::LiftedChain { base, segments, .. } => self.check_lifted_chain(base, segments),
             Expr::Group { inner, .. } => self.check_expr(inner),
         }
+    }
+
+    fn check_lifted_chain(
+        &mut self,
+        base: &Expr,
+        segments: &[crate::ast::LiftedChainSegment],
+    ) -> Ty {
+        let mut current = self.check_expr(base);
+        for segment in segments {
+            let Some((family, inner)) = self.unwrap_lifted_type(&current) else {
+                if !matches!(current, Ty::Unknown) {
+                    self.add_error(
+                        "invalid_lifted_access",
+                        format!(
+                            ".-> requires a lifted receiver, but receiver has type '{}'; use '.' for ordinary member access",
+                            current.describe()
+                        ),
+                        segment.span,
+                    );
+                }
+                self.push_scope();
+                self.define_local(&segment.param, Ty::Unknown, false);
+                self.check_expr(&segment.body);
+                self.pop_scope();
+                return Ty::Unknown;
+            };
+
+            self.push_scope();
+            self.define_local(&segment.param, inner.clone(), false);
+            self.lifted_segment_depth += 1;
+            let segment_ty = self.check_expr(&segment.body);
+            self.lifted_segment_depth -= 1;
+            self.pop_scope();
+
+            current = self.lifted_segment_result_type(&current, &family, &segment_ty, segment.span);
+        }
+        current
+    }
+
+    fn unwrap_lifted_type(&self, ty: &Ty) -> Option<(LiftedFamily, Ty)> {
+        match ty {
+            Ty::Named(name, args) if name == "Option" && args.len() == 1 => {
+                Some((LiftedFamily::Option, args[0].clone()))
+            }
+            Ty::Named(name, args) if name == "Result" && args.len() == 2 => Some((
+                LiftedFamily::Result {
+                    error: args[1].clone(),
+                },
+                args[0].clone(),
+            )),
+            Ty::Named(name, args) if name == "Either" && args.len() == 2 => Some((
+                LiftedFamily::Either {
+                    left: args[0].clone(),
+                },
+                args[1].clone(),
+            )),
+            Ty::Unknown => Some((LiftedFamily::Option, Ty::Unknown)),
+            _ => None,
+        }
+    }
+
+    fn lifted_segment_result_type(
+        &mut self,
+        current: &Ty,
+        family: &LiftedFamily,
+        segment_ty: &Ty,
+        span: crate::source::Span,
+    ) -> Ty {
+        match (family, segment_ty) {
+            (LiftedFamily::Option, Ty::Named(name, args))
+                if name == "Option" && args.len() == 1 =>
+            {
+                Ty::Named("Option".to_string(), vec![args[0].clone()])
+            }
+            (LiftedFamily::Result { error }, Ty::Named(name, args))
+                if name == "Result" && args.len() == 2 =>
+            {
+                if self.is_assignable(&args[1], error) {
+                    Ty::Named("Result".to_string(), vec![args[0].clone(), error.clone()])
+                } else {
+                    self.add_incompatible_lifted_error(current, segment_ty, &args[1], error, span);
+                    Ty::Unknown
+                }
+            }
+            (LiftedFamily::Either { left }, Ty::Named(name, args))
+                if name == "Either" && args.len() == 2 =>
+            {
+                if self.is_assignable(&args[0], left) {
+                    Ty::Named("Either".to_string(), vec![left.clone(), args[1].clone()])
+                } else {
+                    self.add_incompatible_lifted_error(current, segment_ty, &args[0], left, span);
+                    Ty::Unknown
+                }
+            }
+            _ => self.wrap_lifted_type(family, segment_ty.clone()),
+        }
+    }
+
+    fn wrap_lifted_type(&self, family: &LiftedFamily, inner: Ty) -> Ty {
+        match family {
+            LiftedFamily::Option => Ty::Named("Option".to_string(), vec![inner]),
+            LiftedFamily::Result { error } => {
+                Ty::Named("Result".to_string(), vec![inner, error.clone()])
+            }
+            LiftedFamily::Either { left } => {
+                Ty::Named("Either".to_string(), vec![left.clone(), inner])
+            }
+        }
+    }
+
+    fn add_incompatible_lifted_error(
+        &mut self,
+        current: &Ty,
+        segment_ty: &Ty,
+        actual_error: &Ty,
+        expected_error: &Ty,
+        span: crate::source::Span,
+    ) {
+        self.add_error(
+            "incompatible_lifted_error",
+            format!(
+                "lifted segment returns '{}', but the current chain is '{}'; '{}' is not assignable to '{}'; convert the error explicitly before using .->",
+                segment_ty.describe(),
+                current.describe(),
+                actual_error.describe(),
+                expected_error.describe()
+            ),
+            span,
+        );
     }
 
     fn check_lambda_expr(
@@ -5630,6 +5775,18 @@ impl<'a> Checker<'a> {
                 "cannot access member '{}' on function value of type '{}'",
                 name,
                 receiver_ty.describe(),
+            );
+        }
+
+        if self.lifted_segment_depth > 0
+            && !matches!(receiver_ty, Ty::Unknown)
+            && self.unwrap_lifted_type(receiver_ty).is_some()
+        {
+            return format!(
+                "cannot access member '{}' on lifted value '{}'; use '.->{}' to continue through the lifted value",
+                name,
+                receiver_ty.describe(),
+                name
             );
         }
 

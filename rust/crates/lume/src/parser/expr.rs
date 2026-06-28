@@ -4,6 +4,7 @@ use super::*;
 struct ChainSegment {
     param: String,
     body: Expr,
+    span: Span,
 }
 
 impl<'a> Parser<'a> {
@@ -1017,7 +1018,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_postfix_expr(&mut self) -> Option<Expr> {
         let mut expr = self.parse_primary_expr()?;
-        let mut chain_segment: Option<(String, Expr)> = None;
+        let mut chain_segment: Option<(String, Expr, Span)> = None;
         let mut chain_segments = Vec::new();
         loop {
             if self.at(TokenKind::Newline) && self.at_next(TokenKind::Dot) {
@@ -1040,8 +1041,8 @@ impl<'a> Parser<'a> {
             }
             if self.match_token(TokenKind::Dot) {
                 if self.match_token(TokenKind::Arrow) {
-                    if let Some((param, body)) = chain_segment.take() {
-                        chain_segments.push(ChainSegment { param, body });
+                    if let Some((param, body, span)) = chain_segment.take() {
+                        chain_segments.push(ChainSegment { param, body, span });
                     }
                     let (name, end) = self.parse_member_name("expected member name after '.->'")?;
                     let param = format!("__lume_chain{}", chain_segments.len());
@@ -1050,14 +1051,13 @@ impl<'a> Parser<'a> {
                         span: end,
                     };
                     let start = receiver.span();
-                    chain_segment = Some((
-                        param,
-                        Expr::Member {
-                            receiver: Box::new(receiver),
-                            name,
-                            span: start.cover(end),
-                        },
-                    ));
+                    let body = Expr::Member {
+                        receiver: Box::new(receiver),
+                        name,
+                        span: start.cover(end),
+                    };
+                    let span = body.span();
+                    chain_segment = Some((param, body, span));
                     continue;
                 }
                 self.skip_newlines();
@@ -1161,8 +1161,8 @@ impl<'a> Parser<'a> {
             }
             break;
         }
-        if let Some((param, body)) = chain_segment.take() {
-            chain_segments.push(ChainSegment { param, body });
+        if let Some((param, body, span)) = chain_segment.take() {
+            chain_segments.push(ChainSegment { param, body, span });
         }
         Some(Self::finish_chain_expr(expr, chain_segments))
     }
@@ -1182,19 +1182,23 @@ impl<'a> Parser<'a> {
 
     fn active_postfix_expr<'b>(
         expr: &'b Expr,
-        chain_segment: &'b Option<(String, Expr)>,
+        chain_segment: &'b Option<(String, Expr, Span)>,
     ) -> &'b Expr {
-        chain_segment.as_ref().map(|(_, body)| body).unwrap_or(expr)
+        chain_segment
+            .as_ref()
+            .map(|(_, body, _)| body)
+            .unwrap_or(expr)
     }
 
-    fn apply_postfix<F>(expr: &mut Expr, chain_segment: &mut Option<(String, Expr)>, apply: F)
+    fn apply_postfix<F>(expr: &mut Expr, chain_segment: &mut Option<(String, Expr, Span)>, apply: F)
     where
         F: FnOnce(Expr) -> Expr,
     {
-        if let Some((_, body)) = chain_segment.as_mut() {
+        if let Some((_, body, span)) = chain_segment.as_mut() {
             let placeholder = Expr::Unit { span: body.span() };
             let target = std::mem::replace(body, placeholder);
             *body = apply(target);
+            *span = body.span();
         } else {
             let placeholder = Expr::Unit { span: expr.span() };
             let target = std::mem::replace(expr, placeholder);
@@ -1202,41 +1206,28 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn finish_chain_expr(mut expr: Expr, segments: Vec<ChainSegment>) -> Expr {
-        let total = segments.len();
-        for (index, segment) in segments.into_iter().enumerate() {
-            let method = if index + 1 == total { "map" } else { "flatMap" };
-            let receiver_span = expr.span();
-            let body_span = segment.body.span();
-            let callee = Expr::Member {
-                receiver: Box::new(expr),
-                name: method.to_string(),
-                span: receiver_span.cover(body_span),
-            };
-            let lambda = Expr::Lambda {
-                params: vec![LambdaParam {
-                    name: segment.param,
-                    ty: None,
-                    destructure: None,
-                    span: body_span,
-                }],
-                body: LambdaBody::Expr(Box::new(segment.body)),
-                span: body_span,
-            };
-            let lambda_span = lambda.span();
-            expr = Expr::Call {
-                callee: Box::new(callee),
-                args: vec![CallArg {
-                    name: None,
-                    ty: None,
-                    value: lambda,
-                    span: lambda_span,
-                }],
-                uses_brace_syntax: false,
-                span: receiver_span.cover(lambda_span),
-            };
+    fn finish_chain_expr(expr: Expr, segments: Vec<ChainSegment>) -> Expr {
+        if segments.is_empty() {
+            return expr;
         }
-        expr
+        let span = expr.span().cover(
+            segments
+                .last()
+                .map(|segment| segment.span)
+                .unwrap_or(expr.span()),
+        );
+        Expr::LiftedChain {
+            base: Box::new(expr),
+            segments: segments
+                .into_iter()
+                .map(|segment| LiftedChainSegment {
+                    param: segment.param,
+                    body: segment.body,
+                    span: segment.span,
+                })
+                .collect(),
+            span,
+        }
     }
 
     fn validate_trailing_lambda_block(&mut self, block: &Block, open_span: Span) {

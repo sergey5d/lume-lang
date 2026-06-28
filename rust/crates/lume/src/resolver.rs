@@ -1989,6 +1989,23 @@ impl<'a> Resolver<'a> {
                 }
                 self.pop_scope();
             }
+            Expr::LiftedChain { base, segments, .. } => {
+                self.resolve_expr(base);
+                for segment in segments {
+                    self.push_scope();
+                    self.define_value(
+                        &segment.param,
+                        segment.span,
+                        false,
+                        SymbolKind::Parameter(ParameterKind::Lambda),
+                        "duplicate_parameter",
+                        format!("duplicate parameter '{}'", segment.param),
+                        false,
+                    );
+                    self.resolve_expr(&segment.body);
+                    self.pop_scope();
+                }
+            }
             Expr::Group { inner, .. } => self.resolve_expr(inner),
         }
     }

@@ -5,6 +5,9 @@
 # Ada
 # Ada
 # Ada
+# 1
+# Ada
+# Ada
 # Ada
 # Ada
 # Ada
@@ -25,10 +28,13 @@ class User {
     def profileResult() Result[Profile, Int] = Ok(this.profileValue)
 
     def profileEither() Either[Str, Profile] = Right(this.profileValue)
+
+    def name() Name = this.profileValue.primaryName()
 }
 
 class Profile {
     nameValue Name
+    users [User] = []
 
     def primaryName() Name = this.nameValue
 
@@ -45,12 +51,23 @@ class Name {
     first Str
 
     def display() Str = this.first
+
+    def parseFirstResult() Result[Int, ParseError] = Ok(1)
+}
+
+class ParseError {
+    message Str
 }
 
 def main() Unit {
+    friendProfile = Profile {
+        nameValue: Name { first: "Ada" }
+    }
+    friend = User { profileValue: friendProfile }
     user = User {
         profileValue: Profile {
             nameValue: Name { first: "Ada" }
+            users: [friend]
         }
     }
 
@@ -78,6 +95,22 @@ def main() Unit {
     # Normal dots after .-> stay inside the current lifted segment.
     displayName Option[Str] = optionSource.->profile().primaryName().display()
     println(displayName.orPanic())
+
+    mixedFirstName Option[Str] = optionSource
+        .->profileOpt()
+        .->users.head()
+        .->name()
+        .first
+    println(mixedFirstName.orPanic())
+
+    parenthesizedContainerMethod Str = (optionSource.->profile().primaryName()).orPanic().first
+    println(parenthesizedContainerMethod)
+
+    differentFamilyMaps Option[Result[Int, ParseError]] = optionSource
+        .->profile()
+        .primaryName()
+        .parseFirstResult()
+    println(differentFamilyMaps.orPanic().orPanic())
 
     lineLeadingDisplayName Option[Str] = optionSource
         .->profile()

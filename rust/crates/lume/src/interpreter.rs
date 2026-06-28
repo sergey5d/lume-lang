@@ -615,6 +615,12 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
                 ast::LambdaBody::Block(block) => rewrite_block_for_runtime(block, module, graph),
             }
         }
+        ast::Expr::LiftedChain { base, segments, .. } => {
+            rewrite_expr_for_runtime(base, module, graph);
+            for segment in segments {
+                rewrite_expr_for_runtime(&mut segment.body, module, graph);
+            }
+        }
         ast::Expr::Group { inner, .. } => rewrite_expr_for_runtime(inner, module, graph),
     }
 }

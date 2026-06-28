@@ -1777,33 +1777,32 @@ def make() Unit = values.map { (left, right) -> left + right }
 }
 
 #[test]
-fn parses_arrow_chain_as_flatmap_then_map_calls() {
-    fn call_method_name(expr: &Expr) -> &str {
-        let Expr::Call { callee, .. } = expr else {
-            panic!("expected call, got {expr:#?}");
-        };
-        let Expr::Member { name, .. } = callee.as_ref() else {
-            panic!("expected method callee, got {callee:#?}");
-        };
-        name
-    }
-
-    fn call_receiver(expr: &Expr) -> &Expr {
-        let Expr::Call { callee, .. } = expr else {
-            panic!("expected call, got {expr:#?}");
-        };
-        let Expr::Member { receiver, .. } = callee.as_ref() else {
-            panic!("expected method callee, got {callee:#?}");
-        };
-        receiver
+fn parses_arrow_chain_as_lifted_segments() {
+    fn segment_member_name(expr: &Expr) -> &str {
+        match expr {
+            Expr::Call { callee, .. } => {
+                let Expr::Member { name, .. } = callee.as_ref() else {
+                    panic!("expected method callee, got {callee:#?}");
+                };
+                name
+            }
+            Expr::Member { name, .. } => name,
+            other => panic!("expected segment member access, got {other:#?}"),
+        }
     }
 
     let expr = parse_expr_only(r#"source.->profileOpt().->nameOpt().->first"#);
-    assert_eq!(call_method_name(&expr), "map");
-    let second = call_receiver(&expr);
-    assert_eq!(call_method_name(second), "flatMap");
-    let first = call_receiver(second);
-    assert_eq!(call_method_name(first), "flatMap");
+    let Expr::LiftedChain { base, segments, .. } = expr else {
+        panic!("expected lifted chain, got {expr:#?}");
+    };
+    assert!(matches!(base.as_ref(), Expr::Identifier { name, .. } if name == "source"));
+    assert_eq!(segments.len(), 3);
+    assert_eq!(segments[0].param, "__lume_chain0");
+    assert_eq!(segments[1].param, "__lume_chain1");
+    assert_eq!(segments[2].param, "__lume_chain2");
+    assert_eq!(segment_member_name(&segments[0].body), "profileOpt");
+    assert_eq!(segment_member_name(&segments[1].body), "nameOpt");
+    assert_eq!(segment_member_name(&segments[2].body), "first");
 }
 
 #[test]

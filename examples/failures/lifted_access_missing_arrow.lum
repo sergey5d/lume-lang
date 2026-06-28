@@ -1,0 +1,20 @@
+# FAIL_REGEX:
+# .*cannot access member 'name' on lifted value 'Option\[Profile\]'; use '\.->name' to continue through the lifted value.*
+
+class Profile {
+    name Str
+}
+
+class User {
+    profile Profile
+
+    def profileOpt() Option[Profile] = Some(this.profile)
+}
+
+def main() Unit {
+    user = User {
+        profile: Profile { name: "Ada" }
+    }
+    userOpt Option[User] = Some(user)
+    name = userOpt.->profileOpt().name
+}

@@ -51,47 +51,79 @@ Function type parameter lists must be parenthesized. Use `(Int) -> Int`,
 not `Int -> Int`. Lambda expressions still use ordinary arrow syntax, for
 example `value -> value + 1`.
 
-## Lifted Chaining
+## Lifted Access
 
-Use `.->` to chain through values that provide `map` and `flatMap`, such as
-`Option`, `Result`, and `Either`.
+Use `.->` to continue an access chain inside a lifted value: `Option[T]`,
+`Result[T, E]`, or `Either[E, T]`.
 
 ```txt
-name = userOpt
+firstName = userOpt
     .->profileOpt()
-    .->nameOpt()
+    .->users.head()
+    .->name()
     .->first
 ```
 
-The last `.->` segment is lowered to `map`; earlier `.->` segments are lowered
-to `flatMap`:
+Each `.->` starts a lifted segment. Normal `.`, calls, and indexes after it stay
+inside the current segment until another `.->` appears or the expression ends.
 
 ```txt
-source.->a().b().->c
+userOpt
+    .->profileOpt()
+    .->users.head()
+    .->name()
+    .first
 ```
 
-is equivalent to:
+has these lifted segments:
 
 ```txt
-source.flatMap(x -> x.a().b()).map(y -> y.c)
+profileOpt()
+users.head()
+name().first
 ```
 
-Normal `.` calls can be mixed into a lifted segment:
+Each segment is typechecked against the successful value inside the current
+container. If a segment returns a plain value, `.->` lowers to `map`:
 
 ```txt
-displayName = userOpt.->profile().primaryName().display()
+userOpt.->name().first
+userOpt.map(user -> user.name().first)
+```
 
-firstName = userBoxOpt.->user().profile().nameOpt().->first
+If a segment returns the same lifted family, `.->` lowers to `flatMap`:
+
+```txt
+userOpt.->profileOpt()
+userOpt.flatMap(user -> user.profileOpt())
+```
+
+Only same-family results flatten:
+
+```txt
+Option[A]    + Option[B]    => Option[B]
+Result[A, E] + Result[B, E] => Result[B, E]
+Either[E, A] + Either[E, B] => Either[E, B]
+
+Option[A] + Result[B, E] => Option[Result[B, E]]
 ```
 
 Rules:
 
 - `.->member` starts a lifted chain segment
 - normal `.member` calls after `.->` stay inside the current segment until the next `.->`
-- all non-final lifted segments call `flatMap`
-- the final lifted segment calls `map`
-- the container families are not converted implicitly; `Option` chains stay `Option`, `Result` chains stay `Result`, and `Either` chains stay `Either`
+- the compiler chooses `map` or `flatMap` for each segment from that segment's type
+- `Result` and `Either` flatten only when the segment failure type is assignable to the current failure type
+- ordinary `.` inside a segment is not lifted; use another `.->` to cross another lifted result
 - `.` and `.->` may start the next line inside an active expression
+
+```txt
+userOpt.->profileOpt().name    # invalid: .name is applied to Option[Profile]
+userOpt.->profileOpt().->name  # valid
+
+(userOpt.->name()).orPanic()   # call orPanic on Option[Name]
+userOpt.->name().orPanic()     # call orPanic inside the segment
+```
 
 ## Runtime Metadata
 
@@ -1861,7 +1893,7 @@ Newline continuation:
   - unary prefixes: unary `-`, `!`, `try`
   - runtime type check keyword: `is`
   - match arrow: `=>`
-  - separators / chaining markers: `,`, `.`
+  - separators / chaining markers: `,`, `.`, `.->`
 - Delimited forms allow layout after opening delimiters and after commas, but they do not make leading binary/update operators valid by themselves.
 - Binding/callable `=` may start its expression on the same line or the next indented line.
 - Callable bodies have two forms:

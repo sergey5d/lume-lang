@@ -363,6 +363,22 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             body: Box::new(desugar_lambda_body(body)),
             span: *span,
         },
+        ast::Expr::LiftedChain {
+            base,
+            segments,
+            span,
+        } => core::Expr::LiftedChain {
+            base: Box::new(desugar_expr(base)),
+            segments: segments
+                .iter()
+                .map(|segment| core::LiftedChainSegment {
+                    param: segment.param.clone(),
+                    body: desugar_expr(&segment.body),
+                    span: segment.span,
+                })
+                .collect(),
+            span: *span,
+        },
         ast::Expr::Group { inner, .. } => desugar_expr(inner),
     }
 }

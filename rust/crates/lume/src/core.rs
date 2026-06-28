@@ -382,6 +382,11 @@ pub enum Expr {
         body: Box<Expr>,
         span: Span,
     },
+    LiftedChain {
+        base: Box<Expr>,
+        segments: Vec<LiftedChainSegment>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -411,9 +416,17 @@ impl Expr {
             | Expr::Block { span, .. }
             | Expr::Match { span, .. }
             | Expr::ForYield { span, .. }
-            | Expr::Lambda { span, .. } => *span,
+            | Expr::Lambda { span, .. }
+            | Expr::LiftedChain { span, .. } => *span,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiftedChainSegment {
+    pub param: String,
+    pub body: Expr,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
