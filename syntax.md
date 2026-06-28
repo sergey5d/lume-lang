@@ -649,8 +649,10 @@ tupled Point = (5, 6)
 ```
 
 Construction rules:
-- braces are named constructor arguments: `Type { field: value }`
-- parentheses are positional constructor arguments: `Type(value)`
+- a constructor declares the shape of values accepted by construction
+- `new { field Type, other Type = default } { ... }` declares a constructor shape with required and defaulted fields
+- braces fill that constructor shape by field name: `Type { field: value, other: value }`
+- parentheses fill the same constructor shape by declaration order: `Type(value, otherValue)`
 - constructor parentheses accept positional arguments only; use braces for named constructor arguments
 - function and method calls may still use named arguments in parentheses
 - `Type { value }` is not valid; use `Type(value)`
@@ -787,6 +789,9 @@ Constructors use a dedicated `new` block inside `impl`.
 - `new { params } { body }` declares a block-bodied constructor
 - `new { params } = expression` declares an expression-bodied constructor
 - constructor parameters use `name Type`, with optional trailing defaults such as `age Int = 0`
+- the constructor parameter block is the constructor shape accepted by call sites
+- `Type { field: value }` constructs by matching that shape by field name
+- `Type(value)` constructs by filling that same shape by declaration order
 - constructor parameters may end with one variadic list parameter such as `items [Str] vararg`
 - `hidden new { params } { body }` declares a private constructor
 - each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
@@ -966,8 +971,8 @@ items.zipMap { (left,
 ```
 
 Trailing brace call syntax on non-constructor calls is only for lambda arguments.
-Constructor braces are named constructor arguments, so enum named payloads use
-braces and enum positional payloads use parentheses:
+Constructor braces fill the constructor shape by field name, so enum named
+payloads use braces and enum positional payloads use parentheses:
 
 ```txt
 maybeOrder = Some(Order { id: 7 })

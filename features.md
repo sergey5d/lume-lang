@@ -1,27 +1,16 @@
 # Feature Notes
 
 This file captures the main language gaps and near-term design directions.
+It is for unsettled or proposed features only; settled syntax and behavior
+belong in `syntax.md`.
 
 ## Highest Priority
 
-### 1. Match / Pattern Matching
+### 1. Type Pattern Analysis
 
-`match` exists now, including:
-- enum case patterns
-- tuple patterns
-- literal/value patterns
-- class extractor patterns
-- simple type patterns
-- guards
-- nested enum / tuple / class extractor patterns
-
-Still missing:
+Open checker/runtime work:
 - generic type-aware type patterns at runtime
 - unreachable-case detection
-
-Current matching split:
-- `match` is the exhaustive / total form
-- `partial` is the partial form and returns `Option[...]`
 
 ## Important Next Tier
 
@@ -30,7 +19,7 @@ Current matching split:
 Enums exist, but they still want:
 - better generic type-pattern ergonomics
 
-Now that `match` exists and enum exhaustiveness is checked, the biggest remaining enum work is more expressive generic type-pattern support.
+The biggest remaining enum work is more expressive generic type-pattern support.
 
 ### 3. Derived Protocols
 
@@ -242,17 +231,6 @@ Current leaning:
 - `impl` looks cleaner for medium and large types because it separates shape from behavior
 - but it should probably remain optional rather than mandatory, because small types often read better when fields and methods stay together
 
-### Single-Line Body Syntax
-
-The shorthand body rules are now intentionally narrow:
-- new code should prefer brace-delimited `if`
-- `for` is block-only
-- `match` and `partial` are block-only
-- `else expr` and `yield expr` are valid same-line forms
-- if a shorthand body moves to the next line, a `{ ... }` block is required
-
-This keeps the surface compact without turning newlines into implicit structure.
-
 ### Irrefutable and Refutable Binding
 
 Binding syntax is organized around whether the pattern is irrefutable or
@@ -296,65 +274,6 @@ Current leaning:
 - keep the current keyword-free arrow form unless real readability problems show up
 - only add a `lambda` keyword if it solves a concrete ambiguity or makes larger expressions meaningfully clearer
 
-### Product Type Conversion Surface
-
-The settled policy for product-like values separates nominal construction from
-structural shape conversion.
-
-Product categories:
-- classes
-- named shapes
-- anonymous shapes
-- tuples
-
-Construction rules:
-- classes are nominal and constructor-gated
-- class construction must name the class: `User(...)` or `User { name: value }`
-- braces are named construction: `Type { field: value }`
-- parentheses are positional construction: `Type(value)`
-- braces never mean positional construction
-- anonymous named construction uses `{ field: value }`
-- `shape(...)` expression syntax is not part of the language
-
-Shape conversion rules:
-- tuple -> known shape is allowed when the target shape type is explicit or expected
-- tuple -> class is not allowed
-- shape -> shape assignment is structural by field names and types
-- shape -> interface is allowed only through explicit `shape Name with Interface`
-- shape -> class is not implicit
-- class -> shape is allowed through visible public fields
-- class -> interface-through-shape is not automatic; bind the class to the shape view first
-- hidden fields are not visible to shape conversion
-- class -> tuple is not implicit
-- shape -> tuple is not implicit
-
-Examples:
-
-```txt
-shape Point {
-    x Int
-    y Int
-}
-
-class Pixel {
-    x Int
-    y Int
-}
-
-point Point = (1, 2)           # tuple -> named shape
-anon { x Int, y Int } = (1, 2) # tuple -> anonymous shape
-fromClass Point = Pixel(1, 2)  # class -> shape through visible fields
-same Point = { x: 1, y: 2 }    # anonymous shape -> named shape
-
-user User = ("Ada", 10)        # invalid: tuple -> class
-user User = { name: "Ada" }    # invalid: shape -> class
-```
-
-Important separation:
-- value conversion is different from pattern destructuring
-- allowing class values to convert to shapes does not automatically mean `match` should destructure them using anonymous-shape patterns
-- if class/shape projection to tuples is ever added, it should be explicit, for example through a future `tuple(value)` helper
-
 ### Anonymous-Shape Binding From String Templates
 
 One possible future feature is anonymous-shape binding from interpolated-looking string templates, where a template shape declares the fields to extract.
@@ -388,50 +307,12 @@ Open questions:
 - whether the result should be an anonymous shape or a named type when a context type is available
 - whether failure should produce `Option`, `Result`, or a runtime error
 
-### Match Totality / Partial Match Behavior
+### Singleton Factory Questions
 
-This is now settled:
-- avoid runtime "no match" exceptions as a normal language outcome
-- keep `match` as the exhaustive / total form
-- partial matching now uses `partial`
-
-Related lambda-syntax discussion:
-- today explicit lambda forms like `list.map(value -> match value { ... })` work
-- possible future shorthand: allow implicit-input match lambdas
-  - block form: `list.map(match { ... })`
-  - single-expression shorthand form: `list.map(match: Some(x) => x + 1)`
-- this would only make sense in contexts where a one-argument lambda is expected
-- open question:
-  - is this worthwhile readability improvement
-  - or unnecessary contextual magic compared to the explicit lambda form
-
-### Constructor / Singleton Factory Design
-
-The current constructor surface is:
-- `new { params } { body }` declares block-bodied explicit constructors in `impl Class`
-- `new { params } = expression` declares expression-bodied explicit constructors
-- `hidden new { params } { body }` can hide an explicit constructor
-- any explicit `new` suppresses implicit structural field construction
-- braces are named constructor arguments: `Type { field: value }`
-- parentheses are positional constructor arguments: `Type(value)`
-- braces cannot be used for positional arguments: `Type { value }` is invalid
-- both forms resolve through the same available `new`/field construction shape
-- constructor parentheses are positional only; named constructor arguments use braces
-- tuple values are not constructor calls; they can only initialize known shapes
-- explicit constructors may end with one variadic list parameter such as `items [T] vararg`
-- `[T] vararg` receives extra positional constructor arguments as `[T]` inside the constructor body
-- only one variadic parameter is allowed
-- named constructor arguments can target a variadic constructor parameter by passing a `[T]` value
-- variadic constructor parameters may have a default `[T]` value
-
-Still open:
 - whether same-named `single` declarations should act as privileged factory companions
 - whether singleton factory methods should ever get hidden-field access to class internals
-- whether additional constructor-hiding syntax is needed beyond `hidden new { ... } { ... }`
 
 Current leaning:
-- autogenerated structural construction still makes sense for simple public shapes
-- explicit `new` remains the escape hatch for custom construction
 - `single` factory methods are useful as ordinary namespaced helpers, but hidden-field companion privileges should be a separate deliberate decision
 
 ## Suggested Priority Order
@@ -440,4 +321,3 @@ Current leaning:
 2. derived `Eq` / `Hashed`
 3. stdlib collection/query growth
 4. operator overloading
-5. constructor/factory polish
