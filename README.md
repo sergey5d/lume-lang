@@ -47,6 +47,7 @@ Run the checked example sweep:
 - Anonymous shapes use `{ field: value }`; named `shape` declarations are structural data-only types.
 - Shapes can implement interfaces with `shape Name with Interface`; classes must be explicitly viewed as a shape before using shape-provided interfaces.
 - `single Name { ... }` declares both a singleton type and the singleton value `Name`; reference `Name` directly, not `Name()` or `Name {}`.
+- `impl single Name { ... }` requires an explicit `single Name { ... }` declaration; it does not synthesize the singleton.
 - Custom constructor declarations are class-only and live in `impl` blocks as `new { ... } { body }` or `new { ... } = expr`; `new { ... }` declares the constructor input shape.
 - Variadic params use list type syntax: `items [Str] vararg`; constructor varargs can also be passed by name as a list.
 - Field construction and anonymous-shape construction use `field: value`, not `field = value`.

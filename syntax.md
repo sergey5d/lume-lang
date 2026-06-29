@@ -319,10 +319,13 @@ def health2() Str = "ok"
 def richMetadata() Str = "ok"
 ```
 
+`single Routes { ... }` declares one singleton value named `Routes`, so `Routes.health`
+is ordinary field access on that stable singleton value.
+
 Annotation arguments are compile-time metadata values. They may only be literals, stable constants, aggregate literals made from allowed values, or constant expressions composed from allowed values:
 
 - immutable top-level constants, including imported constants
-- immutable fields on `single` values, such as `Routes.health`
+- immutable fields on `single` values, such as `Routes.health`; this is allowed because `single Name { ... }` declares the singleton value `Name`
 - immutable constants through a module alias, such as `routes.healthPath`
 - enum cases, such as `RouteVisibility.Public`
 - arithmetic, comparison, boolean, and string-concatenation expressions whose operands are also annotation-safe
@@ -1088,7 +1091,7 @@ answer = box.valuePlusOne()
 The expression `Name` evaluates to that singleton value, so singles can be passed to functions, stored in locals, and called through later like any other value.
 Singles cannot be constructed with `Name()` or `Name {}`; reference `Name` directly.
 
-`impl single Name { ... }` may also synthesize an empty singleton companion when `Name` already exists and no singleton fields are needed.
+`impl single Name { ... }` attaches methods only to an explicit `single Name { ... }` declaration. It never creates the singleton by itself; declare `single Name {}` first when no fields are needed.
 
 Another class example:
 

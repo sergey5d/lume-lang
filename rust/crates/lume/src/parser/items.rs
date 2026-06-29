@@ -926,7 +926,7 @@ fn type_body_constructor_message(kind: TypeKind, name: &str) -> String {
         }
         TypeKind::Single => {
             format!(
-                "single '{name}' constructors are declared in impl single blocks; move 'new' into impl single {name}"
+                "single '{name}' cannot declare custom constructors; reference '{name}' directly"
             )
         }
         TypeKind::Interface => {

@@ -366,21 +366,7 @@ impl ModuleInfo {
         let target_type_params = impl_target_type_params(&block.target);
         let target = match block.target_kind {
             ImplTargetKind::Instance => self.types.get_mut(target_name),
-            ImplTargetKind::Single => {
-                if !self.singles.contains_key(target_name) {
-                    if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
-                        return;
-                    }
-                    let sig = self
-                        .types
-                        .get(target_name)
-                        .cloned()
-                        .map(|base| synthetic_single_sig_from_type(&base))
-                        .unwrap_or_else(|| standalone_single_sig(target_name));
-                    self.singles.insert(target_name.to_string(), sig);
-                }
-                self.singles.get_mut(target_name)
-            }
+            ImplTargetKind::Single => self.singles.get_mut(target_name),
         };
         if let Some(sig) = target {
             for method in &block.methods {
@@ -442,30 +428,6 @@ impl AmbientInfo {
         }
 
         Ok(ambient)
-    }
-}
-
-fn synthetic_single_sig_from_type(base: &TypeSig) -> TypeSig {
-    TypeSig {
-        kind: TypeKind::Single,
-        name: base.name.clone(),
-        type_params: Vec::new(),
-        with_bounds: Vec::new(),
-        fields: Vec::new(),
-        methods: HashMap::new(),
-        enum_cases: HashMap::new(),
-    }
-}
-
-fn standalone_single_sig(name: &str) -> TypeSig {
-    TypeSig {
-        kind: TypeKind::Single,
-        name: name.to_string(),
-        type_params: Vec::new(),
-        with_bounds: Vec::new(),
-        fields: Vec::new(),
-        methods: HashMap::new(),
-        enum_cases: HashMap::new(),
     }
 }
 
@@ -1075,19 +1037,6 @@ impl<'a> Checker<'a> {
             ImplTargetKind::Single => {
                 if let Some(single_sig) = self.lookup_single_local(target_name) {
                     single_sig
-                } else if let Some(base_sig) = self.lookup_type_local(target_name) {
-                    if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
-                        self.add_error(
-                            "invalid_type_arity",
-                            format!(
-                                "single '{}' expects no type arguments; write 'impl single {}'",
-                                target_name, target_name
-                            ),
-                            block.span,
-                        );
-                        return;
-                    }
-                    synthetic_single_sig_from_type(&base_sig)
                 } else {
                     if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
                         self.add_error(
@@ -1100,7 +1049,15 @@ impl<'a> Checker<'a> {
                         );
                         return;
                     }
-                    standalone_single_sig(target_name)
+                    self.add_error(
+                        "unknown_impl_target",
+                        format!(
+                            "unknown single impl target '{}'; declare 'single {} {{}}' before 'impl single {}'",
+                            target_name, target_name, target_name
+                        ),
+                        block.span,
+                    );
+                    return;
                 }
             }
         };
@@ -7958,7 +7915,7 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_impl_single_without_explicit_single_decl() {
+    fn rejects_impl_single_without_explicit_single_decl() {
         let program = parse_inline(
             r#"
 class User {
@@ -7973,7 +7930,16 @@ def main() User = User.make("Ada")
 "#,
         );
         let result = check_program(&program);
-        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "unknown_impl_target"
+                    && diag
+                        .message
+                        .contains("declare 'single User {}' before 'impl single User'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -8645,6 +8611,9 @@ impl User {
     } {
         this.name = name
     }
+}
+
+single User {
 }
 
 impl single User {

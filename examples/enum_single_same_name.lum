@@ -12,6 +12,9 @@ enum Color {
     }
 }
 
+single Color {
+}
+
 impl single Color {
     def palette() Str = "palette"
 }

@@ -33,7 +33,7 @@ Mental model:
 - `class` declares storage, fields, and implemented interfaces
 - `shape` declares a structural, read-only field view
 - `impl Type { ... }` declares constructors and instance behavior for classes and shapes
-- `impl single Name { ... }` declares singleton behavior
+- `impl single Name { ... }` attaches behavior to an explicit `single Name { ... }` declaration
 - constructors are dedicated `new { ... } { body }` declarations, where `new { ... }` is the constructor input shape
 - field access inside methods should use `this.field`
 
@@ -68,10 +68,14 @@ Benefits:
 - gives interfaces, classes, enums, and singles a consistent extension story
 - makes large types easier to navigate
 
+Declaration-body methods are also supported for classes, enums, and singles.
+Prefer `impl` for larger types when it improves scanability; keep declaration
+body methods available for small types and method-only singles.
+
 Tradeoffs:
 
 - understanding a small type may require reading two blocks
-- examples are a little longer than inline-method classes
+- examples are a little longer than classes with methods in the declaration body
 - the language needs clear rules for hidden-field access from `impl`
 
 ## Constructors
@@ -104,7 +108,6 @@ Current constructor rules:
 
 ## Open Questions
 
-- should inline methods remain supported as a convenience, or should `impl` be the only documented behavior home?
 - should multiple `impl A { ... }` blocks be allowed?
 - can `impl A` live in another file or module?
 - should same-named `single` declarations ever get privileged factory access to class internals?

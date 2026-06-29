@@ -219,18 +219,6 @@ Open questions:
 
 ## TBD
 
-### `impl` Blocks For Methods
-
-Top-level `impl Type { ... }` blocks exist now for attaching methods to classes and enums, and `impl single Name { ... }` attaches singleton methods. The language still needs a final decision on whether `impl` should remain required for ordinary methods.
-
-Open question:
-- keep `impl Type { ... }` as the required home for methods on classes/enums
-- or allow methods inline in the original type declaration and treat `impl` as optional extra syntax
-
-Current leaning:
-- `impl` looks cleaner for medium and large types because it separates shape from behavior
-- but it should probably remain optional rather than mandatory, because small types often read better when fields and methods stay together
-
 ### Irrefutable and Refutable Binding
 
 Binding syntax is organized around whether the pattern is irrefutable or

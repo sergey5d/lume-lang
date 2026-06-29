@@ -88,13 +88,12 @@ impl Person {
 }
 ```
 
-Open question:
+Settled rule:
 
-- should inline methods remain supported as a convenience?
-- or should `impl` become the only documented home for behavior?
-
-The `impl` split reads better for medium and large types, but tiny examples can
-feel a little heavier.
+- classes, enums, and singles may declare methods in the declaration body
+- classes, shapes, enums, and singles may also attach methods through `impl`
+- prefer `impl` for medium and large types when it makes the stored fields easier to scan
+- declaration-body methods remain useful for small types and method-only singles
 
 ### 2. Constructor Surface
 

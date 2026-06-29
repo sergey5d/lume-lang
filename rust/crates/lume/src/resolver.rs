@@ -748,30 +748,6 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
     decls
 }
 
-fn synthetic_single_type_info(target: &TypeInfo) -> TypeInfo {
-    TypeInfo {
-        kind: TypeKind::Single,
-        visibility: target.visibility,
-        arity: 0,
-        span: target.span,
-        fields: Vec::new(),
-        methods: HashMap::new(),
-        enum_cases: HashMap::new(),
-    }
-}
-
-fn standalone_single_type_info(span: crate::source::Span) -> TypeInfo {
-    TypeInfo {
-        kind: TypeKind::Single,
-        visibility: Visibility::Default,
-        arity: 0,
-        span,
-        fields: Vec::new(),
-        methods: HashMap::new(),
-        enum_cases: HashMap::new(),
-    }
-}
-
 fn merge_impl_decl_into_infos(
     types: &mut HashMap<String, TypeInfo>,
     singles: &mut HashMap<String, TypeInfo>,
@@ -782,20 +758,7 @@ fn merge_impl_decl_into_infos(
     };
     let target = match block.target_kind {
         ImplTargetKind::Instance => types.get_mut(target_name),
-        ImplTargetKind::Single => {
-            if !singles.contains_key(target_name) {
-                if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
-                    return;
-                }
-                let info = types
-                    .get(target_name)
-                    .cloned()
-                    .map(|target_type| synthetic_single_type_info(&target_type))
-                    .unwrap_or_else(|| standalone_single_type_info(block.span));
-                singles.insert(target_name.to_string(), info);
-            }
-            singles.get_mut(target_name)
-        }
+        ImplTargetKind::Single => singles.get_mut(target_name),
     };
     let Some(target) = target else {
         return;
@@ -991,18 +954,6 @@ impl<'a> Resolver<'a> {
                 }
             }
             ImplTargetKind::Single => {
-                if !self.singles.contains_key(target_name) {
-                    if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
-                        return;
-                    }
-                    let info = self
-                        .types
-                        .get(target_name)
-                        .cloned()
-                        .map(|target_type| synthetic_single_type_info(&target_type))
-                        .unwrap_or_else(|| standalone_single_type_info(block.span));
-                    self.singles.insert(target_name.to_string(), info);
-                }
                 let Some(target) = self.singles.get_mut(target_name) else {
                     return;
                 };
@@ -1460,23 +1411,21 @@ impl<'a> Resolver<'a> {
                                     *span,
                                 );
                             }
-                        } else if self.types.contains_key(name) {
-                            if !args.is_empty() {
-                                self.add_error(
-                                    "invalid_type_arity",
-                                    format!(
-                                        "single '{}' expects no type arguments; write 'impl single {}'",
-                                        name, name
-                                    ),
-                                    *span,
-                                );
-                            }
                         } else if !args.is_empty() {
                             self.add_error(
                                 "invalid_type_arity",
                                 format!(
                                     "single '{}' expects no type arguments; write 'impl single {}'",
                                     name, name
+                                ),
+                                *span,
+                            );
+                        } else {
+                            self.add_error(
+                                "unknown_impl_target",
+                                format!(
+                                    "unknown single impl target '{}'; declare 'single {} {{}}' before 'impl single {}'",
+                                    name, name, name
                                 ),
                                 *span,
                             );

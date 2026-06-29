@@ -6403,6 +6403,9 @@ $name
                 }
             }
 
+            single Color {
+            }
+
             impl single Color {
                 def palette() Str = "palette"
             }
@@ -6421,11 +6424,14 @@ $name
     }
 
     #[test]
-    fn runs_impl_single_without_explicit_single_decl() {
+    fn runs_impl_single_with_explicit_single_decl() {
         let program = lower_inline(
             r#"
             class Box {
                 value Int
+            }
+
+            single Box {
             }
 
             impl single Box {

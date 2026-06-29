@@ -167,14 +167,6 @@ impl<'a> Lowerer<'a> {
                 _ => {}
             }
         }
-        for item in &self.source.items {
-            let Item::Impl(block) = item else {
-                continue;
-            };
-            if block.target_kind == ImplTargetKind::Single {
-                self.declare_synthetic_single(block);
-            }
-        }
     }
 
     fn define_items(&mut self) {
@@ -327,33 +319,6 @@ impl<'a> Lowerer<'a> {
         if let Some(ty) = self.program.types.get_mut(type_id.0) {
             ty.methods.extend(method_ids);
         }
-    }
-
-    fn declare_synthetic_single(&mut self, block: &ImplBlock) {
-        let Some(target_name) = named_type_name(&block.target) else {
-            return;
-        };
-        let key = (target_name.to_string(), ast::TypeKind::Single);
-        if self.type_ids.contains_key(&key) {
-            return;
-        }
-
-        // `impl single Name` can attach singleton methods to an explicit
-        // `single Name { ... }` declaration or synthesize an empty companion.
-        let mut ty = ir::TypeDef::new(ast::TypeKind::Single, target_name.to_string());
-        if let Some(base_decl) = self.source.items.iter().find_map(|item| match item {
-            Item::Type(decl) if decl.name == target_name && decl.kind != ast::TypeKind::Single => {
-                Some(decl)
-            }
-            _ => None,
-        }) {
-            ty.visibility = base_decl.visibility;
-            ty.span = Some(base_decl.span);
-        } else {
-            ty.span = Some(block.span);
-        }
-        let id = self.program.add_type(ty);
-        self.type_ids.insert(key, id);
     }
 
     fn impl_target_type_id(

@@ -20,6 +20,9 @@ impl B {
     def label() Str = "B"
 }
 
+single C {
+}
+
 impl single C {
     def bump(value Int) Int = value + 1
 

@@ -20,6 +20,9 @@ impl single Ascending {
     def compare(left Int, right Int) Int = left - right
 }
 
+single Solution {
+}
+
 impl single Solution {
     def sol2(nums List[Int]) List[List[Int]] {
         nums.sort(Ascending)
