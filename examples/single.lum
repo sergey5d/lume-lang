@@ -11,6 +11,8 @@ class B {
 
 single A {
     var count Int = 2
+
+    def value() Int = this.count
 }
 
 impl single A {
@@ -19,8 +21,6 @@ impl single A {
 
     # explicit factory method
     def create(str Str) B = B { size: 1 }
-
-    def value() Int = this.count
 
     def test(a Int) Int {
         return a + this.value()

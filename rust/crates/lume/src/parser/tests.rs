@@ -654,22 +654,25 @@ def health() Str = "ok"
 }
 
 #[test]
-fn rejects_methods_in_single_body() {
+fn parses_methods_in_single_body() {
     let result = parse(
         r#"
 single Counter {
+    hidden value = 0
+
     def next() Int = 1
 }
 "#,
     );
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.message.contains("cannot declare methods in its body")),
-        "{:#?}",
-        result.diagnostics
-    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Type(decl) => {
+            assert_eq!(decl.kind, TypeKind::Single);
+            assert_eq!(decl.members.len(), 2);
+        }
+        other => panic!("expected singleton type, got {other:#?}"),
+    }
 }
 
 #[test]

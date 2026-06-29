@@ -687,6 +687,22 @@ Construction rules:
 - `Type({ ... })` is not supported; use named fields or positional values directly
 - `shape(...)` expression syntax is not supported; use tuple-to-shape construction instead
 
+## Brace Disambiguation
+
+Braces carry several meanings. The parser chooses by the tokens before and inside the braces:
+
+```txt
+{ field: value }                 # anonymous shape literal
+{ field Type: value }            # typed anonymous shape literal
+{ expr }                         # block expression
+Type { field: value }            # named construction or enum named payload
+call { x -> ... }                # trailing lambda
+Interface with Other { def ... } # anonymous interface implementation
+new { field Type }               # constructor input shape declaration
+```
+
+Single-expression braces such as `{ value }` are block expressions, not anonymous shapes. To construct an anonymous shape, use named fields with `:`.
+
 Shape conversion rules:
 - field names and field types must match at compile time
 - extra fields are allowed when passing a value to a narrower shape
@@ -778,7 +794,7 @@ def printf(format Str, value [Str] vararg) Unit
 The parameter is available as `[T]` inside the body, and call sites pass the
 extra values positionally.
 
-Enums can declare methods inline. Classes, shapes, and singles attach behavior through top-level `impl` blocks:
+Classes, enums, and singles can declare methods inline. Classes, shapes, enums, and singles can also attach behavior through top-level `impl` blocks. Shape bodies remain data-only, so shape methods must use `impl ShapeName { ... }`:
 
 ```txt
 class Counter {
@@ -1049,19 +1065,19 @@ impl Box[T] {
 }
 ```
 
-When a class or singleton implements an interface method inside an `impl ... { ... }` block, it uses ordinary `def`.
+When a class or singleton implements an interface method inside its body or an `impl ... { ... }` block, it uses ordinary `def`.
 
 Singleton:
 
 ```txt
 single MathBox {
     value Int = 5
+
+    def valuePlusOne() Int = this.value + 1
 }
 
 impl single MathBox {
     def double(value Int) Int = value * 2
-
-    def valuePlusOne() Int = this.value + 1
 }
 
 box = MathBox

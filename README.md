@@ -105,10 +105,12 @@ enum Status {
 
 single Log {
     prefix Str = "lume"
+
+    def headline(title Str) Unit = println(this.prefix, title)
 }
 
 impl single Log {
-    def headline(title Str) Unit = println(this.prefix, title)
+    def shout(title Str) Unit = println(this.prefix, title + "!")
 }
 
 class Project with Named {

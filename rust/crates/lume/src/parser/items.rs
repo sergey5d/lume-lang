@@ -477,10 +477,6 @@ impl<'a> Parser<'a> {
                             "annotation '{}' cannot declare methods; annotations are data-only metadata shapes",
                             name
                         )),
-                        TypeKind::Single => Some(format!(
-                            "single '{}' cannot declare methods in its body; use 'impl single {}'",
-                            name, name
-                        )),
                         TypeKind::Record => Some(format!(
                             "shape '{}' cannot declare methods in its body; use 'impl {}'",
                             name, name
