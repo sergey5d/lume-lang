@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*only classes can declare custom constructors; annotation 'Route' cannot declare constructors.*
+
+annotation Route {
+    path Str
+}
+
+impl Route {
+    new {
+        path Str
+    } {}
+}

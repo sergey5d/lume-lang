@@ -1,0 +1,27 @@
+# EXPECT:
+# left
+# custom
+# named
+# named-custom
+
+enum Outcome {
+    value Str
+    tag Str
+
+    case Left {
+        value Str
+        tag = "left"
+    }
+}
+
+def main() Unit {
+    omitted Outcome = Outcome.Left("bad")
+    explicit Outcome = Outcome.Left("bad", "custom")
+    namedOmitted Outcome = Outcome.Left { value: "named" }
+    namedExplicit Outcome = Outcome.Left { value: "named", tag: "named-custom" }
+
+    println(omitted.tag)
+    println(explicit.tag)
+    println(namedOmitted.value)
+    println(namedExplicit.tag)
+}

@@ -46,11 +46,11 @@ Run the checked example sweep:
 - Constructors declare the accepted construction shape; `Type { field: value }` fills it by field name and `Type(value)` fills it by declaration order.
 - Anonymous shapes use `{ field: value }`; named `shape` declarations are structural data-only types.
 - Shapes can implement interfaces with `shape Name with Interface`; classes must be explicitly viewed as a shape before using shape-provided interfaces.
-- Constructor declarations live in `impl` blocks as `new { ... } { body }` or `new { ... } = expr`; `new { ... }` declares the constructor input shape.
+- Custom constructor declarations are class-only and live in `impl` blocks as `new { ... } { body }` or `new { ... } = expr`; `new { ... }` declares the constructor input shape.
 - Variadic params use list type syntax: `items [Str] vararg`; constructor varargs can also be passed by name as a list.
 - Field construction and anonymous-shape construction use `field: value`, not `field = value`.
 - Assignment uses `=` for first binding / constructor field initialization and `:=` for reassignment.
-- Enum payload cases use positional or named constructor syntax, for example `Status.Ready(3)` or `Status.Ready { value: 3 }`; zero-payload cases are bare, for example `Status.Empty`.
+- Enum payload cases use implicit positional or named constructor syntax, for example `Status.Ready(3)` or `Status.Ready { value: 3 }`; zero-payload cases are bare, for example `Status.Empty`.
 - `let`, `expect`, and `if let` support `<-` extraction from `Option`, `Result`, and `Either`.
 - `match` is exhaustive; `partial match` returns `Option[...]`.
 - `for`, `for ... yield`, `while`, `break`, `continue`, and callable-scoped `defer` are supported.

@@ -8,8 +8,8 @@ use crate::{
     Diagnostic,
     ast::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
-        ElseBranch, ElseExprBranch, Expr, ForBinding, FunctionDecl, IfConditionClause, IfStmt,
-        ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase, MatchCaseBody, MatchStmt,
+        ElseBranch, ElseExprBranch, Expr, FieldDecl, ForBinding, FunctionDecl, IfConditionClause,
+        IfStmt, ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase, MatchCaseBody, MatchStmt,
         MethodDecl, Param, Pattern, PatternBindingKind, PatternBindingStmt, Program, Stmt,
         TypeDecl, TypeKind, TypeMember, TypeRef, Visibility,
     },
@@ -479,6 +479,32 @@ fn type_kind_label(kind: TypeKind) -> &'static str {
     }
 }
 
+fn custom_constructor_error(sig: &TypeSig) -> String {
+    match sig.kind {
+        TypeKind::Annotation => format!(
+            "only classes can declare custom constructors; annotation '{}' cannot declare constructors",
+            sig.name
+        ),
+        TypeKind::Record => format!(
+            "only classes can declare custom constructors; shape '{}' uses structural brace construction",
+            sig.name
+        ),
+        TypeKind::Enum => format!(
+            "only classes can declare custom constructors; enum '{}' uses enum cases for construction",
+            sig.name
+        ),
+        TypeKind::Interface => format!(
+            "only classes can declare custom constructors; interface '{}' cannot declare constructors",
+            sig.name
+        ),
+        TypeKind::Single => format!(
+            "only classes can declare custom constructors; single '{}' is initialized as a singleton value",
+            sig.name
+        ),
+        TypeKind::Class => format!("class '{}' can declare custom constructors", sig.name),
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct World {
     modules: HashMap<PathBuf, ModuleInfo>,
@@ -864,21 +890,19 @@ impl<'a> Checker<'a> {
                     }
                 }
                 TypeMember::Method(method) => {
+                    if method.name == "new" && decl.kind != TypeKind::Class {
+                        self.add_error(
+                            "invalid_constructor_decl",
+                            custom_constructor_error(&type_sig),
+                            method.span,
+                        );
+                        continue;
+                    }
                     if decl.kind == TypeKind::Annotation {
                         self.add_error(
                             "invalid_annotation_method",
                             format!(
                                 "annotation '{}': annotations cannot declare methods",
-                                decl.name
-                            ),
-                            method.span,
-                        );
-                    }
-                    if decl.kind == TypeKind::Interface && method.name == "new" {
-                        self.add_error(
-                            "invalid_interface_method",
-                            format!(
-                                "interface '{}': interfaces cannot declare constructors",
                                 decl.name
                             ),
                             method.span,
@@ -976,14 +1000,24 @@ impl<'a> Checker<'a> {
                     return;
                 };
                 if type_sig.kind == TypeKind::Annotation {
-                    self.add_error(
-                        "invalid_annotation_impl",
-                        format!(
-                            "annotation '{}' cannot have impl methods; annotations are data-only metadata shapes",
-                            target_name
-                        ),
-                        block.span,
-                    );
+                    if let Some(constructor) =
+                        block.methods.iter().find(|method| method.name == "new")
+                    {
+                        self.add_error(
+                            "invalid_constructor_decl",
+                            custom_constructor_error(&type_sig),
+                            constructor.span,
+                        );
+                    } else {
+                        self.add_error(
+                            "invalid_annotation_impl",
+                            format!(
+                                "annotation '{}' cannot have impl methods; annotations are data-only metadata shapes",
+                                target_name
+                            ),
+                            block.span,
+                        );
+                    }
                     return;
                 }
                 if type_sig.kind == TypeKind::Interface || type_sig.kind == TypeKind::Single {
@@ -1030,13 +1064,10 @@ impl<'a> Checker<'a> {
         };
         self.push_type_params(type_sig.type_params.iter().map(String::as_str));
         for method in &block.methods {
-            if type_sig.kind == TypeKind::Record && method.name == "new" {
+            if method.name == "new" && type_sig.kind != TypeKind::Class {
                 self.add_error(
-                    "invalid_shape_constructor",
-                    format!(
-                        "shape '{}' cannot declare custom constructors; use brace construction",
-                        type_sig.name
-                    ),
+                    "invalid_constructor_decl",
+                    custom_constructor_error(&type_sig),
                     method.span,
                 );
                 continue;
@@ -1106,7 +1137,7 @@ impl<'a> Checker<'a> {
         method: &MethodDecl,
         owner: &TypeSig,
     ) {
-        if method.name != "new" || !matches!(owner.kind, TypeKind::Class | TypeKind::Single) {
+        if method.name != "new" || owner.kind != TypeKind::Class {
             return;
         }
         let required_fields = owner
@@ -6225,7 +6256,8 @@ impl<'a> Checker<'a> {
     fn lookup_bare_enum_case_value_type(&self, name: &str, expected: &Ty) -> Option<Ty> {
         let case = self.world.lookup_enum_case(self.module, name)?;
         case.params
-            .is_empty()
+            .iter()
+            .all(|param| param.has_initializer)
             .then(|| self.materialize_enum_case_result_against(&case.result, expected))
     }
 
@@ -6718,6 +6750,25 @@ fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -
     }
 }
 
+fn enum_case_field_sig_ty(
+    field: &FieldDecl,
+    owner_fields: &[FieldSig],
+    owner_type_params: &HashSet<String>,
+) -> Ty {
+    field
+        .ty
+        .as_ref()
+        .map(|ty| convert_type_ref(ty, owner_type_params))
+        .or_else(|| {
+            owner_fields
+                .iter()
+                .find(|owner_field| owner_field.name == field.name)
+                .map(|owner_field| owner_field.ty.clone())
+        })
+        .or_else(|| field.initializer.as_ref().and_then(infer_literal_type))
+        .unwrap_or(Ty::Unknown)
+}
+
 fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
     let owner_params = decl
         .type_params
@@ -6761,17 +6812,12 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                 let ctor_params = case
                     .fields
                     .iter()
-                    .filter(|field| field.ty.is_some() && field.initializer.is_none())
                     .map(|field| FieldSig {
                         name: field.name.clone(),
-                        ty: field
-                            .ty
-                            .as_ref()
-                            .map(|ty| convert_type_ref(ty, &owner_params))
-                            .unwrap_or(Ty::Unknown),
+                        ty: enum_case_field_sig_ty(field, &fields, &owner_params),
                         mutable: field.mutable,
                         hidden: field.visibility == Visibility::Hidden,
-                        has_initializer: false,
+                        has_initializer: field.initializer.is_some(),
                         variadic: false,
                     })
                     .collect::<Vec<_>>();
@@ -9202,6 +9248,90 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_enum_case_default_constructor_shapes() {
+        let program = parse_inline(
+            r#"
+enum Outcome {
+    tag Str
+
+    case Left {
+        value Str
+        tag = "left"
+    }
+}
+
+def main() Unit {
+    omitted Outcome = Outcome.Left("bad")
+    explicit Outcome = Outcome.Left("bad", "custom")
+    namedOmitted Outcome = Outcome.Left { value: "named" }
+    namedExplicit Outcome = Outcome.Left { value: "named", tag: "custom" }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_custom_constructors_for_non_class_kinds() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+}
+
+impl Point {
+    new { x Int } {
+        this.x = x
+    }
+}
+
+enum Status {
+    case Ready {
+        value Int
+    }
+}
+
+impl Status {
+    new { value Int } = Status.Ready(value)
+}
+
+annotation Route {
+    path Str
+}
+
+impl Route {
+    new { path Str } {}
+}
+
+single Config {
+}
+
+impl single Config {
+    new {} {}
+}
+"#,
+        );
+        let result = check_program(&program);
+        for expected in [
+            "shape 'Point'",
+            "enum 'Status'",
+            "annotation 'Route'",
+            "single 'Config'",
+        ] {
+            assert!(
+                result.diagnostics.iter().any(|diag| {
+                    diag.code == "invalid_constructor_decl"
+                        && diag.message.contains("only classes")
+                        && diag.message.contains(expected)
+                }),
+                "missing {expected}: {:#?}",
+                result.diagnostics
+            );
+        }
     }
 
     #[test]

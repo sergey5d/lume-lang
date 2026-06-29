@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*shape 'Point' cannot declare custom constructors; use brace construction.*
+# .*only classes can declare custom constructors; shape 'Point' uses structural brace construction.*
 
 shape Point {
     x Int

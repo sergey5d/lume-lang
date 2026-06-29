@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*only classes can declare custom constructors; enum 'Status' uses enum cases for construction.*
+
+enum Status {
+    case Ready {
+        value Int
+    }
+}
+
+impl Status {
+    new {
+        value Int
+    } = Status.Ready(value)
+}

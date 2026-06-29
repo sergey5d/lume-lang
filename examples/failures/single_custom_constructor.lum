@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*only classes can declare custom constructors; single 'Config' is initialized as a singleton value.*
+
+single Config {
+}
+
+impl single Config {
+    new {
+    } {
+    }
+}

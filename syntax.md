@@ -788,11 +788,12 @@ impl Counter {
 }
 ```
 
-Constructors use a dedicated `new` block inside `impl`.
+Custom constructors are class-only and use a dedicated `new` block inside `impl`.
 
 - `new { ... }` declares the constructor input shape
 - `new { ... } { body }` declares a block-bodied constructor
 - `new { ... } = expression` declares an expression-bodied constructor
+- shape, enum, enum case, single, annotation, and interface declarations cannot define custom `new` constructors
 - constructor shape fields use `name Type`, with optional trailing defaults such as `age Int = 0`
 - `Type { field: value }` constructs by matching the constructor input shape by field name
 - `Type(value)` constructs by filling the same constructor input shape positionally by declaration order
@@ -809,7 +810,7 @@ Constructors use a dedicated `new` block inside `impl`.
 - member order is storage first, constructors next, methods last
 - class, shape, enum, and single bodies list storage fields before behavior
 - enum cases count as enum storage and must appear before enum methods
-- impl blocks list all `new` constructors before ordinary `def` methods
+- class impl blocks list all `new` constructors before ordinary `def` methods
 
 ```txt
 class Person {
@@ -1143,10 +1144,12 @@ Enum cases are data-only:
 - cases may declare payload fields
 - cases may assign shared enum fields
 - cases may not declare methods
+- cases may not declare custom constructors
 - there is no `impl Enum.Case { ... }` form
 - zero-payload cases are values and are written without call syntax, for example `None`
 - payload cases use positional constructor syntax, for example `Some(value)`
 - payload cases may also use named constructor braces, for example `Some { value: value }`
+- payload and shared fields with defaults may be omitted from enum case constructors
 - `None()`-style calls for zero-payload cases are invalid
 
 Behavior for enums belongs on the enum itself, either inline or in `impl Enum { ... }` blocks, and case-specific behavior should be expressed with `match`.
