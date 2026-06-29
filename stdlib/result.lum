@@ -2,6 +2,14 @@
 # INTERPRETER
 
 enum Result[T, E] {
+    case Ok {
+        value T
+    }
+
+    case Err {
+        error E
+    }
+
     def isOk() Bool = match this {
         case Ok(_) => true
         case Err(_) => false
@@ -32,13 +40,5 @@ enum Result[T, E] {
     def flatMap[X](f (T) -> Result[X, E]) Result[X, E] = match this {
         case Ok(value) => f(value)
         case Err(error) => Err(error)
-    }
-
-    case Ok {
-        value T
-    }
-
-    case Err {
-        error E
     }
 }

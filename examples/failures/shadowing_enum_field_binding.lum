@@ -4,13 +4,13 @@
 enum Color {
     code Str
 
+    case Red {
+        code = "red"
+    }
+
     def bad() Str {
         code = "shadow"
         this.code
-    }
-
-    case Red {
-        code = "red"
     }
 }
 

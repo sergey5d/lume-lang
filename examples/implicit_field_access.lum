@@ -38,11 +38,11 @@ impl Counter {
 enum Color {
     code Str
 
-    def label() Str = code
-
     case Red {
         code = "red"
     }
+
+    def label() Str = code
 }
 
 def main() Unit {

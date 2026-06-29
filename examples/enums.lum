@@ -10,8 +10,6 @@ enum Color {
     color Str
     temperature Int
 
-    def isReddish() Bool = this.temperature % 5 == 0
-
     case Black {
         color = "xxx"
         temperature = 1
@@ -20,17 +18,19 @@ enum Color {
         color = "xxx2"
         temperature = 2
     }
+
+    def isReddish() Bool = this.temperature % 5 == 0
 }
 
 # Naive implementation of option type
 enum OptionX[T] {
 
-    def isDefined() Bool = this != None
-
     case NoneX
     case SomeX {
         value T
     }
+
+    def isDefined() Bool = this != None
 }
 
 black = Color.Black

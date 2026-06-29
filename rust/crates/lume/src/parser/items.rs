@@ -1,5 +1,17 @@
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TypeBodyOrder {
+    Storage,
+    Method,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ImplBodyOrder {
+    Constructor,
+    Method,
+}
+
 impl<'a> Parser<'a> {
     pub(super) fn parse_module_decl(&mut self) -> Option<ModuleDecl> {
         let start = self.previous_span();
@@ -377,6 +389,7 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
 
         let mut members = Vec::new();
+        let mut body_order = TypeBodyOrder::Storage;
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             self.skip_newlines();
             if self.at(TokenKind::RBrace) {
@@ -389,6 +402,16 @@ impl<'a> Parser<'a> {
                 if let Some(case_decl) =
                     self.parse_enum_case(member_annotations, self.previous_span())
                 {
+                    if body_order == TypeBodyOrder::Method {
+                        self.diagnostics.push(Diagnostic::error(
+                            "invalid_member_order",
+                            format!(
+                                "enum cases must appear before methods in enum '{}'; move case '{}' above method declarations",
+                                name, case_decl.name
+                            ),
+                            case_decl.span,
+                        ));
+                    }
                     members.push(TypeMember::Case(case_decl));
                 } else {
                     self.synchronize_member();
@@ -438,10 +461,28 @@ impl<'a> Parser<'a> {
                         member_visibility,
                         kind == TypeKind::Interface,
                     )?;
+                    body_order = TypeBodyOrder::Method;
                     members.push(TypeMember::Method(method));
                 }
                 _ => {
                     let field = self.parse_field_decl(member_annotations, member_visibility)?;
+                    if body_order == TypeBodyOrder::Method
+                        && matches!(
+                            kind,
+                            TypeKind::Class | TypeKind::Record | TypeKind::Enum | TypeKind::Single
+                        )
+                    {
+                        self.diagnostics.push(Diagnostic::error(
+                            "invalid_member_order",
+                            format!(
+                                "storage fields must appear before methods in {} '{}'; move field '{}' above method declarations",
+                                type_kind_name(kind),
+                                name,
+                                field.name
+                            ),
+                            field.span,
+                        ));
+                    }
                     members.push(TypeMember::Field(field));
                 }
             }
@@ -522,6 +563,7 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
 
         let mut methods = Vec::new();
+        let mut body_order = ImplBodyOrder::Constructor;
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             self.skip_newlines();
             if self.at(TokenKind::RBrace) {
@@ -530,7 +572,18 @@ impl<'a> Parser<'a> {
             let annotations = self.parse_annotations()?;
             let visibility = self.parse_visibility();
             let method = if self.at(TokenKind::Identifier) && self.current().lexeme == "new" {
-                self.parse_constructor_decl(annotations, visibility)?
+                let constructor = self.parse_constructor_decl(annotations, visibility)?;
+                if body_order == ImplBodyOrder::Method {
+                    self.diagnostics.push(Diagnostic::error(
+                        "invalid_member_order",
+                        format!(
+                            "constructors must appear before methods in impl '{}'; move 'new' above method declarations",
+                            impl_target_name(&target)
+                        ),
+                        constructor.span,
+                    ));
+                }
+                constructor
             } else {
                 let method = self.parse_method_decl(annotations, visibility, false)?;
                 if method.name == "new" {
@@ -540,6 +593,7 @@ impl<'a> Parser<'a> {
                         method.span,
                     ));
                 }
+                body_order = ImplBodyOrder::Method;
                 method
             };
             methods.push(method);
@@ -753,6 +807,24 @@ impl<'a> Parser<'a> {
             }
             _ => false,
         }
+    }
+}
+
+fn type_kind_name(kind: TypeKind) -> &'static str {
+    match kind {
+        TypeKind::Annotation => "annotation",
+        TypeKind::Class => "class",
+        TypeKind::Record => "shape",
+        TypeKind::Single => "single",
+        TypeKind::Interface => "interface",
+        TypeKind::Enum => "enum",
+    }
+}
+
+fn impl_target_name(target: &TypeRef) -> &str {
+    match target {
+        TypeRef::Named { name, .. } => name,
+        _ => "target",
     }
 }
 

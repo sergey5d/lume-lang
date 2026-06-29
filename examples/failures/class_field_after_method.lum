@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*storage fields must appear before methods in class 'User'.*field 'name'.*
+
+class User {
+    def label() Str = "user"
+    name Str
+}

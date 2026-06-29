@@ -3,13 +3,13 @@
 # palette
 
 enum Color {
+    case Red
+    case Blue
+
     def label() Str = match this {
         case Color.Red => "red"
         case Color.Blue => "blue"
     }
-
-    case Red
-    case Blue
 }
 
 impl single Color {

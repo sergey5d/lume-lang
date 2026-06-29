@@ -328,6 +328,81 @@ impl Counter {
 }
 
 #[test]
+fn rejects_class_field_after_method() {
+    let result = parse(
+        r#"
+class User {
+    def label() Str = "user"
+    name Str
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_member_order"
+                && diag
+                    .message
+                    .contains("storage fields must appear before methods")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_enum_case_after_method() {
+    let result = parse(
+        r#"
+enum MaybeInt {
+    def isSet() Bool = true
+    case Some { value Int }
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_member_order"
+                && diag
+                    .message
+                    .contains("enum cases must appear before methods")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_constructor_after_impl_method() {
+    let result = parse(
+        r#"
+class User {
+    name Str
+}
+
+impl User {
+    def label() Str = this.name
+
+    new {
+        name Str
+    } {
+        this.name = name
+    }
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_member_order"
+                && diag
+                    .message
+                    .contains("constructors must appear before methods")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_expression_bodied_constructor() {
     let result = parse(
         r#"

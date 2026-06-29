@@ -6351,8 +6351,6 @@ $name
                 color Str
                 temperature Int
 
-                def isReddish() Bool = this.temperature % 5 == 0
-
                 case Black {
                     color = "xxx"
                     temperature = 1
@@ -6361,15 +6359,17 @@ $name
                     color = "xxx2"
                     temperature = 10
                 }
+
+                def isReddish() Bool = this.temperature % 5 == 0
             }
 
             enum OptionX[T] {
-                def isDefined() Bool = this != None
-
                 case NoneX
                 case SomeX {
                     value T
                 }
+
+                def isDefined() Bool = this != None
             }
 
             def main() Unit {
@@ -6394,13 +6394,13 @@ $name
         let program = lower_inline(
             r#"
             enum Color {
+                case Red
+                case Blue
+
                 def label() Str = match this {
                     case Color.Red => "red"
                     case Color.Blue => "blue"
                 }
-
-                case Red
-                case Blue
             }
 
             impl single Color {

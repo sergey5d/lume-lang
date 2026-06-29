@@ -21,7 +21,6 @@ Built-in generic/container types:
 - `Map[K, V]`
 - `Set[T]`
 - `List[T]` or `[T]`
-- `Unit`
 
 List shorthand can be nested, for example:
 
@@ -807,6 +806,10 @@ Constructors use a dedicated `new` block inside `impl`.
 - `this` is the instance receiver
 - instance fields on classes, enums, and singles may be accessed bare when they are not shadowed
 - use `this.field` when a parameter/local shadows a field, for example `this.age`
+- member order is storage first, constructors next, methods last
+- class, shape, enum, and single bodies list storage fields before behavior
+- enum cases count as enum storage and must appear before enum methods
+- impl blocks list all `new` constructors before ordinary `def` methods
 
 ```txt
 class Person {
@@ -1118,11 +1121,11 @@ Enums:
 enum Color {
     code Str
 
-    def isWarm() Bool = code == "red"
-
     case Red {
         code = "red"
     }
+
+    def isWarm() Bool = code == "red"
 }
 ```
 

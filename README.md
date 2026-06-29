@@ -1,10 +1,12 @@
 # Lume
 
 `Lume` is an experimental programming language with a Rust implementation in
-this repository. The language is intentionally direct: classes are nominal,
-shapes are structural data, methods live in `impl`, control flow is expression
-friendly where it stays readable, and the runtime currently executes the Rust
-compiler/interpreter pipeline under `rust/`.
+this repository. The language is intentionally direct: classes are nominal for
+construction and class-to-class assignment, while also exposing a structural
+public-field view for shape conversion and destructuring. Shapes are structural
+data, methods live in `impl`, control flow is expression friendly where it stays
+readable, and the runtime currently executes the Rust compiler/interpreter
+pipeline under `rust/`.
 
 The repo currently centers on:
 

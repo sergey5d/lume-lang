@@ -2,6 +2,11 @@
 # INTERPRETER
 
 enum Option[T] {
+    case None
+    case Some {
+        value T
+    }
+
     def isSet() Bool = match this {
         case Some(_) => true
         case Option.None => false
@@ -29,10 +34,5 @@ enum Option[T] {
     def flatMap[X](f (T) -> Option[X]) Option[X] = match this {
         case Some(value) => f(value)
         case Option.None => None()
-    }
-
-    case None
-    case Some {
-        value T
     }
 }
