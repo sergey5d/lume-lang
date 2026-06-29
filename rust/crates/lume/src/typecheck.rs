@@ -251,6 +251,7 @@ struct FunctionSig {
     params: Vec<ParamSig>,
     ret: Ty,
     visibility: Visibility,
+    has_body: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -937,9 +938,50 @@ impl<'a> Checker<'a> {
             }
         }
 
+        self.check_interface_implementation(&type_sig, decl.span);
         self.check_type_field_initializers(decl, &type_sig);
 
         self.pop_type_params();
+    }
+
+    fn check_interface_implementation(&mut self, sig: &TypeSig, span: crate::source::Span) {
+        if sig.kind == TypeKind::Interface {
+            return;
+        }
+
+        for bound in &sig.with_bounds {
+            let Ty::Named(interface_name, _) = bound else {
+                continue;
+            };
+            let Some(interface_sig) = self.lookup_any_type(interface_name) else {
+                continue;
+            };
+            if interface_sig.kind != TypeKind::Interface {
+                continue;
+            }
+
+            let mut required = HashSet::new();
+            let mut seen = HashSet::new();
+            self.collect_required_interface_method_names(&interface_sig, &mut seen, &mut required);
+            let mut missing = required
+                .into_iter()
+                .filter(|name| !self.type_declares_method_body(sig, name))
+                .collect::<Vec<_>>();
+            missing.sort();
+            for name in missing {
+                self.add_error(
+                    "missing_interface_member",
+                    format!(
+                        "{} '{}' declares interface '{}' but does not implement required method '{}'",
+                        type_kind_label(sig.kind),
+                        sig.name,
+                        interface_sig.name,
+                        name
+                    ),
+                    span,
+                );
+            }
+        }
     }
 
     fn check_type_field_initializers(&mut self, decl: &TypeDecl, owner: &TypeSig) {
@@ -3897,7 +3939,7 @@ impl<'a> Checker<'a> {
             };
             let mut required = HashSet::new();
             let mut seen = HashSet::new();
-            self.collect_interface_method_names(&interface_sig, &mut seen, &mut required);
+            self.collect_required_interface_method_names(&interface_sig, &mut seen, &mut required);
 
             let mut missing = required
                 .into_iter()
@@ -3960,7 +4002,7 @@ impl<'a> Checker<'a> {
         Some(sig)
     }
 
-    fn collect_interface_method_names(
+    fn collect_required_interface_method_names(
         &self,
         sig: &TypeSig,
         seen: &mut HashSet<String>,
@@ -3969,7 +4011,6 @@ impl<'a> Checker<'a> {
         if !seen.insert(sig.name.clone()) {
             return;
         }
-        methods.extend(sig.methods.keys().cloned());
         for bound in &sig.with_bounds {
             let Ty::Named(bound_name, _) = bound else {
                 continue;
@@ -3978,9 +4019,22 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if bound_sig.kind == TypeKind::Interface {
-                self.collect_interface_method_names(&bound_sig, seen, methods);
+                self.collect_required_interface_method_names(&bound_sig, seen, methods);
             }
         }
+        for (name, overloads) in &sig.methods {
+            if overloads.iter().any(|method| !method.has_body) {
+                methods.insert(name.clone());
+            } else {
+                methods.remove(name);
+            }
+        }
+    }
+
+    fn type_declares_method_body(&self, sig: &TypeSig, name: &str) -> bool {
+        sig.methods
+            .get(name)
+            .is_some_and(|methods| methods.iter().any(|method| method.has_body))
     }
 
     fn reject_parenthesized_named_constructor_args(
@@ -5798,6 +5852,7 @@ impl<'a> Checker<'a> {
                                 .collect(),
                             ret: substitute_type(&method.ret, &subst),
                             visibility: method.visibility,
+                            has_body: method.has_body,
                         })
                         .collect(),
                 )
@@ -6862,6 +6917,7 @@ fn function_sig_from_function(
             .map(|ty| convert_type_ref(ty, &type_params))
             .unwrap_or(Ty::Unknown),
         visibility: function.visibility,
+        has_body: true,
     }
 }
 
@@ -6893,6 +6949,7 @@ fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -
             .map(|ty| convert_type_ref(ty, &type_params))
             .unwrap_or(Ty::Unknown),
         visibility: method.visibility,
+        has_body: method.body.is_some(),
     }
 }
 

@@ -1,0 +1,68 @@
+# EXPECT:
+# shape shape-value
+# enum ready
+# single hi
+# ref hi
+# annotation Annotation
+
+interface Labeled {
+    def label() Str
+}
+
+interface Metadata {
+    def category() Str = "metadata"
+}
+
+annotation Route with Metadata {
+    path Str
+    method Str = "GET"
+}
+
+shape NamedShape with Labeled {
+    name Str
+}
+
+impl NamedShape {
+    def label() Str = this.name
+}
+
+enum Status with Labeled {
+    case Ready
+    case Failed {
+        reason Str
+    }
+}
+
+impl Status {
+    def label() Str = match this {
+        case Ready => "ready"
+        case Failed(reason) => reason
+    }
+}
+
+single Greeter with Labeled {
+}
+
+impl single Greeter {
+    def label() Str = this.hello()
+
+    def hello() Str = "hi"
+}
+
+def main() Unit {
+    named NamedShape = NamedShape { name: "shape-value" }
+    namedLabel Labeled = named
+    println("shape", namedLabel.label())
+
+    statusLabel Labeled = Status.Ready
+    println("enum", statusLabel.label())
+
+    greeterLabel Labeled = Greeter
+    println("single", greeterLabel.label())
+
+    a = Greeter
+    println("ref", a.hello())
+
+    routeType = typeOf[Route]
+    println("annotation", routeType.kind())
+}

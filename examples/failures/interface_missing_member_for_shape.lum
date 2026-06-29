@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*shape 'NamedShape' declares interface 'Labeled' but does not implement required method 'label'.*
+
+interface Labeled {
+    def label() Str
+}
+
+shape NamedShape with Labeled {
+    name Str
+}
+
+def main() Unit {
+    named Labeled = NamedShape { name: "bad" }
+}

@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*annotation 'Route' declares interface 'Labeled' but does not implement required method 'label'.*
+
+interface Labeled {
+    def label() Str
+}
+
+annotation Route with Labeled {
+    path Str
+}
