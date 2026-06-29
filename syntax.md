@@ -29,6 +29,8 @@ List shorthand can be nested, for example:
 
 Common stdlib/prelude types:
 - `Option[T]`
+- `Result[T, E]`
+- `Either[L, R]`
 - `Iterable[T]`
 - `Iterator[T]`
 - `Type`
