@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*single 'Config' cannot be constructed; reference 'Config' directly.*
+
+single Config {
+    value Int = 5
+}
+
+def main() Unit {
+    created = Config()
+    alsoCreated = Config {}
+}

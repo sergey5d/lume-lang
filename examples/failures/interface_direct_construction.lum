@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*interface 'Reader' cannot be constructed directly; use an anonymous implementation that defines all required members.*
+
+interface Reader {
+    def read() Str
+}
+
+def main() Unit {
+    reader = Reader()
+    alsoReader = Reader {}
+}

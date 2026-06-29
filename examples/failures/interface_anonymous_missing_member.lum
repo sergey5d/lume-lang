@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*anonymous implementation of interface 'Reader' is missing method 'close'.*
+
+interface Reader {
+    def read() Str
+    def close() Unit
+}
+
+def main() Unit {
+    handler Reader = Reader {
+        def read() Str = "open"
+    }
+}

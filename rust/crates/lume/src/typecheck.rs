@@ -3410,7 +3410,11 @@ impl<'a> Checker<'a> {
                     Ty::Record(Vec::new())
                 }
             }
-            Expr::AnonymousInterface { .. } => Ty::Unknown,
+            Expr::AnonymousInterface {
+                interfaces,
+                methods,
+                span,
+            } => self.check_anonymous_interface_expr(interfaces, methods, *span, expected),
             Expr::Try { value, span } => {
                 if self.current_return == Ty::Unknown {
                     self.add_error("invalid_try", "try used outside callable body", *span);
@@ -3804,7 +3808,7 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
     ) -> Ty {
         if uses_brace_syntax
-            && !self.brace_call_uses_structural_construction(callee)
+            && self.brace_call_type_sig(callee).is_none()
             && !self.brace_call_targets_current_constructor(callee)
             && !self.brace_call_targets_enum_case(callee)
             && !trailing_brace_call_has_lambda_arg(args)
@@ -3869,6 +3873,112 @@ impl<'a> Checker<'a> {
                     span,
                 );
                 Ty::Unknown
+            }
+        }
+    }
+
+    fn check_anonymous_interface_expr(
+        &mut self,
+        interfaces: &[TypeRef],
+        methods: &[MethodDecl],
+        span: crate::source::Span,
+        expected: &Ty,
+    ) -> Ty {
+        let provided = methods
+            .iter()
+            .map(|method| method.name.clone())
+            .collect::<HashSet<_>>();
+        let mut result_tys = Vec::new();
+
+        for interface in interfaces {
+            let interface_ty = self.ty_from_type_ref(interface);
+            let Some(interface_sig) = self.interface_sig_from_type_ref(interface) else {
+                continue;
+            };
+            let mut required = HashSet::new();
+            let mut seen = HashSet::new();
+            self.collect_interface_method_names(&interface_sig, &mut seen, &mut required);
+
+            let mut missing = required
+                .into_iter()
+                .filter(|name| !provided.contains(name))
+                .collect::<Vec<_>>();
+            missing.sort();
+            for name in missing {
+                self.add_error(
+                    "missing_interface_member",
+                    format!(
+                        "anonymous implementation of interface '{}' is missing method '{}'",
+                        interface_sig.name, name
+                    ),
+                    span,
+                );
+            }
+            result_tys.push(interface_ty);
+        }
+
+        if result_tys
+            .iter()
+            .any(|interface_ty| self.is_assignable(interface_ty, expected))
+        {
+            expected.clone()
+        } else if result_tys.len() == 1 {
+            result_tys.pop().unwrap_or(Ty::Unknown)
+        } else {
+            Ty::Unknown
+        }
+    }
+
+    fn interface_sig_from_type_ref(&mut self, interface: &TypeRef) -> Option<TypeSig> {
+        let TypeRef::Named { name, .. } = interface else {
+            self.add_error(
+                "invalid_anonymous_interface",
+                "anonymous implementation target must be an interface name",
+                interface.span(),
+            );
+            return None;
+        };
+        let Some(sig) = self.lookup_any_type(name) else {
+            self.add_error(
+                "unknown_type",
+                format!("unknown interface '{}'", name),
+                interface.span(),
+            );
+            return None;
+        };
+        if sig.kind != TypeKind::Interface {
+            self.add_error(
+                "invalid_anonymous_interface",
+                format!(
+                    "anonymous implementation target '{}' must be an interface",
+                    sig.name
+                ),
+                interface.span(),
+            );
+            return None;
+        }
+        Some(sig)
+    }
+
+    fn collect_interface_method_names(
+        &self,
+        sig: &TypeSig,
+        seen: &mut HashSet<String>,
+        methods: &mut HashSet<String>,
+    ) {
+        if !seen.insert(sig.name.clone()) {
+            return;
+        }
+        methods.extend(sig.methods.keys().cloned());
+        for bound in &sig.with_bounds {
+            let Ty::Named(bound_name, _) = bound else {
+                continue;
+            };
+            let Some(bound_sig) = self.lookup_any_type(bound_name) else {
+                continue;
+            };
+            if bound_sig.kind == TypeKind::Interface {
+                self.collect_interface_method_names(&bound_sig, seen, methods);
             }
         }
     }
@@ -4401,6 +4511,16 @@ impl<'a> Checker<'a> {
                         parenthesized_record_arg,
                     ));
                 }
+                if let Some(sig) = self.lookup_any_single(name) {
+                    return Some(self.check_named_type_constructor(
+                        &sig,
+                        args,
+                        span,
+                        uses_brace_syntax,
+                        structural_record_arg,
+                        parenthesized_record_arg,
+                    ));
+                }
                 None
             }
             Expr::Member { receiver, name, .. } => {
@@ -4616,6 +4736,30 @@ impl<'a> Checker<'a> {
                 format!(
                     "annotation '{}' cannot be constructed as a value; use '@{} {{ ... }}' as metadata",
                     sig.name, sig.name
+                ),
+                span,
+            );
+            return ret;
+        }
+
+        if sig.kind == TypeKind::Single {
+            self.add_error(
+                "invalid_single_construction",
+                format!(
+                    "single '{}' cannot be constructed; reference '{}' directly",
+                    sig.name, sig.name
+                ),
+                span,
+            );
+            return ret;
+        }
+
+        if sig.kind == TypeKind::Interface {
+            self.add_error(
+                "invalid_interface_construction",
+                format!(
+                    "interface '{}' cannot be constructed directly; use an anonymous implementation that defines all required members",
+                    sig.name
                 ),
                 span,
             );
@@ -5020,11 +5164,6 @@ impl<'a> Checker<'a> {
         args.to_vec()
     }
 
-    fn brace_call_uses_structural_construction(&self, callee: &Expr) -> bool {
-        self.brace_call_type_sig(callee)
-            .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Record))
-    }
-
     fn brace_call_targets_explicit_constructor(&self, callee: &Expr) -> bool {
         self.brace_call_type_sig(callee)
             .is_some_and(|sig| sig.kind == TypeKind::Class && sig.methods.contains_key("new"))
@@ -5063,11 +5202,18 @@ impl<'a> Checker<'a> {
                 .lookup_type_local(name)
                 .or_else(|| self.world.lookup_imported_type(self.module, name))
                 .or_else(|| self.lookup_unique_module_type(name))
+                .or_else(|| self.lookup_any_single(name))
                 .or_else(|| self.world.ambient.types.get(name).cloned()),
             Expr::Member { .. } => module_alias_and_member(callee).and_then(|(alias, member)| {
                 self.world
                     .lookup_module_alias(self.module, &alias)
-                    .and_then(|module| module.types.get(&member).cloned())
+                    .and_then(|module| {
+                        module
+                            .types
+                            .get(&member)
+                            .cloned()
+                            .or_else(|| module.singles.get(&member).cloned())
+                    })
             }),
             _ => None,
         };
