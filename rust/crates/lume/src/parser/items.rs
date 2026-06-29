@@ -402,7 +402,7 @@ impl<'a> Parser<'a> {
 
             if kind == TypeKind::Enum && self.match_keyword(Keyword::Case) {
                 if let Some(case_decl) =
-                    self.parse_enum_case(member_annotations, self.previous_span())
+                    self.parse_enum_case(member_annotations, self.previous_span(), &name)
                 {
                     match body_order {
                         TypeBodyOrder::Storage => {}
@@ -564,10 +564,16 @@ impl<'a> Parser<'a> {
         &mut self,
         annotations: Vec<Annotation>,
         case_span: Span,
+        enum_name: &str,
     ) -> Option<EnumCaseDecl> {
         let (name, name_span) = self.expect_identifier("expected enum case name")?;
         let mut fields = Vec::new();
         self.skip_newlines();
+        let mut end = name_span;
+        if self.match_keyword(Keyword::With) {
+            end = self.report_enum_case_interface_bound(enum_name, &name)?;
+            self.skip_newlines();
+        }
         if self.match_token(TokenKind::LBrace) {
             self.skip_newlines();
             while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
@@ -589,8 +595,27 @@ impl<'a> Parser<'a> {
             annotations,
             name,
             fields,
-            span: case_span.cover(name_span),
+            span: case_span.cover(end),
         })
+    }
+
+    fn report_enum_case_interface_bound(
+        &mut self,
+        enum_name: &str,
+        case_name: &str,
+    ) -> Option<Span> {
+        let with_span = self.previous_span();
+        let bounds = self.parse_type_ref_list()?;
+        let end = bounds.last().map(TypeRef::span).unwrap_or(with_span);
+        self.diagnostics.push(Diagnostic::error(
+            "invalid_enum_case_interface",
+            format!(
+                "enum case '{}.{}' cannot implement interfaces; put 'with ...' on enum '{}'",
+                enum_name, case_name, enum_name
+            ),
+            with_span.cover(end),
+        ));
+        Some(end)
     }
 
     pub(super) fn parse_impl_block(&mut self) -> Option<ImplBlock> {

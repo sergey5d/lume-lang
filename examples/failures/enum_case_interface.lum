@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*enum case 'Outcome.Left' cannot implement interfaces; put 'with ...' on enum 'Outcome'.*
+
+interface Labeled {
+    def label() Str
+}
+
+enum Outcome {
+    case Left with Labeled {
+        value Str
+    }
+}
