@@ -1055,12 +1055,22 @@ Singleton:
 
 ```txt
 single MathBox {
+    value Int = 5
 }
 
 impl single MathBox {
     def double(value Int) Int = value * 2
+
+    def valuePlusOne() Int = this.value + 1
 }
+
+box = MathBox
+answer = box.valuePlusOne()
 ```
+
+`single Name { ... }` declares both a singleton type `Name` and one singleton value `Name`.
+The expression `Name` evaluates to that singleton value, so singles can be passed to functions, stored in locals, and called through later like any other value.
+Singles cannot be constructed with `Name()` or `Name {}`; reference `Name` directly.
 
 `impl single Name { ... }` may also synthesize an empty singleton companion when `Name` already exists and no singleton fields are needed.
 
