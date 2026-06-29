@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*constructors must appear before methods in class 'User'.*
+
+class User {
+    def label() Str = "user"
+
+    new {
+        name Str
+    } {
+        this.name = name
+    }
+}

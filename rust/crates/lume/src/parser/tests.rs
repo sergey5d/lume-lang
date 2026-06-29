@@ -403,6 +403,76 @@ impl User {
 }
 
 #[test]
+fn rejects_class_field_after_inline_constructor() {
+    let result = parse(
+        r#"
+class User {
+    new {
+        name Str
+    } {
+        this.name = name
+    }
+
+    name Str
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_member_order"
+                && diag
+                    .message
+                    .contains("storage fields must appear before constructors")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "unexpected_constructor_decl"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_inline_constructor_after_class_method() {
+    let result = parse(
+        r#"
+class User {
+    def label() Str = "user"
+
+    new {
+        name Str
+    } {
+        this.name = name
+    }
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_member_order"
+                && diag
+                    .message
+                    .contains("constructors must appear before methods")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "unexpected_constructor_decl"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_expression_bodied_constructor() {
     let result = parse(
         r#"

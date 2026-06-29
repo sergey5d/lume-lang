@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TypeBodyOrder {
     Storage,
+    Constructor,
     Method,
 }
 
@@ -390,6 +391,7 @@ impl<'a> Parser<'a> {
 
         let mut members = Vec::new();
         let mut body_order = TypeBodyOrder::Storage;
+        let mut misplaced_constructors = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             self.skip_newlines();
             if self.at(TokenKind::RBrace) {
@@ -402,15 +404,28 @@ impl<'a> Parser<'a> {
                 if let Some(case_decl) =
                     self.parse_enum_case(member_annotations, self.previous_span())
                 {
-                    if body_order == TypeBodyOrder::Method {
-                        self.diagnostics.push(Diagnostic::error(
-                            "invalid_member_order",
-                            format!(
-                                "enum cases must appear before methods in enum '{}'; move case '{}' above method declarations",
-                                name, case_decl.name
-                            ),
-                            case_decl.span,
-                        ));
+                    match body_order {
+                        TypeBodyOrder::Storage => {}
+                        TypeBodyOrder::Constructor => {
+                            self.diagnostics.push(Diagnostic::error(
+                                "invalid_member_order",
+                                format!(
+                                    "enum cases must appear before constructors in enum '{}'; move case '{}' above constructor declarations",
+                                    name, case_decl.name
+                                ),
+                                case_decl.span,
+                            ));
+                        }
+                        TypeBodyOrder::Method => {
+                            self.diagnostics.push(Diagnostic::error(
+                                "invalid_member_order",
+                                format!(
+                                    "enum cases must appear before methods in enum '{}'; move case '{}' above method declarations",
+                                    name, case_decl.name
+                                ),
+                                case_decl.span,
+                            ));
+                        }
                     }
                     members.push(TypeMember::Case(case_decl));
                 } else {
@@ -436,6 +451,26 @@ impl<'a> Parser<'a> {
                 return None;
             }
             match self.current_kind() {
+                TokenKind::Identifier if self.current().lexeme == "new" => {
+                    let constructor =
+                        self.parse_constructor_decl(member_annotations, member_visibility)?;
+                    if body_order == TypeBodyOrder::Method {
+                        self.diagnostics.push(Diagnostic::error(
+                            "invalid_member_order",
+                            format!(
+                                "constructors must appear before methods in {} '{}'; move 'new' above method declarations",
+                                type_kind_name(kind),
+                                name
+                            ),
+                            constructor.span,
+                        ));
+                    }
+                    misplaced_constructors.push(constructor.span);
+                    if body_order != TypeBodyOrder::Method {
+                        body_order = TypeBodyOrder::Constructor;
+                    }
+                    members.push(TypeMember::Method(constructor));
+                }
                 TokenKind::Keyword(Keyword::Def) => {
                     let body_method_error = match kind {
                         TypeKind::Annotation => Some(format!(
@@ -466,27 +501,50 @@ impl<'a> Parser<'a> {
                 }
                 _ => {
                     let field = self.parse_field_decl(member_annotations, member_visibility)?;
-                    if body_order == TypeBodyOrder::Method
-                        && matches!(
-                            kind,
-                            TypeKind::Class | TypeKind::Record | TypeKind::Enum | TypeKind::Single
-                        )
-                    {
-                        self.diagnostics.push(Diagnostic::error(
-                            "invalid_member_order",
-                            format!(
-                                "storage fields must appear before methods in {} '{}'; move field '{}' above method declarations",
-                                type_kind_name(kind),
-                                name,
-                                field.name
-                            ),
-                            field.span,
-                        ));
+                    if matches!(
+                        kind,
+                        TypeKind::Class | TypeKind::Record | TypeKind::Enum | TypeKind::Single
+                    ) {
+                        match body_order {
+                            TypeBodyOrder::Storage => {}
+                            TypeBodyOrder::Constructor => {
+                                self.diagnostics.push(Diagnostic::error(
+                                    "invalid_member_order",
+                                    format!(
+                                        "storage fields must appear before constructors in {} '{}'; move field '{}' above constructor declarations",
+                                        type_kind_name(kind),
+                                        name,
+                                        field.name
+                                    ),
+                                    field.span,
+                                ));
+                            }
+                            TypeBodyOrder::Method => {
+                                self.diagnostics.push(Diagnostic::error(
+                                    "invalid_member_order",
+                                    format!(
+                                        "storage fields must appear before methods in {} '{}'; move field '{}' above method declarations",
+                                        type_kind_name(kind),
+                                        name,
+                                        field.name
+                                    ),
+                                    field.span,
+                                ));
+                            }
+                        }
                     }
                     members.push(TypeMember::Field(field));
                 }
             }
             self.skip_newlines();
+        }
+
+        for span in misplaced_constructors {
+            self.diagnostics.push(Diagnostic::error(
+                "unexpected_constructor_decl",
+                type_body_constructor_message(kind, &name),
+                span,
+            ));
         }
 
         let end = self.consume(TokenKind::RBrace, "expected '}' after type body")?;
@@ -825,6 +883,37 @@ fn impl_target_name(target: &TypeRef) -> &str {
     match target {
         TypeRef::Named { name, .. } => name,
         _ => "target",
+    }
+}
+
+fn type_body_constructor_message(kind: TypeKind, name: &str) -> String {
+    match kind {
+        TypeKind::Annotation => {
+            format!(
+                "annotation '{name}' cannot declare constructors; annotations are data-only metadata shapes"
+            )
+        }
+        TypeKind::Class => {
+            format!(
+                "class '{name}' constructors are declared in impl blocks; move 'new' into impl {name}"
+            )
+        }
+        TypeKind::Record => {
+            format!(
+                "shape '{name}' cannot declare custom constructors; use structural brace construction"
+            )
+        }
+        TypeKind::Single => {
+            format!(
+                "single '{name}' constructors are declared in impl single blocks; move 'new' into impl single {name}"
+            )
+        }
+        TypeKind::Interface => {
+            format!("interface '{name}' cannot declare constructors")
+        }
+        TypeKind::Enum => {
+            format!("enum '{name}' cannot declare constructors; enum cases define values")
+        }
     }
 }
 
