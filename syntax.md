@@ -655,40 +655,69 @@ tupled Point = (5, 6)
 ```
 
 Construction rules:
-- a constructor declares the shape of values accepted by construction
-- `new { field Type, other Type = default } { ... }` declares a constructor shape with required and defaulted fields
-- braces fill that constructor shape by field name: `Type { field: value, other: value }`
-- parentheses fill the same constructor shape by declaration order: `Type(value, otherValue)`
+
+General construction rules:
+
+- a constructor shape declares the fields accepted by construction
 - constructor parentheses accept positional arguments only; use braces for construction fields
 - function and method calls may still use named arguments in parentheses
 - `Type { value }` is not valid; use `Type(value)`
 - anonymous shapes use `{ field: value }` for field construction and tuple values for contextual positional construction
 - builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` use parentheses
-- `Type { ... }` and `Type(...)` both resolve through the available `new`/field construction shape
-- any explicit `new` disables implicit structural field construction for that class
-- `Type {}` works when the visible construction shape has no required fields
-- construction braces check only visible public fields
-- in construction braces, public fields without initializers are required
-- in construction braces, public fields with initializers are optional
-- in construction braces, hidden fields are never part of the accepted shape
-- hidden fields without initializers suppress implicit field constructors; define `new` to initialize them
-- positional construction follows declared public-field order
-- public fields may be omitted from positional construction only when the omitted fields form a trailing suffix and all have initializers
-- positional construction is rejected when a hidden initialized field appears before a later public field
+- `Type { ... }` and `Type(...)` both resolve through the available explicit `new` shape or implicit field-construction shape
+- class construction is nominal and constructor-gated; shape construction is structural
+- tuple values cannot construct classes; write `User(...)` or `User { ... }`
+- tuple values can construct anonymous or named shapes only when the target shape type is known
+- nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
+- `Type({ ... })` is not supported; use construction fields or positional values directly
+- `shape(...)` expression syntax is not supported; use tuple-to-shape construction instead
+
+Explicit constructor shape rules:
+
+- `new { field Type, other Type = default } { ... }` declares an explicit constructor input shape with required and defaulted fields
+- constructor input fields do not have to be class fields; they are inputs to the constructor body
+- `Type { field: value, other: value }` matches the explicit constructor input shape by field name
+- `Type(value, otherValue)` fills the same explicit constructor input shape by declaration order
+- if any explicit `new` exists, implicit field construction is disabled for that class
 - explicit constructors may use one trailing variadic constructor shape field such as `items [T] vararg`
 - a variadic constructor shape field receives the extra positional arguments as `[T]`
 - only one variadic constructor shape field is allowed
 - construction fields can target a variadic constructor shape field by passing a `[T]` value
 - variadic constructor shape fields may have a default `[T]` value
 - variadic constructor shape fields cannot follow defaulted shape fields
+
+```txt
+class User {
+    name Str
+    age Int
+}
+
+impl User {
+    new {
+        label Str
+    } {
+        this.name = label
+        this.age = 0
+    }
+}
+
+user User = User { label: "Ada" }
+```
+
+Implicit field construction rules:
+
+- if a class has no explicit `new`, the compiler synthesizes a constructor shape from visible public fields
+- construction braces check the synthesized visible-public-field shape
+- public fields without initializers are required
+- public fields with initializers are optional
+- hidden fields are excluded from the synthesized constructor shape
+- hidden fields without initializers suppress implicit field constructors; define `new` to initialize them
+- `Type {}` works when the synthesized field-construction shape has no required fields
+- positional construction follows declared public-field order
+- public fields may be omitted from positional construction only when the omitted fields form a trailing suffix and all have initializers
+- positional construction is rejected when a hidden initialized field appears before a later public field
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
-- tuple values cannot construct classes; write `User(...)` or `User { ... }`
-- tuple values can construct anonymous or named shapes only when the target shape type is known
-- class construction is nominal and constructor-gated; shape construction is structural
-- nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
-- `Type({ ... })` is not supported; use construction fields or positional values directly
-- `shape(...)` expression syntax is not supported; use tuple-to-shape construction instead
 
 ## Brace Disambiguation
 
@@ -698,7 +727,7 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 { field: value }                 # anonymous shape literal
 { field Type: value }            # typed anonymous shape literal
 { expr }                         # block expression
-Type { field: value }            # named construction or enum named payload
+Type { field: value }            # brace field construction or enum field payload
 call { x -> ... }                # trailing lambda
 Interface with Other { def ... } # anonymous interface implementation
 new { field Type }               # constructor input shape declaration

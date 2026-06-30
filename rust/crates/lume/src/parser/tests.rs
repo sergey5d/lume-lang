@@ -867,7 +867,7 @@ fn rejects_equals_in_named_shape_literal_fields() {
     let result = parse(r#"def run() Unit = { name = "Ana", age = 10 }"#);
     assert!(
         !result.diagnostics.is_empty(),
-        "expected parser diagnostics for '=' named construction fields"
+        "expected parser diagnostics for '=' construction fields"
     );
 }
 

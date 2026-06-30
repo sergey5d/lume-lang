@@ -100,10 +100,11 @@ impl Person {
 
 Current constructor rules:
 
-- if a class has no explicit `new`, eligible field construction uses `Type { field: value }` and `Type(value)`
+- `new { ... }` declares an explicit constructor input shape
+- `Type { field: value }` matches explicit constructor input fields by name
+- `Type(...)` fills explicit constructor input fields by declaration order
 - if any explicit `new` exists, implicit field constructors are suppressed
-- `Type(...)` is positional construction through the available `new` / field construction shape
-- `Type { field: value }` is named construction through the available `new` / field construction shape
+- if a class has no explicit `new`, field construction uses a synthesized shape from visible public fields
 - `hidden new { ... } { ... }` hides a constructor from outside callers
 
 ## Open Questions
