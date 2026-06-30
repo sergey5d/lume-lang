@@ -21,7 +21,7 @@ impl OrderManager {
 
         arr = str.split("\s*,\s*")
 
-        expect arr.size() == 5
+        assert arr.size() == 5
 
         id = try Int.parse(arr[0])
 

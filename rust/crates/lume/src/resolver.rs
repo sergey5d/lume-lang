@@ -207,6 +207,7 @@ struct DeclSpan {
 #[derive(Debug, Clone, Copy)]
 struct Symbol {
     span: crate::source::Span,
+    visibility: Visibility,
     mutable: bool,
     kind: SymbolKind,
 }
@@ -561,7 +562,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
     let decls = collect_top_level_decls(&module.program);
     let mut out = Vec::new();
     for (name, decl) in decls.functions {
-        if decl.visibility == Visibility::Public {
+        if decl.visibility != Visibility::Hidden || same_module {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -571,6 +572,9 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
     }
     for (name, symbol) in decls.globals {
         if symbol.mutable {
+            continue;
+        }
+        if symbol.visibility == Visibility::Hidden && !same_module {
             continue;
         }
         out.push(ImportSymbol {
@@ -632,7 +636,7 @@ fn resolve_imported_symbol(
 ) -> Option<ImportedSymbol> {
     let decls = collect_top_level_decls(&module.program);
     if let Some(decl) = decls.functions.get(name) {
-        if decl.visibility == Visibility::Public {
+        if decl.visibility != Visibility::Hidden || same_module {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 single_name: None,
@@ -642,7 +646,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(symbol) = decls.globals.get(name) {
-        if !symbol.mutable {
+        if !symbol.mutable && (symbol.visibility != Visibility::Hidden || same_module) {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 single_name: None,
@@ -731,6 +735,7 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
                         local.name.clone(),
                         Symbol {
                             span: local.span,
+                            visibility: binding.visibility,
                             mutable: local.mutable,
                             kind: SymbolKind::GlobalBinding,
                         },
@@ -983,12 +988,26 @@ impl<'a> Resolver<'a> {
                     .functions
                     .into_iter()
                     .filter_map(|(name, decl)| {
-                        (decl.visibility == Visibility::Public).then_some((name, decl.span))
+                        (decl.visibility != Visibility::Hidden).then_some((name, decl.span))
                     })
                     .collect(),
-                globals: decls.globals.into_iter().collect(),
-                types: decls.types,
-                singles: decls.singles,
+                globals: decls
+                    .globals
+                    .into_iter()
+                    .filter(|(_, symbol)| {
+                        !symbol.mutable && symbol.visibility != Visibility::Hidden
+                    })
+                    .collect(),
+                types: decls
+                    .types
+                    .into_iter()
+                    .filter(|(_, info)| info.visibility != Visibility::Hidden)
+                    .collect(),
+                singles: decls
+                    .singles
+                    .into_iter()
+                    .filter(|(_, info)| info.visibility != Visibility::Hidden)
+                    .collect(),
             };
             self.modules_by_alias.insert(alias.clone(), namespace);
         }
@@ -1065,6 +1084,7 @@ impl<'a> Resolver<'a> {
                     local.name.clone(),
                     Symbol {
                         span: local.span,
+                        visibility: binding.visibility,
                         mutable: local.mutable,
                         kind: SymbolKind::GlobalBinding,
                     },
@@ -1514,7 +1534,7 @@ impl<'a> Resolver<'a> {
                 }
             }
             Stmt::PatternBinding(stmt) => self.resolve_pattern_binding(stmt),
-            Stmt::ExpectCondition(stmt) => self.resolve_expr(&stmt.condition),
+            Stmt::Assert(stmt) => self.resolve_expr(&stmt.condition),
             Stmt::Assignment(assignment) => self.resolve_assignment(assignment),
             Stmt::If(stmt) => self.resolve_if_stmt(stmt),
             Stmt::Match(stmt) => {
@@ -2277,6 +2297,7 @@ impl<'a> Resolver<'a> {
             name.to_string(),
             Symbol {
                 span,
+                visibility: Visibility::Default,
                 mutable,
                 kind,
             },
@@ -2749,8 +2770,6 @@ def main() Unit {}
     fn rejects_runtime_annotation_values() {
         let program = parse_inline(
             r#"
-var mutablePath Str = "/mutable"
-
 annotation Route {
     path Str
 }
@@ -2761,7 +2780,6 @@ single Config {
 
 def makePath() Str = "/runtime"
 
-@Route { path: mutablePath }
 @Route { path: Config.path }
 @Route { path: makePath() }
 def main() Unit {}
@@ -2774,8 +2792,8 @@ def main() Unit {}
             .filter(|diag| diag.code == "invalid_annotation_value")
             .count();
         assert_eq!(
-            invalid_values, 3,
-            "expected mutable global, mutable single field, and call to be rejected: {:#?}",
+            invalid_values, 2,
+            "expected mutable single field and call to be rejected: {:#?}",
             result.diagnostics
         );
     }

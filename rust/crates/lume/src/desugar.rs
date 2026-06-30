@@ -65,7 +65,7 @@ pub fn desugar_stmt(stmt: &ast::Stmt) -> core::Stmt {
             value: desugar_expr(&stmt.value),
             span: stmt.span,
         }),
-        ast::Stmt::ExpectCondition(stmt) => desugar_expect_condition_stmt(stmt),
+        ast::Stmt::Assert(stmt) => desugar_assert_stmt(stmt),
         ast::Stmt::Assignment(stmt) => core::Stmt::Assignment(core::AssignmentStmt {
             targets: stmt.targets.iter().map(desugar_expr).collect(),
             operator: stmt.operator,
@@ -138,7 +138,7 @@ pub fn desugar_stmt(stmt: &ast::Stmt) -> core::Stmt {
     }
 }
 
-fn desugar_expect_condition_stmt(stmt: &ast::ExpectConditionStmt) -> core::Stmt {
+fn desugar_assert_stmt(stmt: &ast::AssertStmt) -> core::Stmt {
     let panic_expr = core::Expr::Call {
         callee: Box::new(core::Expr::Identifier {
             name: "panic".to_string(),
@@ -148,7 +148,7 @@ fn desugar_expect_condition_stmt(stmt: &ast::ExpectConditionStmt) -> core::Stmt 
             name: None,
             ty: None,
             value: core::Expr::String {
-                raw: "expect condition was false".to_string(),
+                raw: "assert condition was false".to_string(),
                 span: stmt.span,
             },
             span: stmt.span,

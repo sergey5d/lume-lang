@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*top-level mutable bindings are not allowed; move mutable module state into a single, class instance, or function local.*
+
+var counter Int = 0

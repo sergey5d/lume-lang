@@ -53,6 +53,7 @@ impl<'a> Parser<'a> {
                 self.restore(checkpoint);
                 self.parse_let_stmt()
             }
+            TokenKind::Keyword(Keyword::Assert) => self.parse_assert_stmt(),
             TokenKind::Keyword(Keyword::Expect) => self.parse_expect_stmt(),
             TokenKind::Keyword(Keyword::Var) => {
                 let stmt = self.parse_binding_stmt_after_var()?;
@@ -293,7 +294,7 @@ impl<'a> Parser<'a> {
             if self.match_keyword(Keyword::Else) {
                 self.error_at_current(
                     "unexpected_token",
-                    "expect does not support 'else'; use 'let ... else ...' or plain 'expect'",
+                    "expect does not support 'else'; use 'let ... else ...' for recoverable pattern matching",
                 );
                 return None;
             }
@@ -307,28 +308,17 @@ impl<'a> Parser<'a> {
         }
 
         let checkpoint = self.checkpoint();
-        let diagnostics_len = self.diagnostics.len();
         if let Some(pattern) = self.parse_pattern() {
             let (pattern, operator) = if self.match_token(TokenKind::Eq) {
                 (pattern, "=")
             } else if self.match_token(TokenKind::LeftArrow) {
                 (self.wrap_extract_pattern(pattern), "<-")
             } else {
-                self.restore(checkpoint);
-                self.diagnostics.truncate(diagnostics_len);
-                let condition = self.parse_expr()?;
-                if self.match_keyword(Keyword::Else) {
-                    self.error_at_current(
-                        "unexpected_token",
-                        "expect does not support 'else'; use 'let ... else ...' or plain 'expect'",
-                    );
-                    return None;
-                }
-                let end = condition.span();
-                return Some(Stmt::ExpectCondition(ExpectConditionStmt {
-                    condition,
-                    span: start.cover(end),
-                }));
+                self.error_at_current(
+                    "expected_pattern_binding",
+                    "expect only supports pattern/assertive binding; use 'assert' for boolean assertions",
+                );
+                return None;
             };
             if operator != "=" && self.at(TokenKind::Newline) {
                 self.error_at_current(
@@ -341,7 +331,7 @@ impl<'a> Parser<'a> {
             if self.match_keyword(Keyword::Else) {
                 self.error_at_current(
                     "unexpected_token",
-                    "expect does not support 'else'; use 'let ... else ...' or plain 'expect'",
+                    "expect does not support 'else'; use 'let ... else ...' for recoverable pattern matching",
                 );
                 return None;
             }
@@ -355,18 +345,29 @@ impl<'a> Parser<'a> {
             }));
         }
         self.restore(checkpoint);
-        self.diagnostics.truncate(diagnostics_len);
+        self.error_at_current(
+            "expected_pattern_binding",
+            "expect only supports pattern/assertive binding; use 'assert' for boolean assertions",
+        );
+        None
+    }
 
-        let condition = self.parse_expr()?;
-        if self.match_keyword(Keyword::Else) {
+    pub(super) fn parse_assert_stmt(&mut self) -> Option<Stmt> {
+        let start = self.consume_keyword(Keyword::Assert, "expected 'assert'")?;
+        if self.at(TokenKind::Newline) {
             self.error_at_current(
-                "unexpected_token",
-                "expect does not support 'else'; use 'let ... else ...' or plain 'expect'",
+                "expected_expression",
+                "expected condition on same line after \"assert\"",
             );
             return None;
         }
+        let condition = self.parse_expr()?;
+        if self.match_keyword(Keyword::Else) {
+            self.error_at_current("unexpected_token", "assert does not support 'else'");
+            return None;
+        }
         let end = condition.span();
-        Some(Stmt::ExpectCondition(ExpectConditionStmt {
+        Some(Stmt::Assert(AssertStmt {
             condition,
             span: start.cover(end),
         }))

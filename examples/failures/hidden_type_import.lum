@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*use 'model/pubdemo' has no public symbol 'SecretBox'.*
+
+module app
+
+use model/pubdemo/{SecretBox}
+
+def main() Unit {}

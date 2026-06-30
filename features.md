@@ -76,10 +76,12 @@ Finalized policy:
 Current module/use support is usable.
 
 Settled direction:
-- top-level bindings are private by default
-- top-level functions are private by default
-- exported top-level functions and exported immutable module bindings use explicit `public`
-- mutable module state should not be exposed directly as used variables
+- top-level functions are public by default
+- top-level immutable bindings are public by default
+- top-level types are public by default
+- `hidden` makes top-level functions, constants, and types private
+- `public` is removed from the language surface
+- top-level mutable bindings are not allowed; mutable module state belongs inside `single`, class instances, or function locals
 
 Still open:
 - whether singleton methods should ever be usable directly beyond explicit `use module/Single/*` and builtin `OS` prelude behavior
@@ -92,12 +94,12 @@ Annotations exist as compile-time metadata shapes. They currently attach to decl
 Open question:
 - do we want annotations on global functions/method-like top-level `def` declarations as a first-class supported target
 - do we want annotations on global variables/top-level bindings
-- if top-level bindings become annotatable, should that apply only to immutable constants, or also to mutable module state
+- if top-level bindings become annotatable, immutable constants are the only viable target because top-level mutable bindings are not allowed
 - whether annotated globals should affect module export/import metadata, runtime reflection, generated code, or only checker/tooling behavior
 
 Current leaning:
 - global functions are probably useful annotation targets for routing, tests, effects, permissions, and generated bindings
-- immutable top-level constants may be useful too, but mutable globals are more questionable because annotation metadata should describe stable declarations, not changing state
+- immutable top-level constants may be useful too, but annotation metadata should describe stable declarations, not changing state
 
 ## Longer-Term Ideas
 
@@ -230,6 +232,7 @@ refutable:
 - `let PATTERN = value else { ... }` for refutable binding with an explicit failure path
 - `let { PATTERN = value ... } else { ... }` for multiple sequential refutable bindings sharing one fallback
 - `expect PATTERN = value` for assertive refutable binding that panics on mismatch; if the binding is irrefutable, use `let`
+- `assert condition` for boolean assertions that panic when false
 - `PATTERN <- source` as shorthand for the success case inside `if let`, `let ... else`, and `expect`
   `Some(PATTERN)` for `Option`, `Ok(PATTERN)` for `Result`, and `Right(PATTERN)` for `Either`
   plain `let` accepts this form only when the source expression itself proves the success case, such as `let item <- Some(5)`
@@ -239,6 +242,21 @@ TODO:
 - consider direct nested payload destructuring inside `if let`, for example `if let Some((_, initialY, _)) = rows.get(0) { ... }`
 - for now, prefer `if let Some(row) = rows.get(0) { ... }` and destructure `row` on the next line inside the branch
 - keep `if let` chaining limited to `&&` joins; if we ever extend it, do that deliberately rather than broadening it implicitly through general boolean syntax
+
+### Assertion and Panic Placement
+
+Current surface:
+- `expect PATTERN = value` is for assertive pattern binding
+- `assert condition` is for boolean assertion and panics when false
+- `panic(...)` is available through the builtin/prelude `OS` methods
+
+Open question:
+- should boolean assertion remain statement syntax, or should it become a core/prelude function such as `assert(condition)`
+
+Current leaning:
+- keep assertion out of `OS.assert(...)` because assertion is not really an operating-system capability
+- if the language ever wants fewer keywords, prefer a global/prelude `assert(...)` over `OS.assert(...)`
+- keep `OS` focused on platform/runtime boundary helpers rather than turning it into a general utility namespace
 
 ### Lambda Surface
 

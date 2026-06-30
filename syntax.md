@@ -330,7 +330,7 @@ Annotation arguments are compile-time metadata values. They may only be literals
 - enum cases, such as `RouteVisibility.Public`
 - arithmetic, comparison, boolean, and string-concatenation expressions whose operands are also annotation-safe
 
-Calls, constructors, indexing, mutable globals, mutable singleton fields, ordinary object field reads, `try`, `for ... yield`, `match`, `if`, lambdas, and blocks are rejected in annotation arguments.
+Calls, constructors, indexing, mutable singleton fields, ordinary object field reads, `try`, `for ... yield`, `match`, `if`, lambdas, and blocks are rejected in annotation arguments. Top-level mutable bindings are not allowed at all, so they are rejected before annotation argument checking.
 
 Supported targets currently include:
 
@@ -357,9 +357,9 @@ Top-level forms:
 - `shape`
 - `single`
 - `enum`
-- `public def`
-- `public name Type = expr`
+- `name Type = expr`
 - `hidden def`
+- `hidden name Type = expr`
 - `hidden annotation`
 - `hidden interface`
 - `hidden class`
@@ -412,7 +412,7 @@ enum OptionX[T] {
 }
 ```
 
-Arbitrary statements such as `if`, `for`, `match`, `defer`, `expect`, or expression statements are not valid at top level. Put executable code inside a function such as `def main() { ... }`.
+Arbitrary statements such as `if`, `for`, `match`, `defer`, `expect`, `assert`, or expression statements are not valid at top level. Put executable code inside a function such as `def main() { ... }`.
 
 ## Variable Declarations
 
@@ -430,12 +430,15 @@ var count = 0
 var total Int = 10
 ```
 
-Top-level bindings are also supported:
+Top-level immutable bindings are also supported and are public by default:
 
 ```txt
 seed Int = 1
-var counter Int = 0
+hidden internalSeed Int = 0
 ```
+
+Top-level mutable bindings are not allowed. Mutable module state must live
+inside a `single`, class instance, or function local.
 
 Fields without initializers are only valid in class-like field declarations:
 
@@ -1535,22 +1538,24 @@ expect {
 `expect` is statement-only and does not support `else`; use `let ... else`
 when you want an explicit fallback path.
 
-`expect` also supports plain boolean assertions:
+Use `assert` for plain boolean assertions:
 
 ```txt
-expect split.size() == 3
+assert split.size() == 3
 ```
 
 This form requires a `Bool` condition and panics when the condition is `false`.
+Boolean checks are intentionally not written with `expect`; `expect` is reserved
+for pattern/assertive binding.
 
 Possible future extension:
 
 ```txt
-expect split.size() == 3, "asset must have 3 parts"
+assert split.size() == 3, "asset must have 3 parts"
 expect Some(value) = maybeValue, "missing value"
 ```
 
-This is only a proposal for now; trailing messages on `expect` are not currently implemented.
+This is only a proposal for now; trailing messages on `assert` and `expect` are not currently implemented.
 
 Propagation form:
 
@@ -1936,6 +1941,7 @@ Boolean:
 Other operators / constructs:
 
 - `is` for runtime type checks
+- `assert` for boolean assertions that panic when false
 - `<-` for `for` iteration and success-case extraction in `if let`, `let ... else`, and `expect`
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases
@@ -2066,15 +2072,18 @@ name = userOpt
 
 Supported today:
 
-- `public` on top-level `def`
-- `public` on top-level immutable bindings
 - `hidden` on top-level `def`
+- `hidden` on top-level immutable bindings
 - `hidden` on top-level `interface`
 - `hidden` on top-level `class` / `shape` / `single` / `enum`
 - `hidden` on fields
 - `hidden` on methods
 
-Top-level `def` and immutable bindings are private by default and only become importable across modules when marked `public`.
+Top-level functions, immutable bindings, and types are public by default.
+Use `hidden` for private top-level functions, constants, and types.
+Top-level mutable bindings are not allowed; mutable module state must live inside
+`single`, class instances, or function locals.
+The `public` keyword is not part of the language surface.
 
 ## Notes
 

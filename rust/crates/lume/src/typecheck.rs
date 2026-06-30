@@ -1483,7 +1483,7 @@ impl<'a> Checker<'a> {
                 }
                 self.check_field_initializer_expr(&stmt.value, owner, initialized_fields);
             }
-            Stmt::ExpectCondition(stmt) => {
+            Stmt::Assert(stmt) => {
                 self.check_field_initializer_expr(&stmt.condition, owner, initialized_fields);
             }
             Stmt::Assignment(stmt) => {
@@ -2087,8 +2087,8 @@ impl<'a> Checker<'a> {
                 self.check_pattern_binding_stmt(stmt);
                 Ty::unit()
             }
-            Stmt::ExpectCondition(stmt) => {
-                self.check_expect_condition_stmt(stmt);
+            Stmt::Assert(stmt) => {
+                self.check_assert_stmt(stmt);
                 Ty::unit()
             }
             Stmt::Assignment(assignment) => {
@@ -2307,12 +2307,12 @@ impl<'a> Checker<'a> {
         self.bind_pattern(&stmt.pattern, &value_ty);
     }
 
-    fn check_expect_condition_stmt(&mut self, stmt: &crate::ast::ExpectConditionStmt) {
+    fn check_assert_stmt(&mut self, stmt: &crate::ast::AssertStmt) {
         let condition_ty = self.check_expr(&stmt.condition);
         self.require_bool(
             &condition_ty,
             stmt.condition.span(),
-            "expect condition must be Bool",
+            "assert condition must be Bool",
         );
     }
 
@@ -2329,7 +2329,7 @@ impl<'a> Checker<'a> {
             Stmt::Expr(expr_stmt) => self.expr_guarantees_control_exit(&expr_stmt.expr),
             Stmt::If(stmt) => self.if_stmt_guarantees_control_exit(stmt),
             Stmt::Match(stmt) => self.match_stmt_guarantees_control_exit(stmt),
-            Stmt::ExpectCondition(_) => false,
+            Stmt::Assert(_) => false,
             _ => false,
         }
     }
@@ -4332,7 +4332,7 @@ impl<'a> Checker<'a> {
             Stmt::Expr(expr_stmt) => self.check_discarded_expr_in_statement(&expr_stmt.expr),
             Stmt::If(stmt) => self.check_discarded_if_stmt_in_statement(stmt),
             Stmt::Match(stmt) => self.check_discarded_match_stmt_in_statement(stmt),
-            Stmt::ExpectCondition(_) => {}
+            Stmt::Assert(_) => {}
             _ => {}
         }
     }
@@ -8070,11 +8070,11 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_expect_condition_statement() {
+    fn allows_assert_statement() {
         let program = parse_inline(
             r#"
 def main() Unit {
-    expect 1 + 2 == 3
+    assert 1 + 2 == 3
 }
 "#,
         );
@@ -8201,11 +8201,11 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_non_bool_expect_condition() {
+    fn rejects_non_bool_assert_condition() {
         let program = parse_inline(
             r#"
 def main() Unit {
-    expect 1
+    assert 1
 }
 "#,
         );
@@ -8213,7 +8213,7 @@ def main() Unit {
         assert!(
             result.diagnostics.iter().any(|diag| {
                 diag.code == "invalid_condition_type"
-                    && diag.message.contains("expect condition must be Bool")
+                    && diag.message.contains("assert condition must be Bool")
             }),
             "{:#?}",
             result.diagnostics

@@ -77,7 +77,7 @@ fn parses_top_level_bindings() {
     let result = parse(
         r#"
 seed Int = 1
-var counter Int = 0
+hidden internalSeed Int = 0
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -91,6 +91,25 @@ var counter Int = 0
         &program.items[1],
         Item::Statement(Stmt::Binding(_))
     ));
+}
+
+#[test]
+fn rejects_top_level_mutable_bindings() {
+    let result = parse(
+        r#"
+var counter Int = 0
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "top_level_mutable_binding"
+                && diag
+                    .message
+                    .contains("top-level mutable bindings are not allowed")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
@@ -1631,11 +1650,11 @@ def run(value Option[Int]) Unit {
 }
 
 #[test]
-fn parses_expect_condition_statement() {
+fn parses_assert_statement() {
     let result = parse(
         r#"
 def run(split [Str]) Unit {
-    expect split.size() == 3
+    assert split.size() == 3
 }
 "#,
     );
@@ -1647,16 +1666,35 @@ def run(split [Str]) Unit {
     };
     match &function.body {
         CallableBody::Block(block) => match &block.statements[0] {
-            Stmt::ExpectCondition(stmt) => match &stmt.condition {
+            Stmt::Assert(stmt) => match &stmt.condition {
                 Expr::Binary {
                     op: BinaryOp::Eq, ..
                 } => {}
                 other => panic!("expected equality condition, got {other:#?}"),
             },
-            other => panic!("expected expect condition statement, got {other:#?}"),
+            other => panic!("expected assert statement, got {other:#?}"),
         },
         other => panic!("expected block body, got {other:#?}"),
     }
+}
+
+#[test]
+fn rejects_expect_boolean_assertion() {
+    let result = parse(
+        r#"
+def run(split [Str]) Unit {
+    expect split.size() == 3
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "expected_pattern_binding"
+                && diag.message.contains("use 'assert' for boolean assertions")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]

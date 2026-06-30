@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*use 'model/pubdemo' has no public symbol 'secret'.*
+
+module app
+
+use model/pubdemo/{secret}
+
+def main() Unit {
+    println(secret)
+}

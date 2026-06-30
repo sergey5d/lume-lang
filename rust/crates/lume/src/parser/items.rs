@@ -123,13 +123,6 @@ impl<'a> Parser<'a> {
             | TokenKind::Keyword(Keyword::Single)
             | TokenKind::Keyword(Keyword::Interface)
             | TokenKind::Keyword(Keyword::Enum) => {
-                if visibility == Visibility::Public {
-                    self.error_at_current(
-                        "unexpected_visibility",
-                        "'public' is only supported for top-level functions and immutable bindings",
-                    );
-                    return None;
-                }
                 let decl = self.parse_type_decl(annotations, visibility)?;
                 Some(Item::Type(decl))
             }
@@ -152,30 +145,12 @@ impl<'a> Parser<'a> {
                 Some(Item::Impl(block))
             }
             _ => {
-                if visibility == Visibility::Public && self.at_keyword(Keyword::Var) {
+                if self.at_keyword(Keyword::Var) {
                     self.error_at_current(
-                        "unexpected_visibility",
-                        "'public' is only supported for immutable named top-level bindings",
+                        "top_level_mutable_binding",
+                        "top-level mutable bindings are not allowed; move mutable module state into a single, class instance, or function local",
                     );
                     return None;
-                }
-                if self.at_keyword(Keyword::Var) {
-                    if !annotations.is_empty() {
-                        self.error_at_current(
-                            "unexpected_annotation",
-                            "annotations are not supported on bindings yet",
-                        );
-                        return None;
-                    }
-                    if visibility != Visibility::Default {
-                        self.error_at_current(
-                            "unexpected_visibility",
-                            "visibility modifiers are only valid on declarations",
-                        );
-                        return None;
-                    }
-                    let stmt = self.parse_binding_stmt_after_var()?;
-                    return Some(Item::Statement(Stmt::Binding(stmt)));
                 }
                 if self.is_binding_start() {
                     if !annotations.is_empty() {
@@ -186,18 +161,6 @@ impl<'a> Parser<'a> {
                         return None;
                     }
                     if let Some(mut stmt) = self.try_parse_binding_stmt() {
-                        if visibility == Visibility::Public
-                            && stmt
-                                .bindings
-                                .iter()
-                                .any(|binding| binding.name == "_" || binding.mutable)
-                        {
-                            self.error_at_current(
-                                "unexpected_visibility",
-                                "'public' is only supported for immutable named top-level bindings",
-                            );
-                            return None;
-                        }
                         stmt.visibility = visibility;
                         return Some(Item::Statement(Stmt::Binding(stmt)));
                     }
@@ -212,11 +175,7 @@ impl<'a> Parser<'a> {
                 if visibility != Visibility::Default {
                     self.error_at_current(
                         "unexpected_visibility",
-                        if visibility == Visibility::Public {
-                            "'public' is only supported for top-level functions and immutable bindings"
-                        } else {
-                            "visibility modifiers are only valid on declarations"
-                        },
+                        "visibility modifiers are only valid on declarations",
                     );
                     return None;
                 }
@@ -231,7 +190,12 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_visibility(&mut self) -> Visibility {
         if self.match_keyword(Keyword::Public) {
-            Visibility::Public
+            self.diagnostics.push(Diagnostic::error(
+                "removed_keyword",
+                "'public' was removed; top-level declarations and immutable constants are public by default, use 'hidden' for private items",
+                self.previous_span(),
+            ));
+            Visibility::Default
         } else if self.match_keyword(Keyword::Hidden) {
             Visibility::Hidden
         } else {
@@ -436,20 +400,6 @@ impl<'a> Parser<'a> {
             }
 
             let member_visibility = self.parse_visibility();
-            if member_visibility == Visibility::Public {
-                let message = match kind {
-                    TypeKind::Annotation => {
-                        "public is not allowed on annotation fields; annotation fields are public by default"
-                    }
-                    TypeKind::Interface => "public is not allowed inside interfaces",
-                    TypeKind::Enum => "public is not allowed on enum members",
-                    TypeKind::Class => "public is not allowed on class members",
-                    TypeKind::Single => "public is not allowed on single members",
-                    TypeKind::Record => "public is not allowed on shape members",
-                };
-                self.error_at_current("unexpected_visibility", message);
-                return None;
-            }
             match self.current_kind() {
                 TokenKind::Identifier if self.current().lexeme == "new" => {
                     let constructor =
@@ -765,7 +715,9 @@ impl<'a> Parser<'a> {
         allow_signature_only: bool,
     ) -> Option<MethodDecl> {
         let start = self.consume_keyword(Keyword::Def, "expected 'def'")?;
-        let (name, _) = if self.at(TokenKind::Keyword(Keyword::Expect)) {
+        let (name, _) = if self.at(TokenKind::Keyword(Keyword::Assert))
+            || self.at(TokenKind::Keyword(Keyword::Expect))
+        {
             let token = self.current().clone();
             self.advance();
             (token.lexeme, token.span)

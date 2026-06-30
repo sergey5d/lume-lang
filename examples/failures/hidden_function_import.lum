@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*use 'model/pubdemo' has no public symbol 'whisper'.*
+
+module app
+
+use model/pubdemo/{whisper}
+
+def main() Unit {
+    println(whisper())
+}

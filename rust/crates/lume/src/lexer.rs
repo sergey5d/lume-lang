@@ -6,6 +6,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keyword {
     Annotation,
+    Assert,
     As,
     Break,
     Continue,
@@ -292,6 +293,7 @@ impl<'a> Lexer<'a> {
         }
         let kind = match lexeme.as_str() {
             "annotation" => TokenKind::Keyword(Keyword::Annotation),
+            "assert" => TokenKind::Keyword(Keyword::Assert),
             "as" => TokenKind::Keyword(Keyword::As),
             "break" => TokenKind::Keyword(Keyword::Break),
             "continue" => TokenKind::Keyword(Keyword::Continue),
@@ -560,11 +562,12 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = left :+ right\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\nassert true\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = left :+ right\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Annotation)));
+        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Assert)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::As)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Vararg)));

@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*for pattern must be irrefutable for value of type 'Option\[Int\]'.*
+
+def main() Unit {
+    values List[Option[Int]] = [Some(1), None]
+
+    for Some(value) <- values {
+        println(value)
+    }
+}

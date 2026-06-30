@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*unknown imported member 'SecretBox' \(module 'pubdemo' has no visible member 'SecretBox'\).*
+
+module app
+
+use model/pubdemo
+
+def main() Unit {
+    value = pubdemo.SecretBox { value: "x" }
+}

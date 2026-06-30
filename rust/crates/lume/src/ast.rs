@@ -60,7 +60,6 @@ pub enum Item {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Default,
-    Public,
     Hidden,
 }
 
@@ -246,7 +245,7 @@ pub struct Block {
 pub enum Stmt {
     Binding(BindingStmt),
     PatternBinding(PatternBindingStmt),
-    ExpectCondition(ExpectConditionStmt),
+    Assert(AssertStmt),
     Assignment(AssignmentStmt),
     Defer(DeferStmt),
     If(IfStmt),
@@ -266,7 +265,7 @@ impl Stmt {
         match self {
             Stmt::Binding(stmt) => stmt.span,
             Stmt::PatternBinding(stmt) => stmt.span,
-            Stmt::ExpectCondition(stmt) => stmt.span,
+            Stmt::Assert(stmt) => stmt.span,
             Stmt::Assignment(stmt) => stmt.span,
             Stmt::Defer(stmt) => stmt.span,
             Stmt::If(stmt) => stmt.span,
@@ -458,9 +457,9 @@ pub struct PatternBindingStmt {
     pub span: Span,
 }
 
-/// An `expect CONDITION` statement that panics when the condition is false.
+/// An `assert CONDITION` statement that panics when the condition is false.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExpectConditionStmt {
+pub struct AssertStmt {
     pub condition: Expr,
     pub span: Span,
 }

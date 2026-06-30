@@ -314,7 +314,7 @@ fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: 
             rewrite_pattern_for_runtime(&mut stmt.pattern, module);
             rewrite_expr_for_runtime(&mut stmt.value, module, graph);
         }
-        ast::Stmt::ExpectCondition(stmt) => {
+        ast::Stmt::Assert(stmt) => {
             rewrite_expr_for_runtime(&mut stmt.condition, module, graph);
         }
         ast::Stmt::Assignment(assign) => {
@@ -6749,12 +6749,12 @@ $name
     }
 
     #[test]
-    fn runs_expect_condition_statements() {
+    fn runs_assert_statements() {
         let program = lower_inline(
             r#"
             def main() Unit {
                 split = "BTC-USD-5.0".split("-")
-                expect split.size() == 3
+                assert split.size() == 3
                 OS.println("ok")
             }
             "#,
@@ -6771,7 +6771,7 @@ $name
             r#"
             def main() Unit {
                 split = "1234, BUY, 10, NEW".split("\s*,\s*")
-                expect split.size() == 4
+                assert split.size() == 4
                 OS.println(split[0])
                 OS.println(split[1])
                 OS.println(split[2])
@@ -6993,9 +6993,9 @@ $name
     }
 
     #[test]
-    fn run_path_executes_public_imports_across_modules() {
+    fn run_path_executes_default_exports_across_modules() {
         let path = repo_root().join("examples/pub_imports.lum");
-        let run = run_path(path, None).expect("run public uses");
+        let run = run_path(path, None).expect("run default exports");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "hello, Ada\nhello!\n");
     }
