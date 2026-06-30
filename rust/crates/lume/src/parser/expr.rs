@@ -531,6 +531,22 @@ impl<'a> Parser<'a> {
         self.finish_brace_record_literal_expr(start)
     }
 
+    fn reject_unparenthesized_pair_field_initializer(&mut self, value: &Expr) {
+        if matches!(
+            value,
+            Expr::Binary {
+                op: BinaryOp::Colon,
+                ..
+            }
+        ) {
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_pair_expression",
+                "pair expressions inside field initializers must be parenthesized",
+                value.span(),
+            ));
+        }
+    }
+
     pub(super) fn finish_brace_record_literal_expr(&mut self, start: Span) -> Option<Expr> {
         #[derive(Clone)]
         struct RecordEntry {
@@ -548,6 +564,7 @@ impl<'a> Parser<'a> {
                 let (name, name_span) = self.expect_identifier("expected shape field name")?;
                 if self.match_token(TokenKind::Colon) {
                     let value = self.parse_expr()?;
+                    self.reject_unparenthesized_pair_field_initializer(&value);
                     RecordEntry {
                         name: Some(name),
                         ty: None,
@@ -559,6 +576,7 @@ impl<'a> Parser<'a> {
                     if let Some(ty) = ty {
                         if self.match_token(TokenKind::Colon) {
                             let value = self.parse_expr()?;
+                            self.reject_unparenthesized_pair_field_initializer(&value);
                             RecordEntry {
                                 name: Some(name),
                                 ty: Some(ty),
@@ -822,8 +840,17 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_colon_expr(&mut self) -> Option<Expr> {
         let mut expr = self.parse_or_expr()?;
+        let mut saw_pair = false;
         loop {
             let op = if self.match_token(TokenKind::Colon) {
+                if saw_pair {
+                    self.diagnostics.push(Diagnostic::error(
+                        "invalid_pair_expression",
+                        "':' pair expressions are non-associative; parenthesize nested pairs",
+                        self.previous_span(),
+                    ));
+                }
+                saw_pair = true;
                 BinaryOp::Colon
             } else if self.match_token(TokenKind::ColonPlus) {
                 BinaryOp::RecordMerge

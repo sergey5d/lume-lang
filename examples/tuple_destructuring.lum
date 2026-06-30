@@ -4,6 +4,7 @@
 # tuple mixed 8 mixed
 # tuple mixed2 9 mixed2
 # tuple pair 20 pair
+# tuple colon 30 colon
 # tuple skip only unused
 # tuple skip 14 xxx
 # 0
@@ -23,6 +24,10 @@ def main() Int {
 
     let (tuplePairLeft, tuplePairRight) = (20, "pair")
     println("tuple pair", tuplePairLeft, tuplePairRight)
+
+    colonPair (Int, Str) = 30: "colon"
+    let (colonPairLeft, colonPairRight) = colonPair
+    println("tuple colon", colonPairLeft, colonPairRight)
 
     let (_, skippedOnlyTupleValue) = (21, "unused")
     println("tuple skip only", skippedOnlyTupleValue)

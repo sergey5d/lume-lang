@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*pair expressions inside field initializers must be parenthesized.*
+
+class Holder {
+    entry (Str, Int)
+}
+
+def main() Unit {
+    holder = Holder {
+        entry: "a": 1
+    }
+}

@@ -738,6 +738,22 @@ fn parses_shape_literal_forms() {
         other => panic!("expected tuple literal, got {other:#?}"),
     }
 
+    match parse_expr_only(r#""a": 1"#) {
+        Expr::Binary {
+            op: BinaryOp::Colon,
+            ..
+        } => {}
+        other => panic!("expected pair expression, got {other:#?}"),
+    }
+
+    match parse_expr_only(r#"{ entry: ("a": 1) }"#) {
+        Expr::RecordLiteral { fields, values, .. } => {
+            assert!(values.is_empty());
+            assert_eq!(fields.len(), 1);
+        }
+        other => panic!("expected shape literal, got {other:#?}"),
+    }
+
     match parse_expr_only("Person { name: name, age: age }") {
         Expr::Call {
             args,
@@ -801,6 +817,47 @@ fn parses_shape_literal_forms() {
             .message
             .contains("anonymous shape literals use '{ ... }'")),
         "expected class(...) rejection, got diagnostics: {:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_chained_pair_expression_without_parentheses() {
+    let result = parse(
+        r#"
+def main() Unit {
+    value = "a": 1: true
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_pair_expression" && diag.message.contains("non-associative")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_unparenthesized_pair_field_initializer() {
+    let result = parse(
+        r#"
+def main() Unit {
+    holder = Holder {
+        entry: "a": 1
+    }
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_pair_expression"
+                && diag
+                    .message
+                    .contains("field initializers must be parenthesized")
+        }),
+        "{:#?}",
         result.diagnostics
     );
 }

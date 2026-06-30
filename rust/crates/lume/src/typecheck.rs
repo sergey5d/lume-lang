@@ -5353,7 +5353,7 @@ impl<'a> Checker<'a> {
                 }
                 Ty::bool()
             }
-            BinaryOp::Colon => Ty::Unknown,
+            BinaryOp::Colon => Ty::Tuple(vec![left.clone(), right.clone()]),
         }
     }
 

@@ -1212,7 +1212,7 @@ Range construction is explicit:
 Range(10, 0, -1)
 ```
 
-## Lists, Arrays, Tuples
+## Lists, Arrays, Maps, Tuples
 
 List literal:
 
@@ -1245,10 +1245,37 @@ boxes Array[Box] = Array(Box(1), Box(2))
 takeArray(Array(4, 5, 6))
 ```
 
+Map construction:
+
+```txt
+entries Map[Str, Int] = Map("a": 1, "b": 2)
+value Option[Int] = entries["a"]
+```
+
+`Map(...)` accepts tuple-pair arguments. The `key: value` form is a general
+pair expression, not syntax that only exists inside `Map(...)`.
+
 Tuple literal:
 
 ```txt
 (1, "x")
+pair (Str, Int) = "a": 1
+```
+
+`:` has two roles depending on grammar context:
+
+- in brace field lists, `field: value` binds a value to a named field
+- in ordinary expressions, `left: right` constructs a 2-tuple pair value
+
+Pair expressions are non-associative. Use `(a, b, c)` for TupleN values, and
+use parentheses when intentionally nesting pairs: `(a: b): c` or `a: (b: c)`.
+
+Pair values inside field initializers should be parenthesized for readability:
+
+```txt
+holder = Holder {
+    entry: ("a": 1)
+}
 ```
 
 ## Statements
@@ -1884,6 +1911,7 @@ Other operators / constructs:
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases
 - `with` for interface implementation and generic bounds
+- `:` for ordinary pair expressions, where `left: right` constructs a 2-tuple
 - `:<` for class, shape, and anonymous-shape update
 - `:+` for shape merge; the left and right shapes must have distinct field names
 
@@ -1896,6 +1924,7 @@ for item <- items {
 (Int) -> Str
 SomeX(x) => x
 class Box[T] with Named
+pair = "a": 1
 ```
 
 Shape merge:
@@ -1927,6 +1956,7 @@ Current operator overloading constraints:
 - Comparison operators are intended to work through `Ordering[T]` rather than custom operator declarations.
 - Equality is intended to work through `Eq[T]` rather than custom operator declarations.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
+- `:` is a built-in pair expression operator only, not an overloadable collection/custom operator.
 - `:+` is a built-in shape merge operator only, not an overloadable collection/custom operator.
 - The spellings `:-`, `++`, `--`, and `::` are removed from the language surface and currently produce `unsupported_operator` lexer diagnostics.
 
