@@ -2813,7 +2813,7 @@ def main() Unit {}
             root.join("stdlib/range.lum"),
             root.join("examples/import_forms.lum"),
             root.join("examples/classes.lum"),
-            root.join("examples/controll_flow/match_enums.lum"),
+            root.join("examples/control_flow/match_enums.lum"),
             root.join("examples/random_code/bumper.lum"),
         ];
         let mut failures = Vec::new();
