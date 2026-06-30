@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*plain 'let name = value' is not supported in for-yield clauses; use 'name = value' for ordinary bindings.*
+
+def main() Unit {
+    values = for {
+        item <- [1, 2]
+        let doubled = item * 2
+    } yield doubled
+
+    println(values.size())
+}

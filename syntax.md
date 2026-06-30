@@ -1649,33 +1649,48 @@ for i <- Range(0, 10) {
 
 `Range(start, end)` is start-inclusive and end-exclusive. With two arguments it automatically chooses a step of `1` or `-1` based on the bounds, and `Range(start, end, step)` allows an explicit step.
 
-Destructuring loop:
+Generator heads bind one plain identifier. Destructure inside the body with
+`let`:
 
 ```txt
-for (x, y, char) <- rows {
+for row <- rows {
+    let (x, y, char) = row
     OS.println(char)
 }
 ```
 
-Class destructuring loop:
+The same rule applies to class and anonymous-shape values:
 
 ```txt
-for { name, location } <- users {
+for user <- users {
+    let { name, location } = user
     OS.println(name, location)
 }
 
-for { location as loc, name } <- users {
+for user <- users {
+    let { location as loc, name } = user
     OS.println(name, loc)
 }
 ```
 
-Pattern loop:
+Refutable logic goes in the loop body:
 
 ```txt
-allSome = [Some(5), Some(6)]
-for Some(item) <- allSome {
+for maybeItem <- items {
+    let Some(item) = maybeItem else {
+        continue
+    }
     OS.println(item)
 }
+```
+
+These generator heads are invalid:
+
+```txt
+for (x, y) <- pairs { ... }
+for { name, age } <- users { ... }
+for Some(item) <- values { ... }
+for item Int <- items { ... }
 ```
 
 Yield form:
@@ -1691,9 +1706,10 @@ Multi-clause yield form:
 ```txt
 items = for {
     x <- [1, 2]
+    doubled = x * 2
     y <- [10, 20]
 } yield {
-    x + y
+    doubled + y
 }
 ```
 
@@ -1703,25 +1719,71 @@ items = for {
 items = for item <- [1, 2, 3] yield item * 2
 ```
 
-`for` clauses in the block form may also include local `=` bindings and `:=`
-updates.
-
-Tuple destructuring in `for` clauses must use parentheses:
+Only these clause kinds are allowed inside `for { ... } yield`:
 
 ```txt
-for (value, idx) <- rows {
-    OS.println(value, idx)
-}
+name <- iterable
+name = expr
+let (x, y) = pair
+let { name, age } = user
 ```
 
-Class destructuring in `for` clauses uses braces and follows the same
-name-based rules as `let { ... }`.
+Plain local bindings do not use `let`:
 
-Pattern-based `for` clauses are supported when the compiler can prove that
-every produced value matches the pattern. That proof may come from the item type
-being irrefutable for the pattern, or from an exact known iterable such as a
-literal list of matching values. If the compiler can see a non-matching
-alternative, it rejects the loop.
+```txt
+value = expr      # ordinary binding
+let (x, y) = pair # destructuring
+```
+
+`let` clauses must be statically irrefutable:
+
+```txt
+values = for {
+    pair <- pairs
+    let (x, y) = pair
+} yield x + y
+```
+
+Refutable `let`, `let ... else`, `expect`, reassignment, mutation, expression
+statements, and guards are not clause forms. Put that logic in the body or use
+helpers such as `filterMap`:
+
+```txt
+result = items.filterMap(item -> partial match item {
+    case Some(value) => value
+})
+```
+
+Mental model:
+
+```txt
+for      = pulls values from iterables
+let      = destructures irrefutable values
+match    = handles refutable cases
+yield    = produces values
+```
+
+`for item <- items yield item * 2` lowers approximately to
+`items.map(item -> item * 2)`.
+
+Nested generators lower approximately through `flatMap` and `map`:
+
+```txt
+for {
+    x <- xs
+    y <- ys
+} yield x + y
+```
+
+is approximately:
+
+```txt
+xs.flatMap(x ->
+    ys.map(y ->
+        x + y
+    )
+)
+```
 
 `continue` is valid in `while`, `for`, and `for ... yield`.
 Inside `for ... yield`, it skips the current iteration without producing a
@@ -1911,7 +1973,8 @@ Invalid because the names do not match fields:
 let { usr, address } = user
 ```
 
-The same name-based rule applies in `for { ... } <- items`.
+Use the same name-based rule after binding an item in a `for` body or a
+`for { ... } yield` `let` clause.
 
 ## Operators
 

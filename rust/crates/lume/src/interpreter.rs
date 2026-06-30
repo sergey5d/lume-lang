@@ -6008,11 +6008,13 @@ mod tests {
                     SecretUser("Ada", "secret-2", "London"),
                 )
 
-                for { name as userName, location as userLocation } <- users {
+                for user <- users {
+                    let { name as userName, location as userLocation } = user
                     OS.println("pos", userName, userLocation)
                 }
 
-                for { location as loc, name } <- users {
+                for user <- users {
+                    let { location as loc, name } = user
                     OS.println("named", name, loc)
                 }
             }
@@ -6680,7 +6682,7 @@ $name
     }
 
     #[test]
-    fn runs_plain_let_and_irrefutable_for_pattern_bindings() {
+    fn runs_plain_let_and_irrefutable_for_body_bindings() {
         let program = lower_inline(
             r#"
             class Pair {
@@ -6694,11 +6696,13 @@ $name
                 OS.println("let", item + other)
 
                 allSome = [Some(5), Some(6)]
-                for Some(loopItem) <- allSome {
+                for maybeItem <- allSome {
+                    expect Some(loopItem) = maybeItem
                     OS.println("known", loopItem)
                 }
 
-                knownMapped = for Some(mappedItem) <- allSome yield {
+                knownMapped = for maybeItem <- allSome yield {
+                    expect Some(mappedItem) = maybeItem
                     mappedItem + 1
                 }
 
@@ -6708,11 +6712,13 @@ $name
 
                 pairs = List(Pair(1, 10), Pair(2, 20), Pair(3, 30))
 
-                for Pair(left, right) <- pairs {
+                for pairItem <- pairs {
+                    let Pair(left, right) = pairItem
                     OS.println("for", left, right)
                 }
 
-                mapped = for Pair(left, right) <- pairs yield {
+                mapped = for pairItem <- pairs yield {
+                    let Pair(left, right) = pairItem
                     left + right
                 }
 

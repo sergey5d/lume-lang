@@ -59,7 +59,8 @@ def main() Unit {
     println("range zipWithIndex", rangeIndexedValue, rangeIndexedPos)
 
     var pairSum = 0
-    for (left, right) <- listPairs {
+    for pair <- listPairs {
+        let (left, right) = pair
         if right == "a" || right == "b" {
             pairSum += left
         }
@@ -67,7 +68,8 @@ def main() Unit {
     println("pair sum", pairSum)
 
     var indexedSum = 0
-    for (value, index) <- listIndexed {
+    for indexed <- listIndexed {
+        let (value, index) = indexed
         if index < 2 {
             indexedSum += value + index
         }
@@ -75,7 +77,8 @@ def main() Unit {
     println("indexed sum", indexedSum)
 
     var arrayPairSum = 0
-    for (left, right) <- arrayPairs {
+    for pair <- arrayPairs {
+        let (left, right) = pair
         if right == "y" {
             arrayPairSum += left
         }
@@ -83,7 +86,8 @@ def main() Unit {
     println("array pair sum", arrayPairSum)
 
     var rangePairSum = 0
-    for (left, right) <- rangePairs {
+    for pair <- rangePairs {
+        let (left, right) = pair
         if right == "p" || right == "q" {
             rangePairSum += left
         }
@@ -91,7 +95,8 @@ def main() Unit {
     println("range pair sum", rangePairSum)
 
     var rangeIndexSum = 0
-    for (value, index) <- rangeIndexed {
+    for indexed <- rangeIndexed {
+        let (value, index) = indexed
         rangeIndexSum += value + index
     }
     println("range index sum", rangeIndexSum)

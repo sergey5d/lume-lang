@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*for generator must bind a plain identifier before '<-'.*
+
+shape User {
+    name Str
+    age Int
+}
+
+def main() Unit {
+    users [User] = [User("Ada", 37)]
+
+    for { name, age } <- users {
+        println(name, age)
+    }
+}

@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*for generator must bind a plain identifier before '<-'.*
+
+def main() Unit {
+    pairs List[(Int, Int)] = [(1, 2)]
+
+    for (left, right) <- pairs {
+        println(left + right)
+    }
+}

@@ -10,8 +10,10 @@ def main() Int {
 	items = for {
 		left <- [1, 2]
 		right <- [10, 20]
+		let (base, extra) = (left, right)
+		total = base + extra
 	} yield {
-		left + right
+		total
 	}
 
 	for item <- items {

@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*for yield clauses only support 'name <- iterable', 'name = expr', and 'let pattern = expr'.*
+
+def main() Unit {
+    var total = 0
+
+    mapped = for {
+        item <- [1, 2]
+        total := item
+    } yield item
+
+    println(mapped.size())
+}

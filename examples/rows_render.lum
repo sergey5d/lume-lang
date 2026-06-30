@@ -41,7 +41,8 @@ def syntax1(rows List[(Int, Int, Str)]) Unit {
     if let Some(firstRow) = rows.get(0) {
         let (_, initialY Int, _) = firstRow
         var lastY = initialY
-        for (x Int, y Int, char Str) <- rows {
+        for row <- rows {
+            let (x Int, y Int, char Str) = row
             for lineStep <- Range(y, lastY) {
                 println()
             }
@@ -63,7 +64,8 @@ def syntax2(rows List[(Int, Int, Str)]) Unit {
     if let Some(firstRow) = rows.get(0) {
         let (_, initialY Int, _) = firstRow
         var lastY = initialY
-        for (x, y, char) <- rows {
+        for row <- rows {
+            let (x, y, char) = row
             for lineStep <- Range(y, lastY) {
                 println()
             }
@@ -106,27 +108,27 @@ def syntax3(rows List[(Int, Int, Str)]) Unit {
 
 def syntax4(rows List[(Int, Int, Str)]) Unit {
     var lastX = 0
-    for {
-        (_, initialY Int, _) <- rows.get(0)
+    if let Some(first) = rows.get(0) {
+        let (_, initialY Int, _) = first
         var lastY = initialY
-        (x, y, char Str) <- rows
-        # just as an example
-        xImmutable = x
-    } yield {
-        for lineStep <- Range(y, lastY) {
-            println()
-        }
-        if lastX < xImmutable {
-            for spaceStep <- Range(lastX, xImmutable) {
-                OS.print(" ")
+        for row <- rows {
+            let (x, y, char Str) = row
+            # just as an example
+            xImmutable = x
+            for lineStep <- Range(y, lastY) {
+                println()
             }
+            if lastX < xImmutable {
+                for spaceStep <- Range(lastX, xImmutable) {
+                    OS.print(" ")
+                }
+            }
+            OS.print(char)
+            lastX := x + 1
+            lastY := y
         }
-        OS.print(char)
-        lastX := x + 1
-        lastY := y
-        char
+        println()
     }
-    println()
 }
 
 def main() Unit {

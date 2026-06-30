@@ -72,7 +72,8 @@ def main() Unit {
         (7, 5),
     )
 
-    for (time, cost) <- requests {
+    for request <- requests {
+        let (time, cost) = request
         allowed = bucket.allow(time, cost)
         # Show whether the request passed and what the bucket level is after it.
         println("time", time, "cost", cost, "allowed", allowed, "level", bucket.currentLevel())

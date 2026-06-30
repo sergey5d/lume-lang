@@ -72,7 +72,8 @@ impl AssetPrices {
 
         results [Str] = []
 
-        for (toAsset, price) <- permutations {
+        for permutation <- permutations {
+            let (toAsset, price) = permutation
 
             if visited.contains(toAsset) {
                 continue

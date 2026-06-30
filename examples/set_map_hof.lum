@@ -81,11 +81,12 @@ def main() Unit {
 
     var total = 0
 
-    for item Int <- seen {
+    for item <- seen {
         total += item
     }
 
-    for (key Str, value Int) <- values {
+    for entry <- values {
+        let (key Str, value Int) = entry
         total += value
     }
 

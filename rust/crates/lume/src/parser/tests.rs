@@ -179,7 +179,7 @@ def run(limit Int) Int {
 }
 
 #[test]
-fn parses_for_tuple_destructuring_with_parentheses() {
+fn rejects_for_tuple_destructuring_in_generator() {
     let result = parse(
         r#"
 def run(rows List[(Int, Int)]) Unit {
@@ -189,11 +189,18 @@ def run(rows List[(Int, Int)]) Unit {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "invalid_for_generator"),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
-fn parses_for_class_destructuring_with_braces() {
+fn rejects_for_shape_destructuring_in_generator() {
     let result = parse(
         r#"
 def run(rows List[Row]) Unit {
@@ -203,31 +210,18 @@ def run(rows List[Row]) Unit {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    match &program.items[0] {
-        Item::Function(function) => match &function.body {
-            CallableBody::Block(block) => match &block.statements[0] {
-                Stmt::For(stmt) => {
-                    assert_eq!(stmt.bindings.len(), 1);
-                    let binding = &stmt.bindings[0];
-                    assert_eq!(binding.destructure, Some(DestructureKind::Record));
-                    assert_eq!(binding.bindings.len(), 2);
-                    assert_eq!(binding.bindings[0].name, "value");
-                    assert_eq!(binding.bindings[0].field_name.as_deref(), Some("value"));
-                    assert_eq!(binding.bindings[1].name, "label");
-                    assert_eq!(binding.bindings[1].field_name.as_deref(), Some("label"));
-                }
-                other => panic!("expected for stmt, got {other:#?}"),
-            },
-            other => panic!("expected block body, got {other:#?}"),
-        },
-        other => panic!("expected function, got {other:#?}"),
-    }
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "invalid_for_generator"),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
-fn parses_for_named_class_destructuring_with_braces() {
+fn rejects_for_named_shape_destructuring_in_generator() {
     let result = parse(
         r#"
 def run(users List[User]) Unit {
@@ -237,34 +231,18 @@ def run(users List[User]) Unit {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    match &program.items[0] {
-        Item::Function(function) => match &function.body {
-            CallableBody::Block(block) => match &block.statements[0] {
-                Stmt::For(stmt) => {
-                    assert_eq!(stmt.bindings.len(), 1);
-                    let binding = &stmt.bindings[0];
-                    assert_eq!(binding.destructure, Some(DestructureKind::Record));
-                    assert_eq!(binding.bindings.len(), 3);
-                    assert_eq!(binding.bindings[0].name, "name");
-                    assert_eq!(binding.bindings[0].field_name.as_deref(), Some("name"));
-                    assert_eq!(binding.bindings[1].name, "loc");
-                    assert_eq!(binding.bindings[1].field_name.as_deref(), Some("location"));
-                    assert!(binding.bindings[1].ty.is_some());
-                    assert_eq!(binding.bindings[2].name, "skipped");
-                    assert_eq!(binding.bindings[2].field_name.as_deref(), Some("country"));
-                }
-                other => panic!("expected for stmt, got {other:#?}"),
-            },
-            other => panic!("expected block body, got {other:#?}"),
-        },
-        other => panic!("expected function, got {other:#?}"),
-    }
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "invalid_for_generator"),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
-fn parses_for_constructor_pattern() {
+fn rejects_for_constructor_pattern_in_generator() {
     let result = parse(
         r#"
 def run(values List[Option[Int]]) Unit {
@@ -274,30 +252,14 @@ def run(values List[Option[Int]]) Unit {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    match &program.items[0] {
-        Item::Function(function) => match &function.body {
-            CallableBody::Block(block) => match &block.statements[0] {
-                Stmt::For(stmt) => {
-                    assert_eq!(stmt.bindings.len(), 1);
-                    let binding = &stmt.bindings[0];
-                    assert!(binding.bindings.is_empty());
-                    assert_eq!(binding.destructure, None);
-                    match binding.pattern.as_ref() {
-                        Some(Pattern::Constructor { path, args, .. }) => {
-                            assert_eq!(path, &vec!["Some".to_string()]);
-                            assert_eq!(args.len(), 1);
-                        }
-                        other => panic!("expected constructor pattern, got {other:#?}"),
-                    }
-                }
-                other => panic!("expected for stmt, got {other:#?}"),
-            },
-            other => panic!("expected block body, got {other:#?}"),
-        },
-        other => panic!("expected function, got {other:#?}"),
-    }
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "invalid_for_generator"),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
@@ -314,7 +276,71 @@ def run(rows List[(Int, Int)]) Unit {
     assert!(
         result.diagnostics.iter().any(|diag| diag
             .message
-            .contains("tuple destructuring in 'for' requires parentheses")),
+            .contains("for generator must bind a plain identifier")),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn parses_for_yield_with_irrefutable_let_clauses() {
+    let result = parse(
+        r#"
+def run(pairs List[(Int, Int)], users List[User]) [Int] {
+	    values = for {
+	        pair <- pairs
+	        let (left Int, right Int) = pair
+	        sum = left + right
+	        user <- users
+	        let { name, age Int } = user
+	    } yield sum + age
+	    return values
+	}
+	"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => match &block.statements[0] {
+                Stmt::Binding(binding) => match &binding.values[0] {
+                    Expr::ForYield { bindings, .. } => {
+                        assert_eq!(bindings.len(), 5);
+                        assert_eq!(bindings[0].bindings[0].name, "pair");
+                        assert_eq!(bindings[0].destructure, None);
+                        assert_eq!(bindings[1].destructure, Some(DestructureKind::Tuple));
+                        assert_eq!(bindings[2].bindings[0].name, "sum");
+                        assert_eq!(bindings[3].bindings[0].name, "user");
+                        assert_eq!(bindings[4].destructure, Some(DestructureKind::Record));
+                    }
+                    other => panic!("expected for-yield expression, got {other:#?}"),
+                },
+                other => panic!("expected binding stmt, got {other:#?}"),
+            },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
+fn rejects_for_yield_plain_let_binding_clause() {
+    let result = parse(
+        r#"
+def run(items [Int]) [Int] {
+    values = for {
+        item <- items
+        let doubled = item * 2
+    } yield doubled
+    return values
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "plain_let_binding"),
         "{:#?}",
         result.diagnostics
     );
@@ -1383,6 +1409,26 @@ def run(value Option[Int]) Int {
         },
         other => panic!("expected block body, got {other:#?}"),
     }
+}
+
+#[test]
+fn rejects_plain_let_identifier_binding() {
+    let result = parse(
+        r#"
+def run() Int {
+    let value = 5
+    return value
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "plain_let_binding"),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]

@@ -9639,13 +9639,15 @@ def main(value) Int {
     fn rejects_refutable_for_pattern() {
         let program = parse_inline(
             r#"
-def main() Unit {
-    values List[Option[Int]] = [Some(1), None]
-    for Some(value) <- values {
-        OS.println(value)
-    }
-}
-"#,
+	def main() Unit {
+	    values List[Option[Int]] = [Some(1), None]
+	    mapped = for {
+	        maybe <- values
+	        let Some(value) = maybe
+	    } yield value
+	    OS.println(mapped.size())
+	}
+	"#,
         );
         let result = check_program(&program);
         assert!(

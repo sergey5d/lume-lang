@@ -1900,6 +1900,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.current_block = Some(success_block);
                 self.apply_pending_bindings(plan.bindings);
                 self.lower_for_bindings(&bindings[1..], body, span);
+                let success_current = self.current_block;
 
                 self.current_block = Some(failure_block);
                 self.emit_panic("for pattern did not match", first.span);
@@ -1907,6 +1908,7 @@ impl<'a> FunctionLowerer<'a> {
                     span: Some(first.span),
                     kind: ir::TerminatorKind::Unreachable,
                 });
+                self.current_block = success_current;
                 return;
             }
             if first.destructure.is_some() && first.values.len() == 1 {

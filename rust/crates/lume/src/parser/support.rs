@@ -234,13 +234,34 @@ impl<'a> Parser<'a> {
             .get(self.index + 1)
             .is_some_and(|token| token.kind == TokenKind::LBrace)
         {
-            let parser = Parser {
-                tokens: self.tokens,
-                index: self.index + 1,
-                diagnostics: Vec::new(),
-                allow_trailing_block_call: self.allow_trailing_block_call,
-            };
-            return !parser.is_for_brace_destructuring_binding_start();
+            let mut i = self.index + 1;
+            let mut brace_depth = 0isize;
+            while let Some(token) = self.tokens.get(i) {
+                match token.kind {
+                    TokenKind::LBrace => brace_depth += 1,
+                    TokenKind::RBrace => {
+                        brace_depth -= 1;
+                        if brace_depth == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    TokenKind::Eof => return false,
+                    _ => {}
+                }
+                i += 1;
+            }
+            while self
+                .tokens
+                .get(i)
+                .is_some_and(|token| token.kind == TokenKind::Newline)
+            {
+                i += 1;
+            }
+            return self
+                .tokens
+                .get(i)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Yield)));
         }
         let mut i = self.index + 1;
         while let Some(token) = self.tokens.get(i) {

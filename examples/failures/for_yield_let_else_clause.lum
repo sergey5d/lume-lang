@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*for yield let clauses cannot use 'else'.*
+
+def main() Unit {
+    values [Option[Int]] = [Some(1)]
+
+    mapped = for {
+        maybe <- values
+        let Some(value) = maybe else {
+            value = 0
+        }
+    } yield value
+
+    println(mapped.size())
+}

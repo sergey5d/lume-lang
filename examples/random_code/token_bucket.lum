@@ -74,7 +74,8 @@ def main() Unit {
         (7, 5),
     )
 
-    for (time, cost) <- requests {
+    for request <- requests {
+        let (time, cost) = request
         allowed = bucket.allow(time, cost)
         # Show whether the request passed and how many tokens remain after it.
         println("time", time, "cost", cost, "allowed", allowed, "tokens", bucket.currentTokens())

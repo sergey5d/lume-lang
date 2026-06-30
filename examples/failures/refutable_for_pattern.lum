@@ -4,7 +4,10 @@
 def main() Unit {
     values List[Option[Int]] = [Some(1), None]
 
-    for Some(value) <- values {
-        println(value)
-    }
+    mapped = for {
+        maybe <- values
+        let Some(value) = maybe
+    } yield value
+
+    println(mapped.size())
 }

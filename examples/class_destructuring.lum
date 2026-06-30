@@ -77,7 +77,8 @@ def main() Int {
         SecretUser("Sergey", "secret-1", "Tampa"),
         SecretUser("Ada", "secret-2", "London"),
     )
-    for { name as userName, location as userLocation } <- users {
+    for user <- users {
+        let { name as userName, location as userLocation } = user
         println("for named plain", userName, userLocation)
     }
 
@@ -86,7 +87,8 @@ def main() Int {
     let { name, location } = user
     println("named", name, location)
 
-    for { location as loc, name as loopName } <- users {
+    for loopUser <- users {
+        let { location as loc, name as loopName } = loopUser
         println("for named", loopName, loc)
     }
 
