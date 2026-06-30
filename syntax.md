@@ -56,6 +56,7 @@ example `value -> value + 1`.
 
 Use `.->` to continue an access chain inside a lifted value: `Option[T]`,
 `Result[T, E]`, or `Either[E, T]`.
+The lifted access operator is one token; whitespace inside `.->` is invalid.
 
 ```txt
 firstName = userOpt

@@ -58,6 +58,7 @@ pub enum TokenKind {
     RBracket,
     Comma,
     Dot,
+    DotArrow,
     Colon,
     At,
     Ellipsis,
@@ -349,6 +350,11 @@ impl<'a> Lexer<'a> {
             '[' => Some(TokenKind::LBracket),
             ']' => Some(TokenKind::RBracket),
             ',' => Some(TokenKind::Comma),
+            '.' if self.peek() == Some('-') && self.peek_n(1) == Some('>') => {
+                self.bump();
+                self.bump();
+                Some(TokenKind::DotArrow)
+            }
             '.' if self.take('.') && self.take('.') => Some(TokenKind::Ellipsis),
             '.' => Some(TokenKind::Dot),
             ':' if self.take('+') => Some(TokenKind::ColonPlus),
@@ -562,7 +568,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\nassert true\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = left :+ right\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\nassert true\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = left :+ right\nlifted = value.->name()\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -573,6 +579,7 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Vararg)));
         assert!(kinds.contains(&TokenKind::ColonPlus));
         assert!(kinds.contains(&TokenKind::ColonLess));
+        assert!(kinds.contains(&TokenKind::DotArrow));
         assert!(kinds.contains(&TokenKind::Float));
         assert!(
             result
@@ -580,6 +587,30 @@ mod tests {
                 .iter()
                 .any(|token| token.kind == TokenKind::String && token.lexeme == "raw\"$name\\n\"")
         );
+    }
+
+    #[test]
+    fn lexes_lifted_access_operator_as_atomic_token() {
+        let exact = lex(&source("user.->name()"));
+        assert!(exact.diagnostics.is_empty(), "{:#?}", exact.diagnostics);
+        assert!(
+            exact
+                .tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::DotArrow && token.lexeme == ".->"),
+            "{:#?}",
+            exact.tokens
+        );
+
+        let spaced = lex(&source("user. ->name()"));
+        assert!(spaced.diagnostics.is_empty(), "{:#?}", spaced.diagnostics);
+        let kinds: Vec<TokenKind> = spaced.tokens.iter().map(|token| token.kind).collect();
+        assert!(
+            kinds
+                .windows(2)
+                .any(|pair| pair[0] == TokenKind::Dot && pair[1] == TokenKind::Arrow)
+        );
+        assert!(!kinds.contains(&TokenKind::DotArrow));
     }
 
     #[test]

@@ -2187,6 +2187,25 @@ fn parses_arrow_chain_as_lifted_segments() {
 }
 
 #[test]
+fn rejects_spaced_lifted_access_operator() {
+    let result = parse(
+        r#"
+def run(userOpt Option[User]) Unit {
+    name = userOpt. ->profileOpt()
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "spaced_lifted_access_operator"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_trailing_block_lambda_when_parameter_list_starts_on_opening_line() {
     let result = parse(
         r#"

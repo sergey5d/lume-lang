@@ -374,6 +374,7 @@ impl<'a> Parser<'a> {
             TokenKind::Eq => "=",
             TokenKind::FatArrow => "=>",
             TokenKind::LeftArrow => "<-",
+            TokenKind::DotArrow => ".->",
             TokenKind::ColonPlus => ":+",
             TokenKind::ColonLess => ":<",
             TokenKind::Newline => "NEWLINE",

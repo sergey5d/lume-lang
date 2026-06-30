@@ -1103,8 +1103,30 @@ impl<'a> Parser<'a> {
         let mut chain_segment: Option<(String, Expr, Span)> = None;
         let mut chain_segments = Vec::new();
         loop {
-            if self.at(TokenKind::Newline) && self.at_next(TokenKind::Dot) {
+            if self.at(TokenKind::Newline)
+                && (self.at_next(TokenKind::Dot) || self.at_next(TokenKind::DotArrow))
+            {
                 self.advance();
+                continue;
+            }
+            if self.match_token(TokenKind::DotArrow) {
+                if let Some((param, body, span)) = chain_segment.take() {
+                    chain_segments.push(ChainSegment { param, body, span });
+                }
+                let (name, end) = self.parse_member_name("expected member name after '.->'")?;
+                let param = format!("__lume_chain{}", chain_segments.len());
+                let receiver = Expr::Identifier {
+                    name: param.clone(),
+                    span: end,
+                };
+                let start = receiver.span();
+                let body = Expr::Member {
+                    receiver: Box::new(receiver),
+                    name,
+                    span: start.cover(end),
+                };
+                let span = body.span();
+                chain_segment = Some((param, body, span));
                 continue;
             }
             if self.match_token(TokenKind::LParen) {
@@ -1122,27 +1144,14 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.match_token(TokenKind::Dot) {
-                if self.match_token(TokenKind::Arrow) {
-                    if let Some((param, body, span)) = chain_segment.take() {
-                        chain_segments.push(ChainSegment { param, body, span });
-                    }
-                    let (name, end) = self.parse_member_name("expected member name after '.->'")?;
-                    let param = format!("__lume_chain{}", chain_segments.len());
-                    let receiver = Expr::Identifier {
-                        name: param.clone(),
-                        span: end,
-                    };
-                    let start = receiver.span();
-                    let body = Expr::Member {
-                        receiver: Box::new(receiver),
-                        name,
-                        span: start.cover(end),
-                    };
-                    let span = body.span();
-                    chain_segment = Some((param, body, span));
-                    continue;
-                }
                 self.skip_newlines();
+                if self.at(TokenKind::Arrow) {
+                    self.error_at_current(
+                        "spaced_lifted_access_operator",
+                        "lifted access operator must be written as '.->' without whitespace",
+                    );
+                    return None;
+                }
                 let (name, end) = self.parse_member_name("expected member name after '.'")?;
                 Self::apply_postfix(&mut expr, &mut chain_segment, |target| {
                     let start = target.span();

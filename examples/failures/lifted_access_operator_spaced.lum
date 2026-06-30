@@ -1,0 +1,9 @@
+# FAIL_REGEX:
+# .*lifted access operator must be written as '\.->' without whitespace.*
+
+class User {
+}
+
+def main(userOpt Option[User]) Unit {
+    name = userOpt. ->profileOpt()
+}
