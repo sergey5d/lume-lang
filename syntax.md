@@ -41,7 +41,7 @@ Common stdlib/prelude types:
 
 Tuple types:
 
-- unnamed tuples: `(Int, Str)`
+- `(Int, Str)`
 
 Function types:
 

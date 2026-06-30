@@ -142,7 +142,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        if fields.len() == 1 && fields[0].name.is_none() {
+        if fields.len() == 1 {
             return Some(fields.into_iter().next()?.ty);
         }
         Some(TypeRef::Tuple {
@@ -215,25 +215,20 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_tuple_type_field(&mut self) -> Option<TupleTypeField> {
-        let checkpoint = self.checkpoint();
         if self.at(TokenKind::Identifier) && self.at_next(TokenKind::Identifier) {
-            let (name, name_span) = self.expect_identifier("expected tuple field name")?;
+            let name_span = self.current_span();
+            self.error_at_current(
+                "invalid_tuple_type_field",
+                "tuple types are positional; use anonymous shape type '{ name Type }' for named fields",
+            );
+            self.advance();
             let ty = self.parse_type_ref()?;
             let span = name_span.cover(ty.span());
-            return Some(TupleTypeField {
-                name: Some(name),
-                ty,
-                span,
-            });
+            return Some(TupleTypeField { ty, span });
         }
-        self.restore(checkpoint);
         let ty = self.parse_type_ref()?;
         let span = ty.span();
-        Some(TupleTypeField {
-            name: None,
-            ty,
-            span,
-        })
+        Some(TupleTypeField { ty, span })
     }
 
     pub(super) fn can_start_type_ref(&self) -> bool {

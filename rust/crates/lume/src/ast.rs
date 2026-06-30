@@ -206,10 +206,9 @@ pub enum TypeRef {
     },
 }
 
-/// One field inside a tuple type, optionally carrying a label.
+/// One positional element inside a tuple type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TupleTypeField {
-    pub name: Option<String>,
     pub ty: TypeRef,
     pub span: Span,
 }

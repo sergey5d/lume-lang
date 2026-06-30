@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*tuple types are positional; use anonymous shape type '\{ name Type \}' for named fields.*
+
+def describe(value (name Str, age Int)) Unit {}

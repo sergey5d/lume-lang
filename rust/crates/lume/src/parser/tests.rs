@@ -2337,6 +2337,28 @@ def apply(f (Int) -> Int, both (Int, Str) -> Bool) Unit {}
 }
 
 #[test]
+fn rejects_tuple_type_field_names() {
+    let result = parse(
+        r#"
+def describe(value (name Str, age Int)) Unit {}
+"#,
+    );
+    let diagnostics = result
+        .diagnostics
+        .iter()
+        .filter(|diag| diag.code == "invalid_tuple_type_field")
+        .collect::<Vec<_>>();
+    assert_eq!(diagnostics.len(), 2, "{:#?}", result.diagnostics);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diag| diag.message.contains("tuple types are positional")),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn rejects_unparenthesized_function_type_refs() {
     let result = parse(
         r#"
