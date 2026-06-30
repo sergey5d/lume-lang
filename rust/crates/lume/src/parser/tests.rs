@@ -1744,31 +1744,25 @@ def run(split [Str]) Unit {
 }
 
 #[test]
-fn parses_if_expression_without_else_as_unit_block_expr() {
+fn rejects_if_expression_without_else() {
     let result = parse(
         r#"
-def run(flag Bool) Unit = match flag {
-    case true => if flag { println("x") }
-    case false => ()
+def run(flag Bool) Int {
+    value = if flag {
+        1
+    }
+    return value
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    let function = match &program.items[0] {
-        Item::Function(function) => function,
-        other => panic!("expected function, got {other:#?}"),
-    };
-    match &function.body {
-        CallableBody::Expr(Expr::Match { cases, .. }) => match &cases[0].body {
-            MatchCaseBody::Expr(Expr::Block { body, .. }) => match &body.statements[0] {
-                Stmt::If(stmt) => assert!(stmt.else_branch.is_none()),
-                other => panic!("expected synthesized if statement, got {other:#?}"),
-            },
-            other => panic!("expected block-wrapped if expression, got {other:#?}"),
-        },
-        other => panic!("expected match expression body, got {other:#?}"),
-    }
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "if_expression_requires_else"),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]

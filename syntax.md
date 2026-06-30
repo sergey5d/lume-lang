@@ -1417,13 +1417,30 @@ if let Some(pair) = maybePair {
 
 Direct nested payload destructuring in the `if let` pattern itself is still a possible future extension.
 
-Expression form:
+Statement form may omit `else`:
+
+```txt
+if value > 0 {
+    println("positive")
+}
+```
+
+Expression form must include `else`, because it has to produce a value on both
+paths:
 
 ```txt
 result = if value > 0 {
     1
 } else {
     0
+}
+```
+
+Invalid:
+
+```txt
+result = if value > 0 {
+    1
 }
 ```
 

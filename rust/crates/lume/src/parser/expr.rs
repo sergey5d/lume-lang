@@ -7,28 +7,6 @@ struct ChainSegment {
 }
 
 impl<'a> Parser<'a> {
-    fn wrap_if_without_else(&self, start: Span, condition: Expr, then_block: Block) -> Expr {
-        let span = start.cover(then_block.span);
-        Expr::Block {
-            body: Block {
-                statements: vec![Stmt::If(IfStmt {
-                    condition: Some(condition),
-                    condition_clauses: Vec::new(),
-                    pattern: None,
-                    pattern_value: None,
-                    pattern_clauses: Vec::new(),
-                    bindings: Vec::new(),
-                    binding_value: None,
-                    then_block,
-                    else_branch: None,
-                    span,
-                })],
-                span,
-            },
-            span,
-        }
-    }
-
     pub(super) fn parse_expr(&mut self) -> Option<Expr> {
         self.skip_newlines();
         if let Some(lambda) = self.try_parse_lambda_expr() {
@@ -331,7 +309,11 @@ impl<'a> Parser<'a> {
         let condition = self.parse_expr_without_trailing_block_call()?;
         let then_block = self.parse_if_body_block()?;
         if !self.match_keyword(Keyword::Else) {
-            return Some(self.wrap_if_without_else(start, condition, then_block));
+            self.error_at_current(
+                "if_expression_requires_else",
+                "if expression requires 'else'; use statement form 'if condition { ... }' when no value is needed",
+            );
+            return None;
         }
         if self.at(TokenKind::Newline) {
             self.error_at_current(
