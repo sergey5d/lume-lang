@@ -747,11 +747,11 @@ impl<'a> Parser<'a> {
         } else {
             self.consume_keyword(Keyword::Match, "expected 'match'")?
         };
-        let value = if self.at(TokenKind::LBrace) {
-            Expr::Placeholder { span: start }
-        } else {
-            self.parse_expr_without_trailing_block_call()?
-        };
+        if self.at(TokenKind::LBrace) {
+            self.error_missing_match_value(partial);
+            return None;
+        }
+        let value = self.parse_expr_without_trailing_block_call()?;
         let (cases, end) = self.parse_match_cases()?;
         Some(MatchStmt {
             partial,

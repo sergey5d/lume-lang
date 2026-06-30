@@ -1885,7 +1885,11 @@ values.map(value -> partial match value {
 })
 ```
 
-`match` and `partial match` always require a block of cases. Inline `match value: ...` shorthand is not supported.
+`match` and `partial match` always require an explicit value and a block of cases.
+Omitted-scrutinee shorthand such as `match { ... }` is not supported.
+Postfix match syntax such as `value match { ... }` is not supported; use prefix
+`match value { ... }`.
+Inline `match value: ...` shorthand is not supported.
 
 Every `match` and `partial match` branch must start with `case`.
 

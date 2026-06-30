@@ -1822,6 +1822,68 @@ def run(flag Bool) Unit = match flag {
 }
 
 #[test]
+fn rejects_match_without_value() {
+    let result = parse(
+        r#"
+def run() Int = match {
+    case true => 1
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "missing_match_value"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_partial_match_without_value() {
+    let result = parse(
+        r#"
+def run() Option[Int] = partial match {
+    case Some(value) => value
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "missing_match_value"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_postfix_match_expression() {
+    let result = parse(
+        r#"
+def run(flag Bool) Int {
+    value = flag match {
+        case true => 1
+        case false => 0
+    }
+
+    return value
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "postfix_match_not_supported"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_single_statement_match_case_body_without_braces() {
     let result = parse(
         r#"

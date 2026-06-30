@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*match requires a value before '\{'; use 'match value \{ \.\.\. \}'.*
+
+def main() Int =
+    match {
+        case true => 1
+    }

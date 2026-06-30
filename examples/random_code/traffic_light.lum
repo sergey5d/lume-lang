@@ -6,7 +6,7 @@ enum Side {
 
 impl Side {
     def reverse() Side {
-        this match {
+        match this {
             case NS => EW
             case EW => NS
         }

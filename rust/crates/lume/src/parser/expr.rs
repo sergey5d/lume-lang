@@ -346,11 +346,11 @@ impl<'a> Parser<'a> {
         start: Span,
         partial: bool,
     ) -> Option<Expr> {
-        let value = if self.at(TokenKind::LBrace) {
-            Expr::Placeholder { span: start }
-        } else {
-            self.parse_expr_without_trailing_block_call()?
-        };
+        if self.at(TokenKind::LBrace) {
+            self.error_missing_match_value(partial);
+            return None;
+        }
+        let value = self.parse_expr_without_trailing_block_call()?;
         let (cases, end) = self.parse_match_cases()?;
         Some(Expr::Match {
             partial,
@@ -1189,16 +1189,12 @@ impl<'a> Parser<'a> {
                 });
                 continue;
             }
-            if self.match_keyword(Keyword::Match) {
-                let start = Self::active_postfix_expr(&expr, &chain_segment).span();
-                let (cases, end) = self.parse_match_cases()?;
-                Self::apply_postfix(&mut expr, &mut chain_segment, |target| Expr::Match {
-                    partial: false,
-                    value: Box::new(target),
-                    cases,
-                    span: start.cover(end),
-                });
-                continue;
+            if self.at_keyword(Keyword::Match) {
+                self.error_at_current(
+                    "postfix_match_not_supported",
+                    "postfix match is not supported; use 'match value { ... }'",
+                );
+                return None;
             }
             if self.allow_trailing_block_call && self.at(TokenKind::LBrace) {
                 let active = Self::active_postfix_expr(&expr, &chain_segment);

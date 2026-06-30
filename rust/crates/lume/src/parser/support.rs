@@ -81,6 +81,15 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub(super) fn error_missing_match_value(&mut self, partial: bool) {
+        let message = if partial {
+            "partial match requires a value before '{'; use 'partial match value { ... }'"
+        } else {
+            "match requires a value before '{'; use 'match value { ... }'"
+        };
+        self.error_at_current("missing_match_value", message);
+    }
+
     pub(super) fn expect_identifier(&mut self, message: &'static str) -> Option<(String, Span)> {
         if self.at(TokenKind::Identifier) {
             let token = self.current().clone();
