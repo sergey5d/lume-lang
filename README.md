@@ -1,26 +1,47 @@
 # Lume
 
-`Lume` is an experimental programming language with a Rust implementation in
-this repository. The language is intentionally direct: classes are nominal for
-construction and class-to-class assignment, while also exposing a structural
-public-field view for shape conversion and destructuring. Shapes are structural
-data, methods live in `impl`, control flow is expression friendly where it stays
-readable, and the runtime currently executes the Rust compiler/interpreter
-pipeline under `rust/`.
+`Lume` is an experimental programming language implemented in Rust. The current
+repo focuses on the compiler/interpreter pipeline, language design notes,
+checked examples, a small stdlib, and VS Code syntax support.
 
-The repo currently centers on:
+The language aims to stay direct and readable. It is designed around a few
+separate ideas rather than one large object model trying to do everything.
 
-- the Rust compiler/interpreter pipeline under `rust/`
-- language docs such as `syntax.md` and `features.md`
-- checked-in `examples/` and `stdlib/` source files
-- editor support under `vscode-extension/`
+For the language reference, start with [syntax.md](syntax.md). For implementation
+details, start with [ARCHITECTURE.md](ARCHITECTURE.md) and
+[rust/README.md](rust/README.md).
 
-For implementation details, start with [rust/README.md](rust/README.md). For the
-full language reference, start with [syntax.md](syntax.md).
+## Language Model
+
+Lume separates the main concepts deliberately:
+
+- `class` is the nominal runtime type: it owns identity, fields, visibility, and
+  class construction.
+- `shape` is structural data: public read-only fields that can be matched,
+  passed, and converted by field compatibility.
+- `enum` models tagged alternatives, while `single` models one singleton value
+  with optional fields and methods.
+- `interface` describes behavior; types opt in explicitly instead of gaining
+  behavior by accidental structural matches.
+
+Construction is its own idea:
+
+- `new { ... }` declares the input shape accepted by a class constructor.
+- `Type { field: value }` fills that constructor shape by field name.
+- `Type(value)` fills the same constructor shape by declaration order.
+- If a class has no explicit `new`, the compiler synthesizes field construction
+  from visible public fields.
+
+Control flow is expression-friendly but still explicit:
+
+- `match` is exhaustive; `partial match` returns `Option`.
+- `let`, `if let`, and `expect` are pattern-oriented binding forms.
+- `try` and lifted access (`.->`) handle `Option`, `Result`, and `Either` flow
+  without turning every method call into special syntax.
 
 ## Quick Start
 
-From the repository root:
+Run the CLI from the repository root:
 
 ```bash
 cargo run --manifest-path rust/Cargo.toml -p lume -- parse examples/constructors.lum
@@ -28,221 +49,65 @@ cargo run --manifest-path rust/Cargo.toml -p lume -- check examples/random_code/
 cargo run --manifest-path rust/Cargo.toml -p lume -- run examples/range.lum
 ```
 
-Run the Rust test suite:
+Run tests:
 
 ```bash
 cargo test --manifest-path rust/Cargo.toml -p lume
-```
-
-Run the checked example sweep:
-
-```bash
 ./run_samples.sh
 ```
 
-## Syntax Snapshot
-
-- Use declarations use `use`, for example `use model/things/{A, B as AliasB}`.
-- Constructors declare the accepted construction shape; `Type { field: value }` fills it by field name and `Type(value)` fills it by declaration order.
-- Anonymous shapes use `{ field: value }`; named `shape` declarations are structural data-only types.
-- Shapes can implement interfaces with `shape Name with Interface`; classes must be explicitly viewed as a shape before using shape-provided interfaces.
-- `single Name { ... }` declares both a singleton type and the singleton value `Name`; reference `Name` directly, not `Name()` or `Name {}`.
-- `impl single Name { ... }` requires an explicit `single Name { ... }` declaration; it does not synthesize the singleton.
-- Custom constructor declarations are class-only and live in `impl` blocks as `new { ... } { body }` or `new { ... } = expr`; `new { ... }` declares the constructor input shape.
-- Variadic params use list type syntax: `items [Str] vararg`; constructor varargs can also be passed by name as a list.
-- Field construction and anonymous-shape construction use `field: value`, not `field = value`.
-- Assignment uses `=` for first binding / constructor field initialization and `:=` for reassignment.
-- Enum payload cases use implicit positional or field construction syntax, for example `Status.Ready(3)` or `Status.Ready { value: 3 }`; zero-payload cases are bare, for example `Status.Empty`.
-- `let`, `expect`, and `if let` support `<-` extraction from `Option`, `Result`, and `Either`.
-- `match` is exhaustive; `partial match` returns `Option[...]`.
-- `for`, `for ... yield`, `while`, `break`, `continue`, and callable-scoped `defer` are supported.
-- Lambdas use explicit arrows: `value -> value + 1`, `(value Int) -> value + 1`, or trailing-call form `items.map { value -> ... }`.
-
-Common import forms:
+## Small Taste
 
 ```txt
-use model/things
-use model/things/*
-use model/things/A
-use model/things/A as AliasA
-use model/things/{A, B as AliasB}
-use model/things/Console/{print as write}
-```
-
-## Example
-
-This longer example is a compact tour of the current surface syntax: interfaces,
-annotations, shapes, classes, `impl`, `single`, enums, constructors, varargs, named and
-positional construction, destructuring, `let` / `expect`, `try`, `match`,
-`partial match`, lambdas, `for`, `for ... yield`, `while`, `continue`, `defer`,
-shape update, and shape merge.
-
-```txt
-interface Named {
-    def label() Str
-}
-
 shape Point {
     x Int
     y Int
 }
 
-impl Point {
-    def move(dx Int, dy Int) Point = Point {
-        x: this.x + dx
-        y: this.y + dy
-    }
-}
-
-enum Status {
-    case Empty
-    case Ready {
-        count Int
-    }
-    case Failed {
-        reason Str
-    }
-}
-
-single Log {
-    prefix Str = "lume"
-
-    def headline(title Str) Unit = println(this.prefix, title)
-}
-
-impl single Log {
-    def shout(title Str) Unit = println(this.prefix, title + "!")
-}
-
-class Project with Named {
+class User {
     name Str
-    origin Point
-    tags [Str]
-    hidden var visits Int = 0
+    home Point
 }
 
-impl Project {
+impl User {
     new {
         name Str
-        origin Point
-        tags [Str] vararg
+        home Point
     } {
         this.name = name
-        this.origin = origin
-        this.tags = tags
-        this.visits = 0
+        this.home = home
     }
 
-    def label() Str = this.name + "@" + this.origin.x + "," + this.origin.y
+    new {
+        label Str
+    } = new(label, Point { x: 0, y: 0 })
 
-    def visit() Int {
-        this.visits := this.visits + 1
-        this.visits
+    def moved(dx Int, dy Int) User = User {
+        name: this.name
+        home: Point {
+            x: this.home.x + dx
+            y: this.home.y + dy
+        }
     }
-
-    def tagCount() Int = this.tags.size()
-
-    def status() Status = if this.tags.size() == 0 {
-        Status.Empty
-    } else {
-        Status.Ready(this.tags.size())
-    }
-}
-
-def readyCount(status Status) Option[Int] = partial match status {
-    case Ready(count) => count
-}
-
-def describe(status Status) Str = match status {
-    case Status.Empty => "empty"
-    case Ready(count) => "ready " + count
-    case Failed(reason) => "failed " + reason
-}
-
-def firstTagOr(project Project, fallback Str) Str {
-    let tag <- project.tags.get(0) else return fallback
-    tag
-}
-
-def secondTag(project Project) Option[Str] {
-    tag = try project.tags.get(1)
-    Some(tag)
-}
-
-def report(project Project) Unit {
-    defer println("done", project.name)
-    let { name as projectName, origin } = project
-    let { x, y } = origin
-    println("project", projectName, x, y, project.label())
 }
 
 def main() Unit {
-    Log.headline("syntax tour")
+    user User = User { label: "Ada" }
+    moved = user.moved(3, 4)
 
-    project = Project("Lume", Point(3, 4), "parser", "runtime", "docs")
-    named = Project { name: "Named", origin: Point(1, 2), tags: ["docs"] }
-    empty = Project { name: "Empty", origin: Point(0, 0) }
-
-    report(project)
-    report(named)
-    println("empty", describe(empty.status()))
-
-    expect project.tagCount() == 3
-    expect first <- project.tags.get(0)
-    println("first", first)
-    println("fallback", firstTagOr(empty, "none"))
-
-    let Some(second) = secondTag(project) else return ()
-    println("second", second)
-
-    if let count <- readyCount(project.status()) {
-        println("ready-count", count)
-    }
-
-    moved = project.origin.move(10, 20)
-    updated = moved :< { y: 99 }
-    meta = { owner: "core" } :+ { priority: 1 }
-    println("point", updated.x, updated.y, meta.owner, meta.priority)
-
-    doubled = [1, 2, 3].map(value -> value * 2)
-    for (value, index) <- doubled.zipWithIndex() {
-        println("doubled", index, value)
-    }
-
-    yielded = for {
-        left <- [1, 2]
-        right <- [10, 20]
-    } yield left + right
-
-    var total Int = 0
-    for value <- yielded {
-        if value == 22 {
-            continue
-        }
-        total := total + value
-    }
-
-    var countdown Int = 3
-    while countdown > 0 {
-        total := total + countdown
-        countdown := countdown - 1
-    }
-
-    println("total", total, project.visit())
+    let { name, home } = moved
+    println(name, home.x, home.y)
 }
 ```
 
+More runnable examples live in [examples/](examples/).
+
 ## Repository Layout
 
-- `rust/`
-  Rust implementation, CLI, lowering, runtime, and tests.
-- `examples/`
-  Lume programs used as samples and parity fixtures.
-- `stdlib/`
-  Standard library sources loaded by the Rust toolchain.
-- `syntax.md`
-  Language syntax reference.
-- `features.md`
-  Feature notes and design status.
-- `ARCHITECTURE.md`
-  High-level architecture notes for the current Rust pipeline.
+- `rust/` - Rust compiler, resolver, typechecker, lowering, interpreter, and CLI.
+- `examples/` - Lume programs used as samples and parity fixtures.
+- `stdlib/` - Standard library sources loaded by the Rust toolchain.
+- `vscode-extension/` - Editor highlighting support.
+- `syntax.md` - Current language syntax reference.
+- `features.md` - Unsettled feature notes and design discussion.
+- `ARCHITECTURE.md` - High-level architecture notes for the current pipeline.
