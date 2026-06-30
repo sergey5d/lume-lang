@@ -64,7 +64,8 @@ Operator overloading now exists and is mainly intended for compact value-oriente
 - interface-driven abstractions that want symbolic operators over implementing types
 
 Constraint:
-- keep it same-line only; no newline-based implicit body after `:`
+- use ordinary callable body syntax: `def ... = expr` or `def ... { ... }`
+- do not introduce operator-specific body forms
 
 Finalized policy:
 - operator overloading is limited to interfaces, classes, and enums
