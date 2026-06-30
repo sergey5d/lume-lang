@@ -929,6 +929,42 @@ fn parses_colon_shape_update_fields() {
 }
 
 #[test]
+fn parses_newline_separated_shape_update_fields() {
+    match parse_expr_only(
+        r#"
+value :< {
+    amount: 42
+    label: value.label,
+    count: 3
+}
+"#,
+    ) {
+        Expr::RecordUpdate { updates, .. } => {
+            assert_eq!(updates.len(), 3);
+            assert_eq!(updates[0].name.as_deref(), Some("amount"));
+            assert_eq!(updates[1].name.as_deref(), Some("label"));
+            assert_eq!(updates[2].name.as_deref(), Some("count"));
+        }
+        other => panic!("expected shape update, got {other:#?}"),
+    }
+}
+
+#[test]
+fn rejects_same_line_shape_update_fields_without_separator() {
+    let result = parse(r#"def run(value Amount) Unit = value :< { amount: 42 label: "x" }"#);
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "unexpected_token"
+                && diag
+                    .message
+                    .contains("expected ',' or newline between shape update fields")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_shape_merge_operator() {
     match parse_expr_only("left :+ right") {
         Expr::Binary {

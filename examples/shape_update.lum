@@ -1,6 +1,6 @@
 # EXPECT:
 # original 10 x
-# updated 42 x
+# updated 42 y
 
 class Amount {
     amount Int
@@ -9,7 +9,10 @@ class Amount {
 
 def main() Unit {
     value = Amount(10, "x")
-    updated = value :< { amount: 42 }
+    updated = value :< {
+        amount: 42
+        description: "y"
+    }
 
     println("original " + value.amount + " " + value.description)
     println("updated " + updated.amount + " " + updated.description)

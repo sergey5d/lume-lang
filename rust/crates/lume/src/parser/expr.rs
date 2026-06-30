@@ -802,11 +802,27 @@ impl<'a> Parser<'a> {
                 span: name_span.cover(value.span()),
                 value,
             });
+            let separated_by_comma = self.match_token(TokenKind::Comma);
+            let separated_by_newline = if !separated_by_comma {
+                self.match_token(TokenKind::Newline)
+            } else {
+                false
+            };
             self.skip_newlines();
-            if !self.match_token(TokenKind::Comma) {
+            if separated_by_newline {
+                self.match_token(TokenKind::Comma);
+                self.skip_newlines();
+            }
+            if self.at(TokenKind::RBrace) || self.at(TokenKind::Eof) {
                 break;
             }
-            self.skip_newlines();
+            if !separated_by_comma && !separated_by_newline {
+                self.error_at_current(
+                    "unexpected_token",
+                    "expected ',' or newline between shape update fields",
+                );
+                return None;
+            }
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after shape update")?;
         Some((updates, start.cover(end)))
