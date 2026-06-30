@@ -927,29 +927,15 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_or_expr(&mut self) -> Option<Expr> {
         self.parse_left_assoc(
-            |parser| parser.parse_bit_or_expr(),
-            &[(TokenKind::OrOr, BinaryOp::Or)],
-        )
-    }
-
-    pub(super) fn parse_bit_or_expr(&mut self) -> Option<Expr> {
-        self.parse_left_assoc(
             |parser| parser.parse_and_expr(),
-            &[(TokenKind::Pipe, BinaryOp::BitOr)],
+            &[(TokenKind::OrOr, BinaryOp::Or)],
         )
     }
 
     pub(super) fn parse_and_expr(&mut self) -> Option<Expr> {
         self.parse_left_assoc(
-            |parser| parser.parse_bit_and_expr(),
-            &[(TokenKind::AndAnd, BinaryOp::And)],
-        )
-    }
-
-    pub(super) fn parse_bit_and_expr(&mut self) -> Option<Expr> {
-        self.parse_left_assoc(
             |parser| parser.parse_equality_expr(),
-            &[(TokenKind::Ampersand, BinaryOp::BitAnd)],
+            &[(TokenKind::AndAnd, BinaryOp::And)],
         )
     }
 

@@ -4155,8 +4155,6 @@ fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
         AstBinaryOp::Or => Some(ir::BinaryOp::Or),
         AstBinaryOp::RecordMerge => Some(ir::BinaryOp::RecordMerge),
         AstBinaryOp::And => Some(ir::BinaryOp::And),
-        AstBinaryOp::BitOr => Some(ir::BinaryOp::BitOr),
-        AstBinaryOp::BitAnd => Some(ir::BinaryOp::BitAnd),
         AstBinaryOp::Eq => Some(ir::BinaryOp::Eq),
         AstBinaryOp::NotEq => Some(ir::BinaryOp::NotEq),
         AstBinaryOp::Less => Some(ir::BinaryOp::Less),

@@ -1878,6 +1878,15 @@ result Option[Int] = partial match value {
 }
 ```
 
+Partial match statement form executes the matching case if one exists and does
+nothing when no case matches:
+
+```txt
+partial match value {
+    case SomeX(x) => println(x)
+}
+```
+
 Partial mapped through an explicit lambda:
 
 ```txt
@@ -1933,7 +1942,8 @@ Generic arguments inside runtime type patterns are intentionally rejected for no
 Current notes:
 
 - enum exhaustiveness is checked
-- `partial match` skips exhaustiveness checking and wraps the result in `Option[...]`
+- expression `partial match` skips exhaustiveness checking and wraps the result in `Option[...]`
+- statement `partial match` skips exhaustiveness checking and does nothing when no case matches
 - bare singleton enum cases should still be written in qualified form when needed, for example `MaybeInt.NoneX`
 
 ## Destructuring
@@ -2087,7 +2097,6 @@ Newline continuation:
 - A newline continues the current expression only when the previous line clearly ends in a continuation form, except postfix chains may continue when the next line starts with `.` or `.->`.
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
-  - bitwise operators: `|`, `&`
   - shape/update operators: `:<`, `:+`
   - unary prefixes: unary `-`, `!`, `try`
   - runtime type check keyword: `is`

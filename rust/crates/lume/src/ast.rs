@@ -773,8 +773,6 @@ pub enum BinaryOp {
     RecordMerge,
     Or,
     And,
-    BitOr,
-    BitAnd,
     Eq,
     NotEq,
     Less,

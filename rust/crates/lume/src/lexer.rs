@@ -71,8 +71,6 @@ pub enum TokenKind {
     Bang,
     Less,
     Greater,
-    Ampersand,
-    Pipe,
     Arrow,
     FatArrow,
     LeftArrow,
@@ -387,9 +385,9 @@ impl<'a> Lexer<'a> {
             '>' if self.take('=') => Some(TokenKind::GreaterEq),
             '>' => Some(TokenKind::Greater),
             '&' if self.take('&') => Some(TokenKind::AndAnd),
-            '&' => Some(TokenKind::Ampersand),
+            '&' => return self.unsupported_operator(start, "&"),
             '|' if self.take('|') => Some(TokenKind::OrOr),
-            '|' => Some(TokenKind::Pipe),
+            '|' => return self.unsupported_operator(start, "|"),
             _ => None,
         };
 
@@ -548,14 +546,14 @@ mod tests {
 
     #[test]
     fn rejects_reserved_symbolic_collection_operators() {
-        let result = lex(&source("c :- d\ne :: f\ng ++ h\ni -- j\n"));
+        let result = lex(&source("c :- d\ne :: f\ng ++ h\ni -- j\na & b\nc | d\n"));
         let messages = result
             .diagnostics
             .iter()
             .map(|diag| (diag.code, diag.message.as_str()))
             .collect::<Vec<_>>();
-        assert_eq!(messages.len(), 4);
-        for operator in [":-", "::", "++", "--"] {
+        assert_eq!(messages.len(), 6);
+        for operator in [":-", "::", "++", "--", "&", "|"] {
             assert!(
                 messages.iter().any(|(code, message)| {
                     *code == "unsupported_operator" && message.contains(operator)

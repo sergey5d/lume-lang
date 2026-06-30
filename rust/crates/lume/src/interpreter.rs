@@ -4340,14 +4340,6 @@ impl<'a> Interpreter<'a> {
                 left.as_bool(self, span, "left side of ||")?
                     || right.as_bool(self, span, "right side of ||")?,
             )),
-            ir::BinaryOp::BitAnd => match (left, right) {
-                (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs & rhs)),
-                _ => Err(self.runtime_error(span, "binary '&' expects Int values")),
-            },
-            ir::BinaryOp::BitOr => match (left, right) {
-                (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs | rhs)),
-                _ => Err(self.runtime_error(span, "binary '|' expects Int values")),
-            },
         }
     }
 

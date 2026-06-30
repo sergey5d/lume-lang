@@ -5344,9 +5344,7 @@ impl<'a> Checker<'a> {
             | BinaryOp::Greater
             | BinaryOp::GreaterEq
             | BinaryOp::And
-            | BinaryOp::Or
-            | BinaryOp::BitAnd
-            | BinaryOp::BitOr => {
+            | BinaryOp::Or => {
                 if matches!(op, BinaryOp::And | BinaryOp::Or) {
                     self.require_bool(left, span, "logical operator expects Bool operands");
                     self.require_bool(right, span, "logical operator expects Bool operands");

@@ -599,8 +599,6 @@ pub enum BinaryOp {
     GreaterEq,
     And,
     Or,
-    BitAnd,
-    BitOr,
 }
 
 /// The lowered type vocabulary used by typechecking, lowering, and interpretation.

@@ -5,6 +5,7 @@
 # 0
 # 2
 # true
+# 4
 
 enum MaybeInt {
     case NoneX
@@ -34,4 +35,13 @@ def main() Unit {
     let Some(secondPartial) = partialMapped.get(1) else return ()
     println(firstPartial.getOr(0))
     println(secondPartial.isEmpty())
+
+    var partialStmt = 0
+    partial match MaybeInt.SomeX(4) {
+        case SomeX(x) => partialStmt += x
+    }
+    partial match MaybeInt.NoneX {
+        case SomeX(x) => partialStmt += x
+    }
+    println(partialStmt)
 }

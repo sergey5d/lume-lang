@@ -2613,8 +2613,6 @@ fn is_annotation_constant_binary_op(op: crate::ast::BinaryOp) -> bool {
         op,
         crate::ast::BinaryOp::Or
             | crate::ast::BinaryOp::And
-            | crate::ast::BinaryOp::BitOr
-            | crate::ast::BinaryOp::BitAnd
             | crate::ast::BinaryOp::Eq
             | crate::ast::BinaryOp::NotEq
             | crate::ast::BinaryOp::Less
