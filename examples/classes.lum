@@ -1,5 +1,5 @@
 # EXPECT:
-# brace named Sammy 15 NYC
+# brace fields Sammy 15 NYC
 # positional Ben 12 Paris
 # positional hidden Liam 8 5
 # positional hidden-third Ada 4 7
@@ -7,11 +7,11 @@
 # ctor manual 5 Bobby
 
 # Class construction rules in one place:
-# - classes without explicit `new` support named braces and positional parentheses
+# - classes without explicit `new` support brace field construction and positional parentheses
 # - positional construction follows public field order
 # - trailing public defaults may be omitted
 # - hidden defaulted fields may trail public fields and stay out of the shape
-# - explicit `new` supports named braces and positional parentheses
+# - explicit `new` supports brace field construction and positional parentheses
 # - explicit `new` can define defaulted trailing parameters
 
 class Profile {
@@ -96,7 +96,7 @@ def main() Unit {
     aFromAlt A = A { maturity: 21 }
     bManual B = B(5)
 
-    println("brace named", named.name, named.age, named.city)
+    println("brace fields", named.name, named.age, named.city)
     println("positional", positional.name, positional.age, positional.city)
     println(
         "positional hidden",

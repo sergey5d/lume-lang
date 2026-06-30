@@ -645,7 +645,7 @@ impl<'a> Parser<'a> {
                 }
                 self.diagnostics.push(Diagnostic::error(
                     "unexpected_token",
-                    "cannot mix named and positional shape fields",
+                    "cannot mix construction fields and positional shape fields",
                     entry.span,
                 ));
                 return None;
@@ -654,7 +654,7 @@ impl<'a> Parser<'a> {
             if !entries.is_empty() {
                 self.diagnostics.push(Diagnostic::error(
                     "positional_brace_construction",
-                    "braces are for named fields; use 'Type(...)' for positional constructors or assign a tuple to an explicitly typed shape",
+                    "braces are for construction fields; use 'Type(...)' for positional constructors or assign a tuple to an explicitly typed shape",
                     start.cover(end),
                 ));
                 return None;

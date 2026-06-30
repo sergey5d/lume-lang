@@ -72,7 +72,7 @@ def main() Unit {
     # Capacity 5 over a 5-tick sliding window.
     bucket = SlidingWindowLimiter(5, 5)
 
-    # Each request carries named fields instead of a positional tuple.
+    # Each request carries construction fields instead of a positional tuple.
     requests List[{ time Int, cost Int }] = List(
         { time: 0, cost: 3 },
         { time: 0, cost: 2 },

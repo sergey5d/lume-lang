@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# constructor syntax for 'MixedProfile' does not accept anonymous shape arguments in '\(\.\.\.\)'; use named brace arguments or positional values directly
+# constructor syntax for 'MixedProfile' does not accept anonymous shape arguments in '\(\.\.\.\)'; use construction fields in braces or positional values directly
 
 class MixedProfile {
     name Str

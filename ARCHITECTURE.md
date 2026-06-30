@@ -95,7 +95,7 @@ like grouped expressions, parser call style flags, and lambda body variants.
 
 - type references and generic arity
 - bindings and assignments
-- calls, methods, constructors, and named arguments
+- calls, methods, constructors, and function/method named arguments
 - control-flow forms such as `if`, `match`, `for`, and `let`
 - `use` declaration and visibility rules
 

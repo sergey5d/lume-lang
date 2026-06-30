@@ -19,9 +19,9 @@
 # - nested writes through an initialized field still use `:=`
 # - constructor shape fields and constructor-call fields may be comma separated
 # - `new(...)` delegates to another constructor positionally
-# - `new { field: value }` delegates to another constructor by named fields
+# - `new { field: value }` delegates to another constructor by construction fields
 # - a trailing `[T] vararg` constructor shape field receives positional varargs as `[T]`
-# - named constructor calls can pass a vararg as a single `[T]` value
+# - construction fields can pass a vararg as a single `[T]` value
 # - defaulted varargs are used when the vararg is omitted
 
 class Profile {

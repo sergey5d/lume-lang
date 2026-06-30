@@ -99,7 +99,7 @@ as:
 - generic arity mismatches
 - argument and return type mismatches
 - invalid assignment and binding types
-- incorrect constructor arity and named arguments
+- incorrect constructor arity and function/method named arguments
 - invalid `break` outside a loop
 - unknown used module members
 

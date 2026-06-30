@@ -35,7 +35,7 @@ These older surfaces should stay out of new examples and docs:
 - `import`; use `use`
 - legacy named structural declarations; use `shape` for structural data or `class` for nominal types
 - legacy anonymous structural wrappers; use plain `{ ... }`
-- named fields with `=` inside construction; use `field: value`
+- construction fields with `=` inside construction; use `field: value`
 - language-level `unwrap` forms; use `let ... else`, `expect`, or `try`
 - placeholder expression lambdas like `_ + 1`; use `x -> x + 1`
 - class-to-tuple destructuring; use class/anonymous-shape brace destructuring

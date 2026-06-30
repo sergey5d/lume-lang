@@ -3994,7 +3994,7 @@ impl<'a> Checker<'a> {
             .is_some_and(|methods| methods.iter().any(|method| method.has_body))
     }
 
-    fn reject_parenthesized_named_constructor_args(
+    fn reject_parenthesized_constructor_fields(
         &mut self,
         args: &[crate::ast::CallArg],
         uses_brace_syntax: bool,
@@ -4005,7 +4005,7 @@ impl<'a> Checker<'a> {
         }
         self.add_error(
             "invalid_constructor_call",
-            "constructor parentheses accept positional arguments only; use braces for named constructor arguments",
+            "constructor parentheses accept positional arguments only; use braces for construction fields",
             span,
         );
         true
@@ -4621,7 +4621,7 @@ impl<'a> Checker<'a> {
     ) -> Option<Ty> {
         match name {
             "Range" => {
-                self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
+                self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
                 if !(args.len() == 2 || args.len() == 3) {
                     self.add_error(
                         "invalid_argument_count",
@@ -4648,7 +4648,7 @@ impl<'a> Checker<'a> {
                 Some(Ty::Named("IntRange".to_string(), Vec::new()))
             }
             "List" => {
-                self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
+                self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
                 let mut item = Ty::Unknown;
                 for arg in args {
                     item = join_types(&item, &self.check_expr(&arg.value));
@@ -4656,7 +4656,7 @@ impl<'a> Checker<'a> {
                 Some(Ty::Named("List".to_string(), vec![item]))
             }
             "Set" => {
-                self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
+                self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
                 let mut item = Ty::Unknown;
                 for arg in args {
                     item = join_types(&item, &self.check_expr(&arg.value));
@@ -4664,7 +4664,7 @@ impl<'a> Checker<'a> {
                 Some(Ty::Named("Set".to_string(), vec![item]))
             }
             "Array" => {
-                self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
+                self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
                 let mut item = Ty::Unknown;
                 for arg in args {
                     item = join_types(&item, &self.check_expr(&arg.value));
@@ -4672,7 +4672,7 @@ impl<'a> Checker<'a> {
                 Some(Ty::Named("Array".to_string(), vec![item]))
             }
             "Map" => {
-                self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
+                self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
                 let mut key = Ty::Unknown;
                 let mut value = Ty::Unknown;
                 for arg in args {
@@ -4731,7 +4731,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use named brace arguments or positional values directly",
+                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use construction fields in braces or positional values directly",
                     sig.name
                 ),
                 span,
@@ -4739,7 +4739,7 @@ impl<'a> Checker<'a> {
             return ret;
         }
 
-        self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
+        self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
 
         if sig.kind == TypeKind::Annotation {
             self.add_error(
@@ -4850,7 +4850,7 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "no_matching_overload",
                     format!(
-                        "{} '{}' brace construction requires named fields",
+                        "{} '{}' brace construction requires construction fields",
                         type_kind_label(sig.kind),
                         sig.name
                     ),
@@ -5037,7 +5037,7 @@ impl<'a> Checker<'a> {
             );
             return case.result.clone();
         }
-        self.reject_parenthesized_named_constructor_args(args, uses_brace_syntax, span);
+        self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
         self.check_constructor_signature(&case.params, &case.result, args, span)
     }
 
@@ -6114,7 +6114,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "positional_brace_construction",
                 format!(
-                    "{} '{}' uses named brace construction; write '{}(...)' for positional construction",
+                    "{} '{}' uses brace field construction; write '{}(...)' for positional construction",
                     type_kind_label(sig.kind),
                     sig.name,
                     sig.name
@@ -6131,7 +6131,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' has no implicit named-field constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
+                    "{} '{}' has no implicit field constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
                     type_kind_label(sig.kind),
                     sig.name,
                     field.name
@@ -6156,7 +6156,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' named brace construction expects {}..{} visible fields, got {}",
+                    "{} '{}' brace field construction expects {}..{} visible fields, got {}",
                     type_kind_label(sig.kind),
                     sig.name,
                     required_visible,
@@ -6173,7 +6173,7 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "no_matching_overload",
                     format!(
-                        "{} '{}' requires named brace fields that match the visible shape",
+                        "{} '{}' requires construction fields that match the visible shape",
                         type_kind_label(sig.kind),
                         sig.name
                     ),
@@ -6185,7 +6185,7 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "no_matching_overload",
                     format!(
-                        "{} '{}' has no visible field '{}' for named brace construction",
+                        "{} '{}' has no visible field '{}' for brace field construction",
                         type_kind_label(sig.kind),
                         sig.name,
                         name
@@ -6223,7 +6223,7 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "no_matching_overload",
                     format!(
-                        "{} '{}' named brace construction is missing required field '{}'",
+                        "{} '{}' brace field construction is missing required field '{}'",
                         type_kind_label(sig.kind),
                         sig.name,
                         field.name
@@ -7710,7 +7710,7 @@ def main() Unit {
         assert!(
             result.diagnostics.iter().any(|diag| {
                 diag.message.contains(
-                    "no implicit named-field constructor because hidden field 'token' has no initializer",
+                    "no implicit field constructor because hidden field 'token' has no initializer",
                 )
             }),
             "{:#?}",

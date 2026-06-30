@@ -2962,7 +2962,7 @@ impl<'a> Interpreter<'a> {
                         return Err(self.runtime_error(
                             span,
                             format!(
-                                "brace construction for '{}' expects named constructor fields",
+                                "brace construction for '{}' expects constructor fields",
                                 type_name
                             ),
                         ));
@@ -2996,7 +2996,7 @@ impl<'a> Interpreter<'a> {
                     return Err(self.runtime_error(
                         span,
                         format!(
-                            "brace-based construction for '{}' expects named shape fields",
+                            "brace-based construction for '{}' expects construction fields",
                             type_name
                         ),
                     ));
@@ -3008,7 +3008,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use named brace arguments or positional values directly",
+                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use construction fields in braces or positional values directly",
                     type_name
                 ),
             ));
@@ -3050,7 +3050,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' has no implicit named-field constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
+                    "class '{}' has no implicit field constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
                     ty.name, field.name
                 ),
             ));
@@ -3069,7 +3069,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' requires named brace fields that match the visible class shape",
+                    "class '{}' requires construction fields that match the visible class shape",
                     ty.name
                 ),
             ));
@@ -3084,7 +3084,7 @@ impl<'a> Interpreter<'a> {
                 return Err(self.runtime_error(
                     span,
                     format!(
-                        "class '{}' requires named brace fields that match the visible class shape",
+                        "class '{}' requires construction fields that match the visible class shape",
                         ty.name
                     ),
                 ));
@@ -3097,7 +3097,7 @@ impl<'a> Interpreter<'a> {
                 return Err(self.runtime_error(
                     span,
                     format!(
-                        "class '{}' requires named brace fields that match the visible class shape",
+                        "class '{}' requires construction fields that match the visible class shape",
                         ty.name
                     ),
                 ));

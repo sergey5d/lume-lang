@@ -531,7 +531,7 @@ updated = value :< {
 
 ## Construction
 
-Braces are for named fields and named arguments:
+Braces are for construction fields:
 
 ```txt
 user = { name: "Ada", age: 10 }
@@ -545,7 +545,7 @@ user User = User("Ada", 10)
 maybe = Some(5)
 ```
 
-Braces are also the named constructor form for enum payload cases:
+Braces are also the field construction form for enum payload cases:
 
 ```txt
 maybe = Some { value: 5 }
@@ -557,7 +557,7 @@ Zero-payload enum cases are bare values, not calls:
 none = None
 ```
 
-Anonymous shapes use plain braces for named construction:
+Anonymous shapes use plain braces for construction fields:
 
 ```txt
 user = {
@@ -622,7 +622,7 @@ Named shapes are data-only structural field views:
 - methods are declared with `impl ShapeName { ... }`
 - custom `new` constructors are not allowed
 - shapes may declare interface bounds with `shape Name with Interface`
-- named construction uses `ShapeName { field: value }`
+- brace field construction uses `ShapeName { field: value }`
 - positional construction uses `ShapeName(...)`
 - contextual tuple construction is allowed when the expected type is a known shape
 
@@ -659,18 +659,18 @@ Construction rules:
 - `new { field Type, other Type = default } { ... }` declares a constructor shape with required and defaulted fields
 - braces fill that constructor shape by field name: `Type { field: value, other: value }`
 - parentheses fill the same constructor shape by declaration order: `Type(value, otherValue)`
-- constructor parentheses accept positional arguments only; use braces for named constructor arguments
+- constructor parentheses accept positional arguments only; use braces for construction fields
 - function and method calls may still use named arguments in parentheses
 - `Type { value }` is not valid; use `Type(value)`
-- anonymous shapes use `{ field: value }` for named construction and tuple values for contextual positional construction
+- anonymous shapes use `{ field: value }` for field construction and tuple values for contextual positional construction
 - builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` use parentheses
 - `Type { ... }` and `Type(...)` both resolve through the available `new`/field construction shape
 - any explicit `new` disables implicit structural field construction for that class
 - `Type {}` works when the visible construction shape has no required fields
-- named braces check only visible public fields
-- in named braces, public fields without initializers are required
-- in named braces, public fields with initializers are optional
-- in named braces, hidden fields are never part of the accepted shape
+- construction braces check only visible public fields
+- in construction braces, public fields without initializers are required
+- in construction braces, public fields with initializers are optional
+- in construction braces, hidden fields are never part of the accepted shape
 - hidden fields without initializers suppress implicit field constructors; define `new` to initialize them
 - positional construction follows declared public-field order
 - public fields may be omitted from positional construction only when the omitted fields form a trailing suffix and all have initializers
@@ -678,7 +678,7 @@ Construction rules:
 - explicit constructors may use one trailing variadic constructor shape field such as `items [T] vararg`
 - a variadic constructor shape field receives the extra positional arguments as `[T]`
 - only one variadic constructor shape field is allowed
-- named constructor arguments can target a variadic constructor shape field by passing a `[T]` value
+- construction fields can target a variadic constructor shape field by passing a `[T]` value
 - variadic constructor shape fields may have a default `[T]` value
 - variadic constructor shape fields cannot follow defaulted shape fields
 - mutable vs immutable field differences do not matter for structural shape matching
@@ -687,7 +687,7 @@ Construction rules:
 - tuple values can construct anonymous or named shapes only when the target shape type is known
 - class construction is nominal and constructor-gated; shape construction is structural
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
-- `Type({ ... })` is not supported; use named fields or positional values directly
+- `Type({ ... })` is not supported; use construction fields or positional values directly
 - `shape(...)` expression syntax is not supported; use tuple-to-shape construction instead
 
 ## Brace Disambiguation
@@ -704,7 +704,7 @@ Interface with Other { def ... } # anonymous interface implementation
 new { field Type }               # constructor input shape declaration
 ```
 
-Single-expression braces such as `{ value }` are block expressions, not anonymous shapes. To construct an anonymous shape, use named fields with `:`.
+Single-expression braces such as `{ value }` are block expressions, not anonymous shapes. To construct an anonymous shape, use construction fields with `:`.
 
 Shape conversion rules:
 - field names and field types must match at compile time
@@ -721,8 +721,8 @@ Shape conversion rules:
 - shape-to-class is not implicit; use a class constructor
 - tuple-to-class is not allowed; use a class constructor
 - ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
-- named fields inside construction braces use `field: value`
-- named fields may carry an explicit initializer type as `field Type: value`
+- construction fields inside braces use `field: value`
+- construction fields may carry an explicit initializer type as `field Type: value`
 - single-expression braces like `{ value }` are still block expressions, not anonymous shapes
 
 Examples:
@@ -822,8 +822,8 @@ Custom constructors are class-only and use a dedicated `new` block inside `impl`
 - `hidden new { ... } { body }` declares a private constructor
 - each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
 - `new(...)` inside another constructor delegates positionally to another constructor of the same class
-- `new { field: value }` inside another constructor delegates with named constructor arguments to another constructor of the same class
-- class call sites use braces for named arguments, for example `Person { name: "Ada", age: 10 }`
+- `new { field: value }` inside another constructor delegates with construction fields to another constructor of the same class
+- class call sites use braces for construction fields, for example `Person { name: "Ada", age: 10 }`
 - class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
 - `this` is the instance receiver
 - instance fields on classes, enums, and singles may be accessed bare when they are not shadowed
@@ -1179,7 +1179,7 @@ Enum cases are data-only:
 - there is no `impl Enum.Case { ... }` form
 - zero-payload cases are values and are written without call syntax, for example `None`
 - payload cases use positional constructor syntax, for example `Some(value)`
-- payload cases may also use named constructor braces, for example `Some { value: value }`
+- payload cases may also use construction fields in braces, for example `Some { value: value }`
 - payload and shared fields with defaults may be omitted from enum case constructors
 - `None()`-style calls for zero-payload cases are invalid
 
@@ -1264,7 +1264,7 @@ pair (Str, Int) = "a": 1
 
 `:` has two roles depending on grammar context:
 
-- in brace field lists, `field: value` binds a value to a named field
+- in brace field lists, `field: value` binds a value to a construction field
 - in ordinary expressions, `left: right` constructs a 2-tuple pair value
 
 Pair expressions are non-associative. Use `(a, b, c)` for TupleN values, and
@@ -1910,6 +1910,7 @@ Other operators / constructs:
 - `<-` for `for` iteration and success-case extraction in `if let`, `let ... else`, and `expect`
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases
+- `.->` for lifted access through `Option`, `Result`, and `Either`
 - `with` for interface implementation and generic bounds
 - `:` for ordinary pair expressions, where `left: right` constructs a 2-tuple
 - `:<` for class, shape, and anonymous-shape update

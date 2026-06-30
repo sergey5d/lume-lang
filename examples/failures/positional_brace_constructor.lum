@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# braces are for named fields; use 'Type\(\.\.\.\)' for positional constructors or assign a tuple to an explicitly typed shape
+# braces are for construction fields; use 'Type\(\.\.\.\)' for positional constructors or assign a tuple to an explicitly typed shape
 
 class Box {
     value Int

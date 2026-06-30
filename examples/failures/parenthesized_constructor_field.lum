@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# constructor parentheses accept positional arguments only; use braces for construction fields
+
+class User {
+    name Str
+}
+
+def main() Unit {
+    _ User = User(name = "Ada")
+}

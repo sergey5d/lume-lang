@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# no_matching_overload at .*: class 'MixedProfile' named brace construction expects 2\.\.2 visible fields, got 3
+# no_matching_overload at .*: class 'MixedProfile' brace field construction expects 2\.\.2 visible fields, got 3
 
 class MixedProfile {
     name Str
