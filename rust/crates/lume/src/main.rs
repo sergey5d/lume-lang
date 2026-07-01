@@ -1,8 +1,8 @@
 use std::{env, fs, path::Path, process::ExitCode};
 
 use lume::{
-    Diagnostic, LocatedDiagnostic, SourceFile, check_path, lex, parse_program, render_diagnostic,
-    render_path_diagnostic, run_path,
+    Diagnostic, JavaBackendOptions, LocatedDiagnostic, SourceFile, check_path, generate_java_path,
+    lex, parse_program, render_diagnostic, render_path_diagnostic, run_path,
 };
 
 fn main() -> ExitCode {
@@ -17,6 +17,7 @@ fn main() -> ExitCode {
         "parse" => parse_command(&mut args),
         "check" => check_command(&mut args),
         "run" => run_command(&mut args),
+        "java" => java_command(&mut args),
         _ => {
             eprintln!("unknown command '{command}'");
             print_usage();
@@ -118,12 +119,41 @@ fn run_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
     }
 }
 
+fn java_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
+    let path = match read_path_arg(args, "java") {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+    let out = match read_java_out_arg(args) {
+        Ok(out) => out,
+        Err(code) => return code,
+    };
+
+    match generate_java_path(&path, JavaBackendOptions::new(out)) {
+        Ok(result) => {
+            if !result.diagnostics.is_empty() {
+                print_path_diagnostics(&result.diagnostics);
+                return ExitCode::from(1);
+            }
+            for written in result.written_files {
+                println!("wrote {}", written.display());
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn print_usage() {
     eprintln!("usage:");
     eprintln!("  lume tokens <file>");
     eprintln!("  lume parse <file>");
     eprintln!("  lume check <file>");
     eprintln!("  lume run <file> [entry]");
+    eprintln!("  lume java <file> --out <dir>");
 }
 
 fn read_source_arg(
@@ -156,6 +186,32 @@ fn read_source_path(path: String) -> Result<SourceFile, ExitCode> {
     };
 
     Ok(SourceFile::new(path, text))
+}
+
+fn read_java_out_arg(args: &mut impl Iterator<Item = String>) -> Result<String, ExitCode> {
+    let Some(flag) = args.next() else {
+        eprintln!("missing --out <dir> for 'java'");
+        print_usage();
+        return Err(ExitCode::from(2));
+    };
+    if flag != "--out" {
+        eprintln!("unknown argument '{flag}' for 'java'");
+        print_usage();
+        return Err(ExitCode::from(2));
+    }
+
+    let Some(out) = args.next() else {
+        eprintln!("missing directory after --out for 'java'");
+        print_usage();
+        return Err(ExitCode::from(2));
+    };
+    if let Some(extra) = args.next() {
+        eprintln!("unknown argument '{extra}' for 'java'");
+        print_usage();
+        return Err(ExitCode::from(2));
+    }
+
+    Ok(out)
 }
 
 fn exit_with_path_diagnostics(diagnostics: &[LocatedDiagnostic]) -> ExitCode {

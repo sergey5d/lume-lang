@@ -111,7 +111,10 @@ pub fn run_path(
     })
 }
 
-fn merged_runtime_program(graph: &ModuleGraph, root: &PathBuf) -> Result<ast::Program, String> {
+pub(crate) fn merged_runtime_program(
+    graph: &ModuleGraph,
+    root: &PathBuf,
+) -> Result<ast::Program, String> {
     let mut order = Vec::new();
     let mut seen = HashSet::new();
     collect_runtime_module_order(graph, root, &mut seen, &mut order);
