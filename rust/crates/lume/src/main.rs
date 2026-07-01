@@ -1,7 +1,7 @@
-use std::{env, fs, process::ExitCode};
+use std::{env, fs, path::Path, process::ExitCode};
 
 use lume::{
-    Diagnostic, SourceFile, check_path, lex, parse_program, render_diagnostic,
+    Diagnostic, LocatedDiagnostic, SourceFile, check_path, lex, parse_program, render_diagnostic,
     render_path_diagnostic, run_path,
 };
 
@@ -13,127 +13,107 @@ fn main() -> ExitCode {
     };
 
     match command.as_str() {
-        "tokens" => {
-            let file = match read_source(&mut args, "tokens") {
-                Ok(file) => file,
-                Err(code) => return code,
-            };
-            let path = file.name.clone();
-            let result = lex(&file);
-            for token in &result.tokens {
-                println!(
-                    "{:>4}:{:<4} {:<16} {}",
-                    token.span.start_pos.line,
-                    token.span.start_pos.column,
-                    format!("{:?}", token.kind),
-                    token.lexeme.escape_default(),
-                );
-            }
-            if result.has_errors() {
-                for diagnostic in &result.diagnostics {
-                    print_diagnostic(&path, Some(&file.text), diagnostic);
-                }
-                return ExitCode::from(1);
-            }
-            ExitCode::SUCCESS
-        }
-        "parse" => {
-            let file = match read_source(&mut args, "parse") {
-                Ok(file) => file,
-                Err(code) => return code,
-            };
-            let path = file.name.clone();
-            let lexed = lex(&file);
-            if lexed.has_errors() {
-                for diagnostic in &lexed.diagnostics {
-                    print_diagnostic(&path, Some(&file.text), diagnostic);
-                }
-                return ExitCode::from(1);
-            }
-
-            let parsed = parse_program(&lexed.tokens);
-            if !parsed.diagnostics.is_empty() {
-                for diagnostic in &parsed.diagnostics {
-                    print_diagnostic(&path, Some(&file.text), diagnostic);
-                }
-                return ExitCode::from(1);
-            }
-
-            match parsed.program {
-                Some(program) => {
-                    println!("{program:#?}");
-                    ExitCode::SUCCESS
-                }
-                None => ExitCode::from(1),
-            }
-        }
-        "check" => {
-            let Some(path) = args.next() else {
-                eprintln!("missing source file for 'check'");
-                print_usage();
-                return ExitCode::from(2);
-            };
-
-            match check_path(&path) {
-                Ok(result) => {
-                    if result.diagnostics.is_empty() {
-                        ExitCode::SUCCESS
-                    } else {
-                        for located in &result.diagnostics {
-                            eprintln!(
-                                "{}",
-                                render_path_diagnostic(
-                                    std::path::Path::new(&located.path),
-                                    &located.diagnostic,
-                                )
-                            );
-                        }
-                        ExitCode::from(1)
-                    }
-                }
-                Err(err) => {
-                    eprintln!("{err}");
-                    ExitCode::from(1)
-                }
-            }
-        }
-        "run" => {
-            let Some(path) = args.next() else {
-                eprintln!("missing source file for 'run'");
-                print_usage();
-                return ExitCode::from(2);
-            };
-            let requested_entry = args.next();
-            match run_path(&path, requested_entry.as_deref()) {
-                Ok(result) => {
-                    if !result.diagnostics.is_empty() {
-                        for located in &result.diagnostics {
-                            eprintln!(
-                                "{}",
-                                render_path_diagnostic(
-                                    std::path::Path::new(&located.path),
-                                    &located.diagnostic,
-                                )
-                            );
-                        }
-                        return ExitCode::from(1);
-                    }
-                    print!("{}", result.output);
-                    if let Some(value) = result.return_value {
-                        println!("{value}");
-                    }
-                    ExitCode::SUCCESS
-                }
-                Err(err) => {
-                    eprintln!("{err}");
-                    ExitCode::from(1)
-                }
-            }
-        }
+        "tokens" => tokens_command(&mut args),
+        "parse" => parse_command(&mut args),
+        "check" => check_command(&mut args),
+        "run" => run_command(&mut args),
         _ => {
             eprintln!("unknown command '{command}'");
             print_usage();
             ExitCode::from(2)
+        }
+    }
+}
+
+fn tokens_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
+    let file = match read_source_arg(args, "tokens") {
+        Ok(file) => file,
+        Err(code) => return code,
+    };
+
+    let result = lex(&file);
+    for token in &result.tokens {
+        println!(
+            "{:>4}:{:<4} {:<16} {}",
+            token.span.start_pos.line,
+            token.span.start_pos.column,
+            format!("{:?}", token.kind),
+            token.lexeme.escape_default(),
+        );
+    }
+
+    if result.has_errors() {
+        print_source_diagnostics(&file, &result.diagnostics);
+        return ExitCode::from(1);
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn parse_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
+    let file = match read_source_arg(args, "parse") {
+        Ok(file) => file,
+        Err(code) => return code,
+    };
+
+    let lexed = lex(&file);
+    if lexed.has_errors() {
+        print_source_diagnostics(&file, &lexed.diagnostics);
+        return ExitCode::from(1);
+    }
+
+    let parsed = parse_program(&lexed.tokens);
+    if !parsed.diagnostics.is_empty() {
+        print_source_diagnostics(&file, &parsed.diagnostics);
+        return ExitCode::from(1);
+    }
+
+    match parsed.program {
+        Some(program) => {
+            println!("{program:#?}");
+            ExitCode::SUCCESS
+        }
+        None => ExitCode::from(1),
+    }
+}
+
+fn check_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
+    let path = match read_path_arg(args, "check") {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+
+    match check_path(&path) {
+        Ok(result) => exit_with_path_diagnostics(&result.diagnostics),
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
+    let path = match read_path_arg(args, "run") {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+
+    let requested_entry = args.next();
+    match run_path(&path, requested_entry.as_deref()) {
+        Ok(result) => {
+            if !result.diagnostics.is_empty() {
+                print_path_diagnostics(&result.diagnostics);
+                return ExitCode::from(1);
+            }
+            print!("{}", result.output);
+            if let Some(value) = result.return_value {
+                println!("{value}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::from(1)
         }
     }
 }
@@ -146,16 +126,27 @@ fn print_usage() {
     eprintln!("  lume run <file> [entry]");
 }
 
-fn read_source(
+fn read_source_arg(
     args: &mut impl Iterator<Item = String>,
     command: &str,
 ) -> Result<SourceFile, ExitCode> {
+    let path = read_path_arg(args, command)?;
+    read_source_path(path)
+}
+
+fn read_path_arg(
+    args: &mut impl Iterator<Item = String>,
+    command: &str,
+) -> Result<String, ExitCode> {
     let Some(path) = args.next() else {
         eprintln!("missing source file for '{command}'");
         print_usage();
         return Err(ExitCode::from(2));
     };
+    Ok(path)
+}
 
+fn read_source_path(path: String) -> Result<SourceFile, ExitCode> {
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
         Err(err) => {
@@ -165,6 +156,30 @@ fn read_source(
     };
 
     Ok(SourceFile::new(path, text))
+}
+
+fn exit_with_path_diagnostics(diagnostics: &[LocatedDiagnostic]) -> ExitCode {
+    if diagnostics.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        print_path_diagnostics(diagnostics);
+        ExitCode::from(1)
+    }
+}
+
+fn print_source_diagnostics(file: &SourceFile, diagnostics: &[Diagnostic]) {
+    for diagnostic in diagnostics {
+        print_diagnostic(&file.name, Some(&file.text), diagnostic);
+    }
+}
+
+fn print_path_diagnostics(diagnostics: &[LocatedDiagnostic]) {
+    for located in diagnostics {
+        eprintln!(
+            "{}",
+            render_path_diagnostic(Path::new(&located.path), &located.diagnostic)
+        );
+    }
 }
 
 fn print_diagnostic(path: &str, source: Option<&str>, diagnostic: &Diagnostic) {
