@@ -2,6 +2,8 @@
 
 ## Step 1: Backend Seam
 
+Status: done.
+
 Goal: add the smallest backend path that reuses the existing checked/lowered Lume pipeline and branches before interpretation.
 
 Tasks:
@@ -20,6 +22,8 @@ Done when:
 - `cargo test --manifest-path rust/Cargo.toml -p lume` passes.
 
 ## Step 2: Declaration Skeletons
+
+Status: done.
 
 Goal: emit Java source skeletons for Lume declarations.
 
@@ -74,4 +78,3 @@ Tasks:
 - Add Java classpath resolver.
 - Add optional descriptor file fallback.
 - Resolve external constructors, methods, fields, enum constants, and static members before codegen.
-
