@@ -29,6 +29,9 @@ pub(crate) fn render_declaration_skeletons(bundle: &BackendBundle) -> Vec<JavaSo
     }
 
     for ty in &bundle.ir.types {
+        if names.is_java_type(&ty.name) {
+            continue;
+        }
         sources.push(JavaSource {
             relative_path: package.relative_file(&format!("{}.java", java_type_name(&ty.name))),
             contents: render_type_shell(bundle, ty, &package, &names),
@@ -714,6 +717,18 @@ impl<'a> FunctionEmitter<'a> {
 
     fn emit_named_runtime_call(&self, path: &[String], args: &[String]) -> Option<String> {
         match path {
+            [owner] if self.names.is_java_type(owner) => Some(format!(
+                "new {}{}({})",
+                self.names.named_type(owner),
+                self.names.java_constructor_type_args(owner),
+                args.join(", ")
+            )),
+            [owner, method] if self.names.is_java_type(owner) => Some(format!(
+                "{}.{}({})",
+                self.names.named_type(owner),
+                java_member_name(method),
+                args.join(", ")
+            )),
             [owner, method] if owner == "Array" => {
                 let target = match method.as_str() {
                     "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" | "fill" => {
@@ -793,7 +808,11 @@ impl<'a> FunctionEmitter<'a> {
             .iter()
             .map(|field| self.emit_operand(&field.value))
             .collect::<Option<Vec<_>>>()?;
-        Some(format!("new {}({})", java_type_name(name), args.join(", ")))
+        Some(format!(
+            "new {}({})",
+            self.names.named_type(name),
+            args.join(", ")
+        ))
     }
 
     fn emit_variant(
@@ -959,6 +978,7 @@ fn module_base_name(bundle: &BackendBundle) -> String {
 
 struct JavaNames {
     java_types: HashMap<String, String>,
+    java_type_param_counts: HashMap<String, usize>,
 }
 
 impl JavaNames {
@@ -974,7 +994,19 @@ impl JavaNames {
                 DescriptorOrigin::Lume => None,
             })
             .collect();
-        Self { java_types }
+        let java_type_param_counts = bundle
+            .descriptors
+            .types
+            .iter()
+            .filter_map(|ty| match &ty.origin {
+                DescriptorOrigin::Java { .. } => Some((ty.name.clone(), ty.type_params.len())),
+                DescriptorOrigin::Lume => None,
+            })
+            .collect();
+        Self {
+            java_types,
+            java_type_param_counts,
+        }
     }
 
     fn return_type(&self, ty: &ir::Type) -> String {
@@ -1039,6 +1071,22 @@ impl JavaNames {
             .get(name)
             .cloned()
             .unwrap_or_else(|| java_type_name(name))
+    }
+
+    fn is_java_type(&self, name: &str) -> bool {
+        self.java_types.contains_key(name)
+    }
+
+    fn java_constructor_type_args(&self, name: &str) -> &'static str {
+        if self
+            .java_type_param_counts
+            .get(name)
+            .is_some_and(|count| *count > 0)
+        {
+            "<>"
+        } else {
+            ""
+        }
     }
 
     fn builtin_container(&self, name: &str, args: &[ir::Type]) -> String {

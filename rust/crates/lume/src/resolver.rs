@@ -10,7 +10,7 @@ use crate::{
         Annotation, AssignOp, AssignmentStmt, Binding, Block, CallableBody, ElseBranch,
         ElseExprBranch, Expr, ExprStmt, ForBinding, ForStmt, FunctionDecl, IfConditionClause,
         IfStmt, ImplBlock, ImplTargetKind, ImportDecl, ImportSymbol, Item, LambdaBody, LetElseStmt,
-        MatchCase, MatchCaseBody, MethodDecl, Pattern, PatternBindingStmt, Program,
+        MatchCase, MatchCaseBody, MethodDecl, Param, Pattern, PatternBindingStmt, Program,
         RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
         WhileStmt,
     },
@@ -118,6 +118,29 @@ pub(crate) fn load_module_graph_with_options(
 pub(crate) struct ModuleLoadOptions {
     pub(crate) allow_unresolved_java_imports: bool,
     pub(crate) java_external_type_params: HashMap<String, Vec<String>>,
+    pub(crate) java_external_classes: HashMap<String, JavaExternalClass>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct JavaExternalClass {
+    pub(crate) type_params: Vec<String>,
+    pub(crate) constructors: Vec<JavaExternalCallable>,
+    pub(crate) methods: Vec<JavaExternalCallable>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct JavaExternalCallable {
+    pub(crate) name: String,
+    pub(crate) type_params: Vec<String>,
+    pub(crate) params: Vec<JavaExternalParam>,
+    pub(crate) return_type: Option<TypeRef>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct JavaExternalParam {
+    pub(crate) name: String,
+    pub(crate) ty: Option<TypeRef>,
+    pub(crate) variadic: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -391,7 +414,7 @@ fn load_module_with_options(
             .get(&child_abs)
             .ok_or_else(|| format!("loaded module missing {}", child_abs.display()))?;
 
-        if !java_import && !module.dependencies.contains(&child_abs) {
+        if !module.dependencies.contains(&child_abs) {
             module.dependencies.push(child_abs.clone());
         }
         if !java_import
@@ -594,10 +617,17 @@ fn ensure_java_external_module(
         let local_name = symbol.alias.clone().unwrap_or_else(|| symbol.name.clone());
         let qualified_name = java_qualified_name(&import.path, &symbol.name);
         let type_params = options
-            .java_external_type_params
+            .java_external_classes
             .get(&qualified_name)
-            .cloned()
+            .map(|class| class.type_params.clone())
+            .or_else(|| {
+                options
+                    .java_external_type_params
+                    .get(&qualified_name)
+                    .cloned()
+            })
             .unwrap_or_default();
+        let external_class = options.java_external_classes.get(&qualified_name);
         if module
             .program
             .items
@@ -612,6 +642,7 @@ fn ensure_java_external_module(
             .push(Item::Type(synthetic_java_type_decl(
                 local_name,
                 type_params,
+                external_class,
                 symbol.span,
             )));
     }
@@ -626,6 +657,7 @@ fn java_external_module_path(path: &str) -> PathBuf {
 fn synthetic_java_type_decl(
     name: String,
     type_params: Vec<String>,
+    external_class: Option<&JavaExternalClass>,
     span: crate::source::Span,
 ) -> TypeDecl {
     TypeDecl {
@@ -642,9 +674,67 @@ fn synthetic_java_type_decl(
             })
             .collect(),
         with_bounds: Vec::new(),
-        members: Vec::new(),
+        members: synthetic_java_members(external_class, span),
         span,
     }
+}
+
+fn synthetic_java_members(
+    external_class: Option<&JavaExternalClass>,
+    span: crate::source::Span,
+) -> Vec<TypeMember> {
+    let Some(external_class) = external_class else {
+        return Vec::new();
+    };
+    external_class
+        .constructors
+        .iter()
+        .map(|constructor| synthetic_java_method("new", constructor, None, span))
+        .chain(external_class.methods.iter().map(|method| {
+            synthetic_java_method(
+                method.name.as_str(),
+                method,
+                method.return_type.clone(),
+                span,
+            )
+        }))
+        .collect()
+}
+
+fn synthetic_java_method(
+    name: &str,
+    callable: &JavaExternalCallable,
+    return_type: Option<TypeRef>,
+    span: crate::source::Span,
+) -> TypeMember {
+    TypeMember::Method(MethodDecl {
+        annotations: Vec::new(),
+        visibility: Visibility::Default,
+        name: name.to_string(),
+        type_params: callable
+            .type_params
+            .iter()
+            .map(|name| TypeParam {
+                name: name.clone(),
+                bounds: Vec::new(),
+                span,
+            })
+            .collect(),
+        params: callable
+            .params
+            .iter()
+            .map(|param| Param {
+                name: param.name.clone(),
+                ty: param.ty.clone(),
+                initializer: None,
+                variadic: param.variadic,
+                span,
+            })
+            .collect(),
+        return_type,
+        body: None,
+        span,
+    })
 }
 
 pub(crate) fn read_directives(path: &Path) -> Result<FileDirectives, String> {

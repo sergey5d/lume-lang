@@ -9,8 +9,12 @@ mod emit;
 
 use crate::{
     Diagnostic,
+    ast::TypeRef,
     backend::{ExternalDescriptors, bundle::build_backend_bundle_with_load_options},
-    resolver::{LocatedDiagnostic, ModuleLoadOptions, load_module_graph_with_options},
+    resolver::{
+        JavaExternalCallable, JavaExternalClass, JavaExternalParam, LocatedDiagnostic,
+        ModuleLoadOptions, load_module_graph_with_options,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -47,6 +51,7 @@ pub fn generate_java_path(
     let discovery_options = ModuleLoadOptions {
         allow_unresolved_java_imports: true,
         java_external_type_params: HashMap::new(),
+        java_external_classes: HashMap::new(),
     };
     let (discovery_graph, _) = load_module_graph_with_options(path, &discovery_options)?;
     let discovered_externals = ExternalDescriptors::from_module_graph(&discovery_graph);
@@ -61,6 +66,7 @@ pub fn generate_java_path(
     let load_options = ModuleLoadOptions {
         allow_unresolved_java_imports: true,
         java_external_type_params: external_resolution.type_params,
+        java_external_classes: external_resolution.classes,
     };
     let bundled = build_backend_bundle_with_load_options(path, &load_options)?;
     if !bundled.diagnostics.is_empty() {
@@ -95,6 +101,7 @@ pub fn generate_java_path(
 struct ExternalClassResolution {
     diagnostics: Vec<LocatedDiagnostic>,
     type_params: HashMap<String, Vec<String>>,
+    classes: HashMap<String, JavaExternalClass>,
 }
 
 fn resolve_external_classes(
@@ -103,8 +110,15 @@ fn resolve_external_classes(
 ) -> Result<ExternalClassResolution, String> {
     let index = JavaClasspathIndex::from_entries(&options.classpath)?;
     let classpath = java_classpath(&options.classpath)?;
+    let local_type_names = externals
+        .symbols
+        .iter()
+        .filter(|symbol| matches!(symbol.kind, crate::backend::ExternalSymbolKind::Type))
+        .map(|symbol| (symbol.qualified_name.clone(), symbol.local_name.clone()))
+        .collect::<HashMap<_, _>>();
     let mut diagnostics = Vec::new();
     let mut type_params = HashMap::new();
+    let mut classes = HashMap::new();
     for symbol in &externals.symbols {
         if !matches!(symbol.kind, crate::backend::ExternalSymbolKind::Type) {
             continue;
@@ -113,16 +127,26 @@ fn resolve_external_classes(
             diagnostics.push(missing_java_class_diagnostic(symbol));
             continue;
         }
-        let Some(descriptor) = inspect_java_class(classpath.as_deref(), &symbol.qualified_name)?
+        let Some(descriptor) = inspect_java_class(
+            classpath.as_deref(),
+            &symbol.qualified_name,
+            &local_type_names,
+            symbol.span,
+        )?
         else {
             diagnostics.push(missing_java_class_diagnostic(symbol));
             continue;
         };
-        type_params.insert(symbol.qualified_name.clone(), descriptor.type_params);
+        type_params.insert(
+            symbol.qualified_name.clone(),
+            descriptor.class.type_params.clone(),
+        );
+        classes.insert(symbol.qualified_name.clone(), descriptor.class);
     }
     Ok(ExternalClassResolution {
         diagnostics,
         type_params,
+        classes,
     })
 }
 
@@ -171,12 +195,14 @@ impl JavaClasspathIndex {
 
 #[derive(Debug, Clone)]
 struct JavaClassDescriptor {
-    type_params: Vec<String>,
+    class: JavaExternalClass,
 }
 
 fn inspect_java_class(
     classpath: Option<&std::ffi::OsStr>,
     qualified_name: &str,
+    local_type_names: &HashMap<String, String>,
+    span: crate::source::Span,
 ) -> Result<Option<JavaClassDescriptor>, String> {
     let mut command = Command::new("javap");
     if let Some(classpath) = classpath {
@@ -192,7 +218,7 @@ fn inspect_java_class(
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(Some(JavaClassDescriptor {
-        type_params: parse_javap_type_params(&stdout, qualified_name),
+        class: parse_javap_class(&stdout, qualified_name, local_type_names, span),
     }))
 }
 
@@ -229,6 +255,384 @@ fn parse_javap_type_params(output: &str, qualified_name: &str) -> Vec<String> {
                 .map(str::to_string)
         })
         .collect()
+}
+
+enum ParsedJavaCallable {
+    Constructor(JavaExternalCallable),
+    Method(JavaExternalCallable),
+}
+
+struct JavaTypeContext<'a> {
+    local_type_names: &'a HashMap<String, String>,
+    type_params: HashSet<String>,
+    current_package: &'a str,
+    span: crate::source::Span,
+}
+
+fn parse_javap_class(
+    output: &str,
+    qualified_name: &str,
+    local_type_names: &HashMap<String, String>,
+    span: crate::source::Span,
+) -> JavaExternalClass {
+    let type_params = parse_javap_type_params(output, qualified_name);
+    let current_package = java_package_name(qualified_name);
+    let mut constructors = Vec::new();
+    let mut methods = Vec::new();
+
+    for line in output.lines() {
+        let ctx = JavaTypeContext {
+            local_type_names,
+            type_params: type_params.iter().cloned().collect(),
+            current_package,
+            span,
+        };
+        match parse_javap_callable_line(line, qualified_name, ctx) {
+            Some(ParsedJavaCallable::Constructor(constructor)) => constructors.push(constructor),
+            Some(ParsedJavaCallable::Method(method)) => methods.push(method),
+            None => {}
+        }
+    }
+
+    JavaExternalClass {
+        type_params,
+        constructors,
+        methods,
+    }
+}
+
+fn parse_javap_callable_line(
+    line: &str,
+    qualified_name: &str,
+    mut ctx: JavaTypeContext<'_>,
+) -> Option<ParsedJavaCallable> {
+    let line = line.trim().strip_suffix(';')?.trim();
+    let line = line.strip_prefix("public ")?;
+    let open = line.find('(')?;
+    let close = line.rfind(')')?;
+    if close < open {
+        return None;
+    }
+
+    let mut before = strip_java_modifiers(line[..open].trim());
+    let (method_type_params, rest) = strip_leading_java_generic_decl(before);
+    before = strip_java_modifiers(rest);
+    ctx.type_params.extend(method_type_params.iter().cloned());
+
+    let params = parse_javap_params(&line[open + 1..close], &ctx);
+    if java_constructor_name_matches(before, qualified_name) {
+        return Some(ParsedJavaCallable::Constructor(JavaExternalCallable {
+            name: "new".to_string(),
+            type_params: method_type_params,
+            params,
+            return_type: None,
+        }));
+    }
+
+    let (return_ty, name) = split_java_return_and_name(before)?;
+    let return_type = java_type_to_lume_type_ref(return_ty, &ctx).or_else(|| {
+        (return_ty == "void").then(|| TypeRef::Named {
+            name: "Unit".to_string(),
+            args: Vec::new(),
+            span: ctx.span,
+        })
+    });
+    Some(ParsedJavaCallable::Method(JavaExternalCallable {
+        name: name.to_string(),
+        type_params: method_type_params,
+        params,
+        return_type,
+    }))
+}
+
+fn parse_javap_params(params: &str, ctx: &JavaTypeContext<'_>) -> Vec<JavaExternalParam> {
+    if params.trim().is_empty() {
+        return Vec::new();
+    }
+    split_java_signature_list(params)
+        .into_iter()
+        .enumerate()
+        .map(|(index, raw)| {
+            let raw = raw.trim();
+            let variadic = raw.ends_with("...");
+            let raw_ty = raw.strip_suffix("...").map(str::trim).unwrap_or(raw);
+            let ty = java_type_to_lume_type_ref(raw_ty, ctx).map(|ty| {
+                if variadic {
+                    TypeRef::Named {
+                        name: "List".to_string(),
+                        args: vec![ty],
+                        span: ctx.span,
+                    }
+                } else {
+                    ty
+                }
+            });
+            JavaExternalParam {
+                name: format!("arg{index}"),
+                ty,
+                variadic,
+            }
+        })
+        .collect()
+}
+
+fn strip_java_modifiers(mut value: &str) -> &str {
+    loop {
+        let trimmed = value.trim_start();
+        let Some((head, rest)) = split_first_word(trimmed) else {
+            return trimmed;
+        };
+        if matches!(
+            head,
+            "abstract"
+                | "default"
+                | "final"
+                | "native"
+                | "static"
+                | "strictfp"
+                | "synchronized"
+                | "transient"
+        ) {
+            value = rest;
+        } else {
+            return trimmed;
+        }
+    }
+}
+
+fn split_first_word(value: &str) -> Option<(&str, &str)> {
+    let value = value.trim_start();
+    if value.is_empty() {
+        return None;
+    }
+    let end = value
+        .char_indices()
+        .find_map(|(index, ch)| ch.is_whitespace().then_some(index))
+        .unwrap_or(value.len());
+    Some((&value[..end], value[end..].trim_start()))
+}
+
+fn strip_leading_java_generic_decl(value: &str) -> (Vec<String>, &str) {
+    let value = value.trim_start();
+    if !value.starts_with('<') {
+        return (Vec::new(), value);
+    }
+    let Some(end) = find_matching_angle(value, 0) else {
+        return (Vec::new(), value);
+    };
+    let params = split_java_signature_list(&value[1..end])
+        .into_iter()
+        .filter_map(|param| {
+            param
+                .trim()
+                .split_whitespace()
+                .next()
+                .filter(|name| !name.is_empty())
+                .map(str::to_string)
+        })
+        .collect();
+    (params, value[end + 1..].trim_start())
+}
+
+fn java_constructor_name_matches(value: &str, qualified_name: &str) -> bool {
+    let simple_name = qualified_name.rsplit('.').next().unwrap_or(qualified_name);
+    let erased = erase_java_generic_suffix(value.trim());
+    erased == qualified_name || erased == simple_name
+}
+
+fn split_java_return_and_name(value: &str) -> Option<(&str, &str)> {
+    let mut depth = 0usize;
+    let mut split = None;
+    for (index, ch) in value.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            ch if ch.is_whitespace() && depth == 0 => split = Some(index),
+            _ => {}
+        }
+    }
+    let split = split?;
+    let return_ty = value[..split].trim();
+    let name = value[split..].trim();
+    (!return_ty.is_empty() && !name.is_empty()).then_some((return_ty, name))
+}
+
+fn java_type_to_lume_type_ref(src: &str, ctx: &JavaTypeContext<'_>) -> Option<TypeRef> {
+    let mut src = src.trim();
+    while let Some(rest) = src.strip_prefix("final ") {
+        src = rest.trim_start();
+    }
+    if let Some(rest) = src.strip_prefix("? extends ") {
+        return java_type_to_lume_type_ref(rest, ctx);
+    }
+    if let Some(rest) = src.strip_prefix("? super ") {
+        return java_type_to_lume_type_ref(rest, ctx);
+    }
+    if src == "?" || src == "java.lang.Object" || src == "Object" {
+        return None;
+    }
+
+    let mut array_depth = 0usize;
+    while let Some(rest) = src.strip_suffix("[]") {
+        array_depth += 1;
+        src = rest.trim_end();
+    }
+
+    let mut ty = java_non_array_type_to_lume_type_ref(src, ctx)?;
+    for _ in 0..array_depth {
+        ty = TypeRef::Named {
+            name: "Array".to_string(),
+            args: vec![ty],
+            span: ctx.span,
+        };
+    }
+    Some(ty)
+}
+
+fn java_non_array_type_to_lume_type_ref(src: &str, ctx: &JavaTypeContext<'_>) -> Option<TypeRef> {
+    let (base, arg_sources) = split_java_generic_type(src);
+    let args = arg_sources
+        .into_iter()
+        .map(|arg| java_type_to_lume_type_ref(arg, ctx))
+        .collect::<Option<Vec<_>>>()?;
+
+    if let Some(name) = java_builtin_lume_type_name(base, args.len()) {
+        return Some(TypeRef::Named {
+            name: name.to_string(),
+            args,
+            span: ctx.span,
+        });
+    }
+
+    if ctx.type_params.contains(base) && args.is_empty() {
+        return Some(TypeRef::Named {
+            name: base.to_string(),
+            args: Vec::new(),
+            span: ctx.span,
+        });
+    }
+
+    let local_name = java_local_type_name(base, ctx)?;
+    Some(TypeRef::Named {
+        name: local_name,
+        args,
+        span: ctx.span,
+    })
+}
+
+fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static str> {
+    match base {
+        "void" => Some("Unit"),
+        "boolean" | "java.lang.Boolean" | "Boolean" => Some("Bool"),
+        "byte" | "short" | "int" | "long" | "java.lang.Byte" | "java.lang.Short"
+        | "java.lang.Integer" | "java.lang.Long" | "Byte" | "Short" | "Integer" | "Long" => {
+            Some("Int")
+        }
+        "float" | "double" | "java.lang.Float" | "java.lang.Double" | "Float" | "Double" => {
+            Some("Float")
+        }
+        "char" | "java.lang.Character" | "Character" => Some("Rune"),
+        "java.lang.String" | "String" => Some("Str"),
+        "java.util.List"
+        | "java.util.Collection"
+        | "java.lang.Iterable"
+        | "List"
+        | "Collection"
+        | "Iterable"
+            if arg_count == 1 =>
+        {
+            Some("List")
+        }
+        "java.util.Set" | "Set" if arg_count == 1 => Some("Set"),
+        "java.util.Map" | "Map" if arg_count == 2 => Some("Map"),
+        "java.util.Optional" | "Optional" if arg_count == 1 => Some("Option"),
+        _ => None,
+    }
+}
+
+fn java_local_type_name(base: &str, ctx: &JavaTypeContext<'_>) -> Option<String> {
+    if base.contains('.') {
+        let package = java_package_name(base);
+        if package == ctx.current_package {
+            return ctx.local_type_names.get(base).cloned();
+        }
+        return None;
+    }
+    let qualified = if ctx.current_package.is_empty() {
+        base.to_string()
+    } else {
+        format!("{}.{}", ctx.current_package, base)
+    };
+    ctx.local_type_names.get(&qualified).cloned()
+}
+
+fn split_java_generic_type(src: &str) -> (&str, Vec<&str>) {
+    let src = src.trim();
+    let Some(start) = src.find('<') else {
+        return (src, Vec::new());
+    };
+    let Some(end) = find_matching_angle(src, start) else {
+        return (src, Vec::new());
+    };
+    let base = src[..start].trim();
+    let args = split_java_signature_list(&src[start + 1..end]);
+    (base, args)
+}
+
+fn split_java_signature_list(src: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (index, ch) in src.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(src[start..index].trim());
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    let tail = src[start..].trim();
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+    out
+}
+
+fn find_matching_angle(src: &str, open_index: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, ch) in src
+        .char_indices()
+        .skip_while(|(index, _)| *index < open_index)
+    {
+        match ch {
+            '<' => depth += 1,
+            '>' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn erase_java_generic_suffix(value: &str) -> &str {
+    let Some(start) = value.find('<') else {
+        return value;
+    };
+    value[..start].trim_end()
+}
+
+fn java_package_name(qualified_name: &str) -> &str {
+    qualified_name
+        .rsplit_once('.')
+        .map(|(package, _)| package)
+        .unwrap_or("")
 }
 
 fn index_jar(path: &Path, classes: &mut HashSet<String>) -> Result<(), String> {
@@ -588,6 +992,136 @@ def main() Unit {
     }
 
     #[test]
+    fn validates_java_constructor_and_method_signatures_from_jar() {
+        if !command_available("javac")
+            || !command_available("java")
+            || !command_available("jar")
+            || !command_available("javap")
+        {
+            eprintln!("skipping Java signature test because a JDK tool is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-signatures");
+        let source = temp.join("java_signatures.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        let jar = create_widget_jar(&temp);
+        fs::write(
+            &source,
+            r#"
+module demo/javasigs
+
+use third/party/{Widget, GenericBox}
+
+def main() Unit {
+    widget Widget = Widget("Ada", 7)
+    label Str = widget.label()
+    count Int = widget.count()
+    made Widget = Widget.create("Bob")
+    boxed GenericBox[Str] = GenericBox("hello")
+    boxedValue Str = boxed.value()
+    println(label)
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(
+            &source,
+            JavaBackendOptions::new(&out).with_classpath_entry(&jar),
+        )
+        .expect("generate java");
+
+        assert!(result.diagnostics.is_empty());
+        let module =
+            fs::read_to_string(out.join("demo/javasigs/JavasigsModule.java")).expect("read module");
+        assert!(module.contains("new third.party.Widget(\"Ada\", 7L)"));
+        assert!(module.contains(".label()"));
+        assert!(module.contains(".count()"));
+        assert!(module.contains("third.party.Widget.create(\"Bob\")"));
+        assert!(module.contains("new third.party.GenericBox<>(\"hello\")"));
+        assert!(!out.join("demo/javasigs/Widget.java").exists());
+        assert!(!out.join("demo/javasigs/GenericBox.java").exists());
+
+        let mut sources = java_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac")
+                .arg("-cp")
+                .arg(&jar)
+                .arg("-d")
+                .arg(&classes)
+                .args(&sources),
+            "javac",
+        );
+
+        let runtime_classpath =
+            env::join_paths([classes.as_path(), jar.as_path()]).expect("join runtime classpath");
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(runtime_classpath)
+                .arg("demo.javasigs.JavasigsMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "Ada\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn rejects_java_constructor_signature_mismatch_from_jar() {
+        if !command_available("javac") || !command_available("jar") || !command_available("javap") {
+            eprintln!("skipping Java signature mismatch test because a JDK tool is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-signature-mismatch");
+        let source = temp.join("java_signature_mismatch.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        let jar = create_widget_jar(&temp);
+        fs::write(
+            &source,
+            r#"
+module demo/javamismatch
+
+use third/party/Widget
+
+def main() Unit {
+    widget Widget = Widget(5, "bad")
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(
+            &source,
+            JavaBackendOptions::new(&out).with_classpath_entry(&jar),
+        )
+        .expect("generate java");
+
+        assert!(result.written_files.is_empty());
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.diagnostic.code == "no_matching_overload"
+                    || diag.diagnostic.code == "invalid_argument_type"),
+            "expected constructor mismatch diagnostic, got {:#?}",
+            result.diagnostics
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn reports_missing_java_class_from_classpath() {
         if !command_available("javap") || !command_available("javac") || !command_available("jar") {
             eprintln!("skipping missing Java class test because a JDK tool is not available");
@@ -853,6 +1387,25 @@ def main() Int {
 package third.party;
 
 public final class Widget {
+    private final String label;
+    private final long count;
+
+    public Widget(String label, long count) {
+        this.label = label;
+        this.count = count;
+    }
+
+    public static Widget create(String label) {
+        return new Widget(label, 0L);
+    }
+
+    public String label() {
+        return label;
+    }
+
+    public long count() {
+        return count;
+    }
 }
 "#,
         )
@@ -864,6 +1417,15 @@ public final class Widget {
 package third.party;
 
 public final class GenericBox<T> {
+    private final T value;
+
+    public GenericBox(T value) {
+        this.value = value;
+    }
+
+    public T value() {
+        return value;
+    }
 }
 "#,
         )

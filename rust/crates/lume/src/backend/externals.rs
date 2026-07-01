@@ -17,6 +17,7 @@ pub struct ExternalSymbol {
     pub qualified_name: String,
     pub kind: ExternalSymbolKind,
     pub type_params: Vec<String>,
+    pub method_names: Vec<String>,
     pub source_path: String,
     pub span: Span,
 }
@@ -65,6 +66,7 @@ impl ExternalDescriptors {
                             qualified_name,
                             kind,
                             type_params: external_type_params(graph, symbol),
+                            method_names: external_method_names(graph, symbol),
                             source_path: module.display_path.clone(),
                             span: symbol.span,
                         })
@@ -86,7 +88,7 @@ impl ExternalDescriptors {
                 },
                 type_params: symbol.type_params.clone(),
                 fields: Vec::new(),
-                method_names: Vec::new(),
+                method_names: symbol.method_names.clone(),
             })
             .collect()
     }
@@ -96,21 +98,47 @@ fn external_type_params(
     graph: &ModuleGraph,
     symbol: &crate::resolver::ImportedSymbol,
 ) -> Vec<String> {
-    graph
-        .modules
-        .get(&symbol.module_path)
-        .into_iter()
-        .flat_map(|module| module.program.items.iter())
-        .find_map(|item| match item {
-            crate::ast::Item::Type(decl) if decl.name == symbol.original_name => Some(
-                decl.type_params
-                    .iter()
-                    .map(|param| param.name.clone())
-                    .collect(),
-            ),
-            _ => None,
+    external_type_decl(graph, symbol)
+        .map(|decl| {
+            decl.type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect()
         })
         .unwrap_or_default()
+}
+
+fn external_method_names(
+    graph: &ModuleGraph,
+    symbol: &crate::resolver::ImportedSymbol,
+) -> Vec<String> {
+    external_type_decl(graph, symbol)
+        .map(|decl| {
+            decl.members
+                .iter()
+                .filter_map(|member| match member {
+                    crate::ast::TypeMember::Method(method) => Some(method.name.clone()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn external_type_decl<'a>(
+    graph: &'a ModuleGraph,
+    symbol: &crate::resolver::ImportedSymbol,
+) -> Option<&'a crate::ast::TypeDecl> {
+    graph
+        .modules
+        .get(&symbol.module_path)?
+        .program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            crate::ast::Item::Type(decl) if decl.name == symbol.original_name => Some(decl),
+            _ => None,
+        })
 }
 
 fn java_import_symbols(import: &ImportDecl) -> Vec<ExternalSymbol> {
@@ -126,6 +154,7 @@ fn java_import_symbols(import: &ImportDecl) -> Vec<ExternalSymbol> {
             qualified_name: format!("{package}.{}", symbol.name),
             kind: ExternalSymbolKind::Type,
             type_params: Vec::new(),
+            method_names: Vec::new(),
             source_path: String::new(),
             span: symbol.span,
         })

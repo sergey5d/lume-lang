@@ -6098,6 +6098,8 @@ impl<'a> Checker<'a> {
                         if !matches!(actual, Ty::Unknown) {
                             if self.is_assignable(actual, &expected) {
                                 score += 2;
+                            } else if type_contains_type_param(&expected) {
+                                score += 1;
                             } else {
                                 return None;
                             }
@@ -7523,6 +7525,18 @@ fn substitute_type(ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
             Box::new(substitute_type(ret, subst)),
         ),
         Ty::Unknown => Ty::Unknown,
+    }
+}
+
+fn type_contains_type_param(ty: &Ty) -> bool {
+    match ty {
+        Ty::TypeParam(_) => true,
+        Ty::Named(_, args) | Ty::Tuple(args) => args.iter().any(type_contains_type_param),
+        Ty::Record(fields) => fields.iter().any(|(_, ty)| type_contains_type_param(ty)),
+        Ty::Function(params, ret) => {
+            params.iter().any(type_contains_type_param) || type_contains_type_param(ret)
+        }
+        Ty::Never | Ty::Unknown => false,
     }
 }
 
