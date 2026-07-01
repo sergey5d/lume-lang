@@ -49,6 +49,8 @@ Tasks:
 
 ## Step 4: Body Codegen MVP
 
+Status: done for MVP-supported IR; unsupported complex IR still falls back to explicit stubs.
+
 Goal: generate correctness-first Java bodies from IR.
 
 Tasks:

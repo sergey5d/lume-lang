@@ -56,7 +56,7 @@ fn render_module_wrapper(bundle: &BackendBundle, package: &JavaPackage) -> Strin
         out.push('\n');
         out.push_str("    static ");
         push_function_signature(&mut out, function);
-        push_stub_body(&mut out);
+        push_function_body(&mut out, bundle, function);
     }
 
     out.push_str("}\n");
@@ -83,6 +83,7 @@ fn render_class(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage)
         java_type_params(&ty.type_params)
     ));
     push_fields(&mut out, ty);
+    push_class_constructor(&mut out, ty);
     push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody);
     out.push_str("}\n");
     out
@@ -246,7 +247,9 @@ fn push_instance_methods(
         push_function_signature(out, function);
         match shell {
             MethodShell::Abstract => out.push_str(";\n"),
-            MethodShell::DefaultBody | MethodShell::StubBody => push_stub_body(out),
+            MethodShell::DefaultBody | MethodShell::StubBody => {
+                push_function_body(out, bundle, function)
+            }
         }
     }
 }
@@ -276,7 +279,7 @@ fn push_function_signature(out: &mut String, function: &ir::Function) {
                 format!(
                     "{} {}",
                     java_type_for_value(&local.ty),
-                    java_member_name(&local.name)
+                    java_local_name(local)
                 )
             })
             .collect::<Vec<_>>()
@@ -285,10 +288,550 @@ fn push_function_signature(out: &mut String, function: &ir::Function) {
     out.push(')');
 }
 
+fn push_function_body(out: &mut String, bundle: &BackendBundle, function: &ir::Function) {
+    match FunctionEmitter::new(bundle, function).emit_body() {
+        Some(body) => out.push_str(&body),
+        None => push_stub_body(out),
+    }
+}
+
 fn push_stub_body(out: &mut String) {
     out.push_str(" {\n");
     out.push_str("        throw new UnsupportedOperationException(\"Lume Java body generation is not implemented yet\");\n");
     out.push_str("    }\n");
+}
+
+fn push_class_constructor(out: &mut String, ty: &ir::TypeDef) {
+    let name = java_type_name(&ty.name);
+    out.push('\n');
+    out.push_str("    ");
+    out.push_str(&name);
+    out.push_str("() {}\n");
+    if ty.fields.is_empty() {
+        return;
+    }
+
+    out.push('\n');
+    out.push_str("    ");
+    out.push_str(&name);
+    out.push('(');
+    out.push_str(
+        &ty.fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| {
+                format!(
+                    "{} {}",
+                    java_type_for_value(&field.ty),
+                    constructor_param_name(field, index)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    out.push_str(") {\n");
+    for (index, field) in ty.fields.iter().enumerate() {
+        out.push_str("        this.");
+        out.push_str(&java_member_name(&field.name));
+        out.push_str(" = ");
+        out.push_str(&constructor_param_name(field, index));
+        out.push_str(";\n");
+    }
+    out.push_str("    }\n");
+}
+
+fn constructor_param_name(field: &ir::Field, index: usize) -> String {
+    format!("{}_arg{index}", java_member_name(&field.name))
+}
+
+struct FunctionEmitter<'a> {
+    bundle: &'a BackendBundle,
+    function: &'a ir::Function,
+    module_class: String,
+}
+
+impl<'a> FunctionEmitter<'a> {
+    fn new(bundle: &'a BackendBundle, function: &'a ir::Function) -> Self {
+        Self {
+            bundle,
+            function,
+            module_class: module_class_name(bundle),
+        }
+    }
+
+    fn emit_body(&self) -> Option<String> {
+        let mut out = String::new();
+        out.push_str(" {\n");
+        for local in &self.function.locals {
+            if self.local_is_declared_elsewhere(local) {
+                continue;
+            }
+            out.push_str("        ");
+            out.push_str(&java_type_for_value(&local.ty));
+            out.push(' ');
+            out.push_str(&java_local_name(local));
+            out.push_str(" = ");
+            out.push_str(&java_default_value(&local.ty));
+            out.push_str(";\n");
+        }
+
+        if !self.function.blocks.is_empty() {
+            out.push_str("        int __block = ");
+            out.push_str(&self.function.entry.0.to_string());
+            out.push_str(";\n");
+            out.push_str("        while (true) {\n");
+            out.push_str("            switch (__block) {\n");
+            for block in &self.function.blocks {
+                self.emit_block(&mut out, block)?;
+            }
+            out.push_str("                default:\n");
+            out.push_str("                    throw new IllegalStateException(\"unknown Lume block \" + __block);\n");
+            out.push_str("            }\n");
+            out.push_str("        }\n");
+        }
+
+        out.push_str("    }\n");
+        Some(out)
+    }
+
+    fn emit_block(&self, out: &mut String, block: &ir::BasicBlock) -> Option<()> {
+        out.push_str("                case ");
+        out.push_str(&block.id.0.to_string());
+        out.push_str(":\n");
+        out.push_str("                {\n");
+        for statement in &block.statements {
+            self.emit_statement(out, statement)?;
+        }
+        self.emit_terminator(out, &block.terminator)?;
+        out.push_str("                }\n");
+        if !terminator_exits_case(&block.terminator.kind) {
+            out.push_str("                break;\n");
+        }
+        Some(())
+    }
+
+    fn emit_statement(&self, out: &mut String, statement: &ir::Statement) -> Option<()> {
+        match &statement.kind {
+            ir::StatementKind::Assign { target, value } => {
+                let mut value_expr = self.emit_rvalue(value)?;
+                if let Some(target_ty) = self.place_type(target) {
+                    value_expr = self.cast_if_unknown_source(
+                        value_expr,
+                        self.rvalue_type(value),
+                        &target_ty,
+                    );
+                }
+                out.push_str("                    ");
+                out.push_str(&self.emit_place(target)?);
+                out.push_str(" = ");
+                out.push_str(&value_expr);
+                out.push_str(";\n");
+                Some(())
+            }
+            ir::StatementKind::Eval { value } => {
+                if !rvalue_can_be_java_statement(value) {
+                    return Some(());
+                }
+                out.push_str("                    ");
+                out.push_str(&self.emit_rvalue(value)?);
+                out.push_str(";\n");
+                Some(())
+            }
+            ir::StatementKind::Defer { .. } => None,
+        }
+    }
+
+    fn emit_terminator(&self, out: &mut String, terminator: &ir::Terminator) -> Option<()> {
+        match &terminator.kind {
+            ir::TerminatorKind::Goto(target) => {
+                out.push_str("                    __block = ");
+                out.push_str(&target.0.to_string());
+                out.push_str(";\n");
+                Some(())
+            }
+            ir::TerminatorKind::Branch {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                out.push_str("                    if (");
+                out.push_str(&self.emit_operand(condition)?);
+                out.push_str(") {\n");
+                out.push_str("                        __block = ");
+                out.push_str(&then_block.0.to_string());
+                out.push_str(";\n");
+                out.push_str("                    } else {\n");
+                out.push_str("                        __block = ");
+                out.push_str(&else_block.0.to_string());
+                out.push_str(";\n");
+                out.push_str("                    }\n");
+                Some(())
+            }
+            ir::TerminatorKind::Switch {
+                scrutinee,
+                arms,
+                default,
+            } => {
+                out.push_str("                    Object __switch = ");
+                out.push_str(&self.emit_operand(scrutinee)?);
+                out.push_str(";\n");
+                for arm in arms {
+                    out.push_str("                    if (java.util.Objects.equals(__switch, ");
+                    out.push_str(&self.emit_switch_value(&arm.value)?);
+                    out.push_str(")) {\n");
+                    out.push_str("                        __block = ");
+                    out.push_str(&arm.target.0.to_string());
+                    out.push_str(";\n");
+                    out.push_str("                        break;\n");
+                    out.push_str("                    }\n");
+                }
+                out.push_str("                    __block = ");
+                out.push_str(&default.0.to_string());
+                out.push_str(";\n");
+                Some(())
+            }
+            ir::TerminatorKind::Return(value) => {
+                if is_java_void_type(&self.function.return_ty) {
+                    out.push_str("                    return;\n");
+                } else {
+                    out.push_str("                    return ");
+                    if let Some(value) = value {
+                        let value_expr = self.cast_if_unknown_source(
+                            self.emit_operand(value)?,
+                            self.operand_type(value),
+                            &self.function.return_ty,
+                        );
+                        out.push_str(&value_expr);
+                    } else {
+                        out.push_str(&java_default_value(&self.function.return_ty));
+                    }
+                    out.push_str(";\n");
+                }
+                Some(())
+            }
+            ir::TerminatorKind::Unreachable => {
+                out.push_str("                    throw new IllegalStateException(\"entered unreachable Lume block\");\n");
+                Some(())
+            }
+        }
+    }
+
+    fn emit_switch_value(&self, value: &ir::SwitchValue) -> Option<String> {
+        match value {
+            ir::SwitchValue::Bool(value) => Some(value.to_string()),
+            ir::SwitchValue::Int(value) => Some(format!("{value}L")),
+            ir::SwitchValue::String(value) => Some(java_string_literal(value)),
+            ir::SwitchValue::EnumCase(_) => None,
+        }
+    }
+
+    fn emit_rvalue(&self, value: &ir::RValue) -> Option<String> {
+        match value {
+            ir::RValue::Use(operand) => self.emit_operand(operand),
+            ir::RValue::Unary { op, operand } => {
+                let op = match op {
+                    ir::UnaryOp::Neg => "-",
+                    ir::UnaryOp::Not => "!",
+                };
+                Some(format!("({op}{})", self.emit_operand(operand)?))
+            }
+            ir::RValue::Binary { op, left, right } => self.emit_binary(*op, left, right),
+            ir::RValue::Call { callee, args, .. } => self.emit_call(callee, args),
+            ir::RValue::Tuple(items) => self.emit_tuple(items),
+            ir::RValue::List(items) => {
+                let args = self.emit_operands(items)?;
+                Some(format!("lume.runtime.LumeList.of({})", args.join(", ")))
+            }
+            ir::RValue::Construct { ty, fields } => self.emit_construct(ty, fields),
+            ir::RValue::Variant {
+                enum_name,
+                case_name,
+                fields,
+            } => self.emit_variant(enum_name, case_name, fields),
+            ir::RValue::Field { base, name } => Some(format!(
+                "{}.{}",
+                self.emit_operand(base)?,
+                java_member_name(name)
+            )),
+            ir::RValue::Cast { operand, .. } => self.emit_operand(operand),
+            ir::RValue::NamedValue { .. }
+            | ir::RValue::Record(_)
+            | ir::RValue::RecordUpdate { .. }
+            | ir::RValue::Index { .. }
+            | ir::RValue::TypeTest { .. }
+            | ir::RValue::TypeOf { .. }
+            | ir::RValue::Closure { .. } => None,
+        }
+    }
+
+    fn emit_binary(
+        &self,
+        op: ir::BinaryOp,
+        left: &ir::Operand,
+        right: &ir::Operand,
+    ) -> Option<String> {
+        let left = self.emit_operand(left)?;
+        let right = self.emit_operand(right)?;
+        match op {
+            ir::BinaryOp::Eq => Some(format!("java.util.Objects.equals({left}, {right})")),
+            ir::BinaryOp::NotEq => Some(format!("!java.util.Objects.equals({left}, {right})")),
+            ir::BinaryOp::RecordMerge => None,
+            _ => {
+                let op = match op {
+                    ir::BinaryOp::Add => "+",
+                    ir::BinaryOp::Sub => "-",
+                    ir::BinaryOp::Mul => "*",
+                    ir::BinaryOp::Div => "/",
+                    ir::BinaryOp::Mod => "%",
+                    ir::BinaryOp::Less => "<",
+                    ir::BinaryOp::LessEq => "<=",
+                    ir::BinaryOp::Greater => ">",
+                    ir::BinaryOp::GreaterEq => ">=",
+                    ir::BinaryOp::And => "&&",
+                    ir::BinaryOp::Or => "||",
+                    ir::BinaryOp::Eq | ir::BinaryOp::NotEq | ir::BinaryOp::RecordMerge => {
+                        unreachable!()
+                    }
+                };
+                Some(format!("({left} {op} {right})"))
+            }
+        }
+    }
+
+    fn emit_call(&self, callee: &ir::Callee, args: &[ir::Operand]) -> Option<String> {
+        let args = self.emit_operands(args)?;
+        match callee {
+            ir::Callee::Direct(id) => {
+                let target = self.bundle.ir.function(*id)?;
+                match target.kind {
+                    ir::FunctionKind::TopLevel => {
+                        let name = java_member_name(&target.name);
+                        if matches!(self.function.kind, ir::FunctionKind::TopLevel) {
+                            Some(format!("{name}({})", args.join(", ")))
+                        } else {
+                            Some(format!(
+                                "{}.{}({})",
+                                self.module_class,
+                                name,
+                                args.join(", ")
+                            ))
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            ir::Callee::Method { receiver, method } => Some(format!(
+                "{}.{}({})",
+                self.emit_operand(receiver)?,
+                java_member_name(method),
+                args.join(", ")
+            )),
+            ir::Callee::Intrinsic(intrinsic) => self.emit_intrinsic(intrinsic, &args),
+            ir::Callee::Indirect(_) | ir::Callee::Named { .. } => None,
+        }
+    }
+
+    fn emit_intrinsic(&self, intrinsic: &ir::Intrinsic, args: &[String]) -> Option<String> {
+        match intrinsic {
+            ir::Intrinsic::Print => Some(format!(
+                "lume.runtime.LumeRuntime.print({})",
+                args.join(", ")
+            )),
+            ir::Intrinsic::Println => Some(format!(
+                "lume.runtime.LumeRuntime.println({})",
+                args.join(", ")
+            )),
+            ir::Intrinsic::Printf => Some(format!(
+                "lume.runtime.LumeRuntime.printf({})",
+                args.join(", ")
+            )),
+            ir::Intrinsic::Panic => Some(format!(
+                "lume.runtime.LumePanic.panic({})",
+                args.first()
+                    .cloned()
+                    .unwrap_or_else(|| java_string_literal("panic"))
+            )),
+            ir::Intrinsic::Assert => {
+                let condition = args.first()?;
+                let message = args
+                    .get(1)
+                    .cloned()
+                    .unwrap_or_else(|| java_string_literal("assertion failed"));
+                Some(format!(
+                    "lume.runtime.LumeRuntime.assertTrue({condition}, {message})"
+                ))
+            }
+            ir::Intrinsic::ListAppend => {
+                if args.len() != 2 {
+                    return None;
+                }
+                Some(format!("{}.add({})", args[0], args[1]))
+            }
+            ir::Intrinsic::IterInit
+            | ir::Intrinsic::IterHasNext
+            | ir::Intrinsic::IterNext
+            | ir::Intrinsic::ExtractSuccessIsSet
+            | ir::Intrinsic::ExtractSuccessValue
+            | ir::Intrinsic::VariantIs(_)
+            | ir::Intrinsic::VariantField(_) => None,
+        }
+    }
+
+    fn emit_tuple(&self, items: &[ir::Operand]) -> Option<String> {
+        if !(2..=8).contains(&items.len()) {
+            return None;
+        }
+        let args = self.emit_operands(items)?;
+        Some(format!(
+            "new lume.runtime.Tuple{}<>({})",
+            items.len(),
+            args.join(", ")
+        ))
+    }
+
+    fn emit_construct(&self, ty: &ir::Type, fields: &[ir::NamedOperand]) -> Option<String> {
+        let ir::Type::Named { name, .. } = ty else {
+            return None;
+        };
+        let args = fields
+            .iter()
+            .map(|field| self.emit_operand(&field.value))
+            .collect::<Option<Vec<_>>>()?;
+        Some(format!("new {}({})", java_type_name(name), args.join(", ")))
+    }
+
+    fn emit_variant(
+        &self,
+        enum_name: &str,
+        case_name: &str,
+        fields: &[ir::NamedOperand],
+    ) -> Option<String> {
+        let args = fields
+            .iter()
+            .map(|field| self.emit_operand(&field.value))
+            .collect::<Option<Vec<_>>>()?;
+        Some(format!(
+            "new {}.{}<>({})",
+            java_type_name(enum_name),
+            java_type_name(case_name),
+            args.join(", ")
+        ))
+    }
+
+    fn emit_operands(&self, operands: &[ir::Operand]) -> Option<Vec<String>> {
+        operands
+            .iter()
+            .map(|operand| self.emit_operand(operand))
+            .collect()
+    }
+
+    fn emit_operand(&self, operand: &ir::Operand) -> Option<String> {
+        match operand {
+            ir::Operand::Copy(place) | ir::Operand::Move(place) => self.emit_place(place),
+            ir::Operand::Const(constant) => Some(java_constant(constant)),
+        }
+    }
+
+    fn emit_place(&self, place: &ir::Place) -> Option<String> {
+        match place {
+            ir::Place::Local(id) => self
+                .function
+                .locals
+                .get(id.0)
+                .map(|local| self.local_reference(local)),
+            ir::Place::Global(id) => self
+                .bundle
+                .ir
+                .globals
+                .get(id.0)
+                .map(|global| java_member_name(&global.name)),
+            ir::Place::Field { base, name } => Some(format!(
+                "{}.{}",
+                self.emit_operand(base)?,
+                java_member_name(name)
+            )),
+            ir::Place::Index { .. } => None,
+        }
+    }
+
+    fn place_type(&self, place: &ir::Place) -> Option<ir::Type> {
+        match place {
+            ir::Place::Local(id) => self.function.locals.get(id.0).map(|local| local.ty.clone()),
+            ir::Place::Global(id) => self
+                .bundle
+                .ir
+                .globals
+                .get(id.0)
+                .map(|global| global.ty.clone()),
+            ir::Place::Field { .. } | ir::Place::Index { .. } => None,
+        }
+    }
+
+    fn operand_type(&self, operand: &ir::Operand) -> Option<ir::Type> {
+        match operand {
+            ir::Operand::Copy(place) | ir::Operand::Move(place) => self.place_type(place),
+            ir::Operand::Const(_) => None,
+        }
+    }
+
+    fn rvalue_type(&self, value: &ir::RValue) -> Option<ir::Type> {
+        match value {
+            ir::RValue::Use(operand) => self.operand_type(operand),
+            ir::RValue::Call { callee, .. } => match callee {
+                ir::Callee::Direct(id) => self
+                    .bundle
+                    .ir
+                    .function(*id)
+                    .map(|function| function.return_ty.clone()),
+                _ => None,
+            },
+            ir::RValue::Construct { ty, .. } => Some(ty.clone()),
+            ir::RValue::Cast { ty, .. } => Some(ty.clone()),
+            _ => None,
+        }
+    }
+
+    fn cast_if_unknown_source(
+        &self,
+        expr: String,
+        source_ty: Option<ir::Type>,
+        target_ty: &ir::Type,
+    ) -> String {
+        if !matches!(source_ty, Some(ir::Type::Unknown)) || matches!(target_ty, ir::Type::Unknown) {
+            return expr;
+        }
+        if is_java_void_type(target_ty) {
+            return expr;
+        }
+        format!("(({}) {expr})", java_type_for_value(target_ty))
+    }
+
+    fn local_reference(&self, local: &ir::Local) -> String {
+        if matches!(local.kind, ir::LocalKind::Capture) && local.name == "this" {
+            "this".to_string()
+        } else {
+            java_local_name(local)
+        }
+    }
+
+    fn local_is_declared_elsewhere(&self, local: &ir::Local) -> bool {
+        matches!(local.kind, ir::LocalKind::Param)
+            || (matches!(local.kind, ir::LocalKind::Capture) && local.name == "this")
+    }
+}
+
+fn rvalue_can_be_java_statement(value: &ir::RValue) -> bool {
+    matches!(
+        value,
+        ir::RValue::Call { .. } | ir::RValue::Construct { .. } | ir::RValue::Variant { .. }
+    )
+}
+
+fn terminator_exits_case(kind: &ir::TerminatorKind) -> bool {
+    matches!(
+        kind,
+        ir::TerminatorKind::Return(_) | ir::TerminatorKind::Unreachable
+    )
 }
 
 fn module_class_name(bundle: &BackendBundle) -> String {
@@ -474,6 +1017,82 @@ fn java_type_name(name: &str) -> String {
 
 fn java_member_name(name: &str) -> String {
     sanitize_identifier(name, IdentifierStyle::Member)
+}
+
+fn java_local_name(local: &ir::Local) -> String {
+    format!("{}_{}", java_member_name(&local.name), local.id.0)
+}
+
+fn java_default_value(ty: &ir::Type) -> String {
+    if is_java_void_type(ty) {
+        return "lume.runtime.LumeUnit.INSTANCE".to_string();
+    }
+    if type_is_named_or_primitive(ty, "Bool", |ty| matches!(ty, ir::Type::Bool)) {
+        "false".to_string()
+    } else if type_is_named_or_primitive(ty, "Int", |ty| matches!(ty, ir::Type::Int)) {
+        "0L".to_string()
+    } else if type_is_named_or_primitive(ty, "Float", |ty| matches!(ty, ir::Type::Float)) {
+        "0.0".to_string()
+    } else if type_is_named_or_primitive(ty, "Str", |ty| matches!(ty, ir::Type::Str)) {
+        java_string_literal("")
+    } else {
+        "null".to_string()
+    }
+}
+
+fn type_is_named_or_primitive(
+    ty: &ir::Type,
+    name: &str,
+    primitive: impl FnOnce(&ir::Type) -> bool,
+) -> bool {
+    primitive(ty)
+        || matches!(ty, ir::Type::Named { name: ty_name, args } if ty_name == name && args.is_empty())
+}
+
+fn is_java_void_type(ty: &ir::Type) -> bool {
+    matches!(ty, ir::Type::Unit)
+        || matches!(ty, ir::Type::Named { name, args } if name == "Unit" && args.is_empty())
+}
+
+fn java_constant(constant: &ir::Constant) -> String {
+    match constant {
+        ir::Constant::Unit => "lume.runtime.LumeUnit.INSTANCE".to_string(),
+        ir::Constant::Bool(value) => value.to_string(),
+        ir::Constant::Int(value) => format!("{value}L"),
+        ir::Constant::Float(value) => {
+            let mut rendered = value.to_string();
+            if !rendered.contains('.') && !rendered.contains('e') && !rendered.contains('E') {
+                rendered.push_str(".0");
+            }
+            rendered
+        }
+        ir::Constant::String(value) => java_string_literal(value),
+        ir::Constant::List(items) => {
+            let items = items
+                .iter()
+                .map(java_constant)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("lume.runtime.LumeList.of({items})")
+        }
+    }
+}
+
+fn java_string_literal(value: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn sanitize_identifier(name: &str, style: IdentifierStyle) -> String {

@@ -236,6 +236,57 @@ def main() Unit {
         let _ = fs::remove_dir_all(temp);
     }
 
+    #[test]
+    fn emits_mvp_function_bodies_for_supported_ir() {
+        let temp = temp_path("lume-java-bodies");
+        let source = temp.join("body.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/body
+
+def add(left Int, right Int) Int {
+    result Int = left + right
+    result
+}
+
+def choose(flag Bool) Int {
+    if flag {
+        10
+    } else {
+        20
+    }
+}
+
+def main() Unit {
+    value Int = add(2, 3)
+    println(value)
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        let module =
+            fs::read_to_string(out.join("demo/body/BodyModule.java")).expect("read module");
+        assert!(!module.contains("UnsupportedOperationException"));
+        assert!(module.contains("static Long add(Long left_0, Long right_1)"));
+        assert!(module.contains("tmp3_3 = (left_0 + right_1);"));
+        assert!(module.contains("result_2 = ((Long) tmp3_3);"));
+        assert!(module.contains("return result_2;"));
+        assert!(module.contains("if (flag_0)"));
+        assert!(module.contains("return ((Long) tmp1_1);"));
+        assert!(module.contains("tmp1_1 = add(2L, 3L);"));
+        assert!(module.contains("value_0 = ((Long) tmp1_1);"));
+        assert!(module.contains("tmp2_2 = lume.runtime.LumeRuntime.println(value_0);"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
     fn temp_path(prefix: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
