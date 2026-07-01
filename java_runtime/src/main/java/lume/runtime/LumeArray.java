@@ -35,6 +35,12 @@ public final class LumeArray<T> {
         return new LumeArray<>(values);
     }
 
+    public static LumeArray<Integer> ofRune(long length) {
+        var values = new Object[Math.toIntExact(length)];
+        Arrays.fill(values, 0);
+        return new LumeArray<>(values);
+    }
+
     public static <T> LumeArray<T> fill(long length, T value) {
         var values = new Object[Math.toIntExact(length)];
         Arrays.fill(values, value);

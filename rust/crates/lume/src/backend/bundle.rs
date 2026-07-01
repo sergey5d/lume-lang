@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     ast,
-    backend::descriptors::BackendDescriptors,
+    backend::{descriptors::BackendDescriptors, externals::ExternalDescriptors},
     interpreter::merged_runtime_program,
     ir,
     lower::lower_program,
@@ -18,6 +18,7 @@ pub struct BackendBundle {
     pub ast: ast::Program,
     pub ir: ir::Program,
     pub descriptors: BackendDescriptors,
+    pub externals: ExternalDescriptors,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -37,12 +38,13 @@ pub fn build_backend_bundle(path: impl AsRef<Path>) -> Result<BackendBundleResul
     }
 
     let (graph, root_path) = load_module_graph(path)?;
-    let root_display_path = graph
+    let root_module = graph
         .modules
         .get(&root_path)
-        .ok_or_else(|| format!("loaded root module missing {}", root_path.display()))?
-        .display_path
-        .clone();
+        .ok_or_else(|| format!("loaded root module missing {}", root_path.display()))?;
+    let root_display_path = root_module.display_path.clone();
+    let externals =
+        ExternalDescriptors::from_programs(graph.modules.values().map(|module| &module.program));
     let ast = merged_runtime_program(&graph, &root_path)?;
 
     let lowered = lower_program(&ast);
@@ -73,6 +75,7 @@ pub fn build_backend_bundle(path: impl AsRef<Path>) -> Result<BackendBundleResul
             ast,
             ir,
             descriptors,
+            externals,
         }),
     })
 }

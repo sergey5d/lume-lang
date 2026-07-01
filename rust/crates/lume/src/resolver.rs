@@ -9,9 +9,10 @@ use crate::{
     ast::{
         Annotation, AssignOp, AssignmentStmt, Binding, Block, CallableBody, ElseBranch,
         ElseExprBranch, Expr, ExprStmt, ForBinding, ForStmt, FunctionDecl, IfConditionClause,
-        IfStmt, ImplBlock, ImplTargetKind, ImportSymbol, LambdaBody, LetElseStmt, MatchCase,
-        MatchCaseBody, MethodDecl, Pattern, PatternBindingStmt, Program, RecordTypeField, Stmt,
-        TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility, WhileStmt,
+        IfStmt, ImplBlock, ImplTargetKind, ImportDecl, ImportSymbol, Item, LambdaBody, LetElseStmt,
+        MatchCase, MatchCaseBody, MethodDecl, Pattern, PatternBindingStmt, Program,
+        RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
+        WhileStmt,
     },
     lexer::lex,
     parser::parse_program,
@@ -352,17 +353,26 @@ pub(crate) fn load_module(
         .map(|module| module.name.as_str());
     let imports = module.program.imports.clone();
     for import in imports {
-        let child_path = base_dir.join(format!("{}.lum", import.path));
-        let child_abs = load_module(&child_path, graph, loading)?;
+        let java_import = is_java_import_path(&import.path);
+        let child_abs = if java_import {
+            ensure_java_external_module(&import, graph)?
+        } else {
+            let child_path = base_dir.join(format!("{}.lum", import.path));
+            load_module(&child_path, graph, loading)?
+        };
         let child = graph
             .modules
             .get(&child_abs)
             .ok_or_else(|| format!("loaded module missing {}", child_abs.display()))?;
 
-        if !module.dependencies.contains(&child_abs) {
+        if !java_import && !module.dependencies.contains(&child_abs) {
             module.dependencies.push(child_abs.clone());
         }
-        if import.single_name.is_none() && import.symbols.is_empty() && !import.wildcard {
+        if !java_import
+            && import.single_name.is_none()
+            && import.symbols.is_empty()
+            && !import.wildcard
+        {
             let alias = module_alias(&import.path);
             if let Some(existing) = import_paths.get(&alias) {
                 if existing != &import.path {
@@ -408,7 +418,15 @@ pub(crate) fn load_module(
         }
 
         for symbol in symbols {
-            let resolved = if let Some(single_name) = import.single_name.as_deref() {
+            let local_name = symbol.alias.clone().unwrap_or(symbol.name.clone());
+            let resolved = if java_import {
+                ImportedSymbol {
+                    original_name: local_name.clone(),
+                    single_name: None,
+                    kind: ImportedKind::Type,
+                    module_path: child_abs.clone(),
+                }
+            } else if let Some(single_name) = import.single_name.as_deref() {
                 resolve_imported_single_member(
                     child,
                     single_name,
@@ -432,7 +450,6 @@ pub(crate) fn load_module(
                 )?
             };
 
-            let local_name = symbol.alias.clone().unwrap_or(symbol.name.clone());
             if module.imports.contains_key(&local_name) {
                 return Err(format!(
                     "used symbol '{}' conflicts with module use alias",
@@ -495,6 +512,84 @@ fn format_path_diagnostics(
 
 fn module_alias(path: &str) -> String {
     path.rsplit('/').next().unwrap_or(path).to_string()
+}
+
+fn is_java_import_path(path: &str) -> bool {
+    path.starts_with("java/")
+}
+
+fn ensure_java_external_module(
+    import: &ImportDecl,
+    graph: &mut ModuleGraph,
+) -> Result<PathBuf, String> {
+    if import.single_name.is_some() || import.wildcard {
+        return Err(format!(
+            "java use '{}' must import explicit classes; wildcard and member imports are not supported yet",
+            import.path
+        ));
+    }
+    if import.symbols.is_empty() {
+        return Err(format!(
+            "java use '{}' must import at least one class",
+            import.path
+        ));
+    }
+
+    let path = java_external_module_path(&import.path);
+    let module = graph
+        .modules
+        .entry(path.clone())
+        .or_insert_with(|| LoadedModule {
+            path: path.clone(),
+            display_path: path.display().to_string(),
+            program: Program {
+                module: None,
+                imports: Vec::new(),
+                items: Vec::new(),
+                span: Some(import.span),
+            },
+            imports: HashMap::new(),
+            symbol_imports: HashMap::new(),
+            dependencies: Vec::new(),
+        });
+
+    for symbol in &import.symbols {
+        let local_name = symbol.alias.clone().unwrap_or_else(|| symbol.name.clone());
+        if module
+            .program
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Type(decl) if decl.name == local_name))
+        {
+            continue;
+        }
+        module
+            .program
+            .items
+            .push(Item::Type(synthetic_java_type_decl(
+                local_name,
+                symbol.span,
+            )));
+    }
+
+    Ok(path)
+}
+
+fn java_external_module_path(path: &str) -> PathBuf {
+    PathBuf::from(format!("<java:{path}>"))
+}
+
+fn synthetic_java_type_decl(name: String, span: crate::source::Span) -> TypeDecl {
+    TypeDecl {
+        annotations: Vec::new(),
+        visibility: Visibility::Default,
+        kind: TypeKind::Class,
+        name,
+        type_params: Vec::new(),
+        with_bounds: Vec::new(),
+        members: Vec::new(),
+        span,
+    }
 }
 
 pub(crate) fn read_directives(path: &Path) -> Result<FileDirectives, String> {

@@ -76,11 +76,21 @@ Tasks:
 
 ## Step 6: Java External Resolver
 
+Status: in progress; direct Java type imports are implemented for checking and Java generation.
+
 Goal: let ordinary Lume imports resolve Java classes into Lume-shaped external descriptors.
 
 Tasks:
 
-- Add external resolver registry.
-- Add Java classpath resolver.
+- Add external resolver registry. Partial: root imports now produce backend external descriptors.
+- Add Java classpath resolver. Partial: `use java/time/Instant` and `use java/time/{Duration as JDuration}` resolve as external class descriptors.
 - Add optional descriptor file fallback.
 - Resolve external constructors, methods, fields, enum constants, and static members before codegen.
+
+Completed slice:
+
+- Resolver treats `java/...` imports as synthetic external modules instead of `.lum` modules.
+- Typechecker can use imported Java class names in Lume declarations.
+- Java backend emits qualified Java names such as `java.time.Instant`.
+- Java external descriptors preserve Lume aliases such as `JDuration`.
+- Synthetic Java external types are not lowered into generated source files.

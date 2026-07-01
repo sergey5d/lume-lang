@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     ast::TypeKind,
@@ -13,24 +16,29 @@ pub(crate) struct JavaSource {
 
 pub(crate) fn render_declaration_skeletons(bundle: &BackendBundle) -> Vec<JavaSource> {
     let package = JavaPackage::from_module(bundle.ir.module.as_deref());
+    let names = JavaNames::from_bundle(bundle);
     let mut sources = Vec::new();
 
     sources.push(JavaSource {
         relative_path: package.relative_file(&format!("{}.java", module_class_name(bundle))),
-        contents: render_module_wrapper(bundle, &package),
+        contents: render_module_wrapper(bundle, &package, &names),
     });
 
     for ty in &bundle.ir.types {
         sources.push(JavaSource {
             relative_path: package.relative_file(&format!("{}.java", java_type_name(&ty.name))),
-            contents: render_type_shell(bundle, ty, &package),
+            contents: render_type_shell(bundle, ty, &package, &names),
         });
     }
 
     sources
 }
 
-fn render_module_wrapper(bundle: &BackendBundle, package: &JavaPackage) -> String {
+fn render_module_wrapper(
+    bundle: &BackendBundle,
+    package: &JavaPackage,
+    names: &JavaNames,
+) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!("final class {} {{\n", module_class_name(bundle)));
@@ -41,7 +49,7 @@ fn render_module_wrapper(bundle: &BackendBundle, package: &JavaPackage) -> Strin
     for global in &bundle.ir.globals {
         out.push('\n');
         out.push_str("    static ");
-        out.push_str(&java_type_for_value(&global.ty));
+        out.push_str(&names.value_type(&global.ty));
         out.push(' ');
         out.push_str(&java_member_name(&global.name));
         out.push_str(";\n");
@@ -55,26 +63,36 @@ fn render_module_wrapper(bundle: &BackendBundle, package: &JavaPackage) -> Strin
     {
         out.push('\n');
         out.push_str("    static ");
-        push_function_signature(&mut out, function);
-        push_function_body(&mut out, bundle, function);
+        push_function_signature(&mut out, function, names);
+        push_function_body(&mut out, bundle, function, names);
     }
 
     out.push_str("}\n");
     out
 }
 
-fn render_type_shell(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage) -> String {
+fn render_type_shell(
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    package: &JavaPackage,
+    names: &JavaNames,
+) -> String {
     match ty.kind {
-        TypeKind::Annotation => render_annotation(ty, package),
-        TypeKind::Class => render_class(bundle, ty, package),
-        TypeKind::Record => render_shape(bundle, ty, package),
-        TypeKind::Single => render_single(bundle, ty, package),
-        TypeKind::Interface => render_interface(bundle, ty, package),
-        TypeKind::Enum => render_enum(bundle, ty, package),
+        TypeKind::Annotation => render_annotation(ty, package, names),
+        TypeKind::Class => render_class(bundle, ty, package, names),
+        TypeKind::Record => render_shape(bundle, ty, package, names),
+        TypeKind::Single => render_single(bundle, ty, package, names),
+        TypeKind::Interface => render_interface(bundle, ty, package, names),
+        TypeKind::Enum => render_enum(bundle, ty, package, names),
     }
 }
 
-fn render_class(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage) -> String {
+fn render_class(
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    package: &JavaPackage,
+    names: &JavaNames,
+) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!(
@@ -82,14 +100,19 @@ fn render_class(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage)
         java_type_name(&ty.name),
         java_type_params(&ty.type_params)
     ));
-    push_fields(&mut out, ty);
-    push_class_constructor(&mut out, ty);
-    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody);
+    push_fields(&mut out, ty, names);
+    push_class_constructor(&mut out, ty, names);
+    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     out.push_str("}\n");
     out
 }
 
-fn render_shape(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage) -> String {
+fn render_shape(
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    package: &JavaPackage,
+    names: &JavaNames,
+) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!(
@@ -100,18 +123,23 @@ fn render_shape(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage)
             .iter()
             .map(|field| format!(
                 "{} {}",
-                java_type_for_value(&field.ty),
+                names.value_type(&field.ty),
                 java_member_name(&field.name)
             ))
             .collect::<Vec<_>>()
             .join(", ")
     ));
-    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody);
+    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     out.push_str("}\n");
     out
 }
 
-fn render_single(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage) -> String {
+fn render_single(
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    package: &JavaPackage,
+    names: &JavaNames,
+) -> String {
     let mut out = String::new();
     let name = java_type_name(&ty.name);
     push_header(&mut out, package);
@@ -120,13 +148,18 @@ fn render_single(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage
         "    static final {name} INSTANCE = new {name}();\n"
     ));
     out.push_str(&format!("    private {name}() {{}}\n"));
-    push_fields(&mut out, ty);
-    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody);
+    push_fields(&mut out, ty, names);
+    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     out.push_str("}\n");
     out
 }
 
-fn render_interface(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage) -> String {
+fn render_interface(
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    package: &JavaPackage,
+    names: &JavaNames,
+) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!(
@@ -134,18 +167,18 @@ fn render_interface(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPack
         java_type_name(&ty.name),
         java_type_params(&ty.type_params)
     ));
-    push_instance_methods(&mut out, bundle, ty, MethodShell::Abstract);
+    push_instance_methods(&mut out, bundle, ty, MethodShell::Abstract, names);
     out.push_str("}\n");
     out
 }
 
-fn render_annotation(ty: &ir::TypeDef, package: &JavaPackage) -> String {
+fn render_annotation(ty: &ir::TypeDef, package: &JavaPackage, names: &JavaNames) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!("@interface {} {{\n", java_type_name(&ty.name)));
     for field in &ty.fields {
         out.push_str("    ");
-        out.push_str(&java_type_for_annotation(&field.ty));
+        out.push_str(&names.annotation_type(&field.ty));
         out.push(' ');
         out.push_str(&java_member_name(&field.name));
         out.push_str("();\n");
@@ -154,7 +187,12 @@ fn render_annotation(ty: &ir::TypeDef, package: &JavaPackage) -> String {
     out
 }
 
-fn render_enum(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage) -> String {
+fn render_enum(
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    package: &JavaPackage,
+    names: &JavaNames,
+) -> String {
     let mut out = String::new();
     let enum_name = java_type_name(&ty.name);
     let type_params = java_type_params(&ty.type_params);
@@ -175,7 +213,7 @@ fn render_enum(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage) 
         ));
     }
 
-    push_instance_methods(&mut out, bundle, ty, MethodShell::DefaultBody);
+    push_instance_methods(&mut out, bundle, ty, MethodShell::DefaultBody, names);
 
     for case in &ty.enum_cases {
         out.push('\n');
@@ -190,7 +228,7 @@ fn render_enum(bundle: &BackendBundle, ty: &ir::TypeDef, package: &JavaPackage) 
                 .map(|field| {
                     format!(
                         "{} {}",
-                        java_type_for_value(&field.ty),
+                        names.value_type(&field.ty),
                         java_member_name(&field.name)
                     )
                 })
@@ -216,10 +254,10 @@ fn push_header(out: &mut String, package: &JavaPackage) {
     }
 }
 
-fn push_fields(out: &mut String, ty: &ir::TypeDef) {
+fn push_fields(out: &mut String, ty: &ir::TypeDef, names: &JavaNames) {
     for field in &ty.fields {
         out.push_str("    ");
-        out.push_str(&java_type_for_value(&field.ty));
+        out.push_str(&names.value_type(&field.ty));
         out.push(' ');
         out.push_str(&java_member_name(&field.name));
         out.push_str(";\n");
@@ -231,6 +269,7 @@ fn push_instance_methods(
     bundle: &BackendBundle,
     ty: &ir::TypeDef,
     shell: MethodShell,
+    names: &JavaNames,
 ) {
     for method_id in &ty.methods {
         let Some(function) = bundle.ir.function(*method_id) else {
@@ -244,11 +283,11 @@ fn push_instance_methods(
         if shell == MethodShell::DefaultBody {
             out.push_str("default ");
         }
-        push_function_signature(out, function);
+        push_function_signature(out, function, names);
         match shell {
             MethodShell::Abstract => out.push_str(";\n"),
             MethodShell::DefaultBody | MethodShell::StubBody => {
-                push_function_body(out, bundle, function)
+                push_function_body(out, bundle, function, names)
             }
         }
     }
@@ -261,12 +300,12 @@ enum MethodShell {
     StubBody,
 }
 
-fn push_function_signature(out: &mut String, function: &ir::Function) {
+fn push_function_signature(out: &mut String, function: &ir::Function, names: &JavaNames) {
     if !function.type_params.is_empty() {
         out.push_str(&java_type_params(&function.type_params));
         out.push(' ');
     }
-    out.push_str(&java_type_for_return(&function.return_ty));
+    out.push_str(&names.return_type(&function.return_ty));
     out.push(' ');
     out.push_str(&java_member_name(&function.name));
     out.push('(');
@@ -275,21 +314,20 @@ fn push_function_signature(out: &mut String, function: &ir::Function) {
             .params
             .iter()
             .filter_map(|param| function.locals.get(param.0))
-            .map(|local| {
-                format!(
-                    "{} {}",
-                    java_type_for_value(&local.ty),
-                    java_local_name(local)
-                )
-            })
+            .map(|local| format!("{} {}", names.value_type(&local.ty), java_local_name(local)))
             .collect::<Vec<_>>()
             .join(", "),
     );
     out.push(')');
 }
 
-fn push_function_body(out: &mut String, bundle: &BackendBundle, function: &ir::Function) {
-    match FunctionEmitter::new(bundle, function).emit_body() {
+fn push_function_body(
+    out: &mut String,
+    bundle: &BackendBundle,
+    function: &ir::Function,
+    names: &JavaNames,
+) {
+    match FunctionEmitter::new(bundle, function, names).emit_body() {
         Some(body) => out.push_str(&body),
         None => push_stub_body(out),
     }
@@ -301,7 +339,7 @@ fn push_stub_body(out: &mut String) {
     out.push_str("    }\n");
 }
 
-fn push_class_constructor(out: &mut String, ty: &ir::TypeDef) {
+fn push_class_constructor(out: &mut String, ty: &ir::TypeDef, names: &JavaNames) {
     let name = java_type_name(&ty.name);
     out.push('\n');
     out.push_str("    ");
@@ -322,7 +360,7 @@ fn push_class_constructor(out: &mut String, ty: &ir::TypeDef) {
             .map(|(index, field)| {
                 format!(
                     "{} {}",
-                    java_type_for_value(&field.ty),
+                    names.value_type(&field.ty),
                     constructor_param_name(field, index)
                 )
             })
@@ -347,14 +385,16 @@ fn constructor_param_name(field: &ir::Field, index: usize) -> String {
 struct FunctionEmitter<'a> {
     bundle: &'a BackendBundle,
     function: &'a ir::Function,
+    names: &'a JavaNames,
     module_class: String,
 }
 
 impl<'a> FunctionEmitter<'a> {
-    fn new(bundle: &'a BackendBundle, function: &'a ir::Function) -> Self {
+    fn new(bundle: &'a BackendBundle, function: &'a ir::Function, names: &'a JavaNames) -> Self {
         Self {
             bundle,
             function,
+            names,
             module_class: module_class_name(bundle),
         }
     }
@@ -367,7 +407,7 @@ impl<'a> FunctionEmitter<'a> {
                 continue;
             }
             out.push_str("        ");
-            out.push_str(&java_type_for_value(&local.ty));
+            out.push_str(&self.names.value_type(&local.ty));
             out.push(' ');
             out.push_str(&java_local_name(local));
             out.push_str(" = ");
@@ -809,7 +849,7 @@ impl<'a> FunctionEmitter<'a> {
         if is_java_void_type(target_ty) {
             return expr;
         }
-        format!("(({}) {expr})", java_type_for_value(target_ty))
+        format!("(({}) {expr})", self.names.value_type(target_ty))
     }
 
     fn local_reference(&self, local: &ir::Local) -> String {
@@ -859,56 +899,124 @@ fn module_class_name(bundle: &BackendBundle) -> String {
     format!("{}Module", java_type_name(&raw))
 }
 
-fn java_type_for_return(ty: &ir::Type) -> String {
-    match ty {
-        ir::Type::Unit => "void".to_string(),
-        ir::Type::Named { name, args } if name == "Unit" && args.is_empty() => "void".to_string(),
-        _ => java_type_for_value(ty),
-    }
+struct JavaNames {
+    external_types: HashMap<String, String>,
 }
 
-fn java_type_for_value(ty: &ir::Type) -> String {
-    match ty {
-        ir::Type::Unknown => "Object".to_string(),
-        ir::Type::Never => "lume.runtime.LumePanic".to_string(),
-        ir::Type::Unit => "lume.runtime.LumeUnit".to_string(),
-        ir::Type::Bool => "Boolean".to_string(),
-        ir::Type::Int => "Long".to_string(),
-        ir::Type::Float => "Double".to_string(),
-        ir::Type::Str => "String".to_string(),
-        ir::Type::Named { name, args } if args.is_empty() => {
-            java_named_builtin_value(name).unwrap_or_else(|| java_type_name(name))
+impl JavaNames {
+    fn from_bundle(bundle: &BackendBundle) -> Self {
+        Self {
+            external_types: bundle.externals.type_name_map(),
         }
-        ir::Type::Named { name, args } if is_builtin_container(name) => {
-            java_builtin_container(name, args)
-        }
-        ir::Type::Named { name, args } => {
-            let args = args
-                .iter()
-                .map(java_type_for_value)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{}<{args}>", java_type_name(name))
-        }
-        ir::Type::Tuple(items) => java_tuple_type(items),
-        ir::Type::Record(_) | ir::Type::Function { .. } => "Object".to_string(),
-        ir::Type::TypeParam(name) => java_type_name(name),
     }
-}
 
-fn java_type_for_annotation(ty: &ir::Type) -> String {
-    match ty {
-        ir::Type::Bool => "boolean".to_string(),
-        ir::Type::Int => "long".to_string(),
-        ir::Type::Float => "double".to_string(),
-        ir::Type::Str => "String".to_string(),
-        ir::Type::Named { name, args } if args.is_empty() => {
-            java_named_builtin_annotation(name).unwrap_or_else(|| java_type_name(name))
+    fn return_type(&self, ty: &ir::Type) -> String {
+        match ty {
+            ir::Type::Unit => "void".to_string(),
+            ir::Type::Named { name, args } if name == "Unit" && args.is_empty() => {
+                "void".to_string()
+            }
+            _ => self.value_type(ty),
         }
-        ir::Type::Named { name, args } if name == "List" && args.len() == 1 => {
-            format!("{}[]", java_type_for_annotation(&args[0]))
+    }
+
+    fn value_type(&self, ty: &ir::Type) -> String {
+        match ty {
+            ir::Type::Unknown => "Object".to_string(),
+            ir::Type::Never => "lume.runtime.LumePanic".to_string(),
+            ir::Type::Unit => "lume.runtime.LumeUnit".to_string(),
+            ir::Type::Bool => "Boolean".to_string(),
+            ir::Type::Int => "Long".to_string(),
+            ir::Type::Float => "Double".to_string(),
+            ir::Type::Str => "String".to_string(),
+            ir::Type::Named { name, args } if args.is_empty() => java_named_builtin_value(name)
+                .or_else(|| self.external_types.get(name).cloned())
+                .unwrap_or_else(|| java_type_name(name)),
+            ir::Type::Named { name, args } if is_builtin_container(name) => {
+                self.builtin_container(name, args)
+            }
+            ir::Type::Named { name, args } => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.value_type(arg))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}<{args}>", self.named_type(name))
+            }
+            ir::Type::Tuple(items) => self.tuple_type(items),
+            ir::Type::Record(_) | ir::Type::Function { .. } => "Object".to_string(),
+            ir::Type::TypeParam(name) => java_type_name(name),
         }
-        _ => "String".to_string(),
+    }
+
+    fn annotation_type(&self, ty: &ir::Type) -> String {
+        match ty {
+            ir::Type::Bool => "boolean".to_string(),
+            ir::Type::Int => "long".to_string(),
+            ir::Type::Float => "double".to_string(),
+            ir::Type::Str => "String".to_string(),
+            ir::Type::Named { name, args } if args.is_empty() => {
+                java_named_builtin_annotation(name)
+                    .or_else(|| self.external_types.get(name).cloned())
+                    .unwrap_or_else(|| java_type_name(name))
+            }
+            ir::Type::Named { name, args } if name == "List" && args.len() == 1 => {
+                format!("{}[]", self.annotation_type(&args[0]))
+            }
+            _ => "String".to_string(),
+        }
+    }
+
+    fn named_type(&self, name: &str) -> String {
+        self.external_types
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| java_type_name(name))
+    }
+
+    fn builtin_container(&self, name: &str, args: &[ir::Type]) -> String {
+        match name {
+            "Array" if args.len() == 1 => {
+                format!("lume.runtime.LumeArray<{}>", self.value_type(&args[0]))
+            }
+            "Either" if args.len() == 2 => format!(
+                "lume.runtime.Either<{}, {}>",
+                self.value_type(&args[0]),
+                self.value_type(&args[1])
+            ),
+            "List" if args.len() == 1 => {
+                format!("lume.runtime.LumeList<{}>", self.value_type(&args[0]))
+            }
+            "Map" if args.len() == 2 => format!(
+                "lume.runtime.LumeMap<{}, {}>",
+                self.value_type(&args[0]),
+                self.value_type(&args[1])
+            ),
+            "Option" if args.len() == 1 => {
+                format!("lume.runtime.Option<{}>", self.value_type(&args[0]))
+            }
+            "Result" if args.len() == 2 => format!(
+                "lume.runtime.Result<{}, {}>",
+                self.value_type(&args[0]),
+                self.value_type(&args[1])
+            ),
+            "Set" if args.len() == 1 => {
+                format!("lume.runtime.LumeSet<{}>", self.value_type(&args[0]))
+            }
+            _ => "Object".to_string(),
+        }
+    }
+
+    fn tuple_type(&self, items: &[ir::Type]) -> String {
+        if !(2..=8).contains(&items.len()) {
+            return "Object".to_string();
+        }
+        let args = items
+            .iter()
+            .map(|item| self.value_type(item))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("lume.runtime.Tuple{}<{args}>", items.len())
     }
 }
 
@@ -940,51 +1048,6 @@ fn is_builtin_container(name: &str) -> bool {
         name,
         "Array" | "Either" | "List" | "Map" | "Option" | "Result" | "Set"
     )
-}
-
-fn java_builtin_container(name: &str, args: &[ir::Type]) -> String {
-    match name {
-        "Array" if args.len() == 1 => {
-            format!("lume.runtime.LumeArray<{}>", java_type_for_value(&args[0]))
-        }
-        "Either" if args.len() == 2 => format!(
-            "lume.runtime.Either<{}, {}>",
-            java_type_for_value(&args[0]),
-            java_type_for_value(&args[1])
-        ),
-        "List" if args.len() == 1 => {
-            format!("lume.runtime.LumeList<{}>", java_type_for_value(&args[0]))
-        }
-        "Map" if args.len() == 2 => format!(
-            "lume.runtime.LumeMap<{}, {}>",
-            java_type_for_value(&args[0]),
-            java_type_for_value(&args[1])
-        ),
-        "Option" if args.len() == 1 => {
-            format!("lume.runtime.Option<{}>", java_type_for_value(&args[0]))
-        }
-        "Result" if args.len() == 2 => format!(
-            "lume.runtime.Result<{}, {}>",
-            java_type_for_value(&args[0]),
-            java_type_for_value(&args[1])
-        ),
-        "Set" if args.len() == 1 => {
-            format!("lume.runtime.LumeSet<{}>", java_type_for_value(&args[0]))
-        }
-        _ => "Object".to_string(),
-    }
-}
-
-fn java_tuple_type(items: &[ir::Type]) -> String {
-    if !(2..=8).contains(&items.len()) {
-        return "Object".to_string();
-    }
-    let args = items
-        .iter()
-        .map(java_type_for_value)
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("lume.runtime.Tuple{}<{args}>", items.len())
 }
 
 fn java_type_params(params: &[String]) -> String {

@@ -239,6 +239,46 @@ def main() Unit {
     }
 
     #[test]
+    fn resolves_java_type_imports_for_generation() {
+        let temp = temp_path("lume-java-imports");
+        let source = temp.join("external.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/external
+
+use java/time/Instant
+use java/time/{Duration as JDuration}
+
+class Event {
+    at Instant
+    duration JDuration
+}
+
+def main() Unit {
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        let event = fs::read_to_string(out.join("demo/external/Event.java")).expect("read event");
+        assert!(event.contains("java.time.Instant at;"));
+        assert!(event.contains("java.time.Duration duration;"));
+        assert!(
+            event.contains("Event(java.time.Instant at_arg0, java.time.Duration duration_arg1)")
+        );
+        assert!(!out.join("demo/external/Instant.java").exists());
+        assert!(!out.join("demo/external/JDuration.java").exists());
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn emits_mvp_function_bodies_for_supported_ir() {
         let temp = temp_path("lume-java-bodies");
         let source = temp.join("body.lum");

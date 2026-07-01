@@ -9,3 +9,4 @@ pub use descriptors::{
     BackendDescriptors, DescriptorField, DescriptorFunction, DescriptorGlobal, DescriptorModule,
     DescriptorType,
 };
+pub use externals::{ExternalDescriptors, ExternalSymbol, ExternalSymbolKind};
