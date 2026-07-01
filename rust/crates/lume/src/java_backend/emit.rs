@@ -454,8 +454,14 @@ impl<'a> FunctionEmitter<'a> {
                 then_block,
                 else_block,
             } => {
+                let condition_ty = ir::Type::Bool;
+                let condition_expr = self.cast_if_unknown_source(
+                    self.emit_operand(condition)?,
+                    self.operand_type(condition),
+                    &condition_ty,
+                );
                 out.push_str("                    if (");
-                out.push_str(&self.emit_operand(condition)?);
+                out.push_str(&condition_expr);
                 out.push_str(") {\n");
                 out.push_str("                        __block = ");
                 out.push_str(&then_block.0.to_string());
@@ -1066,7 +1072,7 @@ fn java_constant(constant: &ir::Constant) -> String {
             }
             rendered
         }
-        ir::Constant::String(value) => java_string_literal(value),
+        ir::Constant::String(value) => java_string_literal(&decode_lume_string_literal(value)),
         ir::Constant::List(items) => {
             let items = items
                 .iter()
@@ -1092,6 +1098,51 @@ fn java_string_literal(value: &str) -> String {
         }
     }
     out.push('"');
+    out
+}
+
+fn decode_lume_string_literal(raw: &str) -> String {
+    let (is_raw, quoted) = raw
+        .strip_prefix("raw")
+        .map_or((false, raw), |quoted| (true, quoted));
+    let body = if quoted.starts_with("\"\"\"") && quoted.ends_with("\"\"\"") && quoted.len() >= 6 {
+        &quoted[3..quoted.len() - 3]
+    } else {
+        quoted
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .unwrap_or(quoted)
+    };
+    if is_raw {
+        body.to_string()
+    } else {
+        decode_lume_string_contents(body)
+    }
+}
+
+fn decode_lume_string_contents(body: &str) -> String {
+    let mut out = String::new();
+    let mut chars = body.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('\\') => out.push('\\'),
+            Some('"') => out.push('"'),
+            Some('0') => out.push('\0'),
+            Some('$') => out.push('$'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
     out
 }
 

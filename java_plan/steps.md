@@ -63,6 +63,8 @@ Tasks:
 
 ## Step 5: Parity Harness
 
+Status: done for MVP-supported Java generation; the test skips when `javac`/`java` are unavailable.
+
 Goal: compare interpreter output and generated Java output for selected examples.
 
 Tasks:

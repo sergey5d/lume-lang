@@ -63,11 +63,13 @@ pub fn generate_java_path(
 mod tests {
     use std::{
         fs,
-        path::PathBuf,
+        path::{Path, PathBuf},
+        process::Command,
         time::{SystemTime, UNIX_EPOCH},
     };
 
     use super::*;
+    use crate::run_path;
 
     #[test]
     fn generates_declaration_skeletons_for_checked_program() {
@@ -287,6 +289,88 @@ def main() Unit {
         let _ = fs::remove_dir_all(temp);
     }
 
+    #[test]
+    fn generated_java_matches_interpreter_for_supported_program() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java parity test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-parity");
+        let source = temp.join("parity.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/parity
+
+def add(left Int, right Int) Int {
+    result Int = left + right
+    result
+}
+
+def main() Int {
+    value Int = add(2, 3)
+    println(value)
+
+    if value > 4 {
+        println("bigger")
+    } else {
+        println("smaller")
+    }
+
+    0
+}
+"#,
+        )
+        .expect("write source");
+
+        let interpreted = run_path(&source, None).expect("run interpreter");
+        assert!(interpreted.diagnostics.is_empty());
+        let expected = interpreter_stdout(interpreted);
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(generated.diagnostics.is_empty());
+
+        let runner = out.join("demo/parity/JavaParityRunner.java");
+        fs::write(
+            &runner,
+            r#"
+package demo.parity;
+
+final class JavaParityRunner {
+    public static void main(String[] args) {
+        System.out.println(ParityModule.main());
+    }
+}
+"#,
+        )
+        .expect("write runner");
+
+        let mut sources = java_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.parity.JavaParityRunner"),
+            "java",
+        );
+        let actual = String::from_utf8(output.stdout).expect("java stdout utf8");
+        assert_eq!(actual, expected);
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
     fn temp_path(prefix: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -299,5 +383,58 @@ def main() Unit {
             .expect("rust workspace root")
             .join("target")
             .join(format!("{prefix}-{nanos}"))
+    }
+
+    fn interpreter_stdout(result: crate::PathRunResult) -> String {
+        let mut output = result.output;
+        if let Some(value) = result.return_value {
+            output.push_str(&value);
+            output.push('\n');
+        }
+        output
+    }
+
+    fn command_available(name: &str) -> bool {
+        Command::new(name).arg("-version").output().is_ok()
+    }
+
+    fn java_runtime_sources() -> Vec<PathBuf> {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir
+            .parent()
+            .and_then(|crates_dir| crates_dir.parent())
+            .and_then(|rust_dir| rust_dir.parent())
+            .expect("repo root");
+        let runtime_dir = repo_root.join("java_runtime/src/main/java/lume/runtime");
+        let mut sources = Vec::new();
+        collect_java_sources(&runtime_dir, &mut sources).expect("collect runtime java");
+        sources
+    }
+
+    fn collect_java_sources(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                collect_java_sources(&path, out)?;
+            } else if path.extension().is_some_and(|ext| ext == "java") {
+                out.push(path);
+            }
+        }
+        Ok(())
+    }
+
+    fn run_checked(command: &mut Command, name: &str) -> std::process::Output {
+        let output = command
+            .output()
+            .unwrap_or_else(|err| panic!("run {name}: {err}"));
+        if !output.status.success() {
+            panic!(
+                "{name} failed\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        output
     }
 }
