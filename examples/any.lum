@@ -1,0 +1,38 @@
+# EXPECT:
+# class true Person{name=Ada}
+# shape true shape{name=Ada}
+# enum true Green
+# single true Marker{label=marker}
+# any true 42
+
+class Person {
+    name Str
+}
+
+enum Light {
+    case Green
+    case Red
+}
+
+single Marker {
+    label Str = "marker"
+}
+
+def main() Unit {
+    person = Person { name: "Ada" }
+    otherPerson = Person { name: "Ada" }
+    println("class", person.equals(otherPerson), person.toStr())
+
+    shapeValue = { name: "Ada" }
+    otherShapeValue = { name: "Ada" }
+    println("shape", shapeValue.equals(otherShapeValue), shapeValue.toStr())
+
+    light = Green
+    println("enum", light.equals(Green), light.toStr())
+
+    marker Any = Marker
+    println("single", marker.equals(Marker), marker.toStr())
+
+    value Any = 42
+    println("any", value.equals(42), value.toStr())
+}

@@ -1,0 +1,35 @@
+module examples/java_compat
+
+use java/lang/StringBuilder
+use java/time/Instant
+use java/util/ArrayDeque
+
+def main() Unit {
+    now Instant = Instant.now()
+
+    builder StringBuilder = StringBuilder()
+    builder.append("generated at ")
+    builder.append(now.toString())
+
+    message Str = builder.toString()
+
+    messages ArrayDeque[Str] = ArrayDeque()
+    messages.add(message)
+    messages.add("processed with ArrayDeque")
+
+    first Str = messages.remove()
+    empty Bool = messages.isEmpty()
+
+    output StringBuilder = StringBuilder()
+    output.append(first)
+    output.append(" | empty=")
+    output.append(empty)
+    output.append(" | any=")
+
+    asAny Any = builder
+    output.append(asAny.toStr())
+    output.append(" | object=")
+    output.append(asAny)
+
+    println(output.toString())
+}

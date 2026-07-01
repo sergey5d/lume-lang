@@ -4368,6 +4368,10 @@ fn index_result_ir_type(ty: &ir::Type) -> ir::Type {
 }
 
 fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
+    if let Some(ty) = universal_member_type(name) {
+        return Some(ty);
+    }
+
     let ir::Type::Named {
         name: type_name,
         args,
@@ -4393,6 +4397,20 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         }),
         ("List" | "Array" | "Set" | "Map", "isEmpty" | "nonEmpty") => Some(ir::Type::Function {
             params: Vec::new(),
+            ret: Box::new(ir::Type::Bool),
+        }),
+        _ => None,
+    }
+}
+
+fn universal_member_type(name: &str) -> Option<ir::Type> {
+    match name {
+        "toStr" => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Str),
+        }),
+        "equals" => Some(ir::Type::Function {
+            params: vec![ir::Type::named("Any")],
             ret: Box::new(ir::Type::Bool),
         }),
         _ => None,

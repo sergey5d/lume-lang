@@ -28,6 +28,7 @@ List shorthand can be nested, for example:
 - `[[[(Str, Int)]]]`
 
 Common stdlib/prelude types:
+- `Any`
 - `Option[T]`
 - `Result[T, E]`
 - `Either[L, R]`
@@ -38,6 +39,12 @@ Common stdlib/prelude types:
 - `Ordering[T]`
 - `Printer`
 - `OS`
+
+Universal value operations:
+
+- `value.toStr()` returns a `Str` rendering of the value
+- `value.equals(other)` returns `Bool` and has the same equality semantics as `value == other`
+- `Any` is the top value type: any value can be assigned to `Any`, but `Any` is not assignable back to a narrower type without an explicit safe form
 
 Tuple types:
 

@@ -3758,6 +3758,12 @@ impl<'a> Interpreter<'a> {
             _ => {}
         }
 
+        if let Some(value) =
+            self.try_invoke_universal_method(receiver.clone(), method, &args, span)?
+        {
+            return Ok(value);
+        }
+
         Err(self.runtime_error(
             span,
             format!(
@@ -3766,6 +3772,36 @@ impl<'a> Interpreter<'a> {
                 receiver.render()
             ),
         ))
+    }
+
+    fn try_invoke_universal_method(
+        &self,
+        receiver: Value,
+        method: &str,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+        match method {
+            "toStr" => {
+                if !args.is_empty() {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("toStr expects 0 arguments, got {}", args.len()),
+                    ));
+                }
+                Ok(Some(Value::String(receiver.render())))
+            }
+            "equals" => {
+                if args.len() != 1 {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("equals expects 1 argument, got {}", args.len()),
+                    ));
+                }
+                Ok(Some(Value::Bool(values_equal(&receiver, &args[0]))))
+            }
+            _ => Ok(None),
+        }
     }
 
     fn invoke_user_variant_method(
@@ -3795,6 +3831,11 @@ impl<'a> Interpreter<'a> {
             &args,
         ) {
             return self.call_function(function, Some(receiver), None, args, span);
+        }
+        if let Some(value) =
+            self.try_invoke_universal_method(receiver.clone(), method, &args, span)?
+        {
+            return Ok(value);
         }
         Err(self.runtime_error(
             span,

@@ -140,6 +140,10 @@ impl Ty {
         Self::named("Type")
     }
 
+    fn any() -> Self {
+        Self::named("Any")
+    }
+
     fn bool() -> Self {
         Self::named("Bool")
     }
@@ -207,6 +211,10 @@ impl Ty {
         matches!(self, Ty::Named(name, args) if name == "Bool" && args.is_empty())
     }
 
+    fn is_any(&self) -> bool {
+        matches!(self, Ty::Named(name, args) if name == "Any" && args.is_empty())
+    }
+
     fn is_str(&self) -> bool {
         matches!(self, Ty::Named(name, args) if name == "Str" && args.is_empty())
     }
@@ -260,6 +268,40 @@ struct FunctionSig {
     ret: Ty,
     visibility: Visibility,
     has_body: bool,
+}
+
+fn universal_member_type(name: &str) -> Option<Ty> {
+    universal_method_sigs(name).and_then(|methods| {
+        let first = methods.into_iter().next()?;
+        Some(Ty::Function(
+            first.params.into_iter().map(|param| param.ty).collect(),
+            Box::new(first.ret),
+        ))
+    })
+}
+
+fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
+    let sig = match name {
+        "toStr" => FunctionSig {
+            params: Vec::new(),
+            ret: Ty::str(),
+            visibility: Visibility::Default,
+            has_body: true,
+        },
+        "equals" => FunctionSig {
+            params: vec![ParamSig {
+                name: "other".to_string(),
+                ty: Ty::any(),
+                variadic: false,
+                has_initializer: false,
+            }],
+            ret: Ty::bool(),
+            visibility: Visibility::Default,
+            has_body: true,
+        },
+        _ => return None,
+    };
+    Some(vec![sig])
 }
 
 #[derive(Debug, Clone)]
@@ -5732,7 +5774,9 @@ impl<'a> Checker<'a> {
     fn member_type(&self, receiver: &Ty, name: &str) -> Option<Ty> {
         match receiver {
             Ty::Named(type_name, args) => {
-                let sig = self.lookup_any_type(type_name)?;
+                let Some(sig) = self.lookup_any_type(type_name) else {
+                    return universal_member_type(name);
+                };
                 let subst = sig
                     .type_params
                     .iter()
@@ -5756,14 +5800,15 @@ impl<'a> Checker<'a> {
                         Box::new(substitute_type(&first.ret, &subst)),
                     ));
                 }
-                None
+                universal_member_type(name)
             }
             Ty::Record(fields) => fields
                 .iter()
                 .find(|(field_name, _)| field_name == name)
-                .map(|(_, ty)| ty.clone()),
+                .map(|(_, ty)| ty.clone())
+                .or_else(|| universal_member_type(name)),
             Ty::Unknown => Some(Ty::Unknown),
-            _ => None,
+            _ => universal_member_type(name),
         }
     }
 
@@ -5776,8 +5821,12 @@ impl<'a> Checker<'a> {
     fn member_method_sigs(&self, receiver: &Ty, name: &str) -> Option<Vec<FunctionSig>> {
         match receiver {
             Ty::Named(type_name, args) => {
-                let sig = self.lookup_any_type(type_name)?;
-                let methods = self.method_sigs_for_type(&sig, name)?;
+                let Some(sig) = self.lookup_any_type(type_name) else {
+                    return universal_method_sigs(name);
+                };
+                let Some(methods) = self.method_sigs_for_type(&sig, name) else {
+                    return universal_method_sigs(name);
+                };
                 let subst = sig
                     .type_params
                     .iter()
@@ -5805,7 +5854,8 @@ impl<'a> Checker<'a> {
                         .collect(),
                 )
             }
-            _ => None,
+            Ty::Unknown => universal_method_sigs(name),
+            _ => universal_method_sigs(name),
         }
     }
 
@@ -7564,6 +7614,9 @@ fn materialize_type(ty: &Ty) -> Ty {
 
 fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
     if matches!(actual, Ty::Unknown) || matches!(expected, Ty::Unknown) {
+        return true;
+    }
+    if expected.is_any() {
         return true;
     }
     if matches!(actual, Ty::Never) {

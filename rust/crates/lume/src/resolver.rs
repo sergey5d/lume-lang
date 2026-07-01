@@ -2885,9 +2885,8 @@ fn type_ref_name(reference: &TypeRef) -> Option<&str> {
 
 fn builtin_type_arity(name: &str) -> Option<usize> {
     match name {
-        "Int" | "Int64" | "Bool" | "Rune" | "Float" | "Float64" | "Str" | "Unit" | "Never" => {
-            Some(0)
-        }
+        "Any" | "Int" | "Int64" | "Bool" | "Rune" | "Float" | "Float64" | "Str" | "Unit"
+        | "Never" => Some(0),
         _ => None,
     }
 }

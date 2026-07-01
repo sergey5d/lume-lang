@@ -703,12 +703,21 @@ impl<'a> FunctionEmitter<'a> {
                     _ => None,
                 }
             }
-            ir::Callee::Method { receiver, method } => Some(format!(
-                "{}.{}({})",
-                self.emit_operand(receiver)?,
-                java_member_name(method),
-                args.join(", ")
-            )),
+            ir::Callee::Method { receiver, method } => {
+                let receiver = self.emit_operand(receiver)?;
+                match (method.as_str(), args.as_slice()) {
+                    ("toStr", []) => Some(format!("String.valueOf({receiver})")),
+                    ("equals", [other]) => {
+                        Some(format!("java.util.Objects.equals({receiver}, {other})"))
+                    }
+                    _ => Some(format!(
+                        "{}.{}({})",
+                        receiver,
+                        java_member_name(method),
+                        args.join(", ")
+                    )),
+                }
+            }
             ir::Callee::Intrinsic(intrinsic) => self.emit_intrinsic(intrinsic, &args),
             ir::Callee::Named { path } => self.emit_named_runtime_call(path, &args),
             ir::Callee::Indirect(_) => None,
@@ -1137,6 +1146,7 @@ impl JavaNames {
 
 fn java_named_builtin_value(name: &str) -> Option<String> {
     match name {
+        "Any" => Some("Object".to_string()),
         "Unit" => Some("lume.runtime.LumeUnit".to_string()),
         "Bool" => Some("Boolean".to_string()),
         "Int" => Some("Long".to_string()),

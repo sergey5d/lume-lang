@@ -468,8 +468,8 @@ fn java_type_to_lume_type_ref(src: &str, ctx: &JavaTypeContext<'_>) -> Option<Ty
     if let Some(rest) = src.strip_prefix("? super ") {
         return java_type_to_lume_type_ref(rest, ctx);
     }
-    if src == "?" || src == "java.lang.Object" || src == "Object" {
-        return None;
+    if src == "?" {
+        return Some(any_type_ref(ctx));
     }
 
     let mut array_depth = 0usize;
@@ -512,17 +512,21 @@ fn java_non_array_type_to_lume_type_ref(src: &str, ctx: &JavaTypeContext<'_>) ->
         });
     }
 
-    let local_name = java_local_type_name(base, ctx)?;
-    Some(TypeRef::Named {
-        name: local_name,
-        args,
-        span: ctx.span,
-    })
+    if let Some(local_name) = java_local_type_name(base, ctx) {
+        return Some(TypeRef::Named {
+            name: local_name,
+            args,
+            span: ctx.span,
+        });
+    }
+
+    Some(any_type_ref(ctx))
 }
 
 fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static str> {
     match base {
         "void" => Some("Unit"),
+        "java.lang.Object" | "Object" if arg_count == 0 => Some("Any"),
         "boolean" | "java.lang.Boolean" | "Boolean" => Some("Bool"),
         "byte" | "short" | "int" | "long" | "java.lang.Byte" | "java.lang.Short"
         | "java.lang.Integer" | "java.lang.Long" | "Byte" | "Short" | "Integer" | "Long" => {
@@ -547,6 +551,14 @@ fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static 
         "java.util.Map" | "Map" if arg_count == 2 => Some("Map"),
         "java.util.Optional" | "Optional" if arg_count == 1 => Some("Option"),
         _ => None,
+    }
+}
+
+fn any_type_ref(ctx: &JavaTypeContext<'_>) -> TypeRef {
+    TypeRef::Named {
+        name: "Any".to_string(),
+        args: Vec::new(),
+        span: ctx.span,
     }
 }
 
