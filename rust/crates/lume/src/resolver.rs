@@ -425,7 +425,7 @@ pub(crate) fn load_module(
                 resolve_imported_symbol(child, symbol.name.as_str(), same_module).ok_or_else(
                     || {
                         format!(
-                            "use '{}' has no public symbol '{}'",
+                            "use '{}' has no visible symbol '{}'",
                             import.path, symbol.name
                         )
                     },
@@ -2733,7 +2733,7 @@ annotation Route {
 }
 
 enum RouteKind {
-    case Public
+    case External
 }
 
 annotation Metadata {
@@ -2751,7 +2751,7 @@ single Config {
 @Route { path: routePath }
 @Route { path: Config.path }
 @Metadata {
-    kind: RouteKind.Public,
+    kind: RouteKind.External,
     path: "/literal" + routePath,
     score: 1 + 2,
     nested: { name: Config.path, value: 1 }

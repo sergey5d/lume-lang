@@ -70,8 +70,8 @@ def main() Int {
     let { value Int as skippedClassLeft, label Str as skippedClassRight } = Crate(16, "drop", "class-skip")
     println("class skip", skippedClassLeft, skippedClassRight)
 
-    let { name as publicName, location as publicLocation } = SecretUser("Sergey", "secret", "Tampa")
-    println("hidden named", publicName, publicLocation)
+    let { name as visibleName, location as visibleLocation } = SecretUser("Sergey", "secret", "Tampa")
+    println("hidden named", visibleName, visibleLocation)
 
     users = List(
         SecretUser("Sergey", "secret-1", "Tampa"),

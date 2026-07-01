@@ -746,7 +746,6 @@ impl<'a> Parser<'a> {
             parser.tokens.get(lookahead).map(|token| token.kind),
             Some(TokenKind::At)
                 | Some(TokenKind::Keyword(Keyword::Hidden))
-                | Some(TokenKind::Keyword(Keyword::Public))
                 | Some(TokenKind::Keyword(Keyword::Def))
         )
     }

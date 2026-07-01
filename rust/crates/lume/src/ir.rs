@@ -221,7 +221,7 @@ impl Function {
         }
     }
 
-    // add_param reserves a local slot that is part of the public callable
+    // add_param reserves a local slot that is part of the callable
     // signature and records it in declaration order.
     pub fn add_param(&mut self, name: impl Into<String>, ty: Type) -> LocalId {
         let id = self.add_local(name, ty, false, LocalKind::Param);

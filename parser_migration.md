@@ -2,7 +2,7 @@
 
 ## Goal
 
-Split the former `rust/crates/lume/src/parser.rs` into the current [rust/crates/lume/src/parser/](/Users/sergeyd/Projects/a-lang/rust/crates/lume/src/parser) module tree without changing parser behavior or the public parsing entry points.
+Split the former `rust/crates/lume/src/parser.rs` into the current [rust/crates/lume/src/parser/](/Users/sergeyd/Projects/a-lang/rust/crates/lume/src/parser) module tree without changing parser behavior or the exported parsing entry points.
 
 Status: complete.
 
@@ -48,7 +48,7 @@ Each file continues to contain `impl<'a> Parser<'a>` blocks for its own method c
 - no behavior changes in diagnostics or recovery unless needed to preserve compilation after the split
 - no trait-based parser rewrite
 
-## Public API To Preserve
+## Exported API To Preserve
 
 These should remain stable:
 

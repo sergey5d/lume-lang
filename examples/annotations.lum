@@ -11,7 +11,7 @@ annotation Route {
 }
 
 enum RouteVisibility {
-    case Public
+    case External
     case Internal
 }
 
@@ -46,7 +46,7 @@ single AnnotationConstants {
     code: 123,
     enabled: true,
     disabled: false,
-    visibility: RouteVisibility.Public,
+    visibility: RouteVisibility.External,
     joinedPath: "/api" + "/health",
     total: 1 + 2,
     tags: ["a", "b"],

@@ -17,7 +17,7 @@ Lume separates the main concepts deliberately:
 
 - `class` is the nominal runtime type: it owns identity, fields, visibility, and
   class construction.
-- `shape` is structural data: public read-only fields that can be matched,
+- `shape` is structural data: visible read-only fields that can be matched,
   passed, and converted by field compatibility.
 - `enum` models tagged alternatives, while `single` models one singleton value
   with optional fields and methods.
@@ -30,7 +30,7 @@ Construction is its own idea:
 - `Type { field: value }` fills that constructor shape by field name.
 - `Type(value)` fills the same constructor shape by declaration order.
 - If a class has no explicit `new`, the compiler synthesizes field construction
-  from visible public fields.
+  from visible fields.
 
 Control flow is expression-friendly but still explicit:
 

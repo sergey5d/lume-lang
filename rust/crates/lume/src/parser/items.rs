@@ -189,14 +189,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_visibility(&mut self) -> Visibility {
-        if self.match_keyword(Keyword::Public) {
-            self.diagnostics.push(Diagnostic::error(
-                "removed_keyword",
-                "'public' was removed; top-level declarations and immutable constants are public by default, use 'hidden' for private items",
-                self.previous_span(),
-            ));
-            Visibility::Default
-        } else if self.match_keyword(Keyword::Hidden) {
+        if self.match_keyword(Keyword::Hidden) {
             Visibility::Hidden
         } else {
             Visibility::Default

@@ -1,6 +1,0 @@
-# FAIL_REGEX:
-# .*'public' was removed; top-level declarations and immutable constants are public by default, use 'hidden' for private items.*
-
-interface Named {
-    public def label() Str = "named"
-}

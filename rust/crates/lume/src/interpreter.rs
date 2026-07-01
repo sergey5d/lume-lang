@@ -3133,7 +3133,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' cannot use positional construction because private defaulted fields must come after all public fields",
+                    "class '{}' cannot use positional construction because hidden defaulted fields must come after all visible fields",
                     ty.name
                 ),
             ));
@@ -3152,7 +3152,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' positional construction must match the public field order and may omit only trailing defaulted fields",
+                    "class '{}' positional construction must match visible field order and may omit only trailing defaulted fields",
                     ty.name
                 ),
             ));

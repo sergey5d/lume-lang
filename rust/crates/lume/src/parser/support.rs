@@ -362,7 +362,6 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Single) => "SINGLE",
             TokenKind::Keyword(Keyword::Interface) => "INTERFACE",
             TokenKind::Keyword(Keyword::Enum) => "ENUM",
-            TokenKind::Keyword(Keyword::Public) => "PUB",
             TokenKind::Keyword(Keyword::Hidden) => "PRIVATE",
             TokenKind::Keyword(Keyword::Var) => "VAR",
             TokenKind::LBrace => "{",

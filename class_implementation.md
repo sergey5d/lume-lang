@@ -104,7 +104,7 @@ Current constructor rules:
 - `Type { field: value }` matches explicit constructor input fields by name
 - `Type(...)` fills explicit constructor input fields by declaration order
 - if any explicit `new` exists, implicit field constructors are suppressed
-- if a class has no explicit `new`, field construction uses a synthesized shape from visible public fields
+- if a class has no explicit `new`, field construction uses a synthesized shape from visible fields
 - `hidden new { ... } { ... }` hides a constructor from outside callers
 
 ## Open Questions

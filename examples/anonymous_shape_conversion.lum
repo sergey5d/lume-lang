@@ -1,6 +1,6 @@
 # EXPECT:
 # class Ada 10
-# public Ben 12 NYC
+# visible Ben 12 NYC
 # vars 3 4
 # full Nora 20 Paris
 # mixed Liam 8 5
@@ -84,7 +84,7 @@ def main() Unit {
     }
 
     println("class", user.name, user.age)
-    println("public", person.name, person.age, person.city)
+    println("visible", person.name, person.age, person.city)
     println("vars", point.x, point.y)
     println("full", fullPerson.name, fullPerson.age, fullPerson.city)
     println("mixed", profile.name, profile.age, profile.scoreValue())

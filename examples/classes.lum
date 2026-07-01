@@ -8,9 +8,9 @@
 
 # Class construction rules in one place:
 # - classes without explicit `new` support brace field construction and positional parentheses
-# - positional construction follows public field order
-# - trailing public defaults may be omitted
-# - hidden defaulted fields may trail public fields and stay out of the shape
+# - positional construction follows visible field order
+# - trailing visible defaults may be omitted
+# - hidden defaulted fields may trail visible fields and stay out of the shape
 # - explicit `new` supports brace field construction and positional parentheses
 # - explicit `new` can define defaulted trailing parameters
 

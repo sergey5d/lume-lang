@@ -41,7 +41,6 @@ These older surfaces should stay out of new examples and docs:
 - placeholder expression lambdas like `_ + 1`; use `x -> x + 1`
 - class-to-tuple destructuring; use class/anonymous-shape brace destructuring
 - `Type({ ... })` nominal conversion; use explicit construction or a future `anon as Type` form if adopted
-- `public`; top-level declarations and immutable constants are public by default, use `hidden` for private items
 
 ## Keep
 
@@ -70,7 +69,7 @@ These still feel like strong surface choices:
 Notes:
 
 - `case` makes `match` blocks easier to scan.
-- `hidden` is the readable private marker; public is the default and does not need a keyword.
+- `hidden` is the readable private marker; default visibility does not need a keyword.
 - `expect` is a better assertive word than reviving `unwrap` syntax.
 
 ## Places To Keep Watching

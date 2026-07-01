@@ -6312,7 +6312,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' cannot use positional construction because private defaulted fields must come after all public fields",
+                    "{} '{}' cannot use positional construction because hidden defaulted fields must come after all visible fields",
                     type_kind_label(sig.kind),
                     sig.name
                 ),
@@ -8812,7 +8812,7 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_positional_construction_when_private_default_breaks_public_order() {
+    fn rejects_positional_construction_when_hidden_default_breaks_visible_order() {
         let program = parse_inline(
             r#"
 class Broken {
@@ -8830,7 +8830,7 @@ def main() Unit {
         assert!(
             result.diagnostics.iter().any(|diag| diag
                 .message
-                .contains("private defaulted fields must come after all public fields")),
+                .contains("hidden defaulted fields must come after all visible fields")),
             "{:#?}",
             result.diagnostics
         );

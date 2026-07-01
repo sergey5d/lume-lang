@@ -77,11 +77,10 @@ Finalized policy:
 Current module/use support is usable.
 
 Settled direction:
-- top-level functions are public by default
-- top-level immutable bindings are public by default
-- top-level types are public by default
+- top-level functions are exported by default
+- top-level immutable bindings are exported by default
+- top-level types are exported by default
 - `hidden` makes top-level functions, constants, and types private
-- `public` is removed from the language surface
 - top-level mutable bindings are not allowed; mutable module state belongs inside `single`, class instances, or function locals
 
 Still open:

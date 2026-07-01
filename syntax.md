@@ -246,7 +246,7 @@ Meaning:
 - `use module/sub`
   qualified access through the module name, for example `sub.A`
 - `use module/sub/*`
-  use all public symbols unqualified
+  use all visible symbols unqualified
 - `use module/sub/A`
   use one symbol unqualified
 - `use module/sub/A as B`
@@ -263,7 +263,7 @@ Built-in `OS` methods are available implicitly in every file, so `print(...)`, `
 ## Top-Level Declarations
 
 Annotations are declared with `annotation`. They are shape-like metadata types:
-- only public immutable fields are allowed
+- only visible immutable fields are allowed
 - fields may have default values
 - methods and custom constructors are not allowed
 
@@ -276,7 +276,7 @@ annotation Route {
 }
 
 enum RouteVisibility {
-    case Public
+    case External
     case Internal
 }
 
@@ -313,7 +313,7 @@ def health2() Str = "ok"
     text: "literal",
     code: 123,
     enabled: true,
-    visibility: RouteVisibility.Public,
+    visibility: RouteVisibility.External,
     joinedPath: "/api" + "/health",
     total: 1 + 2,
     tags: ["a", "b"],
@@ -330,7 +330,7 @@ Annotation arguments are compile-time metadata values. They may only be literals
 - immutable top-level constants, including imported constants
 - immutable fields on `single` values, such as `Routes.health`; this is allowed because `single Name { ... }` declares the singleton value `Name`
 - immutable constants through a module alias, such as `routes.healthPath`
-- enum cases, such as `RouteVisibility.Public`
+- enum cases, such as `RouteVisibility.External`
 - arithmetic, comparison, boolean, and string-concatenation expressions whose operands are also annotation-safe
 
 Calls, constructors, indexing, mutable singleton fields, ordinary object field reads, `try`, `for ... yield`, `match`, `if`, lambdas, and blocks are rejected in annotation arguments. Top-level mutable bindings are not allowed at all, so they are rejected before annotation argument checking.
@@ -433,7 +433,7 @@ var count = 0
 var total Int = 10
 ```
 
-Top-level immutable bindings are also supported and are public by default:
+Top-level immutable bindings are also supported:
 
 ```txt
 seed Int = 1
@@ -465,7 +465,7 @@ single Greeter {
 }
 ```
 
-Public class fields, shape fields, enum fields, and singleton fields still require explicit field types.
+Visible class fields, shape fields, enum fields, and singleton fields still require explicit field types.
 
 ## Assignment and Update
 
@@ -623,7 +623,7 @@ settings Settings = Settings {}
 ```
 
 Named shapes are data-only structural field views:
-- fields are always public and read-only
+- fields are always visible and read-only
 - fields are declared in the `shape` body
 - methods are declared with `impl ShapeName { ... }`
 - custom `new` constructors are not allowed
@@ -712,16 +712,16 @@ user User = User { label: "Ada" }
 
 Implicit field construction rules:
 
-- if a class has no explicit `new`, the compiler synthesizes a constructor shape from visible public fields
-- construction braces check the synthesized visible-public-field shape
-- public fields without initializers are required
-- public fields with initializers are optional
+- if a class has no explicit `new`, the compiler synthesizes a constructor shape from visible fields
+- construction braces check the synthesized visible-field shape
+- visible fields without initializers are required
+- visible fields with initializers are optional
 - hidden fields are excluded from the synthesized constructor shape
 - hidden fields without initializers suppress implicit field constructors; define `new` to initialize them
 - `Type {}` works when the synthesized field-construction shape has no required fields
-- positional construction follows declared public-field order
-- public fields may be omitted from positional construction only when the omitted fields form a trailing suffix and all have initializers
-- positional construction is rejected when a hidden initialized field appears before a later public field
+- positional construction follows declared visible-field order
+- visible fields may be omitted from positional construction only when the omitted fields form a trailing suffix and all have initializers
+- positional construction is rejected when a hidden initialized field appears before a later visible field
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
 
@@ -749,7 +749,7 @@ Shape conversion rules:
 - tuple-to-shape is allowed only when the target shape is known
 - tuple-to-shape follows shape field order exactly
 - shape-to-shape assignment is structural by field names and field types
-- class-to-shape is allowed through visible public fields
+- class-to-shape is allowed through visible fields
 - shape-to-interface follows the shape's explicit `with Interface` bounds
 - class-to-interface-through-shape is not automatic; assign the class value to an explicit shape view first
 - hidden class fields are not visible to shape conversion
@@ -2168,11 +2168,10 @@ Supported today:
 - `hidden` on fields
 - `hidden` on methods
 
-Top-level functions, immutable bindings, and types are public by default.
-Use `hidden` for private top-level functions, constants, and types.
+Default visibility is public. There is no `public` keyword.
+Use `hidden` for private top-level functions, constants, types, fields, and methods.
 Top-level mutable bindings are not allowed; mutable module state must live inside
 `single`, class instances, or function locals.
-The `public` keyword is not part of the language surface.
 
 ## Notes
 

@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*use 'model/pubdemo' has no public symbol 'whisper'.*
+# .*use 'model/pubdemo' has no visible symbol 'whisper'.*
 
 module app
 
