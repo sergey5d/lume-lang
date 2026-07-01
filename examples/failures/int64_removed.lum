@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*undefined type 'Int64'.*
+
+def main() Unit {
+    value Int64 = 1
+}

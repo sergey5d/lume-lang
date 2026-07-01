@@ -492,11 +492,8 @@ impl<'a> FunctionEmitter<'a> {
             ir::StatementKind::Assign { target, value } => {
                 let mut value_expr = self.emit_rvalue(value)?;
                 if let Some(target_ty) = self.place_type(target) {
-                    value_expr = self.cast_if_unknown_source(
-                        value_expr,
-                        self.rvalue_type(value),
-                        &target_ty,
-                    );
+                    value_expr =
+                        self.coerce_to_target_type(value_expr, self.rvalue_type(value), &target_ty);
                 }
                 out.push_str("                    ");
                 out.push_str(&self.emit_place(target)?);
@@ -532,7 +529,7 @@ impl<'a> FunctionEmitter<'a> {
                 else_block,
             } => {
                 let condition_ty = ir::Type::Bool;
-                let condition_expr = self.cast_if_unknown_source(
+                let condition_expr = self.coerce_to_target_type(
                     self.emit_operand(condition)?,
                     self.operand_type(condition),
                     &condition_ty,
@@ -579,7 +576,7 @@ impl<'a> FunctionEmitter<'a> {
                 } else {
                     out.push_str("                    return ");
                     if let Some(value) = value {
-                        let value_expr = self.cast_if_unknown_source(
+                        let value_expr = self.coerce_to_target_type(
                             self.emit_operand(value)?,
                             self.operand_type(value),
                             &self.function.return_ty,
@@ -915,12 +912,22 @@ impl<'a> FunctionEmitter<'a> {
         }
     }
 
-    fn cast_if_unknown_source(
+    fn coerce_to_target_type(
         &self,
         expr: String,
         source_ty: Option<ir::Type>,
         target_ty: &ir::Type,
     ) -> String {
+        if is_named_builtin(target_ty, "Int32")
+            && (source_ty.is_none() || source_is_wide_int(source_ty.as_ref()))
+        {
+            return format!("((int) ({expr}))");
+        }
+        if is_named_builtin(target_ty, "Float32")
+            && (source_ty.is_none() || source_is_wide_float(source_ty.as_ref()))
+        {
+            return format!("((float) ({expr}))");
+        }
         if !matches!(source_ty, Some(ir::Type::Unknown)) || matches!(target_ty, ir::Type::Unknown) {
             return expr;
         }
@@ -1150,7 +1157,9 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Unit" => Some("lume.runtime.LumeUnit".to_string()),
         "Bool" => Some("Boolean".to_string()),
         "Int" => Some("Long".to_string()),
+        "Int32" => Some("Integer".to_string()),
         "Float" => Some("Double".to_string()),
+        "Float32" => Some("Float".to_string()),
         "Str" => Some("String".to_string()),
         "Rune" => Some("Integer".to_string()),
         _ => None,
@@ -1161,7 +1170,9 @@ fn java_named_builtin_annotation(name: &str) -> Option<String> {
     match name {
         "Bool" => Some("boolean".to_string()),
         "Int" => Some("long".to_string()),
+        "Int32" => Some("int".to_string()),
         "Float" => Some("double".to_string()),
+        "Float32" => Some("float".to_string()),
         "Str" => Some("String".to_string()),
         "Rune" => Some("int".to_string()),
         _ => None,
@@ -1246,6 +1257,20 @@ fn type_is_named_or_primitive(
 fn is_java_void_type(ty: &ir::Type) -> bool {
     matches!(ty, ir::Type::Unit)
         || matches!(ty, ir::Type::Named { name, args } if name == "Unit" && args.is_empty())
+}
+
+fn is_named_builtin(ty: &ir::Type, expected: &str) -> bool {
+    matches!(ty, ir::Type::Named { name, args } if name == expected && args.is_empty())
+}
+
+fn source_is_wide_int(ty: Option<&ir::Type>) -> bool {
+    matches!(ty, Some(ir::Type::Int))
+        || matches!(ty, Some(ir::Type::Named { name, args }) if name == "Int" && args.is_empty())
+}
+
+fn source_is_wide_float(ty: Option<&ir::Type>) -> bool {
+    matches!(ty, Some(ir::Type::Float))
+        || matches!(ty, Some(ir::Type::Named { name, args }) if name == "Float" && args.is_empty())
 }
 
 fn java_constant(constant: &ir::Constant) -> String {

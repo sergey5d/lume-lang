@@ -528,13 +528,11 @@ fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static 
         "void" => Some("Unit"),
         "java.lang.Object" | "Object" if arg_count == 0 => Some("Any"),
         "boolean" | "java.lang.Boolean" | "Boolean" => Some("Bool"),
-        "byte" | "short" | "int" | "long" | "java.lang.Byte" | "java.lang.Short"
-        | "java.lang.Integer" | "java.lang.Long" | "Byte" | "Short" | "Integer" | "Long" => {
-            Some("Int")
-        }
-        "float" | "double" | "java.lang.Float" | "java.lang.Double" | "Float" | "Double" => {
-            Some("Float")
-        }
+        "byte" | "short" | "int" | "java.lang.Byte" | "java.lang.Short" | "java.lang.Integer"
+        | "Byte" | "Short" | "Integer" => Some("Int32"),
+        "long" | "java.lang.Long" | "Long" => Some("Int"),
+        "float" | "java.lang.Float" | "Float" => Some("Float32"),
+        "double" | "java.lang.Double" | "Double" => Some("Float"),
         "char" | "java.lang.Character" | "Character" => Some("Rune"),
         "java.lang.String" | "String" => Some("Str"),
         "java.util.List"

@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*undefined type 'Float64'.*
+
+def main() Unit {
+    value Float64 = 1.5
+}

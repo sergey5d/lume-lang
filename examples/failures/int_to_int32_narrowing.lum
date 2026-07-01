@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*cannot assign value of type 'Int' to binding 'narrow' of type 'Int32'.*
+
+def main() Unit {
+    value Int = 1
+    narrow Int32 = value
+}

@@ -220,11 +220,19 @@ impl Ty {
     }
 
     fn is_int_like(&self) -> bool {
-        matches!(self, Ty::Named(name, args) if args.is_empty() && (name == "Int" || name == "Int64"))
+        matches!(self, Ty::Named(name, args) if args.is_empty() && (name == "Int" || name == "Int32"))
+    }
+
+    fn is_int32(&self) -> bool {
+        matches!(self, Ty::Named(name, args) if name == "Int32" && args.is_empty())
     }
 
     fn is_float_like(&self) -> bool {
-        matches!(self, Ty::Named(name, args) if args.is_empty() && (name == "Float" || name == "Float64"))
+        matches!(self, Ty::Named(name, args) if args.is_empty() && (name == "Float" || name == "Float32"))
+    }
+
+    fn is_float32(&self) -> bool {
+        matches!(self, Ty::Named(name, args) if name == "Float32" && args.is_empty())
     }
 
     fn is_numeric(&self) -> bool {
@@ -3275,7 +3283,9 @@ impl<'a> Checker<'a> {
                 let _ = expected;
                 Ty::Unknown
             }
+            Expr::Integer { .. } if expected.is_int32() => expected.clone(),
             Expr::Integer { .. } => Ty::int(),
+            Expr::Float { .. } if expected.is_float32() => expected.clone(),
             Expr::Float { .. } => Ty::float(),
             Expr::String { .. } => Ty::str(),
             Expr::Bool { .. } => Ty::bool(),

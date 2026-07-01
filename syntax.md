@@ -7,9 +7,9 @@ This file describes the language syntax that is available now.
 Primitive types:
 
 - `Int`
-- `Int64`
+- `Int32`
 - `Float`
-- `Float64`
+- `Float32`
 - `Bool`
 - `Str`
 - `Rune`
