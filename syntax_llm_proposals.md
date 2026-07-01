@@ -19,7 +19,8 @@ The language is strongest when it keeps one obvious form for each major idea:
 - `Type { field: value }` for named construction
 - `{ field: value }` for anonymous shapes
 - `try` for propagation
-- `expect` for assertive refutable binding or boolean assertions
+- `expect` for assertive refutable binding
+- `assert(...)` for runtime/prelude boolean assertions
 - explicit lambdas such as `value -> value + 1`
 
 The main cleanup principle still stands:
@@ -40,6 +41,7 @@ These older surfaces should stay out of new examples and docs:
 - placeholder expression lambdas like `_ + 1`; use `x -> x + 1`
 - class-to-tuple destructuring; use class/anonymous-shape brace destructuring
 - `Type({ ... })` nominal conversion; use explicit construction or a future `anon as Type` form if adopted
+- `public`; top-level declarations and immutable constants are public by default, use `hidden` for private items
 
 ## Keep
 
@@ -51,12 +53,12 @@ These still feel like strong surface choices:
 - `single`
 - `enum`
 - `interface`
-- `public`
 - `hidden`
 - `match` with mandatory `case`
 - `partial` as the partial-match form
 - `let`
 - `expect`
+- `assert(...)`
 - `defer`
 - `@Annotation(...)`
 - `Type { ... }`
@@ -68,7 +70,7 @@ These still feel like strong surface choices:
 Notes:
 
 - `case` makes `match` blocks easier to scan.
-- `public` and `hidden` are readable visibility markers.
+- `hidden` is the readable private marker; public is the default and does not need a keyword.
 - `expect` is a better assertive word than reviving `unwrap` syntax.
 
 ## Places To Keep Watching

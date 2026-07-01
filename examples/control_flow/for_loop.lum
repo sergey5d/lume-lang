@@ -5,21 +5,50 @@
 # item 4
 # item 5
 # total 15
+# yielded 2
+# yielded 3
+# yielded 4
+# combo 11
+# combo 21
+# combo 12
+# combo 22
+# combo size 4
 # 0
 
 def main() Int {
-	var total Int = 0
+    var total Int = 0
 
-	for item <- [1, 2, 3] {
-		println("item " + item)
-		total += item
-	}
+    for item <- [1, 2, 3] {
+        println("item " + item)
+        total += item
+    }
 
-	for item <- Range(4, 6) {
-		println("item " + item)
-		total += item
-	}
+    for item <- Range(4, 6) {
+        println("item " + item)
+        total += item
+    }
 
-	println("total " + total)
-	0
+    println("total " + total)
+
+    yielded = for item <- [1, 2, 3] yield item + 1
+
+    for item <- yielded {
+        println("yielded " + item)
+    }
+
+    combos = for {
+        left <- [1, 2]
+        right <- [10, 20]
+        let (base, extra) = (left, right)
+        combo = base + extra
+    } yield {
+        combo
+    }
+
+    for combo <- combos {
+        println("combo " + combo)
+    }
+
+    println("combo size " + combos.size())
+    0
 }

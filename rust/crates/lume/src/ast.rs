@@ -244,7 +244,6 @@ pub struct Block {
 pub enum Stmt {
     Binding(BindingStmt),
     PatternBinding(PatternBindingStmt),
-    Assert(AssertStmt),
     Assignment(AssignmentStmt),
     Defer(DeferStmt),
     If(IfStmt),
@@ -264,7 +263,6 @@ impl Stmt {
         match self {
             Stmt::Binding(stmt) => stmt.span,
             Stmt::PatternBinding(stmt) => stmt.span,
-            Stmt::Assert(stmt) => stmt.span,
             Stmt::Assignment(stmt) => stmt.span,
             Stmt::Defer(stmt) => stmt.span,
             Stmt::If(stmt) => stmt.span,
@@ -453,13 +451,6 @@ pub struct PatternBindingStmt {
     pub clauses: Vec<RefutableClause>,
     pub pattern: Pattern,
     pub value: Expr,
-    pub span: Span,
-}
-
-/// An `assert CONDITION` statement that panics when the condition is false.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AssertStmt {
-    pub condition: Expr,
     pub span: Span,
 }
 

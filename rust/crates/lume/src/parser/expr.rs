@@ -1242,7 +1242,6 @@ impl<'a> Parser<'a> {
 
     fn parse_member_name(&mut self, message: &'static str) -> Option<(String, Span)> {
         if self.at(TokenKind::Keyword(Keyword::Annotation))
-            || self.at(TokenKind::Keyword(Keyword::Assert))
             || self.at(TokenKind::Keyword(Keyword::Expect))
             || self.at(TokenKind::Keyword(Keyword::Case))
         {

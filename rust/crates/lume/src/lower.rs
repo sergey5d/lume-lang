@@ -4134,6 +4134,7 @@ fn intrinsic_for_name(name: &str) -> Option<ir::Intrinsic> {
         "println" => Some(ir::Intrinsic::Println),
         "printf" => Some(ir::Intrinsic::Printf),
         "panic" => Some(ir::Intrinsic::Panic),
+        "assert" => Some(ir::Intrinsic::Assert),
         _ => None,
     }
 }

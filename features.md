@@ -140,13 +140,13 @@ Later improvements could include:
 Concrete example of the kind of narrowing worth considering:
 
 ```txt
-if (x is String) {
-    println(x.length)
+if x is Str {
+    println(x.size())
 }
 ```
 
 Meaning:
-- after the `is String` check succeeds, `x` would be treated as `String` inside the `if` body
+- after the `is Str` check succeeds, `x` would be treated as `Str` inside the `if` body
 - the programmer would not need to write an explicit cast before using string-specific members
 
 Possible follow-up extensions if this direction is adopted:
@@ -154,11 +154,11 @@ Possible follow-up extensions if this direction is adopted:
 - preserving narrowing after early exits, for example:
 
 ```txt
-if !(x is String) {
+if !(x is Str) {
     return
 }
 
-println(x.length)
+println(x.size())
 ```
 
 - combining narrowing with boolean conditions when the flow stays obvious
@@ -233,7 +233,7 @@ refutable:
 - `let PATTERN = value else { ... }` for refutable binding with an explicit failure path
 - `let { PATTERN = value ... } else { ... }` for multiple sequential refutable bindings sharing one fallback
 - `expect PATTERN = value` for assertive refutable binding that panics on mismatch; if the binding is irrefutable, use `let`
-- `assert condition` for boolean assertions that panic when false
+- `assert(condition)` and `assert(condition, message)` for boolean assertions that panic when false
 - `PATTERN <- source` as shorthand for the success case inside `if let`, `let ... else`, and `expect`
   `Some(PATTERN)` for `Option`, `Ok(PATTERN)` for `Result`, and `Right(PATTERN)` for `Either`
   plain `let` accepts this form only when the source expression itself proves the success case, such as `let item <- Some(5)`
@@ -243,21 +243,6 @@ TODO:
 - consider direct nested payload destructuring inside `if let`, for example `if let Some((_, initialY, _)) = rows.get(0) { ... }`
 - for now, prefer `if let Some(row) = rows.get(0) { ... }` and destructure `row` on the next line inside the branch
 - keep `if let` chaining limited to `&&` joins; if we ever extend it, do that deliberately rather than broadening it implicitly through general boolean syntax
-
-### Assertion and Panic Placement
-
-Current surface:
-- `expect PATTERN = value` is for assertive pattern binding
-- `assert condition` is for boolean assertion and panics when false
-- `panic(...)` is available through the builtin/prelude `OS` methods
-
-Open question:
-- should boolean assertion remain statement syntax, or should it become a core/prelude function such as `assert(condition)`
-
-Current leaning:
-- keep assertion out of `OS.assert(...)` because assertion is not really an operating-system capability
-- if the language ever wants fewer keywords, prefer a global/prelude `assert(...)` over `OS.assert(...)`
-- keep `OS` focused on platform/runtime boundary helpers rather than turning it into a general utility namespace
 
 ### Lambda Surface
 

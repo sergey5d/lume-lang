@@ -12,4 +12,6 @@ impl single OS {
     def println(value [Str] vararg) Unit = ()
     def printf(format Str, value [Str] vararg) Unit = ()
     def panic(value [Str] vararg) Never = panic()
+    def assert(condition Bool) Unit = ()
+    def assert(condition Bool, message Str) Unit = ()
 }

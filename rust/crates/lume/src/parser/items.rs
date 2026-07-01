@@ -715,9 +715,7 @@ impl<'a> Parser<'a> {
         allow_signature_only: bool,
     ) -> Option<MethodDecl> {
         let start = self.consume_keyword(Keyword::Def, "expected 'def'")?;
-        let (name, _) = if self.at(TokenKind::Keyword(Keyword::Assert))
-            || self.at(TokenKind::Keyword(Keyword::Expect))
-        {
+        let (name, _) = if self.at(TokenKind::Keyword(Keyword::Expect)) {
             let token = self.current().clone();
             self.advance();
             (token.lexeme, token.span)

@@ -33,7 +33,7 @@ impl AssetPrices {
 
             split = asset.split("-")
 
-            assert split.size() == 3
+            assert(split.size() == 3)
 
             println("split: " + split[0] + "-" + split[1] + "-" + split[2])
 

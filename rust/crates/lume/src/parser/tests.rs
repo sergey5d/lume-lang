@@ -1732,11 +1732,11 @@ def run(value Option[Int]) Unit {
 }
 
 #[test]
-fn parses_assert_statement() {
+fn parses_assert_runtime_call() {
     let result = parse(
         r#"
 def run(split [Str]) Unit {
-    assert split.size() == 3
+    assert(split.size() == 3)
 }
 "#,
     );
@@ -1748,16 +1748,45 @@ def run(split [Str]) Unit {
     };
     match &function.body {
         CallableBody::Block(block) => match &block.statements[0] {
-            Stmt::Assert(stmt) => match &stmt.condition {
-                Expr::Binary {
-                    op: BinaryOp::Eq, ..
-                } => {}
-                other => panic!("expected equality condition, got {other:#?}"),
+            Stmt::Expr(stmt) => match &stmt.expr {
+                Expr::Call { callee, args, .. } => {
+                    assert_eq!(args.len(), 1);
+                    assert!(
+                        matches!(callee.as_ref(), Expr::Identifier { name, .. } if name == "assert")
+                    );
+                    assert!(matches!(
+                        args[0].value,
+                        Expr::Binary {
+                            op: BinaryOp::Eq,
+                            ..
+                        }
+                    ));
+                }
+                other => panic!("expected assert call, got {other:#?}"),
             },
-            other => panic!("expected assert statement, got {other:#?}"),
+            other => panic!("expected expression statement, got {other:#?}"),
         },
         other => panic!("expected block body, got {other:#?}"),
     }
+}
+
+#[test]
+fn rejects_removed_assert_statement_syntax() {
+    let result = parse(
+        r#"
+def run(split [Str]) Unit {
+    assert split.size() == 3
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "removed_assert_statement"
+                && diag.message.contains("use assert(condition)")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
@@ -1772,7 +1801,9 @@ def run(split [Str]) Unit {
     assert!(
         result.diagnostics.iter().any(|diag| {
             diag.code == "expected_pattern_binding"
-                && diag.message.contains("use 'assert' for boolean assertions")
+                && diag
+                    .message
+                    .contains("use assert(condition) for boolean assertions")
         }),
         "{:#?}",
         result.diagnostics

@@ -221,6 +221,8 @@ OS.print("hello")
 OS.println("hello")
 OS.printf("value=%d\n", 42)
 OS.panic("boom")
+OS.assert(ready)
+OS.assert(ready, "not ready")
 OS.stdout.println("hello")
 OS.stderr.println("oops")
 ```
@@ -256,7 +258,7 @@ Meaning:
 - `use module/sub/SingletonName/{printLn as printN, print}`
   use selected visible singleton methods from a singleton
 
-Built-in `OS` methods are available implicitly in every file, so `print(...)`, `println(...)`, `printf(...)`, and `panic(...)` work without writing `use OS/*`. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
+Built-in `OS` methods are available implicitly in every file, so `print(...)`, `println(...)`, `printf(...)`, `panic(...)`, and `assert(...)` work without writing `use OS/*`. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
 
 ## Top-Level Declarations
 
@@ -413,7 +415,7 @@ enum OptionX[T] {
 }
 ```
 
-Arbitrary statements such as `if`, `for`, `match`, `defer`, `expect`, `assert`, or expression statements are not valid at top level. Put executable code inside a function such as `def main() { ... }`.
+Arbitrary statements such as `if`, `for`, `match`, `defer`, `expect`, or expression statements are not valid at top level. Put executable code inside a function such as `def main() { ... }`.
 
 ## Variable Declarations
 
@@ -1556,24 +1558,18 @@ expect {
 `expect` is statement-only and does not support `else`; use `let ... else`
 when you want an explicit fallback path.
 
-Use `assert` for plain boolean assertions:
+Use the runtime/prelude `assert(...)` method for plain boolean assertions:
 
 ```txt
-assert split.size() == 3
+assert(split.size() == 3)
+assert(split.size() == 3, "split must have 3 parts")
 ```
 
-This form requires a `Bool` condition and panics when the condition is `false`.
+The first argument must be `Bool`. When the condition is `false`, `assert`
+panics. The optional second argument is the panic message.
+Statement-style `assert condition` is not supported.
 Boolean checks are intentionally not written with `expect`; `expect` is reserved
 for pattern/assertive binding.
-
-Possible future extension:
-
-```txt
-assert split.size() == 3, "asset must have 3 parts"
-expect Some(value) = maybeValue, "missing value"
-```
-
-This is only a proposal for now; trailing messages on `assert` and `expect` are not currently implemented.
 
 Propagation form:
 
@@ -2036,7 +2032,6 @@ Boolean:
 Other operators / constructs:
 
 - `is` for runtime type checks
-- `assert` for boolean assertions that panic when false
 - `<-` for `for` iteration and success-case extraction in `if let`, `let ... else`, and `expect`
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases

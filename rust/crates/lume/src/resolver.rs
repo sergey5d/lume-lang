@@ -142,7 +142,7 @@ impl AmbientRegistry {
         let mut registry = AmbientRegistry::default();
         for value in [
             "List", "Map", "Set", "Array", "Range", "Int", "Int64", "Bool", "Rune", "Float",
-            "Float64", "Str", "Unit", "Never", "print", "println", "printf", "panic",
+            "Float64", "Str", "Unit", "Never", "print", "println", "printf", "panic", "assert",
         ] {
             registry.values.insert(value.to_string());
         }
@@ -1534,7 +1534,6 @@ impl<'a> Resolver<'a> {
                 }
             }
             Stmt::PatternBinding(stmt) => self.resolve_pattern_binding(stmt),
-            Stmt::Assert(stmt) => self.resolve_expr(&stmt.condition),
             Stmt::Assignment(assignment) => self.resolve_assignment(assignment),
             Stmt::If(stmt) => self.resolve_if_stmt(stmt),
             Stmt::Match(stmt) => {

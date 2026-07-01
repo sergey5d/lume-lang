@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*assert statement syntax was removed; use assert\(condition\) or assert\(condition, message\).*
+
+def main() Unit {
+    assert 1 + 2 == 3
+}

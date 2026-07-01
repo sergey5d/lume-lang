@@ -420,7 +420,7 @@ impl AmbientInfo {
         }
 
         if let Some(os) = ambient.singles.get("OS") {
-            for builtin in ["print", "println", "printf", "panic"] {
+            for builtin in ["print", "println", "printf", "panic", "assert"] {
                 if let Some(sigs) = os.methods.get(builtin) {
                     ambient.functions.insert(builtin.to_string(), sigs.clone());
                 }
@@ -1483,9 +1483,6 @@ impl<'a> Checker<'a> {
                 }
                 self.check_field_initializer_expr(&stmt.value, owner, initialized_fields);
             }
-            Stmt::Assert(stmt) => {
-                self.check_field_initializer_expr(&stmt.condition, owner, initialized_fields);
-            }
             Stmt::Assignment(stmt) => {
                 for target in &stmt.targets {
                     self.check_field_initializer_expr(target, owner, initialized_fields);
@@ -2087,10 +2084,6 @@ impl<'a> Checker<'a> {
                 self.check_pattern_binding_stmt(stmt);
                 Ty::unit()
             }
-            Stmt::Assert(stmt) => {
-                self.check_assert_stmt(stmt);
-                Ty::unit()
-            }
             Stmt::Assignment(assignment) => {
                 self.check_assignment(assignment);
                 Ty::unit()
@@ -2307,15 +2300,6 @@ impl<'a> Checker<'a> {
         self.bind_pattern(&stmt.pattern, &value_ty);
     }
 
-    fn check_assert_stmt(&mut self, stmt: &crate::ast::AssertStmt) {
-        let condition_ty = self.check_expr(&stmt.condition);
-        self.require_bool(
-            &condition_ty,
-            stmt.condition.span(),
-            "assert condition must be Bool",
-        );
-    }
-
     fn block_guarantees_control_exit(&self, block: &Block) -> bool {
         block
             .statements
@@ -2329,7 +2313,6 @@ impl<'a> Checker<'a> {
             Stmt::Expr(expr_stmt) => self.expr_guarantees_control_exit(&expr_stmt.expr),
             Stmt::If(stmt) => self.if_stmt_guarantees_control_exit(stmt),
             Stmt::Match(stmt) => self.match_stmt_guarantees_control_exit(stmt),
-            Stmt::Assert(_) => false,
             _ => false,
         }
     }
@@ -3834,6 +3817,9 @@ impl<'a> Checker<'a> {
             }
             return Ty::unit();
         }
+        if self.is_builtin_assert_call(callee) {
+            return self.check_builtin_assert_call(&normalized_args, span);
+        }
         if let Some(ty) = self.check_builtin_static_method_call(callee, &normalized_args, span) {
             return ty;
         }
@@ -4332,7 +4318,6 @@ impl<'a> Checker<'a> {
             Stmt::Expr(expr_stmt) => self.check_discarded_expr_in_statement(&expr_stmt.expr),
             Stmt::If(stmt) => self.check_discarded_if_stmt_in_statement(stmt),
             Stmt::Match(stmt) => self.check_discarded_match_stmt_in_statement(stmt),
-            Stmt::Assert(_) => {}
             _ => {}
         }
     }
@@ -6013,6 +5998,62 @@ impl<'a> Checker<'a> {
             Expr::Member { receiver, name, .. } => name == "panic" && path_starts_with_os(receiver),
             _ => false,
         }
+    }
+
+    fn is_builtin_assert_call(&self, callee: &Expr) -> bool {
+        match callee {
+            Expr::Identifier { name, .. } => name == "assert",
+            Expr::Member { receiver, name, .. } => {
+                name == "assert" && path_starts_with_os(receiver)
+            }
+            _ => false,
+        }
+    }
+
+    fn check_builtin_assert_call(
+        &mut self,
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) -> Ty {
+        if !matches!(args.len(), 1 | 2) {
+            self.add_error(
+                "invalid_argument_count",
+                format!("assert expects 1 or 2 arguments, got {}", args.len()),
+                span,
+            );
+        }
+
+        if let Some(condition) = args.first() {
+            let actual = self.check_expr(&condition.value);
+            self.require_assignable(
+                &actual,
+                &Ty::bool(),
+                condition.span,
+                "invalid_argument_type",
+                format!(
+                    "assert condition has type '{}' but expects 'Bool'",
+                    actual.describe()
+                ),
+            );
+        }
+        if let Some(message) = args.get(1) {
+            let actual = self.check_expr(&message.value);
+            self.require_assignable(
+                &actual,
+                &Ty::str(),
+                message.span,
+                "invalid_argument_type",
+                format!(
+                    "assert message has type '{}' but expects 'Str'",
+                    actual.describe()
+                ),
+            );
+        }
+        for extra in args.iter().skip(2) {
+            self.check_expr(&extra.value);
+        }
+
+        Ty::unit()
     }
 
     fn choose_overload<'b>(
@@ -8068,11 +8109,14 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_assert_statement() {
+    fn allows_assert_runtime_calls() {
         let program = parse_inline(
             r#"
 def main() Unit {
-    assert 1 + 2 == 3
+    assert(1 + 2 == 3)
+    assert(true, "still true")
+    OS.assert(true)
+    OS.assert(true, "still true")
 }
 "#,
         );
@@ -8203,15 +8247,17 @@ def main() Unit {
         let program = parse_inline(
             r#"
 def main() Unit {
-    assert 1
+    assert(1)
 }
 "#,
         );
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diag| {
-                diag.code == "invalid_condition_type"
-                    && diag.message.contains("assert condition must be Bool")
+                diag.code == "invalid_argument_type"
+                    && diag
+                        .message
+                        .contains("assert condition has type 'Int' but expects 'Bool'")
             }),
             "{:#?}",
             result.diagnostics

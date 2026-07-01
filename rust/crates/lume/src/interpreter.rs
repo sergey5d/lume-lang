@@ -314,9 +314,6 @@ fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: 
             rewrite_pattern_for_runtime(&mut stmt.pattern, module);
             rewrite_expr_for_runtime(&mut stmt.value, module, graph);
         }
-        ast::Stmt::Assert(stmt) => {
-            rewrite_expr_for_runtime(&mut stmt.condition, module, graph);
-        }
         ast::Stmt::Assignment(assign) => {
             for target in &mut assign.targets {
                 rewrite_expr_for_runtime(target, module, graph);
@@ -3471,6 +3468,7 @@ impl<'a> Interpreter<'a> {
                 let message = self.render_panic_message(&args, span)?;
                 Err(self.runtime_error(span, message))
             }
+            ir::Intrinsic::Assert => self.invoke_assert(args, span),
             ir::Intrinsic::IterInit => {
                 if args.len() != 1 {
                     return Err(self.runtime_error(span, "IterInit expects 1 argument"));
@@ -3557,6 +3555,7 @@ impl<'a> Interpreter<'a> {
                 let message = self.render_panic_message(&args, span)?;
                 Err(self.runtime_error(span, message))
             }
+            "assert" => self.invoke_assert(args, span),
             _ => Err(self.runtime_error(span, format!("unknown OS method '{}'", method))),
         }
     }
@@ -3594,6 +3593,30 @@ impl<'a> Interpreter<'a> {
             .map_err(|message| self.runtime_error(span, message))?;
         self.output.push_str(&text);
         Ok(Value::Unit)
+    }
+
+    fn invoke_assert(
+        &mut self,
+        mut args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        if !matches!(args.len(), 1 | 2) {
+            return Err(self.runtime_error(
+                span,
+                format!("assert expects 1 or 2 arguments, got {}", args.len()),
+            ));
+        }
+        if args[0].as_bool(self, span, "assert condition")? {
+            return Ok(Value::Unit);
+        }
+
+        let panic_args = if args.len() == 2 {
+            vec![args.remove(1)]
+        } else {
+            vec![Value::String("assert condition was false".to_string())]
+        };
+        let message = self.render_panic_message(&panic_args, span)?;
+        Err(self.runtime_error(span, message))
     }
 
     fn render_panic_message(
@@ -6747,12 +6770,13 @@ $name
     }
 
     #[test]
-    fn runs_assert_statements() {
+    fn runs_assert_runtime_calls() {
         let program = lower_inline(
             r#"
             def main() Unit {
                 split = "BTC-USD-5.0".split("-")
-                assert split.size() == 3
+                assert(split.size() == 3)
+                OS.assert(split.size() == 3, "split should have 3 parts")
                 OS.println("ok")
             }
             "#,
@@ -6764,12 +6788,32 @@ $name
     }
 
     #[test]
+    fn fails_assert_runtime_call_with_message() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                assert(false, "split must have 3 parts")
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(
+            run.diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("panic: split must have 3 parts")),
+            "{:#?}",
+            run.diagnostics
+        );
+    }
+
+    #[test]
     fn runs_regex_string_split() {
         let program = lower_inline(
             r#"
             def main() Unit {
                 split = "1234, BUY, 10, NEW".split("\s*,\s*")
-                assert split.size() == 4
+                assert(split.size() == 4)
                 OS.println(split[0])
                 OS.println(split[1])
                 OS.println(split[2])

@@ -45,7 +45,6 @@ impl<'a> Parser<'a> {
                 self.restore(checkpoint);
                 self.parse_let_stmt()
             }
-            TokenKind::Keyword(Keyword::Assert) => self.parse_assert_stmt(),
             TokenKind::Keyword(Keyword::Expect) => self.parse_expect_stmt(),
             TokenKind::Keyword(Keyword::Var) => {
                 let stmt = self.parse_binding_stmt_after_var()?;
@@ -67,6 +66,13 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Break) => self.parse_break_stmt().map(Stmt::Break),
             TokenKind::Keyword(Keyword::Continue) => self.parse_continue_stmt().map(Stmt::Continue),
             _ => {
+                if self.at_removed_assert_statement() {
+                    self.error_at_current(
+                        "removed_assert_statement",
+                        "assert statement syntax was removed; use assert(condition) or assert(condition, message)",
+                    );
+                    return None;
+                }
                 if let Some(binding) = self.try_parse_binding_stmt() {
                     return Some(Stmt::Binding(binding));
                 }
@@ -315,7 +321,7 @@ impl<'a> Parser<'a> {
             } else {
                 self.error_at_current(
                     "expected_pattern_binding",
-                    "expect only supports pattern/assertive binding; use 'assert' for boolean assertions",
+                    "expect only supports pattern/assertive binding; use assert(condition) for boolean assertions",
                 );
                 return None;
             };
@@ -346,30 +352,9 @@ impl<'a> Parser<'a> {
         self.restore(checkpoint);
         self.error_at_current(
             "expected_pattern_binding",
-            "expect only supports pattern/assertive binding; use 'assert' for boolean assertions",
+            "expect only supports pattern/assertive binding; use assert(condition) for boolean assertions",
         );
         None
-    }
-
-    pub(super) fn parse_assert_stmt(&mut self) -> Option<Stmt> {
-        let start = self.consume_keyword(Keyword::Assert, "expected 'assert'")?;
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                "expected condition on same line after \"assert\"",
-            );
-            return None;
-        }
-        let condition = self.parse_expr()?;
-        if self.match_keyword(Keyword::Else) {
-            self.error_at_current("unexpected_token", "assert does not support 'else'");
-            return None;
-        }
-        let end = condition.span();
-        Some(Stmt::Assert(AssertStmt {
-            condition,
-            span: start.cover(end),
-        }))
     }
 
     pub(super) fn try_parse_binding_stmt(&mut self) -> Option<BindingStmt> {
@@ -404,6 +389,26 @@ impl<'a> Parser<'a> {
             destructure: None,
             span: start.cover(end),
         })
+    }
+
+    fn at_removed_assert_statement(&self) -> bool {
+        self.current_kind() == TokenKind::Identifier
+            && self.current().lexeme == "assert"
+            && matches!(
+                self.tokens.get(self.index + 1).map(|token| token.kind),
+                Some(
+                    TokenKind::Identifier
+                        | TokenKind::Integer
+                        | TokenKind::Float
+                        | TokenKind::String
+                        | TokenKind::Bang
+                        | TokenKind::Minus
+                        | TokenKind::LBracket
+                        | TokenKind::LBrace
+                        | TokenKind::Keyword(Keyword::True)
+                        | TokenKind::Keyword(Keyword::False)
+                )
+            )
     }
 
     pub(super) fn parse_binding(&mut self, mutable: bool) -> Option<Binding> {
