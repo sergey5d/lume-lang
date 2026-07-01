@@ -321,8 +321,8 @@ fn java_type_for_return(ty: &ir::Type) -> String {
 fn java_type_for_value(ty: &ir::Type) -> String {
     match ty {
         ir::Type::Unknown => "Object".to_string(),
-        ir::Type::Never => "RuntimeException".to_string(),
-        ir::Type::Unit => "Void".to_string(),
+        ir::Type::Never => "lume.runtime.LumePanic".to_string(),
+        ir::Type::Unit => "lume.runtime.LumeUnit".to_string(),
         ir::Type::Bool => "Boolean".to_string(),
         ir::Type::Int => "Long".to_string(),
         ir::Type::Float => "Double".to_string(),
@@ -331,12 +331,7 @@ fn java_type_for_value(ty: &ir::Type) -> String {
             java_named_builtin_value(name).unwrap_or_else(|| java_type_name(name))
         }
         ir::Type::Named { name, args } if is_builtin_container(name) => {
-            let args = args
-                .iter()
-                .map(java_type_for_value)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("Object /* {name}[{args}] */")
+            java_builtin_container(name, args)
         }
         ir::Type::Named { name, args } => {
             let args = args
@@ -346,9 +341,8 @@ fn java_type_for_value(ty: &ir::Type) -> String {
                 .join(", ");
             format!("{}<{args}>", java_type_name(name))
         }
-        ir::Type::Tuple(_) | ir::Type::Record(_) | ir::Type::Function { .. } => {
-            "Object".to_string()
-        }
+        ir::Type::Tuple(items) => java_tuple_type(items),
+        ir::Type::Record(_) | ir::Type::Function { .. } => "Object".to_string(),
         ir::Type::TypeParam(name) => java_type_name(name),
     }
 }
@@ -371,7 +365,7 @@ fn java_type_for_annotation(ty: &ir::Type) -> String {
 
 fn java_named_builtin_value(name: &str) -> Option<String> {
     match name {
-        "Unit" => Some("Void".to_string()),
+        "Unit" => Some("lume.runtime.LumeUnit".to_string()),
         "Bool" => Some("Boolean".to_string()),
         "Int" => Some("Long".to_string()),
         "Float" => Some("Double".to_string()),
@@ -397,6 +391,51 @@ fn is_builtin_container(name: &str) -> bool {
         name,
         "Array" | "Either" | "List" | "Map" | "Option" | "Result" | "Set"
     )
+}
+
+fn java_builtin_container(name: &str, args: &[ir::Type]) -> String {
+    match name {
+        "Array" if args.len() == 1 => {
+            format!("lume.runtime.LumeArray<{}>", java_type_for_value(&args[0]))
+        }
+        "Either" if args.len() == 2 => format!(
+            "lume.runtime.Either<{}, {}>",
+            java_type_for_value(&args[0]),
+            java_type_for_value(&args[1])
+        ),
+        "List" if args.len() == 1 => {
+            format!("lume.runtime.LumeList<{}>", java_type_for_value(&args[0]))
+        }
+        "Map" if args.len() == 2 => format!(
+            "lume.runtime.LumeMap<{}, {}>",
+            java_type_for_value(&args[0]),
+            java_type_for_value(&args[1])
+        ),
+        "Option" if args.len() == 1 => {
+            format!("lume.runtime.Option<{}>", java_type_for_value(&args[0]))
+        }
+        "Result" if args.len() == 2 => format!(
+            "lume.runtime.Result<{}, {}>",
+            java_type_for_value(&args[0]),
+            java_type_for_value(&args[1])
+        ),
+        "Set" if args.len() == 1 => {
+            format!("lume.runtime.LumeSet<{}>", java_type_for_value(&args[0]))
+        }
+        _ => "Object".to_string(),
+    }
+}
+
+fn java_tuple_type(items: &[ir::Type]) -> String {
+    if !(2..=8).contains(&items.len()) {
+        return "Object".to_string();
+    }
+    let args = items
+        .iter()
+        .map(java_type_for_value)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("lume.runtime.Tuple{}<{args}>", items.len())
 }
 
 fn java_type_params(params: &[String]) -> String {

@@ -90,6 +90,16 @@ class User {
     age Int
 }
 
+class RuntimeBox {
+    items [Int]
+    names Set[Str]
+    index Map[Str, [Int]]
+    maybe Option[Str]
+    result Result[Int, Str]
+    either Either[Str, Int]
+    pair (Int, Str)
+}
+
 single Routes {
     health Str = "/health"
 
@@ -143,6 +153,12 @@ def main() Unit {
             result
                 .written_files
                 .iter()
+                .any(|path| path.ends_with("demo/app/RuntimeBox.java"))
+        );
+        assert!(
+            result
+                .written_files
+                .iter()
                 .any(|path| path.ends_with("demo/app/Routes.java"))
         );
         assert!(
@@ -176,6 +192,19 @@ def main() Unit {
         assert!(class.contains("class User"));
         assert!(class.contains("String name;"));
         assert!(class.contains("Long age;"));
+
+        let runtime_box =
+            fs::read_to_string(out.join("demo/app/RuntimeBox.java")).expect("read runtime box");
+        assert!(runtime_box.contains("lume.runtime.LumeList<Long> items;"));
+        assert!(runtime_box.contains("lume.runtime.LumeSet<String> names;"));
+        assert!(
+            runtime_box
+                .contains("lume.runtime.LumeMap<String, lume.runtime.LumeList<Long>> index;")
+        );
+        assert!(runtime_box.contains("lume.runtime.Option<String> maybe;"));
+        assert!(runtime_box.contains("lume.runtime.Result<Long, String> result;"));
+        assert!(runtime_box.contains("lume.runtime.Either<String, Long> either;"));
+        assert!(runtime_box.contains("lume.runtime.Tuple2<Long, String> pair;"));
 
         let single = fs::read_to_string(out.join("demo/app/Routes.java")).expect("read single");
         assert!(single.contains("final class Routes"));

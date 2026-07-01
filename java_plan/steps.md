@@ -38,6 +38,8 @@ Tasks:
 
 ## Step 3: Runtime Library Skeleton
 
+Status: done.
+
 Goal: add the Java runtime package that generated code can target.
 
 Tasks:
