@@ -6,8 +6,8 @@ use crate::{
     interpreter::merged_runtime_program,
     ir,
     lower::lower_program,
-    resolver::{LocatedDiagnostic, load_module_graph},
-    typecheck::check_path,
+    resolver::{LocatedDiagnostic, ModuleLoadOptions, load_module_graph_with_options},
+    typecheck::check_path_with_load_options,
 };
 
 /// Checked, merged, and lowered program state shared by non-interpreter backends.
@@ -28,8 +28,15 @@ pub struct BackendBundleResult {
 }
 
 pub fn build_backend_bundle(path: impl AsRef<Path>) -> Result<BackendBundleResult, String> {
+    build_backend_bundle_with_load_options(path, &ModuleLoadOptions::default())
+}
+
+pub(crate) fn build_backend_bundle_with_load_options(
+    path: impl AsRef<Path>,
+    load_options: &ModuleLoadOptions,
+) -> Result<BackendBundleResult, String> {
     let path = path.as_ref();
-    let checked = check_path(path)?;
+    let checked = check_path_with_load_options(path, load_options)?;
     if !checked.diagnostics.is_empty() {
         return Ok(BackendBundleResult {
             diagnostics: checked.diagnostics,
@@ -37,14 +44,13 @@ pub fn build_backend_bundle(path: impl AsRef<Path>) -> Result<BackendBundleResul
         });
     }
 
-    let (graph, root_path) = load_module_graph(path)?;
+    let (graph, root_path) = load_module_graph_with_options(path, load_options)?;
     let root_module = graph
         .modules
         .get(&root_path)
         .ok_or_else(|| format!("loaded root module missing {}", root_path.display()))?;
     let root_display_path = root_module.display_path.clone();
-    let externals =
-        ExternalDescriptors::from_programs(graph.modules.values().map(|module| &module.program));
+    let externals = ExternalDescriptors::from_module_graph(&graph);
     let ast = merged_runtime_program(&graph, &root_path)?;
 
     let lowered = lower_program(&ast);
@@ -65,7 +71,7 @@ pub fn build_backend_bundle(path: impl AsRef<Path>) -> Result<BackendBundleResul
     let ir = lowered
         .program
         .expect("ir program after successful lowering");
-    let descriptors = BackendDescriptors::from_ir(&ir);
+    let descriptors = BackendDescriptors::from_ir_and_externals(&ir, &externals);
 
     Ok(BackendBundleResult {
         diagnostics: Vec::new(),

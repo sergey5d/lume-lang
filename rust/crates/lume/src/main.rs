@@ -124,12 +124,12 @@ fn java_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
         Ok(path) => path,
         Err(code) => return code,
     };
-    let out = match read_java_out_arg(args) {
-        Ok(out) => out,
+    let options = match read_java_options(args) {
+        Ok(options) => options,
         Err(code) => return code,
     };
 
-    match generate_java_path(&path, JavaBackendOptions::new(out)) {
+    match generate_java_path(&path, options) {
         Ok(result) => {
             if !result.diagnostics.is_empty() {
                 print_path_diagnostics(&result.diagnostics);
@@ -153,7 +153,7 @@ fn print_usage() {
     eprintln!("  lume parse <file>");
     eprintln!("  lume check <file>");
     eprintln!("  lume run <file> [entry]");
-    eprintln!("  lume java <file> --out <dir>");
+    eprintln!("  lume java <file> --out <dir> [--classpath <path>]");
 }
 
 fn read_source_arg(
@@ -188,30 +188,48 @@ fn read_source_path(path: String) -> Result<SourceFile, ExitCode> {
     Ok(SourceFile::new(path, text))
 }
 
-fn read_java_out_arg(args: &mut impl Iterator<Item = String>) -> Result<String, ExitCode> {
-    let Some(flag) = args.next() else {
+fn read_java_options(
+    args: &mut impl Iterator<Item = String>,
+) -> Result<JavaBackendOptions, ExitCode> {
+    let mut out = None;
+    let mut classpath = Vec::new();
+
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--out" => {
+                let Some(value) = args.next() else {
+                    eprintln!("missing directory after --out for 'java'");
+                    print_usage();
+                    return Err(ExitCode::from(2));
+                };
+                out = Some(value);
+            }
+            "--classpath" | "--class-path" | "-cp" => {
+                let Some(value) = args.next() else {
+                    eprintln!("missing path after {flag} for 'java'");
+                    print_usage();
+                    return Err(ExitCode::from(2));
+                };
+                classpath.extend(env::split_paths(&value));
+            }
+            _ => {
+                eprintln!("unknown argument '{flag}' for 'java'");
+                print_usage();
+                return Err(ExitCode::from(2));
+            }
+        }
+    }
+
+    let Some(out) = out else {
         eprintln!("missing --out <dir> for 'java'");
         print_usage();
         return Err(ExitCode::from(2));
     };
-    if flag != "--out" {
-        eprintln!("unknown argument '{flag}' for 'java'");
-        print_usage();
-        return Err(ExitCode::from(2));
+    let mut options = JavaBackendOptions::new(out);
+    for entry in classpath {
+        options = options.with_classpath_entry(entry);
     }
-
-    let Some(out) = args.next() else {
-        eprintln!("missing directory after --out for 'java'");
-        print_usage();
-        return Err(ExitCode::from(2));
-    };
-    if let Some(extra) = args.next() {
-        eprintln!("unknown argument '{extra}' for 'java'");
-        print_usage();
-        return Err(ExitCode::from(2));
-    }
-
-    Ok(out)
+    Ok(options)
 }
 
 fn exit_with_path_diagnostics(diagnostics: &[LocatedDiagnostic]) -> ExitCode {

@@ -14,8 +14,9 @@ use crate::{
         TypeDecl, TypeKind, TypeMember, TypeRef, Visibility,
     },
     resolver::{
-        ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, collect_module_order,
-        find_stdlib_dir, load_module_graph, parse_program_from_path, read_directives, resolve_path,
+        ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, ModuleLoadOptions,
+        collect_module_order, find_stdlib_dir, load_module_graph_with_options,
+        parse_program_from_path, read_directives, resolve_path_with_options,
     },
     typecheck_diagnostics,
 };
@@ -45,14 +46,21 @@ pub fn check_program(program: &Program) -> CheckResult {
 }
 
 pub fn check_path(path: impl AsRef<Path>) -> Result<PathCheckResult, String> {
-    let resolved = resolve_path(path.as_ref())?;
+    check_path_with_load_options(path, &ModuleLoadOptions::default())
+}
+
+pub(crate) fn check_path_with_load_options(
+    path: impl AsRef<Path>,
+    options: &ModuleLoadOptions,
+) -> Result<PathCheckResult, String> {
+    let resolved = resolve_path_with_options(path.as_ref(), options)?;
     if !resolved.diagnostics.is_empty() {
         return Ok(PathCheckResult {
             diagnostics: resolved.diagnostics,
         });
     }
 
-    let (graph, root_path) = load_module_graph(path.as_ref())?;
+    let (graph, root_path) = load_module_graph_with_options(path.as_ref(), options)?;
     let stdlib_dir = find_stdlib_dir(path.as_ref().parent().unwrap_or_else(|| Path::new(".")))?;
     let mut world = World::from_graph(graph, root_path, stdlib_dir)?;
 

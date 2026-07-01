@@ -1,4 +1,4 @@
-use crate::{ast::TypeKind, ir};
+use crate::{ast::TypeKind, backend::externals::ExternalDescriptors, ir};
 
 #[derive(Debug, Clone, Default)]
 pub struct BackendDescriptors {
@@ -24,6 +24,7 @@ pub struct DescriptorGlobal {
 pub struct DescriptorFunction {
     pub name: String,
     pub owner: Option<String>,
+    pub origin: DescriptorOrigin,
     pub params: Vec<String>,
     pub return_ty: String,
     pub block_count: usize,
@@ -33,9 +34,16 @@ pub struct DescriptorFunction {
 pub struct DescriptorType {
     pub name: String,
     pub kind: String,
+    pub origin: DescriptorOrigin,
     pub type_params: Vec<String>,
     pub fields: Vec<DescriptorField>,
     pub method_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DescriptorOrigin {
+    Lume,
+    Java { qualified_name: String },
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +55,10 @@ pub struct DescriptorField {
 
 impl BackendDescriptors {
     pub fn from_ir(program: &ir::Program) -> Self {
+        Self::from_ir_and_externals(program, &ExternalDescriptors::default())
+    }
+
+    pub fn from_ir_and_externals(program: &ir::Program, externals: &ExternalDescriptors) -> Self {
         let module = program
             .module
             .as_ref()
@@ -68,11 +80,12 @@ impl BackendDescriptors {
             .map(|function| describe_function(program, function))
             .collect();
 
-        let types = program
+        let mut types = program
             .types
             .iter()
             .map(|ty| describe_type_def(program, ty))
-            .collect();
+            .collect::<Vec<_>>();
+        types.extend(externals.type_descriptors());
 
         Self {
             module,
@@ -94,6 +107,7 @@ fn describe_type_def(program: &ir::Program, ty: &ir::TypeDef) -> DescriptorType 
     DescriptorType {
         name: ty.name.clone(),
         kind: describe_type_kind(ty.kind).to_string(),
+        origin: DescriptorOrigin::Lume,
         type_params: ty.type_params.clone(),
         fields: ty
             .fields
@@ -124,6 +138,7 @@ fn describe_function(program: &ir::Program, function: &ir::Function) -> Descript
     DescriptorFunction {
         name: function.name.clone(),
         owner,
+        origin: DescriptorOrigin::Lume,
         params,
         return_ty: describe_type(&function.return_ty),
         block_count: function.blocks.len(),

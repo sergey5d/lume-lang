@@ -61,11 +61,18 @@ pub fn resolve_program(program: &Program) -> CheckResult {
 }
 
 pub fn resolve_path(path: impl AsRef<Path>) -> Result<ResolveResult, String> {
+    resolve_path_with_options(path, &ModuleLoadOptions::default())
+}
+
+pub(crate) fn resolve_path_with_options(
+    path: impl AsRef<Path>,
+    options: &ModuleLoadOptions,
+) -> Result<ResolveResult, String> {
     let root = path.as_ref();
     let stdlib_dir = find_stdlib_dir(root.parent().unwrap_or_else(|| Path::new(".")))?;
     let ambient = AmbientRegistry::load_from_stdlib(&stdlib_dir)?;
     let mut graph = ModuleGraph::default();
-    let root_path = load_module(root, &mut graph, &mut HashSet::new())?;
+    let root_path = load_module_with_options(root, &mut graph, &mut HashSet::new(), options)?;
 
     let mut visited = HashSet::new();
     let mut order = Vec::new();
@@ -95,9 +102,22 @@ pub fn resolve_path(path: impl AsRef<Path>) -> Result<ResolveResult, String> {
 }
 
 pub(crate) fn load_module_graph(path: impl AsRef<Path>) -> Result<(ModuleGraph, PathBuf), String> {
+    load_module_graph_with_options(path, &ModuleLoadOptions::default())
+}
+
+pub(crate) fn load_module_graph_with_options(
+    path: impl AsRef<Path>,
+    options: &ModuleLoadOptions,
+) -> Result<(ModuleGraph, PathBuf), String> {
     let mut graph = ModuleGraph::default();
-    let root = load_module(path.as_ref(), &mut graph, &mut HashSet::new())?;
+    let root = load_module_with_options(path.as_ref(), &mut graph, &mut HashSet::new(), options)?;
     Ok((graph, root))
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ModuleLoadOptions {
+    pub(crate) allow_unresolved_java_imports: bool,
+    pub(crate) java_external_type_params: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -121,6 +141,8 @@ pub(crate) struct ImportedSymbol {
     pub(crate) single_name: Option<String>,
     pub(crate) kind: ImportedKind,
     pub(crate) module_path: PathBuf,
+    pub(crate) external_qualified_name: Option<String>,
+    pub(crate) span: crate::source::Span,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -317,10 +339,11 @@ struct ModuleNamespace {
     singles: HashMap<String, TypeInfo>,
 }
 
-pub(crate) fn load_module(
+fn load_module_with_options(
     path: &Path,
     graph: &mut ModuleGraph,
     loading: &mut HashSet<PathBuf>,
+    options: &ModuleLoadOptions,
 ) -> Result<PathBuf, String> {
     let abs = fs::canonicalize(path).map_err(|err| format!("resolve {}: {err}", path.display()))?;
     if graph.modules.contains_key(&abs) {
@@ -353,12 +376,15 @@ pub(crate) fn load_module(
         .map(|module| module.name.as_str());
     let imports = module.program.imports.clone();
     for import in imports {
-        let java_import = is_java_import_path(&import.path);
+        let child_path = base_dir.join(format!("{}.lum", import.path));
+        let java_import = is_java_import_path(&import.path)
+            || (options.allow_unresolved_java_imports
+                && is_explicit_java_class_import(&import)
+                && !child_path.exists());
         let child_abs = if java_import {
-            ensure_java_external_module(&import, graph)?
+            ensure_java_external_module(&import, graph, options)?
         } else {
-            let child_path = base_dir.join(format!("{}.lum", import.path));
-            load_module(&child_path, graph, loading)?
+            load_module_with_options(&child_path, graph, loading, options)?
         };
         let child = graph
             .modules
@@ -425,6 +451,8 @@ pub(crate) fn load_module(
                     single_name: None,
                     kind: ImportedKind::Type,
                     module_path: child_abs.clone(),
+                    external_qualified_name: Some(java_qualified_name(&import.path, &symbol.name)),
+                    span: symbol.span,
                 }
             } else if let Some(single_name) = import.single_name.as_deref() {
                 resolve_imported_single_member(
@@ -518,9 +546,18 @@ fn is_java_import_path(path: &str) -> bool {
     path.starts_with("java/")
 }
 
+fn is_explicit_java_class_import(import: &ImportDecl) -> bool {
+    import.single_name.is_none() && !import.wildcard && !import.symbols.is_empty()
+}
+
+fn java_qualified_name(path: &str, symbol: &str) -> String {
+    format!("{}.{}", path.replace('/', "."), symbol)
+}
+
 fn ensure_java_external_module(
     import: &ImportDecl,
     graph: &mut ModuleGraph,
+    options: &ModuleLoadOptions,
 ) -> Result<PathBuf, String> {
     if import.single_name.is_some() || import.wildcard {
         return Err(format!(
@@ -555,6 +592,12 @@ fn ensure_java_external_module(
 
     for symbol in &import.symbols {
         let local_name = symbol.alias.clone().unwrap_or_else(|| symbol.name.clone());
+        let qualified_name = java_qualified_name(&import.path, &symbol.name);
+        let type_params = options
+            .java_external_type_params
+            .get(&qualified_name)
+            .cloned()
+            .unwrap_or_default();
         if module
             .program
             .items
@@ -568,6 +611,7 @@ fn ensure_java_external_module(
             .items
             .push(Item::Type(synthetic_java_type_decl(
                 local_name,
+                type_params,
                 symbol.span,
             )));
     }
@@ -579,13 +623,24 @@ fn java_external_module_path(path: &str) -> PathBuf {
     PathBuf::from(format!("<java:{path}>"))
 }
 
-fn synthetic_java_type_decl(name: String, span: crate::source::Span) -> TypeDecl {
+fn synthetic_java_type_decl(
+    name: String,
+    type_params: Vec<String>,
+    span: crate::source::Span,
+) -> TypeDecl {
     TypeDecl {
         annotations: Vec::new(),
         visibility: Visibility::Default,
         kind: TypeKind::Class,
         name,
-        type_params: Vec::new(),
+        type_params: type_params
+            .into_iter()
+            .map(|name| TypeParam {
+                name,
+                bounds: Vec::new(),
+                span,
+            })
+            .collect(),
         with_bounds: Vec::new(),
         members: Vec::new(),
         span,
@@ -737,6 +792,8 @@ fn resolve_imported_symbol(
                 single_name: None,
                 kind: ImportedKind::Function,
                 module_path: module.path.clone(),
+                external_qualified_name: None,
+                span: decl.span,
             });
         }
     }
@@ -747,6 +804,8 @@ fn resolve_imported_symbol(
                 single_name: None,
                 kind: ImportedKind::Value,
                 module_path: module.path.clone(),
+                external_qualified_name: None,
+                span: symbol.span,
             });
         }
     }
@@ -761,6 +820,8 @@ fn resolve_imported_symbol(
                     ImportedKind::Type
                 },
                 module_path: module.path.clone(),
+                external_qualified_name: None,
+                span: info.span,
             });
         }
     }
@@ -771,6 +832,8 @@ fn resolve_imported_symbol(
                 single_name: None,
                 kind: ImportedKind::Single,
                 module_path: module.path.clone(),
+                external_qualified_name: None,
+                span: info.span,
             });
         }
     }
@@ -797,6 +860,8 @@ fn resolve_imported_single_member(
         single_name: Some(single_name.to_string()),
         kind: ImportedKind::Function,
         module_path: module.path.clone(),
+        external_qualified_name: None,
+        span: method.span,
     })
 }
 

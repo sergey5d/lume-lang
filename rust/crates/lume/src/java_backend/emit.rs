@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     ast::TypeKind,
-    backend::BackendBundle,
+    backend::{BackendBundle, DescriptorOrigin},
     ir::{self, FunctionKind},
 };
 
@@ -23,6 +23,10 @@ pub(crate) fn render_declaration_skeletons(bundle: &BackendBundle) -> Vec<JavaSo
         relative_path: package.relative_file(&format!("{}.java", module_class_name(bundle))),
         contents: render_module_wrapper(bundle, &package, &names),
     });
+
+    if let Some(entrypoint) = render_entrypoint_runner(bundle, &package) {
+        sources.push(entrypoint);
+    }
 
     for ty in &bundle.ir.types {
         sources.push(JavaSource {
@@ -69,6 +73,36 @@ fn render_module_wrapper(
 
     out.push_str("}\n");
     out
+}
+
+fn render_entrypoint_runner(bundle: &BackendBundle, package: &JavaPackage) -> Option<JavaSource> {
+    let entry = bundle.ir.entry.and_then(|id| bundle.ir.function(id))?;
+    if !matches!(entry.kind, FunctionKind::TopLevel) {
+        return None;
+    }
+
+    let class_name = runner_class_name(bundle);
+    let module_name = module_class_name(bundle);
+    let method_name = java_member_name(&entry.name);
+    let mut out = String::new();
+    push_header(&mut out, package);
+    out.push_str(&format!("final class {class_name} {{\n"));
+    out.push_str(&format!("    private {class_name}() {{}}\n\n"));
+    out.push_str("    public static void main(String[] args) {\n");
+    if is_java_void_type(&entry.return_ty) {
+        out.push_str(&format!("        {module_name}.{method_name}();\n"));
+    } else {
+        out.push_str(&format!(
+            "        System.out.println({module_name}.{method_name}());\n"
+        ));
+    }
+    out.push_str("    }\n");
+    out.push_str("}\n");
+
+    Some(JavaSource {
+        relative_path: package.relative_file(&format!("{class_name}.java")),
+        contents: out,
+    })
 }
 
 fn render_type_shell(
@@ -673,7 +707,23 @@ impl<'a> FunctionEmitter<'a> {
                 args.join(", ")
             )),
             ir::Callee::Intrinsic(intrinsic) => self.emit_intrinsic(intrinsic, &args),
-            ir::Callee::Indirect(_) | ir::Callee::Named { .. } => None,
+            ir::Callee::Named { path } => self.emit_named_runtime_call(path, &args),
+            ir::Callee::Indirect(_) => None,
+        }
+    }
+
+    fn emit_named_runtime_call(&self, path: &[String], args: &[String]) -> Option<String> {
+        match path {
+            [owner, method] if owner == "Array" => {
+                let target = match method.as_str() {
+                    "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" | "fill" => {
+                        format!("lume.runtime.LumeArray.{}", java_member_name(method))
+                    }
+                    _ => return None,
+                };
+                Some(format!("{target}({})", args.join(", ")))
+            }
+            _ => None,
         }
     }
 
@@ -881,6 +931,14 @@ fn terminator_exits_case(kind: &ir::TerminatorKind) -> bool {
 }
 
 fn module_class_name(bundle: &BackendBundle) -> String {
+    format!("{}Module", module_base_name(bundle))
+}
+
+fn runner_class_name(bundle: &BackendBundle) -> String {
+    format!("{}Main", module_base_name(bundle))
+}
+
+fn module_base_name(bundle: &BackendBundle) -> String {
     let raw = bundle
         .ir
         .module
@@ -896,18 +954,27 @@ fn module_class_name(bundle: &BackendBundle) -> String {
                 .map(str::to_string)
         })
         .unwrap_or_else(|| "Main".to_string());
-    format!("{}Module", java_type_name(&raw))
+    java_type_name(&raw)
 }
 
 struct JavaNames {
-    external_types: HashMap<String, String>,
+    java_types: HashMap<String, String>,
 }
 
 impl JavaNames {
     fn from_bundle(bundle: &BackendBundle) -> Self {
-        Self {
-            external_types: bundle.externals.type_name_map(),
-        }
+        let java_types = bundle
+            .descriptors
+            .types
+            .iter()
+            .filter_map(|ty| match &ty.origin {
+                DescriptorOrigin::Java { qualified_name } => {
+                    Some((ty.name.clone(), qualified_name.clone()))
+                }
+                DescriptorOrigin::Lume => None,
+            })
+            .collect();
+        Self { java_types }
     }
 
     fn return_type(&self, ty: &ir::Type) -> String {
@@ -930,7 +997,7 @@ impl JavaNames {
             ir::Type::Float => "Double".to_string(),
             ir::Type::Str => "String".to_string(),
             ir::Type::Named { name, args } if args.is_empty() => java_named_builtin_value(name)
-                .or_else(|| self.external_types.get(name).cloned())
+                .or_else(|| self.java_types.get(name).cloned())
                 .unwrap_or_else(|| java_type_name(name)),
             ir::Type::Named { name, args } if is_builtin_container(name) => {
                 self.builtin_container(name, args)
@@ -957,7 +1024,7 @@ impl JavaNames {
             ir::Type::Str => "String".to_string(),
             ir::Type::Named { name, args } if args.is_empty() => {
                 java_named_builtin_annotation(name)
-                    .or_else(|| self.external_types.get(name).cloned())
+                    .or_else(|| self.java_types.get(name).cloned())
                     .unwrap_or_else(|| java_type_name(name))
             }
             ir::Type::Named { name, args } if name == "List" && args.len() == 1 => {
@@ -968,7 +1035,7 @@ impl JavaNames {
     }
 
     fn named_type(&self, name: &str) -> String {
-        self.external_types
+        self.java_types
             .get(name)
             .cloned()
             .unwrap_or_else(|| java_type_name(name))
