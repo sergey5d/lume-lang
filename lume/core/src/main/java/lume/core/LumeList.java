@@ -53,6 +53,10 @@ public final class LumeList<T> {
         return new LumeList<>(copy);
     }
 
+    public LumeIterator<T> iterator() {
+        return LumeIterator.from(this);
+    }
+
     public List<T> asJava() {
         return List.copyOf(values);
     }

@@ -924,7 +924,7 @@ impl Maybe[T] {
     }
 
     #[test]
-    fn emits_structured_java_for_core_result_and_either() {
+    fn emits_structured_java_for_core_option_result_and_either() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let repo_root = manifest_dir
             .parent()
@@ -934,11 +934,25 @@ impl Maybe[T] {
 
         for (source_name, expected_lines) in [
             (
+                "Option",
+                vec![
+                    "if (this instanceof Some<?>)",
+                    "if (this instanceof None<?>)",
+                    "if (this instanceof Some<?> __case0)",
+                    "default <X> lume.core.Option<X> map(java.util.function.Function<T, X> f_1)",
+                    "default <X> lume.core.Option<X> flatMap(java.util.function.Function<T, lume.core.Option<X>> f_1)",
+                    "default lume.core.LumeIterator<T> iterator()",
+                    "return new None<>();",
+                ],
+            ),
+            (
                 "Result",
                 vec![
                     "if (this instanceof Ok<?, ?>)",
                     "if (this instanceof Err<?, ?>)",
                     "if (this instanceof Ok<?, ?> __case0)",
+                    "default <X> lume.core.Result<X, E> map(java.util.function.Function<T, X> f_1)",
+                    "default <X> lume.core.Result<X, E> flatMap(java.util.function.Function<T, lume.core.Result<X, E>> f_1)",
                     "return ((T) __case0.value());",
                 ],
             ),
@@ -948,6 +962,8 @@ impl Maybe[T] {
                     "if (this instanceof Left<?, ?>)",
                     "if (this instanceof Right<?, ?>)",
                     "if (this instanceof Right<?, ?> __case1)",
+                    "default <X> lume.core.Either<L, X> map(java.util.function.Function<R, X> f_1)",
+                    "default <X> lume.core.Either<L, X> flatMap(java.util.function.Function<R, lume.core.Either<L, X>> f_1)",
                     "return ((R) __case1.value());",
                 ],
             ),

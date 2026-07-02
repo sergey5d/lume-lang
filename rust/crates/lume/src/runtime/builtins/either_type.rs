@@ -34,7 +34,7 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(4, "expectRight", Vec::new(), either_expect_right),
             builtin_method(5, "getOr", vec![ir::Type::Unknown], either_get_or),
             builtin_method(6, "isSuccess", Vec::new(), either_is_right),
-            builtin_method(7, "unwrap", Vec::new(), either_expect_right),
+            builtin_method(7, "orPanic", Vec::new(), either_expect_right),
             builtin_method(
                 8,
                 "flatMap",

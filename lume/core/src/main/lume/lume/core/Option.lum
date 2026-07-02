@@ -9,9 +9,49 @@ enum Option[T] {
 }
 
 impl Option[T] {
+    def isSet() Bool = match this {
+        case Some(_) => true
+        case None => false
+    }
+
     def isDefined() Bool = match this {
         case Some(_) => true
         case None => false
+    }
+
+    def isSuccess() Bool = match this {
+        case Some(_) => true
+        case None => false
+    }
+
+    def isEmpty() Bool = match this {
+        case Some(_) => false
+        case None => true
+    }
+
+    def map[X](f (T) -> X) Option[X] = match this {
+        case Some(value) => Some(f(value))
+        case None => None
+    }
+
+    def flatMap[X](f (T) -> Option[X]) Option[X] = match this {
+        case Some(value) => f(value)
+        case None => None
+    }
+
+    def getOr(fallback T) T = match this {
+        case Some(value) => value
+        case None => fallback
+    }
+
+    def getOrElse(fallback T) T = match this {
+        case Some(value) => value
+        case None => fallback
+    }
+
+    def iterator() Iterator[T] = match this {
+        case Some(value) => [value].iterator()
+        case None => [].iterator()
     }
 
     def orPanic() T = match this {

@@ -124,16 +124,16 @@ public final class LumeRuntime {
         throw new LumePanic("expected success value");
     }
 
-    public static Object iterInit(Object source) {
+    public static LumeIterator<?> iterInit(Object source) {
         return LumeIterator.from(source);
     }
 
     public static Boolean iterHasNext(Object iterator) {
-        return ((LumeIterator) iterator).hasNext();
+        return ((LumeIterator<?>) iterator).hasNext();
     }
 
     public static Object iterNext(Object iterator) {
-        return ((LumeIterator) iterator).next();
+        return ((LumeIterator<?>) iterator).next();
     }
 
     private static String join(Object... values) {

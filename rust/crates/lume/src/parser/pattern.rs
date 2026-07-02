@@ -314,7 +314,7 @@ impl<'a> Parser<'a> {
                         span: start.cover(close),
                     });
                 }
-                if path.len() == 1 {
+                if path.len() == 1 && !looks_like_constructor_pattern(&name) {
                     Some(Pattern::Binding { name, span: start })
                 } else {
                     Some(Pattern::Constructor {
@@ -330,4 +330,10 @@ impl<'a> Parser<'a> {
             }
         }
     }
+}
+
+fn looks_like_constructor_pattern(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_uppercase())
 }

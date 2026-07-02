@@ -468,6 +468,12 @@ fn method_invoker_expr(owner: &ir::TypeDef, method: &ir::Function, names: &JavaN
         return "null".to_string();
     }
 
+    let type_params = owner
+        .type_params
+        .iter()
+        .chain(method.type_params.iter())
+        .cloned()
+        .collect::<Vec<_>>();
     let owner_type = java_type_name(&owner.name);
     let receiver = format!("(({owner_type}) receiver)");
     let args = method
@@ -475,7 +481,13 @@ fn method_invoker_expr(owner: &ir::TypeDef, method: &ir::Function, names: &JavaN
         .iter()
         .filter_map(|param| method.locals.get(param.0))
         .enumerate()
-        .map(|(index, local)| format!("(({}) args[{}])", names.value_type(&local.ty), index))
+        .map(|(index, local)| {
+            format!(
+                "(({}) args[{}])",
+                invoker_erased_value_type(&local.ty, names, &type_params),
+                index
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let call = format!("{}.{}({})", receiver, java_member_name(&method.name), args);
@@ -483,6 +495,51 @@ fn method_invoker_expr(owner: &ir::TypeDef, method: &ir::Function, names: &JavaN
         format!("(receiver, args) -> {{ {call}; return lume.core.LumeUnit.INSTANCE; }}")
     } else {
         format!("(receiver, args) -> {call}")
+    }
+}
+
+fn invoker_erased_value_type(ty: &ir::Type, names: &JavaNames, type_params: &[String]) -> String {
+    match ty {
+        ir::Type::TypeParam(_) | ir::Type::Unknown => "Object".to_string(),
+        ir::Type::Never => "lume.core.LumePanic".to_string(),
+        ir::Type::Unit => "lume.core.LumeUnit".to_string(),
+        ir::Type::Bool => "Boolean".to_string(),
+        ir::Type::Int => "Long".to_string(),
+        ir::Type::Float => "Double".to_string(),
+        ir::Type::Str => "String".to_string(),
+        ir::Type::Function { params, .. } => match params.as_slice() {
+            [] => "java.util.function.Supplier".to_string(),
+            [_] => "java.util.function.Function".to_string(),
+            [_, _] => "java.util.function.BiFunction".to_string(),
+            _ => "Object".to_string(),
+        },
+        ir::Type::Named { name, args } if is_builtin_container(name) && !args.is_empty() => {
+            invoker_erased_container_type(name, names)
+        }
+        ir::Type::Named { name, args }
+            if args.is_empty() && type_params.iter().any(|param| param == name) =>
+        {
+            "Object".to_string()
+        }
+        ir::Type::Named { name, args } if args.is_empty() => java_named_builtin_value(name)
+            .or_else(|| names.java_types.get(name).cloned())
+            .unwrap_or_else(|| java_type_name(name)),
+        ir::Type::Named { name, .. } => names.named_type(name),
+        ir::Type::Tuple(_) | ir::Type::Record(_) => "Object".to_string(),
+    }
+}
+
+fn invoker_erased_container_type(name: &str, names: &JavaNames) -> String {
+    match name {
+        "Array" => "lume.core.LumeArray".to_string(),
+        "Either" => "lume.core.Either".to_string(),
+        "Iterator" => "lume.core.LumeIterator".to_string(),
+        "List" => "lume.core.LumeList".to_string(),
+        "Map" => "lume.core.LumeMap".to_string(),
+        "Option" => "lume.core.Option".to_string(),
+        "Result" => "lume.core.Result".to_string(),
+        "Set" => "lume.core.LumeSet".to_string(),
+        _ => names.named_type(name),
     }
 }
 
@@ -997,7 +1054,13 @@ impl<'a> SourceBodyEmitter<'a> {
     fn emit_expr(&self, expr: &ast::Expr, bindings: &HashMap<String, String>) -> Option<String> {
         match expr {
             ast::Expr::Identifier { name, .. } if name == "this" => Some("this".to_string()),
-            ast::Expr::Identifier { name, .. } => bindings.get(name).cloned(),
+            ast::Expr::Identifier { name, .. } if self.enum_case(name).is_some() => {
+                Some(format!("new {}<>()", java_type_name(name)))
+            }
+            ast::Expr::Identifier { name, .. } => bindings
+                .get(name)
+                .cloned()
+                .or_else(|| self.param_reference(name)),
             ast::Expr::Bool { value, .. } => Some(value.to_string()),
             ast::Expr::Integer { raw, .. } => Some(format!("{raw}L")),
             ast::Expr::Float { raw, .. } => Some(raw.clone()),
@@ -1005,6 +1068,13 @@ impl<'a> SourceBodyEmitter<'a> {
                 Some(java_string_literal(&decode_lume_string_literal(raw)))
             }
             ast::Expr::Unit { .. } => Some("lume.core.LumeUnit.INSTANCE".to_string()),
+            ast::Expr::ListLiteral { items, .. } => {
+                let items = items
+                    .iter()
+                    .map(|item| self.emit_expr(item, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(format!("lume.core.LumeList.of({})", items.join(", ")))
+            }
             ast::Expr::Group { inner, .. } => self.emit_expr(inner, bindings),
             ast::Expr::Call { callee, args, .. } => self.emit_call(callee, args, bindings),
             _ => None,
@@ -1017,17 +1087,80 @@ impl<'a> SourceBodyEmitter<'a> {
         args: &[ast::CallArg],
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
-        let ast::Expr::Identifier { name, .. } = callee else {
-            return None;
-        };
-        if name != "panic" {
-            return None;
+        match callee {
+            ast::Expr::Identifier { name, .. } if name == "panic" => {
+                let message = match args.first() {
+                    Some(arg) => self.emit_expr(&arg.value, bindings)?,
+                    None => java_string_literal("panic"),
+                };
+                Some(format!("lume.core.LumePanic.panic({message})"))
+            }
+            ast::Expr::Identifier { name, .. } if self.enum_case(name).is_some() => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.emit_expr(&arg.value, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(format!(
+                    "new {}<>({})",
+                    java_type_name(name),
+                    args.join(", ")
+                ))
+            }
+            ast::Expr::Identifier { name, .. } if self.function_param(name).is_some() => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.emit_expr(&arg.value, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                let target = self.param_reference(name)?;
+                match args.as_slice() {
+                    [] => Some(format!("{target}.get()")),
+                    [arg] => Some(format!("{target}.apply({arg})")),
+                    [left, right] => Some(format!("{target}.apply({left}, {right})")),
+                    _ => None,
+                }
+            }
+            ast::Expr::Member { receiver, name, .. }
+                if name == "iterator"
+                    && args.is_empty()
+                    && matches!(
+                        receiver.as_ref(),
+                        ast::Expr::ListLiteral { items, .. } if items.is_empty()
+                    ) =>
+            {
+                Some("lume.core.LumeIterator.from(lume.core.LumeList.of())".to_string())
+            }
+            ast::Expr::Member { receiver, name, .. } => {
+                let receiver = self.emit_expr(receiver, bindings)?;
+                let args = args
+                    .iter()
+                    .map(|arg| self.emit_expr(&arg.value, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(format!(
+                    "{}.{}({})",
+                    receiver,
+                    java_member_name(name),
+                    args.join(", ")
+                ))
+            }
+            _ => None,
         }
-        let message = match args.first() {
-            Some(arg) => self.emit_expr(&arg.value, bindings)?,
-            None => java_string_literal("panic"),
-        };
-        Some(format!("lume.core.LumePanic.panic({message})"))
+    }
+
+    fn param_reference(&self, name: &str) -> Option<String> {
+        self.function
+            .params
+            .iter()
+            .filter_map(|param| self.function.locals.get(param.0))
+            .find(|local| local.name == name)
+            .map(java_local_name)
+    }
+
+    fn function_param(&self, name: &str) -> Option<&'a ir::Local> {
+        self.function
+            .params
+            .iter()
+            .filter_map(|param| self.function.locals.get(param.0))
+            .find(|local| local.name == name && matches!(local.ty, ir::Type::Function { .. }))
     }
 }
 
@@ -1924,6 +2057,7 @@ impl JavaNames {
             ir::Type::Int => "Long".to_string(),
             ir::Type::Float => "Double".to_string(),
             ir::Type::Str => "String".to_string(),
+            ir::Type::Function { params, ret } => self.function_type(params, ret),
             ir::Type::Named { name, args } if args.is_empty() => java_named_builtin_value(name)
                 .or_else(|| self.java_types.get(name).cloned())
                 .unwrap_or_else(|| java_type_name(name)),
@@ -1939,7 +2073,7 @@ impl JavaNames {
                 format!("{}<{args}>", self.named_type(name))
             }
             ir::Type::Tuple(items) => self.tuple_type(items),
-            ir::Type::Record(_) | ir::Type::Function { .. } => "Object".to_string(),
+            ir::Type::Record(_) => "Object".to_string(),
             ir::Type::TypeParam(name) => java_type_name(name),
         }
     }
@@ -1998,6 +2132,9 @@ impl JavaNames {
             "List" if args.len() == 1 => {
                 format!("lume.core.LumeList<{}>", self.value_type(&args[0]))
             }
+            "Iterator" if args.len() == 1 => {
+                format!("lume.core.LumeIterator<{}>", self.value_type(&args[0]))
+            }
             "Map" if args.len() == 2 => format!(
                 "lume.core.LumeMap<{}, {}>",
                 self.value_type(&args[0]),
@@ -2028,6 +2165,24 @@ impl JavaNames {
             .collect::<Vec<_>>()
             .join(", ");
         format!("lume.core.Tuple{}<{args}>", items.len())
+    }
+
+    fn function_type(&self, params: &[ir::Type], ret: &ir::Type) -> String {
+        match params {
+            [] => format!("java.util.function.Supplier<{}>", self.value_type(ret)),
+            [param] => format!(
+                "java.util.function.Function<{}, {}>",
+                self.value_type(param),
+                self.value_type(ret)
+            ),
+            [left, right] => format!(
+                "java.util.function.BiFunction<{}, {}, {}>",
+                self.value_type(left),
+                self.value_type(right),
+                self.value_type(ret)
+            ),
+            _ => "Object".to_string(),
+        }
     }
 }
 
@@ -2070,7 +2225,7 @@ fn java_named_builtin_annotation(name: &str) -> Option<String> {
 fn is_builtin_container(name: &str) -> bool {
     matches!(
         name,
-        "Array" | "Either" | "List" | "Map" | "Option" | "Result" | "Set"
+        "Array" | "Either" | "Iterator" | "List" | "Map" | "Option" | "Result" | "Set"
     )
 }
 

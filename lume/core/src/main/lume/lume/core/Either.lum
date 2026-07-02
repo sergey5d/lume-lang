@@ -11,9 +11,44 @@ enum Either[L, R] {
 }
 
 impl Either[L, R] {
+    def isLeft() Bool = match this {
+        case Left(_) => true
+        case Right(_) => false
+    }
+
     def isRight() Bool = match this {
         case Left(_) => false
         case Right(_) => true
+    }
+
+    def isSuccess() Bool = match this {
+        case Left(_) => false
+        case Right(_) => true
+    }
+
+    def map[X](f (R) -> X) Either[L, X] = match this {
+        case Left(value) => Left(value)
+        case Right(value) => Right(f(value))
+    }
+
+    def flatMap[X](f (R) -> Either[L, X]) Either[L, X] = match this {
+        case Left(value) => Left(value)
+        case Right(value) => f(value)
+    }
+
+    def getOr(fallback R) R = match this {
+        case Left(_) => fallback
+        case Right(value) => value
+    }
+
+    def expectLeft() L = match this {
+        case Left(value) => value
+        case Right(_) => panic("expected Either.Left")
+    }
+
+    def expectRight() R = match this {
+        case Left(_) => panic("expected Either.Right")
+        case Right(value) => value
     }
 
     def orPanic() R = match this {

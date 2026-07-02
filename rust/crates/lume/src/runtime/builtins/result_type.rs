@@ -34,9 +34,8 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(4, "getError", Vec::new(), result_get_error),
             builtin_method(5, "getOr", vec![ir::Type::Unknown], result_get_or),
             builtin_method(6, "isSuccess", Vec::new(), result_is_ok),
-            builtin_method(7, "unwrap", Vec::new(), result_or_panic),
             builtin_method(
-                8,
+                7,
                 "flatMap",
                 vec![ir::Type::Function {
                     params: Vec::new(),

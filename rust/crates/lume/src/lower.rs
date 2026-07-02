@@ -1698,7 +1698,7 @@ impl<'a> FunctionLowerer<'a> {
             ir::RValue::Call {
                 callee: ir::Callee::Method {
                     receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
-                    method: "unwrap".to_string(),
+                    method: "orPanic".to_string(),
                 },
                 args: Vec::new(),
                 structural: false,
@@ -2661,42 +2661,56 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lookup_case_fields(&self, path: &[String], arity: usize) -> Option<Vec<String>> {
         let case_name = path.last()?;
-        if arity == 0 {
-            if path.len() >= 2 {
-                let type_name = &path[path.len() - 2];
-                let has_case = self
-                    .program
-                    .types
-                    .iter()
-                    .filter(|ty| ty.kind == ast::TypeKind::Enum && ty.name == *type_name)
-                    .flat_map(|ty| ty.enum_cases.iter())
-                    .any(|case| case.name == *case_name);
-                if has_case {
-                    return Some(Vec::new());
+        if path.len() >= 2 {
+            let type_name = &path[path.len() - 2];
+            if let Some(case) = self
+                .program
+                .types
+                .iter()
+                .filter(|ty| ty.kind == ast::TypeKind::Enum && ty.name == *type_name)
+                .flat_map(|ty| ty.enum_cases.iter())
+                .find(|case| case.name == *case_name)
+            {
+                if let Some(fields) = enum_case_pattern_fields(case, arity) {
+                    return Some(fields);
                 }
-            }
-            if matches!(
-                case_name.as_str(),
-                "None" | "Some" | "Ok" | "Err" | "Left" | "Right"
-            ) {
-                return Some(Vec::new());
             }
         }
         match case_name.as_str() {
-            "Some" | "Ok" | "Left" | "Right" => {
+            "Some" | "Ok" | "Left" | "Right" if arity == 1 => {
                 return Some(vec!["value".to_string()]);
             }
-            "Err" => {
+            "Err" if arity == 1 => {
                 return Some(vec!["error".to_string()]);
             }
-            "None" => return Some(Vec::new()),
+            "None" if arity == 0 => return Some(Vec::new()),
             _ => {}
+        }
+
+        let ast_matches = self
+            .program
+            .types
+            .iter()
+            .filter(|ty| ty.kind == ast::TypeKind::Enum)
+            .flat_map(|ty| ty.enum_cases.iter())
+            .filter(|case| case.name == *case_name)
+            .filter_map(|case| enum_case_pattern_fields(case, arity))
+            .collect::<Vec<_>>();
+        if ast_matches.len() == 1 {
+            return ast_matches.into_iter().next();
+        }
+        if let Some(first) = ast_matches.first() {
+            if ast_matches.iter().all(|fields| fields == first) {
+                return Some(first.clone());
+            }
         }
 
         if path.len() >= 2 {
             let key = format!("{}.{}", path[path.len() - 2], case_name);
             if let Some(fields) = self.case_fields.get(&key) {
-                return Some(fields.clone());
+                if fields.len() == arity {
+                    return Some(fields.clone());
+                }
             }
         }
 
@@ -2704,7 +2718,7 @@ impl<'a> FunctionLowerer<'a> {
             .case_fields
             .iter()
             .filter_map(|(key, fields)| {
-                if key.ends_with(&format!(".{case_name}")) {
+                if key.ends_with(&format!(".{case_name}")) && fields.len() == arity {
                     Some(fields.clone())
                 } else {
                     None
@@ -2974,7 +2988,7 @@ impl<'a> FunctionLowerer<'a> {
             ir::RValue::Call {
                 callee: ir::Callee::Method {
                     receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
-                    method: "unwrap".to_string(),
+                    method: "orPanic".to_string(),
                 },
                 args: Vec::new(),
                 structural: false,
@@ -5049,6 +5063,24 @@ fn unique_bare_enum_case_exists(program: &ir::Program, case_name: &str) -> bool 
 
 fn enum_case_is_value(case: &ir::EnumCase) -> bool {
     case.fields.is_empty() || case.fields.iter().all(|field| field.initializer.is_some())
+}
+
+fn enum_case_pattern_fields(case: &ir::EnumCase, arity: usize) -> Option<Vec<String>> {
+    if arity > case.fields.len() {
+        return None;
+    }
+    if case.fields[arity..]
+        .iter()
+        .any(|field| field.initializer.is_none())
+    {
+        return None;
+    }
+    Some(
+        case.fields[..arity]
+            .iter()
+            .map(|field| field.name.clone())
+            .collect(),
+    )
 }
 
 fn lower_if_stmt_else_expr(branch: &ElseBranch) -> Option<ElseExprBranch> {

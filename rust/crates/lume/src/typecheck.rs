@@ -2708,7 +2708,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_match_case(&mut self, case: &MatchCase, value_ty: &Ty) -> Ty {
+    fn check_match_case_against(&mut self, case: &MatchCase, value_ty: &Ty, expected: &Ty) -> Ty {
         self.push_scope();
         self.bind_pattern(&case.pattern, value_ty);
         if let Some(guard) = &case.guard {
@@ -2716,8 +2716,8 @@ impl<'a> Checker<'a> {
             self.require_bool(&guard_ty, guard.span(), "match guard must be Bool");
         }
         let ty = match &case.body {
-            MatchCaseBody::Block(block) => self.check_block(block),
-            MatchCaseBody::Expr(expr) => self.check_expr(expr),
+            MatchCaseBody::Block(block) => self.check_block_against(block, expected),
+            MatchCaseBody::Expr(expr) => self.check_expr_against(expr, expected),
         };
         self.pop_scope();
         ty
@@ -3310,7 +3310,7 @@ impl<'a> Checker<'a> {
                 args,
                 uses_brace_syntax,
                 span,
-            } => self.check_call(callee, args, *uses_brace_syntax, *span),
+            } => self.check_call(callee, args, *uses_brace_syntax, *span, expected),
             Expr::Member {
                 receiver,
                 name,
@@ -3555,8 +3555,13 @@ impl<'a> Checker<'a> {
             } => {
                 let value_ty = self.check_expr(value);
                 let mut result = Ty::Unknown;
+                let case_expected = if *partial {
+                    self.unwrap_inner_type(expected)
+                } else {
+                    expected.clone()
+                };
                 for case in cases {
-                    let current = self.check_match_case(case, &value_ty);
+                    let current = self.check_match_case_against(case, &value_ty, &case_expected);
                     result = join_types(&result, &current);
                 }
                 if !*partial {
@@ -3848,6 +3853,7 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         uses_brace_syntax: bool,
         span: crate::source::Span,
+        expected: &Ty,
     ) -> Ty {
         if uses_brace_syntax
             && self.brace_call_type_sig(callee).is_none()
@@ -3886,9 +3892,13 @@ impl<'a> Checker<'a> {
         if let Some(ty) = self.check_builtin_static_factory_call(callee, &normalized_args, span) {
             return ty;
         }
-        if let Some(ty) =
-            self.try_check_constructor_call(callee, &normalized_args, uses_brace_syntax, span)
-        {
+        if let Some(ty) = self.try_check_constructor_call(
+            callee,
+            &normalized_args,
+            uses_brace_syntax,
+            span,
+            expected,
+        ) {
             return ty;
         }
         if let Some((params, ret)) =
@@ -4500,6 +4510,7 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         uses_brace_syntax: bool,
         span: crate::source::Span,
+        expected: &Ty,
     ) -> Option<Ty> {
         let structural_record_arg = call_uses_structural_record_arg(args, uses_brace_syntax);
         let parenthesized_record_arg =
@@ -4535,6 +4546,7 @@ impl<'a> Checker<'a> {
                         args,
                         span,
                         uses_brace_syntax,
+                        expected,
                     ));
                 }
                 if let Some(sig) = self.lookup_type_local(name) {
@@ -4620,6 +4632,7 @@ impl<'a> Checker<'a> {
                                 args,
                                 span,
                                 uses_brace_syntax,
+                                expected,
                             ));
                         }
                         if sig.kind == TypeKind::Single {
@@ -4635,6 +4648,7 @@ impl<'a> Checker<'a> {
                                 args,
                                 span,
                                 uses_brace_syntax,
+                                expected,
                             ));
                         }
                     }
@@ -4647,6 +4661,7 @@ impl<'a> Checker<'a> {
                                 args,
                                 span,
                                 uses_brace_syntax,
+                                expected,
                             ));
                         }
                     }
@@ -5073,17 +5088,44 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
         uses_brace_syntax: bool,
+        expected: &Ty,
     ) -> Ty {
+        let (params, ret) = self.materialized_enum_case_signature_against(case, expected);
         if case.field_count == 0 && args.is_empty() {
             self.add_error(
                 "invalid_enum_case_call",
                 format!("enum case '{case_name}' does not accept call syntax; use '{case_name}'"),
                 span,
             );
-            return case.result.clone();
+            return ret;
         }
         self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
-        self.check_constructor_signature(&case.params, &case.result, args, span)
+        self.check_constructor_signature(&params, &ret, args, span)
+    }
+
+    fn materialized_enum_case_signature_against(
+        &self,
+        case: &EnumCaseSig,
+        expected: &Ty,
+    ) -> (Vec<FieldSig>, Ty) {
+        let mut subst = HashMap::new();
+        if !matches!(expected, Ty::Unknown) {
+            infer_type_subst(&case.result, expected, &mut subst);
+        }
+        let params = case
+            .params
+            .iter()
+            .map(|param| FieldSig {
+                name: param.name.clone(),
+                ty: substitute_type(&param.ty, &subst),
+                mutable: param.mutable,
+                hidden: param.hidden,
+                has_initializer: param.has_initializer,
+                variadic: param.variadic,
+            })
+            .collect();
+        let ret = self.materialize_enum_case_result_against(&case.result, expected);
+        (params, ret)
     }
 
     fn callable_signature_for_args(
@@ -5448,6 +5490,18 @@ impl<'a> Checker<'a> {
             Pattern::Constructor { path, args, .. } => {
                 let case_name = path.last().cloned().unwrap_or_default();
                 if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
+                    if !enum_case_pattern_accepts_arity(&case.params, args.len()) {
+                        self.add_error(
+                            "invalid_destructure",
+                            format!(
+                                "constructor pattern '{}' expects {} fields, got {}",
+                                case_name,
+                                enum_case_pattern_required_count(&case.params),
+                                args.len()
+                            ),
+                            pattern.span(),
+                        );
+                    }
                     let mut subst = HashMap::new();
                     infer_type_subst(&case.result, scrutinee, &mut subst);
                     for (pattern, param) in args.iter().zip(case.params.iter()) {
@@ -5457,6 +5511,18 @@ impl<'a> Checker<'a> {
                         );
                     }
                 } else if let Some(fields) = self.lookup_destructured_type_fields(path) {
+                    if args.len() != fields.len() {
+                        self.add_error(
+                            "invalid_destructure",
+                            format!(
+                                "constructor pattern '{}' expects {} fields, got {}",
+                                case_name,
+                                fields.len(),
+                                args.len()
+                            ),
+                            pattern.span(),
+                        );
+                    }
                     for (pattern, field_ty) in args.iter().zip(fields.iter()) {
                         self.bind_pattern(pattern, field_ty);
                     }
@@ -6865,6 +6931,14 @@ impl<'a> Checker<'a> {
             self.is_assignable_inner(&bound_ty, expected, seen)
         })
     }
+}
+
+fn enum_case_pattern_accepts_arity(params: &[FieldSig], arity: usize) -> bool {
+    arity <= params.len() && params[arity..].iter().all(|param| param.has_initializer)
+}
+
+fn enum_case_pattern_required_count(params: &[FieldSig]) -> usize {
+    params.iter().filter(|param| !param.has_initializer).count()
 }
 
 fn constructor_body_delegates(body: &CallableBody) -> bool {
@@ -9549,6 +9623,47 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn materializes_bare_zero_payload_enum_case_patterns() {
+        let program = parse_inline(
+            r#"
+def mapOption[X](value Option[Int], f (Int) -> X) Option[X] {
+    match value {
+        case Some(item) => Some(f(item))
+        case None => None
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_bare_payload_enum_case_patterns() {
+        let program = parse_inline(
+            r#"
+def main(value Option[Int]) Int {
+    match value {
+        case Some => 1
+        case None => 0
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_destructure"
+                    && diag
+                        .message
+                        .contains("constructor pattern 'Some' expects 1 fields, got 0")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
