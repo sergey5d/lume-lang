@@ -1,0 +1,37 @@
+module examples/java_rest
+
+use lume/rest/{RestServer}
+
+annotation Controller {
+    path Str = ""
+}
+
+annotation GET {
+    path Str
+}
+
+annotation POST {
+    path Str
+}
+
+shape Greeting {
+    message Str
+}
+
+@Controller { path: "/api" }
+class GreetingController {
+    @GET { path: "/health" }
+    def health() Str = "ok"
+
+    @GET { path: "/hello" }
+    def hello() Str = "{ \"message\": \"hello from Lume\" }"
+
+    @POST { path: "/echo" }
+    def echo(body Str) Str = "{ \"echo\": \"" + body + "\" }"
+}
+
+def main() Unit {
+    server RestServer = RestServer(7070)
+    server.setHandler(GreetingController())
+    server.run()
+}

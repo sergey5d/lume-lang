@@ -752,6 +752,11 @@ impl<'a> FunctionEmitter<'a> {
                 self.names.java_constructor_type_args(owner),
                 args.join(", ")
             )),
+            [owner] if self.is_lume_constructible_type(owner) => Some(format!(
+                "new {}({})",
+                self.names.named_type(owner),
+                args.join(", ")
+            )),
             [owner, method] if self.names.is_java_type(owner) => Some(format!(
                 "{}.{}({})",
                 self.names.named_type(owner),
@@ -769,6 +774,13 @@ impl<'a> FunctionEmitter<'a> {
             }
             _ => None,
         }
+    }
+
+    fn is_lume_constructible_type(&self, name: &str) -> bool {
+        self.bundle.ir.types.iter().any(|ty| {
+            ty.name == name
+                && matches!(ty.kind, TypeKind::Class | TypeKind::Record | TypeKind::Enum)
+        })
     }
 
     fn emit_intrinsic(&self, intrinsic: &ir::Intrinsic, args: &[String]) -> Option<String> {

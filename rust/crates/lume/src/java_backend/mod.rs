@@ -1343,6 +1343,41 @@ def main() Unit {
     }
 
     #[test]
+    fn emits_lume_positional_constructor_calls() {
+        let temp = temp_path("lume-java-lume-constructors");
+        let source = temp.join("constructors.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/constructors
+
+class Greeter {
+    def hello() Str = "hi"
+}
+
+def main() Unit {
+    greeter Greeter = Greeter()
+    println(greeter.hello())
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        let module = fs::read_to_string(out.join("demo/constructors/ConstructorsModule.java"))
+            .expect("read module");
+        assert!(!module.contains("UnsupportedOperationException"));
+        assert!(module.contains("tmp1_1 = new Greeter();"));
+        assert!(module.contains("greeter_0 = ((Greeter) tmp1_1);"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_matches_interpreter_for_supported_program() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java parity test because javac/java is not available");
