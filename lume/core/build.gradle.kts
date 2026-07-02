@@ -2,20 +2,12 @@ plugins {
     java
 }
 
-dependencies {
-    implementation("io.javalin:javalin:6.7.0")
-    runtimeOnly("org.slf4j:slf4j-simple:2.0.17")
-}
-
 val repoRoot = layout.projectDirectory.dir("../..")
 val optionSource = layout.projectDirectory.file("src/main/lume/lume/core/Option.lum")
 val resultSource = layout.projectDirectory.file("src/main/lume/lume/core/Result.lum")
 val eitherSource = layout.projectDirectory.file("src/main/lume/lume/core/Either.lum")
-val httpSource = layout.projectDirectory.file("src/main/lume/lume/core/http/HttpServer.lum")
-val lumeSources = listOf(optionSource, resultSource, eitherSource, httpSource)
+val lumeSources = listOf(optionSource, resultSource, eitherSource)
 val runtimeJava = layout.projectDirectory.dir("src/main/java")
-val javaStubs = layout.projectDirectory.dir("src/main/java-stubs")
-val runtimeClasses = layout.buildDirectory.dir("runtime-classes")
 val generatedLumeJava = layout.buildDirectory.dir("generated/sources/lume/java")
 val lumeCompilerSources = repoRoot.dir("rust/crates/lume/src")
 val lumeCompilerManifest = repoRoot.file("rust/Cargo.toml")
@@ -27,13 +19,6 @@ sourceSets {
         java.srcDir(runtimeJava)
         java.srcDir(generatedLumeJava)
     }
-}
-
-val compileRuntimeJava = tasks.register<JavaCompile>("compileRuntimeJava") {
-    description = "Compiles tiny Java stubs so Lume can inspect external classes during core generation."
-    source = fileTree(javaStubs)
-    classpath = configurations.compileClasspath.get()
-    destinationDirectory.set(runtimeClasses)
 }
 
 val cleanGeneratedLumeJava = tasks.register("cleanGeneratedLumeJava") {
@@ -68,7 +53,6 @@ val buildLumeCompiler = tasks.register<Exec>("buildLumeCompiler") {
 fun Exec.configureLumeJavaGeneration(source: org.gradle.api.file.RegularFile) {
     dependsOn(buildLumeCompiler)
     inputs.file(source)
-    inputs.files(fileTree(javaStubs))
     inputs.files(fileTree(lumeCompilerSources))
     inputs.property("lumeExecutable", lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath)
     if (!lumeExecutableOverride.isPresent) {
@@ -79,19 +63,13 @@ fun Exec.configureLumeJavaGeneration(source: org.gradle.api.file.RegularFile) {
     doFirst {
         val outputDir = generatedLumeJava.get().asFile
         val lumeExecutable = lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath
-        val lumeClasspath = files(
-            runtimeClasses.get().asFile,
-            configurations.compileClasspath.get()
-        ).asPath
 
         commandLine(
             lumeExecutable,
             "gen",
             source.asFile.absolutePath,
             "--out",
-            outputDir.absolutePath,
-            "--classpath",
-            lumeClasspath
+            outputDir.absolutePath
         )
     }
 }
@@ -99,7 +77,7 @@ fun Exec.configureLumeJavaGeneration(source: org.gradle.api.file.RegularFile) {
 val generateOptionJava = tasks.register<Exec>("generateOptionJava") {
     description = "Generates Java sources for Lume core Option."
     group = "build"
-    dependsOn(compileRuntimeJava, cleanGeneratedLumeJava)
+    dependsOn(cleanGeneratedLumeJava)
     configureLumeJavaGeneration(optionSource)
 }
 
@@ -117,17 +95,10 @@ val generateEitherJava = tasks.register<Exec>("generateEitherJava") {
     configureLumeJavaGeneration(eitherSource)
 }
 
-val generateHttpJava = tasks.register<Exec>("generateHttpJava") {
-    description = "Generates Java sources for Lume core HTTP."
-    group = "build"
-    dependsOn(generateEitherJava)
-    configureLumeJavaGeneration(httpSource)
-}
-
 val generateLumeJava = tasks.register("generateLumeJava") {
     description = "Generates Java sources for Lume core libraries."
     group = "build"
-    dependsOn(generateHttpJava)
+    dependsOn(generateEitherJava)
     inputs.files(lumeSources)
     outputs.dir(generatedLumeJava)
 }

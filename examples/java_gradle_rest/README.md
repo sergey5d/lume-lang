@@ -8,8 +8,9 @@ route discovery is Lume, and Java is only the low-level HTTP substrate.
   compilation.
 - The plugin defaults to an installed `lume` executable. This repo sample points
   at `../../rust/target/debug/lume` unless `LUME` is set.
-- `lume-core.jar` is an ordinary Java dependency for compilation/runtime. This
-  sample builds the repo-local core jar before generating the app.
+- `lume-core.jar` and `lume-http.jar` are ordinary Java dependencies for
+  compilation/runtime. This sample builds both repo-local jars before generating
+  the app.
 - `gradle build` produces a runnable jar.
 
 ## Build Flow
@@ -17,14 +18,14 @@ route discovery is Lume, and Java is only the low-level HTTP substrate.
 The important tasks are:
 
 - `buildLocalLumeCore`: builds `../../lume/core/build/libs/lume-core.jar`.
+- `buildLocalLumeHttp`: builds `../../lume/http/build/libs/lume-http.jar`.
 - `generateLumeJava`: runs the Lume compiler as `lume gen ...`;
-  `lume-core.jar` is available automatically to generation.
+  the core and HTTP jars are passed to generation.
 - `compileJava`: compiles the generated application Java.
 - `jar`: packages a runnable fat jar with Java dependencies.
 
 The reusable plugin does not know about this repository, Cargo, or
-`lume-core.jar` locations. The repo-local bootstrap is in this example build
-file only.
+Lume jar locations. The repo-local bootstrap is in this example build file only.
 
 ## Commands
 
@@ -57,10 +58,10 @@ curl -X POST http://localhost:7070/api/echo -d 'from curl'
 
 ## HTTP Boundary
 
-The sample imports the Lume core HTTP API as:
+The sample imports the Lume HTTP API as:
 
 ```txt
-use lume/core/http/{HttpServer, Controller, GET, POST}
+use lume/http/{HttpServer, Controller, GET, POST}
 ```
 
 The controller is pure Lume:

@@ -38,6 +38,7 @@ public final class LumeJavaApplicationPlugin implements Plugin<Project> {
             task.setGroup("build");
             task.getInputs().file(extension.getSource());
             task.getInputs().files(extension.getExtraClasspath());
+            task.getInputs().files(extension.getRuntimeClasspath());
             task.getInputs().property("lumeExecutable", extension.getLumeExecutable());
             task.getOutputs().dir(extension.getGeneratedSourceDir());
 
@@ -53,8 +54,12 @@ public final class LumeJavaApplicationPlugin implements Plugin<Project> {
                     "--out",
                     outputDir.getAsFile().getAbsolutePath()
                 );
-                if (!extension.getExtraClasspath().isEmpty()) {
-                    task.args("--classpath", extension.getExtraClasspath().getAsPath());
+                var generationClasspath = project.files(
+                    extension.getRuntimeClasspath(),
+                    extension.getExtraClasspath()
+                );
+                if (!generationClasspath.isEmpty()) {
+                    task.args("--classpath", generationClasspath.getAsPath());
                 }
             });
         });

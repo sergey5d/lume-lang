@@ -1,6 +1,6 @@
 module examples/java_gradle_rest
 
-use lume/core/http/{HttpServer, Controller, GET, POST}
+use lume/http/{HttpServer, Controller, GET, POST}
 
 @Controller { path: "/api" }
 class GreetingController {
