@@ -924,6 +924,62 @@ impl Maybe[T] {
     }
 
     #[test]
+    fn emits_structured_java_for_core_result_and_either() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir
+            .parent()
+            .and_then(|crates_dir| crates_dir.parent())
+            .and_then(|rust_dir| rust_dir.parent())
+            .expect("repo root");
+
+        for (source_name, expected_lines) in [
+            (
+                "Result",
+                vec![
+                    "if (this instanceof Ok<?, ?>)",
+                    "if (this instanceof Err<?, ?>)",
+                    "if (this instanceof Ok<?, ?> __case0)",
+                    "return ((T) __case0.value());",
+                ],
+            ),
+            (
+                "Either",
+                vec![
+                    "if (this instanceof Left<?, ?>)",
+                    "if (this instanceof Right<?, ?>)",
+                    "if (this instanceof Right<?, ?> __case1)",
+                    "return ((R) __case1.value());",
+                ],
+            ),
+        ] {
+            let temp = temp_path(&format!("lume-java-core-{}", source_name.to_lowercase()));
+            let source = repo_root.join(format!(
+                "lume/core/src/main/lume/lume/core/{source_name}.lum"
+            ));
+            let out = temp.join("out");
+            fs::create_dir_all(&temp).expect("create temp dir");
+
+            let result =
+                generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+            assert!(result.diagnostics.is_empty());
+            let generated = fs::read_to_string(out.join(format!("lume/core/{source_name}.java")))
+                .expect("read generated core enum");
+            assert!(!generated.contains("__block"));
+            assert!(!generated.contains("while (true)"));
+            assert!(!generated.contains("variantField"));
+            for expected in expected_lines {
+                assert!(
+                    generated.contains(expected),
+                    "generated {source_name}.java did not contain {expected:?}\n{generated}"
+                );
+            }
+
+            let _ = fs::remove_dir_all(temp);
+        }
+    }
+
+    #[test]
     fn does_not_write_java_when_lume_has_diagnostics() {
         let temp = temp_path("lume-java-invalid");
         let source = temp.join("broken.lum");
@@ -1714,21 +1770,25 @@ public final class GenericBox<T> {
         let mut sources = Vec::new();
         collect_java_source_files(&runtime_dir, &mut sources).expect("collect core java");
 
-        let option_source = repo_root.join("lume/core/src/main/lume/lume/core/Option.lum");
-        let generated_core = temp_path("lume-java-core-option");
-        let result = generate_java_path(&option_source, JavaBackendOptions::new(&generated_core))
-            .expect("generate core option java");
-        assert!(
-            result.diagnostics.is_empty(),
-            "core option java generation produced diagnostics: {:?}",
-            result.diagnostics
-        );
-        sources.extend(
-            result
-                .written_files
-                .into_iter()
-                .filter(|path| path.file_name().is_some_and(|name| name == "Option.java")),
-        );
+        for source_name in ["Option", "Result", "Either"] {
+            let source = repo_root.join(format!(
+                "lume/core/src/main/lume/lume/core/{source_name}.lum"
+            ));
+            let generated_core =
+                temp_path(&format!("lume-java-core-{}", source_name.to_lowercase()));
+            let result = generate_java_path(&source, JavaBackendOptions::new(&generated_core))
+                .unwrap_or_else(|err| panic!("generate core {source_name} java: {err}"));
+            assert!(
+                result.diagnostics.is_empty(),
+                "core {source_name} java generation produced diagnostics: {:?}",
+                result.diagnostics
+            );
+            let expected_file_name = format!("{source_name}.java");
+            sources.extend(result.written_files.into_iter().filter(|path| {
+                path.file_name()
+                    .is_some_and(|name| name == expected_file_name.as_str())
+            }));
+        }
         sources
     }
 

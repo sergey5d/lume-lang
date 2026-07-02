@@ -9,8 +9,10 @@ dependencies {
 
 val repoRoot = layout.projectDirectory.dir("../..")
 val optionSource = layout.projectDirectory.file("src/main/lume/lume/core/Option.lum")
+val resultSource = layout.projectDirectory.file("src/main/lume/lume/core/Result.lum")
+val eitherSource = layout.projectDirectory.file("src/main/lume/lume/core/Either.lum")
 val httpSource = layout.projectDirectory.file("src/main/lume/lume/core/http/HttpServer.lum")
-val lumeSources = listOf(optionSource, httpSource)
+val lumeSources = listOf(optionSource, resultSource, eitherSource, httpSource)
 val runtimeJava = layout.projectDirectory.dir("src/main/java")
 val javaStubs = layout.projectDirectory.dir("src/main/java-stubs")
 val runtimeClasses = layout.buildDirectory.dir("runtime-classes")
@@ -79,10 +81,24 @@ val generateOptionJava = tasks.register<Exec>("generateOptionJava") {
     configureLumeJavaGeneration(optionSource)
 }
 
+val generateResultJava = tasks.register<Exec>("generateResultJava") {
+    description = "Generates Java sources for Lume core Result."
+    group = "build"
+    dependsOn(generateOptionJava)
+    configureLumeJavaGeneration(resultSource)
+}
+
+val generateEitherJava = tasks.register<Exec>("generateEitherJava") {
+    description = "Generates Java sources for Lume core Either."
+    group = "build"
+    dependsOn(generateResultJava)
+    configureLumeJavaGeneration(eitherSource)
+}
+
 val generateHttpJava = tasks.register<Exec>("generateHttpJava") {
     description = "Generates Java sources for Lume core HTTP."
     group = "build"
-    dependsOn(generateOptionJava)
+    dependsOn(generateEitherJava)
     configureLumeJavaGeneration(httpSource)
 }
 

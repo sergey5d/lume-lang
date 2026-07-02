@@ -1,0 +1,23 @@
+module lume/core
+
+enum Either[L, R] {
+    case Left {
+        value L
+    }
+
+    case Right {
+        value R
+    }
+}
+
+impl Either[L, R] {
+    def isRight() Bool = match this {
+        case Left(_) => false
+        case Right(_) => true
+    }
+
+    def orPanic() R = match this {
+        case Left(_) => panic("expected Either.Right")
+        case Right(value) => value
+    }
+}

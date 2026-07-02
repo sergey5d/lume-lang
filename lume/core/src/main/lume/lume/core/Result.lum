@@ -1,0 +1,23 @@
+module lume/core
+
+enum Result[T, E] {
+    case Ok {
+        value T
+    }
+
+    case Err {
+        error E
+    }
+}
+
+impl Result[T, E] {
+    def isOk() Bool = match this {
+        case Ok(_) => true
+        case Err(_) => false
+    }
+
+    def orPanic() T = match this {
+        case Ok(value) => value
+        case Err(_) => panic("expected Result.Ok")
+    }
+}
