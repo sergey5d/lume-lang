@@ -1,4 +1,4 @@
-module lume/http
+module lume/http/javalin
 
 use io/javalin/Javalin
 use io/javalin/http/{Context, Handler}

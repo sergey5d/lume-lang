@@ -12,4 +12,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "lume-http"
+rootProject.name = "lume-http-javalin"

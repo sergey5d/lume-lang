@@ -2,20 +2,21 @@ plugins {
     java
 }
 
+val repoRoot = layout.projectDirectory.dir("../../..")
+val coreJar = repoRoot.file("lume/core/build/libs/lume-core.jar")
+
 dependencies {
-    implementation(files(layout.projectDirectory.file("../core/build/libs/lume-core.jar")))
+    implementation(files(coreJar))
     implementation("io.javalin:javalin:6.7.0")
     runtimeOnly("org.slf4j:slf4j-simple:2.0.17")
 }
 
-val repoRoot = layout.projectDirectory.dir("../..")
-val httpSource = layout.projectDirectory.file("src/main/lume/lume/http/HttpServer.lum")
+val httpSource = layout.projectDirectory.file("src/main/lume/lume/http/javalin/HttpServer.lum")
 val generatedLumeJava = layout.buildDirectory.dir("generated/sources/lume/java")
 val lumeCompilerSources = repoRoot.dir("rust/crates/lume/src")
 val lumeCompilerBinary = repoRoot.file("rust/target/debug/lume")
 val lumeExecutableOverride = providers.environmentVariable("LUME")
 val gradleExecutable = providers.environmentVariable("GRADLE").orElse("gradle")
-val coreJar = repoRoot.file("lume/core/build/libs/lume-core.jar")
 
 sourceSets {
     main {
@@ -24,7 +25,7 @@ sourceSets {
 }
 
 val buildLocalLumeCore = tasks.register<Exec>("buildLocalLumeCore") {
-    description = "Builds the repo-local Lume core jar used by Lume HTTP."
+    description = "Builds the repo-local Lume core jar used by Lume HTTP Javalin."
     group = "build"
 
     commandLine(
@@ -50,8 +51,8 @@ val cleanGeneratedLumeJava = tasks.register("cleanGeneratedLumeJava") {
     }
 }
 
-val generateHttpJava = tasks.register<Exec>("generateHttpJava") {
-    description = "Generates Java sources for Lume HTTP."
+val generateHttpJavalinJava = tasks.register<Exec>("generateHttpJavalinJava") {
+    description = "Generates Java sources for Lume HTTP Javalin."
     group = "build"
     dependsOn(buildLocalLumeCore, cleanGeneratedLumeJava)
 
@@ -81,11 +82,11 @@ val generateHttpJava = tasks.register<Exec>("generateHttpJava") {
 }
 
 tasks.named<JavaCompile>("compileJava") {
-    dependsOn(generateHttpJava)
+    dependsOn(generateHttpJavalinJava)
 }
 
 tasks.named<Jar>("jar") {
-    archiveBaseName.set("lume-http")
+    archiveBaseName.set("lume-http-javalin")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from({
         configurations.runtimeClasspath.get().map { dependency ->
