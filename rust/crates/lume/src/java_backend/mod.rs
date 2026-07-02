@@ -1139,6 +1139,52 @@ def main() Unit {
     }
 
     #[test]
+    fn rejects_missing_java_method_from_jar() {
+        if !command_available("javac") || !command_available("jar") || !command_available("javap") {
+            eprintln!("skipping Java missing method test because a JDK tool is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-missing-method");
+        let source = temp.join("java_missing_method.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        let jar = create_widget_jar(&temp);
+        fs::write(
+            &source,
+            r#"
+module demo/javamissingmethod
+
+use third/party/Widget
+
+def main() Unit {
+    widget Widget = Widget("Ada", 7)
+    widget.nope()
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(
+            &source,
+            JavaBackendOptions::new(&out).with_classpath_entry(&jar),
+        )
+        .expect("generate java");
+
+        assert!(result.written_files.is_empty());
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.diagnostic.code == "unknown_member"),
+            "expected missing Java method diagnostic, got {:#?}",
+            result.diagnostics
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn reports_missing_java_class_from_classpath() {
         if !command_available("javap") || !command_available("javac") || !command_available("jar") {
             eprintln!("skipping missing Java class test because a JDK tool is not available");
