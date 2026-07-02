@@ -8,7 +8,7 @@ class GreetingController {
     def health() Str = "ok"
 
     @GET { path: "/hello" }
-    def hello() Str = "{ \"message\": \"hello from Lume\" }"
+    def hello() Str = raw"""{"message": "hello from Lume" }"""
 
     @POST { path: "/echo" }
     def echo(body Str) Str = "{ \"echo\": \"" + body + "\" }"

@@ -14,4 +14,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "lume-java-gradle-rest"
+rootProject.name = "lume-java-rest"

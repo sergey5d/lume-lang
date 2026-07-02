@@ -1,6 +1,4 @@
 pluginManagement {
-    includeBuild("../../gradle/lume-gradle-plugin")
-
     repositories {
         gradlePluginPortal()
         mavenCentral()
@@ -14,4 +12,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "lume-java-gradle-rest"
+rootProject.name = "lume-gradle-plugin"

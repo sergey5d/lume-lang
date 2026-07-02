@@ -1,7 +1,8 @@
 # Java REST Example
 
-This is the plain source version of the REST example. The Gradle sample is the
-preferred runnable form because it builds `lume-core.jar` automatically.
+This is a small Gradle-backed REST example. The Lume service lives directly in
+`service.lum`, and the local `lume.java-application` Gradle plugin generates and
+compiles Java before running.
 
 The Lume side imports the core HTTP API and lets `HttpServer.addController`
 inspect annotations:
@@ -29,22 +30,11 @@ already-discovered route registrations from Lume.
 
 ## Run
 
-From the repository root:
+From this folder:
 
 ```bash
-gradle -p lume/core jar --no-daemon
-
-cargo build --manifest-path rust/Cargo.toml -p lume
-
-rust/target/debug/lume gen \
-  examples/java_rest/service.lum \
-  --out /tmp/lume-rest
-
-javac -cp lume/core/build/libs/lume-core.jar -d /tmp/lume-rest-classes \
-  /tmp/lume-rest/examples/java_rest/*.java
-
-java -cp /tmp/lume-rest-classes:lume/core/build/libs/lume-core.jar \
-  examples.java_rest.Java_restMain
+gradle build
+gradle run
 ```
 
 Then test:
@@ -55,5 +45,8 @@ curl http://localhost:7070/api/hello
 curl -X POST http://localhost:7070/api/echo -d 'from curl'
 ```
 
-For day-to-day use, prefer `examples/java_gradle_rest`, which wraps these steps
-in Gradle.
+If Gradle is not on `PATH`, pass the executable explicitly:
+
+```bash
+GRADLE=/path/to/gradle /path/to/gradle build
+```

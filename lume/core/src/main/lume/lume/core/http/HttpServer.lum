@@ -16,7 +16,7 @@ annotation POST {
     path Str
 }
 
-class JavalinBackend {
+hidden class JavalinBackend {
     app Javalin
     port Int32
 }

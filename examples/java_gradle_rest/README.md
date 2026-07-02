@@ -7,7 +7,8 @@ route discovery is Lume, and Java is only the low-level HTTP substrate.
 - Core Lume libraries live under `../../lume/core`.
 - `lume-core.jar` contains the Lume runtime, metadata descriptors, and the
   Lume-written `HttpServer`.
-- Gradle generates Java from Lume before compiling.
+- The local `lume.java-application` Gradle plugin generates Java from Lume
+  before compiling.
 - `gradle build` produces a runnable jar.
 
 ## Build Flow
@@ -21,6 +22,10 @@ The important tasks are:
   `lume-core.jar` is available automatically to generation.
 - `compileJava`: compiles the generated application Java.
 - `jar`: packages a runnable fat jar with Java dependencies.
+
+Those tasks are provided by the local Gradle plugin included from
+`../../gradle/lume-gradle-plugin`, so the example build file only declares the
+Lume source file and generated Java main class.
 
 ## Commands
 
