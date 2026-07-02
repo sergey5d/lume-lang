@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    ast::TypeKind,
+    ast::{self, TypeKind},
     backend::{BackendBundle, DescriptorOrigin},
     ir::{self, FunctionKind},
 };
@@ -743,9 +743,309 @@ fn push_function_body(
     function: &ir::Function,
     names: &JavaNames,
 ) {
+    if let Some(body) = structured_source_function_body(bundle, function, names) {
+        out.push_str(&body);
+        return;
+    }
+
     match FunctionEmitter::new(bundle, function, names).emit_body() {
         Some(body) => out.push_str(&body),
         None => push_stub_body(out),
+    }
+}
+
+fn structured_source_function_body(
+    bundle: &BackendBundle,
+    function: &ir::Function,
+    names: &JavaNames,
+) -> Option<String> {
+    let (owner, expr) = source_method_expr(bundle, function)?;
+    SourceBodyEmitter {
+        function,
+        names,
+        owner,
+    }
+    .emit_body(expr)
+}
+
+fn source_method_expr<'a>(
+    bundle: &'a BackendBundle,
+    function: &ir::Function,
+) -> Option<(&'a ir::TypeDef, &'a ast::Expr)> {
+    let FunctionKind::Method { owner } = function.kind else {
+        return None;
+    };
+    let owner = bundle.ir.types.get(owner.0)?;
+    let method = find_source_method(&bundle.ast, owner, function)?;
+    let ast::CallableBody::Expr(expr) = method.body.as_ref()? else {
+        return None;
+    };
+    Some((owner, expr))
+}
+
+fn find_source_method<'a>(
+    program: &'a ast::Program,
+    owner: &ir::TypeDef,
+    function: &ir::Function,
+) -> Option<&'a ast::MethodDecl> {
+    for item in &program.items {
+        match item {
+            ast::Item::Type(type_decl) if type_decl.name == owner.name => {
+                for member in &type_decl.members {
+                    let ast::TypeMember::Method(method) = member else {
+                        continue;
+                    };
+                    if source_method_matches(method, function) {
+                        return Some(method);
+                    }
+                }
+            }
+            ast::Item::Impl(impl_block)
+                if type_ref_base_name(&impl_block.target)
+                    .is_some_and(|name| name == owner.name) =>
+            {
+                for method in &impl_block.methods {
+                    if source_method_matches(method, function) {
+                        return Some(method);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn source_method_matches(method: &ast::MethodDecl, function: &ir::Function) -> bool {
+    method.name == function.name && method.params.len() == function.params.len()
+}
+
+fn type_ref_base_name(ty: &ast::TypeRef) -> Option<&str> {
+    match ty {
+        ast::TypeRef::Named { name, .. } => Some(name),
+        _ => None,
+    }
+}
+
+struct SourceBodyEmitter<'a> {
+    function: &'a ir::Function,
+    names: &'a JavaNames,
+    owner: &'a ir::TypeDef,
+}
+
+impl<'a> SourceBodyEmitter<'a> {
+    fn emit_body(&self, expr: &ast::Expr) -> Option<String> {
+        let mut out = String::new();
+        out.push_str(" {\n");
+        self.emit_returning_expr(&mut out, expr, "        ", &HashMap::new())?;
+        out.push_str("    }\n");
+        Some(out)
+    }
+
+    fn emit_returning_expr(
+        &self,
+        out: &mut String,
+        expr: &ast::Expr,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+    ) -> Option<()> {
+        match expr {
+            ast::Expr::Match {
+                partial: false,
+                value,
+                cases,
+                ..
+            } if self.owner.kind == TypeKind::Enum => {
+                self.emit_match_return(out, value, cases, indent, bindings)
+            }
+            _ => {
+                out.push_str(indent);
+                let expr = self.emit_expr(expr, bindings)?;
+                if is_java_void_type(&self.function.return_ty) {
+                    out.push_str(&expr);
+                    out.push_str(";\n");
+                } else {
+                    out.push_str("return ");
+                    out.push_str(&expr);
+                    out.push_str(";\n");
+                }
+                Some(())
+            }
+        }
+    }
+
+    fn emit_match_return(
+        &self,
+        out: &mut String,
+        value: &ast::Expr,
+        cases: &[ast::MatchCase],
+        indent: &str,
+        bindings: &HashMap<String, String>,
+    ) -> Option<()> {
+        let value = self.emit_expr(value, bindings)?;
+        for (index, case) in cases.iter().enumerate() {
+            if case.guard.is_some() {
+                return None;
+            }
+            let matched = self.match_case_pattern(&case.pattern, &value, index, bindings)?;
+            out.push_str(indent);
+            out.push_str("if (");
+            out.push_str(&matched.condition);
+            out.push_str(") {\n");
+            self.emit_match_case_body(
+                out,
+                &case.body,
+                &format!("{indent}    "),
+                &matched.bindings,
+            )?;
+            out.push_str(indent);
+            out.push_str("}\n");
+        }
+        out.push_str(indent);
+        out.push_str("throw new IllegalStateException(\"non-exhaustive Lume match\");\n");
+        Some(())
+    }
+
+    fn emit_match_case_body(
+        &self,
+        out: &mut String,
+        body: &ast::MatchCaseBody,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+    ) -> Option<()> {
+        match body {
+            ast::MatchCaseBody::Expr(expr) => self.emit_returning_expr(out, expr, indent, bindings),
+            ast::MatchCaseBody::Block(_) => None,
+        }
+    }
+
+    fn match_case_pattern(
+        &self,
+        pattern: &ast::Pattern,
+        value: &str,
+        index: usize,
+        parent_bindings: &HashMap<String, String>,
+    ) -> Option<MatchedCase> {
+        match pattern {
+            ast::Pattern::Constructor { path, args, .. } => {
+                let case_name = path.last()?;
+                self.enum_case_match(case_name, args, value, index, parent_bindings)
+            }
+            ast::Pattern::Binding { name, .. } if self.enum_case(name).is_some() => {
+                self.enum_case_match(name, &[], value, index, parent_bindings)
+            }
+            _ => None,
+        }
+    }
+
+    fn enum_case_match(
+        &self,
+        case_name: &str,
+        args: &[ast::Pattern],
+        value: &str,
+        index: usize,
+        parent_bindings: &HashMap<String, String>,
+    ) -> Option<MatchedCase> {
+        let enum_case = self.enum_case(case_name)?;
+        if enum_case.fields.len() != args.len() {
+            return None;
+        }
+
+        let java_case = java_type_name(case_name);
+        let case_local = format!("__case{index}");
+        let case_type = format!(
+            "{java_case}{}",
+            java_wildcard_type_args(self.owner.type_params.len())
+        );
+        let needs_case_local = args
+            .iter()
+            .any(|arg| matches!(arg, ast::Pattern::Binding { .. }));
+        let condition = if needs_case_local {
+            format!("{value} instanceof {case_type} {case_local}")
+        } else {
+            format!("{value} instanceof {case_type}")
+        };
+        let mut bindings = parent_bindings.clone();
+        for (arg, field) in args.iter().zip(&enum_case.fields) {
+            match arg {
+                ast::Pattern::Wildcard { .. } => {}
+                ast::Pattern::Binding { name, .. } => {
+                    bindings.insert(
+                        name.clone(),
+                        format!(
+                            "(({}) {}.{}())",
+                            self.names.value_type(&field.ty),
+                            case_local,
+                            java_member_name(&field.name)
+                        ),
+                    );
+                }
+                _ => return None,
+            }
+        }
+
+        Some(MatchedCase {
+            condition,
+            bindings,
+        })
+    }
+
+    fn enum_case(&self, name: &str) -> Option<&'a ir::EnumCase> {
+        self.owner.enum_cases.iter().find(|case| case.name == name)
+    }
+
+    fn emit_expr(&self, expr: &ast::Expr, bindings: &HashMap<String, String>) -> Option<String> {
+        match expr {
+            ast::Expr::Identifier { name, .. } if name == "this" => Some("this".to_string()),
+            ast::Expr::Identifier { name, .. } => bindings.get(name).cloned(),
+            ast::Expr::Bool { value, .. } => Some(value.to_string()),
+            ast::Expr::Integer { raw, .. } => Some(format!("{raw}L")),
+            ast::Expr::Float { raw, .. } => Some(raw.clone()),
+            ast::Expr::String { raw, .. } => {
+                Some(java_string_literal(&decode_lume_string_literal(raw)))
+            }
+            ast::Expr::Unit { .. } => Some("lume.core.LumeUnit.INSTANCE".to_string()),
+            ast::Expr::Group { inner, .. } => self.emit_expr(inner, bindings),
+            ast::Expr::Call { callee, args, .. } => self.emit_call(callee, args, bindings),
+            _ => None,
+        }
+    }
+
+    fn emit_call(
+        &self,
+        callee: &ast::Expr,
+        args: &[ast::CallArg],
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let ast::Expr::Identifier { name, .. } = callee else {
+            return None;
+        };
+        if name != "panic" {
+            return None;
+        }
+        let message = match args.first() {
+            Some(arg) => self.emit_expr(&arg.value, bindings)?,
+            None => java_string_literal("panic"),
+        };
+        Some(format!("lume.core.LumePanic.panic({message})"))
+    }
+}
+
+struct MatchedCase {
+    condition: String,
+    bindings: HashMap<String, String>,
+}
+
+fn java_wildcard_type_args(count: usize) -> String {
+    if count == 0 {
+        String::new()
+    } else {
+        format!(
+            "<{}>",
+            std::iter::repeat_n("?", count)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 

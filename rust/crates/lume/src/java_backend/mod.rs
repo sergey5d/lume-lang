@@ -876,6 +876,54 @@ def main() Unit {
     }
 
     #[test]
+    fn emits_structured_java_for_simple_enum_match_methods() {
+        let temp = temp_path("lume-java-enum-match-methods");
+        let source = temp.join("maybe.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/maybe
+
+enum Maybe[T] {
+    case None
+    case Some {
+        value T
+    }
+}
+
+impl Maybe[T] {
+    def isDefined() Bool = match this {
+        case Some(_) => true
+        case None => false
+    }
+
+    def orPanic() T = match this {
+        case Some(value) => value
+        case None => panic("expected Maybe.Some")
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        let maybe = fs::read_to_string(out.join("demo/maybe/Maybe.java")).expect("read maybe");
+        assert!(!maybe.contains("__block"));
+        assert!(!maybe.contains("while (true)"));
+        assert!(!maybe.contains("variantField"));
+        assert!(maybe.contains("if (this instanceof Some<?>)"));
+        assert!(maybe.contains("if (this instanceof None<?>)"));
+        assert!(maybe.contains("if (this instanceof Some<?> __case0)"));
+        assert!(maybe.contains("return ((T) __case0.value());"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn does_not_write_java_when_lume_has_diagnostics() {
         let temp = temp_path("lume-java-invalid");
         let source = temp.join("broken.lum");
