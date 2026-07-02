@@ -38,7 +38,7 @@ public final class LumeSet<T> {
         return values.contains(value);
     }
 
-    public int size() {
+    public long size() {
         return values.size();
     }
 

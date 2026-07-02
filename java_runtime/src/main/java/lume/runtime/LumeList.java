@@ -30,7 +30,7 @@ public final class LumeList<T> {
         return new LumeList<>(list);
     }
 
-    public int size() {
+    public long size() {
         return values.size();
     }
 

@@ -1336,7 +1336,7 @@ def main() Unit {
         assert!(module.contains("if (flag_0)"));
         assert!(module.contains("return ((Long) tmp1_1);"));
         assert!(module.contains("tmp1_1 = add(2L, 3L);"));
-        assert!(module.contains("value_0 = ((Long) tmp1_1);"));
+        assert!(module.contains("value_0 = tmp1_1;"));
         assert!(module.contains("tmp2_2 = lume.runtime.LumeRuntime.println(value_0);"));
 
         let _ = fs::remove_dir_all(temp);
@@ -1372,7 +1372,105 @@ def main() Unit {
             .expect("read module");
         assert!(!module.contains("UnsupportedOperationException"));
         assert!(module.contains("tmp1_1 = new Greeter();"));
-        assert!(module.contains("greeter_0 = ((Greeter) tmp1_1);"));
+        assert!(module.contains("greeter_0 = tmp1_1;"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_exposes_lume_type_descriptors() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java metadata test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-metadata");
+        let source = temp.join("metadata.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/metadata
+
+class User {
+    name Str
+    age Int
+}
+
+enum Status {
+    case Pending
+    case Done {
+        label Str
+    }
+}
+
+def main() Unit {
+    user User = User("Ada", 42)
+
+    declared Type = typeOf[User]
+    actual Type = user.runtimeType
+
+    println(declared.name().orPanic())
+    println(actual.qualifiedName().orPanic())
+    println(declared.kind())
+
+    classType ClassType = declared.asClass().orPanic()
+    fields [Field] = classType.fields()
+    println(fields.size())
+
+    nameField Field = fields.get(0).orPanic()
+    ageField Field = fields.get(1).orPanic()
+
+    println(nameField.name())
+    println(nameField.fieldType().name().orPanic())
+    println(ageField.name())
+    println(ageField.fieldType().name().orPanic())
+
+    enumType EnumType = typeOf[Status].asEnum().orPanic()
+    println(enumType.name().orPanic())
+    println(enumType.kind())
+    println(enumType.case("Pending").orPanic().name())
+}
+"#,
+        )
+        .expect("write source");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(generated.diagnostics.is_empty());
+
+        let user = fs::read_to_string(out.join("demo/metadata/User.java")).expect("read user");
+        assert!(user.contains("static final lume.runtime.LumeType TYPE"));
+        assert!(user.contains("lume.runtime.LumeField.of(\"name\""));
+
+        let module =
+            fs::read_to_string(out.join("demo/metadata/MetadataModule.java")).expect("read module");
+        assert!(!module.contains("UnsupportedOperationException"));
+        assert!(module.contains("tmp3_3 = User.TYPE;"));
+        assert!(module.contains("tmp5_5 = User.TYPE;"));
+
+        let mut sources = java_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.metadata.MetadataMain"),
+            "java",
+        );
+        let actual = String::from_utf8(output.stdout).expect("java stdout utf8");
+        assert_eq!(
+            actual,
+            "User\ndemo.metadata.User\nClass\n2\nname\nStr\nage\nInt\nStatus\nEnum\nPending\n"
+        );
 
         let _ = fs::remove_dir_all(temp);
     }

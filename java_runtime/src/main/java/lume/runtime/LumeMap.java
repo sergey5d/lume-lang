@@ -35,7 +35,7 @@ public final class LumeMap<K, V> {
         return Option.some(values.get(key));
     }
 
-    public int size() {
+    public long size() {
         return values.size();
     }
 

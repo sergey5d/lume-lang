@@ -29,6 +29,32 @@ public final class LumeRuntime {
         return LumeUnit.INSTANCE;
     }
 
+    public static Boolean extractSuccessIsSet(Object value) {
+        if (value instanceof Option<?> option) {
+            return option.isDefined();
+        }
+        if (value instanceof Result<?, ?> result) {
+            return result.isOk();
+        }
+        if (value instanceof Either<?, ?> either) {
+            return either.isRight();
+        }
+        return false;
+    }
+
+    public static Object extractSuccessValue(Object value) {
+        if (value instanceof Option<?> option) {
+            return option.orPanic();
+        }
+        if (value instanceof Result<?, ?> result) {
+            return result.orPanic();
+        }
+        if (value instanceof Either<?, ?> either) {
+            return either.orPanic();
+        }
+        throw new LumePanic("expected success value");
+    }
+
     private static String join(Object... values) {
         return Arrays.stream(values)
                 .map(String::valueOf)

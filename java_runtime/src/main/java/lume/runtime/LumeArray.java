@@ -63,7 +63,7 @@ public final class LumeArray<T> {
         return new LumeArray<>(values);
     }
 
-    public int size() {
+    public long size() {
         return values.length;
     }
 

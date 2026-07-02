@@ -833,11 +833,17 @@ impl<'a> FunctionLowerer<'a> {
                         }
                         continue;
                     }
-                    let ty = local
-                        .ty
-                        .as_ref()
-                        .map(lower_type_ref)
-                        .unwrap_or(ir::Type::Unknown);
+                    let ty = local.ty.as_ref().map(lower_type_ref).unwrap_or_else(|| {
+                        if destructure_single_value {
+                            ir::Type::Unknown
+                        } else {
+                            binding
+                                .values
+                                .get(index)
+                                .map(|expr| inferred_storage_type(self.infer_expr_type(expr)))
+                                .unwrap_or(ir::Type::Unknown)
+                        }
+                    });
                     let local_id = self.add_local(
                         local.name.clone(),
                         ty,
@@ -2902,10 +2908,11 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_expr_from_rvalue(&mut self, expr: &Expr) -> ir::Operand {
+        let ty = inferred_storage_type(self.infer_expr_type(expr));
         let rvalue = self
             .lower_rvalue(expr)
             .expect("rvalue-backed expression should lower to an rvalue");
-        let temp = self.add_temp(ir::Type::Unknown);
+        let temp = self.add_temp(ty);
         self.push_statement(ir::Statement {
             span: Some(expr.span()),
             kind: ir::StatementKind::Assign {
@@ -3142,6 +3149,7 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 current
             }
+            Expr::TypeOf { .. } => ir::Type::named("Type"),
             Expr::If { .. }
             | Expr::Block { .. }
             | Expr::Match { .. }
@@ -3152,7 +3160,6 @@ impl<'a> FunctionLowerer<'a> {
             | Expr::Binary { .. }
             | Expr::RecordUpdate { .. }
             | Expr::Is { .. }
-            | Expr::TypeOf { .. }
             | Expr::Lambda { .. }
             | Expr::Placeholder { .. } => ir::Type::Unknown,
         }
@@ -4381,6 +4388,137 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
     };
     let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
     match (type_name.as_str(), name) {
+        ("Option", "orPanic") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(item),
+        }),
+        ("Option", "isDefined") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Bool),
+        }),
+        ("Result", "orPanic") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(item),
+        }),
+        ("Either", "orPanic") => {
+            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            Some(ir::Type::Function {
+                params: Vec::new(),
+                ret: Box::new(right),
+            })
+        }
+        ("Type", "name" | "qualifiedName") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::option(ir::Type::Str)),
+        }),
+        ("Type", "kind") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::named("TypeKind")),
+        }),
+        ("Type", "asClass") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::option(ir::Type::named("ClassType"))),
+        }),
+        ("Type", "asShape") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::option(ir::Type::named("ShapeType"))),
+        }),
+        ("Type", "asEnum") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::option(ir::Type::named("EnumType"))),
+        }),
+        ("Type", "asInterface") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::option(ir::Type::named("InterfaceType"))),
+        }),
+        ("Type", "asSingle") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::option(ir::Type::named("SingleType"))),
+        }),
+        ("Type", "asAnnotation") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::option(ir::Type::named("AnnotationType"))),
+        }),
+        (
+            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
+            | "AnnotationType",
+            "name" | "qualifiedName",
+        ) => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::option(ir::Type::Str)),
+        }),
+        (
+            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
+            | "AnnotationType",
+            "kind",
+        ) => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::named("TypeKind")),
+        }),
+        ("ClassType" | "ShapeType" | "SingleType" | "AnnotationType", "fields") => {
+            Some(ir::Type::Function {
+                params: Vec::new(),
+                ret: Box::new(ir::Type::list(ir::Type::named("Field"))),
+            })
+        }
+        ("ClassType" | "SingleType", "field") => Some(ir::Type::Function {
+            params: vec![ir::Type::Str],
+            ret: Box::new(ir::Type::option(ir::Type::named("Field"))),
+        }),
+        ("ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType", "methods") => {
+            Some(ir::Type::Function {
+                params: Vec::new(),
+                ret: Box::new(ir::Type::list(ir::Type::named("Method"))),
+            })
+        }
+        ("ClassType" | "SingleType", "method") => Some(ir::Type::Function {
+            params: vec![ir::Type::Str],
+            ret: Box::new(ir::Type::option(ir::Type::named("Method"))),
+        }),
+        ("EnumType", "cases") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::list(ir::Type::named("EnumCase"))),
+        }),
+        ("EnumType", "case") => Some(ir::Type::Function {
+            params: vec![ir::Type::Str],
+            ret: Box::new(ir::Type::option(ir::Type::named("EnumCase"))),
+        }),
+        ("Field", "name") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Str),
+        }),
+        ("Field", "fieldType") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::named("Type")),
+        }),
+        ("Method", "name") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Str),
+        }),
+        ("Method", "params") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::list(ir::Type::named("Param"))),
+        }),
+        ("Method", "returnType") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::named("Type")),
+        }),
+        ("Param", "name") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Str),
+        }),
+        ("Param", "paramType") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::named("Type")),
+        }),
+        ("EnumCase", "name") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Str),
+        }),
+        ("EnumCase", "fields") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::list(ir::Type::named("Field"))),
+        }),
         ("List" | "Array", "head" | "first" | "last" | "removeFirst" | "removeLast") => {
             Some(ir::Type::Function {
                 params: Vec::new(),
@@ -4400,6 +4538,34 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             ret: Box::new(ir::Type::Bool),
         }),
         _ => None,
+    }
+}
+
+fn inferred_storage_type(ty: ir::Type) -> ir::Type {
+    if contains_type_param(&ty) {
+        ir::Type::Unknown
+    } else {
+        ty
+    }
+}
+
+fn contains_type_param(ty: &ir::Type) -> bool {
+    match ty {
+        ir::Type::TypeParam(_) => true,
+        ir::Type::Named { args, .. } | ir::Type::Tuple(args) => {
+            args.iter().any(contains_type_param)
+        }
+        ir::Type::Record(fields) => fields.iter().any(|field| contains_type_param(&field.ty)),
+        ir::Type::Function { params, ret } => {
+            params.iter().any(contains_type_param) || contains_type_param(ret)
+        }
+        ir::Type::Unknown
+        | ir::Type::Never
+        | ir::Type::Unit
+        | ir::Type::Bool
+        | ir::Type::Int
+        | ir::Type::Float
+        | ir::Type::Str => false,
     }
 }
 
