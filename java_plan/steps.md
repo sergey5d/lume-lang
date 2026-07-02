@@ -12,13 +12,13 @@ Tasks:
 - Add `BackendBundle` built from the same path used by `lume run`.
 - Add placeholder descriptors derived from lowered IR.
 - Add Java backend module that consumes `BackendBundle`.
-- Add `lume java <file> --out <dir>`.
+- Add `lume gen <file> --out <dir>`.
 - Emit one marker Java source file.
 - Verify invalid Lume does not generate Java.
 
 Done when:
 
-- `lume java examples/hello.lum --out /tmp/lume-java` writes a Java marker file.
+- `lume gen examples/hello.lum --out /tmp/lume-java` writes a Java marker file.
 - `cargo test --manifest-path rust/Cargo.toml -p lume` passes.
 
 ## Step 2: Declaration Skeletons

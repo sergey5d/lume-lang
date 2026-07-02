@@ -132,14 +132,7 @@ The split is intentional:
 CLI addition:
 
 ```txt
-lume java <file> --out <dir>
-```
-
-Possible later aliases:
-
-```txt
-lume generate-java <file> --out <dir>
-lume build-java <file> --out <dir> --javac
+lume gen <file> --out <dir>
 ```
 
 Start with one command only.
@@ -274,7 +267,7 @@ If a file has no `module`, derive the package from either:
 First version should require an explicit package root if module names are missing:
 
 ```txt
-lume java examples/hello.lum --out generated --base-package lume.generated
+lume gen examples/hello.lum --out generated --base-package lume.generated
 ```
 
 ## Java Target Version
@@ -733,14 +726,14 @@ Deliverables:
 - `java_backend/mod.rs`
 - `JavaBackendOptions`
 - `JavaBackendResult`
-- CLI command `lume java <file> --out <dir>`
+- CLI command `lume gen <file> --out <dir>`
 - output directory creation
 - no-op generation for an empty/simple file
 - tests that invalid Lume does not generate Java
 
 Acceptance:
 
-- `lume java examples/hello.lum --out /tmp/lume-java` runs through check/lower
+- `lume gen examples/hello.lum --out /tmp/lume-java` runs through check/lower
 - backend can emit at least one placeholder Java source file
 - Java generation receives a `BackendBundle`, not raw AST-only state
 
@@ -850,7 +843,7 @@ Deliverables:
 - CLI option for classpath
 
 ```txt
-lume java app.lum --out generated --classpath libs/foo.jar
+lume gen app.lum --out generated --classpath libs/foo.jar
 ```
 
 Acceptance:
@@ -878,7 +871,7 @@ Keep the first PR boring and safe:
 
 1. Add shared `backend` module with descriptor and bundle scaffolding.
 2. Add `java_backend` module with options/result types.
-3. Add `lume java <file> --out <dir>` CLI command.
+3. Add `lume gen <file> --out <dir>` CLI command.
 4. Reuse `check_path`, module loading, and `lower_program`.
 5. Emit one generated marker file containing package and source comments.
 6. Add tests proving invalid Lume prevents generation.

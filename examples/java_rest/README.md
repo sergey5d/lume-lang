@@ -34,10 +34,9 @@ From the repository root:
 ```bash
 /tmp/gradle-9.6.1/bin/gradle -p lume/core jar --no-daemon
 
-cargo run --manifest-path rust/Cargo.toml -p lume -- java \
+cargo run --manifest-path rust/Cargo.toml -p lume -- gen \
   examples/java_rest/service.lum \
-  --out /tmp/lume-rest \
-  --classpath lume/core/build/libs/lume-core.jar
+  --out /tmp/lume-rest
 
 javac -cp lume/core/build/libs/lume-core.jar -d /tmp/lume-rest-classes \
   /tmp/lume-rest/examples/java_rest/*.java

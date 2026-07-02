@@ -17,7 +17,7 @@ fn main() -> ExitCode {
         "parse" => parse_command(&mut args),
         "check" => check_command(&mut args),
         "run" => run_command(&mut args),
-        "java" => java_command(&mut args),
+        "gen" => gen_command(&mut args),
         _ => {
             eprintln!("unknown command '{command}'");
             print_usage();
@@ -119,12 +119,12 @@ fn run_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
     }
 }
 
-fn java_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
-    let path = match read_path_arg(args, "java") {
+fn gen_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
+    let path = match read_path_arg(args, "gen") {
         Ok(path) => path,
         Err(code) => return code,
     };
-    let options = match read_java_options(args) {
+    let options = match read_gen_options(args) {
         Ok(options) => options,
         Err(code) => return code,
     };
@@ -153,7 +153,7 @@ fn print_usage() {
     eprintln!("  lume parse <file>");
     eprintln!("  lume check <file>");
     eprintln!("  lume run <file> [entry]");
-    eprintln!("  lume java <file> --out <dir> [--classpath <path>]");
+    eprintln!("  lume gen <file> --out <dir> [--classpath <path>]");
 }
 
 fn read_source_arg(
@@ -188,7 +188,7 @@ fn read_source_path(path: String) -> Result<SourceFile, ExitCode> {
     Ok(SourceFile::new(path, text))
 }
 
-fn read_java_options(
+fn read_gen_options(
     args: &mut impl Iterator<Item = String>,
 ) -> Result<JavaBackendOptions, ExitCode> {
     let mut out = None;
@@ -198,7 +198,7 @@ fn read_java_options(
         match flag.as_str() {
             "--out" => {
                 let Some(value) = args.next() else {
-                    eprintln!("missing directory after --out for 'java'");
+                    eprintln!("missing directory after --out for 'gen'");
                     print_usage();
                     return Err(ExitCode::from(2));
                 };
@@ -206,14 +206,14 @@ fn read_java_options(
             }
             "--classpath" | "--class-path" | "-cp" => {
                 let Some(value) = args.next() else {
-                    eprintln!("missing path after {flag} for 'java'");
+                    eprintln!("missing path after {flag} for 'gen'");
                     print_usage();
                     return Err(ExitCode::from(2));
                 };
                 classpath.extend(env::split_paths(&value));
             }
             _ => {
-                eprintln!("unknown argument '{flag}' for 'java'");
+                eprintln!("unknown argument '{flag}' for 'gen'");
                 print_usage();
                 return Err(ExitCode::from(2));
             }
@@ -221,7 +221,7 @@ fn read_java_options(
     }
 
     let Some(out) = out else {
-        eprintln!("missing --out <dir> for 'java'");
+        eprintln!("missing --out <dir> for 'gen'");
         print_usage();
         return Err(ExitCode::from(2));
     };

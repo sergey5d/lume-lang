@@ -65,12 +65,10 @@ val generateLumeJava = tasks.register<Exec>("generateLumeJava") {
             "-p",
             "lume",
             "--",
-            "java",
+            "gen",
             lumeSource.asFile.absolutePath,
             "--out",
-            outputDir.absolutePath,
-            "--classpath",
-            lumeCoreJar.asFile.absolutePath
+            outputDir.absolutePath
         )
     }
 }

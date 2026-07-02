@@ -64,7 +64,7 @@ fun Exec.configureLumeJavaGeneration(source: org.gradle.api.file.RegularFile) {
             "-p",
             "lume",
             "--",
-            "java",
+            "gen",
             source.asFile.absolutePath,
             "--out",
             outputDir.absolutePath,

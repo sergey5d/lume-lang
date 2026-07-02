@@ -108,8 +108,9 @@ fn resolve_external_classes(
     externals: &ExternalDescriptors,
     options: &JavaBackendOptions,
 ) -> Result<ExternalClassResolution, String> {
-    let index = JavaClasspathIndex::from_entries(&options.classpath)?;
-    let classpath = java_classpath(&options.classpath)?;
+    let classpath_entries = effective_java_classpath(options);
+    let index = JavaClasspathIndex::from_entries(&classpath_entries)?;
+    let classpath = java_classpath(&classpath_entries)?;
     let local_type_names = externals
         .symbols
         .iter()
@@ -362,6 +363,60 @@ fn java_classpath(entries: &[PathBuf]) -> Result<Option<std::ffi::OsString>, Str
     env::join_paths(entries)
         .map(Some)
         .map_err(|err| format!("build Java classpath: {err}"))
+}
+
+fn effective_java_classpath(options: &JavaBackendOptions) -> Vec<PathBuf> {
+    let mut entries = options.classpath.clone();
+    if let Some(core_jar) = discover_lume_core_jar() {
+        push_unique_classpath_entry(&mut entries, core_jar);
+    }
+    entries
+}
+
+fn push_unique_classpath_entry(entries: &mut Vec<PathBuf>, entry: PathBuf) {
+    let normalized = entry.canonicalize().unwrap_or(entry);
+    let already_present = entries.iter().any(|existing| {
+        existing
+            .canonicalize()
+            .map(|path| path == normalized)
+            .unwrap_or_else(|_| existing == &normalized)
+    });
+    if !already_present {
+        entries.push(normalized);
+    }
+}
+
+fn discover_lume_core_jar() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("LUME_CORE_JAR").map(PathBuf::from) {
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(current_dir) = env::current_dir() {
+        candidates.extend(lume_core_candidates_from_ancestors(&current_dir));
+    }
+    if let Ok(exe) = env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join("lume-core.jar"));
+            if let Some(bin_parent) = parent.parent() {
+                candidates.push(bin_parent.join("lib/lume-core.jar"));
+            }
+            candidates.extend(lume_core_candidates_from_ancestors(parent));
+        }
+    }
+    candidates.push(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../lume/core/build/libs/lume-core.jar"),
+    );
+
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+fn lume_core_candidates_from_ancestors(path: &Path) -> Vec<PathBuf> {
+    path.ancestors()
+        .map(|ancestor| ancestor.join("lume/core/build/libs/lume-core.jar"))
+        .collect()
 }
 
 fn parse_javap_type_params(output: &str, qualified_name: &str) -> Vec<String> {

@@ -15,8 +15,8 @@ route discovery is Lume, and Java is only the low-level HTTP substrate.
 The important tasks are:
 
 - `buildLumeCore`: builds `../../lume/core/build/libs/lume-core.jar`.
-- `generateLumeJava`: runs `cargo run -p lume -- java ...` with `lume-core.jar`
-  on the Lume Java classpath.
+- `generateLumeJava`: runs `cargo run -p lume -- gen ...`; `lume-core.jar`
+  is available automatically to generation.
 - `compileJava`: compiles the generated application Java.
 - `jar`: packages a runnable fat jar with Java dependencies.
 
