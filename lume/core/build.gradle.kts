@@ -8,8 +8,8 @@ dependencies {
 }
 
 val repoRoot = layout.projectDirectory.dir("../..")
-val lumeSource = layout.projectDirectory.file("http/HttpServer.lum")
-val runtimeJava = layout.projectDirectory.dir("runtime/java")
+val lumeSource = layout.projectDirectory.file("src/main/lume/lume/core/http/HttpServer.lum")
+val runtimeJava = layout.projectDirectory.dir("src/main/java")
 val runtimeClasses = layout.buildDirectory.dir("runtime-classes")
 val generatedLumeJava = layout.buildDirectory.dir("generated/sources/lume/java")
 val lumeCompilerSources = repoRoot.dir("rust/crates/lume/src")

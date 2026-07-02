@@ -854,16 +854,13 @@ def main() Unit {
 
         let runtime_box =
             fs::read_to_string(out.join("demo/app/RuntimeBox.java")).expect("read runtime box");
-        assert!(runtime_box.contains("lume.runtime.LumeList<Long> items;"));
-        assert!(runtime_box.contains("lume.runtime.LumeSet<String> names;"));
-        assert!(
-            runtime_box
-                .contains("lume.runtime.LumeMap<String, lume.runtime.LumeList<Long>> index;")
-        );
-        assert!(runtime_box.contains("lume.runtime.Option<String> maybe;"));
-        assert!(runtime_box.contains("lume.runtime.Result<Long, String> result;"));
-        assert!(runtime_box.contains("lume.runtime.Either<String, Long> either;"));
-        assert!(runtime_box.contains("lume.runtime.Tuple2<Long, String> pair;"));
+        assert!(runtime_box.contains("lume.core.LumeList<Long> items;"));
+        assert!(runtime_box.contains("lume.core.LumeSet<String> names;"));
+        assert!(runtime_box.contains("lume.core.LumeMap<String, lume.core.LumeList<Long>> index;"));
+        assert!(runtime_box.contains("lume.core.Option<String> maybe;"));
+        assert!(runtime_box.contains("lume.core.Result<Long, String> result;"));
+        assert!(runtime_box.contains("lume.core.Either<String, Long> either;"));
+        assert!(runtime_box.contains("lume.core.Tuple2<Long, String> pair;"));
 
         let single = fs::read_to_string(out.join("demo/app/Routes.java")).expect("read single");
         assert!(single.contains("final class Routes"));
@@ -1274,7 +1271,7 @@ def main() Int {
         let module =
             fs::read_to_string(out.join("demo/runarray/RunarrayModule.java")).expect("read module");
         assert!(!module.contains("UnsupportedOperationException"));
-        assert!(module.contains("lume.runtime.LumeArray.ofRune(2L)"));
+        assert!(module.contains("lume.core.LumeArray.ofRune(2L)"));
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -1343,7 +1340,7 @@ def main() Unit {
         assert!(module.contains("return ((Long) tmp1_1);"));
         assert!(module.contains("tmp1_1 = add(2L, 3L);"));
         assert!(module.contains("value_0 = tmp1_1;"));
-        assert!(module.contains("tmp2_2 = lume.runtime.LumeRuntime.println(value_0);"));
+        assert!(module.contains("tmp2_2 = lume.core.LumeRuntime.println(value_0);"));
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -1453,9 +1450,9 @@ def main() Unit {
         assert!(generated.diagnostics.is_empty());
 
         let user = fs::read_to_string(out.join("demo/metadata/User.java")).expect("read user");
-        assert!(user.contains("static final lume.runtime.LumeType TYPE"));
-        assert!(user.contains("lume.runtime.LumeField.of(\"name\""));
-        assert!(user.contains("lume.runtime.LumeAnnotationField.of(\"path\", \"/users\")"));
+        assert!(user.contains("static final lume.core.LumeType TYPE"));
+        assert!(user.contains("lume.core.LumeField.of(\"name\""));
+        assert!(user.contains("lume.core.LumeAnnotationField.of(\"path\", \"/users\")"));
 
         let module =
             fs::read_to_string(out.join("demo/metadata/MetadataModule.java")).expect("read module");
@@ -1665,10 +1662,21 @@ public final class GenericBox<T> {
             .and_then(|crates_dir| crates_dir.parent())
             .and_then(|rust_dir| rust_dir.parent())
             .expect("repo root");
-        let runtime_dir = repo_root.join("lume/core/runtime/java/lume/runtime");
+        let runtime_dir = repo_root.join("lume/core/src/main/java/lume/core");
         let mut sources = Vec::new();
-        collect_java_sources(&runtime_dir, &mut sources).expect("collect runtime java");
+        collect_java_source_files(&runtime_dir, &mut sources).expect("collect core java");
         sources
+    }
+
+    fn collect_java_source_files(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "java") {
+                out.push(path);
+            }
+        }
+        Ok(())
     }
 
     fn collect_java_sources(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {

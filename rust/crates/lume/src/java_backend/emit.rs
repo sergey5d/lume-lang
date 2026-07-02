@@ -327,7 +327,7 @@ fn push_type_descriptor(
     package: &JavaPackage,
     names: &JavaNames,
 ) {
-    out.push_str("    public static final lume.runtime.LumeType TYPE = ");
+    out.push_str("    public static final lume.core.LumeType TYPE = ");
     out.push_str(&type_descriptor_expr(bundle, ty, package, names));
     out.push_str(";\n");
 }
@@ -340,7 +340,7 @@ fn push_runtime_type_method(out: &mut String, default_method: bool) {
     } else {
         out.push_str("public ");
     }
-    out.push_str("lume.runtime.LumeType runtimeType() {\n");
+    out.push_str("lume.core.LumeType runtimeType() {\n");
     out.push_str("        return TYPE;\n");
     out.push_str("    }\n");
 }
@@ -359,31 +359,31 @@ fn type_descriptor_expr(
     match ty.kind {
         TypeKind::Annotation => {
             format!(
-                "lume.runtime.LumeType.annotationType({name}, {qualified}, {fields}, {annotations})"
+                "lume.core.LumeType.annotationType({name}, {qualified}, {fields}, {annotations})"
             )
         }
         TypeKind::Class => {
             format!(
-                "lume.runtime.LumeType.classType({name}, {qualified}, {fields}, {methods}, {annotations})"
+                "lume.core.LumeType.classType({name}, {qualified}, {fields}, {methods}, {annotations})"
             )
         }
         TypeKind::Record => {
             format!(
-                "lume.runtime.LumeType.shapeType({name}, {qualified}, {fields}, {methods}, {annotations})"
+                "lume.core.LumeType.shapeType({name}, {qualified}, {fields}, {methods}, {annotations})"
             )
         }
         TypeKind::Single => {
             format!(
-                "lume.runtime.LumeType.singleType({name}, {qualified}, {fields}, {methods}, {annotations})"
+                "lume.core.LumeType.singleType({name}, {qualified}, {fields}, {methods}, {annotations})"
             )
         }
         TypeKind::Interface => {
             format!(
-                "lume.runtime.LumeType.interfaceType({name}, {qualified}, {methods}, {annotations})"
+                "lume.core.LumeType.interfaceType({name}, {qualified}, {methods}, {annotations})"
             )
         }
         TypeKind::Enum => format!(
-            "lume.runtime.LumeType.enumType({}, {}, {}, {}, {})",
+            "lume.core.LumeType.enumType({}, {}, {}, {}, {})",
             name,
             qualified,
             enum_case_array_expr(ty, names),
@@ -406,7 +406,7 @@ fn type_field_array_expr(fields: &[ir::Field], names: &JavaNames) -> String {
         .iter()
         .map(|field| {
             format!(
-                "lume.runtime.LumeField.of({}, {}, {})",
+                "lume.core.LumeField.of({}, {}, {})",
                 java_string_literal(&field.name),
                 type_value_expr(&field.ty, names),
                 annotation_array_expr(&field.annotations)
@@ -414,7 +414,7 @@ fn type_field_array_expr(fields: &[ir::Field], names: &JavaNames) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ");
-    format!("new lume.runtime.LumeField[] {{{items}}}")
+    format!("new lume.core.LumeField[] {{{items}}}")
 }
 
 fn type_method_array_expr(bundle: &BackendBundle, ty: &ir::TypeDef, names: &JavaNames) -> String {
@@ -426,7 +426,7 @@ fn type_method_array_expr(bundle: &BackendBundle, ty: &ir::TypeDef, names: &Java
         .map(|method| method_descriptor_expr(ty, method, names))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("new lume.runtime.LumeMethod[] {{{items}}}")
+    format!("new lume.core.LumeMethod[] {{{items}}}")
 }
 
 fn method_descriptor_expr(owner: &ir::TypeDef, method: &ir::Function, names: &JavaNames) -> String {
@@ -436,7 +436,7 @@ fn method_descriptor_expr(owner: &ir::TypeDef, method: &ir::Function, names: &Ja
         .filter_map(|param| method.locals.get(param.0))
         .map(|local| {
             format!(
-                "lume.runtime.LumeParam.of({}, {})",
+                "lume.core.LumeParam.of({}, {})",
                 java_string_literal(&local.name),
                 type_value_expr(&local.ty, names)
             )
@@ -444,7 +444,7 @@ fn method_descriptor_expr(owner: &ir::TypeDef, method: &ir::Function, names: &Ja
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "lume.runtime.LumeMethod.of({}, {}, new lume.runtime.LumeParam[] {{{}}}, {}, {})",
+        "lume.core.LumeMethod.of({}, {}, new lume.core.LumeParam[] {{{}}}, {}, {})",
         java_string_literal(&method.name),
         type_value_expr(&method.return_ty, names),
         params,
@@ -470,7 +470,7 @@ fn method_invoker_expr(owner: &ir::TypeDef, method: &ir::Function, names: &JavaN
         .join(", ");
     let call = format!("{}.{}({})", receiver, java_member_name(&method.name), args);
     if is_java_void_type(&method.return_ty) {
-        format!("(receiver, args) -> {{ {call}; return lume.runtime.LumeUnit.INSTANCE; }}")
+        format!("(receiver, args) -> {{ {call}; return lume.core.LumeUnit.INSTANCE; }}")
     } else {
         format!("(receiver, args) -> {call}")
     }
@@ -482,7 +482,7 @@ fn enum_case_array_expr(ty: &ir::TypeDef, names: &JavaNames) -> String {
         .iter()
         .map(|case| {
             format!(
-                "lume.runtime.LumeEnumCase.of({}, {}, {})",
+                "lume.core.LumeEnumCase.of({}, {}, {})",
                 java_string_literal(&case.name),
                 type_field_array_expr(&case.fields, names),
                 annotation_array_expr(&case.annotations)
@@ -490,7 +490,7 @@ fn enum_case_array_expr(ty: &ir::TypeDef, names: &JavaNames) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ");
-    format!("new lume.runtime.LumeEnumCase[] {{{items}}}")
+    format!("new lume.core.LumeEnumCase[] {{{items}}}")
 }
 
 fn annotation_array_expr(annotations: &[ir::Annotation]) -> String {
@@ -499,7 +499,7 @@ fn annotation_array_expr(annotations: &[ir::Annotation]) -> String {
         .map(annotation_expr)
         .collect::<Vec<_>>()
         .join(", ");
-    format!("new lume.runtime.LumeAnnotation[] {{{items}}}")
+    format!("new lume.core.LumeAnnotation[] {{{items}}}")
 }
 
 fn annotation_expr(annotation: &ir::Annotation) -> String {
@@ -508,7 +508,7 @@ fn annotation_expr(annotation: &ir::Annotation) -> String {
         .iter()
         .map(|field| {
             format!(
-                "lume.runtime.LumeAnnotationField.of({}, {})",
+                "lume.core.LumeAnnotationField.of({}, {})",
                 java_string_literal(&field.name),
                 annotation_value_expr(&field.value)
             )
@@ -516,7 +516,7 @@ fn annotation_expr(annotation: &ir::Annotation) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "lume.runtime.LumeAnnotation.of({}, new lume.runtime.LumeAnnotationField[] {{{}}})",
+        "lume.core.LumeAnnotation.of({}, new lume.core.LumeAnnotationField[] {{{}}})",
         java_string_literal(&annotation.name),
         fields
     )
@@ -529,7 +529,7 @@ fn annotation_value_expr(value: &ir::AnnotationValue) -> String {
         ir::AnnotationValue::Float(value) => java_float_literal(*value),
         ir::AnnotationValue::String(value) => java_string_literal(value),
         ir::AnnotationValue::List(items) => format!(
-            "lume.runtime.LumeList.of({})",
+            "lume.core.LumeList.of({})",
             items
                 .iter()
                 .map(annotation_value_expr)
@@ -541,14 +541,14 @@ fn annotation_value_expr(value: &ir::AnnotationValue) -> String {
                 .iter()
                 .map(|field| {
                     format!(
-                        "new lume.runtime.Tuple2<>({}, {})",
+                        "new lume.core.Tuple2<>({}, {})",
                         java_string_literal(&field.name),
                         annotation_value_expr(&field.value)
                     )
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("lume.runtime.LumeMap.fromEntries(lume.runtime.LumeList.of({entries}))")
+            format!("lume.core.LumeMap.fromEntries(lume.core.LumeList.of({entries}))")
         }
         ir::AnnotationValue::EnumCase(path) => java_string_literal(&path.join(".")),
         ir::AnnotationValue::Unresolved(value) => java_string_literal(value),
@@ -557,24 +557,24 @@ fn annotation_value_expr(value: &ir::AnnotationValue) -> String {
 
 fn type_value_expr(ty: &ir::Type, names: &JavaNames) -> String {
     match ty {
-        ir::Type::Unknown => "lume.runtime.LumeType.primitive(\"Unknown\")".to_string(),
-        ir::Type::Never => "lume.runtime.LumeType.primitive(\"Never\")".to_string(),
-        ir::Type::Unit => "lume.runtime.LumeType.primitive(\"Unit\")".to_string(),
-        ir::Type::Bool => "lume.runtime.LumeType.primitive(\"Bool\")".to_string(),
-        ir::Type::Int => "lume.runtime.LumeType.primitive(\"Int\")".to_string(),
-        ir::Type::Float => "lume.runtime.LumeType.primitive(\"Float\")".to_string(),
-        ir::Type::Str => "lume.runtime.LumeType.primitive(\"Str\")".to_string(),
+        ir::Type::Unknown => "lume.core.LumeType.primitive(\"Unknown\")".to_string(),
+        ir::Type::Never => "lume.core.LumeType.primitive(\"Never\")".to_string(),
+        ir::Type::Unit => "lume.core.LumeType.primitive(\"Unit\")".to_string(),
+        ir::Type::Bool => "lume.core.LumeType.primitive(\"Bool\")".to_string(),
+        ir::Type::Int => "lume.core.LumeType.primitive(\"Int\")".to_string(),
+        ir::Type::Float => "lume.core.LumeType.primitive(\"Float\")".to_string(),
+        ir::Type::Str => "lume.core.LumeType.primitive(\"Str\")".to_string(),
         ir::Type::Named { name, args }
             if args.is_empty() && java_named_builtin_value(name).is_some() =>
         {
             format!(
-                "lume.runtime.LumeType.primitive({})",
+                "lume.core.LumeType.primitive({})",
                 java_string_literal(name)
             )
         }
         ir::Type::Named { name, args } if args.is_empty() && names.is_java_type(name) => {
             format!(
-                "lume.runtime.LumeType.classType({}, {}, new lume.runtime.LumeField[] {{}}, new lume.runtime.LumeMethod[] {{}})",
+                "lume.core.LumeType.classType({}, {}, new lume.core.LumeField[] {{}}, new lume.core.LumeMethod[] {{}})",
                 java_string_literal(name),
                 java_string_literal(&names.named_type(name))
             )
@@ -592,7 +592,7 @@ fn type_value_expr(ty: &ir::Type, names: &JavaNames) -> String {
                     .join(", ")
             );
             format!(
-                "lume.runtime.LumeType.primitive({})",
+                "lume.core.LumeType.primitive({})",
                 java_string_literal(&rendered)
             )
         }
@@ -606,15 +606,15 @@ fn type_value_expr(ty: &ir::Type, names: &JavaNames) -> String {
                     .join(", ")
             );
             format!(
-                "lume.runtime.LumeType.primitive({})",
+                "lume.core.LumeType.primitive({})",
                 java_string_literal(&rendered)
             )
         }
-        ir::Type::Record(_) => "lume.runtime.LumeType.primitive(\"AnonymousShape\")".to_string(),
-        ir::Type::Function { .. } => "lume.runtime.LumeType.primitive(\"Function\")".to_string(),
+        ir::Type::Record(_) => "lume.core.LumeType.primitive(\"AnonymousShape\")".to_string(),
+        ir::Type::Function { .. } => "lume.core.LumeType.primitive(\"Function\")".to_string(),
         ir::Type::TypeParam(name) => {
             format!(
-                "lume.runtime.LumeType.primitive({})",
+                "lume.core.LumeType.primitive({})",
                 java_string_literal(name)
             )
         }
@@ -1029,7 +1029,7 @@ impl<'a> FunctionEmitter<'a> {
             ir::RValue::Tuple(items) => self.emit_tuple(items),
             ir::RValue::List(items) => {
                 let args = self.emit_operands(items)?;
-                Some(format!("lume.runtime.LumeList.of({})", args.join(", ")))
+                Some(format!("lume.core.LumeList.of({})", args.join(", ")))
             }
             ir::RValue::Construct { ty, fields } => self.emit_construct(ty, fields),
             ir::RValue::Variant {
@@ -1061,7 +1061,7 @@ impl<'a> FunctionEmitter<'a> {
             .map(|ty| {
                 if is_named_builtin(&ty, "Any") {
                     format!(
-                        "lume.runtime.LumeRuntime.runtimeTypeOf({})",
+                        "lume.core.LumeRuntime.runtimeTypeOf({})",
                         self.emit_operand(operand)
                             .unwrap_or_else(|| "null".to_string())
                     )
@@ -1071,22 +1071,22 @@ impl<'a> FunctionEmitter<'a> {
             })
             .or_else(|| match operand {
                 ir::Operand::Const(ir::Constant::Bool(_)) => {
-                    Some("lume.runtime.LumeType.primitive(\"Bool\")".to_string())
+                    Some("lume.core.LumeType.primitive(\"Bool\")".to_string())
                 }
                 ir::Operand::Const(ir::Constant::Int(_)) => {
-                    Some("lume.runtime.LumeType.primitive(\"Int\")".to_string())
+                    Some("lume.core.LumeType.primitive(\"Int\")".to_string())
                 }
                 ir::Operand::Const(ir::Constant::Float(_)) => {
-                    Some("lume.runtime.LumeType.primitive(\"Float\")".to_string())
+                    Some("lume.core.LumeType.primitive(\"Float\")".to_string())
                 }
                 ir::Operand::Const(ir::Constant::String(_)) => {
-                    Some("lume.runtime.LumeType.primitive(\"Str\")".to_string())
+                    Some("lume.core.LumeType.primitive(\"Str\")".to_string())
                 }
                 ir::Operand::Const(ir::Constant::Unit) => {
-                    Some("lume.runtime.LumeType.primitive(\"Unit\")".to_string())
+                    Some("lume.core.LumeType.primitive(\"Unit\")".to_string())
                 }
                 ir::Operand::Const(ir::Constant::List(_)) => {
-                    Some("lume.runtime.LumeType.primitive(\"List\")".to_string())
+                    Some("lume.core.LumeType.primitive(\"List\")".to_string())
                 }
                 _ => None,
             })
@@ -1173,7 +1173,7 @@ impl<'a> FunctionEmitter<'a> {
     fn emit_to_string_call(&self, receiver: &ir::Operand) -> Option<String> {
         match receiver {
             ir::Operand::Const(ir::Constant::Unit) => {
-                Some("lume.runtime.LumeUnit.INSTANCE.toString()".to_string())
+                Some("lume.core.LumeUnit.INSTANCE.toString()".to_string())
             }
             ir::Operand::Const(ir::Constant::Bool(value)) => {
                 Some(format!("Boolean.toString({value})"))
@@ -1214,7 +1214,7 @@ impl<'a> FunctionEmitter<'a> {
             [owner, method] if owner == "Array" => {
                 let target = match method.as_str() {
                     "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" | "fill" => {
-                        format!("lume.runtime.LumeArray.{}", java_member_name(method))
+                        format!("lume.core.LumeArray.{}", java_member_name(method))
                     }
                     _ => return None,
                 };
@@ -1233,20 +1233,18 @@ impl<'a> FunctionEmitter<'a> {
 
     fn emit_intrinsic(&self, intrinsic: &ir::Intrinsic, args: &[String]) -> Option<String> {
         match intrinsic {
-            ir::Intrinsic::Print => Some(format!(
-                "lume.runtime.LumeRuntime.print({})",
-                args.join(", ")
-            )),
+            ir::Intrinsic::Print => {
+                Some(format!("lume.core.LumeRuntime.print({})", args.join(", ")))
+            }
             ir::Intrinsic::Println => Some(format!(
-                "lume.runtime.LumeRuntime.println({})",
+                "lume.core.LumeRuntime.println({})",
                 args.join(", ")
             )),
-            ir::Intrinsic::Printf => Some(format!(
-                "lume.runtime.LumeRuntime.printf({})",
-                args.join(", ")
-            )),
+            ir::Intrinsic::Printf => {
+                Some(format!("lume.core.LumeRuntime.printf({})", args.join(", ")))
+            }
             ir::Intrinsic::Panic => Some(format!(
-                "lume.runtime.LumePanic.panic({})",
+                "lume.core.LumePanic.panic({})",
                 args.first()
                     .cloned()
                     .unwrap_or_else(|| java_string_literal("panic"))
@@ -1258,7 +1256,7 @@ impl<'a> FunctionEmitter<'a> {
                     .cloned()
                     .unwrap_or_else(|| java_string_literal("assertion failed"));
                 Some(format!(
-                    "lume.runtime.LumeRuntime.assertTrue({condition}, {message})"
+                    "lume.core.LumeRuntime.assertTrue({condition}, {message})"
                 ))
             }
             ir::Intrinsic::ExtractSuccessIsSet => {
@@ -1266,7 +1264,7 @@ impl<'a> FunctionEmitter<'a> {
                     return None;
                 }
                 Some(format!(
-                    "lume.runtime.LumeRuntime.extractSuccessIsSet({})",
+                    "lume.core.LumeRuntime.extractSuccessIsSet({})",
                     args[0]
                 ))
             }
@@ -1275,7 +1273,7 @@ impl<'a> FunctionEmitter<'a> {
                     return None;
                 }
                 Some(format!(
-                    "lume.runtime.LumeRuntime.extractSuccessValue({})",
+                    "lume.core.LumeRuntime.extractSuccessValue({})",
                     args[0]
                 ))
             }
@@ -1289,22 +1287,19 @@ impl<'a> FunctionEmitter<'a> {
                 if args.len() != 1 {
                     return None;
                 }
-                Some(format!("lume.runtime.LumeIterator.from({})", args[0]))
+                Some(format!("lume.core.LumeRuntime.iterInit({})", args[0]))
             }
             ir::Intrinsic::IterHasNext => {
                 if args.len() != 1 {
                     return None;
                 }
-                Some(format!(
-                    "((lume.runtime.LumeIterator) {}).hasNext()",
-                    args[0]
-                ))
+                Some(format!("lume.core.LumeRuntime.iterHasNext({})", args[0]))
             }
             ir::Intrinsic::IterNext => {
                 if args.len() != 1 {
                     return None;
                 }
-                Some(format!("((lume.runtime.LumeIterator) {}).next()", args[0]))
+                Some(format!("lume.core.LumeRuntime.iterNext({})", args[0]))
             }
             ir::Intrinsic::VariantIs(_) | ir::Intrinsic::VariantField(_) => None,
         }
@@ -1316,7 +1311,7 @@ impl<'a> FunctionEmitter<'a> {
         }
         let args = self.emit_operands(items)?;
         Some(format!(
-            "new lume.runtime.Tuple{}<>({})",
+            "new lume.core.Tuple{}<>({})",
             items.len(),
             args.join(", ")
         ))
@@ -1584,8 +1579,8 @@ impl JavaNames {
     fn value_type(&self, ty: &ir::Type) -> String {
         match ty {
             ir::Type::Unknown => "Object".to_string(),
-            ir::Type::Never => "lume.runtime.LumePanic".to_string(),
-            ir::Type::Unit => "lume.runtime.LumeUnit".to_string(),
+            ir::Type::Never => "lume.core.LumePanic".to_string(),
+            ir::Type::Unit => "lume.core.LumeUnit".to_string(),
             ir::Type::Bool => "Boolean".to_string(),
             ir::Type::Int => "Long".to_string(),
             ir::Type::Float => "Double".to_string(),
@@ -1654,31 +1649,31 @@ impl JavaNames {
     fn builtin_container(&self, name: &str, args: &[ir::Type]) -> String {
         match name {
             "Array" if args.len() == 1 => {
-                format!("lume.runtime.LumeArray<{}>", self.value_type(&args[0]))
+                format!("lume.core.LumeArray<{}>", self.value_type(&args[0]))
             }
             "Either" if args.len() == 2 => format!(
-                "lume.runtime.Either<{}, {}>",
+                "lume.core.Either<{}, {}>",
                 self.value_type(&args[0]),
                 self.value_type(&args[1])
             ),
             "List" if args.len() == 1 => {
-                format!("lume.runtime.LumeList<{}>", self.value_type(&args[0]))
+                format!("lume.core.LumeList<{}>", self.value_type(&args[0]))
             }
             "Map" if args.len() == 2 => format!(
-                "lume.runtime.LumeMap<{}, {}>",
+                "lume.core.LumeMap<{}, {}>",
                 self.value_type(&args[0]),
                 self.value_type(&args[1])
             ),
             "Option" if args.len() == 1 => {
-                format!("lume.runtime.Option<{}>", self.value_type(&args[0]))
+                format!("lume.core.Option<{}>", self.value_type(&args[0]))
             }
             "Result" if args.len() == 2 => format!(
-                "lume.runtime.Result<{}, {}>",
+                "lume.core.Result<{}, {}>",
                 self.value_type(&args[0]),
                 self.value_type(&args[1])
             ),
             "Set" if args.len() == 1 => {
-                format!("lume.runtime.LumeSet<{}>", self.value_type(&args[0]))
+                format!("lume.core.LumeSet<{}>", self.value_type(&args[0]))
             }
             _ => "Object".to_string(),
         }
@@ -1693,14 +1688,14 @@ impl JavaNames {
             .map(|item| self.value_type(item))
             .collect::<Vec<_>>()
             .join(", ");
-        format!("lume.runtime.Tuple{}<{args}>", items.len())
+        format!("lume.core.Tuple{}<{args}>", items.len())
     }
 }
 
 fn java_named_builtin_value(name: &str) -> Option<String> {
     match name {
         "Any" => Some("Object".to_string()),
-        "Unit" => Some("lume.runtime.LumeUnit".to_string()),
+        "Unit" => Some("lume.core.LumeUnit".to_string()),
         "Bool" => Some("Boolean".to_string()),
         "Int" => Some("Long".to_string()),
         "Int32" => Some("Integer".to_string()),
@@ -1709,13 +1704,13 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Str" => Some("String".to_string()),
         "Rune" => Some("Integer".to_string()),
         "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
-        | "AnnotationType" => Some("lume.runtime.LumeType".to_string()),
-        "TypeKind" => Some("lume.runtime.LumeTypeKind".to_string()),
-        "AnnotationValue" => Some("lume.runtime.LumeAnnotation".to_string()),
-        "Field" => Some("lume.runtime.LumeField".to_string()),
-        "Method" => Some("lume.runtime.LumeMethod".to_string()),
-        "Param" => Some("lume.runtime.LumeParam".to_string()),
-        "EnumCase" => Some("lume.runtime.LumeEnumCase".to_string()),
+        | "AnnotationType" => Some("lume.core.LumeType".to_string()),
+        "TypeKind" => Some("lume.core.LumeTypeKind".to_string()),
+        "AnnotationValue" => Some("lume.core.LumeAnnotation".to_string()),
+        "Field" => Some("lume.core.LumeField".to_string()),
+        "Method" => Some("lume.core.LumeMethod".to_string()),
+        "Param" => Some("lume.core.LumeParam".to_string()),
+        "EnumCase" => Some("lume.core.LumeEnumCase".to_string()),
         _ => None,
     }
 }
@@ -1784,7 +1779,7 @@ fn java_local_name(local: &ir::Local) -> String {
 
 fn java_default_value(ty: &ir::Type) -> String {
     if is_java_void_type(ty) {
-        return "lume.runtime.LumeUnit.INSTANCE".to_string();
+        return "lume.core.LumeUnit.INSTANCE".to_string();
     }
     if type_is_named_or_primitive(ty, "Bool", |ty| matches!(ty, ir::Type::Bool)) {
         "false".to_string()
@@ -1876,7 +1871,7 @@ fn java_type_params_are_bound(ty: &ir::Type, bound: &[String]) -> bool {
 
 fn java_constant(constant: &ir::Constant) -> String {
     match constant {
-        ir::Constant::Unit => "lume.runtime.LumeUnit.INSTANCE".to_string(),
+        ir::Constant::Unit => "lume.core.LumeUnit.INSTANCE".to_string(),
         ir::Constant::Bool(value) => value.to_string(),
         ir::Constant::Int(value) => format!("{value}L"),
         ir::Constant::Float(value) => java_float_literal(*value),
@@ -1887,7 +1882,7 @@ fn java_constant(constant: &ir::Constant) -> String {
                 .map(java_constant)
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("lume.runtime.LumeList.of({items})")
+            format!("lume.core.LumeList.of({items})")
         }
     }
 }

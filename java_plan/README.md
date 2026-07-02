@@ -470,16 +470,16 @@ Non-primitive Lume type mapping:
 
 ```txt
 Lume          Java
-[T]           lume.runtime.LumeList<T>
-List[T]       lume.runtime.LumeList<T>
-Array[T]      lume.runtime.LumeArray<T>
-Set[T]        lume.runtime.LumeSet<T>
-Map[K, V]     lume.runtime.LumeMap<K, V>
-Option[T]     lume.runtime.Option<T>
-Result[T, E]  lume.runtime.Result<T, E>
-Either[L, R]  lume.runtime.Either<L, R>
-Tuple2        lume.runtime.Tuple2<A, B>
-TupleN        lume.runtime.TupleN<...>
+[T]           lume.core.LumeList<T>
+List[T]       lume.core.LumeList<T>
+Array[T]      lume.core.LumeArray<T>
+Set[T]        lume.core.LumeSet<T>
+Map[K, V]     lume.core.LumeMap<K, V>
+Option[T]     lume.core.Option<T>
+Result[T, E]  lume.core.Result<T, E>
+Either[L, R]  lume.core.Either<L, R>
+Tuple2        lume.core.Tuple2<A, B>
+TupleN        lume.core.TupleN<...>
 shape         generated value class
 class         generated nominal class
 single        generated singleton class with INSTANCE
@@ -502,7 +502,7 @@ Generated Java will need a small Java runtime library.
 Proposed package:
 
 ```txt
-lume.runtime
+lume.core
 ```
 
 Minimum runtime types:
@@ -525,15 +525,15 @@ Collection runtime classes should own their method implementations. Internally t
 This can live under:
 
 ```txt
-lume/core/runtime/java/lume/runtime/
+lume/core/src/main/java/lume/core/
 ```
 
 or be emitted into the output folder for the first MVP.
 
 Preferred first version:
 
-- keep checked-in Java runtime substrate source under `lume/core/runtime/java/`
-- generated code imports `lume.runtime.*`
+- keep checked-in Java runtime substrate source under `lume/core/src/main/java/`
+- generated code imports `lume.core.*`
 
 ## Java Imports Into Lume
 
@@ -692,7 +692,7 @@ Possible outputs:
 generated/
   app/domain/User.java
   app/domain/UserModule.java
-  lume/runtime/Option.java
+  lume/core/Option.java
 ```
 
 ## Validation Boundary

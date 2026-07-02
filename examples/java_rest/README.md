@@ -22,7 +22,8 @@ def main() Unit {
 }
 ```
 
-`HttpServer` itself is written in Lume under `lume/core/http/HttpServer.lum`.
+`HttpServer` itself is written in Lume under
+`lume/core/src/main/lume/lume/core/http/HttpServer.lum`.
 The only Java HTTP piece is the low-level `JavalinBackend`, which receives
 already-discovered route registrations from Lume.
 

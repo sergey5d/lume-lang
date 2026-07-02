@@ -44,7 +44,7 @@ Goal: add the Java runtime package that generated code can target.
 
 Tasks:
 
-- Add `lume/core/runtime/java/lume/runtime`.
+- Add `lume/core/src/main/java/lume/core`.
 - Add `LumeUnit`, `Option`, `Result`, `Either`, tuple classes, `LumeList`, `LumeArray`, `LumeSet`, `LumeMap`, `Range`, and `LumePanic` shells.
 
 ## Step 4: Body Codegen MVP
