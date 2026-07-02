@@ -97,6 +97,7 @@ impl Program {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDef {
     pub id: TypeId,
+    pub annotations: Vec<Annotation>,
     pub visibility: Visibility,
     pub kind: TypeKind,
     pub name: String,
@@ -113,6 +114,7 @@ impl TypeDef {
     pub fn new(kind: TypeKind, name: impl Into<String>) -> Self {
         Self {
             id: TypeId(usize::MAX),
+            annotations: Vec::new(),
             visibility: Visibility::Default,
             kind,
             name: name.into(),
@@ -130,6 +132,7 @@ impl TypeDef {
 /// A lowered enum case payload description.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumCase {
+    pub annotations: Vec<Annotation>,
     pub name: String,
     pub fields: Vec<Field>,
     pub span: Option<Span>,
@@ -138,6 +141,7 @@ pub struct EnumCase {
 /// A lowered field description shared by types and enum cases.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
+    pub annotations: Vec<Annotation>,
     pub visibility: Visibility,
     pub mutable: bool,
     pub name: String,
@@ -187,6 +191,7 @@ pub enum FunctionKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub id: FunctionId,
+    pub annotations: Vec<Annotation>,
     pub visibility: Visibility,
     pub kind: FunctionKind,
     pub name: String,
@@ -206,6 +211,7 @@ impl Function {
         let entry = BlockId(0);
         Self {
             id: FunctionId(usize::MAX),
+            annotations: Vec::new(),
             visibility: Visibility::Default,
             kind,
             name: name.into(),
@@ -291,6 +297,31 @@ impl Function {
     pub fn block_mut(&mut self, id: BlockId) -> Option<&mut BasicBlock> {
         self.blocks.get_mut(id.0)
     }
+}
+
+/// Static annotation metadata retained for Java/runtime reflection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Annotation {
+    pub name: String,
+    pub fields: Vec<AnnotationField>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnnotationField {
+    pub name: String,
+    pub value: AnnotationValue,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnnotationValue {
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
+    List(Vec<AnnotationValue>),
+    Record(Vec<AnnotationField>),
+    EnumCase(Vec<String>),
+    Unresolved(String),
 }
 
 /// The purpose of a local slot inside one lowered function.

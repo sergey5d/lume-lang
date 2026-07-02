@@ -525,14 +525,14 @@ Collection runtime classes should own their method implementations. Internally t
 This can live under:
 
 ```txt
-java_runtime/src/main/java/lume/runtime/
+lume/core/runtime/java/lume/runtime/
 ```
 
 or be emitted into the output folder for the first MVP.
 
 Preferred first version:
 
-- keep checked-in Java runtime source under `java_runtime/`
+- keep checked-in Java runtime substrate source under `lume/core/runtime/java/`
 - generated code imports `lume.runtime.*`
 
 ## Java Imports Into Lume

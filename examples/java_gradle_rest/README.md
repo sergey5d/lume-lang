@@ -1,10 +1,12 @@
 # Lume Gradle REST Example
 
-This is the Gradle-shaped version of the Java backend flow:
+This sample shows the intended Java backend shape: application code is Lume,
+route discovery is Lume, and Java is only the low-level HTTP substrate.
 
 - Lume service code lives in `src/main/lume`.
-- Java bridge code lives in `src/main/java`.
-- Gradle resolves Java dependencies, including Javalin.
+- Core Lume libraries live under `../../lume/core`.
+- `lume-core.jar` contains the Lume runtime, metadata descriptors, and the
+  Lume-written `HttpServer`.
 - Gradle generates Java from Lume before compiling.
 - `gradle build` produces a runnable jar.
 
@@ -12,9 +14,10 @@ This is the Gradle-shaped version of the Java backend flow:
 
 The important tasks are:
 
-- `compileBridgeJava`: compiles `src/main/java` into `build/bridge-classes`.
-- `generateLumeJava`: runs `cargo run -p lume -- java ...` with the bridge classes and Gradle dependencies on the Lume Java classpath.
-- `compileJava`: compiles bridge Java, generated Lume Java, and `java_runtime` sources together.
+- `buildLumeCore`: builds `../../lume/core/build/libs/lume-core.jar`.
+- `generateLumeJava`: runs `cargo run -p lume -- java ...` with `lume-core.jar`
+  on the Lume Java classpath.
+- `compileJava`: compiles the generated application Java.
 - `jar`: packages a runnable fat jar with Java dependencies.
 
 ## Commands
@@ -40,9 +43,25 @@ curl http://localhost:7070/api/hello
 curl -X POST http://localhost:7070/api/echo -d 'from curl'
 ```
 
-## Current Limitation
+## HTTP Boundary
 
-The Lume annotations are real syntax and are typechecked, but this bridge still
-mirrors route metadata manually in Java. The next backend step is to emit
-annotation payloads or a generated route registry so the Java bridge can discover
-controllers without hardcoded route registration.
+The sample imports the Lume core HTTP API as:
+
+```txt
+use lume/core/http/{HttpServer, Controller, GET, POST}
+```
+
+The controller is pure Lume:
+
+```txt
+@Controller { path: "/api" }
+class GreetingController {
+    @GET { path: "/health" }
+    def health() Str = "ok"
+}
+```
+
+`HttpServer.addController(controller)` is written in Lume. It inspects Lume
+annotations through runtime metadata and registers discovered routes on a tiny
+Java `JavalinBackend`. The Java backend knows how to expose `get`, `post`, and
+`run`; it does not know application paths or controllers.

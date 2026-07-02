@@ -1,6 +1,7 @@
 package lume.runtime;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.function.IntFunction;
 import java.util.function.Supplier;
 
@@ -76,6 +77,11 @@ public final class LumeArray<T> {
 
     public void set(long index, T value) {
         values[Math.toIntExact(index)] = value;
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<T> asJava() {
+        return (List<T>) Arrays.asList(values);
     }
 
     @SuppressWarnings("unchecked")

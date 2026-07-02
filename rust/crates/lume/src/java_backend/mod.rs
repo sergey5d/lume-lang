@@ -276,6 +276,11 @@ fn parse_javap_class(
     span: crate::source::Span,
 ) -> JavaExternalClass {
     let type_params = parse_javap_type_params(output, qualified_name);
+    let kind = if output.contains("extends java.lang.annotation.Annotation") {
+        crate::ast::TypeKind::Annotation
+    } else {
+        crate::ast::TypeKind::Class
+    };
     let current_package = java_package_name(qualified_name);
     let mut constructors = Vec::new();
     let mut methods = Vec::new();
@@ -295,6 +300,7 @@ fn parse_javap_class(
     }
 
     JavaExternalClass {
+        kind,
         type_params,
         constructors,
         methods,
@@ -978,7 +984,7 @@ def main() Unit {
         assert!(holder.contains("third.party.GenericBox<String> generic;"));
         assert!(holder.contains("java.util.ArrayList<String> list;"));
 
-        let mut sources = java_runtime_sources();
+        let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
         fs::create_dir_all(&classes).expect("create classes dir");
         run_checked(
@@ -1062,7 +1068,7 @@ def main() Unit {
         assert!(!out.join("demo/javasigs/Widget.java").exists());
         assert!(!out.join("demo/javasigs/GenericBox.java").exists());
 
-        let mut sources = java_runtime_sources();
+        let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
         fs::create_dir_all(&classes).expect("create classes dir");
         run_checked(
@@ -1270,7 +1276,7 @@ def main() Int {
         assert!(!module.contains("UnsupportedOperationException"));
         assert!(module.contains("lume.runtime.LumeArray.ofRune(2L)"));
 
-        let mut sources = java_runtime_sources();
+        let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
         fs::create_dir_all(&classes).expect("create classes dir");
         run_checked(
@@ -1394,6 +1400,11 @@ def main() Unit {
             r#"
 module demo/metadata
 
+annotation Route {
+    path Str
+}
+
+@Route { path: "/users" }
 class User {
     name Str
     age Int
@@ -1444,6 +1455,7 @@ def main() Unit {
         let user = fs::read_to_string(out.join("demo/metadata/User.java")).expect("read user");
         assert!(user.contains("static final lume.runtime.LumeType TYPE"));
         assert!(user.contains("lume.runtime.LumeField.of(\"name\""));
+        assert!(user.contains("lume.runtime.LumeAnnotationField.of(\"path\", \"/users\")"));
 
         let module =
             fs::read_to_string(out.join("demo/metadata/MetadataModule.java")).expect("read module");
@@ -1451,7 +1463,7 @@ def main() Unit {
         assert!(module.contains("tmp3_3 = User.TYPE;"));
         assert!(module.contains("tmp5_5 = User.TYPE;"));
 
-        let mut sources = java_runtime_sources();
+        let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
         fs::create_dir_all(&classes).expect("create classes dir");
         run_checked(
@@ -1521,7 +1533,7 @@ def main() Int {
             generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
         assert!(generated.diagnostics.is_empty());
 
-        let mut sources = java_runtime_sources();
+        let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
         fs::create_dir_all(&classes).expect("create classes dir");
         run_checked(
@@ -1646,14 +1658,14 @@ public final class GenericBox<T> {
         jar
     }
 
-    fn java_runtime_sources() -> Vec<PathBuf> {
+    fn core_runtime_sources() -> Vec<PathBuf> {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let repo_root = manifest_dir
             .parent()
             .and_then(|crates_dir| crates_dir.parent())
             .and_then(|rust_dir| rust_dir.parent())
             .expect("repo root");
-        let runtime_dir = repo_root.join("java_runtime/src/main/java/lume/runtime");
+        let runtime_dir = repo_root.join("lume/core/runtime/java/lume/runtime");
         let mut sources = Vec::new();
         collect_java_sources(&runtime_dir, &mut sources).expect("collect runtime java");
         sources

@@ -133,14 +133,14 @@ fn render_class(
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!(
-        "class {}{} {{\n",
+        "public class {}{} {{\n",
         java_type_name(&ty.name),
         java_type_params(&ty.type_params)
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, false);
     push_fields(&mut out, ty, names);
-    push_class_constructor(&mut out, ty, names);
+    push_class_constructors(&mut out, bundle, ty, names);
     push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     out.push_str("}\n");
     out
@@ -155,7 +155,7 @@ fn render_shape(
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!(
-        "record {}{}({}) {{\n",
+        "public record {}{}({}) {{\n",
         java_type_name(&ty.name),
         java_type_params(&ty.type_params),
         ty.fields
@@ -184,9 +184,9 @@ fn render_single(
     let mut out = String::new();
     let name = java_type_name(&ty.name);
     push_header(&mut out, package);
-    out.push_str(&format!("final class {name} {{\n"));
+    out.push_str(&format!("public final class {name} {{\n"));
     out.push_str(&format!(
-        "    static final {name} INSTANCE = new {name}();\n"
+        "    public static final {name} INSTANCE = new {name}();\n"
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, false);
@@ -206,7 +206,7 @@ fn render_interface(
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!(
-        "interface {}{} {{\n",
+        "public interface {}{} {{\n",
         java_type_name(&ty.name),
         java_type_params(&ty.type_params)
     ));
@@ -225,7 +225,10 @@ fn render_annotation(
 ) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
-    out.push_str(&format!("@interface {} {{\n", java_type_name(&ty.name)));
+    out.push_str(&format!(
+        "public @interface {} {{\n",
+        java_type_name(&ty.name)
+    ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
     for field in &ty.fields {
         out.push_str("    ");
@@ -251,7 +254,7 @@ fn render_enum(
     push_header(&mut out, package);
 
     if ty.enum_cases.is_empty() {
-        out.push_str(&format!("interface {enum_name}{type_params} {{\n"));
+        out.push_str(&format!("public interface {enum_name}{type_params} {{\n"));
     } else {
         let permits = ty
             .enum_cases
@@ -260,7 +263,7 @@ fn render_enum(
             .collect::<Vec<_>>()
             .join(", ");
         out.push_str(&format!(
-            "sealed interface {enum_name}{type_params} permits {permits} {{\n"
+            "public sealed interface {enum_name}{type_params} permits {permits} {{\n"
         ));
     }
 
@@ -324,7 +327,7 @@ fn push_type_descriptor(
     package: &JavaPackage,
     names: &JavaNames,
 ) {
-    out.push_str("    static final lume.runtime.LumeType TYPE = ");
+    out.push_str("    public static final lume.runtime.LumeType TYPE = ");
     out.push_str(&type_descriptor_expr(bundle, ty, package, names));
     out.push_str(";\n");
 }
@@ -334,6 +337,8 @@ fn push_runtime_type_method(out: &mut String, default_method: bool) {
     out.push_str("    ");
     if default_method {
         out.push_str("default ");
+    } else {
+        out.push_str("public ");
     }
     out.push_str("lume.runtime.LumeType runtimeType() {\n");
     out.push_str("        return TYPE;\n");
@@ -350,28 +355,40 @@ fn type_descriptor_expr(
     let qualified = java_string_literal(&qualified_type_name(ty, package));
     let fields = type_field_array_expr(&ty.fields, names);
     let methods = type_method_array_expr(bundle, ty, names);
+    let annotations = annotation_array_expr(&ty.annotations);
     match ty.kind {
         TypeKind::Annotation => {
-            format!("lume.runtime.LumeType.annotationType({name}, {qualified}, {fields})")
+            format!(
+                "lume.runtime.LumeType.annotationType({name}, {qualified}, {fields}, {annotations})"
+            )
         }
         TypeKind::Class => {
-            format!("lume.runtime.LumeType.classType({name}, {qualified}, {fields}, {methods})")
+            format!(
+                "lume.runtime.LumeType.classType({name}, {qualified}, {fields}, {methods}, {annotations})"
+            )
         }
         TypeKind::Record => {
-            format!("lume.runtime.LumeType.shapeType({name}, {qualified}, {fields}, {methods})")
+            format!(
+                "lume.runtime.LumeType.shapeType({name}, {qualified}, {fields}, {methods}, {annotations})"
+            )
         }
         TypeKind::Single => {
-            format!("lume.runtime.LumeType.singleType({name}, {qualified}, {fields}, {methods})")
+            format!(
+                "lume.runtime.LumeType.singleType({name}, {qualified}, {fields}, {methods}, {annotations})"
+            )
         }
         TypeKind::Interface => {
-            format!("lume.runtime.LumeType.interfaceType({name}, {qualified}, {methods})")
+            format!(
+                "lume.runtime.LumeType.interfaceType({name}, {qualified}, {methods}, {annotations})"
+            )
         }
         TypeKind::Enum => format!(
-            "lume.runtime.LumeType.enumType({}, {}, {}, {})",
+            "lume.runtime.LumeType.enumType({}, {}, {}, {}, {})",
             name,
             qualified,
             enum_case_array_expr(ty, names),
-            methods
+            methods,
+            annotations
         ),
     }
 }
@@ -389,9 +406,10 @@ fn type_field_array_expr(fields: &[ir::Field], names: &JavaNames) -> String {
         .iter()
         .map(|field| {
             format!(
-                "lume.runtime.LumeField.of({}, {})",
+                "lume.runtime.LumeField.of({}, {}, {})",
                 java_string_literal(&field.name),
-                type_value_expr(&field.ty, names)
+                type_value_expr(&field.ty, names),
+                annotation_array_expr(&field.annotations)
             )
         })
         .collect::<Vec<_>>()
@@ -405,13 +423,13 @@ fn type_method_array_expr(bundle: &BackendBundle, ty: &ir::TypeDef, names: &Java
         .iter()
         .filter_map(|method_id| bundle.ir.function(*method_id))
         .filter(|method| method.name != "new")
-        .map(|method| method_descriptor_expr(method, names))
+        .map(|method| method_descriptor_expr(ty, method, names))
         .collect::<Vec<_>>()
         .join(", ");
     format!("new lume.runtime.LumeMethod[] {{{items}}}")
 }
 
-fn method_descriptor_expr(method: &ir::Function, names: &JavaNames) -> String {
+fn method_descriptor_expr(owner: &ir::TypeDef, method: &ir::Function, names: &JavaNames) -> String {
     let params = method
         .params
         .iter()
@@ -426,11 +444,36 @@ fn method_descriptor_expr(method: &ir::Function, names: &JavaNames) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "lume.runtime.LumeMethod.of({}, {}, new lume.runtime.LumeParam[] {{{}}})",
+        "lume.runtime.LumeMethod.of({}, {}, new lume.runtime.LumeParam[] {{{}}}, {}, {})",
         java_string_literal(&method.name),
         type_value_expr(&method.return_ty, names),
-        params
+        params,
+        annotation_array_expr(&method.annotations),
+        method_invoker_expr(owner, method, names)
     )
+}
+
+fn method_invoker_expr(owner: &ir::TypeDef, method: &ir::Function, names: &JavaNames) -> String {
+    if matches!(owner.kind, TypeKind::Interface | TypeKind::Annotation) {
+        return "null".to_string();
+    }
+
+    let owner_type = java_type_name(&owner.name);
+    let receiver = format!("(({owner_type}) receiver)");
+    let args = method
+        .params
+        .iter()
+        .filter_map(|param| method.locals.get(param.0))
+        .enumerate()
+        .map(|(index, local)| format!("(({}) args[{}])", names.value_type(&local.ty), index))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let call = format!("{}.{}({})", receiver, java_member_name(&method.name), args);
+    if is_java_void_type(&method.return_ty) {
+        format!("(receiver, args) -> {{ {call}; return lume.runtime.LumeUnit.INSTANCE; }}")
+    } else {
+        format!("(receiver, args) -> {call}")
+    }
 }
 
 fn enum_case_array_expr(ty: &ir::TypeDef, names: &JavaNames) -> String {
@@ -439,14 +482,77 @@ fn enum_case_array_expr(ty: &ir::TypeDef, names: &JavaNames) -> String {
         .iter()
         .map(|case| {
             format!(
-                "lume.runtime.LumeEnumCase.of({}, {})",
+                "lume.runtime.LumeEnumCase.of({}, {}, {})",
                 java_string_literal(&case.name),
-                type_field_array_expr(&case.fields, names)
+                type_field_array_expr(&case.fields, names),
+                annotation_array_expr(&case.annotations)
             )
         })
         .collect::<Vec<_>>()
         .join(", ");
     format!("new lume.runtime.LumeEnumCase[] {{{items}}}")
+}
+
+fn annotation_array_expr(annotations: &[ir::Annotation]) -> String {
+    let items = annotations
+        .iter()
+        .map(annotation_expr)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("new lume.runtime.LumeAnnotation[] {{{items}}}")
+}
+
+fn annotation_expr(annotation: &ir::Annotation) -> String {
+    let fields = annotation
+        .fields
+        .iter()
+        .map(|field| {
+            format!(
+                "lume.runtime.LumeAnnotationField.of({}, {})",
+                java_string_literal(&field.name),
+                annotation_value_expr(&field.value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "lume.runtime.LumeAnnotation.of({}, new lume.runtime.LumeAnnotationField[] {{{}}})",
+        java_string_literal(&annotation.name),
+        fields
+    )
+}
+
+fn annotation_value_expr(value: &ir::AnnotationValue) -> String {
+    match value {
+        ir::AnnotationValue::Bool(value) => value.to_string(),
+        ir::AnnotationValue::Int(value) => format!("{value}L"),
+        ir::AnnotationValue::Float(value) => java_float_literal(*value),
+        ir::AnnotationValue::String(value) => java_string_literal(value),
+        ir::AnnotationValue::List(items) => format!(
+            "lume.runtime.LumeList.of({})",
+            items
+                .iter()
+                .map(annotation_value_expr)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        ir::AnnotationValue::Record(fields) => {
+            let entries = fields
+                .iter()
+                .map(|field| {
+                    format!(
+                        "new lume.runtime.Tuple2<>({}, {})",
+                        java_string_literal(&field.name),
+                        annotation_value_expr(&field.value)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("lume.runtime.LumeMap.fromEntries(lume.runtime.LumeList.of({entries}))")
+        }
+        ir::AnnotationValue::EnumCase(path) => java_string_literal(&path.join(".")),
+        ir::AnnotationValue::Unresolved(value) => java_string_literal(value),
+    }
 }
 
 fn type_value_expr(ty: &ir::Type, names: &JavaNames) -> String {
@@ -563,8 +669,10 @@ fn push_instance_methods(
         }
         out.push('\n');
         out.push_str("    ");
-        if shell == MethodShell::DefaultBody {
-            out.push_str("default ");
+        match shell {
+            MethodShell::DefaultBody => out.push_str("default "),
+            MethodShell::StubBody => out.push_str("public "),
+            MethodShell::Abstract => {}
         }
         push_function_signature(out, function, names);
         match shell {
@@ -592,16 +700,21 @@ fn push_function_signature(out: &mut String, function: &ir::Function, names: &Ja
     out.push(' ');
     out.push_str(&java_member_name(&function.name));
     out.push('(');
-    out.push_str(
-        &function
-            .params
-            .iter()
-            .filter_map(|param| function.locals.get(param.0))
-            .map(|local| format!("{} {}", names.value_type(&local.ty), java_local_name(local)))
-            .collect::<Vec<_>>()
-            .join(", "),
-    );
+    out.push_str(&java_param_list(function, names, false));
     out.push(')');
+}
+
+fn java_param_list(function: &ir::Function, names: &JavaNames, skip_receiver: bool) -> String {
+    function
+        .params
+        .iter()
+        .filter_map(|param| function.locals.get(param.0))
+        .filter(|local| {
+            !(skip_receiver && matches!(local.kind, ir::LocalKind::Param) && local.name == "this")
+        })
+        .map(|local| format!("{} {}", names.value_type(&local.ty), java_local_name(local)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn push_function_body(
@@ -622,10 +735,53 @@ fn push_stub_body(out: &mut String) {
     out.push_str("    }\n");
 }
 
-fn push_class_constructor(out: &mut String, ty: &ir::TypeDef, names: &JavaNames) {
+fn push_class_constructors(
+    out: &mut String,
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    names: &JavaNames,
+) {
+    let explicit_constructors = ty
+        .methods
+        .iter()
+        .filter_map(|method_id| bundle.ir.function(*method_id))
+        .filter(|function| function.name == "new")
+        .collect::<Vec<_>>();
+    if !explicit_constructors.is_empty() {
+        for constructor in explicit_constructors {
+            push_explicit_class_constructor(out, bundle, ty, constructor, names);
+        }
+        return;
+    }
+    push_implicit_class_constructors(out, ty, names);
+}
+
+fn push_explicit_class_constructor(
+    out: &mut String,
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    function: &ir::Function,
+    names: &JavaNames,
+) {
+    out.push('\n');
+    out.push_str("    public ");
+    out.push_str(&java_type_name(&ty.name));
+    out.push('(');
+    out.push_str(&java_param_list(function, names, true));
+    out.push(')');
+    match FunctionEmitter::new(bundle, function, names)
+        .with_constructor_body()
+        .emit_body()
+    {
+        Some(body) => out.push_str(&body),
+        None => push_stub_body(out),
+    }
+}
+
+fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &JavaNames) {
     let name = java_type_name(&ty.name);
     out.push('\n');
-    out.push_str("    ");
+    out.push_str("    public ");
     out.push_str(&name);
     out.push_str("() {}\n");
     if ty.fields.is_empty() {
@@ -633,7 +789,7 @@ fn push_class_constructor(out: &mut String, ty: &ir::TypeDef, names: &JavaNames)
     }
 
     out.push('\n');
-    out.push_str("    ");
+    out.push_str("    public ");
     out.push_str(&name);
     out.push('(');
     out.push_str(
@@ -670,6 +826,7 @@ struct FunctionEmitter<'a> {
     function: &'a ir::Function,
     names: &'a JavaNames,
     module_class: String,
+    constructor_body: bool,
 }
 
 impl<'a> FunctionEmitter<'a> {
@@ -679,7 +836,13 @@ impl<'a> FunctionEmitter<'a> {
             function,
             names,
             module_class: module_class_name(bundle),
+            constructor_body: false,
         }
+    }
+
+    fn with_constructor_body(mut self) -> Self {
+        self.constructor_body = true;
+        self
     }
 
     fn emit_body(&self) -> Option<String> {
@@ -817,7 +980,7 @@ impl<'a> FunctionEmitter<'a> {
                 Some(())
             }
             ir::TerminatorKind::Return(value) => {
-                if is_java_void_type(&self.function.return_ty) {
+                if self.constructor_body || is_java_void_type(&self.function.return_ty) {
                     out.push_str("                    return;\n");
                 } else {
                     out.push_str("                    return ");
@@ -895,7 +1058,17 @@ impl<'a> FunctionEmitter<'a> {
 
     fn emit_runtime_type_for_operand(&self, operand: &ir::Operand) -> Option<String> {
         self.operand_type(operand)
-            .map(|ty| type_value_expr(&ty, self.names))
+            .map(|ty| {
+                if is_named_builtin(&ty, "Any") {
+                    format!(
+                        "lume.runtime.LumeRuntime.runtimeTypeOf({})",
+                        self.emit_operand(operand)
+                            .unwrap_or_else(|| "null".to_string())
+                    )
+                } else {
+                    type_value_expr(&ty, self.names)
+                }
+            })
             .or_else(|| match operand {
                 ir::Operand::Const(ir::Constant::Bool(_)) => {
                     Some("lume.runtime.LumeType.primitive(\"Bool\")".to_string())
@@ -1112,11 +1285,28 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 Some(format!("{}.add({})", args[0], args[1]))
             }
-            ir::Intrinsic::IterInit
-            | ir::Intrinsic::IterHasNext
-            | ir::Intrinsic::IterNext
-            | ir::Intrinsic::VariantIs(_)
-            | ir::Intrinsic::VariantField(_) => None,
+            ir::Intrinsic::IterInit => {
+                if args.len() != 1 {
+                    return None;
+                }
+                Some(format!("lume.runtime.LumeIterator.from({})", args[0]))
+            }
+            ir::Intrinsic::IterHasNext => {
+                if args.len() != 1 {
+                    return None;
+                }
+                Some(format!(
+                    "((lume.runtime.LumeIterator) {}).hasNext()",
+                    args[0]
+                ))
+            }
+            ir::Intrinsic::IterNext => {
+                if args.len() != 1 {
+                    return None;
+                }
+                Some(format!("((lume.runtime.LumeIterator) {}).next()", args[0]))
+            }
+            ir::Intrinsic::VariantIs(_) | ir::Intrinsic::VariantField(_) => None,
         }
     }
 
@@ -1521,6 +1711,7 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
         | "AnnotationType" => Some("lume.runtime.LumeType".to_string()),
         "TypeKind" => Some("lume.runtime.LumeTypeKind".to_string()),
+        "AnnotationValue" => Some("lume.runtime.LumeAnnotation".to_string()),
         "Field" => Some("lume.runtime.LumeField".to_string()),
         "Method" => Some("lume.runtime.LumeMethod".to_string()),
         "Param" => Some("lume.runtime.LumeParam".to_string()),

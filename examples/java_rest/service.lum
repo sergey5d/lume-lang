@@ -1,22 +1,6 @@
 module examples/java_rest
 
-use lume/rest/{RestServer}
-
-annotation Controller {
-    path Str = ""
-}
-
-annotation GET {
-    path Str
-}
-
-annotation POST {
-    path Str
-}
-
-shape Greeting {
-    message Str
-}
+use lume/core/http/{HttpServer, Controller, GET, POST}
 
 @Controller { path: "/api" }
 class GreetingController {
@@ -31,7 +15,7 @@ class GreetingController {
 }
 
 def main() Unit {
-    server RestServer = RestServer(7070)
-    server.setHandler(GreetingController())
+    server HttpServer = HttpServer(7070)
+    server.addController(GreetingController())
     server.run()
 }

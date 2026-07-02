@@ -1,54 +1,40 @@
 plugins {
-    application
     java
 }
 
 dependencies {
-    implementation(files(layout.projectDirectory.dir("../..").file("lume/core/build/libs/lume-core.jar")))
+    implementation("io.javalin:javalin:6.7.0")
+    runtimeOnly("org.slf4j:slf4j-simple:2.0.17")
 }
 
 val repoRoot = layout.projectDirectory.dir("../..")
-val lumeSource = layout.projectDirectory.file("src/main/lume/service.lum")
+val lumeSource = layout.projectDirectory.file("http/HttpServer.lum")
+val runtimeJava = layout.projectDirectory.dir("runtime/java")
+val runtimeClasses = layout.buildDirectory.dir("runtime-classes")
 val generatedLumeJava = layout.buildDirectory.dir("generated/sources/lume/java")
-val lumeCoreJar = repoRoot.file("lume/core/build/libs/lume-core.jar")
 val lumeCompilerSources = repoRoot.dir("rust/crates/lume/src")
-val localGradle = file("/tmp/gradle-9.6.1/bin/gradle")
-val gradleExecutable = providers.environmentVariable("GRADLE")
-    .orElse(if (localGradle.exists()) localGradle.absolutePath else "gradle")
-
-application {
-    mainClass.set("examples.java_gradle_rest.Java_gradle_restMain")
-}
 
 sourceSets {
     main {
+        java.srcDir(runtimeJava)
         java.srcDir(generatedLumeJava)
     }
 }
 
-val buildLumeCore = tasks.register<Exec>("buildLumeCore") {
-    description = "Builds lume-core.jar for app generation and compilation."
-    group = "build"
-
-    inputs.files(fileTree(repoRoot.dir("lume/core")))
-    outputs.file(lumeCoreJar)
-
-    commandLine(
-        gradleExecutable.get(),
-        "-p",
-        repoRoot.dir("lume/core").asFile.absolutePath,
-        "jar",
-        "--no-daemon"
-    )
+val compileRuntimeJava = tasks.register<JavaCompile>("compileRuntimeJava") {
+    description = "Compiles Java runtime substrate so Lume can inspect it during core generation."
+    source = fileTree(runtimeJava)
+    classpath = configurations.compileClasspath.get()
+    destinationDirectory.set(runtimeClasses)
 }
 
 val generateLumeJava = tasks.register<Exec>("generateLumeJava") {
-    description = "Generates Java sources from Lume sources."
+    description = "Generates Java sources for Lume core libraries."
     group = "build"
-    dependsOn(buildLumeCore)
+    dependsOn(compileRuntimeJava)
 
     inputs.file(lumeSource)
-    inputs.file(lumeCoreJar)
+    inputs.files(fileTree(runtimeJava))
     inputs.files(fileTree(lumeCompilerSources))
     outputs.dir(generatedLumeJava)
 
@@ -56,6 +42,11 @@ val generateLumeJava = tasks.register<Exec>("generateLumeJava") {
         val outputDir = generatedLumeJava.get().asFile
         outputDir.deleteRecursively()
         outputDir.mkdirs()
+
+        val lumeClasspath = files(
+            runtimeClasses.get().asFile,
+            configurations.compileClasspath.get()
+        ).asPath
 
         commandLine(
             "cargo",
@@ -70,7 +61,7 @@ val generateLumeJava = tasks.register<Exec>("generateLumeJava") {
             "--out",
             outputDir.absolutePath,
             "--classpath",
-            lumeCoreJar.asFile.absolutePath
+            lumeClasspath
         )
     }
 }
@@ -80,10 +71,8 @@ tasks.named<JavaCompile>("compileJava") {
 }
 
 tasks.named<Jar>("jar") {
+    archiveBaseName.set("lume-core")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    manifest {
-        attributes["Main-Class"] = application.mainClass.get()
-    }
     from({
         configurations.runtimeClasspath.get().map { dependency ->
             if (dependency.isDirectory) dependency else zipTree(dependency)

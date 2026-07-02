@@ -1,10 +1,14 @@
-# Java REST Bridge Example
+# Java REST Example
 
-This sample keeps the service code clean in Lume and puts HTTP-container glue in Java.
+This is the plain source version of the REST example. The Gradle sample is the
+preferred runnable form because it builds `lume-core.jar` automatically.
 
-The Lume side declares route metadata:
+The Lume side imports the core HTTP API and lets `HttpServer.addController`
+inspect annotations:
 
 ```txt
+use lume/core/http/{HttpServer, Controller, GET, POST}
+
 @Controller { path: "/api" }
 class GreetingController {
     @GET { path: "/health" }
@@ -12,46 +16,32 @@ class GreetingController {
 }
 
 def main() Unit {
-    server RestServer = RestServer(7070)
-    server.setHandler(GreetingController())
+    server HttpServer = HttpServer(7070)
+    server.addController(GreetingController())
     server.run()
 }
 ```
 
-The Java bridge is intentionally boring. It is a tiny library class imported by
-the Lume program and backed by a Java HTTP container.
-
-Current bridge:
-
-- `java/lume/rest/RestServer.java`
-- uses JDK `com.sun.net.httpserver.HttpServer`
-- manually mirrors the Lume route annotations
-
-That last point is temporary. Lume can parse/typecheck the annotations today,
-but the Java backend does not yet emit route metadata or generate registration
-code from annotation payloads.
+`HttpServer` itself is written in Lume under `lume/core/http/HttpServer.lum`.
+The only Java HTTP piece is the low-level `JavalinBackend`, which receives
+already-discovered route registrations from Lume.
 
 ## Run
 
 From the repository root:
 
 ```bash
-mkdir -p /tmp/lume-rest-lib-classes
-javac -d /tmp/lume-rest-lib-classes \
-  examples/java_rest/java/lume/rest/RestServer.java
-jar --create --file /tmp/lume-rest-lib.jar \
-  -C /tmp/lume-rest-lib-classes .
+/tmp/gradle-9.6.1/bin/gradle -p lume/core jar --no-daemon
 
 cargo run --manifest-path rust/Cargo.toml -p lume -- java \
   examples/java_rest/service.lum \
   --out /tmp/lume-rest \
-  --classpath /tmp/lume-rest-lib.jar
+  --classpath lume/core/build/libs/lume-core.jar
 
-javac -cp /tmp/lume-rest-lib.jar -d /tmp/lume-rest-classes \
-  java_runtime/src/main/java/lume/runtime/*.java \
+javac -cp lume/core/build/libs/lume-core.jar -d /tmp/lume-rest-classes \
   /tmp/lume-rest/examples/java_rest/*.java
 
-java -cp /tmp/lume-rest-classes:/tmp/lume-rest-lib.jar \
+java -cp /tmp/lume-rest-classes:lume/core/build/libs/lume-core.jar \
   examples.java_rest.Java_restMain
 ```
 
@@ -63,19 +53,5 @@ curl http://localhost:7070/api/hello
 curl -X POST http://localhost:7070/api/echo -d 'from curl'
 ```
 
-## Javalin Shape
-
-Once the bridge targets Javalin instead of JDK `HttpServer`, the Java glue can
-keep the same boundary:
-
-```java
-GreetingController controller = new GreetingController();
-
-Javalin app = Javalin.create(config -> {
-    config.routes.get("/api/health", ctx -> ctx.result(controller.health()));
-    config.routes.get("/api/hello", ctx -> ctx.result(controller.hello()));
-    config.routes.post("/api/echo", ctx -> ctx.result(controller.echo(ctx.body())));
-}).start(7070);
-```
-
-The Lume controller code does not need to change.
+For day-to-day use, prefer `examples/java_gradle_rest`, which wraps these steps
+in Gradle.

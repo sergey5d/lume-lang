@@ -107,6 +107,7 @@ impl<'a> Lowerer<'a> {
                         continue;
                     }
                     let mut ty = ir::TypeDef::new(decl.kind, decl.name.clone());
+                    ty.annotations = lower_annotations(&decl.annotations);
                     ty.visibility = decl.visibility;
                     ty.type_params = decl
                         .type_params
@@ -125,6 +126,7 @@ impl<'a> Lowerer<'a> {
                     let id = self.declare_function(
                         &function.name,
                         function.visibility,
+                        &function.annotations,
                         &function.type_params,
                         function.return_type.as_ref(),
                         ir::FunctionKind::TopLevel,
@@ -199,6 +201,7 @@ impl<'a> Lowerer<'a> {
                         .map(lower_type_ref)
                         .unwrap_or(ir::Type::Unknown);
                     fields.push(ir::Field {
+                        annotations: lower_annotations(&field.annotations),
                         visibility: field.visibility,
                         mutable: field.mutable,
                         name: field.name.clone(),
@@ -239,6 +242,7 @@ impl<'a> Lowerer<'a> {
                         .fields
                         .iter()
                         .map(|field| ir::Field {
+                            annotations: lower_annotations(&field.annotations),
                             visibility: field.visibility,
                             mutable: field.mutable,
                             name: field.name.clone(),
@@ -255,6 +259,7 @@ impl<'a> Lowerer<'a> {
                         })
                         .collect();
                     cases.push(ir::EnumCase {
+                        annotations: lower_annotations(&case.annotations),
                         name: case.name.clone(),
                         fields: case_fields,
                         span: Some(case.span),
@@ -341,6 +346,7 @@ impl<'a> Lowerer<'a> {
         &mut self,
         name: &str,
         visibility: ast::Visibility,
+        annotations: &[ast::Annotation],
         type_params: &[ast::TypeParam],
         return_type: Option<&TypeRef>,
         kind: ir::FunctionKind,
@@ -353,6 +359,7 @@ impl<'a> Lowerer<'a> {
             kind,
             return_type.map(lower_type_ref).unwrap_or(ir::Type::Unknown),
         );
+        function.annotations = lower_annotations(annotations);
         function.visibility = visibility;
         function.type_params = type_params.iter().map(|param| param.name.clone()).collect();
         function.span = Some(span);
@@ -387,6 +394,7 @@ impl<'a> Lowerer<'a> {
         let id = self.declare_function(
             &method.name,
             method.visibility,
+            &method.annotations,
             &method.type_params,
             method.return_type.as_ref(),
             ir::FunctionKind::Method { owner },
@@ -407,6 +415,7 @@ impl<'a> Lowerer<'a> {
         let id = self.declare_function(
             "__field_init",
             ast::Visibility::Hidden,
+            &[],
             &[],
             Some(&TypeRef::Named {
                 name: "Unit".to_string(),
@@ -4207,6 +4216,125 @@ fn lower_type_ref(reference: &TypeRef) -> ir::Type {
     }
 }
 
+fn lower_annotations(annotations: &[ast::Annotation]) -> Vec<ir::Annotation> {
+    annotations.iter().filter_map(lower_annotation).collect()
+}
+
+fn lower_annotation(annotation: &ast::Annotation) -> Option<ir::Annotation> {
+    let (name, fields) = match &annotation.value {
+        ast::Expr::Call {
+            callee,
+            args,
+            uses_brace_syntax,
+            ..
+        } => {
+            let name = annotation_expr_name(callee)?;
+            let fields = if *uses_brace_syntax && args.len() == 1 && args[0].name.is_none() {
+                match &args[0].value {
+                    ast::Expr::RecordLiteral { fields, .. } => fields
+                        .iter()
+                        .filter_map(|field| {
+                            Some(ir::AnnotationField {
+                                name: field.name.clone()?,
+                                value: lower_annotation_value(&field.value),
+                            })
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                }
+            } else {
+                args.iter()
+                    .filter_map(|arg| {
+                        Some(ir::AnnotationField {
+                            name: arg.name.clone()?,
+                            value: lower_annotation_value(&arg.value),
+                        })
+                    })
+                    .collect()
+            };
+            (name, fields)
+        }
+        other => (annotation_expr_name(other)?, Vec::new()),
+    };
+    Some(ir::Annotation { name, fields })
+}
+
+fn annotation_expr_name(expr: &ast::Expr) -> Option<String> {
+    match expr {
+        ast::Expr::Identifier { name, .. } => Some(name.clone()),
+        ast::Expr::Member { receiver, name, .. } => {
+            let mut path = annotation_expr_name(receiver)?;
+            path.push('.');
+            path.push_str(name);
+            Some(path)
+        }
+        ast::Expr::Group { inner, .. } => annotation_expr_name(inner),
+        _ => None,
+    }
+}
+
+fn lower_annotation_value(expr: &ast::Expr) -> ir::AnnotationValue {
+    match expr {
+        ast::Expr::Group { inner, .. } => lower_annotation_value(inner),
+        ast::Expr::Bool { value, .. } => ir::AnnotationValue::Bool(*value),
+        ast::Expr::Integer { raw, .. } => {
+            ir::AnnotationValue::Int(raw.parse::<i64>().unwrap_or_default())
+        }
+        ast::Expr::Float { raw, .. } => {
+            ir::AnnotationValue::Float(raw.parse::<f64>().unwrap_or_default())
+        }
+        ast::Expr::String { raw, .. } => ir::AnnotationValue::String(annotation_string_value(raw)),
+        ast::Expr::ListLiteral { items, .. } => {
+            ir::AnnotationValue::List(items.iter().map(lower_annotation_value).collect())
+        }
+        ast::Expr::RecordLiteral { fields, .. } => ir::AnnotationValue::Record(
+            fields
+                .iter()
+                .filter_map(|field| {
+                    Some(ir::AnnotationField {
+                        name: field.name.clone()?,
+                        value: lower_annotation_value(&field.value),
+                    })
+                })
+                .collect(),
+        ),
+        ast::Expr::Member { .. } => annotation_expr_name(expr)
+            .map(|name| {
+                ir::AnnotationValue::EnumCase(name.split('.').map(str::to_string).collect())
+            })
+            .unwrap_or_else(|| ir::AnnotationValue::Unresolved(String::new())),
+        ast::Expr::Binary {
+            left,
+            op: AstBinaryOp::Add,
+            right,
+            ..
+        } => match (lower_annotation_value(left), lower_annotation_value(right)) {
+            (ir::AnnotationValue::String(left), ir::AnnotationValue::String(right)) => {
+                ir::AnnotationValue::String(format!("{left}{right}"))
+            }
+            (ir::AnnotationValue::Int(left), ir::AnnotationValue::Int(right)) => {
+                ir::AnnotationValue::Int(left + right)
+            }
+            (left, right) => ir::AnnotationValue::Unresolved(format!("{left:?} + {right:?}")),
+        },
+        other => ir::AnnotationValue::Unresolved(format!("{other:?}")),
+    }
+}
+
+fn annotation_string_value(raw: &str) -> String {
+    let raw = raw.strip_prefix("raw").unwrap_or(raw);
+    if let Some(body) = raw
+        .strip_prefix("\"\"\"")
+        .and_then(|v| v.strip_suffix("\"\"\""))
+    {
+        return body.to_string();
+    }
+    raw.strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .unwrap_or(raw)
+        .to_string()
+}
+
 fn lower_lambda_param_type(param: &core::LambdaParam) -> ir::Type {
     if let Some(ty) = &param.ty {
         return lower_type_ref(ty);
@@ -4455,6 +4583,34 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: Vec::new(),
             ret: Box::new(ir::Type::named("TypeKind")),
         }),
+        (
+            "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
+            | "AnnotationType" | "Field" | "Method" | "EnumCase",
+            "annotation",
+        ) => Some(ir::Type::Function {
+            params: vec![ir::Type::Str],
+            ret: Box::new(ir::Type::option(ir::Type::named("AnnotationValue"))),
+        }),
+        (
+            "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
+            | "AnnotationType" | "Field" | "Method" | "EnumCase",
+            "hasAnnotation",
+        ) => Some(ir::Type::Function {
+            params: vec![ir::Type::Str],
+            ret: Box::new(ir::Type::Bool),
+        }),
+        ("AnnotationValue", "name") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Str),
+        }),
+        ("AnnotationValue", "field") => Some(ir::Type::Function {
+            params: vec![ir::Type::Str],
+            ret: Box::new(ir::Type::option(ir::Type::named("Any"))),
+        }),
+        ("AnnotationValue", "str") => Some(ir::Type::Function {
+            params: vec![ir::Type::Str],
+            ret: Box::new(ir::Type::option(ir::Type::Str)),
+        }),
         ("ClassType" | "ShapeType" | "SingleType" | "AnnotationType", "fields") => {
             Some(ir::Type::Function {
                 params: Vec::new(),
@@ -4502,6 +4658,13 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         ("Method", "returnType") => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir::Type::named("Type")),
+        }),
+        ("Method", "invoke") => Some(ir::Type::Function {
+            params: vec![
+                ir::Type::named("Any"),
+                ir::Type::list(ir::Type::named("Any")),
+            ],
+            ret: Box::new(ir::Type::named("Any")),
         }),
         ("Param", "name") => Some(ir::Type::Function {
             params: Vec::new(),

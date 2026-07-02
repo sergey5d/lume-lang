@@ -1,5 +1,6 @@
 package lume.runtime;
 
+import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.stream.Collectors;
 
@@ -40,6 +41,46 @@ public final class LumeRuntime {
             return either.isRight();
         }
         return false;
+    }
+
+    public static LumeType runtimeTypeOf(Object value) {
+        if (value == null) {
+            return LumeType.primitive("Null");
+        }
+        if (value instanceof String) {
+            return LumeType.primitive("Str");
+        }
+        if (value instanceof Boolean) {
+            return LumeType.primitive("Bool");
+        }
+        if (value instanceof Long || value instanceof Integer || value instanceof Short || value instanceof Byte) {
+            return LumeType.primitive("Int");
+        }
+        if (value instanceof Double || value instanceof Float) {
+            return LumeType.primitive("Float");
+        }
+        if (value instanceof LumeUnit) {
+            return LumeType.primitive("Unit");
+        }
+
+        try {
+            var method = value.getClass().getDeclaredMethod("runtimeType");
+            method.setAccessible(true);
+            Object result = method.invoke(value);
+            if (result instanceof LumeType type) {
+                return type;
+            }
+        } catch (NoSuchMethodException ignored) {
+            // Plain Java objects may not carry Lume descriptors.
+        } catch (IllegalAccessException | InvocationTargetException err) {
+            throw new LumePanic("failed to read runtimeType: " + err.getMessage());
+        }
+
+        return LumeType.classType(
+                value.getClass().getSimpleName(),
+                value.getClass().getName(),
+                new LumeField[] {},
+                new LumeMethod[] {});
     }
 
     public static Object extractSuccessValue(Object value) {

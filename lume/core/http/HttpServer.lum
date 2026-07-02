@@ -1,0 +1,62 @@
+module lume/core/http
+
+use lume/core/http/{JavalinBackend}
+
+annotation Controller {
+    path Str = ""
+}
+
+annotation GET {
+    path Str
+}
+
+annotation POST {
+    path Str
+}
+
+class HttpServer {
+    backend JavalinBackend
+}
+
+impl HttpServer {
+    new {
+        port Int
+    } {
+        this.backend = JavalinBackend(port)
+    }
+
+    def addController(controller Any) HttpServer {
+        controllerType Type = controller.runtimeType
+        classType ClassType = controllerType.asClass().orPanic()
+        var prefix Str = ""
+
+        if controllerType.hasAnnotation("Controller") {
+            controllerAnnotation AnnotationValue = controllerType.annotation("Controller").orPanic()
+            prefix := controllerAnnotation.str("path").orPanic()
+        }
+
+        methods [Method] = classType.methods()
+        for methodValue <- methods {
+            method Method = methodValue
+
+            if method.hasAnnotation("GET") {
+                route AnnotationValue = method.annotation("GET").orPanic()
+                path Str = prefix + route.str("path").orPanic()
+                this.backend.get(path, controller, method)
+            }
+
+            if method.hasAnnotation("POST") {
+                route AnnotationValue = method.annotation("POST").orPanic()
+                path Str = prefix + route.str("path").orPanic()
+                this.backend.post(path, controller, method)
+            }
+        }
+
+        this
+    }
+
+    def run() HttpServer {
+        this.backend.run()
+        this
+    }
+}

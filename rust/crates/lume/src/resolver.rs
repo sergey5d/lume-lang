@@ -8,11 +8,11 @@ use crate::{
     Diagnostic,
     ast::{
         Annotation, AssignOp, AssignmentStmt, Binding, Block, CallableBody, ElseBranch,
-        ElseExprBranch, Expr, ExprStmt, ForBinding, ForStmt, FunctionDecl, IfConditionClause,
-        IfStmt, ImplBlock, ImplTargetKind, ImportDecl, ImportSymbol, Item, LambdaBody, LetElseStmt,
-        MatchCase, MatchCaseBody, MethodDecl, Param, Pattern, PatternBindingStmt, Program,
-        RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
-        WhileStmt,
+        ElseExprBranch, Expr, ExprStmt, FieldDecl, ForBinding, ForStmt, FunctionDecl,
+        IfConditionClause, IfStmt, ImplBlock, ImplTargetKind, ImportDecl, ImportSymbol, Item,
+        LambdaBody, LetElseStmt, MatchCase, MatchCaseBody, MethodDecl, Param, Pattern,
+        PatternBindingStmt, Program, RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember,
+        TypeParam, TypeRef, Visibility, WhileStmt,
     },
     lexer::lex,
     parser::parse_program,
@@ -121,11 +121,23 @@ pub(crate) struct ModuleLoadOptions {
     pub(crate) java_external_classes: HashMap<String, JavaExternalClass>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct JavaExternalClass {
+    pub(crate) kind: TypeKind,
     pub(crate) type_params: Vec<String>,
     pub(crate) constructors: Vec<JavaExternalCallable>,
     pub(crate) methods: Vec<JavaExternalCallable>,
+}
+
+impl Default for JavaExternalClass {
+    fn default() -> Self {
+        Self {
+            kind: TypeKind::Class,
+            type_params: Vec::new(),
+            constructors: Vec::new(),
+            methods: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -663,7 +675,9 @@ fn synthetic_java_type_decl(
     TypeDecl {
         annotations: Vec::new(),
         visibility: Visibility::Default,
-        kind: TypeKind::Class,
+        kind: external_class
+            .map(|external_class| external_class.kind)
+            .unwrap_or(TypeKind::Class),
         name,
         type_params: type_params
             .into_iter()
@@ -686,6 +700,13 @@ fn synthetic_java_members(
     let Some(external_class) = external_class else {
         return Vec::new();
     };
+    if external_class.kind == TypeKind::Annotation {
+        return external_class
+            .methods
+            .iter()
+            .filter_map(|method| synthetic_java_annotation_field(method, span))
+            .collect();
+    }
     external_class
         .constructors
         .iter()
@@ -699,6 +720,24 @@ fn synthetic_java_members(
             )
         }))
         .collect()
+}
+
+fn synthetic_java_annotation_field(
+    callable: &JavaExternalCallable,
+    span: crate::source::Span,
+) -> Option<TypeMember> {
+    if !callable.params.is_empty() {
+        return None;
+    }
+    Some(TypeMember::Field(FieldDecl {
+        annotations: Vec::new(),
+        visibility: Visibility::Default,
+        mutable: false,
+        name: callable.name.clone(),
+        ty: callable.return_type.clone(),
+        initializer: None,
+        span,
+    }))
 }
 
 fn synthetic_java_method(

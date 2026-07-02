@@ -2,8 +2,14 @@
 # INTERPRETER
 
 interface Annotated {
-    def annotation[A]() Option[A]
-    def hasAnnotation[A]() Bool
+    def annotation(name Str) Option[AnnotationValue]
+    def hasAnnotation(name Str) Bool
+}
+
+interface AnnotationValue {
+    def name() Str
+    def field(name Str) Option[Any]
+    def str(name Str) Option[Str]
 }
 
 enum TypeKind {
@@ -74,6 +80,7 @@ interface Method with Annotated {
     def name() Str
     def params() [Param]
     def returnType() Type
+    def invoke(receiver Any, args [Any] vararg) Any
 }
 
 interface Param {
