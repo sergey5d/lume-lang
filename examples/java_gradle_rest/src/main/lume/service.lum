@@ -11,7 +11,7 @@ class GreetingController {
     def hello() Str = "{ \"message\": \"hello from Lume via Gradle\" }"
 
     @POST { path: "/echo" }
-    def echo(body Str) Str = "{ \"echo\": \"" + body + "\" }"
+    def echo(body Str) Str = """{ "echo": "$body" }"""
 }
 
 def main() Unit {

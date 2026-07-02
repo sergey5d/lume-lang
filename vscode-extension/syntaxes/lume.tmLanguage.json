@@ -52,6 +52,42 @@
     "strings": {
       "patterns": [
         {
+          "name": "string.quoted.double.raw.multiline.lume",
+          "begin": "\\b(raw)(\"\"\")",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.type.string.raw.lume"
+            },
+            "2": {
+              "name": "punctuation.definition.string.begin.lume"
+            }
+          },
+          "end": "\"\"\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.lume"
+            }
+          }
+        },
+        {
+          "name": "string.quoted.double.raw.lume",
+          "begin": "\\b(raw)(\")",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.type.string.raw.lume"
+            },
+            "2": {
+              "name": "punctuation.definition.string.begin.lume"
+            }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.lume"
+            }
+          }
+        },
+        {
           "name": "string.quoted.double.multiline.lume",
           "begin": "\"\"\"",
           "end": "\"\"\"",
