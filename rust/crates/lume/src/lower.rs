@@ -3137,7 +3137,8 @@ impl<'a> FunctionLowerer<'a> {
             } => self.infer_call_type(callee, args, *style, overrides),
             Expr::Member { receiver, name, .. } => {
                 if name == "runtimeType" {
-                    return ir::Type::named("Type");
+                    let receiver_ty = self.infer_expr_type_with_overrides(receiver, overrides);
+                    return ir_runtime_type(receiver_ty);
                 }
                 let receiver_ty = self.infer_expr_type_with_overrides(receiver, overrides);
                 self.infer_member_type(&receiver_ty, name)
@@ -3161,7 +3162,7 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 current
             }
-            Expr::TypeOf { .. } => ir::Type::named("Type"),
+            Expr::TypeOf { ty, .. } => ir_runtime_type(lower_type_ref(ty)),
             Expr::AnonymousInterface { interfaces, .. } => {
                 if interfaces.len() == 1 {
                     lower_type_ref(&interfaces[0])
@@ -4227,6 +4228,16 @@ fn lower_type_ref(reference: &TypeRef) -> ir::Type {
     }
 }
 
+fn ir_runtime_type(represented: ir::Type) -> ir::Type {
+    ir::Type::Named {
+        name: "Type".to_string(),
+        args: vec![match represented {
+            ir::Type::Unknown | ir::Type::Never => ir::Type::named("Any"),
+            other => other,
+        }],
+    }
+}
+
 fn lower_annotations(annotations: &[ast::Annotation]) -> Vec<ir::Annotation> {
     annotations.iter().filter_map(lower_annotation).collect()
 }
@@ -4656,7 +4667,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         }),
         ("Field", "fieldType") => Some(ir::Type::Function {
             params: Vec::new(),
-            ret: Box::new(ir::Type::named("Type")),
+            ret: Box::new(ir_runtime_type(ir::Type::named("Any"))),
         }),
         ("Method", "name") => Some(ir::Type::Function {
             params: Vec::new(),
@@ -4668,7 +4679,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         }),
         ("Method", "returnType") => Some(ir::Type::Function {
             params: Vec::new(),
-            ret: Box::new(ir::Type::named("Type")),
+            ret: Box::new(ir_runtime_type(ir::Type::named("Any"))),
         }),
         ("Method", "invoke") => Some(ir::Type::Function {
             params: vec![
@@ -4683,7 +4694,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         }),
         ("Param", "paramType") => Some(ir::Type::Function {
             params: Vec::new(),
-            ret: Box::new(ir::Type::named("Type")),
+            ret: Box::new(ir_runtime_type(ir::Type::named("Any"))),
         }),
         ("EnumCase", "name") => Some(ir::Type::Function {
             params: Vec::new(),

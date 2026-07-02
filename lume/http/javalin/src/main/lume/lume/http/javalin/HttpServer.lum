@@ -67,8 +67,8 @@ impl HttpServer {
     }
 
     def addController(controller Any) HttpServer {
-        controllerType Type = controller.runtimeType
-        classType ClassType = controllerType.asClass().orPanic()
+        controllerType Type[Any] = controller.runtimeType
+        classType ClassType[Any] = controllerType.asClass().orPanic()
         var prefix Str = ""
 
         if controllerType.hasAnnotation("Controller") {

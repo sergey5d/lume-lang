@@ -26,14 +26,14 @@ enum Status {
 def main() Unit {
     user User = User { name: "Ada", age: 42 }
 
-    declared = typeOf[User]
-    actual = user.runtimeType
+    declared Type[User] = typeOf[User]
+    actual Type[User] = user.runtimeType
 
     println(declared.name().orPanic())
     println(actual.qualifiedName().orPanic())
     println(declared.kind())
 
-    classType = declared.asClass().orPanic()
+    classType ClassType[User] = declared.asClass().orPanic()
     fields = classType.fields()
     println(fields.size())
 
@@ -46,7 +46,7 @@ def main() Unit {
 
     println(typeOf[Int].kind())
 
-    enumType = typeOf[Status].asEnum().orPanic()
+    enumType EnumType[Status] = typeOf[Status].asEnum().orPanic()
     println(enumType.name().orPanic())
     println(enumType.kind())
     println(enumType.case("Pending").orPanic().name())

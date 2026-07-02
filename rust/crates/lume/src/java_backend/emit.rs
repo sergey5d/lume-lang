@@ -2109,7 +2109,7 @@ impl<'a> FunctionEmitter<'a> {
                 interfaces.first().cloned()
             }
             ir::RValue::Cast { ty, .. } => Some(ty.clone()),
-            ir::RValue::TypeOf { .. } => Some(ir::Type::named("Type")),
+            ir::RValue::TypeOf { ty } => Some(runtime_ir_type(ty.clone())),
             _ => None,
         }
     }
@@ -2280,6 +2280,9 @@ impl JavaNames {
             ir::Type::Float => "Double".to_string(),
             ir::Type::Str => "String".to_string(),
             ir::Type::Function { params, ret } => self.function_type(params, ret),
+            ir::Type::Named { name, .. } if is_reflection_type(name) => {
+                "lume.core.LumeType".to_string()
+            }
             ir::Type::Named { name, args } if args.is_empty() => java_named_builtin_value(name)
                 .or_else(|| self.java_types.get(name).cloned())
                 .unwrap_or_else(|| java_type_name(name)),
@@ -2428,6 +2431,29 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Param" => Some("lume.core.LumeParam".to_string()),
         "EnumCase" => Some("lume.core.LumeEnumCase".to_string()),
         _ => None,
+    }
+}
+
+fn is_reflection_type(name: &str) -> bool {
+    matches!(
+        name,
+        "Type"
+            | "ClassType"
+            | "ShapeType"
+            | "EnumType"
+            | "InterfaceType"
+            | "SingleType"
+            | "AnnotationType"
+    )
+}
+
+fn runtime_ir_type(represented: ir::Type) -> ir::Type {
+    ir::Type::Named {
+        name: "Type".to_string(),
+        args: vec![match represented {
+            ir::Type::Unknown | ir::Type::Never => ir::Type::named("Any"),
+            other => other,
+        }],
     }
 }
 

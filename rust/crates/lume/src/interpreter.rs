@@ -1741,7 +1741,10 @@ impl<'a> Interpreter<'a> {
                 params: Vec::new(),
                 ret: Box::new(ir::Type::Unknown),
             },
-            Value::RuntimeType(_) => self.runtime_type_value_for_ir_type(&ir::Type::named("Type")),
+            Value::RuntimeType(_) => self.runtime_type_value_for_ir_type(&ir::Type::Named {
+                name: "Type".to_string(),
+                args: vec![ir::Type::named("Any")],
+            }),
             Value::RuntimeField { .. } => {
                 self.runtime_type_value_for_ir_type(&ir::Type::named("Field"))
             }

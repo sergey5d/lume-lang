@@ -25,67 +25,67 @@ enum TypeKind {
     case AnonymousShape
 }
 
-interface Type with Annotated {
+interface Type[A] with Annotated {
     def name() Option[Str]
     def qualifiedName() Option[Str]
     def kind() TypeKind
 
-    def asClass() Option[ClassType]
-    def asShape() Option[ShapeType]
-    def asEnum() Option[EnumType]
-    def asInterface() Option[InterfaceType]
-    def asSingle() Option[SingleType]
-    def asAnnotation() Option[AnnotationType]
+    def asClass() Option[ClassType[A]]
+    def asShape() Option[ShapeType[A]]
+    def asEnum() Option[EnumType[A]]
+    def asInterface() Option[InterfaceType[A]]
+    def asSingle() Option[SingleType[A]]
+    def asAnnotation() Option[AnnotationType[A]]
 }
 
-interface ClassType with Type {
+interface ClassType[A] with Type[A] {
     def fields() [Field]
     def methods() [Method]
     def field(name Str) Option[Field]
     def method(name Str) Option[Method]
 }
 
-interface ShapeType with Type {
+interface ShapeType[A] with Type[A] {
     def fields() [Field]
     def methods() [Method]
 }
 
-interface EnumType with Type {
+interface EnumType[A] with Type[A] {
     def cases() [EnumCase]
     def case(name Str) Option[EnumCase]
     def methods() [Method]
 }
 
-interface InterfaceType with Type {
+interface InterfaceType[A] with Type[A] {
     def methods() [Method]
 }
 
-interface SingleType with Type {
+interface SingleType[A] with Type[A] {
     def fields() [Field]
     def methods() [Method]
     def field(name Str) Option[Field]
     def method(name Str) Option[Method]
 }
 
-interface AnnotationType with Type {
+interface AnnotationType[A] with Type[A] {
     def fields() [Field]
 }
 
 interface Field with Annotated {
     def name() Str
-    def fieldType() Type
+    def fieldType() Type[Any]
 }
 
 interface Method with Annotated {
     def name() Str
     def params() [Param]
-    def returnType() Type
+    def returnType() Type[Any]
     def invoke(receiver Any, args [Any] vararg) Any
 }
 
 interface Param {
     def name() Str
-    def paramType() Type
+    def paramType() Type[Any]
 }
 
 interface EnumCase with Annotated {

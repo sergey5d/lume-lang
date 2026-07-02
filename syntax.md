@@ -34,7 +34,7 @@ Common stdlib/prelude types:
 - `Either[L, R]`
 - `Iterable[T]`
 - `Iterator[T]`
-- `Type`
+- `Type[T]`
 - `TypeKind`
 - `Ordering[T]`
 - `Printer`
@@ -138,21 +138,24 @@ userOpt.->name().orPanic()     # call orPanic inside the segment
 
 ## Runtime Metadata
 
-Runtime metadata is exposed through the `Type` hierarchy declared in
+Runtime metadata is exposed through the `Type[A]` hierarchy declared in
 `stdlib/runtime.lum`.
 
 Use `typeOf[T]` to get metadata for a type:
 
 ```txt
-userType Type = typeOf[User]
+userType Type[User] = typeOf[User]
 ```
 
 Every value also has a synthetic `runtimeType` field:
 
 ```txt
 user User = User { name: "Ada", age: 42 }
-actual Type = user.runtimeType
+actual Type[User] = user.runtimeType
 ```
+
+`Type[A]` means "metadata for values of type `A`". When the represented type is
+not statically known, use `Type[Any]`.
 
 Common metadata operations:
 
@@ -160,12 +163,12 @@ Common metadata operations:
 println(typeOf[User].name().orPanic())
 println(typeOf[User].kind())
 
-classType = typeOf[User].asClass().orPanic()
+classType ClassType[User] = typeOf[User].asClass().orPanic()
 fields = classType.fields()
 expect Some(nameField) = classType.field("name")
 println(nameField.fieldType().name().orPanic())
 
-enumType = typeOf[Status].asEnum().orPanic()
+enumType EnumType[Status] = typeOf[Status].asEnum().orPanic()
 expect Some(pendingCase) = enumType.case("Pending")
 println(pendingCase.name())
 ```

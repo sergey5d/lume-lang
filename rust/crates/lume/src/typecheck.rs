@@ -136,8 +136,8 @@ impl Ty {
         Self::Named("Option".to_string(), vec![item])
     }
 
-    fn runtime_type() -> Self {
-        Self::named("Type")
+    fn runtime_type(represented: Ty) -> Self {
+        Self::Named("Type".to_string(), vec![runtime_type_arg(represented)])
     }
 
     fn any() -> Self {
@@ -3324,7 +3324,7 @@ impl<'a> Checker<'a> {
                 }
                 let receiver_ty = self.check_expr(receiver);
                 if name == "runtimeType" {
-                    return Ty::runtime_type();
+                    return Ty::runtime_type(receiver_ty);
                 }
                 self.member_type(&receiver_ty, name).unwrap_or_else(|| {
                     self.add_error(
@@ -3531,8 +3531,8 @@ impl<'a> Checker<'a> {
                 Ty::bool()
             }
             Expr::TypeOf { ty, .. } => {
-                self.ty_from_type_ref(ty);
-                Ty::runtime_type()
+                let represented = self.ty_from_type_ref(ty);
+                Ty::runtime_type(represented)
             }
             Expr::If {
                 condition,
@@ -7666,6 +7666,13 @@ fn substitute_type(ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
     }
 }
 
+fn runtime_type_arg(ty: Ty) -> Ty {
+    match ty {
+        Ty::Unknown | Ty::Never => Ty::any(),
+        other => other,
+    }
+}
+
 fn type_contains_type_param(ty: &Ty) -> bool {
     match ty {
         Ty::TypeParam(_) => true,
@@ -10064,6 +10071,59 @@ def main() Unit {
             result.diagnostics.iter().any(|diag| {
                 diag.code == "invalid_defer_control_flow"
                     && diag.message.contains("defer block cannot contain 'return'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_generic_reflection_type_annotations() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+enum Status {
+    case Pending
+}
+
+def main() Unit {
+    user User = User("Ada")
+    declared Type[User] = typeOf[User]
+    actual Type[User] = user.runtimeType
+    classType ClassType[User] = declared.asClass().orPanic()
+    enumType EnumType[Status] = typeOf[Status].asEnum().orPanic()
+    fieldType Type[Any] = classType.fields().get(0).orPanic().fieldType()
+    OS.println(actual.name().orPanic(), enumType.name().orPanic(), fieldType.name().orPanic())
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_raw_reflection_type_annotations() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+def main() Unit {
+    declared Type = typeOf[User]
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_binding_type"
+                    && diag
+                        .message
+                        .contains("cannot assign value of type 'Type[User]'")
             }),
             "{:#?}",
             result.diagnostics
