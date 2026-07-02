@@ -18,6 +18,9 @@ val javaStubs = layout.projectDirectory.dir("src/main/java-stubs")
 val runtimeClasses = layout.buildDirectory.dir("runtime-classes")
 val generatedLumeJava = layout.buildDirectory.dir("generated/sources/lume/java")
 val lumeCompilerSources = repoRoot.dir("rust/crates/lume/src")
+val lumeCompilerManifest = repoRoot.file("rust/Cargo.toml")
+val lumeCompilerBinary = repoRoot.file("rust/target/debug/lume")
+val lumeExecutableOverride = providers.environmentVariable("LUME")
 
 sourceSets {
     main {
@@ -43,27 +46,46 @@ val cleanGeneratedLumeJava = tasks.register("cleanGeneratedLumeJava") {
     }
 }
 
+val buildLumeCompiler = tasks.register<Exec>("buildLumeCompiler") {
+    description = "Builds the repo-local Lume compiler unless LUME points to an installed compiler."
+    group = "build"
+    onlyIf { !lumeExecutableOverride.isPresent }
+
+    inputs.file(lumeCompilerManifest)
+    inputs.files(fileTree(lumeCompilerSources))
+    outputs.file(lumeCompilerBinary)
+
+    commandLine(
+        "cargo",
+        "build",
+        "--manifest-path",
+        lumeCompilerManifest.asFile.absolutePath,
+        "-p",
+        "lume"
+    )
+}
+
 fun Exec.configureLumeJavaGeneration(source: org.gradle.api.file.RegularFile) {
+    dependsOn(buildLumeCompiler)
     inputs.file(source)
     inputs.files(fileTree(javaStubs))
     inputs.files(fileTree(lumeCompilerSources))
+    inputs.property("lumeExecutable", lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath)
+    if (!lumeExecutableOverride.isPresent) {
+        inputs.file(lumeCompilerBinary)
+    }
     outputs.dir(generatedLumeJava)
 
     doFirst {
         val outputDir = generatedLumeJava.get().asFile
+        val lumeExecutable = lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath
         val lumeClasspath = files(
             runtimeClasses.get().asFile,
             configurations.compileClasspath.get()
         ).asPath
 
         commandLine(
-            "cargo",
-            "run",
-            "--manifest-path",
-            repoRoot.file("rust/Cargo.toml").asFile.absolutePath,
-            "-p",
-            "lume",
-            "--",
+            lumeExecutable,
             "gen",
             source.asFile.absolutePath,
             "--out",

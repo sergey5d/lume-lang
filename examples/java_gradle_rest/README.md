@@ -15,8 +15,10 @@ route discovery is Lume, and Java is only the low-level HTTP substrate.
 The important tasks are:
 
 - `buildLumeCore`: builds `../../lume/core/build/libs/lume-core.jar`.
-- `generateLumeJava`: runs `cargo run -p lume -- gen ...`; `lume-core.jar`
-  is available automatically to generation.
+- `buildLumeCompiler`: builds the repo-local Lume compiler, unless `LUME`
+  points to an installed compiler.
+- `generateLumeJava`: runs the Lume compiler as `lume gen ...`;
+  `lume-core.jar` is available automatically to generation.
 - `compileJava`: compiles the generated application Java.
 - `jar`: packages a runnable fat jar with Java dependencies.
 
@@ -27,6 +29,12 @@ From this folder:
 ```bash
 gradle build
 gradle run
+```
+
+To use an installed compiler instead of the repo-local debug binary:
+
+```bash
+LUME=lume gradle build
 ```
 
 Or run the jar:

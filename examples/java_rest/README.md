@@ -32,9 +32,11 @@ already-discovered route registrations from Lume.
 From the repository root:
 
 ```bash
-/tmp/gradle-9.6.1/bin/gradle -p lume/core jar --no-daemon
+gradle -p lume/core jar --no-daemon
 
-cargo run --manifest-path rust/Cargo.toml -p lume -- gen \
+cargo build --manifest-path rust/Cargo.toml -p lume
+
+rust/target/debug/lume gen \
   examples/java_rest/service.lum \
   --out /tmp/lume-rest
 
