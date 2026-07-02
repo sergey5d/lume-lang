@@ -9,9 +9,9 @@ def main() Unit {
 
     builder StringBuilder = StringBuilder()
     builder.append("generated at ")
-    builder.append(now.toString())
+    builder.append(now.toStr())
 
-    message Str = builder.toString()
+    message Str = builder.toStr()
 
     messages ArrayDeque[Str] = ArrayDeque()
     messages.add(message)
@@ -31,5 +31,5 @@ def main() Unit {
     output.append(" | object=")
     output.append(asAny)
 
-    println(output.toString())
+    println(output.toStr())
 }

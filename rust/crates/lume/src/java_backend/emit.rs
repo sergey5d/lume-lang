@@ -700,24 +700,47 @@ impl<'a> FunctionEmitter<'a> {
                     _ => None,
                 }
             }
-            ir::Callee::Method { receiver, method } => {
-                let receiver = self.emit_operand(receiver)?;
-                match (method.as_str(), args.as_slice()) {
-                    ("toStr", []) => Some(format!("String.valueOf({receiver})")),
-                    ("equals", [other]) => {
-                        Some(format!("java.util.Objects.equals({receiver}, {other})"))
-                    }
-                    _ => Some(format!(
+            ir::Callee::Method { receiver, method } => match (method.as_str(), args.as_slice()) {
+                ("toStr", []) => self.emit_to_string_call(receiver),
+                ("equals", [other]) => {
+                    let receiver = self.emit_operand(receiver)?;
+                    Some(format!("java.util.Objects.equals({receiver}, {other})"))
+                }
+                _ => {
+                    let receiver = self.emit_operand(receiver)?;
+                    Some(format!(
                         "{}.{}({})",
                         receiver,
                         java_member_name(method),
                         args.join(", ")
-                    )),
+                    ))
                 }
-            }
+            },
             ir::Callee::Intrinsic(intrinsic) => self.emit_intrinsic(intrinsic, &args),
             ir::Callee::Named { path } => self.emit_named_runtime_call(path, &args),
             ir::Callee::Indirect(_) => None,
+        }
+    }
+
+    fn emit_to_string_call(&self, receiver: &ir::Operand) -> Option<String> {
+        match receiver {
+            ir::Operand::Const(ir::Constant::Unit) => {
+                Some("lume.runtime.LumeUnit.INSTANCE.toString()".to_string())
+            }
+            ir::Operand::Const(ir::Constant::Bool(value)) => {
+                Some(format!("Boolean.toString({value})"))
+            }
+            ir::Operand::Const(ir::Constant::Int(value)) => {
+                Some(format!("Long.toString({value}L)"))
+            }
+            ir::Operand::Const(ir::Constant::Float(value)) => {
+                Some(format!("Double.toString({})", java_float_literal(*value)))
+            }
+            ir::Operand::Const(ir::Constant::String(value)) => Some(format!(
+                "{}.toString()",
+                java_string_literal(&decode_lume_string_literal(value))
+            )),
+            _ => Some(format!("{}.toString()", self.emit_operand(receiver)?)),
         }
     }
 
@@ -1278,13 +1301,7 @@ fn java_constant(constant: &ir::Constant) -> String {
         ir::Constant::Unit => "lume.runtime.LumeUnit.INSTANCE".to_string(),
         ir::Constant::Bool(value) => value.to_string(),
         ir::Constant::Int(value) => format!("{value}L"),
-        ir::Constant::Float(value) => {
-            let mut rendered = value.to_string();
-            if !rendered.contains('.') && !rendered.contains('e') && !rendered.contains('E') {
-                rendered.push_str(".0");
-            }
-            rendered
-        }
+        ir::Constant::Float(value) => java_float_literal(*value),
         ir::Constant::String(value) => java_string_literal(&decode_lume_string_literal(value)),
         ir::Constant::List(items) => {
             let items = items
@@ -1295,6 +1312,14 @@ fn java_constant(constant: &ir::Constant) -> String {
             format!("lume.runtime.LumeList.of({items})")
         }
     }
+}
+
+fn java_float_literal(value: f64) -> String {
+    let mut rendered = value.to_string();
+    if !rendered.contains('.') && !rendered.contains('e') && !rendered.contains('E') {
+        rendered.push_str(".0");
+    }
+    rendered
 }
 
 fn java_string_literal(value: &str) -> String {

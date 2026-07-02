@@ -338,11 +338,18 @@ fn parse_javap_callable_line(
         })
     });
     Some(ParsedJavaCallable::Method(JavaExternalCallable {
-        name: name.to_string(),
+        name: java_method_name_to_lume(name).to_string(),
         type_params: method_type_params,
         params,
         return_type,
     }))
+}
+
+fn java_method_name_to_lume(name: &str) -> &str {
+    match name {
+        "toString" => "toStr",
+        _ => name,
+    }
 }
 
 fn parse_javap_params(params: &str, ctx: &JavaTypeContext<'_>) -> Vec<JavaExternalParam> {
