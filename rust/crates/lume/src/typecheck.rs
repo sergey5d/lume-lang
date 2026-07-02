@@ -6222,7 +6222,7 @@ impl<'a> Checker<'a> {
                         let expected =
                             call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
                         if !matches!(actual, Ty::Unknown) {
-                            if self.is_assignable(actual, &expected) {
+                            if self.arg_matches_expected(arg, actual, &expected) {
                                 score += 2;
                             } else if type_contains_type_param(&expected) {
                                 score += 1;
@@ -6239,6 +6239,10 @@ impl<'a> Checker<'a> {
             })
             .max_by_key(|(score, _)| *score)
             .map(|(_, sig)| sig)
+    }
+
+    fn arg_matches_expected(&self, arg: &crate::ast::CallArg, actual: &Ty, expected: &Ty) -> bool {
+        self.is_assignable(actual, expected) || literal_fits_expected_type(&arg.value, expected)
     }
 
     fn probe_expr_type(&self, expr: &Expr) -> Ty {
@@ -7696,6 +7700,16 @@ fn materialize_type(ty: &Ty) -> Ty {
     }
 }
 
+fn literal_fits_expected_type(expr: &Expr, expected: &Ty) -> bool {
+    match expr {
+        Expr::Integer { raw, .. } if expected.is_int32() => raw
+            .parse::<i64>()
+            .is_ok_and(|value| (i32::MIN as i64..=i32::MAX as i64).contains(&value)),
+        Expr::Float { raw, .. } if expected.is_float32() => raw.parse::<f32>().is_ok(),
+        _ => false,
+    }
+}
+
 fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
     if matches!(actual, Ty::Unknown) || matches!(expected, Ty::Unknown) {
         return true;
@@ -7863,6 +7877,34 @@ class User {
 
 def main() Unit {
     _ User = User("Ada")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_integer_literals_for_int32_call_arguments() {
+        let program = parse_inline(
+            r#"
+class Server {
+    port Int32
+}
+
+impl Server {
+    new {
+        port Int32
+    } {
+        this.port = port
+    }
+
+    def bind(port Int32) Unit {}
+}
+
+def main() Unit {
+    server Server = Server(7070)
+    server.bind(8080)
 }
 "#,
         );

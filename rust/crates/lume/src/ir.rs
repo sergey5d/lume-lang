@@ -562,6 +562,10 @@ pub enum RValue {
     Tuple(Vec<Operand>),
     List(Vec<Operand>),
     Record(Vec<NamedOperand>),
+    AnonymousInterface {
+        interfaces: Vec<Type>,
+        methods: Vec<AnonymousInterfaceMethod>,
+    },
     RecordUpdate {
         base: Operand,
         updates: Vec<NamedOperand>,
@@ -605,6 +609,14 @@ pub enum RValue {
 pub struct NamedOperand {
     pub name: String,
     pub value: Operand,
+}
+
+/// Lowered method body for an anonymous interface implementation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnonymousInterfaceMethod {
+    pub name: String,
+    pub function: FunctionId,
+    pub captures: Vec<Operand>,
 }
 
 /// Supported unary operators in lowered code.

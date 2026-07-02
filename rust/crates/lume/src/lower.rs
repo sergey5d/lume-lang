@@ -1209,45 +1209,34 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn lower_anonymous_interface_rvalue(&mut self, methods: &[MethodDecl]) -> ir::RValue {
-        let fields = methods
+    fn lower_anonymous_interface_rvalue(
+        &mut self,
+        interfaces: &[TypeRef],
+        methods: &[MethodDecl],
+    ) -> ir::RValue {
+        let methods = methods
             .iter()
             .map(|method| {
-                let ty = ir::Type::Function {
-                    params: method
-                        .params
-                        .iter()
-                        .map(|param| {
-                            param
-                                .ty
-                                .as_ref()
-                                .map(lower_type_ref)
-                                .unwrap_or(ir::Type::Unknown)
-                        })
-                        .collect(),
-                    ret: Box::new(
-                        method
-                            .return_type
-                            .as_ref()
-                            .map(lower_type_ref)
-                            .unwrap_or(ir::Type::Unknown),
-                    ),
-                };
-                let closure = self.lower_callable_closure(
+                let ir::RValue::Closure { function, captures } = self.lower_callable_closure(
                     &method.name,
                     &method.params,
                     method.return_type.as_ref(),
                     method.body.as_ref(),
                     method.span,
-                );
-                let operand = self.emit_temp_from_rvalue(closure, ty, Some(method.span));
-                ir::NamedOperand {
+                ) else {
+                    unreachable!("anonymous interface methods lower to closures")
+                };
+                ir::AnonymousInterfaceMethod {
                     name: method.name.clone(),
-                    value: operand,
+                    function,
+                    captures,
                 }
             })
             .collect();
-        ir::RValue::Record(fields)
+        ir::RValue::AnonymousInterface {
+            interfaces: interfaces.iter().map(lower_type_ref).collect(),
+            methods,
+        }
     }
 
     fn visible_capture_sources(
@@ -3173,12 +3162,18 @@ impl<'a> FunctionLowerer<'a> {
                 current
             }
             Expr::TypeOf { .. } => ir::Type::named("Type"),
+            Expr::AnonymousInterface { interfaces, .. } => {
+                if interfaces.len() == 1 {
+                    lower_type_ref(&interfaces[0])
+                } else {
+                    ir::Type::Unknown
+                }
+            }
             Expr::If { .. }
             | Expr::Block { .. }
             | Expr::Match { .. }
             | Expr::ForYield { .. }
             | Expr::Try { .. }
-            | Expr::AnonymousInterface { .. }
             | Expr::Unary { .. }
             | Expr::Binary { .. }
             | Expr::RecordUpdate { .. }
@@ -3647,9 +3642,11 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Lambda { params, body, span } => {
                 Some(self.lower_lambda_rvalue(params, body, *span))
             }
-            Expr::AnonymousInterface { methods, .. } => {
-                Some(self.lower_anonymous_interface_rvalue(methods))
-            }
+            Expr::AnonymousInterface {
+                interfaces,
+                methods,
+                ..
+            } => Some(self.lower_anonymous_interface_rvalue(interfaces, methods)),
             Expr::RecordUpdate {
                 receiver, updates, ..
             } => Some(ir::RValue::RecordUpdate {

@@ -1,6 +1,8 @@
 module lume/core/http
 
-use lume/core/http/{JavalinBackend}
+use io/javalin/Javalin
+use io/javalin/http/{Context, Handler}
+use io/javalin/router/JavalinDefaultRoutingApi
 
 annotation Controller {
     path Str = ""
@@ -14,13 +16,52 @@ annotation POST {
     path Str
 }
 
+class JavalinBackend {
+    app Javalin
+    port Int32
+}
+
+impl JavalinBackend {
+    new {
+        port Int32
+    } {
+        this.app = Javalin.create()
+        this.port = port
+    }
+
+    def get(path Str, controller Any, method Method) JavalinBackend {
+        this.app.get(path, Handler {
+            def handle(ctx Context) Unit {
+                ctx.result(method.invoke(controller).toStr())
+            }
+        })
+
+        this
+    }
+
+    def post(path Str, controller Any, method Method) JavalinBackend {
+        this.app.post(path, Handler {
+            def handle(ctx Context) Unit {
+                ctx.result(method.invoke(controller, ctx.body()).toStr())
+            }
+        })
+
+        this
+    }
+
+    def run() JavalinBackend {
+        this.app.start(this.port)
+        this
+    }
+}
+
 class HttpServer {
     backend JavalinBackend
 }
 
 impl HttpServer {
     new {
-        port Int
+        port Int32
     } {
         this.backend = JavalinBackend(port)
     }

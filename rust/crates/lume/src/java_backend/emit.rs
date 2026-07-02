@@ -769,13 +769,22 @@ enum MethodShell {
 }
 
 fn push_function_signature(out: &mut String, function: &ir::Function, names: &JavaNames) {
+    push_function_signature_named(out, function, names, &function.name);
+}
+
+fn push_function_signature_named(
+    out: &mut String,
+    function: &ir::Function,
+    names: &JavaNames,
+    name: &str,
+) {
     if !function.type_params.is_empty() {
         out.push_str(&java_type_params(&function.type_params));
         out.push(' ');
     }
     out.push_str(&names.return_type(&function.return_ty));
     out.push(' ');
-    out.push_str(&java_member_name(&function.name));
+    out.push_str(&java_member_name(name));
     out.push('(');
     out.push_str(&java_param_list(function, names, false));
     out.push(')');
@@ -792,6 +801,15 @@ fn java_param_list(function: &ir::Function, names: &JavaNames, skip_receiver: bo
         .map(|local| format!("{} {}", names.value_type(&local.ty), java_local_name(local)))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn function_param_types(function: &ir::Function) -> Vec<ir::Type> {
+    function
+        .params
+        .iter()
+        .filter_map(|param| function.locals.get(param.0))
+        .map(|local| local.ty.clone())
+        .collect()
 }
 
 fn push_function_body(
@@ -1280,6 +1298,7 @@ struct FunctionEmitter<'a> {
     names: &'a JavaNames,
     module_class: String,
     constructor_body: bool,
+    capture_overrides: HashMap<ir::LocalId, String>,
 }
 
 impl<'a> FunctionEmitter<'a> {
@@ -1290,11 +1309,17 @@ impl<'a> FunctionEmitter<'a> {
             names,
             module_class: module_class_name(bundle),
             constructor_body: false,
+            capture_overrides: HashMap::new(),
         }
     }
 
     fn with_constructor_body(mut self) -> Self {
         self.constructor_body = true;
+        self
+    }
+
+    fn with_capture_overrides(mut self, capture_overrides: HashMap<ir::LocalId, String>) -> Self {
+        self.capture_overrides = capture_overrides;
         self
     }
 
@@ -1484,6 +1509,10 @@ impl<'a> FunctionEmitter<'a> {
                 let args = self.emit_operands(items)?;
                 Some(format!("lume.core.LumeList.of({})", args.join(", ")))
             }
+            ir::RValue::AnonymousInterface {
+                interfaces,
+                methods,
+            } => self.emit_anonymous_interface(interfaces, methods),
             ir::RValue::Construct { ty, fields } => self.emit_construct(ty, fields),
             ir::RValue::Variant {
                 enum_name,
@@ -1580,10 +1609,10 @@ impl<'a> FunctionEmitter<'a> {
     }
 
     fn emit_call(&self, callee: &ir::Callee, args: &[ir::Operand]) -> Option<String> {
-        let args = self.emit_operands(args)?;
         match callee {
             ir::Callee::Direct(id) => {
                 let target = self.bundle.ir.function(*id)?;
+                let args = self.emit_operands_for_params(args, &function_param_types(target))?;
                 match target.kind {
                     ir::FunctionKind::TopLevel => {
                         let name = java_member_name(&target.name);
@@ -1601,13 +1630,19 @@ impl<'a> FunctionEmitter<'a> {
                     _ => None,
                 }
             }
-            ir::Callee::Method { receiver, method } => match (method.as_str(), args.as_slice()) {
-                ("toStr", []) => self.emit_to_string_call(receiver),
-                ("equals", [other]) => {
+            ir::Callee::Method { receiver, method } => match method.as_str() {
+                "toStr" if args.is_empty() => self.emit_to_string_call(receiver),
+                "equals" if args.len() == 1 => {
+                    let args = self.emit_operands(args)?;
+                    let other = args.first()?;
                     let receiver = self.emit_operand(receiver)?;
                     Some(format!("java.util.Objects.equals({receiver}, {other})"))
                 }
                 _ => {
+                    let params = self
+                        .method_param_types_for_receiver(receiver, method, args.len())
+                        .unwrap_or_default();
+                    let args = self.emit_operands_for_params(args, &params)?;
                     let receiver = self.emit_operand(receiver)?;
                     Some(format!(
                         "{}.{}({})",
@@ -1617,8 +1652,11 @@ impl<'a> FunctionEmitter<'a> {
                     ))
                 }
             },
-            ir::Callee::Intrinsic(intrinsic) => self.emit_intrinsic(intrinsic, &args),
-            ir::Callee::Named { path } => self.emit_named_runtime_call(path, &args),
+            ir::Callee::Intrinsic(intrinsic) => {
+                let args = self.emit_operands(args)?;
+                self.emit_intrinsic(intrinsic, &args)
+            }
+            ir::Callee::Named { path } => self.emit_named_runtime_call(path, args),
             ir::Callee::Indirect(_) => None,
         }
     }
@@ -1645,26 +1683,45 @@ impl<'a> FunctionEmitter<'a> {
         }
     }
 
-    fn emit_named_runtime_call(&self, path: &[String], args: &[String]) -> Option<String> {
+    fn emit_named_runtime_call(&self, path: &[String], operands: &[ir::Operand]) -> Option<String> {
         match path {
-            [owner] if self.names.is_java_type(owner) => Some(format!(
-                "new {}{}({})",
-                self.names.named_type(owner),
-                self.names.java_constructor_type_args(owner),
-                args.join(", ")
-            )),
-            [owner] if self.is_lume_constructible_type(owner) => Some(format!(
-                "new {}({})",
-                self.names.named_type(owner),
-                args.join(", ")
-            )),
-            [owner, method] if self.names.is_java_type(owner) => Some(format!(
-                "{}.{}({})",
-                self.names.named_type(owner),
-                java_member_name(method),
-                args.join(", ")
-            )),
+            [owner] if self.names.is_java_type(owner) => {
+                let params = self
+                    .constructor_param_types(owner, operands.len())
+                    .unwrap_or_default();
+                let args = self.emit_operands_for_params(operands, &params)?;
+                Some(format!(
+                    "new {}{}({})",
+                    self.names.named_type(owner),
+                    self.names.java_constructor_type_args(owner),
+                    args.join(", ")
+                ))
+            }
+            [owner] if self.is_lume_constructible_type(owner) => {
+                let params = self
+                    .constructor_param_types(owner, operands.len())
+                    .unwrap_or_default();
+                let args = self.emit_operands_for_params(operands, &params)?;
+                Some(format!(
+                    "new {}({})",
+                    self.names.named_type(owner),
+                    args.join(", ")
+                ))
+            }
+            [owner, method] if self.names.is_java_type(owner) => {
+                let params = self
+                    .type_method_param_types(owner, method, operands.len())
+                    .unwrap_or_default();
+                let args = self.emit_operands_for_params(operands, &params)?;
+                Some(format!(
+                    "{}.{}({})",
+                    self.names.named_type(owner),
+                    java_member_name(method),
+                    args.join(", ")
+                ))
+            }
             [owner, method] if owner == "Array" => {
+                let args = self.emit_operands(operands)?;
                 let target = match method.as_str() {
                     "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" | "fill" => {
                         format!("lume.core.LumeArray.{}", java_member_name(method))
@@ -1822,10 +1879,122 @@ impl<'a> FunctionEmitter<'a> {
         ))
     }
 
+    fn emit_anonymous_interface(
+        &self,
+        interfaces: &[ir::Type],
+        methods: &[ir::AnonymousInterfaceMethod],
+    ) -> Option<String> {
+        let target = interfaces.first()?;
+        let ir::Type::Named { name, .. } = target else {
+            return None;
+        };
+        if interfaces.len() != 1 {
+            return None;
+        }
+
+        let mut out = String::new();
+        out.push_str("new ");
+        out.push_str(&self.names.named_type(name));
+        out.push_str("() {\n");
+
+        for method in methods {
+            let function = self.bundle.ir.function(method.function)?;
+            let capture_overrides =
+                self.push_anonymous_interface_capture_fields(&mut out, method, function)?;
+
+            out.push_str("        @Override\n");
+            out.push_str("        public ");
+            push_function_signature_named(&mut out, function, self.names, &method.name);
+            out.push_str(
+                &FunctionEmitter::new(self.bundle, function, self.names)
+                    .with_capture_overrides(capture_overrides)
+                    .emit_body()?,
+            );
+        }
+
+        out.push_str("    }");
+        Some(out)
+    }
+
+    fn push_anonymous_interface_capture_fields(
+        &self,
+        out: &mut String,
+        method: &ir::AnonymousInterfaceMethod,
+        function: &ir::Function,
+    ) -> Option<HashMap<ir::LocalId, String>> {
+        let capture_locals = function
+            .locals
+            .iter()
+            .filter(|local| matches!(local.kind, ir::LocalKind::Capture))
+            .collect::<Vec<_>>();
+        if capture_locals.len() != method.captures.len() {
+            return None;
+        }
+
+        let mut overrides = HashMap::new();
+        for (index, (local, capture)) in capture_locals.iter().zip(&method.captures).enumerate() {
+            let field_name = format!(
+                "__capture_{}_{}_{}",
+                java_member_name(&method.name),
+                local.id.0,
+                index
+            );
+            out.push_str("        private final ");
+            out.push_str(&self.local_value_type(&local.ty));
+            out.push(' ');
+            out.push_str(&field_name);
+            out.push_str(" = ");
+            out.push_str(&self.emit_capture_initializer(capture)?);
+            out.push_str(";\n");
+            overrides.insert(local.id, field_name);
+        }
+        if !capture_locals.is_empty() {
+            out.push('\n');
+        }
+        Some(overrides)
+    }
+
+    fn emit_capture_initializer(&self, capture: &ir::Operand) -> Option<String> {
+        let local = match capture {
+            ir::Operand::Copy(place) | ir::Operand::Move(place) => match place.as_ref() {
+                ir::Place::Local(id) => self.function.locals.get(id.0),
+                _ => None,
+            },
+            _ => None,
+        };
+        if local.is_some_and(|local| local.name == "this") {
+            if let ir::FunctionKind::Method { owner } = self.function.kind {
+                let owner = self.bundle.ir.types.get(owner.0)?;
+                return Some(format!("{}.this", java_type_name(&owner.name)));
+            }
+        }
+        self.emit_operand(capture)
+    }
+
     fn emit_operands(&self, operands: &[ir::Operand]) -> Option<Vec<String>> {
         operands
             .iter()
             .map(|operand| self.emit_operand(operand))
+            .collect()
+    }
+
+    fn emit_operands_for_params(
+        &self,
+        operands: &[ir::Operand],
+        params: &[ir::Type],
+    ) -> Option<Vec<String>> {
+        operands
+            .iter()
+            .enumerate()
+            .map(|(index, operand)| {
+                let expr = self.emit_operand(operand)?;
+                Some(match params.get(index) {
+                    Some(target_ty) => {
+                        self.coerce_to_target_type(expr, self.operand_type(operand), target_ty)
+                    }
+                    None => expr,
+                })
+            })
             .collect()
     }
 
@@ -1878,6 +2047,52 @@ impl<'a> FunctionEmitter<'a> {
         }
     }
 
+    fn constructor_param_types(&self, type_name: &str, arg_len: usize) -> Option<Vec<ir::Type>> {
+        let ty = self.type_def(type_name)?;
+        self.functions_named(ty, "new")
+            .find(|function| function.params.len() == arg_len)
+            .map(function_param_types)
+    }
+
+    fn method_param_types_for_receiver(
+        &self,
+        receiver: &ir::Operand,
+        method: &str,
+        arg_len: usize,
+    ) -> Option<Vec<ir::Type>> {
+        let ir::Type::Named { name, .. } = self.operand_type(receiver)? else {
+            return None;
+        };
+        self.type_method_param_types(&name, method, arg_len)
+    }
+
+    fn type_method_param_types(
+        &self,
+        type_name: &str,
+        method: &str,
+        arg_len: usize,
+    ) -> Option<Vec<ir::Type>> {
+        let ty = self.type_def(type_name)?;
+        self.functions_named(ty, method)
+            .find(|function| function.params.len() == arg_len)
+            .map(function_param_types)
+    }
+
+    fn type_def(&self, name: &str) -> Option<&ir::TypeDef> {
+        self.bundle.ir.types.iter().find(|ty| ty.name == name)
+    }
+
+    fn functions_named<'b>(
+        &'b self,
+        ty: &'b ir::TypeDef,
+        name: &'b str,
+    ) -> impl Iterator<Item = &'b ir::Function> + 'b {
+        ty.methods.iter().filter_map(move |id| {
+            let function = self.bundle.ir.function(*id)?;
+            (function.name == name).then_some(function)
+        })
+    }
+
     fn rvalue_type(&self, value: &ir::RValue) -> Option<ir::Type> {
         match value {
             ir::RValue::Use(operand) => self.operand_type(operand),
@@ -1890,6 +2105,9 @@ impl<'a> FunctionEmitter<'a> {
                 _ => None,
             },
             ir::RValue::Construct { ty, .. } => Some(ty.clone()),
+            ir::RValue::AnonymousInterface { interfaces, .. } if interfaces.len() == 1 => {
+                interfaces.first().cloned()
+            }
             ir::RValue::Cast { ty, .. } => Some(ty.clone()),
             ir::RValue::TypeOf { .. } => Some(ir::Type::named("Type")),
             _ => None,
@@ -1951,6 +2169,9 @@ impl<'a> FunctionEmitter<'a> {
     }
 
     fn local_reference(&self, local: &ir::Local) -> String {
+        if let Some(name) = self.capture_overrides.get(&local.id) {
+            return name.clone();
+        }
         if matches!(local.kind, ir::LocalKind::Capture) && local.name == "this" {
             "this".to_string()
         } else {
@@ -1960,6 +2181,7 @@ impl<'a> FunctionEmitter<'a> {
 
     fn local_is_declared_elsewhere(&self, local: &ir::Local) -> bool {
         matches!(local.kind, ir::LocalKind::Param)
+            || self.capture_overrides.contains_key(&local.id)
             || (matches!(local.kind, ir::LocalKind::Capture) && local.name == "this")
     }
 }

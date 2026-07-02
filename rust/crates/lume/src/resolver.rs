@@ -125,6 +125,7 @@ pub(crate) struct ModuleLoadOptions {
 pub(crate) struct JavaExternalClass {
     pub(crate) kind: TypeKind,
     pub(crate) type_params: Vec<String>,
+    pub(crate) with_bounds: Vec<TypeRef>,
     pub(crate) constructors: Vec<JavaExternalCallable>,
     pub(crate) methods: Vec<JavaExternalCallable>,
 }
@@ -134,6 +135,7 @@ impl Default for JavaExternalClass {
         Self {
             kind: TypeKind::Class,
             type_params: Vec::new(),
+            with_bounds: Vec::new(),
             constructors: Vec::new(),
             methods: Vec::new(),
         }

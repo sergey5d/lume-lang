@@ -143,11 +143,144 @@ fn resolve_external_classes(
         );
         classes.insert(symbol.qualified_name.clone(), descriptor.class);
     }
+    flatten_inherited_java_methods(&mut classes, &local_type_names);
     Ok(ExternalClassResolution {
         diagnostics,
         type_params,
         classes,
     })
+}
+
+fn flatten_inherited_java_methods(
+    classes: &mut HashMap<String, JavaExternalClass>,
+    local_type_names: &HashMap<String, String>,
+) {
+    let by_local_name = local_type_names
+        .iter()
+        .map(|(qualified, local)| (local.clone(), qualified.clone()))
+        .collect::<HashMap<_, _>>();
+    let snapshot = classes.clone();
+    for class in classes.values_mut() {
+        let mut seen = HashSet::new();
+        let inherited = inherited_java_methods(class, &snapshot, &by_local_name, &mut seen);
+        class.methods.extend(inherited);
+    }
+}
+
+fn inherited_java_methods(
+    class: &JavaExternalClass,
+    classes: &HashMap<String, JavaExternalClass>,
+    by_local_name: &HashMap<String, String>,
+    seen: &mut HashSet<String>,
+) -> Vec<JavaExternalCallable> {
+    let mut methods = Vec::new();
+    for bound in &class.with_bounds {
+        let TypeRef::Named { name, args, .. } = bound else {
+            continue;
+        };
+        let Some(qualified_name) = by_local_name.get(name) else {
+            continue;
+        };
+        if !seen.insert(qualified_name.clone()) {
+            continue;
+        }
+        let Some(bound_class) = classes.get(qualified_name) else {
+            continue;
+        };
+        let subst = bound_class
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        methods.extend(
+            bound_class
+                .methods
+                .iter()
+                .map(|method| substitute_java_callable(method, &subst)),
+        );
+        methods.extend(
+            inherited_java_methods(bound_class, classes, by_local_name, seen)
+                .into_iter()
+                .map(|method| substitute_java_callable(&method, &subst)),
+        );
+    }
+    methods
+}
+
+fn substitute_java_callable(
+    callable: &JavaExternalCallable,
+    subst: &HashMap<String, TypeRef>,
+) -> JavaExternalCallable {
+    JavaExternalCallable {
+        name: callable.name.clone(),
+        type_params: callable.type_params.clone(),
+        params: callable
+            .params
+            .iter()
+            .map(|param| JavaExternalParam {
+                name: param.name.clone(),
+                ty: param
+                    .ty
+                    .as_ref()
+                    .map(|ty| substitute_java_type_ref(ty, subst)),
+                variadic: param.variadic,
+            })
+            .collect(),
+        return_type: callable
+            .return_type
+            .as_ref()
+            .map(|ty| substitute_java_type_ref(ty, subst)),
+    }
+}
+
+fn substitute_java_type_ref(ty: &TypeRef, subst: &HashMap<String, TypeRef>) -> TypeRef {
+    match ty {
+        TypeRef::Named { name, args, span } if args.is_empty() => {
+            subst.get(name).cloned().unwrap_or_else(|| TypeRef::Named {
+                name: name.clone(),
+                args: Vec::new(),
+                span: *span,
+            })
+        }
+        TypeRef::Named { name, args, span } => TypeRef::Named {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| substitute_java_type_ref(arg, subst))
+                .collect(),
+            span: *span,
+        },
+        TypeRef::Tuple { fields, span } => TypeRef::Tuple {
+            fields: fields
+                .iter()
+                .map(|field| crate::ast::TupleTypeField {
+                    ty: substitute_java_type_ref(&field.ty, subst),
+                    span: field.span,
+                })
+                .collect(),
+            span: *span,
+        },
+        TypeRef::Record { fields, span } => TypeRef::Record {
+            fields: fields
+                .iter()
+                .map(|field| crate::ast::RecordTypeField {
+                    name: field.name.clone(),
+                    ty: substitute_java_type_ref(&field.ty, subst),
+                    span: field.span,
+                })
+                .collect(),
+            span: *span,
+        },
+        TypeRef::Function { params, ret, span } => TypeRef::Function {
+            params: params
+                .iter()
+                .map(|param| substitute_java_type_ref(param, subst))
+                .collect(),
+            ret: Box::new(substitute_java_type_ref(ret, subst)),
+            span: *span,
+        },
+    }
 }
 
 fn missing_java_class_diagnostic(symbol: &crate::backend::ExternalSymbol) -> LocatedDiagnostic {
@@ -262,10 +395,12 @@ enum ParsedJavaCallable {
     Method(JavaExternalCallable),
 }
 
+#[derive(Clone)]
 struct JavaTypeContext<'a> {
     local_type_names: &'a HashMap<String, String>,
     type_params: HashSet<String>,
     current_package: &'a str,
+    allow_cross_package_refs: bool,
     span: crate::source::Span,
 }
 
@@ -276,12 +411,30 @@ fn parse_javap_class(
     span: crate::source::Span,
 ) -> JavaExternalClass {
     let type_params = parse_javap_type_params(output, qualified_name);
+    let header = output
+        .lines()
+        .find(|line| line.contains(" class ") || line.contains(" interface "))
+        .unwrap_or_default();
     let kind = if output.contains("extends java.lang.annotation.Annotation") {
         crate::ast::TypeKind::Annotation
+    } else if header.contains(" interface ") {
+        crate::ast::TypeKind::Interface
     } else {
         crate::ast::TypeKind::Class
     };
     let current_package = java_package_name(qualified_name);
+    let ctx = JavaTypeContext {
+        local_type_names,
+        type_params: type_params.iter().cloned().collect(),
+        current_package,
+        allow_cross_package_refs: false,
+        span,
+    };
+    let bounds_ctx = JavaTypeContext {
+        allow_cross_package_refs: true,
+        ..ctx.clone()
+    };
+    let with_bounds = parse_javap_bounds(header, kind, &bounds_ctx);
     let mut constructors = Vec::new();
     let mut methods = Vec::new();
 
@@ -290,6 +443,7 @@ fn parse_javap_class(
             local_type_names,
             type_params: type_params.iter().cloned().collect(),
             current_package,
+            allow_cross_package_refs: false,
             span,
         };
         match parse_javap_callable_line(line, qualified_name, ctx) {
@@ -302,9 +456,46 @@ fn parse_javap_class(
     JavaExternalClass {
         kind,
         type_params,
+        with_bounds,
         constructors,
         methods,
     }
+}
+
+fn parse_javap_bounds(
+    header: &str,
+    kind: crate::ast::TypeKind,
+    ctx: &JavaTypeContext<'_>,
+) -> Vec<TypeRef> {
+    let header = header.trim().strip_suffix('{').unwrap_or(header).trim();
+    let bounds = match kind {
+        crate::ast::TypeKind::Class => header
+            .split_once(" implements ")
+            .map(|(_, rest)| rest)
+            .unwrap_or_default(),
+        crate::ast::TypeKind::Interface => header
+            .split_once(" extends ")
+            .map(|(_, rest)| rest)
+            .unwrap_or_default(),
+        crate::ast::TypeKind::Annotation => "",
+        _ => "",
+    };
+    split_java_signature_list(bounds)
+        .into_iter()
+        .filter_map(|bound| java_type_to_lume_type_ref(bound, ctx))
+        .filter(|bound| {
+            !matches!(bound, TypeRef::Named { name, args, .. } if is_lume_builtin_java_bound(name, args))
+        })
+        .collect()
+}
+
+fn is_lume_builtin_java_bound(name: &str, args: &[TypeRef]) -> bool {
+    args.is_empty()
+        && matches!(
+            name,
+            "Any" | "Bool" | "Int" | "Int32" | "Float" | "Float32" | "Rune" | "Str" | "Unit"
+        )
+        || matches!(name, "List" | "Set" | "Map" | "Option")
 }
 
 fn parse_javap_callable_line(
@@ -576,7 +767,7 @@ fn any_type_ref(ctx: &JavaTypeContext<'_>) -> TypeRef {
 fn java_local_type_name(base: &str, ctx: &JavaTypeContext<'_>) -> Option<String> {
     if base.contains('.') {
         let package = java_package_name(base);
-        if package == ctx.current_package {
+        if ctx.allow_cross_package_refs || package == ctx.current_package {
             return ctx.local_type_names.get(base).cloned();
         }
         return None;

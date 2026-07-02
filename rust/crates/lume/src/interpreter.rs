@@ -1479,6 +1479,26 @@ impl<'a> Interpreter<'a> {
                     })
                     .collect::<Result<Vec<_>, Diagnostic>>()?,
             )))),
+            ir::RValue::AnonymousInterface { methods, .. } => {
+                Ok(Value::Record(Rc::new(RefCell::new(
+                    methods
+                        .iter()
+                        .map(|method| {
+                            Ok((
+                                method.name.clone(),
+                                Value::Closure(Rc::new(ClosureValue {
+                                    function: method.function,
+                                    captures: method
+                                        .captures
+                                        .iter()
+                                        .map(|capture| self.eval_operand_ref(frame, capture, span))
+                                        .collect::<Result<Vec<_>, _>>()?,
+                                })),
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, Diagnostic>>()?,
+                ))))
+            }
             ir::RValue::RecordUpdate { base, updates } => {
                 let base = self.eval_operand_ref(frame, base, span)?;
                 let updates = updates
