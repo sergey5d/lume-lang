@@ -1665,6 +1665,22 @@ public final class GenericBox<T> {
         let runtime_dir = repo_root.join("lume/core/src/main/java/lume/core");
         let mut sources = Vec::new();
         collect_java_source_files(&runtime_dir, &mut sources).expect("collect core java");
+
+        let option_source = repo_root.join("lume/core/src/main/lume/lume/core/Option.lum");
+        let generated_core = temp_path("lume-java-core-option");
+        let result = generate_java_path(&option_source, JavaBackendOptions::new(&generated_core))
+            .expect("generate core option java");
+        assert!(
+            result.diagnostics.is_empty(),
+            "core option java generation produced diagnostics: {:?}",
+            result.diagnostics
+        );
+        sources.extend(
+            result
+                .written_files
+                .into_iter()
+                .filter(|path| path.file_name().is_some_and(|name| name == "Option.java")),
+        );
         sources
     }
 

@@ -35,8 +35,8 @@ public final class LumeField {
         return annotations.stream()
                 .filter(annotation -> annotation.name().equals(name))
                 .findFirst()
-                .map(Option::some)
-                .orElseGet(Option::none);
+                .map(LumeRuntime::optionSome)
+                .orElseGet(LumeRuntime::optionNone);
     }
 
     public Boolean hasAnnotation(String name) {

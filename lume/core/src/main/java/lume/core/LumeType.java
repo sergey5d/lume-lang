@@ -167,13 +167,13 @@ public final class LumeType {
     }
 
     public Option<String> name() {
-        return name == null || name.isEmpty() ? Option.none() : Option.some(name);
+        return name == null || name.isEmpty() ? LumeRuntime.optionNone() : LumeRuntime.optionSome(name);
     }
 
     public Option<String> qualifiedName() {
         return qualifiedName == null || qualifiedName.isEmpty()
-                ? Option.none()
-                : Option.some(qualifiedName);
+                ? LumeRuntime.optionNone()
+                : LumeRuntime.optionSome(qualifiedName);
     }
 
     public LumeTypeKind kind() {
@@ -181,27 +181,27 @@ public final class LumeType {
     }
 
     public Option<LumeType> asClass() {
-        return kind == LumeTypeKind.Class ? Option.some(this) : Option.none();
+        return kind == LumeTypeKind.Class ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
     }
 
     public Option<LumeType> asShape() {
-        return kind == LumeTypeKind.Shape ? Option.some(this) : Option.none();
+        return kind == LumeTypeKind.Shape ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
     }
 
     public Option<LumeType> asEnum() {
-        return kind == LumeTypeKind.Enum ? Option.some(this) : Option.none();
+        return kind == LumeTypeKind.Enum ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
     }
 
     public Option<LumeType> asInterface() {
-        return kind == LumeTypeKind.Interface ? Option.some(this) : Option.none();
+        return kind == LumeTypeKind.Interface ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
     }
 
     public Option<LumeType> asSingle() {
-        return kind == LumeTypeKind.Single ? Option.some(this) : Option.none();
+        return kind == LumeTypeKind.Single ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
     }
 
     public Option<LumeType> asAnnotation() {
-        return kind == LumeTypeKind.Annotation ? Option.some(this) : Option.none();
+        return kind == LumeTypeKind.Annotation ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
     }
 
     public LumeList<LumeField> fields() {
@@ -216,16 +216,16 @@ public final class LumeType {
         return fields.stream()
                 .filter(field -> field.name().equals(name))
                 .findFirst()
-                .map(Option::some)
-                .orElseGet(Option::none);
+                .map(LumeRuntime::optionSome)
+                .orElseGet(LumeRuntime::optionNone);
     }
 
     public Option<LumeMethod> method(String name) {
         return methods.stream()
                 .filter(method -> method.name().equals(name))
                 .findFirst()
-                .map(Option::some)
-                .orElseGet(Option::none);
+                .map(LumeRuntime::optionSome)
+                .orElseGet(LumeRuntime::optionNone);
     }
 
     public LumeList<LumeEnumCase> cases() {
@@ -236,16 +236,16 @@ public final class LumeType {
         return cases.stream()
                 .filter(enumCase -> enumCase.name().equals(name))
                 .findFirst()
-                .map(Option::some)
-                .orElseGet(Option::none);
+                .map(LumeRuntime::optionSome)
+                .orElseGet(LumeRuntime::optionNone);
     }
 
     public Option<LumeAnnotation> annotation(String name) {
         return annotations.stream()
                 .filter(annotation -> annotation.name().equals(name))
                 .findFirst()
-                .map(Option::some)
-                .orElseGet(Option::none);
+                .map(LumeRuntime::optionSome)
+                .orElseGet(LumeRuntime::optionNone);
     }
 
     public Boolean hasAnnotation(String name) {

@@ -36,9 +36,9 @@ public final class LumeList<T> {
 
     public Option<T> get(long index) {
         if (index < 0 || index >= values.size()) {
-            return Option.none();
+            return LumeRuntime.optionNone();
         }
-        return Option.some(values.get((int) index));
+        return LumeRuntime.optionSome(values.get((int) index));
     }
 
     public LumeList<T> add(T value) {

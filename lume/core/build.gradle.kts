@@ -8,8 +8,11 @@ dependencies {
 }
 
 val repoRoot = layout.projectDirectory.dir("../..")
-val lumeSource = layout.projectDirectory.file("src/main/lume/lume/core/http/HttpServer.lum")
+val optionSource = layout.projectDirectory.file("src/main/lume/lume/core/Option.lum")
+val httpSource = layout.projectDirectory.file("src/main/lume/lume/core/http/HttpServer.lum")
+val lumeSources = listOf(optionSource, httpSource)
 val runtimeJava = layout.projectDirectory.dir("src/main/java")
+val javaStubs = layout.projectDirectory.dir("src/main/java-stubs")
 val runtimeClasses = layout.buildDirectory.dir("runtime-classes")
 val generatedLumeJava = layout.buildDirectory.dir("generated/sources/lume/java")
 val lumeCompilerSources = repoRoot.dir("rust/crates/lume/src")
@@ -22,27 +25,30 @@ sourceSets {
 }
 
 val compileRuntimeJava = tasks.register<JavaCompile>("compileRuntimeJava") {
-    description = "Compiles Java runtime substrate so Lume can inspect it during core generation."
-    source = fileTree(runtimeJava)
+    description = "Compiles tiny Java stubs so Lume can inspect external classes during core generation."
+    source = fileTree(javaStubs)
     classpath = configurations.compileClasspath.get()
     destinationDirectory.set(runtimeClasses)
 }
 
-val generateLumeJava = tasks.register<Exec>("generateLumeJava") {
-    description = "Generates Java sources for Lume core libraries."
-    group = "build"
-    dependsOn(compileRuntimeJava)
+val cleanGeneratedLumeJava = tasks.register("cleanGeneratedLumeJava") {
+    outputs.dir(generatedLumeJava)
 
-    inputs.file(lumeSource)
-    inputs.files(fileTree(runtimeJava))
+    doLast {
+        val outputDir = generatedLumeJava.get().asFile
+        outputDir.deleteRecursively()
+        outputDir.mkdirs()
+    }
+}
+
+fun Exec.configureLumeJavaGeneration(source: org.gradle.api.file.RegularFile) {
+    inputs.file(source)
+    inputs.files(fileTree(javaStubs))
     inputs.files(fileTree(lumeCompilerSources))
     outputs.dir(generatedLumeJava)
 
     doFirst {
         val outputDir = generatedLumeJava.get().asFile
-        outputDir.deleteRecursively()
-        outputDir.mkdirs()
-
         val lumeClasspath = files(
             runtimeClasses.get().asFile,
             configurations.compileClasspath.get()
@@ -57,13 +63,35 @@ val generateLumeJava = tasks.register<Exec>("generateLumeJava") {
             "lume",
             "--",
             "java",
-            lumeSource.asFile.absolutePath,
+            source.asFile.absolutePath,
             "--out",
             outputDir.absolutePath,
             "--classpath",
             lumeClasspath
         )
     }
+}
+
+val generateOptionJava = tasks.register<Exec>("generateOptionJava") {
+    description = "Generates Java sources for Lume core Option."
+    group = "build"
+    dependsOn(compileRuntimeJava, cleanGeneratedLumeJava)
+    configureLumeJavaGeneration(optionSource)
+}
+
+val generateHttpJava = tasks.register<Exec>("generateHttpJava") {
+    description = "Generates Java sources for Lume core HTTP."
+    group = "build"
+    dependsOn(generateOptionJava)
+    configureLumeJavaGeneration(httpSource)
+}
+
+val generateLumeJava = tasks.register("generateLumeJava") {
+    description = "Generates Java sources for Lume core libraries."
+    group = "build"
+    dependsOn(generateHttpJava)
+    inputs.files(lumeSources)
+    outputs.dir(generatedLumeJava)
 }
 
 tasks.named<JavaCompile>("compileJava") {

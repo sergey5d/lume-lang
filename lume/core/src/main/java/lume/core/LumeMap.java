@@ -30,9 +30,9 @@ public final class LumeMap<K, V> {
 
     public Option<V> get(K key) {
         if (!values.containsKey(key)) {
-            return Option.none();
+            return LumeRuntime.optionNone();
         }
-        return Option.some(values.get(key));
+        return LumeRuntime.optionSome(values.get(key));
     }
 
     public long size() {

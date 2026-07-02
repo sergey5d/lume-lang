@@ -353,7 +353,7 @@ fn type_descriptor_expr(
 ) -> String {
     let name = java_string_literal(&ty.name);
     let qualified = java_string_literal(&qualified_type_name(ty, package));
-    let fields = type_field_array_expr(&ty.fields, names);
+    let fields = type_field_array_expr(&ty.fields, names, &ty.type_params);
     let methods = type_method_array_expr(bundle, ty, names);
     let annotations = annotation_array_expr(&ty.annotations);
     match ty.kind {
@@ -401,14 +401,18 @@ fn qualified_type_name(ty: &ir::TypeDef, package: &JavaPackage) -> String {
         .unwrap_or_else(|| java_type_name(&ty.name))
 }
 
-fn type_field_array_expr(fields: &[ir::Field], names: &JavaNames) -> String {
+fn type_field_array_expr(
+    fields: &[ir::Field],
+    names: &JavaNames,
+    type_params: &[String],
+) -> String {
     let items = fields
         .iter()
         .map(|field| {
             format!(
                 "lume.core.LumeField.of({}, {}, {})",
                 java_string_literal(&field.name),
-                type_value_expr(&field.ty, names),
+                type_value_expr_with_params(&field.ty, names, type_params),
                 annotation_array_expr(&field.annotations)
             )
         })
@@ -430,6 +434,12 @@ fn type_method_array_expr(bundle: &BackendBundle, ty: &ir::TypeDef, names: &Java
 }
 
 fn method_descriptor_expr(owner: &ir::TypeDef, method: &ir::Function, names: &JavaNames) -> String {
+    let type_params = owner
+        .type_params
+        .iter()
+        .chain(method.type_params.iter())
+        .cloned()
+        .collect::<Vec<_>>();
     let params = method
         .params
         .iter()
@@ -438,7 +448,7 @@ fn method_descriptor_expr(owner: &ir::TypeDef, method: &ir::Function, names: &Ja
             format!(
                 "lume.core.LumeParam.of({}, {})",
                 java_string_literal(&local.name),
-                type_value_expr(&local.ty, names)
+                type_value_expr_with_params(&local.ty, names, &type_params)
             )
         })
         .collect::<Vec<_>>()
@@ -446,7 +456,7 @@ fn method_descriptor_expr(owner: &ir::TypeDef, method: &ir::Function, names: &Ja
     format!(
         "lume.core.LumeMethod.of({}, {}, new lume.core.LumeParam[] {{{}}}, {}, {})",
         java_string_literal(&method.name),
-        type_value_expr(&method.return_ty, names),
+        type_value_expr_with_params(&method.return_ty, names, &type_params),
         params,
         annotation_array_expr(&method.annotations),
         method_invoker_expr(owner, method, names)
@@ -484,7 +494,7 @@ fn enum_case_array_expr(ty: &ir::TypeDef, names: &JavaNames) -> String {
             format!(
                 "lume.core.LumeEnumCase.of({}, {}, {})",
                 java_string_literal(&case.name),
-                type_field_array_expr(&case.fields, names),
+                type_field_array_expr(&case.fields, names, &ty.type_params),
                 annotation_array_expr(&case.annotations)
             )
         })
@@ -556,6 +566,10 @@ fn annotation_value_expr(value: &ir::AnnotationValue) -> String {
 }
 
 fn type_value_expr(ty: &ir::Type, names: &JavaNames) -> String {
+    type_value_expr_with_params(ty, names, &[])
+}
+
+fn type_value_expr_with_params(ty: &ir::Type, names: &JavaNames, type_params: &[String]) -> String {
     match ty {
         ir::Type::Unknown => "lume.core.LumeType.primitive(\"Unknown\")".to_string(),
         ir::Type::Never => "lume.core.LumeType.primitive(\"Never\")".to_string(),
@@ -567,6 +581,12 @@ fn type_value_expr(ty: &ir::Type, names: &JavaNames) -> String {
         ir::Type::Named { name, args }
             if args.is_empty() && java_named_builtin_value(name).is_some() =>
         {
+            format!(
+                "lume.core.LumeType.primitive({})",
+                java_string_literal(name)
+            )
+        }
+        ir::Type::Named { name, args } if args.is_empty() && type_params.contains(name) => {
             format!(
                 "lume.core.LumeType.primitive({})",
                 java_string_literal(name)
@@ -1301,7 +1321,26 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 Some(format!("lume.core.LumeRuntime.iterNext({})", args[0]))
             }
-            ir::Intrinsic::VariantIs(_) | ir::Intrinsic::VariantField(_) => None,
+            ir::Intrinsic::VariantIs(case_name) => {
+                if args.len() != 1 {
+                    return None;
+                }
+                Some(format!(
+                    "lume.core.LumeRuntime.variantIs({}, {})",
+                    args[0],
+                    java_string_literal(case_name)
+                ))
+            }
+            ir::Intrinsic::VariantField(field_name) => {
+                if args.len() != 1 {
+                    return None;
+                }
+                Some(format!(
+                    "lume.core.LumeRuntime.variantField({}, {})",
+                    args[0],
+                    java_string_literal(field_name)
+                ))
+            }
         }
     }
 

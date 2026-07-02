@@ -25,12 +25,12 @@ public final class LumeAnnotation {
     }
 
     public Option<Object> field(String name) {
-        return fields.containsKey(name) ? Option.some(fields.get(name)) : Option.none();
+        return fields.containsKey(name) ? LumeRuntime.optionSome(fields.get(name)) : LumeRuntime.optionNone();
     }
 
     public Option<String> str(String name) {
         Option<Object> value = field(name);
-        return value.isDefined() ? Option.some(String.valueOf(value.orPanic())) : Option.none();
+        return value.isDefined() ? LumeRuntime.optionSome(String.valueOf(value.orPanic())) : LumeRuntime.optionNone();
     }
 
     public Map<String, Object> asJava() {

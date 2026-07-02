@@ -70,9 +70,9 @@ public final class LumeArray<T> {
 
     public Option<T> get(long index) {
         if (index < 0 || index >= values.length) {
-            return Option.none();
+            return LumeRuntime.optionNone();
         }
-        return Option.some(valueAt(index));
+        return LumeRuntime.optionSome(valueAt(index));
     }
 
     public void set(long index, T value) {

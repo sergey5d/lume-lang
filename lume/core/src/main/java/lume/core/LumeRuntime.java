@@ -30,6 +30,14 @@ public final class LumeRuntime {
         return LumeUnit.INSTANCE;
     }
 
+    public static <T> Option<T> optionSome(T value) {
+        return new Option.Some<>(value);
+    }
+
+    public static <T> Option<T> optionNone() {
+        return new Option.None<>();
+    }
+
     public static Boolean extractSuccessIsSet(Object value) {
         if (value instanceof Option<?> option) {
             return option.isDefined();
@@ -41,6 +49,26 @@ public final class LumeRuntime {
             return either.isRight();
         }
         return false;
+    }
+
+    public static Boolean variantIs(Object value, String caseName) {
+        return value != null && value.getClass().getSimpleName().equals(caseName);
+    }
+
+    public static Object variantField(Object value, String fieldName) {
+        if (value == null) {
+            throw new LumePanic("cannot read enum field '" + fieldName + "' from null");
+        }
+
+        try {
+            var method = value.getClass().getMethod(fieldName);
+            return method.invoke(value);
+        } catch (NoSuchMethodException err) {
+            // Pattern matching may probe fields before the case guard proves that this case matched.
+            return null;
+        } catch (IllegalAccessException | InvocationTargetException err) {
+            throw new LumePanic("failed to read enum field '" + fieldName + "': " + err.getMessage());
+        }
     }
 
     public static LumeType runtimeTypeOf(Object value) {
