@@ -4,28 +4,27 @@ This sample shows the intended Java backend shape: application code is Lume,
 route discovery is Lume, and Java is only the low-level HTTP substrate.
 
 - Lume service code lives in `src/main/lume`.
-- Core Lume libraries live under `../../lume/core`.
-- `lume-core.jar` contains the Lume runtime, metadata descriptors, and the
-  Lume-written `HttpServer`.
-- The local `lume.java-application` Gradle plugin generates Java from Lume
-  before compiling.
+- The local `lume.java-application` Gradle plugin runs `lume gen` before Java
+  compilation.
+- The plugin defaults to an installed `lume` executable. This repo sample points
+  at `../../rust/target/debug/lume` unless `LUME` is set.
+- `lume-core.jar` is an ordinary Java dependency for compilation/runtime. This
+  sample builds the repo-local core jar before generating the app.
 - `gradle build` produces a runnable jar.
 
 ## Build Flow
 
 The important tasks are:
 
-- `buildLumeCore`: builds `../../lume/core/build/libs/lume-core.jar`.
-- `buildLumeCompiler`: builds the repo-local Lume compiler, unless `LUME`
-  points to an installed compiler.
+- `buildLocalLumeCore`: builds `../../lume/core/build/libs/lume-core.jar`.
 - `generateLumeJava`: runs the Lume compiler as `lume gen ...`;
   `lume-core.jar` is available automatically to generation.
 - `compileJava`: compiles the generated application Java.
 - `jar`: packages a runnable fat jar with Java dependencies.
 
-Those tasks are provided by the local Gradle plugin included from
-`../../gradle/lume-gradle-plugin`, so the example build file only declares the
-Lume source file and generated Java main class.
+The reusable plugin does not know about this repository, Cargo, or
+`lume-core.jar` locations. The repo-local bootstrap is in this example build
+file only.
 
 ## Commands
 
