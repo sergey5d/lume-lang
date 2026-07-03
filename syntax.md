@@ -35,10 +35,52 @@ Common stdlib/prelude types:
 - `Iterable[T]`
 - `Iterator[T]`
 - `Type[T]`
+- `Type[_]`
 - `TypeKind`
 - `Ordering[T]`
 - `Printer`
 - `OS`
+
+## Wildcard Capture
+
+`_` inside a type argument is an existential capture, not a normal concrete type.
+It means "some definite type, but this code does not know which one."
+
+```txt
+a List[_] = List(1, 2, 3)
+b Map[_, Str] = intStrMap()
+c Map[_, _] = strIntMap()
+```
+
+When a value is viewed through `_`, the unknown type is captured at that source:
+
+```txt
+first Any = a[0]      # allowed; Any accepts every captured value
+captured = a[0]       # captured has the existential element type from a
+sameCapture = captured
+```
+
+The captured type is only equal to itself when it comes from the same unknown
+source:
+
+```txt
+def same[T](left T, right T) Unit {}
+
+same(a[0], a[1])      # allowed; both values come from a
+same(a[0], b[0])      # rejected if b is a different List[_] source
+```
+
+Capture is read-safe but not write-open. Methods that do not mention the
+captured type can be called, while methods that consume it cannot accept an
+arbitrary concrete value:
+
+```txt
+a.size()              # allowed
+a.add(7)              # rejected; add expects the captured element type, not Int
+
+value Any = a[0]      # allowed
+value SomeType = a[0] # rejected; captured element type is not SomeType
+```
 
 Universal value operations:
 
@@ -154,8 +196,17 @@ user User = User { name: "Ada", age: 42 }
 actual Type[User] = user.runtimeType
 ```
 
-`Type[A]` means "metadata for values of type `A`". When the represented type is
-not statically known, use `Type[Any]`.
+Runtime metadata types are generic over the represented type:
+
+```txt
+Type[A]   # exact typed metadata for A
+Type[_]   # metadata for some captured unknown represented type
+Type[Any] # exact typed metadata specifically for Any
+```
+
+`typeOf[T]` returns `Type[T]`. `value.runtimeType` returns `Type[A]` for a
+concrete statically known value type `A`. If the value is statically `Any` or
+otherwise not known precisely, `runtimeType` returns `Type[_]`.
 
 Common metadata operations:
 
@@ -179,7 +230,7 @@ Rules:
 - `runtimeType` is available as a read-only synthetic field on values
 - `TypeKind` includes `Class`, `Shape`, `Enum`, `Interface`, `Single`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
 - field, method, parameter, and enum-case metadata are runtime values with methods such as `name()`, `fieldType()`, `params()`, and `returnType()`
-- annotation lookup methods exist on the metadata API, but stored annotation payload lookup is not wired yet
+- annotation lookup is typed: use `metadata.hasAnnotation(typeOf[Route])` and `metadata.annotation(typeOf[Route])`
 
 ## Strings
 

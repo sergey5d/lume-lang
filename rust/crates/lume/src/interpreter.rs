@@ -638,6 +638,7 @@ fn rewrite_else_expr_branch_for_runtime(
 
 fn rewrite_type_ref_for_runtime(reference: &mut ast::TypeRef, module: &LoadedModule) {
     match reference {
+        ast::TypeRef::Wildcard { .. } => {}
         ast::TypeRef::Named { name, args, .. } => {
             if let Some(path) = rewritten_imported_symbol_path(module, name) {
                 if path.len() == 1 {
@@ -1912,11 +1913,11 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         match method {
             "annotation" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
+                self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(self.option_none())
             }
             "hasAnnotation" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
+                self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(Value::Bool(false))
             }
             "name" => {
@@ -1991,11 +1992,11 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         match method {
             "annotation" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
+                self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(self.option_none())
             }
             "hasAnnotation" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
+                self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(Value::Bool(false))
             }
             "name" => {
@@ -2028,11 +2029,11 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         match method {
             "annotation" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
+                self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(self.option_none())
             }
             "hasAnnotation" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
+                self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(Value::Bool(false))
             }
             "name" => {
@@ -2113,11 +2114,11 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         match method {
             "annotation" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
+                self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(self.option_none())
             }
             "hasAnnotation" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
+                self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(Value::Bool(false))
             }
             "name" => {

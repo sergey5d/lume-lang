@@ -1,0 +1,9 @@
+# FAIL_REGEX:
+# .*argument has type 'Int' but parameter expects '_'.*
+
+def intStrMap() Map[Int, Str] = Map()
+
+def main() Unit {
+    keyErased Map[_, Str] = intStrMap()
+    keyErased.put(1, "one")
+}

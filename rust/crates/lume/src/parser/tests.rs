@@ -2336,6 +2336,30 @@ def wrap(input Map[Str, [Int]]) [[[(Str, Int)]]] {
 }
 
 #[test]
+fn parses_wildcard_type_argument() {
+    let result = parse(
+        r#"
+def inspect(value Type[_]) Unit {}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match function.params[0].ty.as_ref().expect("parameter type") {
+        TypeRef::Named { name, args, .. } => {
+            assert_eq!(name, "Type");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(&args[0], TypeRef::Wildcard { .. }));
+        }
+        other => panic!("expected Type[_], got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_parenthesized_function_type_refs() {
     let result = parse(
         r#"

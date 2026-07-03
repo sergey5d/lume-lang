@@ -33,6 +33,14 @@ public final class LumeEnumCase {
         return LumeList.from(fields);
     }
 
+    public Option<LumeAnnotation> annotation(LumeType annotationType) {
+        return annotation(annotationName(annotationType));
+    }
+
+    public Boolean hasAnnotation(LumeType annotationType) {
+        return annotation(annotationType).isDefined();
+    }
+
     public Option<LumeAnnotation> annotation(String name) {
         return annotations.stream()
                 .filter(annotation -> annotation.name().equals(name))
@@ -43,6 +51,10 @@ public final class LumeEnumCase {
 
     public Boolean hasAnnotation(String name) {
         return annotation(name).isDefined();
+    }
+
+    private static String annotationName(LumeType annotationType) {
+        return annotationType.name().orPanic();
     }
 
     public LumeType runtimeType() {

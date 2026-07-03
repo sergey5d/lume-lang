@@ -237,6 +237,7 @@ fn substitute_java_callable(
 
 fn substitute_java_type_ref(ty: &TypeRef, subst: &HashMap<String, TypeRef>) -> TypeRef {
     match ty {
+        TypeRef::Wildcard { span } => TypeRef::Wildcard { span: *span },
         TypeRef::Named { name, args, span } if args.is_empty() => {
             subst.get(name).cloned().unwrap_or_else(|| TypeRef::Named {
                 name: name.clone(),

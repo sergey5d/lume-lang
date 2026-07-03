@@ -186,6 +186,9 @@ pub struct Param {
 /// A source-level type reference.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeRef {
+    Wildcard {
+        span: Span,
+    },
     Named {
         name: String,
         args: Vec<TypeRef>,
@@ -224,7 +227,8 @@ pub struct RecordTypeField {
 impl TypeRef {
     pub fn span(&self) -> Span {
         match self {
-            TypeRef::Named { span, .. }
+            TypeRef::Wildcard { span }
+            | TypeRef::Named { span, .. }
             | TypeRef::Tuple { span, .. }
             | TypeRef::Record { span, .. }
             | TypeRef::Function { span, .. } => *span,

@@ -2375,6 +2375,7 @@ impl<'a> Resolver<'a> {
             return;
         };
         match reference {
+            TypeRef::Wildcard { .. } => {}
             TypeRef::Function { params, ret, .. } => {
                 for param in params {
                     self.resolve_type_ref(Some(param));
@@ -2463,6 +2464,9 @@ impl<'a> Resolver<'a> {
 
     fn resolve_type_pattern_ref(&mut self, reference: &TypeRef) {
         match reference {
+            TypeRef::Wildcard { .. } => {
+                self.resolve_type_ref(Some(reference));
+            }
             TypeRef::Function { .. } | TypeRef::Tuple { .. } | TypeRef::Record { .. } => {
                 self.resolve_type_ref(Some(reference));
             }

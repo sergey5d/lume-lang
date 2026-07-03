@@ -1,0 +1,30 @@
+# EXPECT:
+# 3
+# 0
+# 0
+
+def acceptUnknownList(values List[_]) Unit {
+    println(values.size())
+}
+
+def same[T](left T, right T) Unit {}
+
+def intStrMap() Map[Int, Str] = Map()
+
+def strIntMap() Map[Str, Int] = Map()
+
+def main() Unit {
+    values List[_] = List(1, 2, 3)
+    keyErased Map[_, Str] = intStrMap()
+    fullyErased Map[_, _] = strIntMap()
+
+    first Any = values[0]
+    captured = values[0]
+    sameCapture = captured
+
+    same(values[0], values[1])
+    acceptUnknownList(values)
+
+    println(keyErased.size())
+    println(fullyErased.size())
+}

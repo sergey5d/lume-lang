@@ -104,6 +104,8 @@ fn default_inline_ambient() -> AmbientInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Ty {
     Unknown,
+    Wildcard,
+    Capture(usize),
     Never,
     Named(String, Vec<Ty>),
     Tuple(Vec<Ty>),
@@ -136,8 +138,15 @@ impl Ty {
         Self::Named("Option".to_string(), vec![item])
     }
 
-    fn runtime_type(represented: Ty) -> Self {
+    fn exact_runtime_type(represented: Ty) -> Self {
         Self::Named("Type".to_string(), vec![runtime_type_arg(represented)])
+    }
+
+    fn value_runtime_type(represented: Ty) -> Self {
+        Self::Named(
+            "Type".to_string(),
+            vec![runtime_value_type_arg(represented)],
+        )
     }
 
     fn any() -> Self {
@@ -171,6 +180,8 @@ impl Ty {
     fn describe(&self) -> String {
         match self {
             Ty::Unknown => "<unknown>".to_string(),
+            Ty::Wildcard => "_".to_string(),
+            Ty::Capture(_) => "_".to_string(),
             Ty::Never => "Never".to_string(),
             Ty::Named(name, args) if args.is_empty() => name.clone(),
             Ty::Named(name, args) => format!(
@@ -691,6 +702,7 @@ struct Checker<'a> {
     loop_depth: usize,
     defer_depth: usize,
     lifted_segment_depth: usize,
+    next_capture_id: usize,
     globals: HashMap<String, ValueInfo>,
 }
 
@@ -708,6 +720,7 @@ impl<'a> Checker<'a> {
             loop_depth: 0,
             defer_depth: 0,
             lifted_segment_depth: 0,
+            next_capture_id: 0,
             globals: HashMap::new(),
         }
     }
@@ -772,6 +785,7 @@ impl<'a> Checker<'a> {
                         ),
                     );
                 }
+                let ty = self.capture_wildcards(ty);
                 self.globals.insert(
                     binding.name.clone(),
                     ValueInfo {
@@ -1258,6 +1272,38 @@ impl<'a> Checker<'a> {
 
     fn param_local_type(&self, _param: &Param, ty: Ty) -> Ty {
         ty
+    }
+
+    fn fresh_capture(&mut self) -> Ty {
+        let id = self.next_capture_id;
+        self.next_capture_id += 1;
+        Ty::Capture(id)
+    }
+
+    fn capture_wildcards(&mut self, ty: Ty) -> Ty {
+        match ty {
+            Ty::Wildcard => self.fresh_capture(),
+            Ty::Named(name, args) => Ty::Named(
+                name,
+                args.into_iter()
+                    .map(|arg| self.capture_wildcards(arg))
+                    .collect(),
+            ),
+            Ty::Tuple(items) => Ty::Tuple(
+                items
+                    .into_iter()
+                    .map(|item| self.capture_wildcards(item))
+                    .collect(),
+            ),
+            Ty::Record(fields) => Ty::Record(
+                fields
+                    .into_iter()
+                    .map(|(name, ty)| (name, self.capture_wildcards(ty)))
+                    .collect(),
+            ),
+            Ty::Function(params, ret) => Ty::Function(params, ret),
+            other => other,
+        }
     }
 
     fn check_param_list_rules(&mut self, params: &[Param], is_constructor: bool) {
@@ -3324,7 +3370,7 @@ impl<'a> Checker<'a> {
                 }
                 let receiver_ty = self.check_expr(receiver);
                 if name == "runtimeType" {
-                    return Ty::runtime_type(receiver_ty);
+                    return Ty::value_runtime_type(receiver_ty);
                 }
                 self.member_type(&receiver_ty, name).unwrap_or_else(|| {
                     self.add_error(
@@ -3532,7 +3578,7 @@ impl<'a> Checker<'a> {
             }
             Expr::TypeOf { ty, .. } => {
                 let represented = self.ty_from_type_ref(ty);
-                Ty::runtime_type(represented)
+                Ty::exact_runtime_type(represented)
             }
             Expr::If {
                 condition,
@@ -4501,7 +4547,8 @@ impl<'a> Checker<'a> {
             );
         }
 
-        materialize_type(&substitute_type(ret, &subst))
+        let ret = materialize_type(&substitute_type(ret, &subst));
+        self.capture_wildcards(ret)
     }
 
     fn try_check_constructor_call(
@@ -5008,7 +5055,8 @@ impl<'a> Checker<'a> {
                     ),
                 );
             }
-            return materialize_type(&substitute_type(ret, &subst));
+            let ret = materialize_type(&substitute_type(ret, &subst));
+            return self.capture_wildcards(ret);
         }
 
         let arrangement = arrange_constructor_args(params, args);
@@ -5078,7 +5126,8 @@ impl<'a> Checker<'a> {
             );
         }
 
-        materialize_type(&substitute_type(ret, &subst))
+        let ret = materialize_type(&substitute_type(ret, &subst));
+        self.capture_wildcards(ret)
     }
 
     fn check_enum_case_constructor_signature(
@@ -6721,6 +6770,7 @@ impl<'a> Checker<'a> {
 
     fn ty_from_type_ref(&self, reference: &TypeRef) -> Ty {
         match reference {
+            TypeRef::Wildcard { .. } => Ty::Wildcard,
             TypeRef::Named { name, args, .. } => self.resolve_named_type(
                 name,
                 args.iter().map(|arg| self.ty_from_type_ref(arg)).collect(),
@@ -6763,6 +6813,7 @@ impl<'a> Checker<'a> {
         if name == "_" {
             return;
         }
+        let ty = self.capture_wildcards(ty);
         if self.scopes.is_empty() {
             self.push_scope();
         }
@@ -7207,6 +7258,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
 
 fn convert_type_ref(reference: &TypeRef, type_params: &HashSet<String>) -> Ty {
     match reference {
+        TypeRef::Wildcard { .. } => Ty::Wildcard,
         TypeRef::Named { name, args, .. } => {
             if type_params.contains(name) {
                 Ty::TypeParam(name.clone())
@@ -7583,6 +7635,8 @@ fn expr_path_for_known_value(expr: &Expr) -> Option<Vec<String>> {
 
 fn infer_type_subst(expected: &Ty, actual: &Ty, subst: &mut HashMap<String, Ty>) {
     match expected {
+        Ty::Wildcard => {}
+        Ty::Capture(_) => {}
         Ty::TypeParam(name) => {
             let actual = materialize_type(actual);
             subst
@@ -7637,6 +7691,8 @@ fn infer_type_subst(expected: &Ty, actual: &Ty, subst: &mut HashMap<String, Ty>)
 
 fn substitute_type(ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
     match ty {
+        Ty::Wildcard => Ty::Wildcard,
+        Ty::Capture(id) => Ty::Capture(*id),
         Ty::TypeParam(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
         Ty::Never => Ty::Never,
         Ty::Named(name, args) => Ty::Named(
@@ -7668,13 +7724,25 @@ fn substitute_type(ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
 
 fn runtime_type_arg(ty: Ty) -> Ty {
     match ty {
-        Ty::Unknown | Ty::Never => Ty::any(),
+        Ty::Unknown | Ty::Never => Ty::Wildcard,
+        Ty::Capture(_) => Ty::Wildcard,
+        other => other,
+    }
+}
+
+fn runtime_value_type_arg(ty: Ty) -> Ty {
+    match ty {
+        Ty::Unknown | Ty::Never => Ty::Wildcard,
+        Ty::Capture(_) => Ty::Wildcard,
+        ty if ty.is_any() => Ty::Wildcard,
         other => other,
     }
 }
 
 fn type_contains_type_param(ty: &Ty) -> bool {
     match ty {
+        Ty::Wildcard => false,
+        Ty::Capture(_) => false,
         Ty::TypeParam(_) => true,
         Ty::Named(_, args) | Ty::Tuple(args) => args.iter().any(type_contains_type_param),
         Ty::Record(fields) => fields.iter().any(|(_, ty)| type_contains_type_param(ty)),
@@ -7687,6 +7755,8 @@ fn type_contains_type_param(ty: &Ty) -> bool {
 
 fn materialize_type(ty: &Ty) -> Ty {
     match ty {
+        Ty::Wildcard => Ty::Wildcard,
+        Ty::Capture(id) => Ty::Capture(*id),
         Ty::TypeParam(_) => Ty::Unknown,
         Ty::Never => Ty::Never,
         Ty::Named(name, args) => {
@@ -7718,6 +7788,9 @@ fn literal_fits_expected_type(expr: &Expr, expected: &Ty) -> bool {
 }
 
 fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
+    if matches!(expected, Ty::Wildcard) {
+        return true;
+    }
     if matches!(actual, Ty::Unknown) || matches!(expected, Ty::Unknown) {
         return true;
     }
@@ -7732,14 +7805,13 @@ fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
     }
     match (actual, expected) {
         (Ty::Never, Ty::Never) => true,
+        (Ty::Wildcard, Ty::Wildcard) => true,
+        (Ty::Capture(left), Ty::Capture(right)) => left == right,
         (Ty::TypeParam(left), Ty::TypeParam(right)) => left == right,
         (Ty::Named(left, left_args), Ty::Named(right, right_args)) => {
             left == right
                 && left_args.len() == right_args.len()
-                && left_args
-                    .iter()
-                    .zip(right_args.iter())
-                    .all(|(left, right)| is_assignable(left, right))
+                && type_args_assignable(left, left_args, right_args)
         }
         (Ty::Tuple(left), Ty::Tuple(right)) => {
             left.len() == right.len()
@@ -7763,6 +7835,33 @@ fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
         }
         _ => false,
     }
+}
+
+fn type_args_assignable(type_name: &str, actual_args: &[Ty], expected_args: &[Ty]) -> bool {
+    if is_reflection_metadata_type(type_name) {
+        return actual_args
+            .iter()
+            .zip(expected_args.iter())
+            .all(|(actual, expected)| matches!(expected, Ty::Wildcard) || actual == expected);
+    }
+
+    actual_args
+        .iter()
+        .zip(expected_args.iter())
+        .all(|(actual, expected)| is_assignable(actual, expected))
+}
+
+fn is_reflection_metadata_type(name: &str) -> bool {
+    matches!(
+        name,
+        "Type"
+            | "ClassType"
+            | "ShapeType"
+            | "EnumType"
+            | "InterfaceType"
+            | "SingleType"
+            | "AnnotationType"
+    )
 }
 
 fn join_types(left: &Ty, right: &Ty) -> Ty {
@@ -10093,15 +10192,216 @@ def main() Unit {
     user User = User("Ada")
     declared Type[User] = typeOf[User]
     actual Type[User] = user.runtimeType
+    unknown Type[_] = declared
+    anyMetadata Type[Any] = typeOf[Any]
     classType ClassType[User] = declared.asClass().orPanic()
+    unknownClass ClassType[_] = classType
     enumType EnumType[Status] = typeOf[Status].asEnum().orPanic()
-    fieldType Type[Any] = classType.fields().get(0).orPanic().fieldType()
-    OS.println(actual.name().orPanic(), enumType.name().orPanic(), fieldType.name().orPanic())
+    fieldType Type[_] = classType.fields().get(0).orPanic().fieldType()
+    OS.println(actual.name().orPanic(), unknown.name().orPanic(), anyMetadata.kind(), unknownClass.name().orPanic(), enumType.name().orPanic(), fieldType.name().orPanic())
 }
 "#,
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_existential_type_erasure_and_capture_reads() {
+        let program = parse_inline(
+            r#"
+def speak(values List[_]) Unit {
+    OS.println(values.size())
+}
+
+def intStrMap() Map[Int, Str] = Map()
+def strIntMap() Map[Str, Int] = Map()
+
+def main() Unit {
+    a List[_] = List(1, 2, 3)
+    b Map[_, Str] = intStrMap()
+    c Map[_, _] = strIntMap()
+
+    first Any = a[0]
+    captured = a[0]
+    sameCapture = captured
+
+    speak(a)
+    OS.println(a.size(), b.size(), c.size(), first, sameCapture)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_writes_through_existential_list_capture() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    values List[_] = List(1, 2, 3)
+    values.add(7)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_argument_type"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_writes_through_existential_map_captures() {
+        let program = parse_inline(
+            r#"
+def intStrMap() Map[Int, Str] = Map()
+def strIntMap() Map[Str, Int] = Map()
+
+def main() Unit {
+    keyErased Map[_, Str] = intStrMap()
+    valueErased Map[Str, _] = strIntMap()
+
+    keyErased.put(1, "one")
+    valueErased.put("one", 1)
+}
+"#,
+        );
+        let result = check_program(&program);
+        let count = result
+            .diagnostics
+            .iter()
+            .filter(|diag| diag.code == "invalid_argument_type")
+            .count();
+        assert!(count >= 2, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_assigning_existential_capture_to_concrete_type() {
+        let program = parse_inline(
+            r#"
+class SomeType {
+    value Int
+}
+
+def main() Unit {
+    values List[_] = List(1, 2, 3)
+    concrete SomeType = values[0]
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_binding_type"
+                    && diag
+                        .message
+                        .contains("binding 'concrete' of type 'SomeType'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn keeps_existential_captures_equal_only_within_same_source() {
+        let accepted = parse_inline(
+            r#"
+def same[T](left T, right T) Unit {}
+
+def main() Unit {
+    values List[_] = List(1, 2, 3)
+    same(values[0], values[1])
+}
+"#,
+        );
+        let accepted_result = check_program(&accepted);
+        assert!(
+            accepted_result.diagnostics.is_empty(),
+            "{:#?}",
+            accepted_result.diagnostics
+        );
+
+        let rejected = parse_inline(
+            r#"
+def same[T](left T, right T) Unit {}
+
+def main() Unit {
+    left List[_] = List(1)
+    right List[_] = List(2)
+    same(left[0], right[0])
+}
+"#,
+        );
+        let rejected_result = check_program(&rejected);
+        assert!(
+            rejected_result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_argument_type"),
+            "{:#?}",
+            rejected_result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_exact_any_reflection_metadata_for_non_any_type() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+def main() Unit {
+    metadata Type[Any] = typeOf[User]
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_binding_type"
+                    && diag
+                        .message
+                        .contains("cannot assign value of type 'Type[User]'")
+                    && diag
+                        .message
+                        .contains("binding 'metadata' of type 'Type[Any]'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn treats_runtime_type_of_any_as_unknown_metadata() {
+        let program = parse_inline(
+            r#"
+def inspect(value Any) Unit {
+    metadata Type[_] = value.runtimeType
+    exactAny Type[Any] = value.runtimeType
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_binding_type"
+                    && diag
+                        .message
+                        .contains("cannot assign value of type 'Type[_]'")
+                    && diag
+                        .message
+                        .contains("binding 'exactAny' of type 'Type[Any]'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

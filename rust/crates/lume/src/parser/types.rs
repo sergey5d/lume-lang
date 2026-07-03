@@ -189,6 +189,11 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::LParen) {
             return self.parse_parenthesized_or_function_type_ref();
         }
+        if self.is_placeholder_identifier() {
+            let span = self.current_span();
+            self.advance();
+            return Some(TypeRef::Wildcard { span });
+        }
 
         let (name, start) = self.expect_identifier("expected type name")?;
         let mut args = Vec::new();

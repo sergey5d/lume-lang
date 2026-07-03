@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*cannot assign value of type '_' to binding 'concrete' of type 'SomeType'.*
+
+class SomeType {
+    value Int
+}
+
+def main() Unit {
+    values List[_] = List(1, 2, 3)
+    concrete SomeType = values[0]
+}
