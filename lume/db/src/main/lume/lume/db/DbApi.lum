@@ -1,0 +1,67 @@
+module lume/db
+
+use lume/db/{DbError}
+
+interface Row {
+    def columns() [Str]
+    def has(column Str) Bool
+    def value(column Str) Result[Any, DbError]
+    def nullableValue(column Str) Result[Option[Any], DbError]
+    def str(column Str) Result[Str, DbError]
+    def strOpt(column Str) Result[Option[Str], DbError]
+    def int(column Str) Result[Int, DbError]
+    def int64(column Str) Result[Int, DbError]
+    def int32(column Str) Result[Int32, DbError]
+    def intOpt(column Str) Result[Option[Int], DbError]
+    def float(column Str) Result[Float, DbError]
+    def float64(column Str) Result[Float, DbError]
+    def float32(column Str) Result[Float32, DbError]
+    def floatOpt(column Str) Result[Option[Float], DbError]
+    def bool(column Str) Result[Bool, DbError]
+    def boolOpt(column Str) Result[Option[Bool], DbError]
+}
+
+interface Query {
+    def bind(values [Any] vararg) Query
+    def rows() Result[[Row], DbError]
+    def all() Result[[Row], DbError]
+    def map[T](mapper (Row) -> Result[T, DbError]) Result[[T], DbError]
+    def mapValue[T](mapper (Row) -> T) Result[[T], DbError]
+}
+
+interface RowQuery {
+    def bind(values [Any] vararg) RowQuery
+    def row() Result[Option[Row], DbError]
+    def map[T](mapper (Row) -> Result[T, DbError]) Result[Option[T], DbError]
+    def mapValue[T](mapper (Row) -> T) Result[Option[T], DbError]
+}
+
+interface Exec {
+    def bind(values [Any] vararg) BoundExec
+    def run() Result[Int, DbError]
+}
+
+interface BoundExec {
+    def run() Result[Int, DbError]
+}
+
+interface Transaction {
+    def query(sql Str, values [Any] vararg) Query
+    def queryRow(sql Str, values [Any] vararg) RowQuery
+    def exec(sql Str) Exec
+    def exec(sql Str, values [Any] vararg) Result[Int, DbError]
+    def commit() Result[Unit, DbError]
+    def rollback() Result[Unit, DbError]
+    def close() Result[Unit, DbError]
+}
+
+interface Database {
+    def query(sql Str, values [Any] vararg) Query
+    def queryRow(sql Str, values [Any] vararg) RowQuery
+    def exec(sql Str) Exec
+    def exec(sql Str, values [Any] vararg) Result[Int, DbError]
+    def beginTransaction() Result[Transaction, DbError]
+    def close() Result[Unit, DbError]
+    def begin() Result[Transaction, DbError]
+    def transactionally(work (Transaction) -> Result[Unit, DbError]) Result[Unit, DbError]
+}

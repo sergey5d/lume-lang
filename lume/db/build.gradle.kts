@@ -5,6 +5,7 @@ plugins {
 val repoRoot = layout.projectDirectory.dir("../..")
 val coreJar = repoRoot.file("lume/core/build/libs/lume-core.jar")
 val dbSource = layout.projectDirectory.file("src/main/lume/lume/db/Db.lum")
+val dbLumeSources = layout.projectDirectory.dir("src/main/lume")
 val jdbcJava = layout.projectDirectory.dir("src/main/java")
 val apiJava = layout.projectDirectory.dir("src/main/java-api")
 val jdbcClasses = layout.buildDirectory.dir("classes/java/jdbc")
@@ -87,7 +88,7 @@ val generateDbJava = tasks.register<Exec>("generateDbJava") {
     group = "build"
     dependsOn(buildLumeCompiler, compileJdbcJava, cleanGeneratedLumeJava)
 
-    inputs.file(dbSource)
+    inputs.files(fileTree(dbLumeSources))
     inputs.files(fileTree(jdbcJava))
     inputs.files(fileTree(lumeCompilerSources))
     inputs.property("lumeExecutable", lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath)

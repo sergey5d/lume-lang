@@ -153,9 +153,11 @@ fn render_class(
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!(
-        "public class {}{} {{\n",
+        "{}class {}{}{} {{\n",
+        java_type_visibility(ty),
         java_type_name(&ty.name),
-        java_type_params(&ty.type_params)
+        java_type_params(&ty.type_params),
+        java_implements_clause(ty, names)
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, false);
@@ -175,7 +177,8 @@ fn render_shape(
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!(
-        "public record {}{}({}) {{\n",
+        "{}record {}{}({}){} {{\n",
+        java_type_visibility(ty),
         java_type_name(&ty.name),
         java_type_params(&ty.type_params),
         ty.fields
@@ -186,7 +189,8 @@ fn render_shape(
                 java_member_name(&field.name)
             ))
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(", "),
+        java_implements_clause(ty, names)
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, true);
@@ -204,7 +208,11 @@ fn render_single(
     let mut out = String::new();
     let name = java_type_name(&ty.name);
     push_header(&mut out, package);
-    out.push_str(&format!("public final class {name} {{\n"));
+    out.push_str(&format!(
+        "{}final class {name}{} {{\n",
+        java_type_visibility(ty),
+        java_implements_clause(ty, names)
+    ));
     out.push_str(&format!(
         "    public static final {name} INSTANCE = new {name}();\n"
     ));
@@ -226,9 +234,11 @@ fn render_interface(
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!(
-        "public interface {}{} {{\n",
+        "{}interface {}{}{} {{\n",
+        java_type_visibility(ty),
         java_type_name(&ty.name),
-        java_type_params(&ty.type_params)
+        java_type_params(&ty.type_params),
+        java_extends_clause(ty, names)
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, true);
@@ -246,7 +256,8 @@ fn render_annotation(
     let mut out = String::new();
     push_header(&mut out, package);
     out.push_str(&format!(
-        "public @interface {} {{\n",
+        "{}@interface {} {{\n",
+        java_type_visibility(ty),
         java_type_name(&ty.name)
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
@@ -274,7 +285,11 @@ fn render_enum(
     push_header(&mut out, package);
 
     if ty.enum_cases.is_empty() {
-        out.push_str(&format!("public interface {enum_name}{type_params} {{\n"));
+        out.push_str(&format!(
+            "{}interface {enum_name}{type_params}{} {{\n",
+            java_type_visibility(ty),
+            java_extends_clause(ty, names)
+        ));
     } else {
         let permits = ty
             .enum_cases
@@ -283,7 +298,9 @@ fn render_enum(
             .collect::<Vec<_>>()
             .join(", ");
         out.push_str(&format!(
-            "public sealed interface {enum_name}{type_params} permits {permits} {{\n"
+            "{}sealed interface {enum_name}{type_params}{} permits {permits} {{\n",
+            java_type_visibility(ty),
+            java_extends_clause(ty, names)
         ));
     }
 
@@ -319,6 +336,41 @@ fn render_enum(
 
     out.push_str("}\n");
     out
+}
+
+fn java_type_visibility(ty: &ir::TypeDef) -> &'static str {
+    match ty.visibility {
+        ast::Visibility::Hidden => "",
+        ast::Visibility::Default => "public ",
+    }
+}
+
+fn java_implements_clause(ty: &ir::TypeDef, names: &JavaNames) -> String {
+    java_bound_clause(" implements ", ty, names)
+}
+
+fn java_extends_clause(ty: &ir::TypeDef, names: &JavaNames) -> String {
+    java_bound_clause(" extends ", ty, names)
+}
+
+fn java_bound_clause(prefix: &str, ty: &ir::TypeDef, names: &JavaNames) -> String {
+    let bounds = ty
+        .with_bounds
+        .iter()
+        .filter_map(|bound| java_bound_type(bound, names))
+        .collect::<Vec<_>>();
+    if bounds.is_empty() {
+        String::new()
+    } else {
+        format!("{prefix}{}", bounds.join(", "))
+    }
+}
+
+fn java_bound_type(bound: &ir::Type, names: &JavaNames) -> Option<String> {
+    match bound {
+        ir::Type::Named { .. } => Some(names.value_type(bound)),
+        _ => None,
+    }
 }
 
 fn push_header(out: &mut String, package: &JavaPackage) {
@@ -773,7 +825,27 @@ fn push_instance_methods(
         }
         push_function_signature(out, function, names);
         match shell {
-            MethodShell::Abstract => out.push_str(";\n"),
+            MethodShell::Abstract => {
+                out.push_str(";\n");
+                let has_fixed_overload = variadic_fixed_arity(function).is_some_and(|arity| {
+                    ty.methods
+                        .iter()
+                        .filter_map(|id| bundle.ir.function(*id))
+                        .any(|other| {
+                            other.id != function.id
+                                && other.name == function.name
+                                && other.params.len() == arity
+                        })
+                });
+                push_variadic_bridge_method(
+                    out,
+                    function,
+                    names,
+                    "    default ",
+                    &function.name,
+                    has_fixed_overload,
+                );
+            }
             MethodShell::DefaultBody | MethodShell::StubBody => {
                 push_function_body(out, bundle, function, names);
                 let prefix = match shell {

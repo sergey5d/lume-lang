@@ -609,9 +609,21 @@ fn inspect_java_class(
         return Ok(None);
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
+    if !javap_declares_public_type(&stdout, qualified_name) {
+        return Ok(None);
+    }
     Ok(Some(JavaClassDescriptor {
         class: parse_javap_class(&stdout, qualified_name, local_type_names, span),
     }))
+}
+
+fn javap_declares_public_type(output: &str, qualified_name: &str) -> bool {
+    output.lines().any(|line| {
+        let line = line.trim();
+        line.starts_with("public ")
+            && (line.contains(" class ") || line.contains(" interface ") || line.contains(" enum "))
+            && line.contains(qualified_name)
+    })
 }
 
 fn java_classpath(entries: &[PathBuf]) -> Result<Option<std::ffi::OsString>, String> {

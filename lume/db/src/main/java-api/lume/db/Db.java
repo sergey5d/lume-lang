@@ -16,7 +16,7 @@ public final class Db {
 
         @SuppressWarnings("unchecked")
         var ok = (Result.Ok<JdbcDatabase, DbError>) opened;
-        return new Result.Ok<>(new Database(ok.value()));
+        return new Result.Ok<>(new JdbcDatabaseImpl(ok.value()));
     }
 
     public static Result<Database, DbError> connect(String url, String user, String password) {
@@ -29,6 +29,6 @@ public final class Db {
 
         @SuppressWarnings("unchecked")
         var ok = (Result.Ok<JdbcDatabase, DbError>) opened;
-        return new Result.Ok<>(new Database(ok.value()));
+        return new Result.Ok<>(new JdbcDatabaseImpl(ok.value()));
     }
 }
