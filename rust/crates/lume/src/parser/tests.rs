@@ -1961,10 +1961,14 @@ fn parses_supported_lambda_parameter_forms() {
 def main() Unit {
     empty = () -> 0
     bare = x -> x
+    bareIgnored = _ -> 1
     one = (x) -> x
     pair = (x, y) -> x + y
     typed = (x Int) -> x + 1
     typedPair = (x Int, y Int) -> x + y
+    ignored = (_) -> 1
+    ignoredPair = (x, _) -> x
+    typedIgnored = (_ Int, value Int) -> value
 }
 "#,
     );
@@ -2459,6 +2463,27 @@ fn rejects_mixed_typed_and_untyped_lambda_params() {
         r#"
 def main() Unit {
     value = (left Int, right) -> left + right
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_lambda_params"
+                && diag
+                    .message
+                    .contains("lambda parameters must be either all typed or all untyped")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_mixed_typed_and_untyped_ignored_lambda_params() {
+    let result = parse(
+        r#"
+def main() Unit {
+    value = (left Int, _) -> left
 }
 "#,
     );

@@ -13,6 +13,12 @@
 # inlinePair 23
 # inlineTyped 24
 # inlineTypedPair 25
+# ignoredOne 1
+# ignoredBare 1
+# ignoredLeft 20
+# ignoredRight 4
+# ignoredTyped 5
+# ignoredBoth 1
 # inlineMapBare 11
 # inlineMapParen 22
 # inlineMapTyped 33
@@ -81,6 +87,12 @@ def main() Unit {
     println("inlinePair " + runner.two((x, y) -> x + y, 11, 12))
     println("inlineTyped " + runner.one((x Int) -> x + 4, 20))
     println("inlineTypedPair " + runner.two((x Int, y Int) -> x + y, 12, 13))
+    println("ignoredOne " + runner.one((_) -> 1, 20))
+    println("ignoredBare " + runner.one(_ -> 1, 20))
+    println("ignoredLeft " + runner.two((x, _) -> x, 20, 30))
+    println("ignoredRight " + runner.two((_, value) -> value + 1, 20, 3))
+    println("ignoredTyped " + runner.two((_ Int, value Int) -> value + 2, 20, 3))
+    println("ignoredBoth " + runner.two((_, _) -> 1, 20, 3))
 
     inlineMapBare = values.map(x -> x + 10)
     inlineMapParen = values.map((x) -> x + 20)

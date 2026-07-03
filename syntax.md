@@ -985,10 +985,14 @@ Accepted lambda parameter forms are deliberately small:
 ```txt
 () -> expr
 x -> expr
+_ -> expr
 (x) -> expr
 (x, y) -> expr
 (x Int) -> expr
 (x Int, y Int) -> expr
+(_) -> expr
+(x, _) -> expr
+(_ Int, value Int) -> expr
 ```
 
 Typed single-parameter lambdas must use parentheses, so write
@@ -1062,6 +1066,9 @@ source.combine((left, right) -> {
 Rules:
 
 - `_` inside an explicit lambda parameter list means "ignore this parameter slot"
+- `_` is not a readable value, so `(_, value) -> _ + value` is invalid
+- `_ -> expr` is valid as a one-parameter lambda whose parameter is ignored
+- placeholder-expression lambdas such as `_ + 1` and `items.map(_ + 1)` are not supported
 - tuple, class, and anonymous-shape values are destructured inside the lambda body with normal `let`
 - `let` destructuring is not allowed in lambda parameter lists
 

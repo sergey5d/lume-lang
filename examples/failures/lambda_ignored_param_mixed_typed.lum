@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*lambda parameters must be either all typed or all untyped.*
+
+def main() Unit {
+    mapper = (left Int, _) -> left
+}

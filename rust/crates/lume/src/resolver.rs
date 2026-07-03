@@ -2286,6 +2286,9 @@ impl<'a> Resolver<'a> {
             }
             return;
         }
+        if param.name == "_" {
+            return;
+        }
         self.define_value(
             param.name.as_str(),
             param.span,

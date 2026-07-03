@@ -3323,7 +3323,7 @@ impl<'a> Checker<'a> {
             Expr::Placeholder { span } => {
                 self.add_error(
                     "invalid_placeholder_expr",
-                    "'_' is not a valid expression here; use an explicit lambda like 'x -> ...'",
+                    "'_' is not a value; it only marks an ignored pattern or explicit lambda parameter slot",
                     *span,
                 );
                 let _ = expected;
@@ -9669,7 +9669,52 @@ def main() Unit {
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diag| {
-                diag.code == "invalid_placeholder_expr" && diag.message.contains("explicit lambda")
+                diag.code == "invalid_placeholder_expr"
+                    && diag.message.contains("'_' is not a value")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_ignored_lambda_parameter_slots() {
+        let program = parse_inline(
+            r#"
+def consumeOne(f (Int) -> Int) Int = f(10)
+
+def consumeTwo(f (Int, Int) -> Int) Int = f(20, 3)
+
+def main() Unit {
+    one = consumeOne((_) -> 1)
+    bare = consumeOne(_ -> 1)
+    left = consumeTwo((x, _) -> x)
+    right = consumeTwo((_, value) -> value + 1)
+    typed = consumeTwo((_ Int, value Int) -> value + 2)
+    both = consumeTwo((_, _) -> 1)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_reading_ignored_lambda_parameter_slot() {
+        let program = parse_inline(
+            r#"
+def consumeTwo(f (Int, Int) -> Int) Int = f(20, 3)
+
+def main() Unit {
+    value = consumeTwo((_, item) -> _ + item)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_placeholder_expr"
+                    && diag.message.contains("'_' is not a value")
             }),
             "{:#?}",
             result.diagnostics

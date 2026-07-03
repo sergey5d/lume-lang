@@ -1075,8 +1075,11 @@ impl<'a> FunctionLowerer<'a> {
         let mut nested =
             ir::Function::new(nested_name, ir::FunctionKind::Lambda, ir::Type::Unknown);
         nested.span = Some(span);
-        for param in params {
-            nested.add_param(param.name.clone(), lower_lambda_param_type(param));
+        for (index, param) in params.iter().enumerate() {
+            nested.add_param(
+                lower_lambda_param_name(param, index),
+                lower_lambda_param_type(param),
+            );
         }
         let function_id = self.program.add_function(nested);
         let capture_sources = self.visible_capture_sources(None);
@@ -2911,7 +2914,7 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Placeholder { span } => {
                 self.add_error(
                     "lower_invariant",
-                    "placeholder '_' cannot appear as an expression; use an explicit lambda parameter",
+                    "placeholder '_' cannot appear as an expression; use an explicit lambda parameter slot",
                     *span,
                 );
                 ir::Operand::Const(ir::Constant::Unit)
@@ -4407,6 +4410,14 @@ fn lower_lambda_param_type(param: &core::LambdaParam) -> ir::Type {
                 })
                 .collect(),
         ),
+    }
+}
+
+fn lower_lambda_param_name(param: &core::LambdaParam, index: usize) -> String {
+    if param.name == "_" {
+        format!("$ignored{index}")
+    } else {
+        param.name.clone()
     }
 }
 
