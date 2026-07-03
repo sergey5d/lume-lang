@@ -166,7 +166,83 @@ Main design question:
 - whether this should stay very local and conservative
 - or whether the checker should learn more control-flow-sensitive narrowing over time
 
-### 10. Deferred Cleanup
+### 10. Runtime Type Parameters
+
+Do not rush to add reified generic syntax. Since the language now has `Type[A]`,
+the core model should stay explicit first:
+
+```txt
+def load[A](ty Type[A], id Str) Option[A] {
+    ...
+}
+
+user = load(typeOf[User], "123")
+```
+
+This is clear, teachable, and fits the language direction: fewer alternate
+forms, explicit behavior, and less hidden compiler magic.
+
+Runtime type evidence is useful mostly for library-style code:
+- decoding JSON into `A`
+- loading `A` from a registry
+- reflecting over fields or annotations on `A`
+- constructing default values for `A`
+- mapping database rows into `A`
+
+Most generic functions do not need runtime type metadata:
+
+```txt
+def id[A](value A) A = value
+def first[A](items [A]) Option[A] = items.get(0)
+def map[A, B](items [A], f (A) -> B) [B] = ...
+```
+
+Recommendation:
+- now: require explicit `Type[A]` parameters when runtime type information is needed
+- later: consider `[runtime A]` as sugar over a hidden `Type[A]` parameter
+- never: reify all generic parameters automatically
+
+Possible future sugar:
+
+```txt
+def load[runtime A](id Str) Option[A]
+# or
+def load[reified A](id Str) Option[A]
+```
+
+Lowering could be roughly:
+
+```txt
+def load[A](__typeA Type[A], id Str) Option[A]
+```
+
+Then call sites could become:
+
+```txt
+user = load[User]("123")
+user Option[User] = load("123")
+```
+
+Only add this if explicit calls like `load(typeOf[User], id)`,
+`decode(typeOf[Order], json)`, and `schema(typeOf[Route])` become noisy in real
+examples.
+
+Naming is unsettled:
+- `runtime A` is plain and describes the behavior directly
+- `reified A` is compiler-jargony, but that weirdness may be useful because it marks this as a specific type-system feature rather than a general runtime mode
+
+Do not settle the keyword until explicit `Type[A]` examples show whether the
+sugar is needed at all.
+
+Useful diagnostic if someone tries to use erased generic type info directly:
+
+```txt
+generic type 'A' is not available at runtime;
+pass a Type[A] parameter, for example `def bad[A](ty Type[A])`,
+or mark A as reified/runtime if that feature is enabled
+```
+
+### 11. Deferred Cleanup
 
 `defer` is implemented as callable-scoped cleanup.
 
@@ -189,7 +265,7 @@ Open questions:
 - whether runtime errors should also run pending defers
 - whether future async/concurrency features need a stronger cleanup model
 
-### 11. Flow Control Composition
+### 12. Flow Control Composition
 
 Possible future surface:
 
