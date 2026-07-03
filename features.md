@@ -21,6 +21,25 @@ Enums exist, but they still want:
 
 The biggest remaining enum work is more expressive generic type-pattern support.
 
+Possible later enum constant/ordinal support:
+- enum-wide fields could eventually have generated constant values
+- candidate direction:
+
+```txt
+enum MyConstant {
+    someId Int = auto
+
+    case Constant1
+    case Constant2
+}
+```
+
+Open questions:
+- whether `auto` is the right marker, or whether another explicit auto-increment marker would read better
+- whether generated values should instead be exposed through a built-in property like `ordinal`
+- whether explicit overrides should be allowed in the same enum
+- how generated values should interact with non-`Int` enum-wide fields
+
 ### 3. Derived Protocols
 
 Classes should eventually support auto-derived protocols when they stay value-like.
@@ -45,8 +64,31 @@ Likely remaining gaps:
 - clearer `Map` update ergonomics beyond `put`
 - maybe collection partitioning helpers
 - maybe unzip style helpers later
+- whether `Array[T]` should grow `flatMap` and `filter`; if yes, decide whether those return `List[...]`, `Iterable[...]`, fixed-size `Array[...]`, or should stay omitted
 
 These can mostly live in the stdlib, but may still need runtime support in places.
+
+Shape/object construction ergonomics to consider:
+- field spread could replace the dedicated shape update and merge operators `:<` and `:+`
+- possible syntax:
+
+```txt
+updated = User {
+    ...existingUser
+    age: 42
+}
+
+merged = {
+    ...leftShape
+    ...rightShape
+}
+```
+
+Open questions:
+- whether spread should be allowed only inside construction fields or also inside anonymous-shape literals
+- whether duplicate fields should be rejected by default or whether later fields override earlier spread fields
+- whether `User { ...anon }` should construct only when `anon` exactly matches the accepted constructor shape, or whether extra fields may be ignored
+- whether spread should fully replace `:<` and `:+`, or coexist for a transition period
 
 Construction direction:
 - avoid `apply` call magic for collections and similar surfaces
@@ -295,6 +337,22 @@ Open questions:
 - how values produced inside one flow become visible to later composed flows
 - whether `&` should sequence unconditionally, short-circuit, or model dependency composition
 
+### 13. Explicit Tuple Projection
+
+Settled rule:
+- tuple to known shape is allowed when the target shape is known
+- class/shape to tuple is not implicit
+
+Possible later syntax:
+
+```txt
+pair = tuple(instance)
+```
+
+Open question:
+- whether an explicit `tuple(instance)` projection is useful enough to justify reintroducing positional views over named data
+- if added, whether it should expose only visible fields and whether field order should be declaration order
+
 ## TBD
 
 ### Irrefutable and Refutable Binding
@@ -314,7 +372,7 @@ refutable:
   plain `let` accepts this form only when the source expression itself proves the success case, such as `let item <- Some(5)`
 - `value = try source` for propagation from `Option`, `Result`, and `Either`
 
-TODO:
+Open follow-ups:
 - consider direct nested payload destructuring inside `if let`, for example `if let Some((_, initialY, _)) = rows.get(0) { ... }`
 - for now, prefer `if let Some(row) = rows.get(0) { ... }` and destructure `row` on the next line inside the branch
 - keep `if let` chaining limited to `&&` joins; if we ever extend it, do that deliberately rather than broadening it implicitly through general boolean syntax
