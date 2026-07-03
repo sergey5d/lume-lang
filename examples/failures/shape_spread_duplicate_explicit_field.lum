@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*duplicate shape field 'age'.*
+
+def main() Unit {
+    value = { age: 10, age: 42 }
+}

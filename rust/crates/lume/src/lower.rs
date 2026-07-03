@@ -3122,15 +3122,25 @@ impl<'a> FunctionLowerer<'a> {
                             .collect(),
                     );
                 }
-                ir::Type::Record(
-                    fields
-                        .iter()
-                        .map(|field| ir::NamedType {
-                            name: field.name.clone().unwrap_or_default(),
-                            ty: self.infer_expr_type_with_overrides(&field.value, overrides),
-                        })
-                        .collect(),
-                )
+                let mut out = Vec::new();
+                for field in fields {
+                    if let Some(name) = &field.name {
+                        upsert_ir_record_field(
+                            &mut out,
+                            ir::NamedType {
+                                name: name.clone(),
+                                ty: self.infer_expr_type_with_overrides(&field.value, overrides),
+                            },
+                        );
+                    } else if let ir::Type::Record(spread_fields) =
+                        self.infer_expr_type_with_overrides(&field.value, overrides)
+                    {
+                        for spread_field in spread_fields {
+                            upsert_ir_record_field(&mut out, spread_field);
+                        }
+                    }
+                }
+                ir::Type::Record(out)
             }
             Expr::Call {
                 callee,
@@ -3586,6 +3596,22 @@ impl<'a> FunctionLowerer<'a> {
                 if fields.is_empty() && !values.is_empty() {
                     Some(ir::RValue::Tuple(
                         values.iter().map(|value| self.lower_expr(value)).collect(),
+                    ))
+                } else if fields.iter().any(|field| field.name.is_none()) {
+                    Some(ir::RValue::RecordSpread(
+                        fields
+                            .iter()
+                            .map(|field| {
+                                if let Some(name) = &field.name {
+                                    ir::RecordSpreadPart::Field(ir::NamedOperand {
+                                        name: name.clone(),
+                                        value: self.lower_expr(&field.value),
+                                    })
+                                } else {
+                                    ir::RecordSpreadPart::Spread(self.lower_expr(&field.value))
+                                }
+                            })
+                            .collect(),
                     ))
                 } else {
                     Some(ir::RValue::Record(
@@ -4421,6 +4447,17 @@ fn lower_lambda_param_name(param: &core::LambdaParam, index: usize) -> String {
     }
 }
 
+fn upsert_ir_record_field(fields: &mut Vec<ir::NamedType>, field: ir::NamedType) {
+    if let Some(existing) = fields
+        .iter_mut()
+        .find(|existing| existing.name == field.name)
+    {
+        *existing = field;
+    } else {
+        fields.push(field);
+    }
+}
+
 fn join_ir_types(left: ir::Type, right: ir::Type) -> ir::Type {
     match (&left, &right) {
         (ir::Type::Unknown, _) => right,
@@ -5192,7 +5229,7 @@ fn brace_record_constructor_args(args: &[core::CallArg]) -> Option<Vec<core::Cal
         return None;
     };
 
-    if values.is_empty() {
+    if values.is_empty() && fields.iter().all(|field| field.name.is_some()) {
         return Some(fields.clone());
     }
 

@@ -596,6 +596,27 @@ updated = value :< {
 }
 ```
 
+Anonymous-shape spread:
+
+```txt
+copy = { ...value }
+
+updated = {
+    ...value
+    age: 42
+}
+
+extended = {
+    ...value
+    location: "Tampa"
+}
+```
+
+Spread entries copy fields from a class, shape, or anonymous-shape value into a
+new anonymous shape. Later entries win, so an explicit field after a spread
+overwrites that spread field. If the field did not exist, it is added. Writing
+the same explicit field twice in one literal is an error.
+
 ## Construction
 
 Braces are for construction fields:

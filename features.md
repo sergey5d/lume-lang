@@ -69,12 +69,13 @@ Likely remaining gaps:
 These can mostly live in the stdlib, but may still need runtime support in places.
 
 Shape/object construction ergonomics to consider:
-- field spread could replace the dedicated shape update and merge operators `:<` and `:+`
-- possible syntax:
+- field spread exists for anonymous-shape creation and update-like literals
+- open question: field spread could eventually replace the dedicated shape update and merge operators `:<` and `:+`
+- current anonymous-shape spread syntax:
 
 ```txt
-updated = User {
-    ...existingUser
+updated = {
+    ...existingShape
     age: 42
 }
 
@@ -85,8 +86,7 @@ merged = {
 ```
 
 Open questions:
-- whether spread should be allowed only inside construction fields or also inside anonymous-shape literals
-- whether duplicate fields should be rejected by default or whether later fields override earlier spread fields
+- whether spread should be extended to named construction fields, for example `User { ...anon }`
 - whether `User { ...anon }` should construct only when `anon` exactly matches the accepted constructor shape, or whether extra fields may be ignored
 - whether spread should fully replace `:<` and `:+`, or coexist for a transition period
 

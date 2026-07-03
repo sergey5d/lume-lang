@@ -799,6 +799,16 @@ fn parses_shape_literal_forms() {
         other => panic!("expected shape literal, got {other:#?}"),
     }
 
+    match parse_expr_only(r#"{ ...base, age: 42 }"#) {
+        Expr::RecordLiteral { fields, values, .. } => {
+            assert!(values.is_empty());
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, None);
+            assert_eq!(fields[1].name.as_deref(), Some("age"));
+        }
+        other => panic!("expected spread shape literal, got {other:#?}"),
+    }
+
     match parse_expr_only("Person { name: name, age: age }") {
         Expr::Call {
             args,

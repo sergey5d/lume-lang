@@ -135,7 +135,6 @@ Open questions:
 
 - should same-named `single` factories get any privileged access?
 - do we need more explicit syntax for hiding generated construction paths?
-- should anonymous-shape-to-class conversion use `anon as User` later?
 
 ### 3. Symbolic Operators
 

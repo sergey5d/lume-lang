@@ -587,25 +587,40 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn finish_brace_record_literal_expr(&mut self, start: Span) -> Option<Expr> {
-        #[derive(Clone)]
-        struct RecordEntry {
-            name: Option<String>,
-            ty: Option<TypeRef>,
-            value: Expr,
-            span: Span,
+        enum RecordEntry {
+            Field {
+                name: String,
+                ty: Option<TypeRef>,
+                value: Expr,
+                span: Span,
+            },
+            Spread {
+                value: Expr,
+                span: Span,
+            },
+            Positional {
+                span: Span,
+            },
         }
 
         let mut entries = Vec::new();
         self.skip_newlines();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let entry = if self.at(TokenKind::Identifier) {
+            let entry = if self.match_token(TokenKind::Ellipsis) {
+                let start = self.previous_span();
+                let value = self.parse_expr()?;
+                RecordEntry::Spread {
+                    span: start.cover(value.span()),
+                    value,
+                }
+            } else if self.at(TokenKind::Identifier) {
                 let checkpoint = self.checkpoint();
                 let (name, name_span) = self.expect_identifier("expected shape field name")?;
                 if self.match_token(TokenKind::Colon) {
                     let value = self.parse_expr()?;
                     self.reject_unparenthesized_pair_field_initializer(&value);
-                    RecordEntry {
-                        name: Some(name),
+                    RecordEntry::Field {
+                        name,
                         ty: None,
                         span: name_span.cover(value.span()),
                         value,
@@ -616,8 +631,8 @@ impl<'a> Parser<'a> {
                         if self.match_token(TokenKind::Colon) {
                             let value = self.parse_expr()?;
                             self.reject_unparenthesized_pair_field_initializer(&value);
-                            RecordEntry {
-                                name: Some(name),
+                            RecordEntry::Field {
+                                name,
                                 ty: Some(ty),
                                 span: name_span.cover(value.span()),
                                 value,
@@ -625,43 +640,23 @@ impl<'a> Parser<'a> {
                         } else {
                             self.restore(checkpoint);
                             let value = self.parse_expr()?;
-                            RecordEntry {
-                                name: None,
-                                ty: None,
-                                span: value.span(),
-                                value,
-                            }
+                            RecordEntry::Positional { span: value.span() }
                         }
                     } else {
                         self.restore(checkpoint);
                         let value = self.parse_expr()?;
-                        RecordEntry {
-                            name: None,
-                            ty: None,
-                            span: value.span(),
-                            value,
-                        }
+                        RecordEntry::Positional { span: value.span() }
                     }
                 } else {
                     self.restore(checkpoint);
                     let value = self.parse_expr()?;
-                    RecordEntry {
-                        name: None,
-                        ty: None,
-                        span: value.span(),
-                        value,
-                    }
+                    RecordEntry::Positional { span: value.span() }
                 }
             } else {
                 let value = self.parse_expr()?;
-                RecordEntry {
-                    name: None,
-                    ty: None,
-                    span: value.span(),
-                    value,
-                }
+                RecordEntry::Positional { span: value.span() }
             };
-            entries.push(entry.clone());
+            entries.push(entry);
             self.skip_newlines();
             if self.match_token(TokenKind::Comma) {
                 self.skip_newlines();
@@ -669,25 +664,46 @@ impl<'a> Parser<'a> {
             }
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after anonymous shape")?;
-        let has_named = entries.iter().any(|entry| entry.name.is_some());
+        let has_named = entries.iter().any(|entry| {
+            matches!(
+                entry,
+                RecordEntry::Field { .. } | RecordEntry::Spread { .. }
+            )
+        });
         let mut fields = Vec::new();
         if has_named {
             for entry in entries {
-                if let Some(name) = entry.name {
-                    fields.push(CallArg {
-                        name: Some(name),
-                        ty: entry.ty,
-                        value: entry.value,
-                        span: entry.span,
-                    });
-                    continue;
+                match entry {
+                    RecordEntry::Field {
+                        name,
+                        ty,
+                        value,
+                        span,
+                    } => {
+                        fields.push(CallArg {
+                            name: Some(name),
+                            ty,
+                            value,
+                            span,
+                        });
+                    }
+                    RecordEntry::Spread { value, span } => {
+                        fields.push(CallArg {
+                            name: None,
+                            ty: None,
+                            value,
+                            span,
+                        });
+                    }
+                    RecordEntry::Positional { span, .. } => {
+                        self.diagnostics.push(Diagnostic::error(
+                            "unexpected_token",
+                            "cannot mix construction fields and positional shape fields",
+                            span,
+                        ));
+                        return None;
+                    }
                 }
-                self.diagnostics.push(Diagnostic::error(
-                    "unexpected_token",
-                    "cannot mix construction fields and positional shape fields",
-                    entry.span,
-                ));
-                return None;
             }
         } else {
             if !entries.is_empty() {
@@ -1483,6 +1499,13 @@ impl<'a> Parser<'a> {
             .is_some_and(|token| token.kind == TokenKind::RBrace)
         {
             return allow_empty;
+        }
+        if self
+            .tokens
+            .get(lookahead)
+            .is_some_and(|token| token.kind == TokenKind::Ellipsis)
+        {
+            return true;
         }
         if self
             .tokens

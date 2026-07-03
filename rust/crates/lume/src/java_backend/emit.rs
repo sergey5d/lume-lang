@@ -1531,6 +1531,7 @@ impl<'a> FunctionEmitter<'a> {
             ir::RValue::Cast { operand, .. } => self.emit_operand(operand),
             ir::RValue::NamedValue { .. }
             | ir::RValue::Record(_)
+            | ir::RValue::RecordSpread(_)
             | ir::RValue::RecordUpdate { .. }
             | ir::RValue::Index { .. }
             | ir::RValue::TypeTest { .. }

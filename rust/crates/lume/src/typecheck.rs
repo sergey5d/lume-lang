@@ -1946,6 +1946,76 @@ impl<'a> Checker<'a> {
         Ty::Record(left_fields.into_iter().chain(right_fields).collect())
     }
 
+    fn record_spread_shape_fields(
+        &mut self,
+        ty: &Ty,
+        span: crate::source::Span,
+    ) -> Option<Vec<(String, Ty)>> {
+        match ty {
+            Ty::Record(fields) => Some(fields.clone()),
+            Ty::Named(name, args) => {
+                let Some(sig) = self.lookup_any_type(name) else {
+                    self.add_error(
+                        "invalid_shape_spread",
+                        format!(
+                            "shape spread requires a shape value, got '{}'",
+                            ty.describe()
+                        ),
+                        span,
+                    );
+                    return None;
+                };
+                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) || sig.fields.is_empty()
+                {
+                    self.add_error(
+                        "invalid_shape_spread",
+                        format!(
+                            "shape spread requires a shape value, got '{}'",
+                            ty.describe()
+                        ),
+                        span,
+                    );
+                    return None;
+                }
+                if sig.fields.iter().any(|field| field.hidden) {
+                    self.add_error(
+                        "invalid_shape_spread",
+                        format!(
+                            "shape spread cannot use type '{}' because it has hidden fields",
+                            sig.name
+                        ),
+                        span,
+                    );
+                    return None;
+                }
+                let subst = sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                Some(
+                    sig.fields
+                        .iter()
+                        .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
+                        .collect(),
+                )
+            }
+            Ty::Unknown => None,
+            _ => {
+                self.add_error(
+                    "invalid_shape_spread",
+                    format!(
+                        "shape spread requires a shape value, got '{}'",
+                        ty.describe()
+                    ),
+                    span,
+                );
+                None
+            }
+        }
+    }
+
     fn check_block(&mut self, block: &Block) -> Ty {
         self.check_block_against(block, &Ty::Unknown)
     }
@@ -3431,43 +3501,60 @@ impl<'a> Checker<'a> {
                         Ty::Record(fields) => fields.as_slice(),
                         _ => &[],
                     };
-                    return Ty::Record(
-                        fields
-                            .iter()
-                            .filter_map(|field| {
-                                field.name.as_ref().map(|name| {
-                                    let annotated_ty =
-                                        field.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
-                                    let expected_ty =
-                                        annotated_ty.clone().unwrap_or_else(|| {
-                                            expected_fields
-                                                .iter()
-                                                .find(|(expected_name, _)| expected_name == name)
-                                                .map(|(_, ty)| ty.clone())
-                                                .unwrap_or(Ty::Unknown)
-                                        });
-                                    let actual = self.check_expr_against(&field.value, &expected_ty);
-                                    if let Some(annotated_ty) = annotated_ty {
-                                        self.require_assignable(
-                                            &actual,
-                                            &annotated_ty,
-                                            field.span,
-                                            "invalid_field_initializer_type",
-                                            format!(
-                                                "field '{}' is annotated as '{}' but initializer has type '{}'",
-                                                name,
-                                                annotated_ty.describe(),
-                                                actual.describe()
-                                            ),
-                                        );
-                                        (name.clone(), annotated_ty)
-                                    } else {
-                                        (name.clone(), actual)
-                                    }
-                                })
-                            })
-                            .collect(),
-                    );
+                    let mut explicit_names = HashSet::new();
+                    let mut actual_fields = Vec::new();
+                    for field in fields {
+                        if let Some(name) = &field.name {
+                            if !explicit_names.insert(name.clone()) {
+                                self.add_error(
+                                    "duplicate_shape_field",
+                                    format!(
+                                        "shape literal field '{}' is defined more than once",
+                                        name
+                                    ),
+                                    field.span,
+                                );
+                            }
+                            let annotated_ty =
+                                field.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
+                            let expected_ty = annotated_ty.clone().unwrap_or_else(|| {
+                                expected_fields
+                                    .iter()
+                                    .find(|(expected_name, _)| expected_name == name)
+                                    .map(|(_, ty)| ty.clone())
+                                    .unwrap_or(Ty::Unknown)
+                            });
+                            let actual = self.check_expr_against(&field.value, &expected_ty);
+                            let field_ty = if let Some(annotated_ty) = annotated_ty {
+                                self.require_assignable(
+                                    &actual,
+                                    &annotated_ty,
+                                    field.span,
+                                    "invalid_field_initializer_type",
+                                    format!(
+                                        "field '{}' is annotated as '{}' but initializer has type '{}'",
+                                        name,
+                                        annotated_ty.describe(),
+                                        actual.describe()
+                                    ),
+                                );
+                                annotated_ty
+                            } else {
+                                actual
+                            };
+                            upsert_shape_field(&mut actual_fields, name.clone(), field_ty);
+                        } else {
+                            let spread_ty = self.check_expr(&field.value);
+                            if let Some(spread_fields) =
+                                self.record_spread_shape_fields(&spread_ty, field.span)
+                            {
+                                for (name, ty) in spread_fields {
+                                    upsert_shape_field(&mut actual_fields, name, ty);
+                                }
+                            }
+                        }
+                    }
+                    return Ty::Record(actual_fields);
                 }
                 if let Ty::Record(expected_fields) = expected {
                     let mut actual_fields = Vec::new();
@@ -6309,21 +6396,24 @@ impl<'a> Checker<'a> {
             Expr::String { .. } => Ty::str(),
             Expr::Bool { .. } => Ty::bool(),
             Expr::Unit { .. } => Ty::unit(),
-            Expr::RecordLiteral { fields, .. } => Ty::Record(
-                fields
-                    .iter()
-                    .filter_map(|field| {
-                        field.name.as_ref().map(|name| {
-                            let ty = field
-                                .ty
-                                .as_ref()
-                                .map(|ty| self.ty_from_type_ref(ty))
-                                .unwrap_or_else(|| self.probe_expr_type(&field.value));
-                            (name.clone(), ty)
-                        })
-                    })
-                    .collect(),
-            ),
+            Expr::RecordLiteral { fields, .. } => {
+                let mut out = Vec::new();
+                for field in fields {
+                    if let Some(name) = &field.name {
+                        let ty = field
+                            .ty
+                            .as_ref()
+                            .map(|ty| self.ty_from_type_ref(ty))
+                            .unwrap_or_else(|| self.probe_expr_type(&field.value));
+                        upsert_shape_field(&mut out, name.clone(), ty);
+                    } else if let Ty::Record(spread_fields) = self.probe_expr_type(&field.value) {
+                        for (name, ty) in spread_fields {
+                            upsert_shape_field(&mut out, name, ty);
+                        }
+                    }
+                }
+                Ty::Record(out)
+            }
             _ => Ty::Unknown,
         }
     }
@@ -7514,7 +7604,7 @@ fn brace_record_constructor_args(args: &[crate::ast::CallArg]) -> Option<Vec<cra
         return None;
     };
 
-    if values.is_empty() {
+    if values.is_empty() && fields.iter().all(|field| field.name.is_some()) {
         return Some(fields.clone());
     }
 
@@ -7849,6 +7939,14 @@ fn type_args_assignable(type_name: &str, actual_args: &[Ty], expected_args: &[Ty
         .iter()
         .zip(expected_args.iter())
         .all(|(actual, expected)| is_assignable(actual, expected))
+}
+
+fn upsert_shape_field(fields: &mut Vec<(String, Ty)>, name: String, ty: Ty) {
+    if let Some((_, existing_ty)) = fields.iter_mut().find(|(field, _)| field == &name) {
+        *existing_ty = ty;
+    } else {
+        fields.push((name, ty));
+    }
 }
 
 fn is_reflection_metadata_type(name: &str) -> bool {
@@ -9092,6 +9190,63 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_anonymous_shape_spread_add_and_overwrite() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    base = { name: "Ada", age: 10 }
+    updated = { ...base, age: 42, city: "Tampa" }
+    name Str = updated.name
+    age Int = updated.age
+    city Str = updated.city
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_non_shape_spread() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    value = { ...10, age: 42 }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_shape_spread"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_explicit_shape_fields() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    value = { age: 10, age: 42 }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "duplicate_shape_field"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

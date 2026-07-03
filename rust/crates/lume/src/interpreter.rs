@@ -1480,6 +1480,7 @@ impl<'a> Interpreter<'a> {
                     })
                     .collect::<Result<Vec<_>, Diagnostic>>()?,
             )))),
+            ir::RValue::RecordSpread(parts) => self.record_spread_value(frame, parts, span),
             ir::RValue::AnonymousInterface { methods, .. } => {
                 Ok(Value::Record(Rc::new(RefCell::new(
                     methods
@@ -3317,6 +3318,65 @@ impl<'a> Interpreter<'a> {
             other => {
                 Err(self.runtime_error(span, format!("cannot update fields on {}", other.render())))
             }
+        }
+    }
+
+    fn record_spread_value(
+        &mut self,
+        frame: Option<&Frame>,
+        parts: &[ir::RecordSpreadPart],
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let mut out = Vec::new();
+        for part in parts {
+            match part {
+                ir::RecordSpreadPart::Spread(operand) => {
+                    let value = self.eval_operand_ref(frame, operand, span)?;
+                    for (name, value) in self.record_spread_runtime_fields(value, span)? {
+                        upsert_runtime_record_field(&mut out, name, value);
+                    }
+                }
+                ir::RecordSpreadPart::Field(field) => {
+                    let value = self.eval_operand_ref(frame, &field.value, span)?;
+                    upsert_runtime_record_field(&mut out, field.name.clone(), value);
+                }
+            }
+        }
+        Ok(Value::Record(Rc::new(RefCell::new(out))))
+    }
+
+    fn record_spread_runtime_fields(
+        &mut self,
+        value: Value,
+        span: Option<Span>,
+    ) -> Result<Vec<(String, Value)>, Diagnostic> {
+        match value {
+            Value::Record(fields) => Ok(fields.borrow().clone()),
+            Value::Aggregate(instance) if instance.borrow().case_name.is_none() => {
+                let instance = instance.borrow();
+                if instance.fields.is_empty() {
+                    return Err(self.runtime_error(
+                        span,
+                        format!(
+                            "shape spread requires a shape value, got {}",
+                            instance.type_name
+                        ),
+                    ));
+                }
+                Ok(instance
+                    .field_names
+                    .iter()
+                    .cloned()
+                    .zip(instance.fields.iter().cloned())
+                    .collect())
+            }
+            other => Err(self.runtime_error(
+                span,
+                format!(
+                    "shape spread requires a shape value, got {}",
+                    other.render()
+                ),
+            )),
         }
     }
 
@@ -5517,6 +5577,14 @@ fn render_ir_type(ty: &ir::Type) -> String {
             render_ir_type(ret)
         ),
         ir::Type::TypeParam(name) => name.clone(),
+    }
+}
+
+fn upsert_runtime_record_field(fields: &mut Vec<(String, Value)>, name: String, value: Value) {
+    if let Some((_, existing_value)) = fields.iter_mut().find(|(field, _)| field == &name) {
+        *existing_value = value;
+    } else {
+        fields.push((name, value));
     }
 }
 

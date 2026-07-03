@@ -562,6 +562,7 @@ pub enum RValue {
     Tuple(Vec<Operand>),
     List(Vec<Operand>),
     Record(Vec<NamedOperand>),
+    RecordSpread(Vec<RecordSpreadPart>),
     AnonymousInterface {
         interfaces: Vec<Type>,
         methods: Vec<AnonymousInterfaceMethod>,
@@ -609,6 +610,13 @@ pub enum RValue {
 pub struct NamedOperand {
     pub name: String,
     pub value: Operand,
+}
+
+/// A source-ordered anonymous-shape spread element.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecordSpreadPart {
+    Spread(Operand),
+    Field(NamedOperand),
 }
 
 /// Lowered method body for an anonymous interface implementation.

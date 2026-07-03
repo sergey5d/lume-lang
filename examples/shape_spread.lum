@@ -1,0 +1,12 @@
+# EXPECT:
+# Ada 42 Tampa
+# Bob 43 Tampa
+
+def main() Unit {
+    base = { name: "Ada", age: 10 }
+    updated = { ...base, age: 42, city: "Tampa" }
+    println(updated.name, updated.age, updated.city)
+
+    renamed = { ...updated, name: "Bob", age: 43 }
+    println(renamed.name, renamed.age, renamed.city)
+}
