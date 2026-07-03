@@ -178,6 +178,43 @@ userOpt.->profileOpt().->name  # valid
 userOpt.->name().orPanic()     # call orPanic inside the segment
 ```
 
+## Lift Expression
+
+Use `lift` to turn a shape or tuple whose members are all the same success
+container family into one container of the assembled value.
+
+```txt
+profile Option[{ id Int, name Str }] = lift {
+    id: maybeId()
+    name: maybeName()
+}
+
+pair Result[(Int, Str), Str] = lift (okId(), okName())
+```
+
+Rules:
+
+- `lift { ... }` accepts named shape fields only
+- `lift (...)` accepts tuple literals
+- every member must be `Option[T]`, `Result[T, E]`, or `Either[L, T]`
+- all members must use the same wrapper family
+- `Result` error types and `Either` left types must be mutually compatible
+- empty shapes and tuples are rejected because the wrapper family cannot be inferred
+- shape spread inside `lift` is not supported yet; list lifted fields explicitly
+
+The result keeps the same wrapper family:
+
+```txt
+lift { id: Option[Int], name: Option[Str] }
+# Option[{ id Int, name Str }]
+
+lift (Result[Int, E], Result[Str, E])
+# Result[(Int, Str), E]
+
+lift { id: Either[L, Int], name: Either[L, Str] }
+# Either[L, { id Int, name Str }]
+```
+
 ## Runtime Metadata
 
 Runtime metadata is exposed through the `Type[A]` hierarchy declared in
@@ -2121,6 +2158,7 @@ Boolean:
 Other operators / constructs:
 
 - `is` for runtime type checks
+- `lift` for assembling shapes or tuples inside `Option`, `Result`, or `Either`
 - `<-` for `for` iteration and success-case extraction in `if let`, `let ... else`, and `expect`
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases
@@ -2182,7 +2220,7 @@ Newline continuation:
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
   - shape/update operators: `:<`, `:+`
-  - unary prefixes: unary `-`, `!`, `try`
+  - unary prefixes: unary `-`, `!`, `try`, `lift`
   - runtime type check keyword: `is`
   - match arrow: `=>`
   - separators / chaining markers: `,`, `.`, `.->`

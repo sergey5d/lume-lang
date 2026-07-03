@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*invalid_lift.*lift expects a shape literal or tuple literal, got 'Unit'.*
+
+def main() Unit {
+    value = lift {}
+}

@@ -1074,6 +1074,16 @@ impl<'a> Parser<'a> {
                 span,
             });
         }
+        if self.match_keyword(Keyword::Lift) {
+            let start = self.previous_span();
+            self.skip_newlines();
+            let value = self.parse_unary_expr()?;
+            let span = start.cover(value.span());
+            return Some(Expr::Lift {
+                value: Box::new(value),
+                span,
+            });
+        }
         if self.match_token(TokenKind::Bang) {
             let start = self.previous_span();
             self.skip_newlines();

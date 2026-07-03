@@ -251,6 +251,14 @@ impl Ty {
     }
 }
 
+fn lift_family_name(family: &LiftedFamily) -> &'static str {
+    match family {
+        LiftedFamily::Option => "Option",
+        LiftedFamily::Result { .. } => "Result",
+        LiftedFamily::Either { .. } => "Either",
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ValueInfo {
     ty: Ty,
@@ -1495,6 +1503,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::Try { value, .. }
+            | Expr::Lift { value, .. }
             | Expr::Unary { expr: value, .. }
             | Expr::Group { inner: value, .. } => {
                 self.check_field_initializer_expr(value, owner, initialized_fields);
@@ -3619,6 +3628,7 @@ impl<'a> Checker<'a> {
                 }
                 inner
             }
+            Expr::Lift { value, span } => self.check_lift_expr(value, *span),
             Expr::Unary { op, expr, span } => {
                 let inner = self.check_expr(expr);
                 match op {
@@ -3758,6 +3768,209 @@ impl<'a> Checker<'a> {
             current = self.lifted_segment_result_type(&current, &family, &segment_ty, segment.span);
         }
         current
+    }
+
+    fn check_lift_expr(&mut self, value: &Expr, span: crate::source::Span) -> Ty {
+        match value {
+            Expr::RecordLiteral { fields, values, .. } => {
+                if !values.is_empty() {
+                    for value in values {
+                        self.check_expr(value);
+                    }
+                    self.add_error(
+                        "invalid_lift",
+                        "lift over a shape requires named fields; use `lift { name: value }`",
+                        span,
+                    );
+                    return Ty::Unknown;
+                }
+                if fields.is_empty() {
+                    self.add_error(
+                        "invalid_lift",
+                        "lift requires at least one shape field so the wrapper type can be inferred",
+                        span,
+                    );
+                    return Ty::Unknown;
+                }
+
+                let mut family = None;
+                let mut lifted_fields = Vec::new();
+                for field in fields {
+                    let Some(name) = &field.name else {
+                        self.check_expr(&field.value);
+                        self.add_error(
+                            "invalid_lift",
+                            "lift does not support shape spread entries yet; list lifted fields explicitly",
+                            field.span,
+                        );
+                        continue;
+                    };
+
+                    let member_ty = self.check_expr(&field.value);
+                    if matches!(member_ty, Ty::Unknown) {
+                        lifted_fields.push((name.clone(), Ty::Unknown));
+                        continue;
+                    }
+                    let Some((member_family, inner_ty)) = self.unwrap_lifted_type(&member_ty)
+                    else {
+                        self.add_error(
+                            "invalid_lift",
+                            format!(
+                                "lift field '{}' must be Option[T], Result[T, E], or Either[L, T], got '{}'",
+                                name,
+                                member_ty.describe()
+                            ),
+                            field.span,
+                        );
+                        continue;
+                    };
+                    self.merge_lift_family(&mut family, member_family, &member_ty, field.span);
+
+                    let field_ty = if let Some(annotated) = &field.ty {
+                        let annotated_ty = self.ty_from_type_ref(annotated);
+                        self.require_assignable(
+                            &inner_ty,
+                            &annotated_ty,
+                            field.span,
+                            "invalid_lift_field_type",
+                            format!(
+                                "lift field '{}' is annotated as '{}' but unwrapped value has type '{}'",
+                                name,
+                                annotated_ty.describe(),
+                                inner_ty.describe()
+                            ),
+                        );
+                        annotated_ty
+                    } else {
+                        inner_ty
+                    };
+                    lifted_fields.push((name.clone(), field_ty));
+                }
+
+                family
+                    .map(|family| self.wrap_lifted_type(&family, Ty::Record(lifted_fields)))
+                    .unwrap_or(Ty::Unknown)
+            }
+            Expr::TupleLiteral { items, .. } => {
+                if items.is_empty() {
+                    self.add_error(
+                        "invalid_lift",
+                        "lift requires at least one tuple item so the wrapper type can be inferred",
+                        span,
+                    );
+                    return Ty::Unknown;
+                }
+
+                let mut family = None;
+                let mut lifted_items = Vec::new();
+                for item in items {
+                    let member_ty = self.check_expr(item);
+                    if matches!(member_ty, Ty::Unknown) {
+                        lifted_items.push(Ty::Unknown);
+                        continue;
+                    }
+                    let Some((member_family, inner_ty)) = self.unwrap_lifted_type(&member_ty)
+                    else {
+                        self.add_error(
+                            "invalid_lift",
+                            format!(
+                                "lift tuple item must be Option[T], Result[T, E], or Either[L, T], got '{}'",
+                                member_ty.describe()
+                            ),
+                            item.span(),
+                        );
+                        continue;
+                    };
+                    self.merge_lift_family(&mut family, member_family, &member_ty, item.span());
+                    lifted_items.push(inner_ty);
+                }
+
+                family
+                    .map(|family| self.wrap_lifted_type(&family, Ty::Tuple(lifted_items)))
+                    .unwrap_or(Ty::Unknown)
+            }
+            Expr::Group { inner, .. } => self.check_lift_expr(inner, span),
+            other => {
+                let actual = self.check_expr(other);
+                if !matches!(actual, Ty::Unknown) {
+                    self.add_error(
+                        "invalid_lift",
+                        format!(
+                            "lift expects a shape literal or tuple literal, got '{}'",
+                            actual.describe()
+                        ),
+                        span,
+                    );
+                }
+                Ty::Unknown
+            }
+        }
+    }
+
+    fn merge_lift_family(
+        &mut self,
+        family: &mut Option<LiftedFamily>,
+        next: LiftedFamily,
+        member_ty: &Ty,
+        span: crate::source::Span,
+    ) {
+        let Some(current) = family else {
+            *family = Some(next);
+            return;
+        };
+
+        match (current, next) {
+            (LiftedFamily::Option, LiftedFamily::Option) => {}
+            (LiftedFamily::Result { error }, LiftedFamily::Result { error: next_error }) => {
+                if self.is_assignable(&next_error, error) {
+                    return;
+                }
+                if self.is_assignable(error, &next_error) {
+                    *error = next_error;
+                    return;
+                }
+                self.add_error(
+                    "incompatible_lift",
+                    format!(
+                        "lift result member has type '{}', but its error type '{}' is not compatible with '{}'",
+                        member_ty.describe(),
+                        next_error.describe(),
+                        error.describe()
+                    ),
+                    span,
+                );
+            }
+            (LiftedFamily::Either { left }, LiftedFamily::Either { left: next_left }) => {
+                if self.is_assignable(&next_left, left) {
+                    return;
+                }
+                if self.is_assignable(left, &next_left) {
+                    *left = next_left;
+                    return;
+                }
+                self.add_error(
+                    "incompatible_lift",
+                    format!(
+                        "lift either member has type '{}', but its left type '{}' is not compatible with '{}'",
+                        member_ty.describe(),
+                        next_left.describe(),
+                        left.describe()
+                    ),
+                    span,
+                );
+            }
+            (current, next) => {
+                self.add_error(
+                    "incompatible_lift",
+                    format!(
+                        "lift members must use the same wrapper family; found {} after {}",
+                        lift_family_name(&next),
+                        lift_family_name(current)
+                    ),
+                    span,
+                );
+            }
+        }
     }
 
     fn unwrap_lifted_type(&self, ty: &Ty) -> Option<(LiftedFamily, Ty)> {
@@ -8052,6 +8265,50 @@ def main() Int {
                 .diagnostics
                 .iter()
                 .any(|diag| diag.code == "invalid_argument_count"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn checks_lift_shape_and_tuple_types() {
+        let program = parse_inline(
+            r#"
+def maybeId() Option[Int] = Some(1)
+def maybeName() Option[Str] = Some("Ada")
+def okId() Result[Int, Str] = Ok(1)
+def okName() Result[Str, Str] = Ok("Ada")
+
+def main() Unit {
+    profile Option[{ id Int, name Str }] = lift {
+        id Int: maybeId()
+        name Str: maybeName()
+    }
+    pair Result[(Int, Str), Str] = lift (okId(), okName())
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_lift_non_container_member() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    value = lift {
+        id: 1
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_lift"),
             "{:#?}",
             result.diagnostics
         );

@@ -1,0 +1,9 @@
+# FAIL_REGEX:
+# .*incompatible_lift.*lift members must use the same wrapper family; found Result after Option.*
+
+def main() Unit {
+    value = lift {
+        id: Some(1)
+        name: Ok("Ada")
+    }
+}

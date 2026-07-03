@@ -615,6 +615,10 @@ pub enum Expr {
         value: Box<Expr>,
         span: Span,
     },
+    Lift {
+        value: Box<Expr>,
+        span: Span,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,
@@ -691,6 +695,7 @@ impl Expr {
             | Expr::RecordLiteral { span, .. }
             | Expr::AnonymousInterface { span, .. }
             | Expr::Try { span, .. }
+            | Expr::Lift { span, .. }
             | Expr::Unary { span, .. }
             | Expr::Binary { span, .. }
             | Expr::Is { span, .. }

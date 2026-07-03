@@ -1,0 +1,66 @@
+# EXPECT:
+# Ada 7
+# true
+# Ada 7
+# missing-name
+# Ada 7
+# left-name
+
+def maybeId() Option[Int] = Some(7)
+
+def maybeName() Option[Str] = Some("Ada")
+
+def missingName() Option[Str] = None
+
+def okId() Result[Int, Str] = Ok(7)
+
+def okName() Result[Str, Str] = Ok("Ada")
+
+def badName() Result[Str, Str] = Err("missing-name")
+
+def rightId() Either[Str, Int] = Right(7)
+
+def rightName() Either[Str, Str] = Right("Ada")
+
+def leftName() Either[Str, Str] = Left("left-name")
+
+def main() Unit {
+    optionProfile Option[{ id Int, name Str }] = lift {
+        id Int: maybeId()
+        name Str: maybeName()
+    }
+    expect Some(profile) = optionProfile
+    println("${profile.name} ${profile.id}")
+
+    missing Option[{ id Int, name Str }] = lift {
+        id: maybeId()
+        name: missingName()
+    }
+    println(missing.isEmpty())
+
+    resultPair Result[(Int, Str), Str] = lift (okId(), okName())
+    expect Ok(pair) = resultPair
+    let (id, name) = pair
+    println("${name} ${id}")
+
+    failedResult Result[{ id Int, name Str }, Str] = lift {
+        id: okId()
+        name: badName()
+    }
+    expect Err(message) = failedResult
+    println(message)
+
+    eitherProfile Either[Str, { id Int, name Str }] = lift {
+        id: rightId()
+        name: rightName()
+    }
+    expect Right(eitherShape) = eitherProfile
+    println("${eitherShape.name} ${eitherShape.id}")
+
+    failedEither Either[Str, { id Int, name Str }] = lift {
+        id: rightId()
+        name: leftName()
+    }
+    expect Left(leftMessage) = failedEither
+    println(leftMessage)
+}

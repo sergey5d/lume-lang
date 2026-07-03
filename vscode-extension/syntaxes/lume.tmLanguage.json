@@ -133,7 +133,7 @@
       "patterns": [
         {
           "name": "keyword.control.lume",
-          "match": "\\b(?:if|else|for|while|yield|partial|match|return|break|continue|expect|is|try|defer)\\b"
+          "match": "\\b(?:if|else|for|while|yield|partial|match|return|break|continue|expect|is|try|lift|defer)\\b"
         },
         {
           "name": "keyword.declaration.lume",

@@ -255,6 +255,10 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             value: Box::new(desugar_expr(value)),
             span: *span,
         },
+        ast::Expr::Lift { value, span } => core::Expr::Lift {
+            value: Box::new(desugar_expr(value)),
+            span: *span,
+        },
         ast::Expr::Unary { op, expr, span } => core::Expr::Unary {
             op: *op,
             expr: Box::new(desugar_expr(expr)),

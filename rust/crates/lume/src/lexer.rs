@@ -24,6 +24,7 @@ pub enum Keyword {
     Interface,
     Is,
     Let,
+    Lift,
     Match,
     Module,
     Partial,
@@ -309,6 +310,7 @@ impl<'a> Lexer<'a> {
             "interface" => TokenKind::Keyword(Keyword::Interface),
             "is" => TokenKind::Keyword(Keyword::Is),
             "let" => TokenKind::Keyword(Keyword::Let),
+            "lift" => TokenKind::Keyword(Keyword::Lift),
             "match" => TokenKind::Keyword(Keyword::Match),
             "module" => TokenKind::Keyword(Keyword::Module),
             "partial" => TokenKind::Keyword(Keyword::Partial),
@@ -562,12 +564,13 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = left :+ right\nlifted = value.->name()\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = left :+ right\nlifted = value.->name()\nlift { value: Some(1) }\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Annotation)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::As)));
+        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Lift)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Vararg)));
         assert!(kinds.contains(&TokenKind::ColonPlus));

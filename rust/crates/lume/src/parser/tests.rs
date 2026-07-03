@@ -2251,6 +2251,28 @@ def run(userOpt Option[User]) Unit {
 }
 
 #[test]
+fn parses_lift_shape_and_tuple_expressions() {
+    let shape = parse_expr_only(r#"lift { id: maybeId(), name: maybeName() }"#);
+    let Expr::Lift { value, .. } = shape else {
+        panic!("expected lift expression, got {shape:#?}");
+    };
+    let Expr::RecordLiteral { fields, values, .. } = value.as_ref() else {
+        panic!("expected lifted shape literal, got {value:#?}");
+    };
+    assert_eq!(fields.len(), 2);
+    assert!(values.is_empty());
+
+    let tuple = parse_expr_only(r#"lift (maybeId(), maybeName())"#);
+    let Expr::Lift { value, .. } = tuple else {
+        panic!("expected lift expression, got {tuple:#?}");
+    };
+    let Expr::TupleLiteral { items, .. } = value.as_ref() else {
+        panic!("expected lifted tuple literal, got {value:#?}");
+    };
+    assert_eq!(items.len(), 2);
+}
+
+#[test]
 fn parses_trailing_block_lambda_when_parameter_list_starts_on_opening_line() {
     let result = parse(
         r#"

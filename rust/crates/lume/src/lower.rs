@@ -2901,6 +2901,7 @@ impl<'a> FunctionLowerer<'a> {
             Expr::ListLiteral { .. }
             | Expr::TupleLiteral { .. }
             | Expr::RecordLiteral { .. }
+            | Expr::Lift { .. }
             | Expr::AnonymousInterface { .. }
             | Expr::Unary { .. }
             | Expr::Binary { .. }
@@ -3188,6 +3189,7 @@ impl<'a> FunctionLowerer<'a> {
             | Expr::Match { .. }
             | Expr::ForYield { .. }
             | Expr::Try { .. }
+            | Expr::Lift { .. }
             | Expr::Unary { .. }
             | Expr::Binary { .. }
             | Expr::RecordUpdate { .. }
@@ -3625,6 +3627,9 @@ impl<'a> FunctionLowerer<'a> {
                     ))
                 }
             }
+            Expr::Lift { value, .. } => Some(ir::RValue::Lift {
+                value: self.lower_expr(value),
+            }),
             Expr::Unary { op, expr, .. } => Some(ir::RValue::Unary {
                 op: match op {
                     ast::UnaryOp::Neg => ir::UnaryOp::Neg,

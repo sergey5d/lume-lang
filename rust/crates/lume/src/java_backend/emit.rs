@@ -1532,6 +1532,7 @@ impl<'a> FunctionEmitter<'a> {
             ir::RValue::NamedValue { .. }
             | ir::RValue::Record(_)
             | ir::RValue::RecordSpread(_)
+            | ir::RValue::Lift { .. }
             | ir::RValue::RecordUpdate { .. }
             | ir::RValue::Index { .. }
             | ir::RValue::TypeTest { .. }

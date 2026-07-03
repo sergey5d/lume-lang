@@ -2194,6 +2194,7 @@ impl<'a> Resolver<'a> {
                 }
             }
             Expr::Try { value, .. } => self.resolve_expr(value),
+            Expr::Lift { value, .. } => self.resolve_expr(value),
             Expr::Unary { expr, .. } => self.resolve_expr(expr),
             Expr::Binary { left, right, .. } => {
                 self.resolve_expr(left);
