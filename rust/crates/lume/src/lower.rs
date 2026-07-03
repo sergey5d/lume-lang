@@ -3213,6 +3213,9 @@ impl<'a> FunctionLowerer<'a> {
         if let Some(ty) = self.infer_constructor_call_type(callee) {
             return ty;
         }
+        if let Some(ty) = self.infer_member_call_type(callee, &normalized_args, overrides) {
+            return ty;
+        }
         match self.infer_expr_type_with_overrides(callee, overrides) {
             ir::Type::Function { ret, .. } => *ret,
             ir::Type::Named { name, args } if declared_type_exists(self.program, &name) => {
@@ -3398,6 +3401,112 @@ impl<'a> FunctionLowerer<'a> {
             ir::Type::Unknown => Some(ir::Type::Unknown),
             _ => builtin_member_type(receiver, name),
         }
+    }
+
+    fn infer_member_call_type(
+        &self,
+        callee: &Expr,
+        args: &[core::CallArg],
+        overrides: &[(String, ir::Type)],
+    ) -> Option<ir::Type> {
+        let Expr::Member { receiver, name, .. } = callee else {
+            return None;
+        };
+        let receiver_ty = self.infer_expr_type_with_overrides(receiver, overrides);
+        let ir::Type::Named {
+            name: type_name,
+            args: type_args,
+        } = &receiver_ty
+        else {
+            return builtin_member_type(&receiver_ty, name).and_then(|ty| match ty {
+                ir::Type::Function { ret, .. } => Some(*ret),
+                _ => None,
+            });
+        };
+        let Some(ty) = self.program.types.iter().find(|ty| ty.name == *type_name) else {
+            return builtin_member_type(&receiver_ty, name).and_then(|ty| match ty {
+                ir::Type::Function { ret, .. } => Some(*ret),
+                _ => None,
+            });
+        };
+        let subst = ir_type_subst(ty, type_args);
+        let return_ty = self.find_method_call_return_type(ty, name, &subst, args)?;
+        if matches!(return_ty, ir::Type::Unknown) {
+            if let Some(fallback) =
+                builtin_member_type(&receiver_ty, name).and_then(|ty| match ty {
+                    ir::Type::Function { ret, .. } => Some(*ret),
+                    _ => None,
+                })
+            {
+                return Some(fallback);
+            }
+        }
+        Some(return_ty)
+    }
+
+    fn find_method_call_return_type(
+        &self,
+        ty: &ir::TypeDef,
+        name: &str,
+        subst: &HashMap<String, ir::Type>,
+        args: &[core::CallArg],
+    ) -> Option<ir::Type> {
+        let mut seen = Vec::new();
+        self.find_method_call_return_type_inner(ty, name, subst, args, &mut seen)
+    }
+
+    fn find_method_call_return_type_inner(
+        &self,
+        ty: &ir::TypeDef,
+        name: &str,
+        subst: &HashMap<String, ir::Type>,
+        args: &[core::CallArg],
+        seen: &mut Vec<String>,
+    ) -> Option<ir::Type> {
+        if seen.iter().any(|item| item == &ty.name) {
+            return None;
+        }
+        seen.push(ty.name.clone());
+        let mut best: Option<(usize, ir::Type)> = None;
+        for method_id in &ty.methods {
+            let Some(function) = self.program.function(*method_id) else {
+                continue;
+            };
+            if function.name != name {
+                continue;
+            }
+            let Some(score) = method_call_arity_score(function, args) else {
+                continue;
+            };
+            if best
+                .as_ref()
+                .map(|(best_score, _)| score > *best_score)
+                .unwrap_or(true)
+            {
+                best = Some((score, substitute_ir_type(&function.return_ty, subst)));
+            }
+        }
+        if let Some((_, return_ty)) = best {
+            return Some(return_ty);
+        }
+
+        for bound in &ty.with_bounds {
+            let ir::Type::Named {
+                name: bound_name, ..
+            } = bound
+            else {
+                continue;
+            };
+            let Some(bound_ty) = self.program.types.iter().find(|ty| ty.name == *bound_name) else {
+                continue;
+            };
+            if let Some(return_ty) =
+                self.find_method_call_return_type_inner(bound_ty, name, subst, args, seen)
+            {
+                return Some(return_ty);
+            }
+        }
+        None
     }
 
     fn find_method_function(&self, ty: &ir::TypeDef, name: &str) -> Option<ir::FunctionId> {
@@ -4840,6 +4949,95 @@ fn function_type_returns_unknown(ty: &ir::Type) -> bool {
     )
 }
 
+fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> Option<usize> {
+    let param_count = function.params.len();
+    let mut slots = vec![0usize; param_count];
+    let mut positional_index = 0usize;
+    let mut used_variadic_positionally = false;
+
+    for arg in args {
+        if let Some(name) = &arg.name {
+            let index = function.params.iter().position(|param| {
+                function
+                    .locals
+                    .get(param.0)
+                    .is_some_and(|local| local.name == *name)
+            })?;
+            if slots[index] > 0 {
+                return None;
+            }
+            slots[index] = 1;
+            continue;
+        }
+
+        while positional_index < param_count
+            && !function
+                .param_variadic
+                .get(positional_index)
+                .copied()
+                .unwrap_or(false)
+            && slots[positional_index] > 0
+        {
+            positional_index += 1;
+        }
+
+        if function.param_variadic.last().copied().unwrap_or(false)
+            && positional_index >= param_count.saturating_sub(1)
+        {
+            let slot = slots.last_mut()?;
+            *slot += 1;
+            used_variadic_positionally = true;
+        } else if positional_index < param_count {
+            if slots[positional_index] > 0 {
+                return None;
+            }
+            slots[positional_index] = 1;
+            if !function
+                .param_variadic
+                .get(positional_index)
+                .copied()
+                .unwrap_or(false)
+            {
+                positional_index += 1;
+            }
+        } else {
+            return None;
+        }
+    }
+
+    let mut omitted_defaults = 0usize;
+    for (index, slot_count) in slots.iter().enumerate() {
+        let variadic = function.param_variadic.get(index).copied().unwrap_or(false);
+        let has_default = function
+            .param_defaults
+            .get(index)
+            .is_some_and(|default| default.is_some());
+        if !variadic && !has_default && *slot_count == 0 {
+            return None;
+        }
+        if !variadic && *slot_count > 1 {
+            return None;
+        }
+        if variadic && *slot_count == 0 {
+            omitted_defaults += 1;
+        } else if has_default && *slot_count == 0 {
+            omitted_defaults += 1;
+        }
+    }
+
+    let has_variadic = function.param_variadic.iter().any(|variadic| *variadic);
+    if !has_variadic && args.len() == param_count {
+        return Some(400 + args.len());
+    }
+    if !has_variadic {
+        return Some(300usize.saturating_sub(omitted_defaults));
+    }
+    if used_variadic_positionally {
+        return Some(200 + args.len());
+    }
+    Some(100usize.saturating_sub(omitted_defaults))
+}
+
 fn ir_type_subst(ty: &ir::TypeDef, args: &[ir::Type]) -> HashMap<String, ir::Type> {
     ty.type_params
         .iter()
@@ -5385,6 +5583,51 @@ mod tests {
             })
             .count();
         assert_eq!(add_calls, 2, "{:#?}", twice.blocks);
+    }
+
+    #[test]
+    fn infers_member_call_type_from_overloaded_variadic_arity() {
+        let program = parse_inline(
+            r#"
+            class Exec {}
+
+            class Runner {}
+
+            impl Runner {
+                def exec(sql Str) Exec = Exec()
+                def exec(sql Str, first Any, rest [Any] vararg) Result[Int, Str] = Ok(1)
+            }
+
+            def main(r Runner) Unit {
+                staged = r.exec("update users")
+                direct = r.exec("update users", true, 1)
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
+        let staged = main
+            .locals
+            .iter()
+            .find(|local| local.name == "staged")
+            .expect("staged local");
+        let direct = main
+            .locals
+            .iter()
+            .find(|local| local.name == "direct")
+            .expect("direct local");
+
+        assert_eq!(staged.ty, ir::Type::named("Exec"));
+        assert_eq!(
+            direct.ty,
+            ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::named("Int"), ir::Type::named("Str")],
+            }
+        );
     }
 
     #[test]

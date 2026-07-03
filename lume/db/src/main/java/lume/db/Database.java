@@ -3,6 +3,7 @@ package lume.db;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.function.Function;
 
 import lume.core.LumeUnit;
 import lume.core.Result;
@@ -42,23 +43,23 @@ public final class Database implements QueryRunner {
         }
     }
 
-    public Query query(String sql) {
-        return new Query(this, sql);
+    public Query query(String sql, Object... values) {
+        return new Query(this, sql).bind(values);
     }
 
-    public Result<Long, DbError> update(String sql, Object... values) {
-        return query(sql).bind(values).update();
+    public RowQuery queryRow(String sql, Object... values) {
+        return new RowQuery(this, sql).bind(values);
     }
 
-    public Result<Long, DbError> insert(String sql, Object... values) {
-        return query(sql).bind(values).insert();
+    public Exec exec(String sql) {
+        return new Exec(this, sql);
     }
 
-    public Result<Long, DbError> delete(String sql, Object... values) {
-        return query(sql).bind(values).delete();
+    public Result<Long, DbError> exec(String sql, Object first, Object... rest) {
+        return new BoundExec(this, sql, SqlBindings.from(first, rest)).run();
     }
 
-    public Result<Transaction, DbError> begin() {
+    public Result<Transaction, DbError> beginTransaction() {
         try {
             var connection = openConnection();
             connection.setAutoCommit(false);
@@ -66,6 +67,47 @@ public final class Database implements QueryRunner {
         } catch (SQLException err) {
             return Jdbc.err(err);
         }
+    }
+
+    public Result<Transaction, DbError> begin() {
+        return beginTransaction();
+    }
+
+    public <T> Result<T, DbError> transaction(Function<Transaction, Result<T, DbError>> work) {
+        var opened = beginTransaction();
+        if (opened instanceof Result.Err<?, ?> err) {
+            @SuppressWarnings("unchecked")
+            var error = (DbError) err.error();
+            return new Result.Err<>(error);
+        }
+
+        @SuppressWarnings("unchecked")
+        var ok = (Result.Ok<Transaction, DbError>) opened;
+        var tx = ok.value();
+        try {
+            var result = work.apply(tx);
+            if (result instanceof Result.Err<?, ?>) {
+                tx.rollback();
+                return result;
+            }
+
+            var committed = tx.commit();
+            if (committed instanceof Result.Err<?, ?> err) {
+                @SuppressWarnings("unchecked")
+                var error = (DbError) err.error();
+                return new Result.Err<>(error);
+            }
+            return result;
+        } catch (RuntimeException err) {
+            tx.rollback();
+            throw err;
+        }
+    }
+
+    public Result<LumeUnit, DbError> transactionally(
+        Function<Transaction, Result<LumeUnit, DbError>> work
+    ) {
+        return transaction(work);
     }
 
     public Result<LumeUnit, DbError> close() {

@@ -1,6 +1,6 @@
 module examples/java_db
 
-use lume/db/{Database, DbError, Query, Row, Transaction}
+use lume/db/{BoundExec, Database, DbError, Exec, Query, Row, RowQuery, Transaction}
 
 class User {
     id Int
@@ -28,30 +28,38 @@ def readUser(row Row) Result[User, DbError] {
 
 def loadByIdAndName(db Database, id Int, name Str) Result[[Row], DbError] {
     db.query("select id, name from users where id = ? and name = ?")
-        .bindTuple((id, name))
-        .all()
+        .bind((id, name))
+        .rows()
+}
+
+def loadOneUser(db Database, id Int) Result[Option[User], DbError] {
+    db.queryRow("select id, name, active from users where id = ?")
+        .bind(id)
+        .map(row -> readUser(row))
 }
 
 def loadNamed(db Database, active Bool) Result[[Str], DbError] {
     params Map[Str, Any] = Map("active": active)
 
     db.query("select name from users where active = :active")
-        .bindNamed(params)
+        .bind(params)
         .map(row -> row.str("name"))
 }
 
 def activateUser(db Database, id Int) Result[Int, DbError] {
-    db.update("update users set active = ? where id = ?", true, id)
+    db.exec("update users set active = ? where id = ?", true, id)
+}
+
+def activateUserStaged(db Database, id Int) Result[Int, DbError] {
+    statement BoundExec = db.exec("update users set active = ? where id = ?").bind(true, id)
+    statement.run()
 }
 
 def replaceUser(db Database, id Int, name Str) Result[Unit, DbError] {
-    tx Transaction = try db.begin()
-    deleted Int = try tx.delete("delete from users where id = ?", id)
-    inserted Int = try tx.insert("insert into users(id, name, active) values (?, ?, ?)", id, name, true)
+    db.transactionally(tx -> {
+        deleted Int = try tx.exec("delete from users where id = ?", id)
+        inserted Int = try tx.exec("insert into users(id, name, active) values (?, ?, ?)", id, name, true)
 
-    if inserted > 0 {
-        return tx.commit()
-    }
-
-    tx.rollback()
+        Ok(())
+    })
 }

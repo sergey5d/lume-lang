@@ -8,35 +8,43 @@ import lume.core.Result;
 
 public final class Transaction implements QueryRunner {
     private final Connection connection;
-    private Boolean closed = false;
+    private State state = State.OPEN;
+    private DbError rollbackOnly;
 
     Transaction(Connection connection) {
         this.connection = connection;
     }
 
-    public Query query(String sql) {
-        return new Query(this, sql);
+    public Query query(String sql, Object... values) {
+        return new Query(this, sql).bind(values);
     }
 
-    public Result<Long, DbError> update(String sql, Object... values) {
-        return query(sql).bind(values).update();
+    public RowQuery queryRow(String sql, Object... values) {
+        return new RowQuery(this, sql).bind(values);
     }
 
-    public Result<Long, DbError> insert(String sql, Object... values) {
-        return query(sql).bind(values).insert();
+    public Exec exec(String sql) {
+        return new Exec(this, sql);
     }
 
-    public Result<Long, DbError> delete(String sql, Object... values) {
-        return query(sql).bind(values).delete();
+    public Result<Long, DbError> exec(String sql, Object first, Object... rest) {
+        return new BoundExec(this, sql, SqlBindings.from(first, rest)).run();
     }
 
     public Result<LumeUnit, DbError> commit() {
-        if (closed) {
-            return Jdbc.err("transaction is already closed");
+        if (state == State.COMMITTED) {
+            return Jdbc.ok(LumeUnit.INSTANCE);
+        }
+        if (state == State.ROLLED_BACK) {
+            return Jdbc.err("transaction has already been rolled back");
+        }
+        if (rollbackOnly != null) {
+            rollback();
+            return Jdbc.err("transaction is marked rollback-only: " + rollbackOnly.message());
         }
         try {
             connection.commit();
-            closeConnection();
+            closeConnection(State.COMMITTED);
             return Jdbc.ok(LumeUnit.INSTANCE);
         } catch (SQLException err) {
             return Jdbc.err(err);
@@ -44,12 +52,12 @@ public final class Transaction implements QueryRunner {
     }
 
     public Result<LumeUnit, DbError> rollback() {
-        if (closed) {
-            return Jdbc.err("transaction is already closed");
+        if (state == State.COMMITTED || state == State.ROLLED_BACK) {
+            return Jdbc.ok(LumeUnit.INSTANCE);
         }
         try {
             connection.rollback();
-            closeConnection();
+            closeConnection(State.ROLLED_BACK);
             return Jdbc.ok(LumeUnit.INSTANCE);
         } catch (SQLException err) {
             return Jdbc.err(err);
@@ -57,35 +65,36 @@ public final class Transaction implements QueryRunner {
     }
 
     public Result<LumeUnit, DbError> close() {
-        if (closed) {
-            return Jdbc.ok(LumeUnit.INSTANCE);
-        }
-        try {
-            connection.rollback();
-            closeConnection();
-            return Jdbc.ok(LumeUnit.INSTANCE);
-        } catch (SQLException err) {
-            return Jdbc.err(err);
-        }
+        return rollback();
     }
 
     @Override
     public <T> Result<T, DbError> run(SqlWork<T> work) {
-        if (closed) {
+        if (state != State.OPEN) {
             return Jdbc.err("transaction is already closed");
+        }
+        if (rollbackOnly != null) {
+            return Jdbc.err("transaction is marked rollback-only: " + rollbackOnly.message());
         }
         try {
             return Jdbc.ok(work.run(connection));
         } catch (SQLException err) {
-            return Jdbc.err(err);
+            rollbackOnly = DbError.from(err);
+            return new Result.Err<>(rollbackOnly);
         }
     }
 
-    private void closeConnection() throws SQLException {
+    private void closeConnection(State finalState) throws SQLException {
         try {
             connection.close();
         } finally {
-            closed = true;
+            state = finalState;
         }
+    }
+
+    private enum State {
+        OPEN,
+        COMMITTED,
+        ROLLED_BACK,
     }
 }
