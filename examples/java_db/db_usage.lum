@@ -1,0 +1,57 @@
+module examples/java_db
+
+use lume/db/{Database, DbError, Query, Row, Transaction}
+
+class User {
+    id Int
+    name Str
+    active Bool
+}
+
+def loadActiveUsers(db Database) Result[[User], DbError] {
+    db.query("select id, name, active from users where active = ?")
+        .bind(true)
+        .map(row -> readUser(row))
+}
+
+def readUser(row Row) Result[User, DbError] {
+    id Int = try row.intValue("id")
+    name Str = try row.str("name")
+    active Bool = try row.bool("active")
+
+    Ok(User {
+        id: id
+        name: name
+        active: active
+    })
+}
+
+def loadByIdAndName(db Database, id Int, name Str) Result[[Row], DbError] {
+    db.query("select id, name from users where id = ? and name = ?")
+        .bindTuple((id, name))
+        .all()
+}
+
+def loadNamed(db Database, active Bool) Result[[Str], DbError] {
+    params Map[Str, Any] = Map("active": active)
+
+    db.query("select name from users where active = :active")
+        .bindNamed(params)
+        .map(row -> row.str("name"))
+}
+
+def activateUser(db Database, id Int) Result[Int, DbError] {
+    db.update("update users set active = ? where id = ?", true, id)
+}
+
+def replaceUser(db Database, id Int, name Str) Result[Unit, DbError] {
+    tx Transaction = try db.begin()
+    deleted Int = try tx.delete("delete from users where id = ?", id)
+    inserted Int = try tx.insert("insert into users(id, name, active) values (?, ?, ?)", id, name, true)
+
+    if inserted > 0 {
+        return tx.commit()
+    }
+
+    tx.rollback()
+}

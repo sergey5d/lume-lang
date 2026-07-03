@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*argument has type '_' but parameter expects '_'.*
+# .*argument has captured element type of List\[_\], but parameter expects a different captured element type of List\[_\].*
 
 def same[T](left T, right T) Unit {}
 

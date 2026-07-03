@@ -1640,6 +1640,28 @@ impl<'a> FunctionEmitter<'a> {
                     let receiver = self.emit_operand(receiver)?;
                     Some(format!("java.util.Objects.equals({receiver}, {other})"))
                 }
+                "isSuccess" | "isSet" | "isDefined" if args.is_empty() => {
+                    let receiver = self.emit_operand(receiver)?;
+                    Some(format!(
+                        "lume.core.LumeRuntime.extractSuccessIsSet({receiver})"
+                    ))
+                }
+                "orPanic" if args.is_empty() => {
+                    let receiver_expr = self.emit_operand(receiver)?;
+                    if self.operand_type(receiver).is_some_and(|ty| {
+                        matches!(
+                            ty,
+                            ir::Type::Named { ref name, .. }
+                                if matches!(name.as_str(), "Option" | "Result" | "Either")
+                        )
+                    }) {
+                        Some(format!("{receiver_expr}.orPanic()"))
+                    } else {
+                        Some(format!(
+                            "lume.core.LumeRuntime.extractSuccessValue({receiver_expr})"
+                        ))
+                    }
+                }
                 _ => {
                     let params = self
                         .method_param_types_for_receiver(receiver, method, args.len())

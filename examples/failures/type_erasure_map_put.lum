@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*argument has type 'Int' but parameter expects '_'.*
+# .*argument has type 'Int' but parameter expects captured key type of Map\[_, Str\].*
 
 def intStrMap() Map[Int, Str] = Map()
 

@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*cannot assign value of type '_' to binding 'concrete' of type 'SomeType'.*
+# .*cannot assign value of type captured element type of List\[_\] to binding 'concrete' of type 'SomeType'.*
 
 class SomeType {
     value Int

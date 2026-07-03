@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*argument has type 'Int' but parameter expects '_'.*
+# .*argument has type 'Int' but parameter expects captured element type of List\[_\].*
 
 def main() Unit {
     values List[_] = List(1, 2, 3)

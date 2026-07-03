@@ -756,6 +756,13 @@ fn java_non_array_type_to_lume_type_ref(src: &str, ctx: &JavaTypeContext<'_>) ->
         .map(|arg| java_type_to_lume_type_ref(arg, ctx))
         .collect::<Option<Vec<_>>>()?;
 
+    if let Some(function) = java_function_type_to_lume_type_ref(base, &args, ctx) {
+        return Some(function);
+    }
+    if let Some(tuple) = java_tuple_type_to_lume_type_ref(base, &args, ctx) {
+        return Some(tuple);
+    }
+
     if let Some(name) = java_builtin_lume_type_name(base, args.len()) {
         return Some(TypeRef::Named {
             name: name.to_string(),
@@ -783,9 +790,65 @@ fn java_non_array_type_to_lume_type_ref(src: &str, ctx: &JavaTypeContext<'_>) ->
     Some(any_type_ref(ctx))
 }
 
+fn java_function_type_to_lume_type_ref(
+    base: &str,
+    args: &[TypeRef],
+    ctx: &JavaTypeContext<'_>,
+) -> Option<TypeRef> {
+    match (base, args) {
+        ("java.util.function.Supplier" | "Supplier", [ret]) => Some(TypeRef::Function {
+            params: Vec::new(),
+            ret: Box::new(ret.clone()),
+            span: ctx.span,
+        }),
+        ("java.util.function.Function" | "Function", [param, ret]) => Some(TypeRef::Function {
+            params: vec![param.clone()],
+            ret: Box::new(ret.clone()),
+            span: ctx.span,
+        }),
+        ("java.util.function.BiFunction" | "BiFunction", [left, right, ret]) => {
+            Some(TypeRef::Function {
+                params: vec![left.clone(), right.clone()],
+                ret: Box::new(ret.clone()),
+                span: ctx.span,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn java_tuple_type_to_lume_type_ref(
+    base: &str,
+    args: &[TypeRef],
+    ctx: &JavaTypeContext<'_>,
+) -> Option<TypeRef> {
+    let arity = match base {
+        "lume.core.Tuple2" | "Tuple2" => 2,
+        "lume.core.Tuple3" | "Tuple3" => 3,
+        "lume.core.Tuple4" | "Tuple4" => 4,
+        "lume.core.Tuple5" | "Tuple5" => 5,
+        "lume.core.Tuple6" | "Tuple6" => 6,
+        "lume.core.Tuple7" | "Tuple7" => 7,
+        "lume.core.Tuple8" | "Tuple8" => 8,
+        _ => return None,
+    };
+    if args.len() != arity {
+        return None;
+    }
+    Some(TypeRef::Tuple {
+        fields: args
+            .iter()
+            .cloned()
+            .map(|ty| crate::ast::TupleTypeField { ty, span: ctx.span })
+            .collect(),
+        span: ctx.span,
+    })
+}
+
 fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static str> {
     match base {
         "void" => Some("Unit"),
+        "lume.core.LumeUnit" | "LumeUnit" if arg_count == 0 => Some("Unit"),
         "java.lang.Object" | "Object" if arg_count == 0 => Some("Any"),
         "boolean" | "java.lang.Boolean" | "Boolean" => Some("Bool"),
         "byte" | "short" | "int" | "java.lang.Byte" | "java.lang.Short" | "java.lang.Integer"
@@ -798,6 +861,7 @@ fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static 
         "java.util.List"
         | "java.util.Collection"
         | "java.lang.Iterable"
+        | "lume.core.LumeList"
         | "List"
         | "Collection"
         | "Iterable"
@@ -805,9 +869,13 @@ fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static 
         {
             Some("List")
         }
-        "java.util.Set" | "Set" if arg_count == 1 => Some("Set"),
-        "java.util.Map" | "Map" if arg_count == 2 => Some("Map"),
-        "java.util.Optional" | "Optional" if arg_count == 1 => Some("Option"),
+        "lume.core.LumeIterator" | "Iterator" if arg_count == 1 => Some("Iterator"),
+        "java.util.Set" | "lume.core.LumeSet" | "Set" if arg_count == 1 => Some("Set"),
+        "java.util.Map" | "lume.core.LumeMap" | "Map" if arg_count == 2 => Some("Map"),
+        "java.util.Optional" | "lume.core.Option" | "Option" if arg_count == 1 => Some("Option"),
+        "lume.core.Result" | "Result" if arg_count == 2 => Some("Result"),
+        "lume.core.Either" | "Either" if arg_count == 2 => Some("Either"),
+        "lume.core.LumeArray" | "Array" if arg_count == 1 => Some("Array"),
         _ => None,
     }
 }
@@ -963,7 +1031,80 @@ mod tests {
     };
 
     use super::*;
-    use crate::run_path;
+    use crate::{
+        run_path,
+        source::{LineColumn, Span},
+    };
+
+    #[test]
+    fn maps_lume_core_java_boundary_types_back_to_lume_types() {
+        let span = Span::new(0, 0, LineColumn::new(1, 1), LineColumn::new(1, 1));
+        let local_type_names = HashMap::from([
+            ("lume.db.DbError".to_string(), "DbError".to_string()),
+            ("lume.db.Row".to_string(), "Row".to_string()),
+        ]);
+        let ctx = JavaTypeContext {
+            type_params: HashSet::from(["T".to_string()]),
+            local_type_names: &local_type_names,
+            current_package: "lume.db",
+            allow_cross_package_refs: false,
+            span,
+        };
+
+        let rows = java_type_to_lume_type_ref(
+            "lume.core.Result<lume.core.LumeList<lume.db.Row>, lume.db.DbError>",
+            &ctx,
+        )
+        .expect("rows result type");
+        assert_eq!(
+            rows,
+            TypeRef::Named {
+                name: "Result".to_string(),
+                args: vec![
+                    TypeRef::Named {
+                        name: "List".to_string(),
+                        args: vec![TypeRef::Named {
+                            name: "Row".to_string(),
+                            args: Vec::new(),
+                            span,
+                        }],
+                        span,
+                    },
+                    TypeRef::Named {
+                        name: "DbError".to_string(),
+                        args: Vec::new(),
+                        span,
+                    },
+                ],
+                span,
+            }
+        );
+
+        let mapper = java_type_to_lume_type_ref(
+            "java.util.function.Function<lume.db.Row, lume.core.Result<T, lume.db.DbError>>",
+            &ctx,
+        )
+        .expect("mapper type");
+        assert!(matches!(
+            mapper,
+            TypeRef::Function {
+                params,
+                ret,
+                ..
+            } if params.len() == 1 && matches!(ret.as_ref(), TypeRef::Named { name, .. } if name == "Result")
+        ));
+
+        let tuple =
+            java_type_to_lume_type_ref("lume.core.Tuple2<java.lang.Long, java.lang.String>", &ctx)
+                .expect("tuple type");
+        assert!(matches!(
+            tuple,
+            TypeRef::Tuple { fields, .. }
+                if fields.len() == 2
+                    && matches!(fields[0].ty, TypeRef::Named { ref name, .. } if name == "Int")
+                    && matches!(fields[1].ty, TypeRef::Named { ref name, .. } if name == "Str")
+        ));
+    }
 
     #[test]
     fn generates_declaration_skeletons_for_checked_program() {

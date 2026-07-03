@@ -711,6 +711,7 @@ struct Checker<'a> {
     defer_depth: usize,
     lifted_segment_depth: usize,
     next_capture_id: usize,
+    capture_labels: HashMap<usize, String>,
     globals: HashMap<String, ValueInfo>,
 }
 
@@ -729,6 +730,7 @@ impl<'a> Checker<'a> {
             defer_depth: 0,
             lifted_segment_depth: 0,
             next_capture_id: 0,
+            capture_labels: HashMap::new(),
             globals: HashMap::new(),
         }
     }
@@ -786,10 +788,10 @@ impl<'a> Checker<'a> {
                         binding.span,
                         "invalid_binding_type",
                         format!(
-                            "cannot assign value of type '{}' to binding '{}' of type '{}'",
-                            inferred.describe(),
+                            "cannot assign value of type {} to binding '{}' of type {}",
+                            self.diagnostic_type_phrase(&inferred),
                             binding.name,
-                            expected.describe()
+                            self.diagnostic_type_phrase(&expected)
                         ),
                     );
                 }
@@ -1283,20 +1285,35 @@ impl<'a> Checker<'a> {
     }
 
     fn fresh_capture(&mut self) -> Ty {
+        self.fresh_capture_with_label(None)
+    }
+
+    fn fresh_capture_with_label(&mut self, label: Option<String>) -> Ty {
         let id = self.next_capture_id;
         self.next_capture_id += 1;
+        if let Some(label) = label {
+            self.capture_labels.insert(id, label);
+        }
         Ty::Capture(id)
     }
 
     fn capture_wildcards(&mut self, ty: Ty) -> Ty {
         match ty {
             Ty::Wildcard => self.fresh_capture(),
-            Ty::Named(name, args) => Ty::Named(
-                name,
-                args.into_iter()
-                    .map(|arg| self.capture_wildcards(arg))
-                    .collect(),
-            ),
+            Ty::Named(name, args) => {
+                let labels = wildcard_capture_labels(&name, &args);
+                Ty::Named(
+                    name,
+                    args.into_iter()
+                        .enumerate()
+                        .map(|(index, arg)| match arg {
+                            Ty::Wildcard => self
+                                .fresh_capture_with_label(labels.get(index).and_then(Clone::clone)),
+                            other => self.capture_wildcards(other),
+                        })
+                        .collect(),
+                )
+            }
             Ty::Tuple(items) => Ty::Tuple(
                 items
                     .into_iter()
@@ -2247,10 +2264,10 @@ impl<'a> Checker<'a> {
                             binding.span,
                             "invalid_binding_type",
                             format!(
-                                "cannot assign value of type '{}' to binding '{}' of type '{}'",
-                                inferred.describe(),
+                                "cannot assign value of type {} to binding '{}' of type {}",
+                                self.diagnostic_type_phrase(&inferred),
                                 binding.name,
-                                expected.describe()
+                                self.diagnostic_type_phrase(&expected)
                             ),
                         );
                     }
@@ -2330,9 +2347,9 @@ impl<'a> Checker<'a> {
                     return_stmt.span,
                     "invalid_return_type",
                     format!(
-                        "return has type '{}' but enclosing callable expects '{}'",
-                        actual.describe(),
-                        expected.describe()
+                        "return has type {} but enclosing callable expects {}",
+                        self.diagnostic_type_phrase(&actual),
+                        self.diagnostic_type_phrase(&expected)
                     ),
                 );
                 actual
@@ -3124,9 +3141,9 @@ impl<'a> Checker<'a> {
                 target.span(),
                 "invalid_assignment_type",
                 format!(
-                    "cannot assign value of type '{}' to target of type '{}'",
-                    actual.describe(),
-                    expected.describe()
+                    "cannot assign value of type {} to target of type {}",
+                    self.diagnostic_type_phrase(&actual),
+                    self.diagnostic_type_phrase(&expected)
                 ),
             );
             if !matches!(assignment.operator, AssignOp::Assign | AssignOp::Reassign)
@@ -4859,10 +4876,11 @@ impl<'a> Checker<'a> {
                         expected.describe()
                     )
                 } else {
-                    format!(
-                        "argument has type '{}' but parameter expects '{}'",
-                        actual.describe(),
-                        expected.describe()
+                    self.diagnostic_type_mismatch_message(
+                        "argument",
+                        &actual,
+                        "parameter",
+                        &expected,
                     )
                 },
             );
@@ -5369,10 +5387,11 @@ impl<'a> Checker<'a> {
                     &expected,
                     arg_span,
                     "invalid_argument_type",
-                    format!(
-                        "constructor argument has type '{}' but expects '{}'",
-                        actual.describe(),
-                        expected.describe()
+                    self.diagnostic_type_mismatch_message(
+                        "constructor argument",
+                        &actual,
+                        "constructor parameter",
+                        &expected,
                     ),
                 );
             }
@@ -5431,17 +5450,18 @@ impl<'a> Checker<'a> {
                 arg_span,
                 "invalid_argument_type",
                 if field_name.is_empty() {
-                    format!(
-                        "constructor argument has type '{}' but expects '{}'",
-                        actual.describe(),
-                        expected.describe()
+                    self.diagnostic_type_mismatch_message(
+                        "constructor argument",
+                        &actual,
+                        "constructor parameter",
+                        &materialize_type(&expected),
                     )
                 } else {
                     format!(
-                        "argument for '{}' has type '{}' but expects '{}'",
+                        "argument for '{}' has type {} but expects {}",
                         field_name,
-                        actual.describe(),
-                        expected.describe()
+                        self.diagnostic_type_phrase(&actual),
+                        self.diagnostic_type_phrase(&materialize_type(&expected))
                     )
                 },
             );
@@ -7175,6 +7195,40 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn diagnostic_type_phrase(&self, ty: &Ty) -> String {
+        match ty {
+            Ty::Capture(id) => self
+                .capture_labels
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| "captured unknown type".to_string()),
+            _ => format!("'{}'", ty.describe()),
+        }
+    }
+
+    fn diagnostic_type_mismatch_message(
+        &self,
+        subject: &str,
+        actual: &Ty,
+        expected_subject: &str,
+        expected: &Ty,
+    ) -> String {
+        if let (Some(actual_id), Some(expected_id)) = (capture_id(actual), capture_id(expected)) {
+            if actual_id != expected_id {
+                return format!(
+                    "{subject} has {}, but {expected_subject} expects a different {}",
+                    self.diagnostic_type_phrase(actual),
+                    self.diagnostic_type_phrase(expected)
+                );
+            }
+        }
+        format!(
+            "{subject} has type {} but {expected_subject} expects {}",
+            self.diagnostic_type_phrase(actual),
+            self.diagnostic_type_phrase(expected)
+        )
+    }
+
     fn require_bool(&mut self, ty: &Ty, span: crate::source::Span, message: &str) {
         if !ty.is_bool() && !matches!(ty, Ty::Unknown) {
             self.add_error("invalid_condition_type", message, span);
@@ -8159,6 +8213,45 @@ fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
         }
         _ => false,
     }
+}
+
+fn capture_id(ty: &Ty) -> Option<usize> {
+    match ty {
+        Ty::Capture(id) => Some(*id),
+        _ => None,
+    }
+}
+
+fn wildcard_capture_labels(type_name: &str, args: &[Ty]) -> Vec<Option<String>> {
+    let rendered_args = args.iter().map(Ty::describe).collect::<Vec<_>>();
+    let rendered = |index: usize| -> String {
+        let mut parts = rendered_args.clone();
+        if let Some(slot) = parts.get_mut(index) {
+            *slot = "_".to_string();
+        }
+        format!("{type_name}[{}]", parts.join(", "))
+    };
+
+    args.iter()
+        .enumerate()
+        .map(|(index, arg)| {
+            if !matches!(arg, Ty::Wildcard) {
+                return None;
+            }
+            match (type_name, index, args.len()) {
+                ("List" | "Array" | "Set", 0, 1) => {
+                    Some(format!("captured element type of {}", rendered(index)))
+                }
+                ("Map", 0, 2) => Some(format!("captured key type of {}", rendered(index))),
+                ("Map", 1, 2) => Some(format!("captured value type of {}", rendered(index))),
+                _ => Some(format!(
+                    "captured type argument {} of {}",
+                    index + 1,
+                    rendered(index)
+                )),
+            }
+        })
+        .collect()
 }
 
 fn type_args_assignable(type_name: &str, actual_args: &[Ty], expected_args: &[Ty]) -> bool {
