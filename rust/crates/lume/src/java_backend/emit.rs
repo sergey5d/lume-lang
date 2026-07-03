@@ -5,8 +5,9 @@ use std::{
 
 use crate::{
     ast::{self, TypeKind},
-    backend::{BackendBundle, DescriptorOrigin},
+    backend::BackendBundle,
     ir::{self, FunctionKind},
+    java_backend::JavaExternalClass,
 };
 
 pub(crate) struct JavaSource {
@@ -14,9 +15,12 @@ pub(crate) struct JavaSource {
     pub(crate) contents: String,
 }
 
-pub(crate) fn render_declaration_skeletons(bundle: &BackendBundle) -> Vec<JavaSource> {
+pub(crate) fn render_declaration_skeletons(
+    bundle: &BackendBundle,
+    external_classes: &HashMap<String, JavaExternalClass>,
+) -> Vec<JavaSource> {
     let package = JavaPackage::from_module(bundle.ir.module.as_deref());
-    let names = JavaNames::from_bundle(bundle);
+    let names = JavaNames::from_external_classes(external_classes);
     let mut sources = Vec::new();
 
     sources.push(JavaSource {
@@ -2496,26 +2500,14 @@ struct JavaNames {
 }
 
 impl JavaNames {
-    fn from_bundle(bundle: &BackendBundle) -> Self {
-        let java_types = bundle
-            .descriptors
-            .types
+    fn from_external_classes(external_classes: &HashMap<String, JavaExternalClass>) -> Self {
+        let java_types = external_classes
             .iter()
-            .filter_map(|ty| match &ty.origin {
-                DescriptorOrigin::Java { qualified_name } => {
-                    Some((ty.name.clone(), qualified_name.clone()))
-                }
-                DescriptorOrigin::Lume => None,
-            })
+            .map(|(name, class)| (name.clone(), class.qualified_name.clone()))
             .collect();
-        let java_type_param_counts = bundle
-            .descriptors
-            .types
+        let java_type_param_counts = external_classes
             .iter()
-            .filter_map(|ty| match &ty.origin {
-                DescriptorOrigin::Java { .. } => Some((ty.name.clone(), ty.type_params.len())),
-                DescriptorOrigin::Lume => None,
-            })
+            .map(|(name, class)| (name.clone(), class.type_params.len()))
             .collect();
         Self {
             java_types,

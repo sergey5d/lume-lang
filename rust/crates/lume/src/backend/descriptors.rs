@@ -1,4 +1,4 @@
-use crate::{ast::TypeKind, backend::externals::ExternalDescriptors, ir};
+use crate::{ast::TypeKind, ir};
 
 #[derive(Debug, Clone, Default)]
 pub struct BackendDescriptors {
@@ -43,7 +43,6 @@ pub struct DescriptorType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DescriptorOrigin {
     Lume,
-    Java { qualified_name: String },
 }
 
 #[derive(Debug, Clone)]
@@ -55,10 +54,6 @@ pub struct DescriptorField {
 
 impl BackendDescriptors {
     pub fn from_ir(program: &ir::Program) -> Self {
-        Self::from_ir_and_externals(program, &ExternalDescriptors::default())
-    }
-
-    pub fn from_ir_and_externals(program: &ir::Program, externals: &ExternalDescriptors) -> Self {
         let module = program
             .module
             .as_ref()
@@ -80,12 +75,11 @@ impl BackendDescriptors {
             .map(|function| describe_function(program, function))
             .collect();
 
-        let mut types = program
+        let types = program
             .types
             .iter()
             .map(|ty| describe_type_def(program, ty))
             .collect::<Vec<_>>();
-        types.extend(externals.type_descriptors());
 
         Self {
             module,

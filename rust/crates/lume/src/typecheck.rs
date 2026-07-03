@@ -582,6 +582,7 @@ impl World {
                                 path: module.path.clone(),
                                 display_path: module.display_path.clone(),
                                 program: module.program.clone(),
+                                source: crate::resolver::ModuleSource::Source,
                                 imports: module.imports.clone(),
                                 symbol_imports: module.symbol_imports.clone(),
                                 dependencies: Vec::new(),

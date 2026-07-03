@@ -175,7 +175,7 @@ fn prepare_runtime_module(
     let mut program = module.program.clone();
     rewrite_program_for_runtime(&mut program, module, graph);
     program.imports.clear();
-    if !is_root {
+    if !is_root || module.source == crate::resolver::ModuleSource::Library {
         program.items.retain(
             |item| !matches!(item, ast::Item::Function(function) if function.name == "main"),
         );

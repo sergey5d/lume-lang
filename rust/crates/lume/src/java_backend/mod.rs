@@ -9,12 +9,12 @@ mod emit;
 
 use crate::{
     Diagnostic,
-    ast::TypeRef,
-    backend::{ExternalDescriptors, bundle::build_backend_bundle_with_load_options},
-    resolver::{
-        JavaExternalCallable, JavaExternalClass, JavaExternalParam, LocatedDiagnostic,
-        ModuleLoadOptions, load_module_graph_with_options,
+    ast::{
+        FieldDecl, ImportDecl, Item, MethodDecl, ModuleDecl, Param, Program, TypeDecl, TypeKind,
+        TypeMember, TypeParam, TypeRef, Visibility,
     },
+    backend::bundle::build_backend_bundle_with_load_options,
+    resolver::{LibraryModule, LocatedDiagnostic, ModuleLoadOptions, parse_program_from_path},
 };
 
 #[derive(Debug, Clone)]
@@ -48,13 +48,7 @@ pub fn generate_java_path(
     options: JavaBackendOptions,
 ) -> Result<JavaBackendResult, String> {
     let path = path.as_ref();
-    let discovery_options = ModuleLoadOptions {
-        allow_unresolved_java_imports: true,
-        java_external_type_params: HashMap::new(),
-        java_external_classes: HashMap::new(),
-    };
-    let (discovery_graph, _) = load_module_graph_with_options(path, &discovery_options)?;
-    let discovered_externals = ExternalDescriptors::from_module_graph(&discovery_graph);
+    let discovered_externals = discover_java_external_symbols(path)?;
     let external_resolution = resolve_external_classes(&discovered_externals, &options)?;
     if !external_resolution.diagnostics.is_empty() {
         return Ok(JavaBackendResult {
@@ -64,9 +58,7 @@ pub fn generate_java_path(
     }
 
     let load_options = ModuleLoadOptions {
-        allow_unresolved_java_imports: true,
-        java_external_type_params: external_resolution.type_params,
-        java_external_classes: external_resolution.classes,
+        library_modules: external_resolution.library_modules.clone(),
     };
     let bundled = build_backend_bundle_with_load_options(path, &load_options)?;
     if !bundled.diagnostics.is_empty() {
@@ -80,7 +72,7 @@ pub fn generate_java_path(
         .bundle
         .expect("backend bundle after successful build");
     let mut written_files = Vec::new();
-    for source in emit::render_declaration_skeletons(&bundle) {
+    for source in emit::render_declaration_skeletons(&bundle, &external_resolution.classes) {
         let path = options.output_dir.join(source.relative_path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -98,14 +90,273 @@ pub fn generate_java_path(
 }
 
 #[derive(Debug, Clone, Default)]
+struct JavaExternalSymbols {
+    symbols: Vec<JavaExternalSymbol>,
+}
+
+#[derive(Debug, Clone)]
+struct JavaExternalSymbol {
+    module_path: String,
+    lume_name: String,
+    qualified_name: String,
+    source_path: String,
+    span: crate::source::Span,
+}
+
+#[derive(Debug, Clone, Default)]
 struct ExternalClassResolution {
     diagnostics: Vec<LocatedDiagnostic>,
-    type_params: HashMap<String, Vec<String>>,
+    library_modules: HashMap<String, LibraryModule>,
     classes: HashMap<String, JavaExternalClass>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct JavaExternalClass {
+    pub(crate) qualified_name: String,
+    pub(crate) kind: TypeKind,
+    pub(crate) type_params: Vec<String>,
+    with_bounds: Vec<TypeRef>,
+    constructors: Vec<JavaExternalCallable>,
+    methods: Vec<JavaExternalCallable>,
+}
+
+#[derive(Debug, Clone)]
+struct JavaExternalCallable {
+    name: String,
+    type_params: Vec<String>,
+    params: Vec<JavaExternalParam>,
+    return_type: Option<TypeRef>,
+}
+
+#[derive(Debug, Clone)]
+struct JavaExternalParam {
+    name: String,
+    ty: Option<TypeRef>,
+    variadic: bool,
+}
+
+fn discover_java_external_symbols(path: &Path) -> Result<JavaExternalSymbols, String> {
+    let mut discovered = JavaExternalSymbols::default();
+    let mut visited = HashSet::new();
+    discover_java_external_symbols_from_path(path, &mut visited, &mut discovered)?;
+    Ok(discovered)
+}
+
+fn discover_java_external_symbols_from_path(
+    path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    discovered: &mut JavaExternalSymbols,
+) -> Result<(), String> {
+    let abs = fs::canonicalize(path).map_err(|err| format!("resolve {}: {err}", path.display()))?;
+    if !visited.insert(abs.clone()) {
+        return Ok(());
+    }
+
+    let program = parse_program_from_path(&abs)?;
+    let base_dir = abs
+        .parent()
+        .ok_or_else(|| format!("resolve module base for {}", abs.display()))?;
+    for import in &program.imports {
+        let child_path = base_dir.join(format!("{}.lum", import.path));
+        if child_path.exists() {
+            discover_java_external_symbols_from_path(&child_path, visited, discovered)?;
+        } else {
+            collect_java_external_symbols_from_import(import, &abs, discovered);
+        }
+    }
+    Ok(())
+}
+
+fn collect_java_external_symbols_from_import(
+    import: &ImportDecl,
+    source_path: &Path,
+    discovered: &mut JavaExternalSymbols,
+) {
+    if import.single_name.is_some() || import.wildcard || import.symbols.is_empty() {
+        return;
+    }
+    let package = import.path.replace('/', ".");
+    for symbol in &import.symbols {
+        let qualified_name = format!("{package}.{}", symbol.name);
+        if discovered
+            .symbols
+            .iter()
+            .any(|existing| existing.qualified_name == qualified_name)
+        {
+            continue;
+        }
+        discovered.symbols.push(JavaExternalSymbol {
+            module_path: import.path.clone(),
+            lume_name: symbol.name.clone(),
+            qualified_name,
+            source_path: source_path.display().to_string(),
+            span: symbol.span,
+        });
+    }
+}
+
+fn java_library_modules(
+    externals: &JavaExternalSymbols,
+    classes_by_qualified: &HashMap<String, JavaExternalClass>,
+) -> HashMap<String, LibraryModule> {
+    let mut grouped = HashMap::<String, Vec<&JavaExternalSymbol>>::new();
+    for symbol in &externals.symbols {
+        if classes_by_qualified.contains_key(&symbol.qualified_name) {
+            grouped
+                .entry(symbol.module_path.clone())
+                .or_default()
+                .push(symbol);
+        }
+    }
+
+    grouped
+        .into_iter()
+        .map(|(module_path, symbols)| {
+            let span = symbols
+                .first()
+                .map(|symbol| symbol.span)
+                .expect("grouped java library module has at least one symbol");
+            let mut seen = HashSet::new();
+            let items = symbols
+                .into_iter()
+                .filter(|symbol| seen.insert(symbol.lume_name.clone()))
+                .filter_map(|symbol| {
+                    classes_by_qualified
+                        .get(&symbol.qualified_name)
+                        .map(|class| {
+                            Item::Type(java_library_type_decl(
+                                &symbol.lume_name,
+                                class,
+                                symbol.span,
+                            ))
+                        })
+                })
+                .collect();
+            (
+                module_path.clone(),
+                LibraryModule {
+                    program: Program {
+                        module: Some(ModuleDecl {
+                            name: module_path,
+                            span,
+                        }),
+                        imports: Vec::new(),
+                        items,
+                        span: Some(span),
+                    },
+                },
+            )
+        })
+        .collect()
+}
+
+fn java_library_type_decl(
+    name: &str,
+    external_class: &JavaExternalClass,
+    span: crate::source::Span,
+) -> TypeDecl {
+    TypeDecl {
+        annotations: Vec::new(),
+        visibility: Visibility::Default,
+        kind: external_class.kind,
+        name: name.to_string(),
+        type_params: external_class
+            .type_params
+            .iter()
+            .map(|name| TypeParam {
+                name: name.clone(),
+                bounds: Vec::new(),
+                span,
+            })
+            .collect(),
+        with_bounds: external_class.with_bounds.clone(),
+        members: java_library_members(external_class, span),
+        span,
+    }
+}
+
+fn java_library_members(
+    external_class: &JavaExternalClass,
+    span: crate::source::Span,
+) -> Vec<TypeMember> {
+    if external_class.kind == TypeKind::Annotation {
+        return external_class
+            .methods
+            .iter()
+            .filter_map(|method| java_library_annotation_field(method, span))
+            .collect();
+    }
+    external_class
+        .constructors
+        .iter()
+        .map(|constructor| java_library_method("new", constructor, None, span))
+        .chain(external_class.methods.iter().map(|method| {
+            java_library_method(
+                method.name.as_str(),
+                method,
+                method.return_type.clone(),
+                span,
+            )
+        }))
+        .collect()
+}
+
+fn java_library_annotation_field(
+    callable: &JavaExternalCallable,
+    span: crate::source::Span,
+) -> Option<TypeMember> {
+    if !callable.params.is_empty() {
+        return None;
+    }
+    Some(TypeMember::Field(FieldDecl {
+        annotations: Vec::new(),
+        visibility: Visibility::Default,
+        mutable: false,
+        name: callable.name.clone(),
+        ty: callable.return_type.clone(),
+        initializer: None,
+        span,
+    }))
+}
+
+fn java_library_method(
+    name: &str,
+    callable: &JavaExternalCallable,
+    return_type: Option<TypeRef>,
+    span: crate::source::Span,
+) -> TypeMember {
+    TypeMember::Method(MethodDecl {
+        annotations: Vec::new(),
+        visibility: Visibility::Default,
+        name: name.to_string(),
+        type_params: callable
+            .type_params
+            .iter()
+            .map(|name| TypeParam {
+                name: name.clone(),
+                bounds: Vec::new(),
+                span,
+            })
+            .collect(),
+        params: callable
+            .params
+            .iter()
+            .map(|param| Param {
+                name: param.name.clone(),
+                ty: param.ty.clone(),
+                initializer: None,
+                variadic: param.variadic,
+                span,
+            })
+            .collect(),
+        return_type,
+        body: None,
+        span,
+    })
+}
+
 fn resolve_external_classes(
-    externals: &ExternalDescriptors,
+    externals: &JavaExternalSymbols,
     options: &JavaBackendOptions,
 ) -> Result<ExternalClassResolution, String> {
     let classpath_entries = effective_java_classpath(options);
@@ -114,14 +365,13 @@ fn resolve_external_classes(
     let local_type_names = externals
         .symbols
         .iter()
-        .filter(|symbol| matches!(symbol.kind, crate::backend::ExternalSymbolKind::Type))
-        .map(|symbol| (symbol.qualified_name.clone(), symbol.local_name.clone()))
+        .map(|symbol| (symbol.qualified_name.clone(), symbol.lume_name.clone()))
         .collect::<HashMap<_, _>>();
     let mut diagnostics = Vec::new();
-    let mut type_params = HashMap::new();
-    let mut classes = HashMap::new();
+    let mut classes_by_qualified = HashMap::new();
+    let mut seen = HashSet::new();
     for symbol in &externals.symbols {
-        if !matches!(symbol.kind, crate::backend::ExternalSymbolKind::Type) {
+        if !seen.insert(symbol.qualified_name.clone()) {
             continue;
         }
         if !index.could_contain(&symbol.qualified_name) {
@@ -138,16 +388,23 @@ fn resolve_external_classes(
             diagnostics.push(missing_java_class_diagnostic(symbol));
             continue;
         };
-        type_params.insert(
-            symbol.qualified_name.clone(),
-            descriptor.class.type_params.clone(),
-        );
-        classes.insert(symbol.qualified_name.clone(), descriptor.class);
+        classes_by_qualified.insert(symbol.qualified_name.clone(), descriptor.class);
     }
-    flatten_inherited_java_methods(&mut classes, &local_type_names);
+    flatten_inherited_java_methods(&mut classes_by_qualified, &local_type_names);
+    let classes = externals
+        .symbols
+        .iter()
+        .filter_map(|symbol| {
+            classes_by_qualified
+                .get(&symbol.qualified_name)
+                .cloned()
+                .map(|class| (symbol.lume_name.clone(), class))
+        })
+        .collect::<HashMap<_, _>>();
+    let library_modules = java_library_modules(externals, &classes_by_qualified);
     Ok(ExternalClassResolution {
         diagnostics,
-        type_params,
+        library_modules,
         classes,
     })
 }
@@ -285,7 +542,7 @@ fn substitute_java_type_ref(ty: &TypeRef, subst: &HashMap<String, TypeRef>) -> T
     }
 }
 
-fn missing_java_class_diagnostic(symbol: &crate::backend::ExternalSymbol) -> LocatedDiagnostic {
+fn missing_java_class_diagnostic(symbol: &JavaExternalSymbol) -> LocatedDiagnostic {
     LocatedDiagnostic {
         path: symbol.source_path.clone(),
         diagnostic: Diagnostic::error(
@@ -510,6 +767,7 @@ fn parse_javap_class(
     }
 
     JavaExternalClass {
+        qualified_name: qualified_name.to_string(),
         kind,
         type_params,
         with_bounds,
