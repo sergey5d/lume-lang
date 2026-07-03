@@ -190,17 +190,21 @@ profile Option[{ id Int, name Str }] = lift {
 }
 
 pair Result[(Int, Str), Str] = lift (okId(), okName())
+
+spreadProfile Option[{ id Int, name Str }] = lift {
+    ...optionParts
+}
 ```
 
 Rules:
 
 - `lift { ... }` accepts named shape fields only
+- shape spread is allowed; spread fields are checked as lifted members in source order
 - `lift (...)` accepts tuple literals
 - every member must be `Option[T]`, `Result[T, E]`, or `Either[L, T]`
 - all members must use the same wrapper family
 - `Result` error types and `Either` left types must be mutually compatible
 - empty shapes and tuples are rejected because the wrapper family cannot be inferred
-- shape spread inside `lift` is not supported yet; list lifted fields explicitly
 
 The result keeps the same wrapper family:
 

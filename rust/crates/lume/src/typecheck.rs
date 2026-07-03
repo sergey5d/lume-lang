@@ -3797,35 +3797,30 @@ impl<'a> Checker<'a> {
                 let mut lifted_fields = Vec::new();
                 for field in fields {
                     let Some(name) = &field.name else {
-                        self.check_expr(&field.value);
-                        self.add_error(
-                            "invalid_lift",
-                            "lift does not support shape spread entries yet; list lifted fields explicitly",
-                            field.span,
-                        );
+                        let spread_ty = self.check_expr(&field.value);
+                        if let Some(spread_fields) =
+                            self.record_spread_shape_fields(&spread_ty, field.span)
+                        {
+                            for (name, member_ty) in spread_fields {
+                                if let Some(inner_ty) = self.check_lift_member_type(
+                                    &name,
+                                    &member_ty,
+                                    &mut family,
+                                    field.span,
+                                ) {
+                                    upsert_shape_field(&mut lifted_fields, name, inner_ty);
+                                }
+                            }
+                        }
                         continue;
                     };
 
                     let member_ty = self.check_expr(&field.value);
-                    if matches!(member_ty, Ty::Unknown) {
-                        lifted_fields.push((name.clone(), Ty::Unknown));
-                        continue;
-                    }
-                    let Some((member_family, inner_ty)) = self.unwrap_lifted_type(&member_ty)
+                    let Some(inner_ty) =
+                        self.check_lift_member_type(name, &member_ty, &mut family, field.span)
                     else {
-                        self.add_error(
-                            "invalid_lift",
-                            format!(
-                                "lift field '{}' must be Option[T], Result[T, E], or Either[L, T], got '{}'",
-                                name,
-                                member_ty.describe()
-                            ),
-                            field.span,
-                        );
                         continue;
                     };
-                    self.merge_lift_family(&mut family, member_family, &member_ty, field.span);
-
                     let field_ty = if let Some(annotated) = &field.ty {
                         let annotated_ty = self.ty_from_type_ref(annotated);
                         self.require_assignable(
@@ -3844,7 +3839,7 @@ impl<'a> Checker<'a> {
                     } else {
                         inner_ty
                     };
-                    lifted_fields.push((name.clone(), field_ty));
+                    upsert_shape_field(&mut lifted_fields, name.clone(), field_ty);
                 }
 
                 family
@@ -3905,6 +3900,32 @@ impl<'a> Checker<'a> {
                 Ty::Unknown
             }
         }
+    }
+
+    fn check_lift_member_type(
+        &mut self,
+        name: &str,
+        member_ty: &Ty,
+        family: &mut Option<LiftedFamily>,
+        span: crate::source::Span,
+    ) -> Option<Ty> {
+        if matches!(member_ty, Ty::Unknown) {
+            return Some(Ty::Unknown);
+        }
+        let Some((member_family, inner_ty)) = self.unwrap_lifted_type(member_ty) else {
+            self.add_error(
+                "invalid_lift",
+                format!(
+                    "lift field '{}' must be Option[T], Result[T, E], or Either[L, T], got '{}'",
+                    name,
+                    member_ty.describe()
+                ),
+                span,
+            );
+            return None;
+        };
+        self.merge_lift_family(family, member_family, member_ty, span);
+        Some(inner_ty)
     }
 
     fn merge_lift_family(
@@ -8283,6 +8304,13 @@ def main() Unit {
     profile Option[{ id Int, name Str }] = lift {
         id Int: maybeId()
         name Str: maybeName()
+    }
+    parts = {
+        id: maybeId()
+        name: maybeName()
+    }
+    spreadProfile Option[{ id Int, name Str }] = lift {
+        ...parts
     }
     pair Result[(Int, Str), Str] = lift (okId(), okName())
 }

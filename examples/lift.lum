@@ -5,6 +5,8 @@
 # missing-name
 # Ada 7
 # left-name
+# Ada 7
+# Grace 7
 
 def maybeId() Option[Int] = Some(7)
 
@@ -63,4 +65,21 @@ def main() Unit {
     }
     expect Left(leftMessage) = failedEither
     println(leftMessage)
+
+    optionParts = {
+        id: maybeId()
+        name: maybeName()
+    }
+    spreadProfile Option[{ id Int, name Str }] = lift {
+        ...optionParts
+    }
+    expect Some(spreadShape) = spreadProfile
+    println("${spreadShape.name} ${spreadShape.id}")
+
+    overwritten Option[{ id Int, name Str }] = lift {
+        ...optionParts
+        name: Some("Grace")
+    }
+    expect Some(overwrittenShape) = overwritten
+    println("${overwrittenShape.name} ${overwrittenShape.id}")
 }
