@@ -210,19 +210,11 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
         },
         ast::Expr::RecordUpdate {
             receiver,
-            updates,
+            patch,
             span,
         } => core::Expr::RecordUpdate {
             receiver: Box::new(desugar_expr(receiver)),
-            updates: updates
-                .iter()
-                .map(|arg| core::CallArg {
-                    name: arg.name.clone(),
-                    ty: arg.ty.clone(),
-                    value: desugar_expr(&arg.value),
-                    span: arg.span,
-                })
-                .collect(),
+            patch: Box::new(desugar_expr(patch)),
             span: *span,
         },
         ast::Expr::RecordLiteral {

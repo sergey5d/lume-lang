@@ -572,7 +572,7 @@ pub enum RValue {
     },
     RecordUpdate {
         base: Operand,
-        updates: Vec<NamedOperand>,
+        patch: Operand,
     },
     Construct {
         ty: Type,
@@ -640,7 +640,6 @@ pub enum UnaryOp {
 /// Supported binary operators in lowered code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
-    RecordMerge,
     Add,
     Sub,
     Mul,

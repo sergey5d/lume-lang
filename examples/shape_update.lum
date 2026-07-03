@@ -1,6 +1,7 @@
 # EXPECT:
 # original 10 x
 # updated 42 y
+# updated2 43 z
 
 class Amount {
     amount Int
@@ -13,7 +14,13 @@ def main() Unit {
         amount: 42
         description: "y"
     }
+    patch = {
+        amount: 43
+        description: "z"
+    }
+    updated2 = value :< patch
 
     println("original " + value.amount + " " + value.description)
     println("updated " + updated.amount + " " + updated.description)
+    println("updated2 " + updated2.amount + " " + updated2.description)
 }

@@ -657,10 +657,26 @@ impl<'a> Parser<'a> {
                 RecordEntry::Positional { span: value.span() }
             };
             entries.push(entry);
+            let separated_by_comma = self.match_token(TokenKind::Comma);
+            let separated_by_newline = if !separated_by_comma {
+                self.match_token(TokenKind::Newline)
+            } else {
+                false
+            };
             self.skip_newlines();
-            if self.match_token(TokenKind::Comma) {
+            if separated_by_newline {
+                self.match_token(TokenKind::Comma);
                 self.skip_newlines();
-                continue;
+            }
+            if self.at(TokenKind::RBrace) || self.at(TokenKind::Eof) {
+                break;
+            }
+            if !separated_by_comma && !separated_by_newline {
+                self.error_at_current(
+                    "unexpected_token",
+                    "expected ',' or newline between anonymous shape fields",
+                );
+                return None;
             }
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after anonymous shape")?;
@@ -731,6 +747,7 @@ impl<'a> Parser<'a> {
             index: self.index,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
+            allow_shape_update_operator: self.allow_shape_update_operator,
         };
         let Some(_) = parser.parse_type_ref() else {
             return false;
@@ -798,49 +815,6 @@ impl<'a> Parser<'a> {
             methods,
             span: start.cover(end),
         })
-    }
-
-    pub(super) fn parse_record_update_args(&mut self) -> Option<(Vec<CallArg>, Span)> {
-        let start = self.consume(TokenKind::LBrace, "expected '{' after ':<'")?;
-        self.skip_newlines();
-        let mut updates = Vec::new();
-        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let (name, name_span) = self.expect_identifier("expected shape field name")?;
-            self.consume(
-                TokenKind::Colon,
-                "expected ':' after shape update field name",
-            )?;
-            let value = self.parse_expr()?;
-            updates.push(CallArg {
-                name: Some(name),
-                ty: None,
-                span: name_span.cover(value.span()),
-                value,
-            });
-            let separated_by_comma = self.match_token(TokenKind::Comma);
-            let separated_by_newline = if !separated_by_comma {
-                self.match_token(TokenKind::Newline)
-            } else {
-                false
-            };
-            self.skip_newlines();
-            if separated_by_newline {
-                self.match_token(TokenKind::Comma);
-                self.skip_newlines();
-            }
-            if self.at(TokenKind::RBrace) || self.at(TokenKind::Eof) {
-                break;
-            }
-            if !separated_by_comma && !separated_by_newline {
-                self.error_at_current(
-                    "unexpected_token",
-                    "expected ',' or newline between shape update fields",
-                );
-                return None;
-            }
-        }
-        let end = self.consume(TokenKind::RBrace, "expected '}' after shape update")?;
-        Some((updates, start.cover(end)))
     }
 
     pub(super) fn parse_block_or_inline_stmt_body(&mut self, owner: &'static str) -> Option<Block> {
@@ -922,8 +896,6 @@ impl<'a> Parser<'a> {
                 }
                 saw_pair = true;
                 BinaryOp::Colon
-            } else if self.match_token(TokenKind::ColonPlus) {
-                BinaryOp::RecordMerge
             } else {
                 break;
             };
@@ -1198,13 +1170,18 @@ impl<'a> Parser<'a> {
                 });
                 continue;
             }
-            if self.match_token(TokenKind::ColonLess) {
+            if self.allow_shape_update_operator && self.match_token(TokenKind::ColonLess) {
                 let start = Self::active_postfix_expr(&expr, &chain_segment).span();
                 self.skip_newlines();
-                let (updates, end) = self.parse_record_update_args()?;
+                let previous = self.allow_shape_update_operator;
+                self.allow_shape_update_operator = false;
+                let patch = self.parse_expr();
+                self.allow_shape_update_operator = previous;
+                let patch = patch?;
+                let end = patch.span();
                 Self::apply_postfix(&mut expr, &mut chain_segment, |target| Expr::RecordUpdate {
                     receiver: Box::new(target),
-                    updates,
+                    patch: Box::new(patch),
                     span: start.cover(end),
                 });
                 continue;
@@ -1535,6 +1512,7 @@ impl<'a> Parser<'a> {
                 index: lookahead + 1,
                 diagnostics: Vec::new(),
                 allow_trailing_block_call: self.allow_trailing_block_call,
+                allow_shape_update_operator: self.allow_shape_update_operator,
             };
             if parser.parse_type_ref().is_some() && parser.at(TokenKind::Colon) {
                 return true;

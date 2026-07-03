@@ -929,11 +929,14 @@ fn rejects_equals_in_named_shape_literal_fields() {
 #[test]
 fn parses_colon_shape_update_fields() {
     match parse_expr_only("value :< { amount: 42, label: value.label }") {
-        Expr::RecordUpdate { updates, .. } => {
-            assert_eq!(updates.len(), 2);
-            assert_eq!(updates[0].name.as_deref(), Some("amount"));
-            assert_eq!(updates[1].name.as_deref(), Some("label"));
-        }
+        Expr::RecordUpdate { patch, .. } => match *patch {
+            Expr::RecordLiteral { fields, .. } => {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].name.as_deref(), Some("amount"));
+                assert_eq!(fields[1].name.as_deref(), Some("label"));
+            }
+            other => panic!("expected shape patch literal, got {other:#?}"),
+        },
         other => panic!("expected shape update, got {other:#?}"),
     }
 }
@@ -949,12 +952,15 @@ value :< {
 }
 "#,
     ) {
-        Expr::RecordUpdate { updates, .. } => {
-            assert_eq!(updates.len(), 3);
-            assert_eq!(updates[0].name.as_deref(), Some("amount"));
-            assert_eq!(updates[1].name.as_deref(), Some("label"));
-            assert_eq!(updates[2].name.as_deref(), Some("count"));
-        }
+        Expr::RecordUpdate { patch, .. } => match *patch {
+            Expr::RecordLiteral { fields, .. } => {
+                assert_eq!(fields.len(), 3);
+                assert_eq!(fields[0].name.as_deref(), Some("amount"));
+                assert_eq!(fields[1].name.as_deref(), Some("label"));
+                assert_eq!(fields[2].name.as_deref(), Some("count"));
+            }
+            other => panic!("expected shape patch literal, got {other:#?}"),
+        },
         other => panic!("expected shape update, got {other:#?}"),
     }
 }
@@ -967,7 +973,7 @@ fn rejects_same_line_shape_update_fields_without_separator() {
             diag.code == "unexpected_token"
                 && diag
                     .message
-                    .contains("expected ',' or newline between shape update fields")
+                    .contains("expected ',' or newline between anonymous shape fields")
         }),
         "{:#?}",
         result.diagnostics
@@ -975,25 +981,28 @@ fn rejects_same_line_shape_update_fields_without_separator() {
 }
 
 #[test]
-fn parses_shape_merge_operator() {
-    match parse_expr_only("left :+ right") {
-        Expr::Binary {
-            op: BinaryOp::RecordMerge,
-            ..
-        } => {}
-        other => panic!("expected shape merge binary expr, got {other:#?}"),
-    }
+fn rejects_removed_shape_merge_operator() {
+    let file = SourceFile::new("test.lum", r#"def run() Unit = left :+ right"#);
+    let result = lex(&file);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "unsupported_operator" && diag.message.contains(":+")),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
 fn rejects_equals_in_shape_update_fields() {
-    let result = parse(r#"def run(value Amount) Unit = value :< { amount = 42 }"#);
+    let result = parse(r#"def run() Unit = { amount = 42, label: "x" }"#);
     assert!(
         result.diagnostics.iter().any(|diag| {
             diag.code == "unexpected_token"
                 && diag
                     .message
-                    .contains("expected ':' after shape update field name")
+                    .contains("expected ',' or newline between anonymous shape fields")
         }),
         "{:#?}",
         result.diagnostics
@@ -2551,8 +2560,10 @@ def main() Unit {
         { age: 42 }
     named = { name: "Ada" }
     located = { location: "Tampa" }
-    merged = named :+
-        located
+    merged = {
+        ...named
+        ...located
+    }
 }
 "#,
     );
@@ -2594,25 +2605,6 @@ def main() Unit {
             .any(|diag| diag.code == "expected_expression"),
         "{:#?}",
         leading_shape_update.diagnostics
-    );
-
-    let leading_shape_merge = parse(
-        r#"
-def main() Unit {
-    named = { name: "Ada" }
-    located = { location: "Tampa" }
-    merged = named
-        :+ located
-}
-"#,
-    );
-    assert!(
-        leading_shape_merge
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "expected_expression"),
-        "{:#?}",
-        leading_shape_merge.diagnostics
     );
 }
 

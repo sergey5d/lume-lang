@@ -1,8 +1,11 @@
 # FAIL_REGEX:
-# .*shape merge field 'name' exists on both operands.*
+# .*shape field 'name' already exists.*
 
 def main() Unit {
     left = { name: "Ada", age: 42 }
     right = { name: "Bob" }
-    value = left :+ right
+    value = {
+        ...left
+        ...right
+    }
 }

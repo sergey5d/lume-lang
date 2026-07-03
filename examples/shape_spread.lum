@@ -4,9 +4,10 @@
 
 def main() Unit {
     base = { name: "Ada", age: 10 }
-    updated = { ...base, age: 42, city: "Tampa" }
+    aged = base :< { age: 42 }
+    updated = { ...aged, city: "Tampa" }
     println(updated.name, updated.age, updated.city)
 
-    renamed = { ...updated, name: "Bob", age: 43 }
+    renamed = updated :< { name: "Bob", age: 43 }
     println(renamed.name, renamed.age, renamed.city)
 }

@@ -535,6 +535,7 @@ impl<'a> Parser<'a> {
             index: self.index,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
+            allow_shape_update_operator: self.allow_shape_update_operator,
         };
         if !parser.match_token(TokenKind::LBrace) {
             return false;

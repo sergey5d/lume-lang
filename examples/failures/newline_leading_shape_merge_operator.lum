@@ -1,9 +1,0 @@
-# FAIL_REGEX:
-# .*expected expression.*
-
-def main() Unit {
-    named = { name: "Ada" }
-    located = { location: "Tampa" }
-    merged = named
-        :+ located
-}

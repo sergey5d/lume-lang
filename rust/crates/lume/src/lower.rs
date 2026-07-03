@@ -3133,9 +3133,9 @@ impl<'a> FunctionLowerer<'a> {
                                 ty: self.infer_expr_type_with_overrides(&field.value, overrides),
                             },
                         );
-                    } else if let ir::Type::Record(spread_fields) =
-                        self.infer_expr_type_with_overrides(&field.value, overrides)
-                    {
+                    } else if let Some(spread_fields) = self.infer_record_spread_fields(
+                        &self.infer_expr_type_with_overrides(&field.value, overrides),
+                    ) {
                         for spread_field in spread_fields {
                             upsert_ir_record_field(&mut out, spread_field);
                         }
@@ -3161,6 +3161,9 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Index { receiver, .. } => {
                 let receiver_ty = self.infer_expr_type_with_overrides(receiver, overrides);
                 index_result_ir_type(&receiver_ty)
+            }
+            Expr::RecordUpdate { receiver, .. } => {
+                self.infer_expr_type_with_overrides(receiver, overrides)
             }
             Expr::LiftedChain { base, segments, .. } => {
                 let mut current = self.infer_expr_type_with_overrides(base, overrides);
@@ -3192,7 +3195,6 @@ impl<'a> FunctionLowerer<'a> {
             | Expr::Lift { .. }
             | Expr::Unary { .. }
             | Expr::Binary { .. }
-            | Expr::RecordUpdate { .. }
             | Expr::Is { .. }
             | Expr::Lambda { .. }
             | Expr::Placeholder { .. } => ir::Type::Unknown,
@@ -3280,6 +3282,33 @@ impl<'a> FunctionLowerer<'a> {
             .rev()
             .find(|(candidate, _)| candidate == name)
             .map(|(_, ty)| ty.clone())
+    }
+
+    fn infer_record_spread_fields(&self, ty: &ir::Type) -> Option<Vec<ir::NamedType>> {
+        match ty {
+            ir::Type::Record(fields) => Some(fields.clone()),
+            ir::Type::Named { name, args } => {
+                let ty = self.program.types.iter().find(|ty| {
+                    ty.name == *name
+                        && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+                })?;
+                if ty.fields.is_empty() {
+                    return None;
+                }
+                let subst = ir_type_subst(ty, args);
+                Some(
+                    ty.fields
+                        .iter()
+                        .filter(|field| field.visibility != ast::Visibility::Hidden)
+                        .map(|field| ir::NamedType {
+                            name: field.name.clone(),
+                            ty: substitute_ir_type(&field.ty, &subst),
+                        })
+                        .collect(),
+                )
+            }
+            _ => None,
+        }
     }
 
     fn lookup_scoped_type(&self, name: &str) -> Option<ir::Type> {
@@ -3792,16 +3821,10 @@ impl<'a> FunctionLowerer<'a> {
                 ..
             } => Some(self.lower_anonymous_interface_rvalue(interfaces, methods)),
             Expr::RecordUpdate {
-                receiver, updates, ..
+                receiver, patch, ..
             } => Some(ir::RValue::RecordUpdate {
                 base: self.lower_expr(receiver),
-                updates: updates
-                    .iter()
-                    .map(|update| ir::NamedOperand {
-                        name: update.name.clone().unwrap_or_default(),
-                        value: self.lower_expr(&update.value),
-                    })
-                    .collect(),
+                patch: self.lower_expr(patch),
             }),
             Expr::Placeholder { .. } => None,
             _ => None,
@@ -4325,7 +4348,6 @@ fn map_assign_op(op: AssignOp) -> Option<ir::BinaryOp> {
 fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
     match op {
         AstBinaryOp::Or => Some(ir::BinaryOp::Or),
-        AstBinaryOp::RecordMerge => Some(ir::BinaryOp::RecordMerge),
         AstBinaryOp::And => Some(ir::BinaryOp::And),
         AstBinaryOp::Eq => Some(ir::BinaryOp::Eq),
         AstBinaryOp::NotEq => Some(ir::BinaryOp::NotEq),

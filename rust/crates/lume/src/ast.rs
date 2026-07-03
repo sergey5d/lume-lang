@@ -598,7 +598,7 @@ pub enum Expr {
     },
     RecordUpdate {
         receiver: Box<Expr>,
-        updates: Vec<CallArg>,
+        patch: Box<Expr>,
         span: Span,
     },
     RecordLiteral {
@@ -769,7 +769,6 @@ pub enum UnaryOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Colon,
-    RecordMerge,
     Or,
     And,
     Eq,

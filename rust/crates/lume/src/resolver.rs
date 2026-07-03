@@ -1932,12 +1932,10 @@ impl<'a> Resolver<'a> {
                 self.resolve_expr(index);
             }
             Expr::RecordUpdate {
-                receiver, updates, ..
+                receiver, patch, ..
             } => {
                 self.resolve_expr(receiver);
-                for update in updates {
-                    self.resolve_expr(&update.value);
-                }
+                self.resolve_expr(patch);
             }
             Expr::RecordLiteral { fields, values, .. } => {
                 let mut seen = HashMap::new();

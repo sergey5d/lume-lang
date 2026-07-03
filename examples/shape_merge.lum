@@ -1,20 +1,39 @@
 # EXPECT:
 # Ada 42 Tampa
 # Bob 7
+# Eve 9
 
 class Label {
     label Str
 }
 
+class SecretName {
+    name Str
+    hidden secret Str = "hidden"
+}
+
 def main() Unit {
     named = { name: "Ada" }
     located = { age: 42, location: "Tampa" }
-    user = named :+ located
+    user = {
+        ...named
+        ...located
+    }
 
     label = Label("Bob")
     counted = { count: 7 }
-    labeledCount = label :+ counted
+    labeledCount = {
+        ...label
+        ...counted
+    }
+
+    secret = SecretName("Eve")
+    secretVisible = {
+        ...secret
+        count: 9
+    }
 
     println(user.name, user.age, user.location)
     println(labeledCount.label, labeledCount.count)
+    println(secretVisible.name, secretVisible.count)
 }

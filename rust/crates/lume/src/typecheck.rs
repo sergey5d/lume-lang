@@ -1506,12 +1506,10 @@ impl<'a> Checker<'a> {
                 self.check_field_initializer_expr(index, owner, initialized_fields);
             }
             Expr::RecordUpdate {
-                receiver, updates, ..
+                receiver, patch, ..
             } => {
                 self.check_field_initializer_expr(receiver, owner, initialized_fields);
-                for update in updates {
-                    self.check_field_initializer_expr(&update.value, owner, initialized_fields);
-                }
+                self.check_field_initializer_expr(patch, owner, initialized_fields);
             }
             Expr::RecordLiteral { fields, values, .. } => {
                 for field in fields {
@@ -1780,110 +1778,22 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_record_update(
-        &mut self,
-        base: &Ty,
-        updates: &[crate::ast::CallArg],
-        span: crate::source::Span,
-    ) {
-        match base {
-            Ty::Named(name, args) => {
-                let Some(sig) = self.lookup_any_type(name) else {
-                    for update in updates {
-                        self.check_expr(&update.value);
-                    }
-                    return;
-                };
-                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
-                    self.add_error(
-                        "invalid_shape_update",
-                        "shape update requires a class, shape, or anonymous shape value",
-                        span,
-                    );
-                    for update in updates {
-                        self.check_expr(&update.value);
-                    }
-                    return;
-                }
-                if sig.kind == TypeKind::Class && sig.fields.iter().any(|field| field.hidden) {
-                    self.add_error(
-                        "invalid_shape_update",
-                        "class update requires a class without private fields",
-                        span,
-                    );
-                }
-                let subst = sig
-                    .type_params
-                    .iter()
-                    .cloned()
-                    .zip(args.iter().cloned())
-                    .collect::<HashMap<_, _>>();
-                let fields = sig
-                    .fields
-                    .iter()
-                    .filter(|field| !field.hidden)
-                    .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
-                    .collect::<Vec<_>>();
-                self.check_record_update_fields(&fields, updates);
-            }
-            Ty::Record(fields) => self.check_record_update_fields(fields, updates),
-            Ty::Unknown => {
-                for update in updates {
-                    self.check_expr(&update.value);
-                }
-            }
-            _ => {
-                self.add_error(
-                    "invalid_shape_update",
-                    "shape update requires a class, shape, or anonymous shape value",
-                    span,
-                );
-                for update in updates {
-                    self.check_expr(&update.value);
-                }
-            }
-        }
+    fn check_record_update(&mut self, base: &Ty, patch: &Expr, span: crate::source::Span) {
+        let patch_ty = self.check_expr(patch);
+        let Some(base_fields) = self.record_update_shape_fields(base, "base", span) else {
+            return;
+        };
+        let Some(patch_fields) = self.record_update_shape_fields(&patch_ty, "patch", patch.span())
+        else {
+            return;
+        };
+        self.check_record_update_fields(&base_fields, &patch_fields, patch.span());
     }
 
-    fn check_record_update_fields(
-        &mut self,
-        fields: &[(String, Ty)],
-        updates: &[crate::ast::CallArg],
-    ) {
-        for update in updates {
-            let Some(name) = update.name.as_deref() else {
-                self.check_expr(&update.value);
-                continue;
-            };
-            let Some((_, expected)) = fields.iter().find(|(field, _)| field == name) else {
-                self.add_error(
-                    "invalid_shape_update",
-                    format!("update field '{}' does not exist on left-hand shape", name),
-                    update.span,
-                );
-                self.check_expr(&update.value);
-                continue;
-            };
-            let actual = self.check_expr_against(&update.value, expected);
-            self.require_assignable(
-                &actual,
-                expected,
-                update.span,
-                "invalid_shape_update",
-                format!(
-                    "update field '{}' expects '{}', got '{}'",
-                    name,
-                    expected.describe(),
-                    actual.describe()
-                ),
-            );
-        }
-    }
-
-    fn record_merge_shape_fields(
+    fn record_update_shape_fields(
         &mut self,
         ty: &Ty,
-        side: &str,
+        role: &str,
         span: crate::source::Span,
     ) -> Option<Vec<(String, Ty)>> {
         match ty {
@@ -1891,33 +1801,21 @@ impl<'a> Checker<'a> {
             Ty::Named(name, args) => {
                 let Some(sig) = self.lookup_any_type(name) else {
                     self.add_error(
-                        "invalid_shape_merge",
+                        "invalid_shape_update",
                         format!(
-                            "shape merge operands must be shape values; {side} operand has type '{}'",
+                            "shape update {role} must be a class, shape, or anonymous shape value, got '{}'",
                             ty.describe()
                         ),
                         span,
                     );
                     return None;
                 };
-                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) || sig.fields.is_empty()
-                {
+                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
                     self.add_error(
-                        "invalid_shape_merge",
+                        "invalid_shape_update",
                         format!(
-                            "shape merge operands must be shape values; {side} operand has type '{}'",
+                            "shape update {role} must be a class, shape, or anonymous shape value, got '{}'",
                             ty.describe()
-                        ),
-                        span,
-                    );
-                    return None;
-                }
-                if sig.fields.iter().any(|field| field.hidden) {
-                    self.add_error(
-                        "invalid_shape_merge",
-                        format!(
-                            "shape merge cannot use type '{}' because it has hidden fields",
-                            sig.name
                         ),
                         span,
                     );
@@ -1932,6 +1830,7 @@ impl<'a> Checker<'a> {
                 Some(
                     sig.fields
                         .iter()
+                        .filter(|field| !field.hidden)
                         .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
                         .collect(),
                 )
@@ -1939,9 +1838,9 @@ impl<'a> Checker<'a> {
             Ty::Unknown => None,
             _ => {
                 self.add_error(
-                    "invalid_shape_merge",
+                    "invalid_shape_update",
                     format!(
-                        "shape merge operands must be shape values; {side} operand has type '{}'",
+                        "shape update {role} must be a class, shape, or anonymous shape value, got '{}'",
                         ty.describe()
                     ),
                     span,
@@ -1951,34 +1850,34 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_record_merge_expr(&mut self, left: &Ty, right: &Ty, span: crate::source::Span) -> Ty {
-        let Some(left_fields) = self.record_merge_shape_fields(left, "left", span) else {
-            return Ty::Unknown;
-        };
-        let Some(right_fields) = self.record_merge_shape_fields(right, "right", span) else {
-            return Ty::Unknown;
-        };
-
-        let left_names = left_fields
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .collect::<HashSet<_>>();
-        let mut has_overlap = false;
-        for (name, _) in &right_fields {
-            if left_names.contains(name.as_str()) {
-                has_overlap = true;
+    fn check_record_update_fields(
+        &mut self,
+        fields: &[(String, Ty)],
+        updates: &[(String, Ty)],
+        span: crate::source::Span,
+    ) {
+        for (name, actual) in updates {
+            let Some((_, expected)) = fields.iter().find(|(field, _)| field == name) else {
                 self.add_error(
-                    "invalid_shape_merge",
-                    format!("shape merge field '{}' exists on both operands", name),
+                    "invalid_shape_update",
+                    format!("update field '{}' does not exist on left-hand shape", name),
                     span,
                 );
-            }
+                continue;
+            };
+            self.require_assignable(
+                actual,
+                expected,
+                span,
+                "invalid_shape_update",
+                format!(
+                    "update field '{}' expects '{}', got '{}'",
+                    name,
+                    expected.describe(),
+                    actual.describe()
+                ),
+            );
         }
-        if has_overlap {
-            return Ty::Unknown;
-        }
-
-        Ty::Record(left_fields.into_iter().chain(right_fields).collect())
     }
 
     fn record_spread_shape_fields(
@@ -2012,17 +1911,6 @@ impl<'a> Checker<'a> {
                     );
                     return None;
                 }
-                if sig.fields.iter().any(|field| field.hidden) {
-                    self.add_error(
-                        "invalid_shape_spread",
-                        format!(
-                            "shape spread cannot use type '{}' because it has hidden fields",
-                            sig.name
-                        ),
-                        span,
-                    );
-                    return None;
-                }
                 let subst = sig
                     .type_params
                     .iter()
@@ -2032,6 +1920,7 @@ impl<'a> Checker<'a> {
                 Some(
                     sig.fields
                         .iter()
+                        .filter(|field| !field.hidden)
                         .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
                         .collect(),
                 )
@@ -2048,6 +1937,27 @@ impl<'a> Checker<'a> {
                 );
                 None
             }
+        }
+    }
+
+    fn push_unique_shape_field(
+        &mut self,
+        fields: &mut Vec<(String, Ty)>,
+        name: String,
+        ty: Ty,
+        span: crate::source::Span,
+    ) {
+        if fields.iter().any(|(field, _)| field == &name) {
+            self.add_error(
+                "duplicate_shape_field",
+                format!(
+                    "shape field '{}' already exists; spread can only add fields, use ':<' to update existing fields",
+                    name
+                ),
+                span,
+            );
+        } else {
+            fields.push((name, ty));
         }
     }
 
@@ -3523,11 +3433,11 @@ impl<'a> Checker<'a> {
             }
             Expr::RecordUpdate {
                 receiver,
-                updates,
+                patch,
                 span,
             } => {
                 let base = self.check_expr(receiver);
-                self.check_record_update(&base, updates, *span);
+                self.check_record_update(&base, patch, *span);
                 base
             }
             Expr::RecordLiteral { fields, values, .. } => {
@@ -3536,20 +3446,9 @@ impl<'a> Checker<'a> {
                         Ty::Record(fields) => fields.as_slice(),
                         _ => &[],
                     };
-                    let mut explicit_names = HashSet::new();
                     let mut actual_fields = Vec::new();
                     for field in fields {
                         if let Some(name) = &field.name {
-                            if !explicit_names.insert(name.clone()) {
-                                self.add_error(
-                                    "duplicate_shape_field",
-                                    format!(
-                                        "shape literal field '{}' is defined more than once",
-                                        name
-                                    ),
-                                    field.span,
-                                );
-                            }
                             let annotated_ty =
                                 field.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
                             let expected_ty = annotated_ty.clone().unwrap_or_else(|| {
@@ -3577,14 +3476,24 @@ impl<'a> Checker<'a> {
                             } else {
                                 actual
                             };
-                            upsert_shape_field(&mut actual_fields, name.clone(), field_ty);
+                            self.push_unique_shape_field(
+                                &mut actual_fields,
+                                name.clone(),
+                                field_ty,
+                                field.span,
+                            );
                         } else {
                             let spread_ty = self.check_expr(&field.value);
                             if let Some(spread_fields) =
                                 self.record_spread_shape_fields(&spread_ty, field.span)
                             {
                                 for (name, ty) in spread_fields {
-                                    upsert_shape_field(&mut actual_fields, name, ty);
+                                    self.push_unique_shape_field(
+                                        &mut actual_fields,
+                                        name,
+                                        ty,
+                                        field.span,
+                                    );
                                 }
                             }
                         }
@@ -3834,7 +3743,12 @@ impl<'a> Checker<'a> {
                                     &mut family,
                                     field.span,
                                 ) {
-                                    upsert_shape_field(&mut lifted_fields, name, inner_ty);
+                                    self.push_unique_shape_field(
+                                        &mut lifted_fields,
+                                        name,
+                                        inner_ty,
+                                        field.span,
+                                    );
                                 }
                             }
                         }
@@ -3865,7 +3779,12 @@ impl<'a> Checker<'a> {
                     } else {
                         inner_ty
                     };
-                    upsert_shape_field(&mut lifted_fields, name.clone(), field_ty);
+                    self.push_unique_shape_field(
+                        &mut lifted_fields,
+                        name.clone(),
+                        field_ty,
+                        field.span,
+                    );
                 }
 
                 family
@@ -5776,7 +5695,6 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
     ) -> Ty {
         match op {
-            BinaryOp::RecordMerge => self.check_record_merge_expr(left, right, span),
             BinaryOp::Add => {
                 if left.is_str() || right.is_str() {
                     Ty::str()
@@ -9583,12 +9501,13 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_anonymous_shape_spread_add_and_overwrite() {
+    fn allows_anonymous_shape_spread_copy_and_extend() {
         let program = parse_inline(
             r#"
 def main() Unit {
     base = { name: "Ada", age: 10 }
-    updated = { ...base, age: 42, city: "Tampa" }
+    aged = base :< { age: 42 }
+    updated = { ...aged, city: "Tampa" }
     name Str = updated.name
     age Int = updated.age
     city Str = updated.city

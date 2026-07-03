@@ -46,6 +46,7 @@ impl<'a> Parser<'a> {
             index: self.index,
             diagnostics_len: self.diagnostics.len(),
             allow_trailing_block_call: self.allow_trailing_block_call,
+            allow_shape_update_operator: self.allow_shape_update_operator,
         }
     }
 
@@ -53,6 +54,7 @@ impl<'a> Parser<'a> {
         self.index = checkpoint.index;
         self.diagnostics.truncate(checkpoint.diagnostics_len);
         self.allow_trailing_block_call = checkpoint.allow_trailing_block_call;
+        self.allow_shape_update_operator = checkpoint.allow_shape_update_operator;
     }
 
     pub(super) fn skip_newlines(&mut self) {
@@ -178,6 +180,7 @@ impl<'a> Parser<'a> {
             index: start,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
+            allow_shape_update_operator: self.allow_shape_update_operator,
         };
         if parser.parse_pattern().is_none() {
             return false;
@@ -374,7 +377,6 @@ impl<'a> Parser<'a> {
             TokenKind::FatArrow => "=>",
             TokenKind::LeftArrow => "<-",
             TokenKind::DotArrow => ".->",
-            TokenKind::ColonPlus => ":+",
             TokenKind::ColonLess => ":<",
             TokenKind::Newline => "NEWLINE",
             TokenKind::Eof => "EOF",

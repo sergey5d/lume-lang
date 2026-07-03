@@ -1827,7 +1827,6 @@ impl<'a> FunctionEmitter<'a> {
         match op {
             ir::BinaryOp::Eq => Some(format!("java.util.Objects.equals({left}, {right})")),
             ir::BinaryOp::NotEq => Some(format!("!java.util.Objects.equals({left}, {right})")),
-            ir::BinaryOp::RecordMerge => None,
             _ => {
                 let op = match op {
                     ir::BinaryOp::Add => "+",
@@ -1841,9 +1840,7 @@ impl<'a> FunctionEmitter<'a> {
                     ir::BinaryOp::GreaterEq => ">=",
                     ir::BinaryOp::And => "&&",
                     ir::BinaryOp::Or => "||",
-                    ir::BinaryOp::Eq | ir::BinaryOp::NotEq | ir::BinaryOp::RecordMerge => {
-                        unreachable!()
-                    }
+                    ir::BinaryOp::Eq | ir::BinaryOp::NotEq => unreachable!(),
                 };
                 Some(format!("({left} {op} {right})"))
             }

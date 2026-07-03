@@ -81,8 +81,10 @@ def main() Unit {
 
     named = { name: "Ada" }
     located = { location: "Tampa" }
-    merged = named :+
-        located
+    merged = {
+        ...named
+        ...located
+    }
 
     helperValue Int = helper()
 

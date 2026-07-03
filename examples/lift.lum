@@ -76,9 +76,11 @@ def main() Unit {
     expect Some(spreadShape) = spreadProfile
     println("${spreadShape.name} ${spreadShape.id}")
 
-    overwritten Option[{ id Int, name Str }] = lift {
-        ...optionParts
+    overwrittenParts = optionParts :< {
         name: Some("Grace")
+    }
+    overwritten Option[{ id Int, name Str }] = lift {
+        ...overwrittenParts
     }
     expect Some(overwrittenShape) = overwritten
     println("${overwrittenShape.name} ${overwrittenShape.id}")

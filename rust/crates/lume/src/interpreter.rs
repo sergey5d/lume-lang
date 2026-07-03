@@ -530,12 +530,10 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
             rewrite_expr_for_runtime(index, module, graph);
         }
         ast::Expr::RecordUpdate {
-            receiver, updates, ..
+            receiver, patch, ..
         } => {
             rewrite_expr_for_runtime(receiver, module, graph);
-            for update in updates {
-                rewrite_expr_for_runtime(&mut update.value, module, graph);
-            }
+            rewrite_expr_for_runtime(patch, module, graph);
         }
         ast::Expr::RecordLiteral { fields, values, .. } => {
             for field in fields {
@@ -1524,17 +1522,10 @@ impl<'a> Interpreter<'a> {
                         .collect::<Result<Vec<_>, Diagnostic>>()?,
                 ))))
             }
-            ir::RValue::RecordUpdate { base, updates } => {
+            ir::RValue::RecordUpdate { base, patch } => {
                 let base = self.eval_operand_ref(frame, base, span)?;
-                let updates = updates
-                    .iter()
-                    .map(|update| {
-                        Ok((
-                            update.name.clone(),
-                            self.eval_operand_ref(frame, &update.value, span)?,
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, Diagnostic>>()?;
+                let patch = self.eval_operand_ref(frame, patch, span)?;
+                let updates = self.record_spread_runtime_fields(patch, span)?;
                 self.record_update_value(base, updates, span)
             }
             ir::RValue::Construct { ty, fields } => self.construct_value(frame, ty, fields, span),
@@ -3356,12 +3347,18 @@ impl<'a> Interpreter<'a> {
                 ir::RecordSpreadPart::Spread(operand) => {
                     let value = self.eval_operand_ref(frame, operand, span)?;
                     for (name, value) in self.record_spread_runtime_fields(value, span)? {
-                        upsert_runtime_record_field(&mut out, name, value);
+                        push_unique_runtime_record_field(&mut out, name, value, span, self)?;
                     }
                 }
                 ir::RecordSpreadPart::Field(field) => {
                     let value = self.eval_operand_ref(frame, &field.value, span)?;
-                    upsert_runtime_record_field(&mut out, field.name.clone(), value);
+                    push_unique_runtime_record_field(
+                        &mut out,
+                        field.name.clone(),
+                        value,
+                        span,
+                        self,
+                    )?;
                 }
             }
         }
@@ -3385,6 +3382,22 @@ impl<'a> Interpreter<'a> {
                             instance.type_name
                         ),
                     ));
+                }
+                if let Some(runtime_type_id) = instance.runtime_type_id {
+                    if let Some(runtime_ty) = self.runtime.type_by_id(runtime_type_id) {
+                        return Ok(runtime_ty
+                            .fields
+                            .iter()
+                            .filter(|field| !field.hidden)
+                            .filter_map(|field| {
+                                instance
+                                    .fields
+                                    .get(field.slot.0)
+                                    .cloned()
+                                    .map(|value| (field.name.clone(), value))
+                            })
+                            .collect());
+                    }
                 }
                 Ok(instance
                     .field_names
@@ -3560,62 +3573,6 @@ impl<'a> Interpreter<'a> {
             RuntimeLiftFamily::Option => self.option_none(),
             RuntimeLiftFamily::Result => self.result_err(value.unwrap_or(Value::Unit)),
             RuntimeLiftFamily::Either => self.either_left(value.unwrap_or(Value::Unit)),
-        }
-    }
-
-    fn record_merge_value(
-        &mut self,
-        left: Value,
-        right: Value,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
-        let mut merged = self.record_merge_runtime_fields(left, "left", span)?;
-        let right_fields = self.record_merge_runtime_fields(right, "right", span)?;
-        for (name, value) in right_fields {
-            if merged.iter().any(|(field, _)| field == &name) {
-                return Err(self.runtime_error(
-                    span,
-                    format!("shape merge field '{}' exists on both operands", name),
-                ));
-            }
-            merged.push((name, value));
-        }
-        Ok(Value::Record(Rc::new(RefCell::new(merged))))
-    }
-
-    fn record_merge_runtime_fields(
-        &mut self,
-        value: Value,
-        side: &str,
-        span: Option<Span>,
-    ) -> Result<Vec<(String, Value)>, Diagnostic> {
-        match value {
-            Value::Record(fields) => Ok(fields.borrow().clone()),
-            Value::Aggregate(instance) if instance.borrow().case_name.is_none() => {
-                let instance = instance.borrow();
-                if instance.fields.is_empty() {
-                    return Err(self.runtime_error(
-                        span,
-                        format!(
-                            "shape merge operands must be shape values; {side} operand is {}",
-                            instance.type_name
-                        ),
-                    ));
-                }
-                Ok(instance
-                    .field_names
-                    .iter()
-                    .cloned()
-                    .zip(instance.fields.iter().cloned())
-                    .collect())
-            }
-            other => Err(self.runtime_error(
-                span,
-                format!(
-                    "shape merge operands must be shape values; {side} operand is {}",
-                    other.render()
-                ),
-            )),
         }
     }
 
@@ -4606,7 +4563,6 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match op {
-            ir::BinaryOp::RecordMerge => self.record_merge_value(left, right, span),
             ir::BinaryOp::Add => match (&left, &right) {
                 (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs + rhs)),
                 (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs + rhs)),
@@ -5763,11 +5719,24 @@ fn render_ir_type(ty: &ir::Type) -> String {
     }
 }
 
-fn upsert_runtime_record_field(fields: &mut Vec<(String, Value)>, name: String, value: Value) {
-    if let Some((_, existing_value)) = fields.iter_mut().find(|(field, _)| field == &name) {
-        *existing_value = value;
+fn push_unique_runtime_record_field(
+    fields: &mut Vec<(String, Value)>,
+    name: String,
+    value: Value,
+    span: Option<Span>,
+    interpreter: &Interpreter<'_>,
+) -> Result<(), Diagnostic> {
+    if fields.iter().any(|(field, _)| field == &name) {
+        Err(interpreter.runtime_error(
+            span,
+            format!(
+                "shape field '{}' already exists; spread can only add fields, use ':<' to update existing fields",
+                name
+            ),
+        ))
     } else {
         fields.push((name, value));
+        Ok(())
     }
 }
 
@@ -6896,7 +6865,7 @@ $name
             a1 = Amount(10, "description", 5)
             a2 = a1.multiple(a1)
             a3 = a2 :< { amount: 101, description: a2.description + " updated" }
-            a4 = a3 :< { amount: 102 } :< { count: 7 }
+            a4 = (a3 :< { amount: 102 }) :< { count: 7 }
 
             def main() Unit {
                 OS.println(a2.amount, a2.description)

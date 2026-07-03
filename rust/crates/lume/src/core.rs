@@ -319,7 +319,7 @@ pub enum Expr {
     },
     RecordUpdate {
         receiver: Box<Expr>,
-        updates: Vec<CallArg>,
+        patch: Box<Expr>,
         span: Span,
     },
     RecordLiteral {

@@ -635,6 +635,9 @@ updated = value :< {
     age: 42
     name: "Bob"
 }
+
+patch = { age: 43 }
+updated2 = value :< patch
 ```
 
 Anonymous-shape spread:
@@ -642,21 +645,28 @@ Anonymous-shape spread:
 ```txt
 copy = { ...value }
 
-updated = {
-    ...value
-    age: 42
-}
-
 extended = {
     ...value
     location: "Tampa"
 }
+
+merged = {
+    ...namePart
+    ...agePart
+}
 ```
 
 Spread entries copy fields from a class, shape, or anonymous-shape value into a
-new anonymous shape. Later entries win, so an explicit field after a spread
-overwrites that spread field. If the field did not exist, it is added. Writing
-the same explicit field twice in one literal is an error.
+new anonymous shape. Spread is additive only: duplicate field names are an
+error, including an explicit field after a spread. To update an existing field,
+use `:<`.
+
+`base :< patch` updates existing visible fields. `base` must be a class, named
+shape, or anonymous shape. `patch` must be a statically known shape-like value.
+Every visible field in `patch` must already exist on `base`, and each patch
+field type must be assignable to the corresponding base field type. The result
+keeps the same class/shape view as `base`. Hidden fields are not updated through
+`:<`.
 
 ## Construction
 
@@ -2170,7 +2180,6 @@ Other operators / constructs:
 - `with` for interface implementation and generic bounds
 - `:` for ordinary pair expressions, where `left: right` constructs a 2-tuple
 - `:<` for class, shape, and anonymous-shape update
-- `:+` for shape merge; the left and right shapes must have distinct field names
 
 Examples:
 
@@ -2184,12 +2193,18 @@ class Box[T] with Named
 pair = "a": 1
 ```
 
-Shape merge:
+Shape copy, extension, and distinct merge:
 
 ```txt
-named = { name: "Ada" }
-located = { location: "Tampa" }
-user = named :+ located
+copy = { ...user }
+extended = {
+    ...user
+    location: "Tampa"
+}
+merged = {
+    ...named
+    ...located
+}
 ```
 
 Operator declarations use symbolic `def` forms on interfaces, classes, and enums:
@@ -2209,13 +2224,12 @@ Current operator overloading constraints:
 - Not allowed to overload:
   - logical operators: `&&`, `||`, `!`
   - equality operators: `==`, `!=`
-  - symbolic collection/custom forms: `:-`, `++`, `--`, `::`
+  - symbolic collection/custom forms: `:+`, `:-`, `++`, `--`, `::`
 - Comparison operators are intended to work through `Ordering[T]` rather than custom operator declarations.
 - Equality is intended to work through `Eq[T]` rather than custom operator declarations.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
 - `:` is a built-in pair expression operator only, not an overloadable collection/custom operator.
-- `:+` is a built-in shape merge operator only, not an overloadable collection/custom operator.
-- The spellings `:-`, `++`, `--`, and `::` are removed from the language surface and currently produce `unsupported_operator` lexer diagnostics.
+- The spellings `:+`, `:-`, `++`, `--`, and `::` are removed from the language surface and currently produce `unsupported_operator` lexer diagnostics.
 
 Newline continuation:
 
@@ -2223,7 +2237,7 @@ Newline continuation:
 - A newline continues the current expression only when the previous line clearly ends in a continuation form, except postfix chains may continue when the next line starts with `.` or `.->`.
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
-  - shape/update operators: `:<`, `:+`
+  - shape/update operators: `:<`
   - unary prefixes: unary `-`, `!`, `try`, `lift`
   - runtime type check keyword: `is`
   - match arrow: `=>`
@@ -2250,9 +2264,6 @@ a = 1 +
 
 updated = user :<
     { age: 42 }
-
-merged = a :+
-    b
 ```
 
 - but this is invalid:

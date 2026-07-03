@@ -73,7 +73,6 @@ pub enum TokenKind {
     Arrow,
     FatArrow,
     LeftArrow,
-    ColonPlus,
     ColonLess,
     ColonAssign,
     EqEq,
@@ -353,7 +352,7 @@ impl<'a> Lexer<'a> {
             }
             '.' if self.take('.') && self.take('.') => Some(TokenKind::Ellipsis),
             '.' => Some(TokenKind::Dot),
-            ':' if self.take('+') => Some(TokenKind::ColonPlus),
+            ':' if self.take('+') => return self.unsupported_operator(start, ":+"),
             ':' if self.take('-') => return self.unsupported_operator(start, ":-"),
             ':' if self.take(':') => return self.unsupported_operator(start, "::"),
             ':' if self.take('<') => Some(TokenKind::ColonLess),
@@ -544,14 +543,16 @@ mod tests {
 
     #[test]
     fn rejects_reserved_symbolic_collection_operators() {
-        let result = lex(&source("c :- d\ne :: f\ng ++ h\ni -- j\na & b\nc | d\n"));
+        let result = lex(&source(
+            "a :+ b\nc :- d\ne :: f\ng ++ h\ni -- j\na & b\nc | d\n",
+        ));
         let messages = result
             .diagnostics
             .iter()
             .map(|diag| (diag.code, diag.message.as_str()))
             .collect::<Vec<_>>();
-        assert_eq!(messages.len(), 6);
-        for operator in [":-", "::", "++", "--", "&", "|"] {
+        assert_eq!(messages.len(), 7);
+        for operator in [":+", ":-", "::", "++", "--", "&", "|"] {
             assert!(
                 messages.iter().any(|(code, message)| {
                     *code == "unsupported_operator" && message.contains(operator)
@@ -564,7 +565,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = left :+ right\nlifted = value.->name()\nlift { value: Some(1) }\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\nlifted = value.->name()\nlift { value: Some(1) }\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -573,7 +574,6 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Lift)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Vararg)));
-        assert!(kinds.contains(&TokenKind::ColonPlus));
         assert!(kinds.contains(&TokenKind::ColonLess));
         assert!(kinds.contains(&TokenKind::DotArrow));
         assert!(kinds.contains(&TokenKind::Float));
