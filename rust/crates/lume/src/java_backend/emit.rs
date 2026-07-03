@@ -72,6 +72,22 @@ fn render_module_wrapper(
         out.push_str("    static ");
         push_function_signature(&mut out, function, names);
         push_function_body(&mut out, bundle, function, names);
+        let has_fixed_overload = variadic_fixed_arity(function).is_some_and(|arity| {
+            bundle.ir.functions.iter().any(|other| {
+                other.id != function.id
+                    && matches!(other.kind, FunctionKind::TopLevel)
+                    && other.name == function.name
+                    && other.params.len() == arity
+            })
+        });
+        push_variadic_bridge_method(
+            &mut out,
+            function,
+            names,
+            "    static ",
+            &function.name,
+            has_fixed_overload,
+        );
     }
 
     out.push_str("}\n");
@@ -755,7 +771,30 @@ fn push_instance_methods(
         match shell {
             MethodShell::Abstract => out.push_str(";\n"),
             MethodShell::DefaultBody | MethodShell::StubBody => {
-                push_function_body(out, bundle, function, names)
+                push_function_body(out, bundle, function, names);
+                let prefix = match shell {
+                    MethodShell::DefaultBody => "    default ",
+                    MethodShell::StubBody => "    public ",
+                    MethodShell::Abstract => unreachable!(),
+                };
+                let has_fixed_overload = variadic_fixed_arity(function).is_some_and(|arity| {
+                    ty.methods
+                        .iter()
+                        .filter_map(|id| bundle.ir.function(*id))
+                        .any(|other| {
+                            other.id != function.id
+                                && other.name == function.name
+                                && other.params.len() == arity
+                        })
+                });
+                push_variadic_bridge_method(
+                    out,
+                    function,
+                    names,
+                    prefix,
+                    &function.name,
+                    has_fixed_overload,
+                );
             }
         }
     }
@@ -801,6 +840,131 @@ fn java_param_list(function: &ir::Function, names: &JavaNames, skip_receiver: bo
         .map(|local| format!("{} {}", names.value_type(&local.ty), java_local_name(local)))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn variadic_element_type(ty: &ir::Type) -> Option<&ir::Type> {
+    match ty {
+        ir::Type::Named { name, args } if name == "List" && args.len() == 1 => args.first(),
+        _ => None,
+    }
+}
+
+fn variadic_fixed_arity(function: &ir::Function) -> Option<usize> {
+    let index = function
+        .param_variadic
+        .iter()
+        .position(|variadic| *variadic)?;
+    (index + 1 == function.params.len()).then_some(index)
+}
+
+fn push_variadic_bridge_method(
+    out: &mut String,
+    function: &ir::Function,
+    names: &JavaNames,
+    prefix: &str,
+    method_name: &str,
+    has_fixed_overload: bool,
+) {
+    let Some(variadic_index) = function
+        .param_variadic
+        .iter()
+        .position(|variadic| *variadic)
+    else {
+        return;
+    };
+    if variadic_index + 1 != function.params.len() {
+        return;
+    }
+    let Some(variadic_local) = function
+        .params
+        .get(variadic_index)
+        .and_then(|param| function.locals.get(param.0))
+    else {
+        return;
+    };
+    let Some(element_ty) = variadic_element_type(&variadic_local.ty) else {
+        return;
+    };
+
+    let fixed_params = function
+        .params
+        .iter()
+        .take(variadic_index)
+        .filter_map(|param| function.locals.get(param.0))
+        .collect::<Vec<_>>();
+    let fixed_decl = fixed_params
+        .iter()
+        .map(|local| format!("{} {}", names.value_type(&local.ty), java_local_name(local)))
+        .collect::<Vec<_>>();
+    let fixed_args = fixed_params
+        .iter()
+        .map(|local| java_local_name(local))
+        .collect::<Vec<_>>();
+
+    if !has_fixed_overload {
+        push_variadic_bridge_overload(
+            out,
+            function,
+            names,
+            prefix,
+            method_name,
+            &fixed_decl,
+            &fixed_args,
+            "lume.core.LumeList.of()".to_string(),
+        );
+    }
+
+    let mut variadic_decl = fixed_decl;
+    variadic_decl.push(format!(
+        "{}... {}",
+        names.value_type(element_ty),
+        java_local_name(variadic_local)
+    ));
+    push_variadic_bridge_overload(
+        out,
+        function,
+        names,
+        prefix,
+        method_name,
+        &variadic_decl,
+        &fixed_args,
+        format!("lume.core.LumeList.of({})", java_local_name(variadic_local)),
+    );
+}
+
+fn push_variadic_bridge_overload(
+    out: &mut String,
+    function: &ir::Function,
+    names: &JavaNames,
+    prefix: &str,
+    method_name: &str,
+    params: &[String],
+    fixed_args: &[String],
+    variadic_arg: String,
+) {
+    out.push('\n');
+    out.push_str(prefix);
+    if !function.type_params.is_empty() {
+        out.push_str(&java_type_params(&function.type_params));
+        out.push(' ');
+    }
+    out.push_str(&names.return_type(&function.return_ty));
+    out.push(' ');
+    out.push_str(&java_member_name(method_name));
+    out.push('(');
+    out.push_str(&params.join(", "));
+    out.push_str(") {\n");
+    out.push_str("        ");
+    if !is_java_void_type(&function.return_ty) {
+        out.push_str("return ");
+    }
+    let mut args = fixed_args.to_vec();
+    args.push(variadic_arg);
+    out.push_str(&java_member_name(method_name));
+    out.push('(');
+    out.push_str(&args.join(", "));
+    out.push_str(");\n");
+    out.push_str("    }\n");
 }
 
 fn function_param_types(function: &ir::Function) -> Vec<ir::Type> {
@@ -1398,7 +1562,7 @@ impl<'a> FunctionEmitter<'a> {
                 out.push_str(";\n");
                 Some(())
             }
-            ir::StatementKind::Defer { .. } => None,
+            ir::StatementKind::Defer { .. } => self.unsupported("defer statement"),
         }
     }
 
@@ -1488,7 +1652,7 @@ impl<'a> FunctionEmitter<'a> {
             ir::SwitchValue::Bool(value) => Some(value.to_string()),
             ir::SwitchValue::Int(value) => Some(format!("{value}L")),
             ir::SwitchValue::String(value) => Some(java_string_literal(value)),
-            ir::SwitchValue::EnumCase(_) => None,
+            ir::SwitchValue::EnumCase(_) => self.unsupported("enum-case switch value"),
         }
     }
 
@@ -1529,14 +1693,14 @@ impl<'a> FunctionEmitter<'a> {
             )),
             ir::RValue::TypeOf { ty } => Some(type_value_expr(ty, self.names)),
             ir::RValue::Cast { operand, .. } => self.emit_operand(operand),
-            ir::RValue::NamedValue { .. }
-            | ir::RValue::Record(_)
-            | ir::RValue::RecordSpread(_)
-            | ir::RValue::Lift { .. }
-            | ir::RValue::RecordUpdate { .. }
-            | ir::RValue::Index { .. }
-            | ir::RValue::TypeTest { .. }
-            | ir::RValue::Closure { .. } => None,
+            ir::RValue::NamedValue { path } => self.emit_named_runtime_value(path),
+            ir::RValue::Record(_) => self.unsupported("anonymous shape literal"),
+            ir::RValue::RecordSpread(_) => self.unsupported("anonymous shape spread"),
+            ir::RValue::Lift { .. } => self.unsupported("lift expression"),
+            ir::RValue::RecordUpdate { .. } => self.unsupported("shape update"),
+            ir::RValue::Index { .. } => self.unsupported("index expression"),
+            ir::RValue::TypeTest { .. } => self.unsupported("type test"),
+            ir::RValue::Closure { .. } => self.unsupported("closure value"),
         }
     }
 
@@ -1629,7 +1793,7 @@ impl<'a> FunctionEmitter<'a> {
                             ))
                         }
                     }
-                    _ => None,
+                    _ => self.unsupported("direct call to non-top-level function"),
                 }
             }
             ir::Callee::Method { receiver, method } => match method.as_str() {
@@ -1681,7 +1845,22 @@ impl<'a> FunctionEmitter<'a> {
                 self.emit_intrinsic(intrinsic, &args)
             }
             ir::Callee::Named { path } => self.emit_named_runtime_call(path, args),
-            ir::Callee::Indirect(_) => None,
+            ir::Callee::Indirect(callee) => self.emit_indirect_call(callee, args),
+        }
+    }
+
+    fn emit_indirect_call(&self, callee: &ir::Operand, args: &[ir::Operand]) -> Option<String> {
+        let params = match self.operand_type(callee) {
+            Some(ir::Type::Function { params, .. }) => params,
+            _ => Vec::new(),
+        };
+        let args = self.emit_operands_for_params(args, &params)?;
+        let callee = self.emit_operand(callee)?;
+        match args.as_slice() {
+            [] => Some(format!("{callee}.get()")),
+            [arg] => Some(format!("{callee}.apply({arg})")),
+            [left, right] => Some(format!("{callee}.apply({left}, {right})")),
+            _ => self.unsupported("function call with more than two arguments"),
         }
     }
 
@@ -1709,6 +1888,14 @@ impl<'a> FunctionEmitter<'a> {
 
     fn emit_named_runtime_call(&self, path: &[String], operands: &[ir::Operand]) -> Option<String> {
         match path {
+            [case] if core_enum_case_owner(case).is_some() => {
+                self.emit_core_enum_case_call(case, operands)
+            }
+            [owner, case]
+                if core_enum_case_owner(case).is_some_and(|expected| expected == owner) =>
+            {
+                self.emit_core_enum_case_call(case, operands)
+            }
             [owner] if self.names.is_java_type(owner) => {
                 let params = self
                     .constructor_param_types(owner, operands.len())
@@ -1754,8 +1941,33 @@ impl<'a> FunctionEmitter<'a> {
                 };
                 Some(format!("{target}({})", args.join(", ")))
             }
-            _ => None,
+            _ => self.unsupported("named runtime call"),
         }
+    }
+
+    fn emit_named_runtime_value(&self, path: &[String]) -> Option<String> {
+        match path {
+            [case] if core_enum_case_owner(case).is_some() => {
+                self.emit_core_enum_case_call(case, &[])
+            }
+            [owner, case]
+                if core_enum_case_owner(case).is_some_and(|expected| expected == owner) =>
+            {
+                self.emit_core_enum_case_call(case, &[])
+            }
+            _ => self.unsupported("named runtime value"),
+        }
+    }
+
+    fn emit_core_enum_case_call(&self, case: &str, operands: &[ir::Operand]) -> Option<String> {
+        let owner = core_enum_case_owner(case)?;
+        let args = self.emit_operands(operands)?;
+        Some(format!(
+            "new lume.core.{}.{}<>({})",
+            java_type_name(owner),
+            java_type_name(case),
+            args.join(", ")
+        ))
     }
 
     fn is_lume_constructible_type(&self, name: &str) -> bool {
@@ -1860,7 +2072,7 @@ impl<'a> FunctionEmitter<'a> {
 
     fn emit_tuple(&self, items: &[ir::Operand]) -> Option<String> {
         if !(2..=8).contains(&items.len()) {
-            return None;
+            return self.unsupported("tuple arity outside Java Tuple2..Tuple8");
         }
         let args = self.emit_operands(items)?;
         Some(format!(
@@ -1872,7 +2084,7 @@ impl<'a> FunctionEmitter<'a> {
 
     fn emit_construct(&self, ty: &ir::Type, fields: &[ir::NamedOperand]) -> Option<String> {
         let ir::Type::Named { name, .. } = ty else {
-            return None;
+            return self.unsupported("non-named construction");
         };
         let args = fields
             .iter()
@@ -2047,8 +2259,18 @@ impl<'a> FunctionEmitter<'a> {
                 self.emit_operand(base)?,
                 java_member_name(name)
             )),
-            ir::Place::Index { .. } => None,
+            ir::Place::Index { .. } => self.unsupported("indexed assignment target"),
         }
+    }
+
+    fn unsupported<T>(&self, reason: &str) -> Option<T> {
+        if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+            eprintln!(
+                "java backend cannot emit '{}': {reason}",
+                self.function.name
+            );
+        }
+        None
     }
 
     fn place_type(&self, place: &ir::Place) -> Option<ir::Type> {
@@ -2084,7 +2306,11 @@ impl<'a> FunctionEmitter<'a> {
         method: &str,
         arg_len: usize,
     ) -> Option<Vec<ir::Type>> {
-        let ir::Type::Named { name, .. } = self.operand_type(receiver)? else {
+        let receiver_ty = self.operand_type(receiver)?;
+        if let Some(params) = builtin_method_param_types(&receiver_ty, method, arg_len) {
+            return Some(params);
+        }
+        let ir::Type::Named { name, .. } = receiver_ty else {
             return None;
         };
         self.type_method_param_types(&name, method, arg_len)
@@ -2155,10 +2381,19 @@ impl<'a> FunctionEmitter<'a> {
             return format!("((float) ({expr}))");
         }
         if source_ty.as_ref().is_some_and(|source| {
+            java_type_contains_unknown(source) || self.is_unbound_named_type(source)
+        }) && java_type_needs_reference_cast(target_ty)
+        {
+            return self.unchecked_reference_cast(expr, target_ty);
+        }
+        if source_ty.as_ref().is_some_and(|source| {
             java_type_contains_type_param(source) || self.is_unbound_named_type(source)
         }) && !java_type_contains_type_param(target_ty)
         {
-            return format!("(({}) {expr})", self.names.value_type(target_ty));
+            return self.unchecked_reference_cast(expr, target_ty);
+        }
+        if source_ty.is_none() && java_type_needs_reference_cast(target_ty) {
+            return self.unchecked_reference_cast(expr, target_ty);
         }
         if !matches!(source_ty, Some(ir::Type::Unknown)) || matches!(target_ty, ir::Type::Unknown) {
             return expr;
@@ -2166,7 +2401,11 @@ impl<'a> FunctionEmitter<'a> {
         if is_java_void_type(target_ty) {
             return expr;
         }
-        format!("(({}) {expr})", self.names.value_type(target_ty))
+        self.unchecked_reference_cast(expr, target_ty)
+    }
+
+    fn unchecked_reference_cast(&self, expr: String, target_ty: &ir::Type) -> String {
+        format!("(({}) ((Object) {expr}))", self.names.value_type(target_ty))
     }
 
     fn local_value_type(&self, ty: &ir::Type) -> String {
@@ -2501,6 +2740,42 @@ fn is_builtin_container(name: &str) -> bool {
     )
 }
 
+fn core_enum_case_owner(case: &str) -> Option<&'static str> {
+    match case {
+        "Some" | "None" => Some("Option"),
+        "Ok" | "Err" => Some("Result"),
+        "Left" | "Right" => Some("Either"),
+        _ => None,
+    }
+}
+
+fn builtin_method_param_types(
+    receiver: &ir::Type,
+    method: &str,
+    arg_len: usize,
+) -> Option<Vec<ir::Type>> {
+    match receiver {
+        ir::Type::Named { name, args }
+            if matches!(name.as_str(), "List" | "Array" | "Set") && args.len() == 1 =>
+        {
+            match (method, arg_len) {
+                ("add", 1) => Some(vec![args[0].clone()]),
+                ("addAll", 1) => Some(vec![receiver.clone()]),
+                ("get" | "remove", 1) => Some(vec![ir::Type::Int]),
+                _ => None,
+            }
+        }
+        ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
+            match (method, arg_len) {
+                ("get" | "remove", 1) => Some(vec![args[0].clone()]),
+                ("put", 2) => Some(vec![args[0].clone(), args[1].clone()]),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn java_type_params(params: &[String]) -> String {
     if params.is_empty() {
         String::new()
@@ -2600,6 +2875,45 @@ fn java_type_contains_type_param(ty: &ir::Type) -> bool {
         ir::Type::Function { params, ret } => {
             params.iter().any(java_type_contains_type_param) || java_type_contains_type_param(ret)
         }
+        ir::Type::Unknown
+        | ir::Type::Never
+        | ir::Type::Unit
+        | ir::Type::Bool
+        | ir::Type::Int
+        | ir::Type::Float
+        | ir::Type::Str => false,
+    }
+}
+
+fn java_type_contains_unknown(ty: &ir::Type) -> bool {
+    match ty {
+        ir::Type::Unknown => true,
+        ir::Type::Named { args, .. } | ir::Type::Tuple(args) => {
+            args.iter().any(java_type_contains_unknown)
+        }
+        ir::Type::Record(fields) => fields
+            .iter()
+            .any(|field| java_type_contains_unknown(&field.ty)),
+        ir::Type::Function { params, ret } => {
+            params.iter().any(java_type_contains_unknown) || java_type_contains_unknown(ret)
+        }
+        ir::Type::TypeParam(_)
+        | ir::Type::Never
+        | ir::Type::Unit
+        | ir::Type::Bool
+        | ir::Type::Int
+        | ir::Type::Float
+        | ir::Type::Str => false,
+    }
+}
+
+fn java_type_needs_reference_cast(ty: &ir::Type) -> bool {
+    match ty {
+        ir::Type::Named { args, .. } => !args.is_empty(),
+        ir::Type::TypeParam(_)
+        | ir::Type::Tuple(_)
+        | ir::Type::Record(_)
+        | ir::Type::Function { .. } => true,
         ir::Type::Unknown
         | ir::Type::Never
         | ir::Type::Unit

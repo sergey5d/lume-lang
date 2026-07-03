@@ -992,6 +992,14 @@ impl<'a> Checker<'a> {
         if sig.kind == TypeKind::Interface {
             return;
         }
+        if sig
+            .methods
+            .values()
+            .flatten()
+            .any(|method| !method.has_body)
+        {
+            return;
+        }
 
         for bound in &sig.with_bounds {
             let Ty::Named(interface_name, _) = bound else {
@@ -6624,6 +6632,9 @@ impl<'a> Checker<'a> {
                             score += 1;
                         }
                     }
+                }
+                if !sig.params.iter().any(|param| param.variadic) {
+                    score += 1;
                 }
                 Some((score, sig))
             })

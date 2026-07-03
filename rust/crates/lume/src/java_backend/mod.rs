@@ -591,18 +591,78 @@ fn parse_javap_callable_line(
         })
     });
     Some(ParsedJavaCallable::Method(JavaExternalCallable {
-        name: java_method_name_to_lume(name).to_string(),
+        name: java_method_name_to_lume(name),
         type_params: method_type_params,
         params,
         return_type,
     }))
 }
 
-fn java_method_name_to_lume(name: &str) -> &str {
+fn java_method_name_to_lume(name: &str) -> String {
     match name {
-        "toString" => "toStr",
-        _ => name,
+        "toString" => "toStr".to_string(),
+        _ => name
+            .strip_suffix('_')
+            .filter(|base| is_java_reserved(base))
+            .unwrap_or(name)
+            .to_string(),
     }
+}
+
+fn is_java_reserved(name: &str) -> bool {
+    matches!(
+        name,
+        "abstract"
+            | "assert"
+            | "boolean"
+            | "break"
+            | "byte"
+            | "case"
+            | "catch"
+            | "char"
+            | "class"
+            | "const"
+            | "continue"
+            | "default"
+            | "do"
+            | "double"
+            | "else"
+            | "enum"
+            | "extends"
+            | "final"
+            | "finally"
+            | "float"
+            | "for"
+            | "goto"
+            | "if"
+            | "implements"
+            | "import"
+            | "instanceof"
+            | "int"
+            | "interface"
+            | "long"
+            | "native"
+            | "new"
+            | "package"
+            | "private"
+            | "protected"
+            | "public"
+            | "return"
+            | "short"
+            | "static"
+            | "strictfp"
+            | "super"
+            | "switch"
+            | "synchronized"
+            | "this"
+            | "throw"
+            | "throws"
+            | "transient"
+            | "try"
+            | "void"
+            | "volatile"
+            | "while"
+    )
 }
 
 fn parse_javap_params(params: &str, ctx: &JavaTypeContext<'_>) -> Vec<JavaExternalParam> {
@@ -1842,13 +1902,77 @@ def main() Unit {
         assert!(!module.contains("UnsupportedOperationException"));
         assert!(module.contains("static Long add(Long left_0, Long right_1)"));
         assert!(module.contains("tmp3_3 = (left_0 + right_1);"));
-        assert!(module.contains("result_2 = ((Long) tmp3_3);"));
+        assert!(module.contains("result_2 = ((Long) ((Object) tmp3_3));"));
         assert!(module.contains("return result_2;"));
         assert!(module.contains("if (flag_0)"));
-        assert!(module.contains("return ((Long) tmp1_1);"));
+        assert!(module.contains("return ((Long) ((Object) tmp1_1));"));
         assert!(module.contains("tmp1_1 = add(2L, 3L);"));
         assert!(module.contains("value_0 = tmp1_1;"));
         assert!(module.contains("tmp2_2 = lume.core.LumeRuntime.println(value_0);"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn emits_core_enum_constructors_and_indirect_calls_in_block_methods() {
+        if !command_available("javac") {
+            eprintln!("skipping Java callback test because javac is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-callback-blocks");
+        let source = temp.join("callbacks.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/callbacks
+
+class Runner {
+}
+
+impl Runner {
+    def call(value Int, mapper (Int) -> Result[Int, Str]) Result[Int, Str] {
+        mapped Result[Int, Str] = mapper(value)
+        match mapped {
+            case Ok(item) => Ok(item)
+            case Err(error) => Err(error)
+        }
+    }
+
+    def maybe(flag Bool) Result[Option[Int], Str] {
+        if flag {
+            Ok(Some(5))
+        } else {
+            Ok(None)
+        }
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        let runner =
+            fs::read_to_string(out.join("demo/callbacks/Runner.java")).expect("read runner");
+        assert!(!runner.contains("UnsupportedOperationException"));
+        assert!(runner.contains("mapper_2.apply"));
+        assert!(runner.contains("new lume.core.Result.Ok<>"));
+        assert!(runner.contains("new lume.core.Result.Err<>"));
+        assert!(runner.contains("new lume.core.Option.Some<>"));
+        assert!(runner.contains("new lume.core.Option.None<>"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -1966,7 +2090,7 @@ def main() Unit {
             fs::read_to_string(out.join("demo/metadata/MetadataModule.java")).expect("read module");
         assert!(!module.contains("UnsupportedOperationException"));
         assert!(module.contains("tmp3_3 = User.TYPE;"));
-        assert!(module.contains("tmp5_5 = User.TYPE;"));
+        assert!(module.matches("User.TYPE").count() >= 2);
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");

@@ -1,6 +1,9 @@
 # Lume DB
 
 `lume/db` is the JDBC-backed database package for generated Java programs.
+The query/exec/transaction API is written in Lume; handwritten Java is kept to
+the small JDBC adapter layer that opens connections, binds SQL values, reads
+rows, and converts `SQLException` into `DbError`.
 
 The public API uses Lume core values at its boundary:
 

@@ -3,32 +3,38 @@ package lume.db;
 import java.sql.Connection;
 import java.sql.SQLException;
 
+import lume.core.LumeList;
 import lume.core.LumeUnit;
 import lume.core.Result;
 
-public final class Transaction implements QueryRunner {
+public final class JdbcTransaction implements JdbcRunner {
     private final Connection connection;
     private State state = State.OPEN;
     private DbError rollbackOnly;
 
-    Transaction(Connection connection) {
+    JdbcTransaction(Connection connection) {
         this.connection = connection;
     }
 
-    public Query query(String sql, Object... values) {
-        return new Query(this, sql).bind(values);
+    @Override
+    public Result<LumeList<JdbcRow>, DbError> query(String sql, Object... values) {
+        var bindings = SqlBindings.from(values);
+        return run(connection ->
+            Jdbc.query(connection, sql, bindings.positional(), bindings.named())
+        );
     }
 
-    public RowQuery queryRow(String sql, Object... values) {
-        return new RowQuery(this, sql).bind(values);
+    @Override
+    public Result<Long, DbError> exec(String sql) {
+        return exec(sql, SqlBindings.empty());
     }
 
-    public Exec exec(String sql) {
-        return new Exec(this, sql);
-    }
-
-    public Result<Long, DbError> exec(String sql, Object first, Object... rest) {
-        return new BoundExec(this, sql, SqlBindings.from(first, rest)).run();
+    @Override
+    public Result<Long, DbError> exec(String sql, Object... values) {
+        var bindings = SqlBindings.from(values);
+        return run(connection ->
+            Jdbc.update(connection, sql, bindings.positional(), bindings.named())
+        );
     }
 
     public Result<LumeUnit, DbError> commit() {

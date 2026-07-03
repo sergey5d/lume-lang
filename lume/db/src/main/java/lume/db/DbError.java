@@ -43,14 +43,14 @@ public final class DbError {
         return message + " (SQL state " + sqlState + ", vendor code " + vendorCode + ")";
     }
 
-    static DbError from(Throwable err) {
+    public static DbError from(Throwable err) {
         if (err instanceof SQLException sql) {
             return new DbError(sql.getMessage(), sql.getSQLState(), sql.getErrorCode());
         }
         return new DbError(err.getMessage());
     }
 
-    static DbError message(String message) {
+    public static DbError message(String message) {
         return new DbError(message);
     }
 }

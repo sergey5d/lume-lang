@@ -9,10 +9,10 @@ import lume.core.LumeRuntime;
 import lume.core.Option;
 import lume.core.Result;
 
-public final class Row {
+public final class JdbcRow {
     private final LinkedHashMap<String, Object> values;
 
-    Row(LinkedHashMap<String, Object> values) {
+    JdbcRow(LinkedHashMap<String, Object> values) {
         this.values = new LinkedHashMap<>(values);
     }
 
@@ -65,7 +65,7 @@ public final class Row {
     }
 
     public Result<Long, DbError> intValue(String column) {
-        return convert(column, Row::toLong);
+        return convert(column, JdbcRow::toLong);
     }
 
     public Result<Long, DbError> int64(String column) {
@@ -77,11 +77,11 @@ public final class Row {
     }
 
     public Result<Option<Long>, DbError> intOpt(String column) {
-        return convertOpt(column, Row::toLong);
+        return convertOpt(column, JdbcRow::toLong);
     }
 
     public Result<Double, DbError> floatValue(String column) {
-        return convert(column, Row::toDouble);
+        return convert(column, JdbcRow::toDouble);
     }
 
     public Result<Double, DbError> float64(String column) {
@@ -93,15 +93,15 @@ public final class Row {
     }
 
     public Result<Option<Double>, DbError> floatOpt(String column) {
-        return convertOpt(column, Row::toDouble);
+        return convertOpt(column, JdbcRow::toDouble);
     }
 
     public Result<Boolean, DbError> bool(String column) {
-        return convert(column, Row::toBool);
+        return convert(column, JdbcRow::toBool);
     }
 
     public Result<Option<Boolean>, DbError> boolOpt(String column) {
-        return convertOpt(column, Row::toBool);
+        return convertOpt(column, JdbcRow::toBool);
     }
 
     private <T> Result<T, DbError> convert(String column, Converter<T> converter) {

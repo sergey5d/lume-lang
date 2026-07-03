@@ -15,7 +15,7 @@ def loadActiveUsers(db Database) Result[[User], DbError] {
 }
 
 def readUser(row Row) Result[User, DbError] {
-    id Int = try row.intValue("id")
+    id Int = try row.int("id")
     name Str = try row.str("name")
     active Bool = try row.bool("active")
 
@@ -28,7 +28,7 @@ def readUser(row Row) Result[User, DbError] {
 
 def loadByIdAndName(db Database, id Int, name Str) Result[[Row], DbError] {
     db.query("select id, name from users where id = ? and name = ?")
-        .bind((id, name))
+        .bind(id, name)
         .rows()
 }
 

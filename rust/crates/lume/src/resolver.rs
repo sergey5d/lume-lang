@@ -689,7 +689,9 @@ fn synthetic_java_type_decl(
                 span,
             })
             .collect(),
-        with_bounds: Vec::new(),
+        with_bounds: external_class
+            .map(|external_class| external_class.with_bounds.clone())
+            .unwrap_or_default(),
         members: synthetic_java_members(external_class, span),
         span,
     }

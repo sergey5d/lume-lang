@@ -27,7 +27,7 @@ final class Jdbc {
         return new Result.Err<>(DbError.message(message));
     }
 
-    static LumeList<Row> query(
+    static LumeList<JdbcRow> query(
         Connection connection,
         String sql,
         List<Object> positional,
@@ -38,7 +38,7 @@ final class Jdbc {
              var resultSet = bind(statement, prepared.values()).executeQuery()) {
             var metadata = resultSet.getMetaData();
             var columnCount = metadata.getColumnCount();
-            var rows = new ArrayList<Row>();
+            var rows = new ArrayList<JdbcRow>();
             while (resultSet.next()) {
                 var values = new LinkedHashMap<String, Object>();
                 for (int index = 1; index <= columnCount; index++) {
@@ -48,7 +48,7 @@ final class Jdbc {
                     }
                     values.put(label, resultSet.getObject(index));
                 }
-                rows.add(new Row(values));
+                rows.add(new JdbcRow(values));
             }
             return LumeList.from(rows);
         }
