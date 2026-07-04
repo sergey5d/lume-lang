@@ -2300,6 +2300,42 @@ def main() Unit {
     }
 
     #[test]
+    fn resolves_java_overload_from_nested_call_return_type() {
+        let temp = temp_path("lume-java-overload-nested-call");
+        let source = temp.join("string_builder.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/builder
+
+use java/lang/StringBuilder
+
+def text() Str = "value"
+
+def main() Unit {
+    builder StringBuilder = StringBuilder()
+    builder.append(text())
+    println(builder.toStr())
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        let module =
+            fs::read_to_string(out.join("demo/builder/BuilderModule.java")).expect("read module");
+        assert!(module.contains("String tmp"));
+        assert!(module.contains(" = text();"));
+        assert!(module.contains(".append(tmp"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn validates_and_compiles_third_party_jar_imports() {
         if !command_available("javac")
             || !command_available("java")

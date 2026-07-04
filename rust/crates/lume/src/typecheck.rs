@@ -6777,6 +6777,35 @@ impl<'a> Checker<'a> {
                 }
                 Ty::Record(out)
             }
+            Expr::Member { receiver, name, .. } => {
+                if let Some(ty) = self.module_member_value_type(expr) {
+                    return ty;
+                }
+                if let Some(ty) = self.static_member_value_type(receiver, name, &Ty::Unknown) {
+                    return ty;
+                }
+                let receiver_ty = self.probe_expr_type(receiver);
+                if name == "runtimeType" {
+                    return Ty::value_runtime_type(receiver_ty);
+                }
+                self.member_type(&receiver_ty, name).unwrap_or(Ty::Unknown)
+            }
+            Expr::Call {
+                callee,
+                args,
+                uses_brace_syntax,
+                ..
+            } => {
+                let normalized_args =
+                    self.normalize_trailing_brace_call_args(callee, args, *uses_brace_syntax);
+                self.callable_signature_for_args_probe(
+                    callee,
+                    &normalized_args,
+                    *uses_brace_syntax,
+                )
+                .map(|(_, ret)| ret)
+                .unwrap_or(Ty::Unknown)
+            }
             _ => Ty::Unknown,
         }
     }
