@@ -2,7 +2,6 @@ module lume/http/javalin
 
 use io/javalin/Javalin
 use io/javalin/http/{Context, Handler}
-use io/javalin/router/JavalinDefaultRoutingApi
 
 annotation Controller {
     path Str = ""

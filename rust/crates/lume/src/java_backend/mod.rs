@@ -116,6 +116,7 @@ pub(crate) struct JavaExternalClass {
     pub(crate) kind: TypeKind,
     pub(crate) type_params: Vec<String>,
     with_bounds: Vec<TypeRef>,
+    inherit_qualified_names: Vec<String>,
     constructors: Vec<JavaExternalCallable>,
     methods: Vec<JavaExternalCallable>,
 }
@@ -205,6 +206,7 @@ fn java_library_modules(
         .filter(|symbol| classes_by_qualified.contains_key(&symbol.qualified_name))
         .map(|symbol| (symbol.lume_name.clone(), symbol.module_path.clone()))
         .collect::<HashMap<_, _>>();
+    let exposed_names = modules_by_name.keys().cloned().collect::<HashSet<_>>();
     let mut grouped = HashMap::<String, Vec<&JavaExternalSymbol>>::new();
     for symbol in &externals.symbols {
         if classes_by_qualified.contains_key(&symbol.qualified_name) {
@@ -233,6 +235,7 @@ fn java_library_modules(
                             Item::Type(java_library_type_decl(
                                 &symbol.lume_name,
                                 class,
+                                &exposed_names,
                                 symbol.span,
                             ))
                         })
@@ -260,6 +263,7 @@ fn java_library_modules(
 fn java_library_type_decl(
     name: &str,
     external_class: &JavaExternalClass,
+    exposed_names: &HashSet<String>,
     span: crate::source::Span,
 ) -> TypeDecl {
     TypeDecl {
@@ -277,10 +281,63 @@ fn java_library_type_decl(
                 span,
             })
             .collect(),
-        with_bounds: external_class.with_bounds.clone(),
-        members: java_library_members(external_class, span),
+        with_bounds: external_class
+            .with_bounds
+            .iter()
+            .filter(|bound| java_library_type_ref_is_exposed(bound, exposed_names))
+            .cloned()
+            .collect(),
+        members: java_library_members(external_class, exposed_names, span),
         span,
     }
+}
+
+fn java_library_type_ref_is_exposed(ty: &TypeRef, exposed_names: &HashSet<String>) -> bool {
+    match ty {
+        TypeRef::Wildcard { .. } => true,
+        TypeRef::Named { name, args, .. } => {
+            java_library_name_is_exposed(name, exposed_names)
+                && args
+                    .iter()
+                    .all(|arg| java_library_type_ref_is_exposed(arg, exposed_names))
+        }
+        TypeRef::Tuple { fields, .. } => fields
+            .iter()
+            .all(|field| java_library_type_ref_is_exposed(&field.ty, exposed_names)),
+        TypeRef::Record { fields, .. } => fields
+            .iter()
+            .all(|field| java_library_type_ref_is_exposed(&field.ty, exposed_names)),
+        TypeRef::Function { params, ret, .. } => {
+            params
+                .iter()
+                .all(|param| java_library_type_ref_is_exposed(param, exposed_names))
+                && java_library_type_ref_is_exposed(ret, exposed_names)
+        }
+    }
+}
+
+fn java_library_name_is_exposed(name: &str, exposed_names: &HashSet<String>) -> bool {
+    matches!(
+        name,
+        "Any"
+            | "Bool"
+            | "Int"
+            | "Int32"
+            | "Float"
+            | "Float32"
+            | "Rune"
+            | "Str"
+            | "Unit"
+            | "Never"
+            | "Array"
+            | "Iterator"
+            | "List"
+            | "Set"
+            | "Map"
+            | "Option"
+            | "Result"
+            | "Either"
+    ) || exposed_names.contains(name)
 }
 
 fn java_library_imports(
@@ -406,28 +463,131 @@ fn collect_java_library_type_ref(ty: &TypeRef, names: &mut HashSet<String>) {
 
 fn java_library_members(
     external_class: &JavaExternalClass,
+    exposed_names: &HashSet<String>,
     span: crate::source::Span,
 ) -> Vec<TypeMember> {
+    let mut class_exposed_names = exposed_names.clone();
+    class_exposed_names.extend(external_class.type_params.iter().cloned());
+
     if external_class.kind == TypeKind::Annotation {
         return external_class
             .methods
             .iter()
-            .filter_map(|method| java_library_annotation_field(method, span))
+            .map(|method| sanitize_java_callable_for_library(method, &class_exposed_names, span))
+            .filter_map(|method| java_library_annotation_field(&method, span))
             .collect();
     }
     external_class
         .constructors
         .iter()
-        .map(|constructor| java_library_method("new", constructor, None, span))
+        .map(|constructor| {
+            let constructor =
+                sanitize_java_callable_for_library(constructor, &class_exposed_names, span);
+            java_library_method("new", &constructor, None, span)
+        })
         .chain(external_class.methods.iter().map(|method| {
+            let mut method_exposed_names = class_exposed_names.clone();
+            method_exposed_names.extend(method.type_params.iter().cloned());
+            let method = sanitize_java_callable_for_library(method, &method_exposed_names, span);
             java_library_method(
                 method.name.as_str(),
-                method,
+                &method,
                 method.return_type.clone(),
                 span,
             )
         }))
         .collect()
+}
+
+fn sanitize_java_callable_for_library(
+    callable: &JavaExternalCallable,
+    exposed_names: &HashSet<String>,
+    span: crate::source::Span,
+) -> JavaExternalCallable {
+    JavaExternalCallable {
+        name: callable.name.clone(),
+        type_params: callable.type_params.clone(),
+        params: callable
+            .params
+            .iter()
+            .map(|param| JavaExternalParam {
+                name: param.name.clone(),
+                ty: param
+                    .ty
+                    .as_ref()
+                    .map(|ty| sanitize_java_type_ref_for_library(ty, exposed_names, span)),
+                variadic: param.variadic,
+            })
+            .collect(),
+        return_type: callable
+            .return_type
+            .as_ref()
+            .map(|ty| sanitize_java_type_ref_for_library(ty, exposed_names, span)),
+    }
+}
+
+fn sanitize_java_type_ref_for_library(
+    ty: &TypeRef,
+    exposed_names: &HashSet<String>,
+    fallback_span: crate::source::Span,
+) -> TypeRef {
+    match ty {
+        TypeRef::Wildcard { span } => TypeRef::Wildcard { span: *span },
+        TypeRef::Named { name, args, span } => {
+            if !java_library_name_is_exposed(name, exposed_names) {
+                return TypeRef::Named {
+                    name: "Any".to_string(),
+                    args: Vec::new(),
+                    span: *span,
+                };
+            }
+            TypeRef::Named {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| {
+                        sanitize_java_type_ref_for_library(arg, exposed_names, fallback_span)
+                    })
+                    .collect(),
+                span: *span,
+            }
+        }
+        TypeRef::Tuple { fields, span } => TypeRef::Tuple {
+            fields: fields
+                .iter()
+                .map(|field| crate::ast::TupleTypeField {
+                    ty: sanitize_java_type_ref_for_library(&field.ty, exposed_names, fallback_span),
+                    span: field.span,
+                })
+                .collect(),
+            span: *span,
+        },
+        TypeRef::Record { fields, span } => TypeRef::Record {
+            fields: fields
+                .iter()
+                .map(|field| crate::ast::RecordTypeField {
+                    name: field.name.clone(),
+                    ty: sanitize_java_type_ref_for_library(&field.ty, exposed_names, fallback_span),
+                    span: field.span,
+                })
+                .collect(),
+            span: *span,
+        },
+        TypeRef::Function { params, ret, span } => TypeRef::Function {
+            params: params
+                .iter()
+                .map(|param| {
+                    sanitize_java_type_ref_for_library(param, exposed_names, fallback_span)
+                })
+                .collect(),
+            ret: Box::new(sanitize_java_type_ref_for_library(
+                ret,
+                exposed_names,
+                fallback_span,
+            )),
+            span: *span,
+        },
+    }
 }
 
 fn java_library_annotation_field(
@@ -492,7 +652,7 @@ fn resolve_external_classes(
     let classpath_entries = effective_java_classpath(options);
     let index = JavaClasspathIndex::from_entries(&classpath_entries)?;
     let classpath = java_classpath(&classpath_entries)?;
-    let local_type_names = externals
+    let mut local_type_names = externals
         .symbols
         .iter()
         .map(|symbol| (symbol.qualified_name.clone(), symbol.lume_name.clone()))
@@ -520,6 +680,12 @@ fn resolve_external_classes(
         };
         classes_by_qualified.insert(symbol.qualified_name.clone(), descriptor.class);
     }
+    load_inherited_java_classes(
+        &mut classes_by_qualified,
+        &mut local_type_names,
+        classpath.as_deref(),
+        &index,
+    )?;
     flatten_inherited_java_methods(&mut classes_by_qualified, &local_type_names);
     let classes = externals
         .symbols
@@ -537,6 +703,47 @@ fn resolve_external_classes(
         library_modules,
         classes,
     })
+}
+
+fn load_inherited_java_classes(
+    classes: &mut HashMap<String, JavaExternalClass>,
+    local_type_names: &mut HashMap<String, String>,
+    classpath: Option<&std::ffi::OsStr>,
+    index: &JavaClasspathIndex,
+) -> Result<(), String> {
+    let mut inspected = classes.keys().cloned().collect::<HashSet<_>>();
+    let mut queue = classes
+        .values()
+        .flat_map(|class| class.inherit_qualified_names.iter().cloned())
+        .collect::<Vec<_>>();
+
+    while let Some(qualified_name) = queue.pop() {
+        if !inspected.insert(qualified_name.clone()) {
+            continue;
+        }
+        if !index.could_contain(&qualified_name) {
+            continue;
+        }
+
+        local_type_names
+            .entry(qualified_name.clone())
+            .or_insert_with(|| java_simple_name(&qualified_name).to_string());
+
+        let Some(descriptor) = inspect_java_class(
+            classpath,
+            &qualified_name,
+            local_type_names,
+            synthetic_java_span(),
+        )?
+        else {
+            continue;
+        };
+
+        queue.extend(descriptor.class.inherit_qualified_names.iter().cloned());
+        classes.insert(qualified_name, descriptor.class);
+    }
+
+    Ok(())
 }
 
 fn flatten_inherited_java_methods(
@@ -913,9 +1120,34 @@ fn parse_javap_class(
         kind,
         type_params,
         with_bounds,
+        inherit_qualified_names: parse_javap_bound_qualified_names(header, kind),
         constructors,
         methods,
     }
+}
+
+fn parse_javap_bound_qualified_names(header: &str, kind: crate::ast::TypeKind) -> Vec<String> {
+    let header = header.trim().strip_suffix('{').unwrap_or(header).trim();
+    let bounds = match kind {
+        crate::ast::TypeKind::Class => header
+            .split_once(" implements ")
+            .map(|(_, rest)| rest)
+            .unwrap_or_default(),
+        crate::ast::TypeKind::Interface => header
+            .split_once(" extends ")
+            .map(|(_, rest)| rest)
+            .unwrap_or_default(),
+        crate::ast::TypeKind::Annotation => "",
+        _ => "",
+    };
+
+    split_java_signature_list(bounds)
+        .into_iter()
+        .filter_map(|bound| {
+            let (base, _) = split_java_generic_type(bound);
+            base.contains('.').then(|| base.to_string())
+        })
+        .collect()
 }
 
 fn parse_javap_bounds(
@@ -1352,7 +1584,10 @@ fn java_local_type_name(base: &str, ctx: &JavaTypeContext<'_>) -> Option<String>
     if base.contains('.') {
         let package = java_package_name(base);
         if ctx.allow_cross_package_refs || package == ctx.current_package {
-            return ctx.local_type_names.get(base).cloned();
+            return ctx.local_type_names.get(base).cloned().or_else(|| {
+                ctx.allow_cross_package_refs
+                    .then(|| java_simple_name(base).to_string())
+            });
         }
         return None;
     }
@@ -1362,6 +1597,19 @@ fn java_local_type_name(base: &str, ctx: &JavaTypeContext<'_>) -> Option<String>
         format!("{}.{}", ctx.current_package, base)
     };
     ctx.local_type_names.get(&qualified).cloned()
+}
+
+fn java_simple_name(qualified_name: &str) -> &str {
+    qualified_name.rsplit('.').next().unwrap_or(qualified_name)
+}
+
+fn synthetic_java_span() -> crate::source::Span {
+    crate::source::Span::new(
+        0,
+        0,
+        crate::source::LineColumn::new(1, 1),
+        crate::source::LineColumn::new(1, 1),
+    )
 }
 
 fn split_java_generic_type(src: &str) -> (&str, Vec<&str>) {
@@ -2064,6 +2312,79 @@ def main() Unit {
     }
 
     #[test]
+    fn validates_java_inherited_interface_methods_from_jar() {
+        if !command_available("javac")
+            || !command_available("java")
+            || !command_available("jar")
+            || !command_available("javap")
+        {
+            eprintln!("skipping Java inherited method test because a JDK tool is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-inherited-methods");
+        let source = temp.join("java_inherited_methods.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        let jar = create_router_jar(&temp);
+        fs::write(
+            &source,
+            r#"
+module demo/javainherit
+
+use third/party/Router
+
+def main() Unit {
+    router Router = Router()
+    again Router = router.ping()
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(
+            &source,
+            JavaBackendOptions::new(&out).with_classpath_entry(&jar),
+        )
+        .expect("generate java");
+
+        assert!(result.diagnostics.is_empty());
+        let module = fs::read_to_string(out.join("demo/javainherit/JavainheritModule.java"))
+            .expect("read module");
+        assert!(module.contains(".ping()"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac")
+                .arg("-cp")
+                .arg(&jar)
+                .arg("-d")
+                .arg(&classes)
+                .args(&sources),
+            "javac",
+        );
+
+        let runtime_classpath =
+            env::join_paths([classes.as_path(), jar.as_path()]).expect("join runtime classpath");
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(runtime_classpath)
+                .arg("demo.javainherit.JavainheritMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            ""
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn rejects_java_constructor_signature_mismatch_from_jar() {
         if !command_available("javac") || !command_available("jar") || !command_available("javap") {
             eprintln!("skipping Java signature mismatch test because a JDK tool is not available");
@@ -2673,6 +2994,63 @@ public final class GenericBox<T> {
                 .arg(&classes)
                 .arg(&source)
                 .arg(&generic_source),
+            "javac",
+        );
+        run_checked(
+            Command::new("jar")
+                .arg("cf")
+                .arg(&jar)
+                .arg("-C")
+                .arg(&classes)
+                .arg("."),
+            "jar",
+        );
+        jar
+    }
+
+    fn create_router_jar(temp: &Path) -> PathBuf {
+        let src_dir = temp.join("java-src/third/party");
+        let classes = temp.join("java-classes");
+        let jar = temp.join("router.jar");
+        fs::create_dir_all(&src_dir).expect("create java src dir");
+        fs::create_dir_all(&classes).expect("create java classes dir");
+
+        let api_source = src_dir.join("RoutingApi.java");
+        fs::write(
+            &api_source,
+            r#"
+package third.party;
+
+public interface RoutingApi<API extends RoutingApi<API>> {
+    @SuppressWarnings("unchecked")
+    default API ping() {
+        return (API) this;
+    }
+}
+"#,
+        )
+        .expect("write routing api java source");
+
+        let router_source = src_dir.join("Router.java");
+        fs::write(
+            &router_source,
+            r#"
+package third.party;
+
+public final class Router implements RoutingApi<Router> {
+    public Router() {
+    }
+}
+"#,
+        )
+        .expect("write router java source");
+
+        run_checked(
+            Command::new("javac")
+                .arg("-d")
+                .arg(&classes)
+                .arg(&api_source)
+                .arg(&router_source),
             "javac",
         );
         run_checked(
