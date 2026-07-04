@@ -222,6 +222,60 @@ Still intentionally unsettled:
 - whether explicit multi-type-argument call syntax needs a dedicated parser form beyond the current `call[Type](...)` shape
 - which additional library APIs should use `[reified A]` instead of explicit `Type[A]` values
 
+Possible target-typed inference rule:
+
+```txt
+def load[reified A]() Option[A] {
+    ...
+}
+
+user Option[User] = load()
+```
+
+This could infer `A = User` from the expected type and lower as if the call had
+been written:
+
+```txt
+user Option[User] = load[User]()
+```
+
+The rule should stay conservative:
+- infer reified type arguments from an expected assignment type, return type, or parameter type only when every reified parameter is pinned to a concrete runtime-denotable type
+- do not infer from `Any`, `_`, wildcard captures, unresolved type parameters, or ambiguous overloads
+- keep `value = load()` rejected when no expected type is available
+- keep explicit `load[User]()` available when the expected type is not obvious enough
+
+Parameter-based inference should also be considered:
+
+```txt
+def describe[reified A](value A) Str {
+    typeOf[A].qualifiedName().orPanic()
+}
+
+name = describe(User { name: "Ada" })
+```
+
+In this shape, ordinary argument types can infer `A` and provide the hidden
+`Type[A]` evidence. The same concrete-type restriction should apply: inference
+from `Any`, `_`, captured unknowns, or an interface-typed local should reify the
+static type only if that is exactly what the source type says. It should not
+recover the hidden concrete implementation type behind an interface value.
+
+Reifiable type arguments should probably include every closed type that has a
+runtime descriptor:
+- primitive types such as `Int`, `Int32`, `Float`, `Float32`, `Bool`, `Str`, `Rune`, and `Unit`
+- classes, enums, enum payload cases through their enum type, singles, annotations, and named shapes
+- interfaces, as interface metadata only
+- tuples and function types, if their component types are also reifiable
+- anonymous shapes only when the full static field shape is known
+- generic instantiations such as `List[User]` only when every type argument is reifiable
+
+The critical distinction:
+- `Type[User]` means metadata for the concrete class `User`
+- `Type[NamedShape]` means metadata for the shape descriptor
+- `Type[SomeInterface]` means metadata for the interface itself, not the runtime implementer
+- `Type[_]` should not be produced by reified inference, because `_` is an existential capture, not a runtime type name
+
 Still rejected:
 - automatic reification of every generic parameter
 - reified type parameters on classes, shapes, enums, annotations, or singles
