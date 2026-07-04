@@ -49,6 +49,7 @@ pub fn resolve_program(program: &Program) -> CheckResult {
         display_path: "<memory>".to_string(),
         program: program.clone(),
         source: ModuleSource::Source,
+        typecheck_only_types: HashSet::new(),
         imports: HashMap::new(),
         symbol_imports: HashMap::new(),
         dependencies: Vec::new(),
@@ -122,6 +123,7 @@ pub(crate) struct ModuleLoadOptions {
 #[derive(Debug, Clone)]
 pub(crate) struct LibraryModule {
     pub(crate) program: Program,
+    pub(crate) typecheck_only_types: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -135,6 +137,7 @@ pub(crate) struct LoadedModule {
     pub(crate) display_path: String,
     pub(crate) program: Program,
     pub(crate) source: ModuleSource,
+    pub(crate) typecheck_only_types: HashSet<String>,
     pub(crate) imports: HashMap<String, PathBuf>,
     pub(crate) symbol_imports: HashMap<String, ImportedSymbol>,
     pub(crate) dependencies: Vec<PathBuf>,
@@ -373,6 +376,7 @@ fn load_module_with_options(
         display_path,
         program,
         source: ModuleSource::Source,
+        typecheck_only_types: HashSet::new(),
         imports: HashMap::new(),
         symbol_imports: HashMap::new(),
         dependencies: Vec::new(),
@@ -554,6 +558,7 @@ fn ensure_library_module(
                 display_path: path.display().to_string(),
                 program: library.program.clone(),
                 source: ModuleSource::Library,
+                typecheck_only_types: library.typecheck_only_types.clone(),
                 imports: HashMap::new(),
                 symbol_imports: HashMap::new(),
                 dependencies: Vec::new(),
@@ -2911,6 +2916,7 @@ class Adder {
 }
 "#,
                 ),
+                typecheck_only_types: HashSet::new(),
             },
         );
 

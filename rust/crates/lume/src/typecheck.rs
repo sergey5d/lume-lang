@@ -601,6 +601,7 @@ impl World {
                                 display_path: module.display_path.clone(),
                                 program: module.program.clone(),
                                 source: crate::resolver::ModuleSource::Source,
+                                typecheck_only_types: HashSet::new(),
                                 imports: module.imports.clone(),
                                 symbol_imports: module.symbol_imports.clone(),
                                 dependencies: Vec::new(),

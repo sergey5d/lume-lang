@@ -175,6 +175,12 @@ fn prepare_runtime_module(
     let mut program = module.program.clone();
     rewrite_program_for_runtime(&mut program, module, graph);
     program.imports.clear();
+    if module.source == crate::resolver::ModuleSource::Library {
+        program.items.retain(|item| match item {
+            ast::Item::Type(decl) => !module.typecheck_only_types.contains(&decl.name),
+            _ => true,
+        });
+    }
     if !is_root || module.source == crate::resolver::ModuleSource::Library {
         program.items.retain(
             |item| !matches!(item, ast::Item::Function(function) if function.name == "main"),

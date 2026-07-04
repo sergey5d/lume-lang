@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::{Path, PathBuf},
 };
 
@@ -22,20 +22,21 @@ pub(crate) fn render_declaration_skeletons(
     let package = JavaPackage::from_module(bundle.ir.module.as_deref());
     let names = JavaNames::from_external_classes(external_classes);
     let mut sources = Vec::new();
-    let mut written_paths = HashSet::new();
+    let mut source_indexes = HashMap::new();
 
     let module_path = package.relative_file(&format!("{}.java", module_class_name(bundle)));
-    if written_paths.insert(module_path.clone()) {
-        sources.push(JavaSource {
+    push_java_source(
+        &mut sources,
+        &mut source_indexes,
+        JavaSource {
             relative_path: module_path,
             contents: render_module_wrapper(bundle, &package, &names),
-        });
-    }
+        },
+        false,
+    );
 
     if let Some(entrypoint) = render_entrypoint_runner(bundle, &package) {
-        if written_paths.insert(entrypoint.relative_path.clone()) {
-            sources.push(entrypoint);
-        }
+        push_java_source(&mut sources, &mut source_indexes, entrypoint, false);
     }
 
     for ty in &bundle.ir.types {
@@ -43,15 +44,48 @@ pub(crate) fn render_declaration_skeletons(
             continue;
         }
         let relative_path = package.relative_file(&format!("{}.java", java_type_name(&ty.name)));
-        if written_paths.insert(relative_path.clone()) {
-            sources.push(JavaSource {
+        push_java_source(
+            &mut sources,
+            &mut source_indexes,
+            JavaSource {
                 relative_path,
                 contents: render_type_shell(bundle, ty, &package, &names),
-            });
-        }
+            },
+            is_java_library_placeholder_type(ty),
+        );
     }
 
     sources
+}
+
+fn push_java_source(
+    sources: &mut Vec<JavaSource>,
+    indexes: &mut HashMap<PathBuf, (usize, bool)>,
+    source: JavaSource,
+    placeholder: bool,
+) {
+    let key = source.relative_path.clone();
+    match indexes.get(&key).copied() {
+        Some((index, existing_placeholder)) if existing_placeholder && !placeholder => {
+            sources[index] = source;
+            indexes.insert(key, (index, placeholder));
+        }
+        Some(_) => {}
+        None => {
+            indexes.insert(key, (sources.len(), placeholder));
+            sources.push(source);
+        }
+    }
+}
+
+fn is_java_library_placeholder_type(ty: &ir::TypeDef) -> bool {
+    ty.kind == TypeKind::Interface
+        && ty.type_params.is_empty()
+        && ty.with_bounds.is_empty()
+        && ty.fields.is_empty()
+        && ty.field_init.is_none()
+        && ty.methods.is_empty()
+        && ty.enum_cases.is_empty()
 }
 
 fn render_module_wrapper(
@@ -1651,18 +1685,22 @@ struct FunctionEmitter<'a> {
     module_class: String,
     constructor_body: bool,
     capture_overrides: HashMap<ir::LocalId, String>,
+    inferred_local_types: HashMap<ir::LocalId, ir::Type>,
 }
 
 impl<'a> FunctionEmitter<'a> {
     fn new(bundle: &'a BackendBundle, function: &'a ir::Function, names: &'a JavaNames) -> Self {
-        Self {
+        let mut emitter = Self {
             bundle,
             function,
             names,
             module_class: module_class_name(bundle),
             constructor_body: false,
             capture_overrides: HashMap::new(),
-        }
+            inferred_local_types: HashMap::new(),
+        };
+        emitter.infer_local_types();
+        emitter
     }
 
     fn with_constructor_body(mut self) -> Self {
@@ -1675,6 +1713,42 @@ impl<'a> FunctionEmitter<'a> {
         self
     }
 
+    fn infer_local_types(&mut self) {
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for block in &self.function.blocks {
+                for statement in &block.statements {
+                    let ir::StatementKind::Assign { target, value } = &statement.kind else {
+                        continue;
+                    };
+                    let ir::Place::Local(local_id) = target else {
+                        continue;
+                    };
+                    let Some(local) = self.function.locals.get(local_id.0) else {
+                        continue;
+                    };
+                    if !matches!(local.ty, ir::Type::Unknown)
+                        || self.inferred_local_types.contains_key(local_id)
+                    {
+                        continue;
+                    }
+                    let Some(inferred) = self.rvalue_type(value) else {
+                        continue;
+                    };
+                    if matches!(inferred, ir::Type::Unknown) {
+                        continue;
+                    }
+                    if self.type_has_unbound_type_params(&inferred) {
+                        continue;
+                    }
+                    self.inferred_local_types.insert(*local_id, inferred);
+                    changed = true;
+                }
+            }
+        }
+    }
+
     fn emit_body(&self) -> Option<String> {
         let mut out = String::new();
         out.push_str(" {\n");
@@ -1682,12 +1756,16 @@ impl<'a> FunctionEmitter<'a> {
             if self.local_is_declared_elsewhere(local) {
                 continue;
             }
+            let local_ty = self
+                .inferred_local_types
+                .get(&local.id)
+                .unwrap_or(&local.ty);
             out.push_str("        ");
-            out.push_str(&self.local_value_type(&local.ty));
+            out.push_str(&self.local_value_type(local_ty));
             out.push(' ');
             out.push_str(&java_local_name(local));
             out.push_str(" = ");
-            out.push_str(&java_default_value(&local.ty));
+            out.push_str(&java_default_value(local_ty));
             out.push_str(";\n");
         }
 
@@ -2023,19 +2101,16 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 "orPanic" if args.is_empty() => {
                     let receiver_expr = self.emit_operand(receiver)?;
-                    if self.operand_type(receiver).is_some_and(|ty| {
-                        matches!(
-                            ty,
-                            ir::Type::Named { ref name, .. }
-                                if matches!(name.as_str(), "Option" | "Result" | "Either")
-                        )
-                    }) {
-                        Some(format!("{receiver_expr}.orPanic()"))
-                    } else {
-                        Some(format!(
-                            "lume.core.LumeRuntime.extractSuccessValue({receiver_expr})"
-                        ))
-                    }
+                    let extracted =
+                        format!("lume.core.LumeRuntime.extractSuccessValue({receiver_expr})");
+                    Some(match self.success_value_type(receiver) {
+                        Some(target_ty) => self.coerce_to_target_type(
+                            extracted,
+                            Some(ir::Type::Unknown),
+                            &target_ty,
+                        ),
+                        None => extracted,
+                    })
                 }
                 _ => {
                     let params = self
@@ -2137,6 +2212,18 @@ impl<'a> FunctionEmitter<'a> {
                 Some(format!(
                     "new {}({})",
                     self.names.named_type(owner),
+                    args.join(", ")
+                ))
+            }
+            [owner, method] if self.names.is_java_single_type(owner) => {
+                let params = self
+                    .type_method_param_types(owner, method, operands.len())
+                    .unwrap_or_default();
+                let args = self.emit_operands_for_params(operands, &params)?;
+                Some(format!(
+                    "{}.INSTANCE.{}({})",
+                    self.names.named_type(owner),
+                    java_member_name(method),
                     args.join(", ")
                 ))
             }
@@ -2324,9 +2411,21 @@ impl<'a> FunctionEmitter<'a> {
         let ir::Type::Named { name, .. } = ty else {
             return self.unsupported("non-named construction");
         };
+        let params = self
+            .constructor_param_types(name, fields.len())
+            .unwrap_or_default();
         let args = fields
             .iter()
-            .map(|field| self.emit_operand(&field.value))
+            .enumerate()
+            .map(|(index, field)| {
+                let expr = self.emit_operand(&field.value)?;
+                Some(match params.get(index) {
+                    Some(target_ty) => {
+                        self.coerce_to_target_type(expr, self.operand_type(&field.value), target_ty)
+                    }
+                    None => expr,
+                })
+            })
             .collect::<Option<Vec<_>>>()?;
         Some(format!(
             "new {}({})",
@@ -2513,7 +2612,11 @@ impl<'a> FunctionEmitter<'a> {
 
     fn place_type(&self, place: &ir::Place) -> Option<ir::Type> {
         match place {
-            ir::Place::Local(id) => self.function.locals.get(id.0).map(|local| local.ty.clone()),
+            ir::Place::Local(id) => self
+                .inferred_local_types
+                .get(id)
+                .cloned()
+                .or_else(|| self.function.locals.get(id.0).map(|local| local.ty.clone())),
             ir::Place::Global(id) => self
                 .bundle
                 .ir
@@ -2568,10 +2671,16 @@ impl<'a> FunctionEmitter<'a> {
         if let Some(params) = builtin_method_param_types(&receiver_ty, method, arg_len) {
             return Some(params);
         }
-        let ir::Type::Named { name, .. } = receiver_ty else {
+        let ir::Type::Named { name, args } = receiver_ty else {
             return None;
         };
-        self.type_method_param_types(&name, method, arg_len)
+        let params = self.type_method_param_types(&name, method, arg_len)?;
+        Some(
+            params
+                .into_iter()
+                .map(|param| self.substitute_receiver_type_args(&name, &args, &param))
+                .collect(),
+        )
     }
 
     fn type_method_param_types(
@@ -2584,6 +2693,59 @@ impl<'a> FunctionEmitter<'a> {
         self.functions_named(ty, method)
             .find(|function| function.params.len() == arg_len)
             .map(function_param_types)
+    }
+
+    fn method_return_type_for_receiver(
+        &self,
+        receiver: &ir::Operand,
+        method: &str,
+        arg_len: usize,
+    ) -> Option<ir::Type> {
+        let receiver_ty = self.operand_type(receiver)?;
+        let ir::Type::Named { name, args } = receiver_ty else {
+            return None;
+        };
+        let ret = self.type_method_return_type(&name, method, arg_len)?;
+        Some(self.substitute_receiver_type_args(&name, &args, &ret))
+    }
+
+    fn type_method_return_type(
+        &self,
+        type_name: &str,
+        method: &str,
+        arg_len: usize,
+    ) -> Option<ir::Type> {
+        let ty = self.type_def(type_name)?;
+        self.functions_named(ty, method)
+            .find(|function| function.params.len() == arg_len)
+            .map(|function| function.return_ty.clone())
+    }
+
+    fn substitute_receiver_type_args(
+        &self,
+        type_name: &str,
+        args: &[ir::Type],
+        ty: &ir::Type,
+    ) -> ir::Type {
+        let Some(type_def) = self.type_def(type_name) else {
+            return ty.clone();
+        };
+        if args.is_empty() {
+            return ty.clone();
+        }
+        if type_def.type_params.is_empty() {
+            return match ty {
+                ir::Type::TypeParam(_) if args.len() == 1 => args[0].clone(),
+                _ => ty.clone(),
+            };
+        }
+        let subst = type_def
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        substitute_java_emit_type(ty, &subst)
     }
 
     fn type_def(&self, name: &str) -> Option<&ir::TypeDef> {
@@ -2604,7 +2766,7 @@ impl<'a> FunctionEmitter<'a> {
     fn rvalue_type(&self, value: &ir::RValue) -> Option<ir::Type> {
         match value {
             ir::RValue::Use(operand) => self.operand_type(operand),
-            ir::RValue::Call { callee, .. } => match callee {
+            ir::RValue::Call { callee, args, .. } => match callee {
                 ir::Callee::Direct(id) => self
                     .bundle
                     .ir
@@ -2615,6 +2777,12 @@ impl<'a> FunctionEmitter<'a> {
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet)
                 | ir::Callee::Intrinsic(ir::Intrinsic::VariantIs(_))
                 | ir::Callee::Intrinsic(ir::Intrinsic::IterHasNext) => Some(ir::Type::Bool),
+                ir::Callee::Method { receiver, method } => {
+                    if method == "orPanic" && args.is_empty() {
+                        return self.success_value_type(receiver);
+                    }
+                    self.method_return_type_for_receiver(receiver, method, args.len())
+                }
                 _ => None,
             },
             ir::RValue::Construct { ty, .. } => Some(ty.clone()),
@@ -2642,6 +2810,11 @@ impl<'a> FunctionEmitter<'a> {
             && (source_ty.is_none() || source_is_wide_float(source_ty.as_ref()))
         {
             return format!("((float) ({expr}))");
+        }
+        if source_ty.as_ref().is_some_and(|source| source != target_ty)
+            && self.target_type_needs_reference_cast(target_ty)
+        {
+            return self.unchecked_reference_cast(expr, target_ty);
         }
         if source_ty.as_ref().is_some_and(|source| {
             java_type_contains_unknown(source) || self.is_unbound_named_type(source)
@@ -2674,6 +2847,9 @@ impl<'a> FunctionEmitter<'a> {
         if is_java_void_type(ty) {
             return true;
         }
+        if self.type_param_is_unbound(ty) {
+            return false;
+        }
         if self.is_unbound_named_type(ty) {
             return false;
         }
@@ -2686,6 +2862,9 @@ impl<'a> FunctionEmitter<'a> {
     }
 
     fn target_type_can_be_unchecked_cast(&self, ty: &ir::Type) -> bool {
+        if self.type_param_is_unbound(ty) {
+            return false;
+        }
         if self.is_unbound_named_type(ty) {
             return false;
         }
@@ -2698,7 +2877,22 @@ impl<'a> FunctionEmitter<'a> {
     }
 
     fn unchecked_reference_cast(&self, expr: String, target_ty: &ir::Type) -> String {
+        if self.type_param_is_unbound(target_ty) || self.is_unbound_named_type(target_ty) {
+            return expr;
+        }
         format!("(({}) ((Object) {expr}))", self.names.value_type(target_ty))
+    }
+
+    fn success_value_type(&self, receiver: &ir::Operand) -> Option<ir::Type> {
+        let receiver_ty = self.operand_type(receiver)?;
+        let ir::Type::Named { name, args } = receiver_ty else {
+            return None;
+        };
+        match name.as_str() {
+            "Option" | "Result" => args.first().cloned(),
+            "Either" => args.get(1).cloned(),
+            _ => None,
+        }
     }
 
     fn local_value_type(&self, ty: &ir::Type) -> String {
@@ -2711,6 +2905,15 @@ impl<'a> FunctionEmitter<'a> {
             return "Object".to_string();
         }
         self.names.value_type(ty)
+    }
+
+    fn type_param_is_unbound(&self, ty: &ir::Type) -> bool {
+        matches!(ty, ir::Type::TypeParam(name) if !self.function.type_params.iter().any(|param| param == name))
+    }
+
+    fn type_has_unbound_type_params(&self, ty: &ir::Type) -> bool {
+        java_type_contains_type_param(ty)
+            && !java_type_params_are_bound(ty, &self.function.type_params)
     }
 
     fn is_unbound_named_type(&self, ty: &ir::Type) -> bool {
@@ -2786,6 +2989,7 @@ fn module_base_name(bundle: &BackendBundle) -> String {
 
 struct JavaNames {
     java_types: HashMap<String, String>,
+    java_type_kinds: HashMap<String, TypeKind>,
     java_type_param_counts: HashMap<String, usize>,
 }
 
@@ -2795,12 +2999,17 @@ impl JavaNames {
             .iter()
             .map(|(name, class)| (name.clone(), class.qualified_name.clone()))
             .collect();
+        let java_type_kinds = external_classes
+            .iter()
+            .map(|(name, class)| (name.clone(), class.kind))
+            .collect();
         let java_type_param_counts = external_classes
             .iter()
             .map(|(name, class)| (name.clone(), class.type_params.len()))
             .collect();
         Self {
             java_types,
+            java_type_kinds,
             java_type_param_counts,
         }
     }
@@ -2875,6 +3084,12 @@ impl JavaNames {
 
     fn is_java_type(&self, name: &str) -> bool {
         self.java_types.contains_key(name)
+    }
+
+    fn is_java_single_type(&self, name: &str) -> bool {
+        self.java_type_kinds
+            .get(name)
+            .is_some_and(|kind| *kind == TypeKind::Single)
     }
 
     fn java_constructor_type_args(&self, name: &str) -> &'static str {
@@ -3232,6 +3447,42 @@ fn java_type_params_are_bound(ty: &ir::Type, bound: &[String]) -> bool {
         | ir::Type::Int
         | ir::Type::Float
         | ir::Type::Str => true,
+    }
+}
+
+fn substitute_java_emit_type(ty: &ir::Type, subst: &HashMap<String, ir::Type>) -> ir::Type {
+    match ty {
+        ir::Type::TypeParam(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        ir::Type::Named { name, args } => ir::Type::Named {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| substitute_java_emit_type(arg, subst))
+                .collect(),
+        },
+        ir::Type::Tuple(items) => ir::Type::Tuple(
+            items
+                .iter()
+                .map(|item| substitute_java_emit_type(item, subst))
+                .collect(),
+        ),
+        ir::Type::Record(fields) => ir::Type::Record(
+            fields
+                .iter()
+                .map(|field| ir::NamedType {
+                    name: field.name.clone(),
+                    ty: substitute_java_emit_type(&field.ty, subst),
+                })
+                .collect(),
+        ),
+        ir::Type::Function { params, ret } => ir::Type::Function {
+            params: params
+                .iter()
+                .map(|param| substitute_java_emit_type(param, subst))
+                .collect(),
+            ret: Box::new(substitute_java_emit_type(ret, subst)),
+        },
+        _ => ty.clone(),
     }
 }
 

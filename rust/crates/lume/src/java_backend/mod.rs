@@ -276,10 +276,10 @@ fn java_library_modules(
                     _ => None,
                 })
                 .collect::<HashSet<_>>();
+            let typecheck_only_types =
+                java_library_local_placeholder_names(&module_path, externals, &existing_names);
             items.extend(java_library_local_placeholder_items(
-                &module_path,
-                externals,
-                &existing_names,
+                &typecheck_only_types,
                 span,
             ));
             let imports = java_library_imports(&module_path, &items, &modules_by_name, span);
@@ -295,30 +295,36 @@ fn java_library_modules(
                         items,
                         span: Some(span),
                     },
+                    typecheck_only_types,
                 },
             )
         })
         .collect()
 }
 
-fn java_library_local_placeholder_items(
+fn java_library_local_placeholder_names(
     module_path: &str,
     externals: &JavaExternalSymbols,
     existing_names: &HashSet<String>,
-    span: crate::source::Span,
-) -> Vec<Item> {
+) -> HashSet<String> {
     let package = module_path.replace('/', ".");
     let prefix = format!("{package}.");
-    let mut names = externals
+    externals
         .local_type_names
         .iter()
         .filter_map(|(qualified, name)| {
             (qualified.starts_with(&prefix) && !existing_names.contains(name))
                 .then_some(name.clone())
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+fn java_library_local_placeholder_items(
+    typecheck_only_types: &HashSet<String>,
+    span: crate::source::Span,
+) -> Vec<Item> {
+    let mut names = typecheck_only_types.iter().cloned().collect::<Vec<_>>();
     names.sort();
-    names.dedup();
     names
         .into_iter()
         .map(|name| {
