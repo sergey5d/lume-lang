@@ -25,15 +25,15 @@ interface Query {
     def bind(values [Any] vararg) Query
     def rows() Result[[Row], DbError]
     def all() Result[[Row], DbError]
-    def map[T](mapper (Row) -> Result[T, DbError]) Result[[T], DbError]
-    def mapValue[T](mapper (Row) -> T) Result[[T], DbError]
+    def map[T](mapper (Row) -> T) Result[[T], DbError]
+    def flatMap[T](mapper (Row) -> Result[T, DbError]) Result[[T], DbError]
 }
 
 interface RowQuery {
     def bind(values [Any] vararg) RowQuery
     def row() Result[Option[Row], DbError]
-    def map[T](mapper (Row) -> Result[T, DbError]) Result[Option[T], DbError]
-    def mapValue[T](mapper (Row) -> T) Result[Option[T], DbError]
+    def map[T](mapper (Row) -> T) Result[Option[T], DbError]
+    def flatMap[T](mapper (Row) -> Result[T, DbError]) Result[Option[T], DbError]
 }
 
 interface Exec {

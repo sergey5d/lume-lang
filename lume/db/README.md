@@ -13,7 +13,7 @@ use lume/db/{Database, Row, DbError}
 def loadUsers(db Database) Result[[User], DbError] {
     db.query("select id, name from users where active = ?")
         .bind(true)
-        .map(row -> readUser(row))
+        .flatMap(row -> readUser(row))
 }
 
 def updateUser(db Database, id Int, name Str) Result[Int, DbError] {
@@ -45,9 +45,11 @@ Supported binding styles:
 Main execution forms:
 
 - `db.query(sql).bind(...).rows()` returns all rows.
-- `db.query(sql).bind(...).map(row -> decode(row))` decodes all rows.
+- `db.query(sql).bind(...).map(row -> pureValue(row))` maps all rows with a pure mapper.
+- `db.query(sql).bind(...).flatMap(row -> decode(row))` decodes all rows with a mapper that returns `Result`.
 - `db.queryRow(sql).bind(...).row()` returns `Option[Row]` and errors if more than one row is returned.
-- `db.queryRow(sql).bind(...).map(row -> decode(row))` decodes zero-or-one row.
+- `db.queryRow(sql).bind(...).map(row -> pureValue(row))` maps zero-or-one row with a pure mapper.
+- `db.queryRow(sql).bind(...).flatMap(row -> decode(row))` decodes zero-or-one row with a mapper that returns `Result`.
 - `db.exec(sql, args...)` runs insert/update/delete/DDL immediately and returns affected row count.
 - `db.exec(sql).bind(...).run()` is the staged/builder form for the same operation.
 

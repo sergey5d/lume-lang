@@ -79,7 +79,18 @@ impl JdbcQuery {
 
     def all() Result[[Row], DbError] = this.rows()
 
-    def map[T](mapper (Row) -> Result[T, DbError]) Result[[T], DbError] {
+    def map[T](mapper (Row) -> T) Result[[T], DbError] {
+        rows [Row] = try this.rows()
+        out [T] = []
+
+        for row <- rows {
+            out.add(mapper(row))
+        }
+
+        Ok(out)
+    }
+
+    def flatMap[T](mapper (Row) -> Result[T, DbError]) Result[[T], DbError] {
         rows [Row] = try this.rows()
         out [T] = []
 
@@ -93,17 +104,6 @@ impl JdbcQuery {
                     return Err(error)
                 }
             }
-        }
-
-        Ok(out)
-    }
-
-    def mapValue[T](mapper (Row) -> T) Result[[T], DbError] {
-        rows [Row] = try this.rows()
-        out [T] = []
-
-        for row <- rows {
-            out.add(mapper(row))
         }
 
         Ok(out)
@@ -136,7 +136,16 @@ impl JdbcRowQuery {
         }
     }
 
-    def map[T](mapper (Row) -> Result[T, DbError]) Result[Option[T], DbError] {
+    def map[T](mapper (Row) -> T) Result[Option[T], DbError] {
+        maybeRow Option[Row] = try this.row()
+
+        match maybeRow {
+            case Some(row) => Ok(Some(mapper(row)))
+            case None => Ok(None)
+        }
+    }
+
+    def flatMap[T](mapper (Row) -> Result[T, DbError]) Result[Option[T], DbError] {
         maybeRow Option[Row] = try this.row()
 
         match maybeRow {
@@ -147,15 +156,6 @@ impl JdbcRowQuery {
                     case Err(error) => Err(error)
                 }
             }
-            case None => Ok(None)
-        }
-    }
-
-    def mapValue[T](mapper (Row) -> T) Result[Option[T], DbError] {
-        maybeRow Option[Row] = try this.row()
-
-        match maybeRow {
-            case Some(row) => Ok(Some(mapper(row)))
             case None => Ok(None)
         }
     }
