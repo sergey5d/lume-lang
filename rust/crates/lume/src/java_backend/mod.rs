@@ -125,6 +125,7 @@ pub(crate) struct JavaExternalClass {
 struct JavaExternalCallable {
     name: String,
     type_params: Vec<String>,
+    reified_type_params: Vec<String>,
     params: Vec<JavaExternalParam>,
     return_type: Option<TypeRef>,
 }
@@ -507,6 +508,7 @@ fn sanitize_java_callable_for_library(
     JavaExternalCallable {
         name: callable.name.clone(),
         type_params: callable.type_params.clone(),
+        reified_type_params: callable.reified_type_params.clone(),
         params: callable
             .params
             .iter()
@@ -614,6 +616,11 @@ fn java_library_method(
     return_type: Option<TypeRef>,
     span: crate::source::Span,
 ) -> TypeMember {
+    let reified_type_params = callable
+        .reified_type_params
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
     TypeMember::Method(MethodDecl {
         annotations: Vec::new(),
         visibility: Visibility::Default,
@@ -623,7 +630,7 @@ fn java_library_method(
             .iter()
             .map(|name| TypeParam {
                 name: name.clone(),
-                reified: false,
+                reified: reified_type_params.contains(name.as_str()),
                 bounds: Vec::new(),
                 span,
             })
@@ -810,6 +817,7 @@ fn substitute_java_callable(
     JavaExternalCallable {
         name: callable.name.clone(),
         type_params: callable.type_params.clone(),
+        reified_type_params: callable.reified_type_params.clone(),
         params: callable
             .params
             .iter()
@@ -1108,7 +1116,7 @@ fn parse_javap_class(
             allow_cross_package_refs: false,
             span,
         };
-        match parse_javap_callable_line(line, qualified_name, ctx) {
+        match parse_javap_callable_line(line, qualified_name, ctx, javap_lume_generated(output)) {
             Some(ParsedJavaCallable::Constructor(constructor)) => constructors.push(constructor),
             Some(ParsedJavaCallable::Method(method)) => methods.push(method),
             None => {}
@@ -1190,6 +1198,7 @@ fn parse_javap_callable_line(
     line: &str,
     qualified_name: &str,
     mut ctx: JavaTypeContext<'_>,
+    lume_generated: bool,
 ) -> Option<ParsedJavaCallable> {
     let line = line.trim().strip_suffix(';')?.trim();
     let line = line.strip_prefix("public ")?;
@@ -1204,11 +1213,19 @@ fn parse_javap_callable_line(
     before = strip_java_modifiers(rest);
     ctx.type_params.extend(method_type_params.iter().cloned());
 
-    let params = parse_javap_params(&line[open + 1..close], &ctx);
+    let raw_param_types = split_java_signature_list(&line[open + 1..close]);
+    let mut params = parse_javap_params(&raw_param_types, &ctx);
+    let reified_type_params = strip_lume_reified_evidence_params(
+        &mut params,
+        &raw_param_types,
+        &method_type_params,
+        lume_generated,
+    );
     if java_constructor_name_matches(before, qualified_name) {
         return Some(ParsedJavaCallable::Constructor(JavaExternalCallable {
             name: "new".to_string(),
             type_params: method_type_params,
+            reified_type_params,
             params,
             return_type: None,
         }));
@@ -1225,9 +1242,44 @@ fn parse_javap_callable_line(
     Some(ParsedJavaCallable::Method(JavaExternalCallable {
         name: java_method_name_to_lume(name),
         type_params: method_type_params,
+        reified_type_params,
         params,
         return_type,
     }))
+}
+
+fn javap_lume_generated(output: &str) -> bool {
+    output
+        .lines()
+        .any(|line| line.trim() == "public static final lume.core.LumeType TYPE;")
+}
+
+fn strip_lume_reified_evidence_params(
+    params: &mut Vec<JavaExternalParam>,
+    raw_param_types: &[&str],
+    type_params: &[String],
+    lume_generated: bool,
+) -> Vec<String> {
+    if !lume_generated || type_params.is_empty() || raw_param_types.is_empty() {
+        return Vec::new();
+    }
+
+    let evidence_count = raw_param_types
+        .iter()
+        .rev()
+        .take_while(|param| java_type_erases_to_lume_type(param))
+        .count();
+    if evidence_count == 0 || evidence_count > type_params.len() || evidence_count > params.len() {
+        return Vec::new();
+    }
+
+    params.truncate(params.len() - evidence_count);
+    type_params[type_params.len() - evidence_count..].to_vec()
+}
+
+fn java_type_erases_to_lume_type(raw: &str) -> bool {
+    let (base, _) = split_java_generic_type(raw);
+    matches!(base.trim(), "lume.core.LumeType" | "LumeType")
 }
 
 fn java_method_name_to_lume(name: &str) -> String {
@@ -1297,12 +1349,12 @@ fn is_java_reserved(name: &str) -> bool {
     )
 }
 
-fn parse_javap_params(params: &str, ctx: &JavaTypeContext<'_>) -> Vec<JavaExternalParam> {
-    if params.trim().is_empty() {
+fn parse_javap_params(params: &[&str], ctx: &JavaTypeContext<'_>) -> Vec<JavaExternalParam> {
+    if params.is_empty() {
         return Vec::new();
     }
-    split_java_signature_list(params)
-        .into_iter()
+    params
+        .iter()
         .enumerate()
         .map(|(index, raw)| {
             let raw = raw.trim();
@@ -1812,6 +1864,68 @@ mod tests {
                     && matches!(fields[0].ty, TypeRef::Named { ref name, .. } if name == "Int")
                     && matches!(fields[1].ty, TypeRef::Named { ref name, .. } if name == "Str")
         ));
+    }
+
+    #[test]
+    fn imports_generated_lume_reified_methods_without_visible_evidence_params() {
+        let span = Span::new(0, 0, LineColumn::new(1, 1), LineColumn::new(1, 1));
+        let local_type_names = HashMap::from([
+            ("lume.db.DbError".to_string(), "DbError".to_string()),
+            ("lume.db.Row".to_string(), "Row".to_string()),
+        ]);
+        let ctx = JavaTypeContext {
+            type_params: HashSet::new(),
+            local_type_names: &local_type_names,
+            current_package: "lume.db",
+            allow_cross_package_refs: false,
+            span,
+        };
+
+        let parsed = parse_javap_callable_line(
+            "public abstract <T extends java.lang.Object> lume.core.Result<lume.core.LumeList<T>, lume.db.DbError> decodeAll(lume.core.LumeType);",
+            "lume.db.Query",
+            ctx,
+            true,
+        );
+        let Some(ParsedJavaCallable::Method(method)) = parsed else {
+            panic!("expected generated Lume method");
+        };
+
+        assert_eq!(method.name, "decodeAll");
+        assert_eq!(method.type_params, vec!["T"]);
+        assert_eq!(method.reified_type_params, vec!["T"]);
+        assert!(method.params.is_empty());
+        assert!(matches!(
+            method.return_type,
+            Some(TypeRef::Named { ref name, .. }) if name == "Result"
+        ));
+    }
+
+    #[test]
+    fn keeps_lume_type_params_visible_for_plain_java_methods() {
+        let span = Span::new(0, 0, LineColumn::new(1, 1), LineColumn::new(1, 1));
+        let local_type_names = HashMap::new();
+        let ctx = JavaTypeContext {
+            type_params: HashSet::new(),
+            local_type_names: &local_type_names,
+            current_package: "third.party",
+            allow_cross_package_refs: false,
+            span,
+        };
+
+        let parsed = parse_javap_callable_line(
+            "public abstract <T extends java.lang.Object> T inspect(lume.core.LumeType);",
+            "third.party.Inspector",
+            ctx,
+            false,
+        );
+        let Some(ParsedJavaCallable::Method(method)) = parsed else {
+            panic!("expected plain Java method");
+        };
+
+        assert_eq!(method.name, "inspect");
+        assert!(method.reified_type_params.is_empty());
+        assert_eq!(method.params.len(), 1);
     }
 
     #[test]
@@ -2727,7 +2841,7 @@ def main() Unit {
         let module = fs::read_to_string(out.join("demo/constructors/ConstructorsModule.java"))
             .expect("read module");
         assert!(!module.contains("UnsupportedOperationException"));
-        assert!(module.contains("tmp1_1 = new Greeter();"));
+        assert!(module.contains("new Greeter()"));
         assert!(module.contains("greeter_0 = tmp1_1;"));
 
         let _ = fs::remove_dir_all(temp);

@@ -2465,7 +2465,7 @@ impl<'a> FunctionEmitter<'a> {
         }
         if source_ty.as_ref().is_some_and(|source| {
             java_type_contains_unknown(source) || self.is_unbound_named_type(source)
-        }) && java_type_needs_reference_cast(target_ty)
+        }) && self.target_type_needs_reference_cast(target_ty)
         {
             return self.unchecked_reference_cast(expr, target_ty);
         }
@@ -2475,7 +2475,7 @@ impl<'a> FunctionEmitter<'a> {
         {
             return self.unchecked_reference_cast(expr, target_ty);
         }
-        if source_ty.is_none() && java_type_needs_reference_cast(target_ty) {
+        if source_ty.is_none() && self.target_type_needs_reference_cast(target_ty) {
             return self.unchecked_reference_cast(expr, target_ty);
         }
         if !matches!(source_ty, Some(ir::Type::Unknown)) || matches!(target_ty, ir::Type::Unknown) {
@@ -2484,7 +2484,34 @@ impl<'a> FunctionEmitter<'a> {
         if is_java_void_type(target_ty) {
             return expr;
         }
+        if !self.target_type_can_be_unchecked_cast(target_ty) {
+            return expr;
+        }
         self.unchecked_reference_cast(expr, target_ty)
+    }
+
+    fn target_type_needs_reference_cast(&self, ty: &ir::Type) -> bool {
+        if self.is_unbound_named_type(ty) {
+            return false;
+        }
+        if java_type_contains_type_param(ty)
+            && !java_type_params_are_bound(ty, &self.function.type_params)
+        {
+            return false;
+        }
+        java_type_needs_reference_cast(ty)
+    }
+
+    fn target_type_can_be_unchecked_cast(&self, ty: &ir::Type) -> bool {
+        if self.is_unbound_named_type(ty) {
+            return false;
+        }
+        if java_type_contains_type_param(ty)
+            && !java_type_params_are_bound(ty, &self.function.type_params)
+        {
+            return false;
+        }
+        !matches!(ty, ir::Type::Unknown | ir::Type::Never | ir::Type::Unit)
     }
 
     fn unchecked_reference_cast(&self, expr: String, target_ty: &ir::Type) -> String {
@@ -2981,7 +3008,10 @@ fn java_type_contains_unknown(ty: &ir::Type) -> bool {
 
 fn java_type_needs_reference_cast(ty: &ir::Type) -> bool {
     match ty {
-        ir::Type::Named { args, .. } => !args.is_empty(),
+        ir::Type::Named { name, args } => {
+            !args.is_empty()
+                || (java_named_builtin_value(name).is_none() && !is_reflection_type(name))
+        }
         ir::Type::TypeParam(_)
         | ir::Type::Tuple(_)
         | ir::Type::Record(_)

@@ -2493,6 +2493,10 @@ impl<'a> FunctionLowerer<'a> {
         match pattern {
             Pattern::Wildcard { .. } => PatternPlan::always_true(),
             Pattern::Extract { inner, span } => {
+                let payload_ty = self
+                    .operand_type(&scrutinee)
+                    .and_then(|ty| unwrap_lifted_ir_type(&ty).map(|(_, inner)| inner))
+                    .unwrap_or(ir::Type::Unknown);
                 let base_condition = self.emit_temp_from_rvalue(
                     ir::RValue::Call {
                         callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet),
@@ -2508,7 +2512,7 @@ impl<'a> FunctionLowerer<'a> {
                         args: vec![scrutinee],
                         structural: false,
                     },
-                    ir::Type::Unknown,
+                    payload_ty,
                     Some(*span),
                 );
                 let inner_plan = self.lower_pattern_plan(payload, inner);
@@ -2526,7 +2530,7 @@ impl<'a> FunctionLowerer<'a> {
                         condition: self.bool_const(true),
                         bindings: vec![PendingBinding {
                             name: name.clone(),
-                            ty: ir::Type::Unknown,
+                            ty: self.operand_type(&scrutinee).unwrap_or(ir::Type::Unknown),
                             source: PendingBindingSource::Operand(scrutinee),
                         }],
                     }
@@ -3359,6 +3363,29 @@ impl<'a> FunctionLowerer<'a> {
         self.capture_sources
             .get(name)
             .map(|source| source.ty.clone())
+    }
+
+    fn operand_type(&self, operand: &ir::Operand) -> Option<ir::Type> {
+        match operand {
+            ir::Operand::Copy(place) | ir::Operand::Move(place) => self.place_type(place),
+            ir::Operand::Const(_) => None,
+        }
+    }
+
+    fn place_type(&self, place: &ir::Place) -> Option<ir::Type> {
+        match place {
+            ir::Place::Local(local) => self
+                .function()
+                .locals
+                .get(local.0)
+                .map(|local| local.ty.clone()),
+            ir::Place::Global(global) => self
+                .program
+                .globals
+                .get(global.0)
+                .map(|global| global.ty.clone()),
+            ir::Place::Field { .. } | ir::Place::Index { .. } => None,
+        }
     }
 
     fn lookup_global_type(&self, name: &str) -> Option<ir::Type> {
@@ -6021,6 +6048,37 @@ mod tests {
                 .iter()
                 .any(|block| matches!(block.terminator.kind, ir::TerminatorKind::Branch { .. }))
         );
+    }
+
+    #[test]
+    fn lowers_extract_pattern_bindings_with_inner_type() {
+        let program = parse_inline(
+            r#"
+            class Row {
+            }
+
+            def unwrap(maybe Option[Row]) Int {
+                let row <- maybe else return 0
+                1
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let unwrap = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "unwrap")
+            .expect("unwrap function");
+        let row = unwrap
+            .locals
+            .iter()
+            .find(|local| local.name == "row")
+            .expect("row binding");
+
+        assert_eq!(row.ty, ir::Type::named("Row"));
     }
 
     #[test]
