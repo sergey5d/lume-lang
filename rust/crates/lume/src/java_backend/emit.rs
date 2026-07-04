@@ -424,7 +424,8 @@ fn type_descriptor_expr(
     names: &JavaNames,
 ) -> String {
     let name = java_string_literal(&ty.name);
-    let qualified = java_string_literal(&qualified_type_name(ty, package));
+    let qualified_name = qualified_type_name(ty, package);
+    let qualified = java_string_literal(&qualified_name);
     let fields = type_field_array_expr(&ty.fields, names, &ty.type_params);
     let methods = type_method_array_expr(bundle, ty, names);
     let annotations = annotation_array_expr(&ty.annotations);
@@ -458,7 +459,7 @@ fn type_descriptor_expr(
             "lume.core.LumeType.enumType({}, {}, {}, {}, {})",
             name,
             qualified,
-            enum_case_array_expr(ty, names),
+            enum_case_array_expr(ty, names, &qualified_name),
             methods,
             annotations
         ),
@@ -623,13 +624,14 @@ fn invoker_erased_container_type(name: &str, names: &JavaNames) -> String {
     }
 }
 
-fn enum_case_array_expr(ty: &ir::TypeDef, names: &JavaNames) -> String {
+fn enum_case_array_expr(ty: &ir::TypeDef, names: &JavaNames, owner_qualified_name: &str) -> String {
     let items = ty
         .enum_cases
         .iter()
         .map(|case| {
             format!(
-                "lume.core.LumeEnumCase.of({}, {}, {})",
+                "lume.core.LumeEnumCase.of({}, {}, {}, {})",
+                java_string_literal(owner_qualified_name),
                 java_string_literal(&case.name),
                 type_field_array_expr(&case.fields, names, &ty.type_params),
                 annotation_array_expr(&case.annotations)

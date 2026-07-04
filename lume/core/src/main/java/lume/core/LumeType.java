@@ -230,9 +230,13 @@ public final class LumeType {
     }
 
     public <T> Result<T, ReflectionError> construct(Object... args) {
+        if (kind == LumeTypeKind.Annotation) {
+            return reflectionErr("cannot construct annotation " + typeLabel()
+                    + ": annotations are metadata only and cannot be instantiated as values");
+        }
         if (kind != LumeTypeKind.Class && kind != LumeTypeKind.Shape) {
             return reflectionErr("cannot construct " + typeLabel()
-                    + ": only class and shape descriptors are constructable");
+                    + ": only class and shape descriptors are constructible");
         }
         if (qualifiedName == null || qualifiedName.isBlank()) {
             return reflectionErr("cannot construct " + typeLabel() + ": type has no Java qualified name");

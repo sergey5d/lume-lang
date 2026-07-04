@@ -99,4 +99,5 @@ interface Param {
 interface EnumCase with Annotated {
     def name() Str
     def fields() [Field]
+    def construct(args [Any] vararg) Result[Any, ReflectionError]
 }

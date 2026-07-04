@@ -5209,6 +5209,13 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: Vec::new(),
             ret: Box::new(ir::Type::list(ir::Type::named("Field"))),
         }),
+        ("EnumCase", "construct") => Some(ir::Type::Function {
+            params: vec![ir::Type::list(ir::Type::named("Any"))],
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::named("Any"), ir::Type::named("ReflectionError")],
+            }),
+        }),
         ("List" | "Array", "head" | "first" | "last" | "removeFirst" | "removeLast") => {
             Some(ir::Type::Function {
                 params: Vec::new(),

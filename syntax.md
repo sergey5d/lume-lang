@@ -263,6 +263,7 @@ println(nameField.fieldType().name().orPanic())
 enumType EnumType[Status] = typeOf[Status].asEnum().orPanic()
 expect Some(pendingCase) = enumType.case("Pending")
 println(pendingCase.name())
+constructedCase Result[Any, ReflectionError] = pendingCase.construct()
 ```
 
 Safe reflective invocation uses `Result` values:
@@ -289,6 +290,8 @@ Rules:
 - field, method, parameter, and enum-case metadata are runtime values with methods such as `name()`, `fieldType()`, `params()`, and `returnType()`
 - annotation lookup is typed and reified: use `metadata.hasAnnotation[Route]()` and `metadata.annotation[Route]()`
 - reflective construction is supported for class and named shape metadata through `construct(args...)`
+- reflective enum case construction is supported through `EnumCase.construct(args...)`
+- annotations are metadata only; they cannot be constructed as runtime values in source code or through reflection
 - reflective field reads use `Field.get(receiver)` and reflective safe method calls use `Method.call(receiver, args...)`
 
 ## Strings
