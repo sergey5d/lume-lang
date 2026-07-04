@@ -13,9 +13,6 @@
       "include": "#numbers"
     },
     {
-      "include": "#controlShorthand"
-    },
-    {
       "include": "#annotations"
     },
     {
@@ -28,10 +25,13 @@
       "include": "#constants"
     },
     {
+      "include": "#constructors"
+    },
+    {
       "include": "#types"
     },
     {
-      "include": "#constructors"
+      "include": "#builtins"
     },
     {
       "include": "#functions"
@@ -95,6 +95,25 @@
             {
               "name": "constant.character.escape.lume",
               "match": "\\\\."
+            },
+            {
+              "name": "meta.interpolation.lume",
+              "begin": "\\$\\{",
+              "end": "\\}",
+              "patterns": [
+                {
+                  "include": "$self"
+                }
+              ]
+            },
+            {
+              "name": "meta.interpolation.simple.lume",
+              "match": "\\$([A-Za-z_][A-Za-z0-9_]*)",
+              "captures": {
+                "1": {
+                  "name": "variable.other.interpolation.lume"
+                }
+              }
             }
           ]
         },
@@ -116,6 +135,15 @@
                   "include": "$self"
                 }
               ]
+            },
+            {
+              "name": "meta.interpolation.simple.lume",
+              "match": "\\$([A-Za-z_][A-Za-z0-9_]*)",
+              "captures": {
+                "1": {
+                  "name": "variable.other.interpolation.lume"
+                }
+              }
             }
           ]
         }
@@ -132,12 +160,28 @@
     "keywords": {
       "patterns": [
         {
+          "name": "meta.match.partial.lume",
+          "match": "\\b(partial)(\\s+)(match)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.control.lume"
+            },
+            "3": {
+              "name": "keyword.control.lume"
+            }
+          }
+        },
+        {
           "name": "keyword.control.lume",
-          "match": "\\b(?:if|else|for|while|yield|partial|match|return|break|continue|expect|is|try|lift|defer)\\b"
+          "match": "\\b(?:if|else|for|while|yield|match|return|break|continue|expect|is|try|lift|defer)\\b"
         },
         {
           "name": "keyword.declaration.lume",
-          "match": "\\b(?:def|new|annotation|class|shape|enum|interface|single|impl|use|module|with|hidden|case|var|vararg|let)\\b"
+          "match": "\\b(?:def|new|annotation|class|shape|enum|interface|single|impl|use|module|with|as|hidden|case|var|vararg|let)\\b"
+        },
+        {
+          "name": "storage.modifier.generic.reified.lume",
+          "match": "\\b(?:reified)\\b"
         }
       ]
     },
@@ -173,30 +217,6 @@
         }
       ]
     },
-    "controlShorthand": {
-      "patterns": [
-        {
-          "name": "meta.control.shorthand.lume",
-          "begin": "\\b(if|else|for|yield)\\b",
-          "beginCaptures": {
-            "1": {
-              "name": "keyword.control.lume"
-            }
-          },
-          "end": ":",
-          "endCaptures": {
-            "0": {
-              "name": "keyword.operator.lume"
-            }
-          },
-          "patterns": [
-            {
-              "include": "$self"
-            }
-          ]
-        }
-      ]
-    },
     "constants": {
       "patterns": [
         {
@@ -209,7 +229,7 @@
       "patterns": [
         {
           "name": "support.type.builtin.lume",
-          "match": "\\b(?:Int|Int64|Bool|Rune|Float|Float64|Str|Unit|Array|List|Set|Map|Option|Result|Either|Iterator|Iterable|Ordering|Eq|Printer|OS|IntRange|Tuple2|Tuple3|Tuple4|Tuple5|Tuple6|Tuple7|Tuple8|Tuple9|Tuple10)\\b"
+          "match": "\\b(?:Any|Int|Int32|Bool|Rune|Float|Float32|Str|Unit|Never|Array|List|Set|Map|Option|Result|Either|Iterator|Iterable|Range|Ordering|Eq|OS|Type|TypeKind|ClassType|ShapeType|EnumType|InterfaceType|SingleType|AnnotationType|Field|Method|Param|EnumCase|AnnotationValue|ReflectionError|Tuple2|Tuple3|Tuple4|Tuple5|Tuple6|Tuple7|Tuple8)\\b"
         },
         {
           "name": "entity.name.type.lume",
@@ -225,6 +245,18 @@
         }
       ]
     },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.lume",
+          "match": "\\b(?:print|println|printf|panic|assert)\\s*(?=\\()"
+        },
+        {
+          "name": "support.function.builtin.typeof.lume",
+          "match": "\\b(typeOf)\\s*(?=\\[)"
+        }
+      ]
+    },
     "functions": {
       "patterns": [
         {
@@ -237,11 +269,19 @@
       "patterns": [
         {
           "name": "keyword.operator.assignment.lume",
-          "match": "<-|:=|="
+          "match": "<-|:=|\\+=|-=|\\*=|/=|%=|="
         },
         {
           "name": "keyword.operator.shape.lume",
-          "match": ":<|:\\+"
+          "match": ":<"
+        },
+        {
+          "name": "keyword.operator.lifted-access.lume",
+          "match": "\\.->"
+        },
+        {
+          "name": "keyword.operator.spread.lume",
+          "match": "\\.\\.\\."
         },
         {
           "name": "keyword.operator.comparison.lume",
@@ -256,8 +296,12 @@
           "match": "=>|->"
         },
         {
+          "name": "keyword.operator.pair.lume",
+          "match": ":"
+        },
+        {
           "name": "keyword.operator.symbolic.lume",
-          "match": "(?<!\\+)\\+(?!\\+)|(?<!-)\\-(?!-)|[*/%&|]"
+          "match": "(?<!\\+)\\+(?!\\+)|(?<!-)\\-(?!-)|[*/%!]"
         },
         {
           "name": "punctuation.separator.arguments.lume",
