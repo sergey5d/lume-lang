@@ -16,7 +16,15 @@ val generatedLumeJava = layout.buildDirectory.dir("generated/sources/lume/java")
 val lumeCompilerSources = repoRoot.dir("rust/crates/lume/src")
 val lumeCompilerBinary = repoRoot.file("rust/target/debug/lume")
 val lumeExecutableOverride = providers.environmentVariable("LUME")
-val gradleExecutable = providers.environmentVariable("GRADLE").orElse("gradle")
+val currentGradleExecutable = providers.provider {
+    val executableName = if (System.getProperty("os.name").lowercase().contains("windows")) {
+        "gradle.bat"
+    } else {
+        "gradle"
+    }
+    gradle.gradleHomeDir?.resolve("bin")?.resolve(executableName)?.absolutePath ?: "gradle"
+}
+val gradleExecutable = providers.environmentVariable("GRADLE").orElse(currentGradleExecutable)
 
 sourceSets {
     main {

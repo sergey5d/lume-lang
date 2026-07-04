@@ -42,15 +42,13 @@ public final class LumeList<T> {
     }
 
     public LumeList<T> add(T value) {
-        var copy = new ArrayList<>(values);
-        copy.add(value);
-        return new LumeList<>(copy);
+        values.add(value);
+        return this;
     }
 
     public LumeList<T> addAll(LumeList<T> other) {
-        var copy = new ArrayList<>(values);
-        copy.addAll(other.values);
-        return new LumeList<>(copy);
+        values.addAll(other.values);
+        return this;
     }
 
     public LumeIterator<T> iterator() {

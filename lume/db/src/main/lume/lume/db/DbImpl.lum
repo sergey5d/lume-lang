@@ -68,10 +68,10 @@ impl JdbcQuery {
 
     def rows() Result[[Row], DbError] {
         jdbcRows [JdbcRow] = try this.runner.query(this.sql, this.values)
-        var out [Row] = []
+        out [Row] = []
 
         for jdbcRow <- jdbcRows {
-            out := out.add(JdbcRowImpl(jdbcRow))
+            out.add(JdbcRowImpl(jdbcRow))
         }
 
         Ok(out)
@@ -81,13 +81,13 @@ impl JdbcQuery {
 
     def map[T](mapper (Row) -> Result[T, DbError]) Result[[T], DbError] {
         rows [Row] = try this.rows()
-        var out [T] = []
+        out [T] = []
 
         for row <- rows {
             mapped Result[T, DbError] = mapper(row)
             match mapped {
                 case Ok(value) => {
-                    out := out.add(value)
+                    out.add(value)
                 }
                 case Err(error) => {
                     return Err(error)
@@ -100,10 +100,10 @@ impl JdbcQuery {
 
     def mapValue[T](mapper (Row) -> T) Result[[T], DbError] {
         rows [Row] = try this.rows()
-        var out [T] = []
+        out [T] = []
 
         for row <- rows {
-            out := out.add(mapper(row))
+            out.add(mapper(row))
         }
 
         Ok(out)
@@ -262,13 +262,13 @@ impl JdbcDatabaseImpl {
                 match committed {
                     case Ok(_) => Ok(value)
                     case Err(error) => {
-                        try tx.rollback()
+                        tx.rollback()
                         Err(error)
                     }
                 }
             }
             case Err(error) => {
-                try tx.rollback()
+                tx.rollback()
                 Err(error)
             }
         }

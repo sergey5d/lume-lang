@@ -8,8 +8,15 @@ val lumeCoreJar = repoRoot.file("lume/core/build/libs/lume-core.jar")
 val lumeHttpJavalinJar = repoRoot.file("lume/http/javalin/build/libs/lume-http-javalin.jar")
 val selectedLumeExecutable = providers.environmentVariable("LUME")
     .orElse(localLume.asFile.absolutePath)
-val gradleExecutable = providers.environmentVariable("GRADLE")
-    .orElse("gradle")
+val currentGradleExecutable = providers.provider {
+    val executableName = if (System.getProperty("os.name").lowercase().contains("windows")) {
+        "gradle.bat"
+    } else {
+        "gradle"
+    }
+    gradle.gradleHomeDir?.resolve("bin")?.resolve(executableName)?.absolutePath ?: "gradle"
+}
+val gradleExecutable = providers.environmentVariable("GRADLE").orElse(currentGradleExecutable)
 
 val buildLocalLumeCore = tasks.register<Exec>("buildLocalLumeCore") {
     description = "Builds the repo-local Lume core jar used by this checkout sample."

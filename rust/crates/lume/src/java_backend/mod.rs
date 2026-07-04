@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     env, fs,
     path::{Path, PathBuf},
     process::Command,
@@ -10,8 +10,8 @@ mod emit;
 use crate::{
     Diagnostic,
     ast::{
-        FieldDecl, ImportDecl, Item, MethodDecl, ModuleDecl, Param, Program, TypeDecl, TypeKind,
-        TypeMember, TypeParam, TypeRef, Visibility,
+        FieldDecl, ImportDecl, ImportSymbol, Item, MethodDecl, ModuleDecl, Param, Program,
+        TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
     },
     backend::bundle::build_backend_bundle_with_load_options,
     resolver::{LibraryModule, LocatedDiagnostic, ModuleLoadOptions, parse_program_from_path},
@@ -199,6 +199,12 @@ fn java_library_modules(
     externals: &JavaExternalSymbols,
     classes_by_qualified: &HashMap<String, JavaExternalClass>,
 ) -> HashMap<String, LibraryModule> {
+    let modules_by_name = externals
+        .symbols
+        .iter()
+        .filter(|symbol| classes_by_qualified.contains_key(&symbol.qualified_name))
+        .map(|symbol| (symbol.lume_name.clone(), symbol.module_path.clone()))
+        .collect::<HashMap<_, _>>();
     let mut grouped = HashMap::<String, Vec<&JavaExternalSymbol>>::new();
     for symbol in &externals.symbols {
         if classes_by_qualified.contains_key(&symbol.qualified_name) {
@@ -231,7 +237,8 @@ fn java_library_modules(
                             ))
                         })
                 })
-                .collect();
+                .collect::<Vec<_>>();
+            let imports = java_library_imports(&module_path, &items, &modules_by_name, span);
             (
                 module_path.clone(),
                 LibraryModule {
@@ -240,7 +247,7 @@ fn java_library_modules(
                             name: module_path,
                             span,
                         }),
-                        imports: Vec::new(),
+                        imports,
                         items,
                         span: Some(span),
                     },
@@ -272,6 +279,127 @@ fn java_library_type_decl(
         with_bounds: external_class.with_bounds.clone(),
         members: java_library_members(external_class, span),
         span,
+    }
+}
+
+fn java_library_imports(
+    module_path: &str,
+    items: &[Item],
+    modules_by_name: &HashMap<String, String>,
+    span: crate::source::Span,
+) -> Vec<ImportDecl> {
+    let mut names = HashSet::new();
+    for item in items {
+        collect_java_library_item_type_refs(item, &mut names);
+    }
+
+    let mut grouped = BTreeMap::<String, Vec<String>>::new();
+    for name in names {
+        let Some(dep_module) = modules_by_name.get(&name) else {
+            continue;
+        };
+        if dep_module == module_path {
+            continue;
+        }
+        grouped
+            .entry(dep_module.clone())
+            .or_default()
+            .push(name.clone());
+    }
+
+    grouped
+        .into_iter()
+        .map(|(path, mut names)| {
+            names.sort();
+            names.dedup();
+            ImportDecl {
+                path,
+                single_name: None,
+                wildcard: false,
+                symbols: names
+                    .into_iter()
+                    .map(|name| ImportSymbol {
+                        name,
+                        alias: None,
+                        span,
+                    })
+                    .collect(),
+                span,
+            }
+        })
+        .collect()
+}
+
+fn collect_java_library_item_type_refs(item: &Item, names: &mut HashSet<String>) {
+    let Item::Type(decl) = item else {
+        return;
+    };
+    for bound in &decl.with_bounds {
+        collect_java_library_type_ref(bound, names);
+    }
+    for param in &decl.type_params {
+        for bound in &param.bounds {
+            collect_java_library_type_ref(bound, names);
+        }
+    }
+    for member in &decl.members {
+        match member {
+            TypeMember::Field(field) => {
+                if let Some(ty) = &field.ty {
+                    collect_java_library_type_ref(ty, names);
+                }
+            }
+            TypeMember::Method(method) => {
+                for type_param in &method.type_params {
+                    for bound in &type_param.bounds {
+                        collect_java_library_type_ref(bound, names);
+                    }
+                }
+                for param in &method.params {
+                    if let Some(ty) = &param.ty {
+                        collect_java_library_type_ref(ty, names);
+                    }
+                }
+                if let Some(ret) = &method.return_type {
+                    collect_java_library_type_ref(ret, names);
+                }
+            }
+            TypeMember::Case(case) => {
+                for field in &case.fields {
+                    if let Some(ty) = &field.ty {
+                        collect_java_library_type_ref(ty, names);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn collect_java_library_type_ref(ty: &TypeRef, names: &mut HashSet<String>) {
+    match ty {
+        TypeRef::Wildcard { .. } => {}
+        TypeRef::Named { name, args, .. } => {
+            names.insert(name.clone());
+            for arg in args {
+                collect_java_library_type_ref(arg, names);
+            }
+        }
+        TypeRef::Tuple { fields, .. } => {
+            for field in fields {
+                collect_java_library_type_ref(&field.ty, names);
+            }
+        }
+        TypeRef::Record { fields, .. } => {
+            for field in fields {
+                collect_java_library_type_ref(&field.ty, names);
+            }
+        }
+        TypeRef::Function { params, ret, .. } => {
+            for param in params {
+                collect_java_library_type_ref(param, names);
+            }
+            collect_java_library_type_ref(ret, names);
+        }
     }
 }
 

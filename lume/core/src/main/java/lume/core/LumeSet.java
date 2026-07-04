@@ -23,15 +23,13 @@ public final class LumeSet<T> {
     }
 
     public LumeSet<T> add(T value) {
-        var copy = new LinkedHashSet<>(values);
-        copy.add(value);
-        return new LumeSet<>(copy);
+        values.add(value);
+        return this;
     }
 
     public LumeSet<T> addAll(LumeSet<T> other) {
-        var copy = new LinkedHashSet<>(values);
-        copy.addAll(other.values);
-        return new LumeSet<>(copy);
+        values.addAll(other.values);
+        return this;
     }
 
     public boolean contains(T value) {
