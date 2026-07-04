@@ -774,9 +774,12 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_callable_body(&mut self, body: &CallableBody, span: Span) {
+        let return_ty = self.function().return_ty.clone();
         let result = match body {
-            CallableBody::Expr(expr) => Some(self.lower_expr(expr)),
-            CallableBody::Block(block) => self.lower_block_value(block),
+            CallableBody::Expr(expr) => Some(self.lower_expr_with_expected(expr, Some(&return_ty))),
+            CallableBody::Block(block) => {
+                self.lower_block_value_with_expected(block, Some(&return_ty))
+            }
         };
         if let Some(block) = self.current_block_mut() {
             block.set_terminator(ir::Terminator {
@@ -787,6 +790,14 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_block_value(&mut self, block: &Block) -> Option<ir::Operand> {
+        self.lower_block_value_with_expected(block, None)
+    }
+
+    fn lower_block_value_with_expected(
+        &mut self,
+        block: &Block,
+        expected: Option<&ir::Type>,
+    ) -> Option<ir::Operand> {
         self.push_scope();
         let mut tail = None;
         for (index, stmt) in block.statements.iter().enumerate() {
@@ -794,7 +805,7 @@ impl<'a> FunctionLowerer<'a> {
             if is_last {
                 match stmt {
                     Stmt::Expr(expr_stmt) => {
-                        tail = Some(self.lower_expr(&expr_stmt.expr));
+                        tail = Some(self.lower_expr_with_expected(&expr_stmt.expr, expected));
                         break;
                     }
                     Stmt::If(if_stmt) => {
@@ -804,11 +815,12 @@ impl<'a> FunctionLowerer<'a> {
                         }
                     }
                     Stmt::Match(match_stmt) => {
-                        tail = Some(self.lower_match_expr(
+                        tail = Some(self.lower_match_expr_with_expected(
                             match_stmt.partial,
                             &match_stmt.value,
                             &match_stmt.cases,
                             match_stmt.span,
+                            expected,
                         ));
                         break;
                     }
@@ -960,7 +972,11 @@ impl<'a> FunctionLowerer<'a> {
             Stmt::While(stmt) => self.lower_while_stmt(stmt),
             Stmt::For(stmt) => self.lower_for_stmt(stmt),
             Stmt::Return(ret) => {
-                let value = ret.value.as_ref().map(|expr| self.lower_expr(expr));
+                let return_ty = self.function().return_ty.clone();
+                let value = ret
+                    .value
+                    .as_ref()
+                    .map(|expr| self.lower_expr_with_expected(expr, Some(&return_ty)));
                 self.terminate(ir::Terminator {
                     span: Some(ret.span),
                     kind: ir::TerminatorKind::Return(value),
@@ -2317,6 +2333,7 @@ impl<'a> FunctionLowerer<'a> {
                 false,
                 join_block,
                 stmt.span,
+                None,
             );
             self.current_block = Some(fail_block);
         }
@@ -2334,11 +2351,22 @@ impl<'a> FunctionLowerer<'a> {
         cases: &[core::MatchCase],
         span: Span,
     ) -> ir::Operand {
+        self.lower_match_expr_with_expected(partial, value, cases, span, None)
+    }
+
+    fn lower_match_expr_with_expected(
+        &mut self,
+        partial: bool,
+        value: &Expr,
+        cases: &[core::MatchCase],
+        span: Span,
+        expected: Option<&ir::Type>,
+    ) -> ir::Operand {
         let scrutinee = self.lower_expr(value);
         let result = self.add_temp(if partial {
             ir::Type::option(ir::Type::Unknown)
         } else {
-            ir::Type::Unknown
+            expected.cloned().unwrap_or(ir::Type::Unknown)
         });
         let join_block = self.add_block();
         self.current_block = self.current_block.or(Some(self.function().entry));
@@ -2355,6 +2383,7 @@ impl<'a> FunctionLowerer<'a> {
                 partial,
                 join_block,
                 span,
+                expected,
             );
             self.current_block = Some(fail_block);
         }
@@ -2391,6 +2420,7 @@ impl<'a> FunctionLowerer<'a> {
         partial: bool,
         join_block: ir::BlockId,
         span: Span,
+        expected: Option<&ir::Type>,
     ) {
         let plan = self.lower_pattern_plan(scrutinee, &case.pattern);
         let mut condition = plan.condition;
@@ -2435,7 +2465,7 @@ impl<'a> FunctionLowerer<'a> {
             MatchCaseBody::Block(block) => {
                 if let Some(target) = result_target {
                     let value = self
-                        .lower_block_value(block)
+                        .lower_block_value_with_expected(block, expected)
                         .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
                     self.assign_match_result(target, value, partial, span);
                 } else {
@@ -2443,7 +2473,7 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             MatchCaseBody::Expr(expr) => {
-                let value = self.lower_expr(expr);
+                let value = self.lower_expr_with_expected(expr, expected);
                 if let Some(target) = result_target {
                     self.assign_match_result(target, value, partial, span);
                 } else {
@@ -2910,6 +2940,34 @@ impl<'a> FunctionLowerer<'a> {
         ir::Operand::Const(ir::Constant::Bool(value))
     }
 
+    fn lower_expr_with_expected(
+        &mut self,
+        expr: &Expr,
+        expected: Option<&ir::Type>,
+    ) -> ir::Operand {
+        let Some(expected) = expected else {
+            return self.lower_expr(expr);
+        };
+        if self.current_block.is_none() {
+            return ir::Operand::Const(ir::Constant::Unit);
+        }
+        match expr {
+            Expr::Match {
+                partial,
+                value,
+                cases,
+                span,
+            } => self.lower_match_expr_with_expected(*partial, value, cases, *span, Some(expected)),
+            Expr::Block { body, .. } => self
+                .lower_block_value_with_expected(body, Some(expected))
+                .unwrap_or(ir::Operand::Const(ir::Constant::Unit)),
+            Expr::Call { .. } | Expr::RecordLiteral { .. } => {
+                self.lower_expr_from_rvalue_with_expected(expr, Some(expected))
+            }
+            _ => self.lower_expr(expr),
+        }
+    }
+
     fn lower_expr(&mut self, expr: &Expr) -> ir::Operand {
         if self.current_block.is_none() {
             return ir::Operand::Const(ir::Constant::Unit);
@@ -3014,10 +3072,23 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_expr_from_rvalue(&mut self, expr: &Expr) -> ir::Operand {
-        let ty = inferred_storage_type(self.infer_expr_type(expr));
-        let rvalue = self
-            .lower_rvalue(expr)
-            .expect("rvalue-backed expression should lower to an rvalue");
+        self.lower_expr_from_rvalue_with_expected(expr, None)
+    }
+
+    fn lower_expr_from_rvalue_with_expected(
+        &mut self,
+        expr: &Expr,
+        expected: Option<&ir::Type>,
+    ) -> ir::Operand {
+        let ty = expected
+            .cloned()
+            .unwrap_or_else(|| inferred_storage_type(self.infer_expr_type(expr)));
+        let rvalue = if expected.is_some() {
+            self.lower_rvalue_with_expected(expr, expected)
+        } else {
+            self.lower_rvalue(expr)
+        }
+        .expect("rvalue-backed expression should lower to an rvalue");
         let temp = self.add_temp(ty);
         self.push_statement(ir::Statement {
             span: Some(expr.span()),
@@ -3833,6 +3904,14 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_rvalue(&mut self, expr: &Expr) -> Option<ir::RValue> {
+        self.lower_rvalue_with_expected(expr, None)
+    }
+
+    fn lower_rvalue_with_expected(
+        &mut self,
+        expr: &Expr,
+        expected: Option<&ir::Type>,
+    ) -> Option<ir::RValue> {
         if let Some(path) = expr_path(expr) {
             if path.len() > 1 && is_named_runtime_value_path(self.program, &path) {
                 return Some(ir::RValue::NamedValue { path });
@@ -3846,6 +3925,13 @@ impl<'a> FunctionLowerer<'a> {
                 items.iter().map(|item| self.lower_expr(item)).collect(),
             )),
             Expr::RecordLiteral { fields, values, .. } => {
+                if let Some(expected) = expected {
+                    if let Some(value) =
+                        self.lower_record_literal_as_named_construct(fields, values, expected)
+                    {
+                        return Some(value);
+                    }
+                }
                 if fields.is_empty() && !values.is_empty() {
                     Some(ir::RValue::Tuple(
                         values.iter().map(|value| self.lower_expr(value)).collect(),
@@ -3924,9 +4010,20 @@ impl<'a> FunctionLowerer<'a> {
                     .into_iter()
                     .cloned()
                     .collect::<Vec<_>>();
+                let expected_args =
+                    self.call_expected_arg_types(call_callee, &ordered_args, expected);
                 let mut lowered_args = ordered_args
                     .iter()
-                    .map(|arg| self.lower_expr(&arg.value))
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        self.lower_expr_with_expected(
+                            &arg.value,
+                            expected_args
+                                .as_ref()
+                                .and_then(|args| args.get(index))
+                                .and_then(Option::as_ref),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 lowered_args.extend(self.reified_call_evidence_args(
                     call_callee,
@@ -3982,6 +4079,140 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Placeholder { .. } => None,
             _ => None,
         }
+    }
+
+    fn call_expected_arg_types(
+        &self,
+        callee: &Expr,
+        _ordered_args: &[core::CallArg],
+        expected: Option<&ir::Type>,
+    ) -> Option<Vec<Option<ir::Type>>> {
+        self.enum_case_expected_arg_types(callee, expected?)
+            .map(|fields| fields.into_iter().map(Some).collect())
+    }
+
+    fn enum_case_expected_arg_types(
+        &self,
+        callee: &Expr,
+        expected: &ir::Type,
+    ) -> Option<Vec<ir::Type>> {
+        let ir::Type::Named {
+            name: expected_name,
+            args,
+        } = expected
+        else {
+            return None;
+        };
+        let path = expr_path(callee)?;
+        let case_name = match path.as_slice() {
+            [case] => case,
+            [owner, case] if owner == expected_name => case,
+            _ => return None,
+        };
+        match (expected_name.as_str(), case_name.as_str(), args.as_slice()) {
+            ("Option", "Some", [value]) => return Some(vec![value.clone()]),
+            ("Result", "Ok", [value, _]) => return Some(vec![value.clone()]),
+            ("Result", "Err", [_, error]) => return Some(vec![error.clone()]),
+            ("Either", "Left", [left, _]) => return Some(vec![left.clone()]),
+            ("Either", "Right", [_, right]) => return Some(vec![right.clone()]),
+            _ => {}
+        }
+        let ty = self
+            .program
+            .types
+            .iter()
+            .find(|ty| ty.name == *expected_name && ty.kind == ast::TypeKind::Enum)?;
+        let enum_case = ty
+            .enum_cases
+            .iter()
+            .find(|enum_case| enum_case.name == *case_name)?;
+        let subst = ty
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        Some(
+            enum_case
+                .fields
+                .iter()
+                .map(|field| substitute_ir_type(&field.ty, &subst))
+                .collect(),
+        )
+    }
+
+    fn lower_record_literal_as_named_construct(
+        &mut self,
+        fields: &[core::CallArg],
+        values: &[Expr],
+        expected: &ir::Type,
+    ) -> Option<ir::RValue> {
+        if !values.is_empty() || fields.iter().any(|field| field.name.is_none()) {
+            return None;
+        }
+        let expected_fields = self.named_construct_fields(expected)?;
+        if fields.iter().any(|field| {
+            field
+                .name
+                .as_ref()
+                .is_some_and(|name| !expected_fields.iter().any(|expected| expected.0 == *name))
+        }) {
+            return None;
+        }
+
+        let mut lowered_fields = Vec::new();
+        for (name, ty, has_initializer, initializer) in expected_fields {
+            let value = if let Some(field) = fields.iter().find(|field| {
+                field
+                    .name
+                    .as_ref()
+                    .is_some_and(|field_name| field_name == &name)
+            }) {
+                self.lower_expr_with_expected(&field.value, Some(&ty))
+            } else if has_initializer {
+                ir::Operand::Const(initializer.unwrap_or_else(|| default_constant_for_type(&ty)))
+            } else {
+                return None;
+            };
+            lowered_fields.push(ir::NamedOperand { name, value });
+        }
+
+        Some(ir::RValue::Construct {
+            ty: expected.clone(),
+            fields: lowered_fields,
+        })
+    }
+
+    fn named_construct_fields(
+        &self,
+        expected: &ir::Type,
+    ) -> Option<Vec<(String, ir::Type, bool, Option<ir::Constant>)>> {
+        let ir::Type::Named { name, args } = expected else {
+            return None;
+        };
+        let ty = self.program.types.iter().find(|ty| {
+            ty.name == *name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+        })?;
+        let subst = ty
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        Some(
+            ty.fields
+                .iter()
+                .filter(|field| field.visibility != ast::Visibility::Hidden)
+                .map(|field| {
+                    (
+                        field.name.clone(),
+                        substitute_ir_type(&field.ty, &subst),
+                        field.has_initializer,
+                        field.initializer.clone(),
+                    )
+                })
+                .collect(),
+        )
     }
 
     fn lower_binary_rvalue(&mut self, left: &Expr, op: AstBinaryOp, right: &Expr) -> ir::RValue {
@@ -5756,6 +5987,25 @@ fn lower_field_initializer_constant(initializer: Option<&ast::Expr>) -> Option<i
             .collect::<Option<Vec<_>>>()
             .map(ir::Constant::List),
         _ => None,
+    }
+}
+
+fn default_constant_for_type(ty: &ir::Type) -> ir::Constant {
+    match ty {
+        ir::Type::Unit => ir::Constant::Unit,
+        ir::Type::Bool => ir::Constant::Bool(false),
+        ir::Type::Int => ir::Constant::Int(0),
+        ir::Type::Float => ir::Constant::Float(0.0),
+        ir::Type::Str => ir::Constant::String(String::new()),
+        ir::Type::Named { name, .. } if name == "Bool" => ir::Constant::Bool(false),
+        ir::Type::Named { name, .. } if matches!(name.as_str(), "Int" | "Int32" | "Rune") => {
+            ir::Constant::Int(0)
+        }
+        ir::Type::Named { name, .. } if matches!(name.as_str(), "Float" | "Float32") => {
+            ir::Constant::Float(0.0)
+        }
+        ir::Type::Named { name, .. } if name == "Str" => ir::Constant::String(String::new()),
+        _ => ir::Constant::Unit,
     }
 }
 

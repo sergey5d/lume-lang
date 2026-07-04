@@ -117,8 +117,16 @@ pub(crate) struct JavaExternalClass {
     pub(crate) type_params: Vec<String>,
     with_bounds: Vec<TypeRef>,
     inherit_qualified_names: Vec<String>,
+    fields: Vec<JavaExternalField>,
     constructors: Vec<JavaExternalCallable>,
     methods: Vec<JavaExternalCallable>,
+}
+
+#[derive(Debug, Clone)]
+struct JavaExternalField {
+    name: String,
+    ty: Option<TypeRef>,
+    initializer: Option<crate::ast::Expr>,
 }
 
 #[derive(Debug, Clone)]
@@ -478,25 +486,34 @@ fn java_library_members(
             .filter_map(|method| java_library_annotation_field(&method, span))
             .collect();
     }
-    external_class
-        .constructors
+    let fields = external_class
+        .fields
         .iter()
-        .map(|constructor| {
-            let constructor =
-                sanitize_java_callable_for_library(constructor, &class_exposed_names, span);
-            java_library_method("new", &constructor, None, span)
-        })
-        .chain(external_class.methods.iter().map(|method| {
-            let mut method_exposed_names = class_exposed_names.clone();
-            method_exposed_names.extend(method.type_params.iter().cloned());
-            let method = sanitize_java_callable_for_library(method, &method_exposed_names, span);
-            java_library_method(
-                method.name.as_str(),
-                &method,
-                method.return_type.clone(),
-                span,
-            )
-        }))
+        .map(|field| java_library_field(field, &class_exposed_names, span));
+
+    fields
+        .chain(
+            external_class
+                .constructors
+                .iter()
+                .map(|constructor| {
+                    let constructor =
+                        sanitize_java_callable_for_library(constructor, &class_exposed_names, span);
+                    java_library_method("new", &constructor, None, span)
+                })
+                .chain(external_class.methods.iter().map(|method| {
+                    let mut method_exposed_names = class_exposed_names.clone();
+                    method_exposed_names.extend(method.type_params.iter().cloned());
+                    let method =
+                        sanitize_java_callable_for_library(method, &method_exposed_names, span);
+                    java_library_method(
+                        method.name.as_str(),
+                        &method,
+                        method.return_type.clone(),
+                        span,
+                    )
+                })),
+        )
         .collect()
 }
 
@@ -608,6 +625,55 @@ fn java_library_annotation_field(
         initializer: None,
         span,
     }))
+}
+
+fn java_library_field(
+    field: &JavaExternalField,
+    exposed_names: &HashSet<String>,
+    span: crate::source::Span,
+) -> TypeMember {
+    TypeMember::Field(FieldDecl {
+        annotations: Vec::new(),
+        visibility: Visibility::Default,
+        mutable: false,
+        name: field.name.clone(),
+        ty: field
+            .ty
+            .as_ref()
+            .map(|ty| sanitize_java_type_ref_for_library(ty, exposed_names, span)),
+        initializer: field.initializer.clone(),
+        span,
+    })
+}
+
+fn java_library_default_initializer_marker(
+    ty: Option<&TypeRef>,
+    exposed_names: &HashSet<String>,
+    span: crate::source::Span,
+) -> crate::ast::Expr {
+    let ty = ty.map(|ty| sanitize_java_type_ref_for_library(ty, exposed_names, span));
+    match ty.as_ref() {
+        Some(TypeRef::Named { name, .. }) if name == "Bool" => {
+            crate::ast::Expr::Bool { value: false, span }
+        }
+        Some(TypeRef::Named { name, .. }) if matches!(name.as_str(), "Int" | "Int32" | "Rune") => {
+            crate::ast::Expr::Integer {
+                raw: "0".to_string(),
+                span,
+            }
+        }
+        Some(TypeRef::Named { name, .. }) if matches!(name.as_str(), "Float" | "Float32") => {
+            crate::ast::Expr::Float {
+                raw: "0.0".to_string(),
+                span,
+            }
+        }
+        Some(TypeRef::Named { name, .. }) if name == "Unit" => crate::ast::Expr::Unit { span },
+        _ => crate::ast::Expr::String {
+            raw: String::new(),
+            span,
+        },
+    }
 }
 
 fn java_library_method(
@@ -946,7 +1012,8 @@ fn inspect_java_class(
         command.arg("-classpath").arg(classpath);
     }
     let output = command
-        .arg("-public")
+        .arg("-private")
+        .arg("-constants")
         .arg(qualified_name)
         .output()
         .map_err(|err| format!("run javap to inspect Java classpath: {err}"))?;
@@ -1081,16 +1148,27 @@ fn parse_javap_class(
     span: crate::source::Span,
 ) -> JavaExternalClass {
     let type_params = parse_javap_type_params(output, qualified_name);
+    let lume_generated = javap_lume_generated(output);
     let header = output
         .lines()
         .find(|line| line.contains(" class ") || line.contains(" interface "))
         .unwrap_or_default();
-    let kind = if output.contains("extends java.lang.annotation.Annotation") {
-        crate::ast::TypeKind::Annotation
+    let kind = if lume_generated {
+        parse_javap_lume_kind(output).unwrap_or_else(|| {
+            if output.contains("extends java.lang.annotation.Annotation") {
+                crate::ast::TypeKind::Annotation
+            } else if header.contains(" interface ") {
+                crate::ast::TypeKind::Interface
+            } else {
+                crate::ast::TypeKind::Class
+            }
+        })
+    } else if output.contains("extends java.lang.annotation.Annotation") {
+        TypeKind::Annotation
     } else if header.contains(" interface ") {
-        crate::ast::TypeKind::Interface
+        TypeKind::Interface
     } else {
-        crate::ast::TypeKind::Class
+        TypeKind::Class
     };
     let current_package = java_package_name(qualified_name);
     let ctx = JavaTypeContext {
@@ -1105,6 +1183,13 @@ fn parse_javap_class(
         ..ctx.clone()
     };
     let with_bounds = parse_javap_bounds(header, kind, &bounds_ctx);
+    let default_fields = parse_javap_lume_default_fields(output);
+    let default_values = parse_javap_lume_default_field_values(output, span);
+    let fields = if lume_generated && kind == TypeKind::Record {
+        parse_javap_record_fields(output, &ctx, &default_fields, &default_values, span)
+    } else {
+        Vec::new()
+    };
     let mut constructors = Vec::new();
     let mut methods = Vec::new();
 
@@ -1122,6 +1207,18 @@ fn parse_javap_class(
             None => {}
         }
     }
+    if lume_generated && kind == TypeKind::Record {
+        constructors.clear();
+    }
+    if kind == TypeKind::Record && !fields.is_empty() {
+        let field_names = fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<HashSet<_>>();
+        methods.retain(|method| {
+            !(method.params.is_empty() && field_names.contains(method.name.as_str()))
+        });
+    }
 
     JavaExternalClass {
         qualified_name: qualified_name.to_string(),
@@ -1129,9 +1226,166 @@ fn parse_javap_class(
         type_params,
         with_bounds,
         inherit_qualified_names: parse_javap_bound_qualified_names(header, kind),
+        fields,
         constructors,
         methods,
     }
+}
+
+fn parse_javap_lume_kind(output: &str) -> Option<TypeKind> {
+    match parse_javap_lume_string_constant(output, "LUME_KIND")?.as_str() {
+        "annotation" => Some(TypeKind::Annotation),
+        "class" => Some(TypeKind::Class),
+        "shape" => Some(TypeKind::Record),
+        "single" => Some(TypeKind::Single),
+        "interface" => Some(TypeKind::Interface),
+        "enum" => Some(TypeKind::Enum),
+        _ => None,
+    }
+}
+
+fn parse_javap_lume_default_fields(output: &str) -> HashSet<String> {
+    parse_javap_lume_string_constant(output, "LUME_DEFAULT_FIELDS")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn parse_javap_lume_default_field_values(
+    output: &str,
+    span: crate::source::Span,
+) -> HashMap<String, crate::ast::Expr> {
+    parse_javap_lume_string_constant(output, "LUME_DEFAULT_FIELD_VALUES")
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '\t');
+            let name = metadata_unescape(parts.next()?);
+            let tag = parts.next()?;
+            let value = metadata_unescape(parts.next().unwrap_or_default());
+            parse_lume_default_metadata_expr(tag, &value, span).map(|expr| (name, expr))
+        })
+        .collect()
+}
+
+fn parse_lume_default_metadata_expr(
+    tag: &str,
+    value: &str,
+    span: crate::source::Span,
+) -> Option<crate::ast::Expr> {
+    match tag {
+        "unit" => Some(crate::ast::Expr::Unit { span }),
+        "bool" => Some(crate::ast::Expr::Bool {
+            value: value == "true",
+            span,
+        }),
+        "int" => Some(crate::ast::Expr::Integer {
+            raw: value.to_string(),
+            span,
+        }),
+        "float" => Some(crate::ast::Expr::Float {
+            raw: value.to_string(),
+            span,
+        }),
+        "str" => Some(crate::ast::Expr::String {
+            raw: value.to_string(),
+            span,
+        }),
+        _ => None,
+    }
+}
+
+fn parse_javap_lume_string_constant(output: &str, name: &str) -> Option<String> {
+    let marker = format!("public static final java.lang.String {name} = ");
+    output.lines().find_map(|line| {
+        let value = line.trim().strip_prefix(&marker)?.strip_suffix(';')?.trim();
+        parse_java_string_constant(value)
+    })
+}
+
+fn parse_java_string_constant(value: &str) -> Option<String> {
+    let body = value.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut chars = body.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        let escaped = chars.next()?;
+        match escaped {
+            '\\' => out.push('\\'),
+            '"' => out.push('"'),
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            other => out.push(other),
+        }
+    }
+    Some(out)
+}
+
+fn metadata_unescape(value: &str) -> String {
+    let mut out = String::new();
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('\\') => out.push('\\'),
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some(other) => out.push(other),
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+fn parse_javap_record_fields(
+    output: &str,
+    ctx: &JavaTypeContext<'_>,
+    default_fields: &HashSet<String>,
+    default_values: &HashMap<String, crate::ast::Expr>,
+    span: crate::source::Span,
+) -> Vec<JavaExternalField> {
+    output
+        .lines()
+        .filter_map(|line| {
+            parse_javap_record_field_line(line, ctx, default_fields, default_values, span)
+        })
+        .collect()
+}
+
+fn parse_javap_record_field_line(
+    line: &str,
+    ctx: &JavaTypeContext<'_>,
+    default_fields: &HashSet<String>,
+    default_values: &HashMap<String, crate::ast::Expr>,
+    span: crate::source::Span,
+) -> Option<JavaExternalField> {
+    let line = line.trim().strip_suffix(';')?.trim();
+    let rest = line.strip_prefix("private final ")?;
+    if rest.contains('(') {
+        return None;
+    }
+    let (raw_ty, raw_name) = split_java_return_and_name(rest)?;
+    let name = java_method_name_to_lume(raw_name);
+    let ty = java_type_to_lume_type_ref(raw_ty, ctx);
+    let initializer = default_values.get(&name).cloned().or_else(|| {
+        default_fields
+            .contains(&name)
+            .then(|| java_library_default_initializer_marker(ty.as_ref(), &HashSet::new(), span))
+    });
+    Some(JavaExternalField {
+        name,
+        ty,
+        initializer,
+    })
 }
 
 fn parse_javap_bound_qualified_names(header: &str, kind: crate::ast::TypeKind) -> Vec<String> {
@@ -2056,6 +2310,8 @@ def main() Unit {
 
         let shape = fs::read_to_string(out.join("demo/app/Point.java")).expect("read shape");
         assert!(shape.contains("record Point(Long x, Long y)"));
+        assert!(shape.contains("public lume.core.LumeType runtimeType()"));
+        assert!(!shape.contains("default lume.core.LumeType runtimeType()"));
 
         let class = fs::read_to_string(out.join("demo/app/User.java")).expect("read class");
         assert!(class.contains("class User"));
@@ -2816,7 +3072,52 @@ def main() Unit {
         assert!(module.contains("return ((Long) ((Object) tmp1_1));"));
         assert!(module.contains("tmp1_1 = add(2L, 3L);"));
         assert!(module.contains("value_0 = tmp1_1;"));
-        assert!(module.contains("tmp2_2 = lume.core.LumeRuntime.println(value_0);"));
+        assert!(module.contains("lume.core.LumeRuntime.println(value_0)"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn emits_named_shape_payloads_for_result_cases() {
+        let temp = temp_path("lume-java-result-shape-payload");
+        let source = temp.join("result_shape.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/result_shape
+
+shape HttpResponse {
+    status Int = 200
+    body Str
+    contentType Str = "application/json"
+}
+
+shape HttpError {
+    status Int
+    body Str
+    contentType Str = "application/json"
+}
+
+def ok() Result[HttpResponse, HttpError] =
+    Ok({ body: "ok" })
+
+def err() Result[HttpResponse, HttpError] =
+    Err({ status: 400, body: "bad" })
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        let module = fs::read_to_string(out.join("demo/result_shape/Result_shapeModule.java"))
+            .expect("read module");
+        assert!(!module.contains("UnsupportedOperationException"));
+        assert!(module.contains("new HttpResponse(200L"));
+        assert!(module.contains("new HttpError(400L"));
+        assert!(module.contains("\"application/json\""));
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -2855,8 +3156,8 @@ impl Reader {
         let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
 
         assert!(result.diagnostics.is_empty());
-        let reader = fs::read_to_string(out.join("demo/single_reified/Reader.java"))
-            .expect("read reader");
+        let reader =
+            fs::read_to_string(out.join("demo/single_reified/Reader.java")).expect("read reader");
         assert!(!reader.contains("UnsupportedOperationException"));
         assert!(reader.contains("Cache.INSTANCE.label"));
         assert!(reader.contains("__type_T_1"));

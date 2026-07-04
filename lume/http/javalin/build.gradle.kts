@@ -13,6 +13,7 @@ dependencies {
 
 val httpSource = layout.projectDirectory.file("src/main/lume/lume/http/javalin/HttpServer.lum")
 val generatedLumeJava = layout.buildDirectory.dir("generated/sources/lume/java")
+val runtimeJavaClasses = layout.buildDirectory.dir("classes/java/httpRuntime")
 val lumeCompilerSources = repoRoot.dir("rust/crates/lume/src")
 val lumeCompilerBinary = repoRoot.file("rust/target/debug/lume")
 val lumeExecutableOverride = providers.environmentVariable("LUME")
@@ -59,13 +60,24 @@ val cleanGeneratedLumeJava = tasks.register("cleanGeneratedLumeJava") {
     }
 }
 
+val compileHttpRuntimeJava = tasks.register<JavaCompile>("compileHttpRuntimeJava") {
+    description = "Compiles Java runtime helpers used by Lume HTTP Javalin during generation."
+    group = "build"
+    dependsOn(buildLocalLumeCore)
+
+    source = fileTree(layout.projectDirectory.dir("src/main/java"))
+    classpath = configurations.compileClasspath.get()
+    destinationDirectory.set(runtimeJavaClasses)
+}
+
 val generateHttpJavalinJava = tasks.register<Exec>("generateHttpJavalinJava") {
     description = "Generates Java sources for Lume HTTP Javalin."
     group = "build"
-    dependsOn(buildLocalLumeCore, cleanGeneratedLumeJava)
+    dependsOn(buildLocalLumeCore, cleanGeneratedLumeJava, compileHttpRuntimeJava)
 
     inputs.file(httpSource)
     inputs.file(coreJar)
+    inputs.files(fileTree(layout.projectDirectory.dir("src/main/java")))
     inputs.files(fileTree(lumeCompilerSources))
     inputs.property("lumeExecutable", lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath)
     if (!lumeExecutableOverride.isPresent) {
@@ -76,6 +88,10 @@ val generateHttpJavalinJava = tasks.register<Exec>("generateHttpJavalinJava") {
     doFirst {
         val outputDir = generatedLumeJava.get().asFile
         val lumeExecutable = lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath
+        val generationClasspath = files(
+            configurations.compileClasspath.get(),
+            runtimeJavaClasses.get().asFile
+        ).asPath
 
         commandLine(
             lumeExecutable,
@@ -84,7 +100,7 @@ val generateHttpJavalinJava = tasks.register<Exec>("generateHttpJavalinJava") {
             "--out",
             outputDir.absolutePath,
             "--classpath",
-            configurations.compileClasspath.get().asPath
+            generationClasspath
         )
     }
 }

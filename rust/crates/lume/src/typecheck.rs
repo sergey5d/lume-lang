@@ -6798,13 +6798,9 @@ impl<'a> Checker<'a> {
             } => {
                 let normalized_args =
                     self.normalize_trailing_brace_call_args(callee, args, *uses_brace_syntax);
-                self.callable_signature_for_args_probe(
-                    callee,
-                    &normalized_args,
-                    *uses_brace_syntax,
-                )
-                .map(|(_, ret)| ret)
-                .unwrap_or(Ty::Unknown)
+                self.callable_signature_for_args_probe(callee, &normalized_args, *uses_brace_syntax)
+                    .map(|(_, ret)| ret)
+                    .unwrap_or(Ty::Unknown)
             }
             _ => Ty::Unknown,
         }
@@ -7437,9 +7433,21 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn shape_target_fields(&self, expected: &Ty) -> Option<Vec<(String, Ty)>> {
+    fn shape_target_fields(&self, expected: &Ty) -> Option<Vec<FieldSig>> {
         match expected {
-            Ty::Record(fields) => Some(fields.clone()),
+            Ty::Record(fields) => Some(
+                fields
+                    .iter()
+                    .map(|(name, ty)| FieldSig {
+                        name: name.clone(),
+                        ty: ty.clone(),
+                        mutable: false,
+                        hidden: false,
+                        has_initializer: false,
+                        variadic: false,
+                    })
+                    .collect(),
+            ),
             Ty::Named(name, args) => {
                 let sig = self.lookup_any_type(name)?;
                 if sig.kind != TypeKind::Record {
@@ -7455,7 +7463,14 @@ impl<'a> Checker<'a> {
                     sig.fields
                         .iter()
                         .filter(|field| !field.hidden)
-                        .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
+                        .map(|field| FieldSig {
+                            name: field.name.clone(),
+                            ty: substitute_type(&field.ty, &subst),
+                            mutable: field.mutable,
+                            hidden: field.hidden,
+                            has_initializer: field.has_initializer,
+                            variadic: field.variadic,
+                        })
                         .collect(),
                 )
             }
@@ -7473,18 +7488,19 @@ impl<'a> Checker<'a> {
                 && items
                     .iter()
                     .zip(expected_fields.iter())
-                    .all(|(actual, (_, expected))| self.is_assignable(actual, expected));
+                    .all(|(actual, expected)| self.is_assignable(actual, &expected.ty));
         }
 
         let Some(actual_fields) = self.structural_fields_for_type(actual) else {
             return false;
         };
 
-        expected_fields.iter().all(|(expected_name, expected_ty)| {
+        expected_fields.iter().all(|expected| {
             actual_fields
                 .iter()
-                .find(|(actual_name, _)| actual_name == expected_name)
-                .is_some_and(|(_, actual_ty)| self.is_assignable(actual_ty, expected_ty))
+                .find(|(actual_name, _)| actual_name == &expected.name)
+                .map(|(_, actual_ty)| self.is_assignable(actual_ty, &expected.ty))
+                .unwrap_or(expected.has_initializer)
         })
     }
 
@@ -10176,6 +10192,31 @@ shape Point {
 def main() Int {
     point Point = (4, 5)
     point.x + point.y
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_anonymous_shape_as_named_shape_enum_payload() {
+        let program = parse_inline(
+            r#"
+shape HttpResponse {
+    status Int = 200
+    body Str
+    contentType Str = "application/json"
+}
+
+shape HttpError {
+    status Int
+    body Str
+    contentType Str = "application/json"
+}
+
+def route() Result[HttpResponse, HttpError] {
+    Err({ status: 400, body: "bad request" })
 }
 "#,
         );

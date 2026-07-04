@@ -2,6 +2,7 @@ module lume/http/javalin
 
 use io/javalin/Javalin
 use io/javalin/http/{Context, Handler}
+use lume/http/javalin/runtime/HttpResponder
 
 annotation Controller {
     path Str = ""
@@ -9,10 +10,24 @@ annotation Controller {
 
 annotation GET {
     path Str
+    contentType Str = "text/plain"
 }
 
 annotation POST {
     path Str
+    contentType Str = "text/plain"
+}
+
+shape HttpResponse {
+    status Int = 200
+    body Str
+    contentType Str = "application/json"
+}
+
+shape HttpError {
+    status Int
+    body Str
+    contentType Str = "application/json"
 }
 
 hidden class JavalinBackend {
@@ -28,13 +43,13 @@ impl JavalinBackend {
         this.port = port
     }
 
-    def get(path Str, controller Any, method Method) JavalinBackend {
+    def get(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.get(path, Handler {
             def handle(ctx Context) Unit {
                 if method.params().size() == 0 {
-                    ctx.result(method.invoke(controller).toStr())
+                    HttpResponder.render(ctx, method.invoke(controller), contentType)
                 } else {
-                    ctx.result(method.invoke(controller, ctx).toStr())
+                    HttpResponder.render(ctx, method.invoke(controller, ctx), contentType)
                 }
             }
         })
@@ -42,10 +57,10 @@ impl JavalinBackend {
         this
     }
 
-    def post(path Str, controller Any, method Method) JavalinBackend {
+    def post(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.post(path, Handler {
             def handle(ctx Context) Unit {
-                ctx.result(method.invoke(controller, ctx.body()).toStr())
+                HttpResponder.render(ctx, method.invoke(controller, ctx.body()), contentType)
             }
         })
 
@@ -86,13 +101,15 @@ impl HttpServer {
             if method.hasAnnotation[GET]() {
                 route AnnotationValue = method.annotation[GET]().orPanic()
                 path Str = prefix + route.str("path").orPanic()
-                this.backend.get(path, controller, method)
+                contentType Str = route.str("contentType").getOr("text/plain")
+                this.backend.get(path, contentType, controller, method)
             }
 
             if method.hasAnnotation[POST]() {
                 route AnnotationValue = method.annotation[POST]().orPanic()
                 path Str = prefix + route.str("path").orPanic()
-                this.backend.post(path, controller, method)
+                contentType Str = route.str("contentType").getOr("text/plain")
+                this.backend.post(path, contentType, controller, method)
             }
         }
 

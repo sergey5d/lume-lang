@@ -193,7 +193,7 @@ fn render_shape(
         java_implements_clause(ty, names)
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
-    push_runtime_type_method(&mut out, true);
+    push_runtime_type_method(&mut out, false);
     push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     out.push_str("}\n");
     out
@@ -411,6 +411,71 @@ fn push_type_descriptor(
     out.push_str("    public static final lume.core.LumeType TYPE = ");
     out.push_str(&type_descriptor_expr(bundle, ty, package, names));
     out.push_str(";\n");
+    out.push_str("    public static final String LUME_KIND = ");
+    out.push_str(&java_string_literal(lume_type_kind_name(ty.kind)));
+    out.push_str(";\n");
+    out.push_str("    public static final String LUME_DEFAULT_FIELDS = ");
+    out.push_str(&java_string_literal(
+        &ty.fields
+            .iter()
+            .filter(|field| field.initializer.is_some())
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+    ));
+    out.push_str(";\n");
+    out.push_str("    public static final String LUME_DEFAULT_FIELD_VALUES = ");
+    out.push_str(&java_string_literal(&lume_default_field_values(&ty.fields)));
+    out.push_str(";\n");
+}
+
+fn lume_type_kind_name(kind: TypeKind) -> &'static str {
+    match kind {
+        TypeKind::Annotation => "annotation",
+        TypeKind::Class => "class",
+        TypeKind::Record => "shape",
+        TypeKind::Single => "single",
+        TypeKind::Interface => "interface",
+        TypeKind::Enum => "enum",
+    }
+}
+
+fn lume_default_field_values(fields: &[ir::Field]) -> String {
+    fields
+        .iter()
+        .filter_map(|field| {
+            field.initializer.as_ref().and_then(|initializer| {
+                lume_constant_metadata(initializer)
+                    .map(|value| format!("{}\t{}", metadata_escape(&field.name), value))
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn lume_constant_metadata(value: &ir::Constant) -> Option<String> {
+    let (tag, body) = match value {
+        ir::Constant::Unit => ("unit", String::new()),
+        ir::Constant::Bool(value) => ("bool", value.to_string()),
+        ir::Constant::Int(value) => ("int", value.to_string()),
+        ir::Constant::Float(value) => ("float", value.to_string()),
+        ir::Constant::String(value) => ("str", metadata_escape(&decode_lume_string_literal(value))),
+        ir::Constant::List(_) => return None,
+    };
+    Some(format!("{tag}\t{body}"))
+}
+
+fn metadata_escape(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            ch => out.push(ch),
+        }
+    }
+    out
 }
 
 fn push_runtime_type_method(out: &mut String, default_method: bool) {
@@ -1807,7 +1872,14 @@ impl<'a> FunctionEmitter<'a> {
             ir::RValue::TypeOf { ty } => Some(type_value_expr(ty, self.names)),
             ir::RValue::Cast { operand, .. } => self.emit_operand(operand),
             ir::RValue::NamedValue { path } => self.emit_named_runtime_value(path),
-            ir::RValue::Record(_) => self.unsupported("anonymous shape literal"),
+            ir::RValue::Record(fields) => self.unsupported(&format!(
+                "anonymous shape literal {{{}}}",
+                fields
+                    .iter()
+                    .map(|field| field.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
             ir::RValue::RecordSpread(_) => self.unsupported("anonymous shape spread"),
             ir::RValue::Lift { .. } => self.unsupported("lift expression"),
             ir::RValue::RecordUpdate { .. } => self.unsupported("shape update"),
