@@ -31,6 +31,32 @@ public final class LumeField {
         return fieldType;
     }
 
+    public Result<Object, ReflectionError> get(Object receiver) {
+        if (receiver == null) {
+            return new Result.Err<>(new ReflectionError("cannot read field '" + name + "' from null"));
+        }
+
+        try {
+            var field = receiver.getClass().getDeclaredField(name);
+            field.setAccessible(true);
+            return new Result.Ok<>(field.get(receiver));
+        } catch (NoSuchFieldException missingField) {
+            try {
+                var accessor = receiver.getClass().getDeclaredMethod(name);
+                accessor.setAccessible(true);
+                return new Result.Ok<>(accessor.invoke(receiver));
+            } catch (ReflectiveOperationException err) {
+                return new Result.Err<>(new ReflectionError(
+                        "cannot read field '" + name + "' from " + receiver.getClass().getName() + ": "
+                                + reflectionMessage(err)));
+            }
+        } catch (ReflectiveOperationException err) {
+            return new Result.Err<>(new ReflectionError(
+                    "cannot read field '" + name + "' from " + receiver.getClass().getName() + ": "
+                            + reflectionMessage(err)));
+        }
+    }
+
     public Option<LumeAnnotation> annotation(LumeType annotationType) {
         return annotation(annotationName(annotationType));
     }
@@ -53,6 +79,14 @@ public final class LumeField {
 
     private static String annotationName(LumeType annotationType) {
         return annotationType.name().orPanic();
+    }
+
+    private static String reflectionMessage(Throwable err) {
+        var cause = err instanceof java.lang.reflect.InvocationTargetException invocation
+                && invocation.getCause() != null
+                ? invocation.getCause()
+                : err;
+        return cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
     }
 
     public LumeType runtimeType() {

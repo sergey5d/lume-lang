@@ -1,5 +1,6 @@
 package lume.core;
 
+import java.lang.reflect.InvocationTargetException;
 import java.util.List;
 
 public final class LumeType {
@@ -228,6 +229,44 @@ public final class LumeType {
                 .orElseGet(LumeRuntime::optionNone);
     }
 
+    public <T> Result<T, ReflectionError> construct(Object... args) {
+        if (kind != LumeTypeKind.Class && kind != LumeTypeKind.Shape) {
+            return reflectionErr("cannot construct " + typeLabel()
+                    + ": only class and shape descriptors are constructable");
+        }
+        if (qualifiedName == null || qualifiedName.isBlank()) {
+            return reflectionErr("cannot construct " + typeLabel() + ": type has no Java qualified name");
+        }
+
+        Class<?> targetClass;
+        try {
+            targetClass = Class.forName(qualifiedName);
+        } catch (ClassNotFoundException err) {
+            return reflectionErr("cannot construct " + typeLabel() + ": Java class '" + qualifiedName
+                    + "' is not available");
+        }
+
+        ReflectionError lastError = null;
+        for (var constructor : targetClass.getConstructors()) {
+            if (constructor.getParameterCount() != args.length) {
+                continue;
+            }
+            try {
+                @SuppressWarnings("unchecked")
+                var value = (T) constructor.newInstance(convertArgs(constructor.getParameterTypes(), args));
+                return new Result.Ok<>(value);
+            } catch (ReflectiveOperationException | RuntimeException err) {
+                lastError = new ReflectionError("cannot construct " + typeLabel() + ": " + reflectionMessage(err));
+            }
+        }
+
+        if (lastError != null) {
+            return new Result.Err<>(lastError);
+        }
+        return reflectionErr("cannot construct " + typeLabel() + ": no public constructor accepts "
+                + args.length + " arguments");
+    }
+
     public LumeList<LumeEnumCase> cases() {
         return LumeList.from(cases);
     }
@@ -262,6 +301,57 @@ public final class LumeType {
 
     private static String annotationName(LumeType annotationType) {
         return annotationType.name().orPanic();
+    }
+
+    private <T> Result<T, ReflectionError> reflectionErr(String message) {
+        return new Result.Err<>(new ReflectionError(message));
+    }
+
+    private String typeLabel() {
+        if (qualifiedName != null && !qualifiedName.isBlank()) {
+            return qualifiedName;
+        }
+        if (name != null && !name.isBlank()) {
+            return name;
+        }
+        return kind.toString();
+    }
+
+    private static Object[] convertArgs(Class<?>[] parameterTypes, Object[] args) {
+        var out = new Object[args.length];
+        for (int index = 0; index < args.length; index++) {
+            out[index] = convertArg(parameterTypes[index], args[index]);
+        }
+        return out;
+    }
+
+    private static Object convertArg(Class<?> parameterType, Object value) {
+        if (value == null || parameterType.isInstance(value)) {
+            return value;
+        }
+        if ((parameterType == Long.class || parameterType == Long.TYPE) && value instanceof Number number) {
+            return number.longValue();
+        }
+        if ((parameterType == Integer.class || parameterType == Integer.TYPE) && value instanceof Number number) {
+            return number.intValue();
+        }
+        if ((parameterType == Double.class || parameterType == Double.TYPE) && value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if ((parameterType == Float.class || parameterType == Float.TYPE) && value instanceof Number number) {
+            return number.floatValue();
+        }
+        if (parameterType == String.class) {
+            return String.valueOf(value);
+        }
+        return value;
+    }
+
+    private static String reflectionMessage(Throwable err) {
+        var cause = err instanceof InvocationTargetException invocation && invocation.getCause() != null
+                ? invocation.getCause()
+                : err;
+        return cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
     }
 
     public LumeType runtimeType() {

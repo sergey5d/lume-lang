@@ -22,6 +22,8 @@ impl JdbcRowImpl {
 
     def nullableValue(column Str) Result[Option[Any], DbError] = this.backend.nullableValue(column)
 
+    def decode[reified T]() Result[T, DbError] = this.backend.decode(typeOf[T])
+
     def str(column Str) Result[Str, DbError] = this.backend.str(column)
 
     def strOpt(column Str) Result[Option[Str], DbError] = this.backend.strOpt(column)
@@ -108,23 +110,49 @@ impl JdbcQuery {
 
         Ok(out)
     }
+
+    def decodeAll[reified T]() Result[[T], DbError] {
+        jdbcRows [JdbcRow] = try this.runner.query(this.sql, this.values)
+        out [T] = []
+
+        for jdbcRow <- jdbcRows {
+            typedJdbcRow JdbcRow = jdbcRow
+            decoded Result[T, DbError] = typedJdbcRow.decode(typeOf[T])
+            match decoded {
+                case Ok(value) => {
+                    out.add(value)
+                }
+                case Err(error) => {
+                    return Err(error)
+                }
+            }
+        }
+
+        Ok(out)
+    }
 }
 
 hidden class JdbcRowQuery with RowQuery {
-    hidden query Query
+    hidden runner JdbcRunner
+    hidden sql Str
+    hidden values [Any]
 }
 
 impl JdbcRowQuery {
     new {
-        query Query
+        runner JdbcRunner
+        sql Str
+        values [Any] = []
     } {
-        this.query = query
+        this.runner = runner
+        this.sql = sql
+        this.values = values
     }
 
-    def bind(values [Any] vararg) RowQuery = JdbcRowQuery(this.query.bind(values))
+    def bind(values [Any] vararg) RowQuery = JdbcRowQuery(this.runner, this.sql, values)
 
     def row() Result[Option[Row], DbError] {
-        rows [Row] = try this.query.rows()
+        rows [Row] = try JdbcQuery(this.runner, this.sql, this.values).rows()
         count Int = rows.size()
 
         if count == 0 {
@@ -157,6 +185,24 @@ impl JdbcRowQuery {
                 }
             }
             case None => Ok(None)
+        }
+    }
+
+    def decodeOne[reified T]() Result[Option[T], DbError] {
+        jdbcRows [JdbcRow] = try this.runner.query(this.sql, this.values)
+        count Int = jdbcRows.size()
+
+        if count == 0 {
+            Ok(None)
+        } else if count > 1 {
+            Err(DbError("queryRow expected at most one row, got " + count))
+        } else {
+            jdbcRow JdbcRow = jdbcRows.get(0).orPanic()
+            decoded Result[T, DbError] = jdbcRow.decode(typeOf[T])
+            match decoded {
+                case Ok(value) => Ok(Some(value))
+                case Err(error) => Err(error)
+            }
         }
     }
 }
@@ -213,7 +259,7 @@ impl JdbcTransactionImpl {
 
     def query(sql Str, values [Any] vararg) Query = JdbcQuery(this.backend, sql, values)
 
-    def queryRow(sql Str, values [Any] vararg) RowQuery = JdbcRowQuery(this.query(sql, values))
+    def queryRow(sql Str, values [Any] vararg) RowQuery = JdbcRowQuery(this.backend, sql, values)
 
     def exec(sql Str) Exec = JdbcExec(this.backend, sql)
 
@@ -239,7 +285,7 @@ impl JdbcDatabaseImpl {
 
     def query(sql Str, values [Any] vararg) Query = JdbcQuery(this.backend, sql, values)
 
-    def queryRow(sql Str, values [Any] vararg) RowQuery = JdbcRowQuery(this.query(sql, values))
+    def queryRow(sql Str, values [Any] vararg) RowQuery = JdbcRowQuery(this.backend, sql, values)
 
     def exec(sql Str) Exec = JdbcExec(this.backend, sql)
 

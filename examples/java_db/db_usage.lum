@@ -11,7 +11,7 @@ class User {
 def loadActiveUsers(db Database) Result[[User], DbError] {
     db.query("select id, name, active from users where active = ?")
         .bind(true)
-        .flatMap(row -> readUser(row))
+        .decodeAll[User]()
 }
 
 def readUser(row Row) Result[User, DbError] {
@@ -35,7 +35,7 @@ def loadByIdAndName(db Database, id Int, name Str) Result[[Row], DbError] {
 def loadOneUser(db Database, id Int) Result[Option[User], DbError] {
     db.queryRow("select id, name, active from users where id = ?")
         .bind(id)
-        .flatMap(row -> readUser(row))
+        .decodeOne[User]()
 }
 
 def loadNamed(db Database, active Bool) Result[[Str], DbError] {

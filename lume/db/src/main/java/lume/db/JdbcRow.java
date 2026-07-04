@@ -1,11 +1,16 @@
 package lume.db;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
+import lume.core.LumeField;
 import lume.core.LumeList;
 import lume.core.LumeRuntime;
+import lume.core.LumeType;
+import lume.core.LumeTypeKind;
 import lume.core.Option;
 import lume.core.Result;
 
@@ -56,6 +61,16 @@ public final class JdbcRow {
         return Jdbc.ok(LumeRuntime.optionSome(value));
     }
 
+    public <T> Result<T, DbError> decode(LumeType targetType) {
+        try {
+            @SuppressWarnings("unchecked")
+            var decoded = (T) instantiate(targetType);
+            return Jdbc.ok(decoded);
+        } catch (DecodeFailure err) {
+            return Jdbc.err(err.getMessage());
+        }
+    }
+
     public Result<String, DbError> str(String column) {
         return convert(column, value -> value instanceof String text ? text : String.valueOf(value));
     }
@@ -102,6 +117,162 @@ public final class JdbcRow {
 
     public Result<Option<Boolean>, DbError> boolOpt(String column) {
         return convertOpt(column, JdbcRow::toBool);
+    }
+
+    private Object instantiate(LumeType targetType) throws DecodeFailure {
+        var kind = targetType.kind();
+        if (kind != LumeTypeKind.Class && kind != LumeTypeKind.Shape) {
+            throw new DecodeFailure("cannot decode SQL row as " + typeLabel(targetType)
+                    + ": only class and shape descriptors are supported");
+        }
+
+        var qualifiedName = targetType.qualifiedName();
+        if (!qualifiedName.isDefined()) {
+            throw new DecodeFailure("cannot decode SQL row as " + typeLabel(targetType)
+                    + ": type has no Java qualified name");
+        }
+
+        Class<?> targetClass;
+        try {
+            targetClass = Class.forName(qualifiedName.orPanic());
+        } catch (ClassNotFoundException err) {
+            throw new DecodeFailure("cannot decode SQL row as " + typeLabel(targetType)
+                    + ": Java class '" + qualifiedName.orPanic() + "' is not available");
+        }
+
+        var fields = targetType.fields().asJava();
+        DecodeFailure lastFailure = null;
+        for (var constructor : targetClass.getConstructors()) {
+            if (constructor.getParameterCount() != fields.size()) {
+                continue;
+            }
+            try {
+                return invokeConstructor(constructor, fields);
+            } catch (DecodeFailure err) {
+                lastFailure = err;
+            }
+        }
+
+        if (lastFailure != null) {
+            throw lastFailure;
+        }
+        throw new DecodeFailure("cannot decode SQL row as " + typeLabel(targetType)
+                + ": no public constructor accepts " + fields.size() + " fields");
+    }
+
+    private Object invokeConstructor(Constructor<?> constructor, java.util.List<LumeField> fields)
+            throws DecodeFailure {
+        var paramTypes = constructor.getParameterTypes();
+        var args = new Object[fields.size()];
+        for (int index = 0; index < fields.size(); index++) {
+            var field = fields.get(index);
+            args[index] = decodeField(field, paramTypes[index]);
+        }
+        try {
+            return constructor.newInstance(args);
+        } catch (InstantiationException | IllegalAccessException err) {
+            throw new DecodeFailure("cannot construct " + constructor.getDeclaringClass().getName()
+                    + ": " + err.getMessage());
+        } catch (InvocationTargetException err) {
+            var cause = err.getCause() == null ? err : err.getCause();
+            throw new DecodeFailure("cannot construct " + constructor.getDeclaringClass().getName()
+                    + ": " + cause.getMessage());
+        }
+    }
+
+    private Object decodeField(LumeField field, Class<?> paramType) throws DecodeFailure {
+        var column = field.name();
+        var key = lookup(column);
+        if (key instanceof Option.None<?>) {
+            throw new DecodeFailure("SQL row has no column '" + column + "' for field '" + field.name() + "'");
+        }
+
+        @SuppressWarnings("unchecked")
+        var some = (Option.Some<String>) key;
+        var value = values.get(some.value());
+        if (value == null) {
+            if (isOptionType(field.fieldType()) || Option.class.isAssignableFrom(paramType)) {
+                return LumeRuntime.optionNone();
+            }
+            throw new DecodeFailure("SQL column '" + column + "' is null for non-optional field '"
+                    + field.name() + "'");
+        }
+
+        try {
+            if (isOptionType(field.fieldType()) || Option.class.isAssignableFrom(paramType)) {
+                return LumeRuntime.optionSome(convertByDescriptor(value, optionInnerDescriptor(field.fieldType())));
+            }
+            return convertForJava(value, paramType, field.fieldType());
+        } catch (RuntimeException err) {
+            throw new DecodeFailure("SQL column '" + column + "' cannot be converted for field '"
+                    + field.name() + "': " + err.getMessage());
+        }
+    }
+
+    private static Object convertForJava(Object value, Class<?> paramType, LumeType fieldType) {
+        if (paramType == Object.class) {
+            return convertByDescriptor(value, typeName(fieldType));
+        }
+        if (paramType == String.class) {
+            return String.valueOf(value);
+        }
+        if (paramType == Long.class || paramType == Long.TYPE) {
+            return toLong(value);
+        }
+        if (paramType == Integer.class || paramType == Integer.TYPE) {
+            return Math.toIntExact(toLong(value));
+        }
+        if (paramType == Double.class || paramType == Double.TYPE) {
+            return toDouble(value);
+        }
+        if (paramType == Float.class || paramType == Float.TYPE) {
+            return toDouble(value).floatValue();
+        }
+        if (paramType == Boolean.class || paramType == Boolean.TYPE) {
+            return toBool(value);
+        }
+        if (paramType.isInstance(value)) {
+            return value;
+        }
+        return convertByDescriptor(value, typeName(fieldType));
+    }
+
+    private static Object convertByDescriptor(Object value, String descriptor) {
+        return switch (descriptor) {
+            case "Str" -> String.valueOf(value);
+            case "Int", "Int64" -> toLong(value);
+            case "Int32", "Rune" -> Math.toIntExact(toLong(value));
+            case "Float", "Float64" -> toDouble(value);
+            case "Float32" -> toDouble(value).floatValue();
+            case "Bool" -> toBool(value);
+            default -> value;
+        };
+    }
+
+    private static boolean isOptionType(LumeType type) {
+        var name = typeName(type);
+        return name.equals("Option") || name.startsWith("Option[");
+    }
+
+    private static String optionInnerDescriptor(LumeType type) {
+        var name = typeName(type);
+        if (name.startsWith("Option[") && name.endsWith("]")) {
+            return name.substring("Option[".length(), name.length() - 1).trim();
+        }
+        return "Any";
+    }
+
+    private static String typeName(LumeType type) {
+        var name = type.name();
+        return name.isDefined() ? name.orPanic() : type.toString();
+    }
+
+    private static String typeLabel(LumeType type) {
+        var qualified = type.qualifiedName();
+        if (qualified.isDefined()) {
+            return qualified.orPanic();
+        }
+        return typeName(type);
     }
 
     private <T> Result<T, DbError> convert(String column, Converter<T> converter) {
@@ -196,5 +367,11 @@ public final class JdbcRow {
     @FunctionalInterface
     private interface Converter<T> {
         T convert(Object value);
+    }
+
+    private static final class DecodeFailure extends Exception {
+        DecodeFailure(String message) {
+            super(message);
+        }
     }
 }

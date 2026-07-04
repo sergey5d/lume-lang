@@ -12,6 +12,10 @@ interface AnnotationValue {
     def str(name Str) Option[Str]
 }
 
+class ReflectionError {
+    message Str
+}
+
 enum TypeKind {
     case Class
     case Shape
@@ -43,11 +47,13 @@ interface ClassType[A] with Type[A] {
     def methods() [Method]
     def field(name Str) Option[Field]
     def method(name Str) Option[Method]
+    def construct(args [Any] vararg) Result[A, ReflectionError]
 }
 
 interface ShapeType[A] with Type[A] {
     def fields() [Field]
     def methods() [Method]
+    def construct(args [Any] vararg) Result[A, ReflectionError]
 }
 
 interface EnumType[A] with Type[A] {
@@ -74,6 +80,7 @@ interface AnnotationType[A] with Type[A] {
 interface Field with Annotated {
     def name() Str
     def fieldType() Type[_]
+    def get(receiver Any) Result[Any, ReflectionError]
 }
 
 interface Method with Annotated {
@@ -81,6 +88,7 @@ interface Method with Annotated {
     def params() [Param]
     def returnType() Type[_]
     def invoke(receiver Any, args [Any] vararg) Any
+    def call(receiver Any, args [Any] vararg) Result[Any, ReflectionError]
 }
 
 interface Param {

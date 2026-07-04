@@ -79,6 +79,21 @@ public final class LumeMethod {
         return invoker.apply(receiver, args);
     }
 
+    public Result<Object, ReflectionError> call(Object receiver, Object... args) {
+        try {
+            return new Result.Ok<>(invoke(receiver, args));
+        } catch (Throwable err) {
+            return new Result.Err<>(new ReflectionError(reflectionMessage(err)));
+        }
+    }
+
+    private static String reflectionMessage(Throwable err) {
+        if (err instanceof LumePanic panic) {
+            return panic.getMessage();
+        }
+        return err.getMessage() == null ? err.getClass().getSimpleName() : err.getMessage();
+    }
+
     public LumeType runtimeType() {
         return LumeType.primitive("Method");
     }

@@ -265,6 +265,22 @@ expect Some(pendingCase) = enumType.case("Pending")
 println(pendingCase.name())
 ```
 
+Safe reflective invocation uses `Result` values:
+
+```txt
+constructed Result[User, ReflectionError] = classType.construct("Ada", 42)
+
+user User = constructed.orPanic()
+nameValue Result[Any, ReflectionError] = nameField.get(user)
+
+expect Some(greetMethod) = classType.method("greet")
+greeting Result[Any, ReflectionError] = greetMethod.call(user)
+```
+
+`Method.invoke(receiver, args...)` is also available as the direct invocation
+form and returns `Any`; it may panic if the method is not invokable or the call
+fails. Prefer `call` when failures should stay in the value model.
+
 Rules:
 
 - `typeOf[T]` is a built-in type metadata operator, not an index operation
@@ -272,6 +288,8 @@ Rules:
 - `TypeKind` includes `Class`, `Shape`, `Enum`, `Interface`, `Single`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
 - field, method, parameter, and enum-case metadata are runtime values with methods such as `name()`, `fieldType()`, `params()`, and `returnType()`
 - annotation lookup is typed and reified: use `metadata.hasAnnotation[Route]()` and `metadata.annotation[Route]()`
+- reflective construction is supported for class and named shape metadata through `construct(args...)`
+- reflective field reads use `Field.get(receiver)` and reflective safe method calls use `Method.call(receiver, args...)`
 
 ## Strings
 

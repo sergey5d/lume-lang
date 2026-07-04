@@ -2762,6 +2762,7 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Method" => Some("lume.core.LumeMethod".to_string()),
         "Param" => Some("lume.core.LumeParam".to_string()),
         "EnumCase" => Some("lume.core.LumeEnumCase".to_string()),
+        "ReflectionError" => Some("lume.core.ReflectionError".to_string()),
         _ => None,
     }
 }

@@ -5134,6 +5134,13 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: vec![ir::Type::Str],
             ret: Box::new(ir::Type::option(ir::Type::named("Method"))),
         }),
+        ("ClassType" | "ShapeType", "construct") => Some(ir::Type::Function {
+            params: vec![ir::Type::list(ir::Type::named("Any"))],
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::named("Any"), ir::Type::named("ReflectionError")],
+            }),
+        }),
         ("EnumType", "cases") => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir::Type::list(ir::Type::named("EnumCase"))),
@@ -5149,6 +5156,13 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         ("Field", "fieldType") => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir_exact_runtime_type(ir::Type::Unknown)),
+        }),
+        ("Field", "get") => Some(ir::Type::Function {
+            params: vec![ir::Type::named("Any")],
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::named("Any"), ir::Type::named("ReflectionError")],
+            }),
         }),
         ("Method", "name") => Some(ir::Type::Function {
             params: Vec::new(),
@@ -5168,6 +5182,16 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                 ir::Type::list(ir::Type::named("Any")),
             ],
             ret: Box::new(ir::Type::named("Any")),
+        }),
+        ("Method", "call") => Some(ir::Type::Function {
+            params: vec![
+                ir::Type::named("Any"),
+                ir::Type::list(ir::Type::named("Any")),
+            ],
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::named("Any"), ir::Type::named("ReflectionError")],
+            }),
         }),
         ("Param", "name") => Some(ir::Type::Function {
             params: Vec::new(),

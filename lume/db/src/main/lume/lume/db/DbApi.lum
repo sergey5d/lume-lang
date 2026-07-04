@@ -7,6 +7,7 @@ interface Row {
     def has(column Str) Bool
     def value(column Str) Result[Any, DbError]
     def nullableValue(column Str) Result[Option[Any], DbError]
+    def decode[reified T]() Result[T, DbError]
     def str(column Str) Result[Str, DbError]
     def strOpt(column Str) Result[Option[Str], DbError]
     def int(column Str) Result[Int, DbError]
@@ -27,6 +28,7 @@ interface Query {
     def all() Result[[Row], DbError]
     def map[T](mapper (Row) -> T) Result[[T], DbError]
     def flatMap[T](mapper (Row) -> Result[T, DbError]) Result[[T], DbError]
+    def decodeAll[reified T]() Result[[T], DbError]
 }
 
 interface RowQuery {
@@ -34,6 +36,7 @@ interface RowQuery {
     def row() Result[Option[Row], DbError]
     def map[T](mapper (Row) -> T) Result[Option[T], DbError]
     def flatMap[T](mapper (Row) -> Result[T, DbError]) Result[Option[T], DbError]
+    def decodeOne[reified T]() Result[Option[T], DbError]
 }
 
 interface Exec {
