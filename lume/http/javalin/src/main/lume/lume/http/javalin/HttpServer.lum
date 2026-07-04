@@ -71,8 +71,8 @@ impl HttpServer {
         classType ClassType[_] = controllerType.asClass().orPanic()
         var prefix Str = ""
 
-        if controllerType.hasAnnotation(typeOf[Controller]) {
-            controllerAnnotation AnnotationValue = controllerType.annotation(typeOf[Controller]).orPanic()
+        if controllerType.hasAnnotation[Controller]() {
+            controllerAnnotation AnnotationValue = controllerType.annotation[Controller]().orPanic()
             prefix := controllerAnnotation.str("path").orPanic()
         }
 
@@ -80,14 +80,14 @@ impl HttpServer {
         for methodValue <- methods {
             method Method = methodValue
 
-            if method.hasAnnotation(typeOf[GET]) {
-                route AnnotationValue = method.annotation(typeOf[GET]).orPanic()
+            if method.hasAnnotation[GET]() {
+                route AnnotationValue = method.annotation[GET]().orPanic()
                 path Str = prefix + route.str("path").orPanic()
                 this.backend.get(path, controller, method)
             }
 
-            if method.hasAnnotation(typeOf[POST]) {
-                route AnnotationValue = method.annotation(typeOf[POST]).orPanic()
+            if method.hasAnnotation[POST]() {
+                route AnnotationValue = method.annotation[POST]().orPanic()
                 path Str = prefix + route.str("path").orPanic()
                 this.backend.post(path, controller, method)
             }

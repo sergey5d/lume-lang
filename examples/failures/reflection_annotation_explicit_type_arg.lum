@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*call expects 0..0 arguments, got 1.*
+
+annotation Route {
+    path Str
+}
+
+class Service {
+}
+
+def main() Unit {
+    metadata Type[Service] = typeOf[Service]
+    metadata.hasAnnotation(typeOf[Route])
+}

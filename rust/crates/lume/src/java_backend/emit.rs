@@ -516,6 +516,7 @@ fn method_descriptor_expr(owner: &ir::TypeDef, method: &ir::Function, names: &Ja
         .params
         .iter()
         .filter_map(|param| method.locals.get(param.0))
+        .filter(|local| !is_reified_type_param_local(&local.name))
         .map(|local| {
             format!(
                 "lume.core.LumeParam.of({}, {})",
@@ -602,6 +603,10 @@ fn invoker_erased_value_type(ty: &ir::Type, names: &JavaNames, type_params: &[St
         ir::Type::Named { name, .. } => names.named_type(name),
         ir::Type::Tuple(_) | ir::Type::Record(_) => "Object".to_string(),
     }
+}
+
+fn is_reified_type_param_local(name: &str) -> bool {
+    name.starts_with("__type_")
 }
 
 fn invoker_erased_container_type(name: &str, names: &JavaNames) -> String {

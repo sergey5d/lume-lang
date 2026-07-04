@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*cannot infer reified type parameter 'Ann'.*
+
+annotation Route {
+    path Str
+}
+
+class Service {}
+
+def main() Unit {
+    metadata Type[Service] = typeOf[Service]
+    metadata.hasAnnotation()
+}

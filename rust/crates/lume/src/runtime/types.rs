@@ -210,12 +210,14 @@ impl RuntimeProgram {
                     .params
                     .iter()
                     .filter_map(|local_id| function.locals.get(local_id.0))
+                    .filter(|local| !is_reified_type_param_local(&local.name))
                     .map(|local| local.ty.clone())
                     .collect();
                 let param_names = function
                     .params
                     .iter()
                     .filter_map(|local_id| function.locals.get(local_id.0))
+                    .filter(|local| !is_reified_type_param_local(&local.name))
                     .map(|local| local.name.clone())
                     .collect();
                 Some(RuntimeMethod {
@@ -367,4 +369,8 @@ impl RuntimeProgram {
             })
             .unwrap_or_default()
     }
+}
+
+fn is_reified_type_param_local(name: &str) -> bool {
+    name.starts_with("__type_")
 }

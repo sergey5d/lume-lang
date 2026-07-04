@@ -3824,9 +3824,10 @@ impl<'a> FunctionLowerer<'a> {
                 let candidate_normalized_args =
                     self.normalize_trailing_brace_call_args(candidate_callee, args, *style);
                 let use_generic_callee = !candidate_type_args.is_empty()
-                    && self
+                    && (self
                         .reified_call_target(candidate_callee, &candidate_normalized_args)
-                        .is_some();
+                        .is_some()
+                        || self.is_builtin_reified_metadata_call(candidate_callee));
                 let (call_callee, explicit_type_args, normalized_args) = if use_generic_callee {
                     (
                         candidate_callee,
@@ -3854,6 +3855,9 @@ impl<'a> FunctionLowerer<'a> {
                     &ordered_args,
                     &explicit_type_args,
                 ));
+                lowered_args.extend(
+                    self.builtin_reified_metadata_evidence_args(call_callee, &explicit_type_args),
+                );
                 Some(ir::RValue::Call {
                     callee: self.lower_callee(call_callee),
                     args: lowered_args,
@@ -4330,6 +4334,25 @@ impl<'a> FunctionLowerer<'a> {
                 self.runtime_type_operand(ty)
             })
             .collect()
+    }
+
+    fn builtin_reified_metadata_evidence_args(
+        &mut self,
+        callee: &Expr,
+        explicit_type_args: &[ir::Type],
+    ) -> Vec<ir::Operand> {
+        if !self.is_builtin_reified_metadata_call(callee) || explicit_type_args.len() != 1 {
+            return Vec::new();
+        }
+        vec![self.runtime_type_operand(explicit_type_args[0].clone())]
+    }
+
+    fn is_builtin_reified_metadata_call(&self, callee: &Expr) -> bool {
+        let Expr::Member { receiver, name, .. } = callee else {
+            return false;
+        };
+        matches!(name.as_str(), "annotation" | "hasAnnotation")
+            && is_annotated_metadata_type(&self.infer_expr_type(receiver))
     }
 
     fn reified_call_target(
@@ -5068,7 +5091,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             | "AnnotationType" | "Field" | "Method" | "EnumCase",
             "annotation",
         ) => Some(ir::Type::Function {
-            params: vec![ir_exact_runtime_type(ir::Type::Unknown)],
+            params: Vec::new(),
             ret: Box::new(ir::Type::option(ir::Type::named("AnnotationValue"))),
         }),
         (
@@ -5076,7 +5099,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             | "AnnotationType" | "Field" | "Method" | "EnumCase",
             "hasAnnotation",
         ) => Some(ir::Type::Function {
-            params: vec![ir_exact_runtime_type(ir::Type::Unknown)],
+            params: Vec::new(),
             ret: Box::new(ir::Type::Bool),
         }),
         ("AnnotationValue", "name") => Some(ir::Type::Function {
@@ -5182,6 +5205,26 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         }),
         _ => None,
     }
+}
+
+fn is_annotated_metadata_type(ty: &ir::Type) -> bool {
+    matches!(
+        ty,
+        ir::Type::Named { name, .. }
+            if matches!(
+                name.as_str(),
+                "Type"
+                    | "ClassType"
+                    | "ShapeType"
+                    | "EnumType"
+                    | "InterfaceType"
+                    | "SingleType"
+                    | "AnnotationType"
+                    | "Field"
+                    | "Method"
+                    | "EnumCase"
+            )
+    )
 }
 
 fn inferred_storage_type(ty: ir::Type) -> ir::Type {

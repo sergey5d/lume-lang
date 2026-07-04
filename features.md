@@ -220,7 +220,7 @@ evidence.
 Still intentionally unsettled:
 - whether expected return types should help infer a reified parameter when no ordinary argument carries it
 - whether explicit multi-type-argument call syntax needs a dedicated parser form beyond the current `call[Type](...)` shape
-- whether standard libraries should prefer explicit `Type[A]` parameters or `[reified A]` for reflection-heavy APIs
+- which additional library APIs should use `[reified A]` instead of explicit `Type[A]` values
 
 Still rejected:
 - automatic reification of every generic parameter

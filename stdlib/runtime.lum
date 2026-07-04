@@ -2,8 +2,8 @@
 # INTERPRETER
 
 interface Annotated {
-    def annotation[Ann](annotationType Type[Ann]) Option[AnnotationValue]
-    def hasAnnotation[Ann](annotationType Type[Ann]) Bool
+    def annotation[reified Ann]() Option[AnnotationValue]
+    def hasAnnotation[reified Ann]() Bool
 }
 
 interface AnnotationValue {

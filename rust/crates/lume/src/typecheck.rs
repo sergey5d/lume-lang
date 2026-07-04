@@ -4790,23 +4790,27 @@ impl<'a> Checker<'a> {
             &selection.explicit_type_args,
             span,
         );
-        let (ret, subst) = self.check_signature_call_with_subst(
+        let (ret, subst, argument_shape_valid) = self.check_signature_call_with_subst(
             &selection.sig.params,
             &selection.sig.ret,
             args,
             span,
             subst,
         );
-        let missing = selection
-            .sig
-            .reified_type_params
-            .iter()
-            .filter(|name| {
-                let ty = subst.get(*name).cloned().unwrap_or(Ty::Unknown);
-                matches!(ty, Ty::Unknown | Ty::TypeParam(_))
-            })
-            .cloned()
-            .collect::<Vec<_>>();
+        let missing = if argument_shape_valid {
+            selection
+                .sig
+                .reified_type_params
+                .iter()
+                .filter(|name| {
+                    let ty = subst.get(*name).cloned().unwrap_or(Ty::Unknown);
+                    matches!(ty, Ty::Unknown | Ty::TypeParam(_))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         for name in missing {
             let callee_name = callable_name_for_diagnostic(callee);
             self.add_error(
@@ -4828,7 +4832,7 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
         mut subst: HashMap<String, Ty>,
-    ) -> (Ty, HashMap<String, Ty>) {
+    ) -> (Ty, HashMap<String, Ty>, bool) {
         let arrangement = arrange_param_args(params, args);
         let min_required = params
             .iter()
@@ -4839,11 +4843,11 @@ impl<'a> Checker<'a> {
         } else {
             params.len()
         };
-        if arrangement.overflow > 0
-            || arrangement.missing_required > 0
-            || args.len() < min_required
-            || args.len() > max_allowed
-        {
+        let argument_shape_valid = arrangement.overflow == 0
+            && arrangement.missing_required == 0
+            && args.len() >= min_required
+            && args.len() <= max_allowed;
+        if !argument_shape_valid {
             self.add_error(
                 "invalid_argument_count",
                 format!(
@@ -4901,7 +4905,7 @@ impl<'a> Checker<'a> {
         }
 
         let ret = materialize_type(&substitute_type(ret, &subst));
-        (self.capture_wildcards(ret), subst)
+        (self.capture_wildcards(ret), subst, argument_shape_valid)
     }
 
     fn explicit_type_arg_subst(

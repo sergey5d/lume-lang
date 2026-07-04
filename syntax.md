@@ -271,7 +271,7 @@ Rules:
 - `runtimeType` is available as a read-only synthetic field on values
 - `TypeKind` includes `Class`, `Shape`, `Enum`, `Interface`, `Single`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
 - field, method, parameter, and enum-case metadata are runtime values with methods such as `name()`, `fieldType()`, `params()`, and `returnType()`
-- annotation lookup is typed: use `metadata.hasAnnotation(typeOf[Route])` and `metadata.annotation(typeOf[Route])`
+- annotation lookup is typed and reified: use `metadata.hasAnnotation[Route]()` and `metadata.annotation[Route]()`
 
 ## Strings
 
