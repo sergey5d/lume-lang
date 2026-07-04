@@ -20,6 +20,8 @@
 # - constructor shape fields and construction fields may be comma separated
 # - `new(...)` delegates to another constructor positionally
 # - `new { field: value }` delegates to another constructor by construction fields
+# - positional construction fills constructor shape fields from the beginning in order
+# - named construction can omit any constructor shape field that has a default
 # - a trailing `[T] vararg` constructor shape field receives positional varargs as `[T]`
 # - construction fields can pass a vararg as a single `[T]` value
 # - defaulted varargs are used when the vararg is omitted

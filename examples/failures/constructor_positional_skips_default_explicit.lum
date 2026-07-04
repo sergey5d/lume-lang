@@ -1,0 +1,21 @@
+# FAIL_REGEX:
+# positional construction for Article with 1 argument leaves required field 'title' unset.*
+
+class Article {
+    body Str
+    title Str
+}
+
+impl Article {
+    new {
+        body Str = "body"
+        title Str
+    } {
+        this.body = body
+        this.title = title
+    }
+}
+
+def main() Unit {
+    _ Article = Article("Intro")
+}

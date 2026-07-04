@@ -838,30 +838,40 @@ Explicit constructor shape rules:
 - constructor input fields do not have to be class fields; they are inputs to the constructor body
 - `Type { field: value, other: value }` matches the explicit constructor input shape by field name
 - `Type(value, otherValue)` fills the same explicit constructor input shape by declaration order
+- constructor input fields may be declared in the author's preferred order; defaults do not have to trail required fields
+- named construction may omit any constructor input field that has a default
+- positional construction fills a prefix of constructor input fields in declaration order
+- positional construction may omit only a trailing suffix whose fields all have defaults
+- positional construction never skips a defaulted field to reach a later required field
 - if any explicit `new` exists, implicit field construction is disabled for that class
 - explicit constructors may use one trailing variadic constructor shape field such as `items [T] vararg`
 - a variadic constructor shape field receives the extra positional arguments as `[T]`
 - only one variadic constructor shape field is allowed
 - construction fields can target a variadic constructor shape field by passing a `[T]` value
 - variadic constructor shape fields may have a default `[T]` value
-- variadic constructor shape fields cannot follow defaulted shape fields
 
 ```txt
-class User {
-    name Str
-    age Int
+class Article {
+    body Str
+    title Str
 }
 
-impl User {
+impl Article {
     new {
-        label Str
+        body Str = "body"
+        title Str
     } {
-        this.name = label
-        this.age = 0
+        this.body = body
+        this.title = title
     }
 }
 
-user User = User { label: "Ada" }
+full Article = Article("custom body", "Intro")
+named Article = Article { title: "Intro" }
+custom Article = Article { body: "custom body", title: "Intro" }
+
+# invalid: fills `body`, then leaves required `title` unset
+bad Article = Article("Intro")
 ```
 
 Implicit field construction rules:
@@ -874,7 +884,8 @@ Implicit field construction rules:
 - hidden fields without initializers suppress implicit field constructors; define `new` to initialize them
 - `Type {}` works when the synthesized field-construction shape has no required fields
 - positional construction follows declared visible-field order
-- visible fields may be omitted from positional construction only when the omitted fields form a trailing suffix and all have initializers
+- positional construction may omit only a trailing suffix of visible fields that all have initializers
+- positional construction never skips a defaulted visible field to reach a later required visible field
 - positional construction is rejected when a hidden initialized field appears before a later visible field
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
@@ -1030,9 +1041,12 @@ Custom constructors are class-only and use a dedicated `new` block inside `impl`
 - `new { ... } { body }` declares a block-bodied constructor
 - `new { ... } = expression` declares an expression-bodied constructor
 - shape, enum, enum case, single, annotation, and interface declarations cannot define custom `new` constructors
-- constructor shape fields use `name Type`, with optional trailing defaults such as `age Int = 0`
+- constructor shape fields use `name Type`, with optional defaults such as `age Int = 0`
 - `Type { field: value }` constructs by matching the constructor input shape by field name
 - `Type(value)` constructs by filling the same constructor input shape positionally by declaration order
+- named construction may omit any constructor shape field with a default
+- positional construction fills a prefix of constructor shape fields and may omit only trailing fields that all have defaults
+- positional construction never skips a defaulted field to reach a later required field
 - constructor shape fields may end with one variadic list field such as `items [Str] vararg`
 - `hidden new { ... } { body }` declares a private constructor
 - each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor

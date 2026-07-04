@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# positional construction for Page with 1 argument leaves required field 'title' unset.*
+
+class Page {
+    body Str = "body"
+    title Str
+}
+
+def main() Unit {
+    _ Page = Page("Intro")
+}

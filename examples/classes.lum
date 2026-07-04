@@ -12,7 +12,7 @@
 # - trailing visible defaults may be omitted
 # - hidden defaulted fields may trail visible fields and stay out of the shape
 # - explicit `new` supports brace field construction and positional parentheses
-# - explicit `new` can define defaulted trailing parameters
+# - constructor defaults may appear anywhere, but positional calls never skip over them
 
 class Profile {
     name Str

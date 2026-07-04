@@ -1398,14 +1398,10 @@ impl<'a> Checker<'a> {
                     param.span,
                 );
             }
-            if param.variadic && seen_default {
+            if param.variadic && seen_default && !is_constructor {
                 self.add_error(
                     "invalid_variadic_param",
-                    if is_constructor {
-                        "variadic constructor parameter cannot follow defaulted parameters"
-                    } else {
-                        "variadic parameter cannot follow defaulted parameters"
-                    },
+                    "variadic parameter cannot follow defaulted parameters",
                     param.span,
                 );
             }
@@ -1426,14 +1422,10 @@ impl<'a> Checker<'a> {
             }
             if param.initializer.is_some() {
                 seen_default = true;
-            } else if seen_default && !param.variadic {
+            } else if seen_default && !param.variadic && !is_constructor {
                 self.add_error(
                     "invalid_constructor_default",
-                    if is_constructor {
-                        "constructor parameters without defaults cannot follow defaulted parameters"
-                    } else {
-                        "parameters without defaults cannot follow defaulted parameters"
-                    },
+                    "parameters without defaults cannot follow defaulted parameters",
                     param.span,
                 );
             }
@@ -5296,19 +5288,19 @@ impl<'a> Checker<'a> {
                 .cloned()
                 .collect::<Vec<_>>();
             if let Some(ctor) = self.choose_overload(&visible, args) {
-                let params = ctor
-                    .params
-                    .iter()
-                    .map(|param| FieldSig {
-                        name: param.name.clone(),
-                        ty: param.ty.clone(),
-                        mutable: false,
-                        hidden: false,
-                        has_initializer: param.has_initializer,
-                        variadic: param.variadic,
-                    })
-                    .collect::<Vec<_>>();
+                let params = constructor_field_sigs_from_params(&ctor.params);
                 return self.check_constructor_signature(&params, &ret, args, span);
+            }
+            if args.iter().all(|arg| arg.name.is_none()) {
+                for ctor in &visible {
+                    let params = constructor_field_sigs_from_params(&ctor.params);
+                    if let Some(message) =
+                        positional_constructor_prefix_message(&sig.name, &params, args.len())
+                    {
+                        self.add_error("invalid_argument_count", message, span);
+                        return ret;
+                    }
+                }
             }
             let hidden = overloads
                 .iter()
@@ -5378,6 +5370,14 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
     ) -> Ty {
         if args.iter().all(|arg| arg.name.is_none()) {
+            if let Some(message) = positional_constructor_prefix_message(
+                constructor_target_name(ret).unwrap_or("constructor"),
+                params,
+                args.len(),
+            ) {
+                self.add_error("invalid_argument_count", message, span);
+                return materialize_type(ret);
+            }
             let arrangement = arrange_constructor_args(params, args);
             let min_required = params
                 .iter()
@@ -6999,6 +6999,13 @@ impl<'a> Checker<'a> {
             return self.check_constructor_signature(&visible_fields, ret, args, span);
         }
 
+        if let Some(message) =
+            positional_constructor_prefix_message(&sig.name, &visible_fields, args.len())
+        {
+            self.add_error("invalid_argument_count", message, span);
+            return materialize_type(ret);
+        }
+
         if args.len() > visible_fields.len()
             || visible_fields[args.len()..]
                 .iter()
@@ -7545,6 +7552,59 @@ impl<'a> Checker<'a> {
 
 fn enum_case_pattern_accepts_arity(params: &[FieldSig], arity: usize) -> bool {
     arity <= params.len() && params[arity..].iter().all(|param| param.has_initializer)
+}
+
+fn constructor_field_sigs_from_params(params: &[ParamSig]) -> Vec<FieldSig> {
+    params
+        .iter()
+        .map(|param| FieldSig {
+            name: param.name.clone(),
+            ty: param.ty.clone(),
+            mutable: false,
+            hidden: false,
+            has_initializer: param.has_initializer,
+            variadic: param.variadic,
+        })
+        .collect()
+}
+
+fn constructor_target_name(ret: &Ty) -> Option<&str> {
+    match ret {
+        Ty::Named(name, _) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+fn positional_constructor_prefix_message(
+    target_name: &str,
+    params: &[FieldSig],
+    arg_count: usize,
+) -> Option<String> {
+    if arg_count > params.len() {
+        return None;
+    }
+    let (required_index, required) = params
+        .iter()
+        .enumerate()
+        .skip(arg_count)
+        .find(|(_, param)| !param.variadic && !param.has_initializer)?;
+    let defaulted_before = params[..required_index]
+        .iter()
+        .filter(|param| param.has_initializer)
+        .map(|param| param.name.clone())
+        .collect::<Vec<_>>();
+    let defaulted = defaulted_before.first()?;
+    Some(format!(
+        "positional construction for {target_name} with {arg_count} {} leaves required field '{}' unset; positional arguments fill fields in declaration order and do not skip defaulted fields. Use {target_name} {{ {}: ... }} to omit defaulted field '{}', pass all fields positionally in declaration order, or move defaulted fields after required fields.",
+        if arg_count == 1 {
+            "argument"
+        } else {
+            "arguments"
+        },
+        required.name,
+        required.name,
+        defaulted
+    ))
 }
 
 fn enum_case_pattern_required_count(params: &[FieldSig]) -> usize {
@@ -8896,6 +8956,86 @@ def main() Int {
     }
 
     #[test]
+    fn allows_constructor_shapes_with_default_before_required_for_named_or_full_positional_calls() {
+        let program = parse_inline(
+            r#"
+class Page {
+    body Str = "body"
+    title Str
+}
+
+class Article {
+    body Str
+    title Str
+}
+
+impl Article {
+    new {
+        body Str = "body"
+        title Str
+    } {
+        this.body = body
+        this.title = title
+    }
+}
+
+def main() Unit {
+    _ Page = Page("custom body", "Intro")
+    _ Page = Page { title: "Intro" }
+    _ Article = Article("custom body", "Intro")
+    _ Article = Article { title: "Intro" }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_short_positional_construction_that_skips_default_before_required_field() {
+        let program = parse_inline(
+            r#"
+class Page {
+    body Str = "body"
+    title Str
+}
+
+class Article {
+    body Str
+    title Str
+}
+
+impl Article {
+    new {
+        body Str = "body"
+        title Str
+    } {
+        this.body = body
+        this.title = title
+    }
+}
+
+def main() Unit {
+    _ Page = Page("Intro")
+    _ Article = Article("Intro")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(result.diagnostics.len(), 2, "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().all(|diag| {
+                diag.code == "invalid_argument_count"
+                    && diag.message.contains("leaves required field 'title' unset")
+                    && diag.message.contains("do not skip defaulted fields")
+                    && diag.message.contains("{ title: ... }")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn reports_named_brace_field_type_mismatch() {
         let program = parse_inline(
             r#"
@@ -9604,14 +9744,14 @@ def bad(left [Int] vararg, right [Int] vararg) Unit = ()
     }
 
     #[test]
-    fn rejects_variadic_constructor_parameter_after_default() {
+    fn allows_variadic_constructor_parameter_after_default() {
         let program = parse_inline(
             r#"
-class Bad {
+class Bucket {
     items [Int]
 }
 
-impl Bad {
+impl Bucket {
     new {
         prefix Int = 0
         items [Int] vararg
@@ -9619,19 +9759,14 @@ impl Bad {
         this.items = items
     }
 }
+
+def main() Unit {
+    _ Bucket = Bucket(1, 2, 3)
+}
 "#,
         );
         let result = check_program(&program);
-        assert!(
-            result.diagnostics.iter().any(|diag| {
-                diag.code == "invalid_variadic_param"
-                    && diag.message.contains(
-                        "variadic constructor parameter cannot follow defaulted parameters",
-                    )
-            }),
-            "{:#?}",
-            result.diagnostics
-        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]
