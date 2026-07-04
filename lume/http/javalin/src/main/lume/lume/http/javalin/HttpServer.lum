@@ -31,7 +31,11 @@ impl JavalinBackend {
     def get(path Str, controller Any, method Method) JavalinBackend {
         this.app.get(path, Handler {
             def handle(ctx Context) Unit {
-                ctx.result(method.invoke(controller).toStr())
+                if method.params().size() == 0 {
+                    ctx.result(method.invoke(controller).toStr())
+                } else {
+                    ctx.result(method.invoke(controller, ctx).toStr())
+                }
             }
         })
 
