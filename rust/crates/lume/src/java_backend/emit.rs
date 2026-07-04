@@ -218,7 +218,16 @@ fn render_single(
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, false);
-    out.push_str(&format!("    private {name}() {{}}\n"));
+    out.push_str(&format!("    private {name}()"));
+    if let Some(field_init) = ty
+        .field_init
+        .and_then(|id| bundle.ir.function(id))
+        .and_then(|function| emit_field_initializer_constructor_body(bundle, function, names))
+    {
+        out.push_str(&field_init);
+    } else {
+        out.push_str(" {}\n");
+    }
     push_fields(&mut out, ty, names);
     push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     out.push_str("}\n");
@@ -1456,6 +1465,24 @@ fn push_stub_body(out: &mut String) {
     out.push_str("    }\n");
 }
 
+fn emit_field_initializer_constructor_body(
+    bundle: &BackendBundle,
+    function: &ir::Function,
+    names: &JavaNames,
+) -> Option<String> {
+    let mut overrides = HashMap::new();
+    for param in &function.params {
+        let local = function.locals.get(param.0)?;
+        if local.name == "this" {
+            overrides.insert(local.id, "this".to_string());
+        }
+    }
+    FunctionEmitter::new(bundle, function, names)
+        .with_constructor_body()
+        .with_capture_overrides(overrides)
+        .emit_body()
+}
+
 fn push_class_constructors(
     out: &mut String,
     bundle: &BackendBundle,
@@ -1876,6 +1903,25 @@ impl<'a> FunctionEmitter<'a> {
                             ))
                         }
                     }
+                    ir::FunctionKind::Method { owner } => {
+                        let owner_ty = self.bundle.ir.types.get(owner.0)?;
+                        let name = java_member_name(&target.name);
+                        if owner_ty.kind == TypeKind::Single {
+                            Some(format!(
+                                "{}.INSTANCE.{}({})",
+                                self.names.named_type(&owner_ty.name),
+                                name,
+                                args.join(", ")
+                            ))
+                        } else if matches!(
+                            self.function.kind,
+                            ir::FunctionKind::Method { owner: current_owner } if current_owner == owner
+                        ) {
+                            Some(format!("this.{}({})", name, args.join(", ")))
+                        } else {
+                            self.unsupported("direct call to non-top-level function")
+                        }
+                    }
                     _ => self.unsupported("direct call to non-top-level function"),
                 }
             }
@@ -1979,6 +2025,16 @@ impl<'a> FunctionEmitter<'a> {
             {
                 self.emit_core_enum_case_call(case, operands)
             }
+            [owner] if owner == "List" => {
+                let args = self.emit_operands(operands)?;
+                Some(format!("lume.core.LumeList.of({})", args.join(", ")))
+            }
+            [owner] if owner == "Map" && operands.is_empty() => {
+                Some("lume.core.LumeMap.empty()".to_string())
+            }
+            [owner] if owner == "Set" && operands.is_empty() => {
+                Some("lume.core.LumeSet.empty()".to_string())
+            }
             [owner] if self.names.is_java_type(owner) => {
                 let params = self
                     .constructor_param_types(owner, operands.len())
@@ -2009,6 +2065,18 @@ impl<'a> FunctionEmitter<'a> {
                 let args = self.emit_operands_for_params(operands, &params)?;
                 Some(format!(
                     "{}.{}({})",
+                    self.names.named_type(owner),
+                    java_member_name(method),
+                    args.join(", ")
+                ))
+            }
+            [owner, method] if self.is_lume_single_type(owner) => {
+                let params = self
+                    .type_method_param_types(owner, method, operands.len())
+                    .unwrap_or_default();
+                let args = self.emit_operands_for_params(operands, &params)?;
+                Some(format!(
+                    "{}.INSTANCE.{}({})",
                     self.names.named_type(owner),
                     java_member_name(method),
                     args.join(", ")
@@ -2058,6 +2126,11 @@ impl<'a> FunctionEmitter<'a> {
             ty.name == name
                 && matches!(ty.kind, TypeKind::Class | TypeKind::Record | TypeKind::Enum)
         })
+    }
+
+    fn is_lume_single_type(&self, name: &str) -> bool {
+        self.type_def(name)
+            .is_some_and(|ty| ty.kind == TypeKind::Single)
     }
 
     fn emit_intrinsic(&self, intrinsic: &ir::Intrinsic, args: &[String]) -> Option<String> {
@@ -2365,7 +2438,11 @@ impl<'a> FunctionEmitter<'a> {
                 .globals
                 .get(id.0)
                 .map(|global| global.ty.clone()),
-            ir::Place::Field { .. } | ir::Place::Index { .. } => None,
+            ir::Place::Field { base, name } => {
+                let base_ty = self.operand_type(base)?;
+                self.field_type(&base_ty, name)
+            }
+            ir::Place::Index { .. } => None,
         }
     }
 
@@ -2373,6 +2450,22 @@ impl<'a> FunctionEmitter<'a> {
         match operand {
             ir::Operand::Copy(place) | ir::Operand::Move(place) => self.place_type(place),
             ir::Operand::Const(_) => None,
+        }
+    }
+
+    fn field_type(&self, ty: &ir::Type, field_name: &str) -> Option<ir::Type> {
+        match ty {
+            ir::Type::Named { name, .. } => self
+                .type_def(name)?
+                .fields
+                .iter()
+                .find(|field| field.name == field_name)
+                .map(|field| field.ty.clone()),
+            ir::Type::Record(fields) => fields
+                .iter()
+                .find(|field| field.name == field_name)
+                .map(|field| field.ty.clone()),
+            _ => None,
         }
     }
 
@@ -2435,6 +2528,11 @@ impl<'a> FunctionEmitter<'a> {
                     .ir
                     .function(*id)
                     .map(|function| function.return_ty.clone()),
+                ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue)
+                | ir::Callee::Intrinsic(ir::Intrinsic::VariantField(_)) => Some(ir::Type::Unknown),
+                ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet)
+                | ir::Callee::Intrinsic(ir::Intrinsic::VariantIs(_))
+                | ir::Callee::Intrinsic(ir::Intrinsic::IterHasNext) => Some(ir::Type::Bool),
                 _ => None,
             },
             ir::RValue::Construct { ty, .. } => Some(ty.clone()),
@@ -2491,6 +2589,9 @@ impl<'a> FunctionEmitter<'a> {
     }
 
     fn target_type_needs_reference_cast(&self, ty: &ir::Type) -> bool {
+        if is_java_void_type(ty) {
+            return true;
+        }
         if self.is_unbound_named_type(ty) {
             return false;
         }

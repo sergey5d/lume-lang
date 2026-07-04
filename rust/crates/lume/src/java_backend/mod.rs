@@ -2134,6 +2134,43 @@ impl Maybe[T] {
     }
 
     #[test]
+    fn emits_typed_enum_payload_pattern_bindings() {
+        let temp = temp_path("lume-java-typed-enum-pattern-bindings");
+        let source = temp.join("main.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/extract
+
+def length(maybe Option[Str]) Int {
+    let Some(text) = maybe else return 0
+    text.size()
+}
+
+def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
+    let Ok(value) = result else return result
+    Ok(value)
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        let module =
+            fs::read_to_string(out.join("demo/extract/ExtractModule.java")).expect("read module");
+        assert!(module.contains("String text_"));
+        assert!(!module.contains("Object text_"));
+        assert!(module.contains("lume.core.LumeUnit value_"));
+        assert!(module.contains("((lume.core.LumeUnit)"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn emits_structured_java_for_core_option_result_and_either() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let repo_root = manifest_dir
@@ -2744,6 +2781,86 @@ def main() Unit {
         assert!(module.contains("tmp1_1 = add(2L, 3L);"));
         assert!(module.contains("value_0 = tmp1_1;"));
         assert!(module.contains("tmp2_2 = lume.core.LumeRuntime.println(value_0);"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn emits_named_single_calls_from_reified_methods() {
+        let temp = temp_path("lume-java-single-reified-call");
+        let source = temp.join("single_reified.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/single_reified
+
+single Cache {
+}
+
+impl single Cache {
+    def label(targetType Type[_]) Str =
+        targetType.name().getOr("?")
+}
+
+class Reader {
+}
+
+impl Reader {
+    def read[reified T]() Str {
+        Cache.label(typeOf[T])
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        let reader = fs::read_to_string(out.join("demo/single_reified/Reader.java"))
+            .expect("read reader");
+        assert!(!reader.contains("UnsupportedOperationException"));
+        assert!(reader.contains("Cache.INSTANCE.label"));
+        assert!(reader.contains("__type_T_1"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn emits_single_field_initializers() {
+        let temp = temp_path("lume-java-single-field-init");
+        let source = temp.join("single_field_init.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/single_field_init
+
+single Cache {
+    hidden var values Map[Str, Str] = Map()
+}
+
+impl single Cache {
+    def remember(key Str, value Str) Unit {
+        updated Map[Str, Str] = this.values.put(key, value)
+        this.values := updated
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        let cache =
+            fs::read_to_string(out.join("demo/single_field_init/Cache.java")).expect("read cache");
+        assert!(!cache.contains("UnsupportedOperationException"));
+        assert!(cache.contains("this.values ="));
+        assert!(cache.contains("lume.core.LumeMap"));
 
         let _ = fs::remove_dir_all(temp);
     }

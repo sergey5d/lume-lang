@@ -1,7 +1,29 @@
 module lume/db
 
 use DbApi/{BoundExec, Database, Exec, Query, Row, RowQuery, Transaction}
-use lume/db/{DbError, JdbcDatabase, JdbcRow, JdbcRunner, JdbcTransaction}
+use lume/db/{DbError, JdbcDatabase, JdbcRow, JdbcRowDecoder, JdbcRunner, JdbcTransaction}
+
+hidden single JdbcRowDecoderCache {
+    hidden var decoders Map[Str, JdbcRowDecoder] = Map()
+}
+
+impl single JdbcRowDecoderCache {
+    def decoder(targetType Type[_]) Result[JdbcRowDecoder, DbError] {
+        key Str = this.key(targetType)
+
+        if let Some(decoder) = this.decoders.get(key) {
+            return Ok(decoder)
+        }
+
+        prepared JdbcRowDecoder = try JdbcRowDecoder.prepare(targetType)
+        updated Map[Str, JdbcRowDecoder] = this.decoders.put(key, prepared)
+        this.decoders := updated
+        Ok(prepared)
+    }
+
+    def key(targetType Type[_]) Str =
+        targetType.qualifiedName().getOr(targetType.name().getOr("<anonymous>"))
+}
 
 hidden class JdbcRowImpl with Row {
     hidden backend JdbcRow
@@ -22,7 +44,10 @@ impl JdbcRowImpl {
 
     def nullableValue(column Str) Result[Option[Any], DbError] = this.backend.nullableValue(column)
 
-    def decode[reified T]() Result[T, DbError] = this.backend.decode(typeOf[T])
+    def decode[reified T]() Result[T, DbError] {
+        decoder JdbcRowDecoder = try JdbcRowDecoderCache.decoder(typeOf[T])
+        decoder.decode(this.backend)
+    }
 
     def str(column Str) Result[Str, DbError] = this.backend.str(column)
 
@@ -113,11 +138,11 @@ impl JdbcQuery {
 
     def decodeAll[reified T]() Result[[T], DbError] {
         jdbcRows [JdbcRow] = try this.runner.query(this.sql, this.values)
+        decoder JdbcRowDecoder = try JdbcRowDecoderCache.decoder(typeOf[T])
         out [T] = []
 
         for jdbcRow <- jdbcRows {
-            typedJdbcRow JdbcRow = jdbcRow
-            decoded Result[T, DbError] = typedJdbcRow.decode(typeOf[T])
+            decoded Result[T, DbError] = decoder.decode(jdbcRow)
             match decoded {
                 case Ok(value) => {
                     out.add(value)
@@ -198,7 +223,8 @@ impl JdbcRowQuery {
             Err(DbError("queryRow expected at most one row, got " + count))
         } else {
             jdbcRow JdbcRow = jdbcRows.get(0).orPanic()
-            decoded Result[T, DbError] = jdbcRow.decode(typeOf[T])
+            decoder JdbcRowDecoder = try JdbcRowDecoderCache.decoder(typeOf[T])
+            decoded Result[T, DbError] = decoder.decode(jdbcRow)
             match decoded {
                 case Ok(value) => Ok(Some(value))
                 case Err(error) => Err(error)

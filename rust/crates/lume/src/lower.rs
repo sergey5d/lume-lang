@@ -2647,13 +2647,15 @@ impl<'a> FunctionLowerer<'a> {
                         .get(index)
                         .cloned()
                         .unwrap_or_else(|| format!("_{}", index + 1));
+                    let field_ty =
+                        self.constructor_pattern_field_type(&scrutinee, path, &field_name, index);
                     let field = self.emit_temp_from_rvalue(
                         ir::RValue::Call {
                             callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantField(field_name)),
                             args: vec![scrutinee.clone()],
                             structural: false,
                         },
-                        ir::Type::Unknown,
+                        field_ty,
                         Some(arg.span()),
                     );
                     let plan = self.lower_pattern_plan(field, arg);
@@ -2666,6 +2668,55 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
         }
+    }
+
+    fn constructor_pattern_field_type(
+        &self,
+        scrutinee: &ir::Operand,
+        path: &[String],
+        field_name: &str,
+        index: usize,
+    ) -> ir::Type {
+        let Some(scrutinee_ty) = self.operand_type(scrutinee) else {
+            return ir::Type::Unknown;
+        };
+        self.enum_case_field_type(&scrutinee_ty, path, field_name, index)
+            .unwrap_or(ir::Type::Unknown)
+    }
+
+    fn enum_case_field_type(
+        &self,
+        scrutinee_ty: &ir::Type,
+        path: &[String],
+        field_name: &str,
+        index: usize,
+    ) -> Option<ir::Type> {
+        let case_name = path.last()?;
+        let ir::Type::Named { name, args } = scrutinee_ty else {
+            return None;
+        };
+
+        match (name.as_str(), case_name.as_str(), field_name) {
+            ("Option", "Some", "value") if args.len() == 1 => return args.first().cloned(),
+            ("Result", "Ok", "value") if args.len() == 2 => return args.first().cloned(),
+            ("Result", "Err", "error") if args.len() == 2 => return args.get(1).cloned(),
+            ("Either", "Left", "value") if args.len() == 2 => return args.first().cloned(),
+            ("Either", "Right", "value") if args.len() == 2 => return args.get(1).cloned(),
+            _ => {}
+        }
+
+        let ty = self
+            .program
+            .types
+            .iter()
+            .find(|ty| ty.kind == ast::TypeKind::Enum && ty.name == *name)?;
+        let case = ty.enum_cases.iter().find(|case| case.name == *case_name)?;
+        let subst = ir_type_subst(ty, args);
+        case.fields
+            .iter()
+            .find(|field| field.name == field_name)
+            .or_else(|| case.fields.get(index))
+            .map(|field| substitute_ir_type(&field.ty, &subst))
     }
 
     fn lower_pattern_literal_expr(&mut self, expr: &ast::Expr) -> ir::Operand {

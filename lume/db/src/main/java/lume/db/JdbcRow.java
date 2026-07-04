@@ -1,16 +1,12 @@
 package lume.db;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
-import java.util.Map;
 
-import lume.core.LumeField;
 import lume.core.LumeList;
 import lume.core.LumeRuntime;
+import lume.core.LumeField;
 import lume.core.LumeType;
-import lume.core.LumeTypeKind;
 import lume.core.Option;
 import lume.core.Result;
 
@@ -62,13 +58,15 @@ public final class JdbcRow {
     }
 
     public <T> Result<T, DbError> decode(LumeType targetType) {
-        try {
+        var prepared = JdbcRowDecoder.prepare(targetType);
+        if (prepared instanceof Result.Err<?, ?> err) {
             @SuppressWarnings("unchecked")
-            var decoded = (T) instantiate(targetType);
-            return Jdbc.ok(decoded);
-        } catch (DecodeFailure err) {
-            return Jdbc.err(err.getMessage());
+            var error = (DbError) err.error();
+            return new Result.Err<>(error);
         }
+        @SuppressWarnings("unchecked")
+        var ok = (Result.Ok<JdbcRowDecoder, DbError>) prepared;
+        return ok.value().decode(this);
     }
 
     public Result<String, DbError> str(String column) {
@@ -119,68 +117,7 @@ public final class JdbcRow {
         return convertOpt(column, JdbcRow::toBool);
     }
 
-    private Object instantiate(LumeType targetType) throws DecodeFailure {
-        var kind = targetType.kind();
-        if (kind != LumeTypeKind.Class && kind != LumeTypeKind.Shape) {
-            throw new DecodeFailure("cannot decode SQL row as " + typeLabel(targetType)
-                    + ": only class and shape descriptors are supported");
-        }
-
-        var qualifiedName = targetType.qualifiedName();
-        if (!qualifiedName.isDefined()) {
-            throw new DecodeFailure("cannot decode SQL row as " + typeLabel(targetType)
-                    + ": type has no Java qualified name");
-        }
-
-        Class<?> targetClass;
-        try {
-            targetClass = Class.forName(qualifiedName.orPanic());
-        } catch (ClassNotFoundException err) {
-            throw new DecodeFailure("cannot decode SQL row as " + typeLabel(targetType)
-                    + ": Java class '" + qualifiedName.orPanic() + "' is not available");
-        }
-
-        var fields = targetType.fields().asJava();
-        DecodeFailure lastFailure = null;
-        for (var constructor : targetClass.getConstructors()) {
-            if (constructor.getParameterCount() != fields.size()) {
-                continue;
-            }
-            try {
-                return invokeConstructor(constructor, fields);
-            } catch (DecodeFailure err) {
-                lastFailure = err;
-            }
-        }
-
-        if (lastFailure != null) {
-            throw lastFailure;
-        }
-        throw new DecodeFailure("cannot decode SQL row as " + typeLabel(targetType)
-                + ": no public constructor accepts " + fields.size() + " fields");
-    }
-
-    private Object invokeConstructor(Constructor<?> constructor, java.util.List<LumeField> fields)
-            throws DecodeFailure {
-        var paramTypes = constructor.getParameterTypes();
-        var args = new Object[fields.size()];
-        for (int index = 0; index < fields.size(); index++) {
-            var field = fields.get(index);
-            args[index] = decodeField(field, paramTypes[index]);
-        }
-        try {
-            return constructor.newInstance(args);
-        } catch (InstantiationException | IllegalAccessException err) {
-            throw new DecodeFailure("cannot construct " + constructor.getDeclaringClass().getName()
-                    + ": " + err.getMessage());
-        } catch (InvocationTargetException err) {
-            var cause = err.getCause() == null ? err : err.getCause();
-            throw new DecodeFailure("cannot construct " + constructor.getDeclaringClass().getName()
-                    + ": " + cause.getMessage());
-        }
-    }
-
-    private Object decodeField(LumeField field, Class<?> paramType) throws DecodeFailure {
+    Object decodeField(LumeField field, Class<?> paramType) throws DecodeFailure {
         var column = field.name();
         var key = lookup(column);
         if (key instanceof Option.None<?>) {
@@ -267,7 +204,7 @@ public final class JdbcRow {
         return name.isDefined() ? name.orPanic() : type.toString();
     }
 
-    private static String typeLabel(LumeType type) {
+    static String typeLabel(LumeType type) {
         var qualified = type.qualifiedName();
         if (qualified.isDefined()) {
             return qualified.orPanic();
@@ -369,7 +306,7 @@ public final class JdbcRow {
         T convert(Object value);
     }
 
-    private static final class DecodeFailure extends Exception {
+    static final class DecodeFailure extends Exception {
         DecodeFailure(String message) {
             super(message);
         }
