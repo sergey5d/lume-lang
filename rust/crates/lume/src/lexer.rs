@@ -83,6 +83,7 @@ pub enum TokenKind {
     MinusEq,
     StarEq,
     SlashEq,
+    PercentEq,
     AndAnd,
     OrOr,
     Eof,
@@ -370,6 +371,7 @@ impl<'a> Lexer<'a> {
             '*' => Some(TokenKind::Star),
             '/' if self.take('=') => Some(TokenKind::SlashEq),
             '/' => Some(TokenKind::Slash),
+            '%' if self.take('=') => Some(TokenKind::PercentEq),
             '%' => Some(TokenKind::Percent),
             '=' if self.take('>') => Some(TokenKind::FatArrow),
             '=' if self.take('=') => Some(TokenKind::EqEq),
@@ -565,7 +567,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\nlifted = value.->name()\nlift { value: Some(1) }\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\ncount %= 2\nlifted = value.->name()\nlift { value: Some(1) }\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -575,6 +577,7 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Vararg)));
         assert!(kinds.contains(&TokenKind::ColonLess));
+        assert!(kinds.contains(&TokenKind::PercentEq));
         assert!(kinds.contains(&TokenKind::DotArrow));
         assert!(kinds.contains(&TokenKind::Float));
         assert!(

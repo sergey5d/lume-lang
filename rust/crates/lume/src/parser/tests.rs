@@ -157,6 +157,7 @@ def run(limit Int) Int {
     for i <- Range(0, limit) {
         total += i
     }
+    total %= 1000
     return total
 }
 "#,
@@ -169,7 +170,7 @@ def run(limit Int) Int {
             assert_eq!(function.name, "run");
             match &function.body {
                 CallableBody::Block(block) => {
-                    assert_eq!(block.statements.len(), 3);
+                    assert_eq!(block.statements.len(), 4);
                 }
                 other => panic!("expected block body, got {other:#?}"),
             }

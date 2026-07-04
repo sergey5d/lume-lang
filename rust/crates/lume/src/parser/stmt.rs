@@ -570,6 +570,8 @@ impl<'a> Parser<'a> {
             AssignOp::MulAssign
         } else if self.match_token(TokenKind::SlashEq) {
             AssignOp::DivAssign
+        } else if self.match_token(TokenKind::PercentEq) {
+            AssignOp::ModAssign
         } else {
             self.restore(checkpoint);
             return None;

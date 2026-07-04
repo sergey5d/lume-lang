@@ -17,6 +17,7 @@
 # stepped 8
 # stepped 6
 # stepped total 24
+# remainder 2
 
 def main() Unit {
     var total Int = 0
@@ -46,4 +47,8 @@ def main() Unit {
         steppedTotal += item
     }
     println("stepped total", steppedTotal)
+
+    var remainder = 17
+    remainder %= 5
+    println("remainder", remainder)
 }
