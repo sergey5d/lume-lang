@@ -7,7 +7,8 @@ val coreJar = repoRoot.file("lume/core/build/libs/lume-core.jar")
 val jsonSource = layout.projectDirectory.file("src/main/lume/lume/json/Json.lum")
 val jsonLumeSources = layout.projectDirectory.dir("src/main/lume")
 val jsonJava = layout.projectDirectory.dir("src/main/java")
-val jsonClasses = layout.buildDirectory.dir("classes/java/json")
+val apiJava = layout.projectDirectory.dir("src/main/java-api")
+val apiClasses = layout.buildDirectory.dir("classes/java/jsonApi")
 val generatedLumeJava = layout.buildDirectory.dir("generated/sources/lume/java")
 val lumeCompilerSources = repoRoot.dir("rust/crates/lume/src")
 val lumeCompilerManifest = repoRoot.file("rust/Cargo.toml")
@@ -79,23 +80,24 @@ val buildLumeCompiler = tasks.register<Exec>("buildLumeCompiler") {
     )
 }
 
-val compileJsonJava = tasks.register<JavaCompile>("compileJsonJava") {
-    description = "Compiles the tiny JVM bridge used by the Lume JSON API."
+val compileJsonApiJava = tasks.register<JavaCompile>("compileJsonApiJava") {
+    description = "Compiles descriptor-only JVM stubs used while generating the Lume JSON API."
     group = "build"
     dependsOn(buildLocalLumeCore)
 
-    source(fileTree(jsonJava))
+    source(fileTree(apiJava))
     classpath = files(coreJar)
-    destinationDirectory.set(jsonClasses)
+    destinationDirectory.set(apiClasses)
 }
 
 val generateJsonJava = tasks.register<Exec>("generateJsonJava") {
     description = "Generates Java sources for the Lume JSON API."
     group = "build"
-    dependsOn(buildLumeCompiler, compileJsonJava, cleanGeneratedLumeJava)
+    dependsOn(buildLumeCompiler, compileJsonApiJava, cleanGeneratedLumeJava)
 
     inputs.files(fileTree(jsonLumeSources))
     inputs.files(fileTree(jsonJava))
+    inputs.files(fileTree(apiJava))
     inputs.files(fileTree(lumeCompilerSources))
     inputs.property("lumeExecutable", lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath)
     if (!lumeExecutableOverride.isPresent) {
@@ -106,7 +108,7 @@ val generateJsonJava = tasks.register<Exec>("generateJsonJava") {
     doFirst {
         val outputDir = generatedLumeJava.get().asFile
         val lumeExecutable = lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath
-        val generationClasspath = files(coreJar, jsonClasses).asPath
+        val generationClasspath = files(coreJar, apiClasses).asPath
 
         commandLine(
             lumeExecutable,
@@ -121,12 +123,10 @@ val generateJsonJava = tasks.register<Exec>("generateJsonJava") {
 }
 
 tasks.named<JavaCompile>("compileJava") {
-    dependsOn(generateJsonJava, compileJsonJava)
-    classpath += files(jsonClasses)
+    dependsOn(generateJsonJava)
 }
 
 tasks.named<Jar>("jar") {
     archiveBaseName.set("lume-json")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    from(jsonClasses)
 }

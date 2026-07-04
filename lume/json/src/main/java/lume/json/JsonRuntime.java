@@ -49,11 +49,11 @@ public final class JsonRuntime {
     }
 
     public static JsonValue obj(LumeList<JsonField> fields) {
-        return new JsonValue.JsonObject(fields.asJava());
+        return new JsonValue.JsonObject(fields);
     }
 
     public static JsonValue array(LumeList<JsonValue> values) {
-        return new JsonValue.JsonArray(values.asJava());
+        return new JsonValue.JsonArray(values);
     }
 
     public static JsonValue encode(Object value) {
@@ -115,7 +115,7 @@ public final class JsonRuntime {
     }
 
     public static String stringify(Object value) {
-        return encode(value).stringify();
+        return render(encode(value));
     }
 
     static String escape(String value) {
@@ -157,7 +157,7 @@ public final class JsonRuntime {
         for (var value : values) {
             out.add(encode(value));
         }
-        return new JsonValue.JsonArray(out);
+        return new JsonValue.JsonArray(LumeList.from(out));
     }
 
     private static JsonValue encodeJavaArray(Object array) {
@@ -166,7 +166,7 @@ public final class JsonRuntime {
         for (int index = 0; index < length; index++) {
             out.add(encode(java.lang.reflect.Array.get(array, index)));
         }
-        return new JsonValue.JsonArray(out);
+        return new JsonValue.JsonArray(LumeList.from(out));
     }
 
     private static JsonValue encodeMap(Map<?, ?> map) {
@@ -174,7 +174,7 @@ public final class JsonRuntime {
         for (var entry : map.entrySet()) {
             fields.add(field(String.valueOf(entry.getKey()), encode(entry.getValue())));
         }
-        return new JsonValue.JsonObject(fields);
+        return new JsonValue.JsonObject(LumeList.from(fields));
     }
 
     private static JsonValue encodeStructured(Object receiver, LumeType type) {
@@ -182,7 +182,7 @@ public final class JsonRuntime {
         for (var encodedField : ENCODER_CACHE.computeIfAbsent(type, JsonRuntime::buildEncoderFields)) {
             fields.add(field(encodedField.jsonName(), encode(readField(encodedField.field(), receiver))));
         }
-        return new JsonValue.JsonObject(fields);
+        return new JsonValue.JsonObject(LumeList.from(fields));
     }
 
     private static List<EncodedField> buildEncoderFields(LumeType type) {
@@ -232,7 +232,51 @@ public final class JsonRuntime {
         if (fields.isEmpty()) {
             return str(caseName);
         }
-        return new JsonValue.JsonObject(List.of(field(caseName, encodeMap(fields))));
+        return new JsonValue.JsonObject(LumeList.of(field(caseName, encodeMap(fields))));
+    }
+
+    private static String render(JsonValue value) {
+        if (value instanceof JsonValue.JsonNull) {
+            return "null";
+        }
+        if (value instanceof JsonValue.JsonBool json) {
+            return Boolean.TRUE.equals(json.value()) ? "true" : "false";
+        }
+        if (value instanceof JsonValue.JsonNumber json) {
+            return json.value();
+        }
+        if (value instanceof JsonValue.JsonString json) {
+            return "\"" + escape(json.value()) + "\"";
+        }
+        if (value instanceof JsonValue.JsonArray json) {
+            var out = new StringBuilder();
+            out.append("[");
+            var values = json.values().asJava();
+            for (int index = 0; index < values.size(); index++) {
+                if (index > 0) {
+                    out.append(",");
+                }
+                out.append(render(values.get(index)));
+            }
+            out.append("]");
+            return out.toString();
+        }
+        if (value instanceof JsonValue.JsonObject json) {
+            var out = new StringBuilder();
+            out.append("{");
+            var fields = json.fields().asJava();
+            for (int index = 0; index < fields.size(); index++) {
+                if (index > 0) {
+                    out.append(",");
+                }
+                var field = fields.get(index);
+                out.append("\"").append(escape(field.name())).append("\":");
+                out.append(render(field.value()));
+            }
+            out.append("}");
+            return out.toString();
+        }
+        return "\"" + escape(String.valueOf(value)) + "\"";
     }
 
     private record EncodedField(String jsonName, LumeField field) {

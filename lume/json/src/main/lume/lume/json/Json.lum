@@ -1,6 +1,6 @@
 module lume/json
 
-use lume/json/{JsonField, JsonRuntime, JsonValue}
+use lume/json/{JsonRuntime}
 
 annotation JsonName {
     value Str
@@ -8,7 +8,40 @@ annotation JsonName {
 
 annotation JsonIgnore {}
 
+shape JsonField {
+    name Str
+    value JsonValue
+}
+
+enum JsonValue {
+    case JsonNull
+
+    case JsonBool {
+        value Bool
+    }
+
+    case JsonNumber {
+        value Str
+    }
+
+    case JsonString {
+        value Str
+    }
+
+    case JsonArray {
+        values [JsonValue]
+    }
+
+    case JsonObject {
+        fields [JsonField]
+    }
+}
+
 single Json {}
+
+impl JsonValue {
+    def stringify() Str = JsonRuntime.stringify(this)
+}
 
 impl single Json {
     def str(value Str) JsonValue = JsonRuntime.str(value)

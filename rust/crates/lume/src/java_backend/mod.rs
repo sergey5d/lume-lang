@@ -92,6 +92,7 @@ pub fn generate_java_path(
 #[derive(Debug, Clone, Default)]
 struct JavaExternalSymbols {
     symbols: Vec<JavaExternalSymbol>,
+    local_type_names: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +164,7 @@ fn discover_java_external_symbols_from_path(
     }
 
     let program = parse_program_from_path(&abs)?;
+    collect_local_lume_type_names(&program, discovered);
     let base_dir = abs
         .parent()
         .ok_or_else(|| format!("resolve module base for {}", abs.display()))?;
@@ -175,6 +177,22 @@ fn discover_java_external_symbols_from_path(
         }
     }
     Ok(())
+}
+
+fn collect_local_lume_type_names(program: &Program, discovered: &mut JavaExternalSymbols) {
+    let Some(module) = program.module.as_ref() else {
+        return;
+    };
+    let package = module.name.replace('/', ".");
+    for item in &program.items {
+        let Item::Type(decl) = item else {
+            continue;
+        };
+        discovered
+            .local_type_names
+            .entry(format!("{package}.{}", decl.name))
+            .or_insert_with(|| decl.name.clone());
+    }
 }
 
 fn collect_java_external_symbols_from_import(
@@ -215,7 +233,8 @@ fn java_library_modules(
         .filter(|symbol| classes_by_qualified.contains_key(&symbol.qualified_name))
         .map(|symbol| (symbol.lume_name.clone(), symbol.module_path.clone()))
         .collect::<HashMap<_, _>>();
-    let exposed_names = modules_by_name.keys().cloned().collect::<HashSet<_>>();
+    let mut exposed_names = modules_by_name.keys().cloned().collect::<HashSet<_>>();
+    exposed_names.extend(externals.local_type_names.values().cloned());
     let mut grouped = HashMap::<String, Vec<&JavaExternalSymbol>>::new();
     for symbol in &externals.symbols {
         if classes_by_qualified.contains_key(&symbol.qualified_name) {
@@ -234,7 +253,7 @@ fn java_library_modules(
                 .map(|symbol| symbol.span)
                 .expect("grouped java library module has at least one symbol");
             let mut seen = HashSet::new();
-            let items = symbols
+            let mut items = symbols
                 .into_iter()
                 .filter(|symbol| seen.insert(symbol.lume_name.clone()))
                 .filter_map(|symbol| {
@@ -250,6 +269,19 @@ fn java_library_modules(
                         })
                 })
                 .collect::<Vec<_>>();
+            let existing_names = items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Type(decl) => Some(decl.name.clone()),
+                    _ => None,
+                })
+                .collect::<HashSet<_>>();
+            items.extend(java_library_local_placeholder_items(
+                &module_path,
+                externals,
+                &existing_names,
+                span,
+            ));
             let imports = java_library_imports(&module_path, &items, &modules_by_name, span);
             (
                 module_path.clone(),
@@ -265,6 +297,41 @@ fn java_library_modules(
                     },
                 },
             )
+        })
+        .collect()
+}
+
+fn java_library_local_placeholder_items(
+    module_path: &str,
+    externals: &JavaExternalSymbols,
+    existing_names: &HashSet<String>,
+    span: crate::source::Span,
+) -> Vec<Item> {
+    let package = module_path.replace('/', ".");
+    let prefix = format!("{package}.");
+    let mut names = externals
+        .local_type_names
+        .iter()
+        .filter_map(|(qualified, name)| {
+            (qualified.starts_with(&prefix) && !existing_names.contains(name))
+                .then_some(name.clone())
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    names
+        .into_iter()
+        .map(|name| {
+            Item::Type(TypeDecl {
+                annotations: Vec::new(),
+                visibility: Visibility::Default,
+                kind: TypeKind::Interface,
+                name,
+                type_params: Vec::new(),
+                with_bounds: Vec::new(),
+                members: Vec::new(),
+                span,
+            })
         })
         .collect()
 }
@@ -725,11 +792,13 @@ fn resolve_external_classes(
     let classpath_entries = effective_java_classpath(options);
     let index = JavaClasspathIndex::from_entries(&classpath_entries)?;
     let classpath = java_classpath(&classpath_entries)?;
-    let mut local_type_names = externals
-        .symbols
-        .iter()
-        .map(|symbol| (symbol.qualified_name.clone(), symbol.lume_name.clone()))
-        .collect::<HashMap<_, _>>();
+    let mut local_type_names = externals.local_type_names.clone();
+    local_type_names.extend(
+        externals
+            .symbols
+            .iter()
+            .map(|symbol| (symbol.qualified_name.clone(), symbol.lume_name.clone())),
+    );
     let mut diagnostics = Vec::new();
     let mut classes_by_qualified = HashMap::new();
     let mut seen = HashSet::new();

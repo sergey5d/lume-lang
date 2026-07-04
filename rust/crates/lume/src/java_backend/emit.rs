@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
 };
 
@@ -22,24 +22,33 @@ pub(crate) fn render_declaration_skeletons(
     let package = JavaPackage::from_module(bundle.ir.module.as_deref());
     let names = JavaNames::from_external_classes(external_classes);
     let mut sources = Vec::new();
+    let mut written_paths = HashSet::new();
 
-    sources.push(JavaSource {
-        relative_path: package.relative_file(&format!("{}.java", module_class_name(bundle))),
-        contents: render_module_wrapper(bundle, &package, &names),
-    });
+    let module_path = package.relative_file(&format!("{}.java", module_class_name(bundle)));
+    if written_paths.insert(module_path.clone()) {
+        sources.push(JavaSource {
+            relative_path: module_path,
+            contents: render_module_wrapper(bundle, &package, &names),
+        });
+    }
 
     if let Some(entrypoint) = render_entrypoint_runner(bundle, &package) {
-        sources.push(entrypoint);
+        if written_paths.insert(entrypoint.relative_path.clone()) {
+            sources.push(entrypoint);
+        }
     }
 
     for ty in &bundle.ir.types {
         if names.is_java_type(&ty.name) {
             continue;
         }
-        sources.push(JavaSource {
-            relative_path: package.relative_file(&format!("{}.java", java_type_name(&ty.name))),
-            contents: render_type_shell(bundle, ty, &package, &names),
-        });
+        let relative_path = package.relative_file(&format!("{}.java", java_type_name(&ty.name)));
+        if written_paths.insert(relative_path.clone()) {
+            sources.push(JavaSource {
+                relative_path,
+                contents: render_type_shell(bundle, ty, &package, &names),
+            });
+        }
     }
 
     sources
