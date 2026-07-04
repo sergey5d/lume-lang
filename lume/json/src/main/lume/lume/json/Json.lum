@@ -1,0 +1,35 @@
+module lume/json
+
+use lume/json/{JsonField, JsonRuntime, JsonValue}
+
+annotation JsonName {
+    value Str
+}
+
+annotation JsonIgnore {}
+
+single Json {}
+
+impl single Json {
+    def str(value Str) JsonValue = JsonRuntime.str(value)
+
+    def int(value Int) JsonValue = JsonRuntime.int(value)
+
+    def float(value Float) JsonValue = JsonRuntime.float(value)
+
+    def bool(value Bool) JsonValue = JsonRuntime.bool(value)
+
+    def nil() JsonValue = JsonRuntime.nil()
+
+    def field(name Str, value JsonValue) JsonField = JsonRuntime.field(name, value)
+
+    def array(values [JsonValue] vararg) JsonValue = JsonRuntime.array(values)
+
+    def obj(fields [JsonField] vararg) JsonValue = JsonRuntime.obj(fields)
+
+    def obj(value Any) JsonValue = JsonRuntime.encode(value)
+
+    def encode(value Any) JsonValue = JsonRuntime.encode(value)
+
+    def stringify(value Any) Str = JsonRuntime.stringify(value)
+}

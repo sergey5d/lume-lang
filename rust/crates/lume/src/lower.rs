@@ -5466,6 +5466,10 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: Vec::new(),
             ret: Box::new(ir_exact_runtime_type(ir::Type::Unknown)),
         }),
+        ("Field", "isHidden") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Bool),
+        }),
         ("Field", "get") => Some(ir::Type::Function {
             params: vec![ir::Type::named("Any")],
             ret: Box::new(ir::Type::Named {

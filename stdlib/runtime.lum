@@ -80,6 +80,7 @@ interface AnnotationType[A] with Type[A] {
 interface Field with Annotated {
     def name() Str
     def fieldType() Type[_]
+    def isHidden() Bool
     def get(receiver Any) Result[Any, ReflectionError]
 }
 

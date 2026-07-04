@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    ast::{self, TypeKind},
+    ast::{self, TypeKind, Visibility},
     backend::BackendBundle,
     ir::{self, FunctionKind},
     java_backend::JavaExternalClass,
@@ -557,10 +557,11 @@ fn type_field_array_expr(
         .iter()
         .map(|field| {
             format!(
-                "lume.core.LumeField.of({}, {}, {})",
+                "lume.core.LumeField.of({}, {}, {}, {})",
                 java_string_literal(&field.name),
                 type_value_expr_with_params(&field.ty, names, type_params),
-                annotation_array_expr(&field.annotations)
+                annotation_array_expr(&field.annotations),
+                matches!(field.visibility, Visibility::Hidden)
             )
         })
         .collect::<Vec<_>>()

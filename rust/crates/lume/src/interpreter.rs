@@ -2030,6 +2030,14 @@ impl<'a> Interpreter<'a> {
                     .unwrap_or(ir::Type::Unknown);
                 Ok(Value::RuntimeType(self.runtime_type_value_for_ir_type(&ty)))
             }
+            "isHidden" => {
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(Value::Bool(
+                    self.runtime_field_metadata(owner, case_id, slot)
+                        .map(|field| field.hidden)
+                        .unwrap_or(false),
+                ))
+            }
             _ => Err(self.unknown_metadata_method(method, span)),
         }
     }

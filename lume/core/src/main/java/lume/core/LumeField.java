@@ -4,15 +4,21 @@ public final class LumeField {
     private final String name;
     private final LumeType fieldType;
     private final java.util.List<LumeAnnotation> annotations;
+    private final boolean hidden;
 
     private LumeField(String name, LumeType fieldType) {
-        this(name, fieldType, java.util.List.of());
+        this(name, fieldType, java.util.List.of(), false);
     }
 
     private LumeField(String name, LumeType fieldType, java.util.List<LumeAnnotation> annotations) {
+        this(name, fieldType, annotations, false);
+    }
+
+    private LumeField(String name, LumeType fieldType, java.util.List<LumeAnnotation> annotations, boolean hidden) {
         this.name = name;
         this.fieldType = fieldType;
         this.annotations = java.util.List.copyOf(annotations);
+        this.hidden = hidden;
     }
 
     public static LumeField of(String name, LumeType fieldType) {
@@ -23,12 +29,24 @@ public final class LumeField {
         return new LumeField(name, fieldType, java.util.List.of(annotations));
     }
 
+    public static LumeField of(String name, LumeType fieldType, LumeAnnotation[] annotations, boolean hidden) {
+        return new LumeField(name, fieldType, java.util.List.of(annotations), hidden);
+    }
+
     public String name() {
         return name;
     }
 
     public LumeType fieldType() {
         return fieldType;
+    }
+
+    public Boolean hidden() {
+        return hidden;
+    }
+
+    public Boolean isHidden() {
+        return hidden;
     }
 
     public Result<Object, ReflectionError> get(Object receiver) {

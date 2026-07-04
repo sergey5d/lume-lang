@@ -1,0 +1,30 @@
+# SKIP: requires lume-json.jar on the Java generation classpath
+
+module examples/java_compat/json_encode
+
+use lume/json/{Json, JsonIgnore, JsonName}
+
+class User {
+    @JsonName { value: "user_name" }
+    name Str
+
+    age Int
+
+    @JsonIgnore
+    temporaryNote Str = "skip me"
+
+    hidden token Str = "secret"
+}
+
+def main() Unit {
+    user User = User { name: "Ada", age: 42 }
+
+    encoded Str = Json.stringify(user)
+    manual Str = Json.stringify(Json.obj(
+        Json.field("ok", Json.bool(true)),
+        Json.field("items", Json.array(Json.str("a"), Json.int(2)))
+    ))
+
+    println(encoded)
+    println(manual)
+}

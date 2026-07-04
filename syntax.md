@@ -259,6 +259,7 @@ classType ClassType[User] = typeOf[User].asClass().orPanic()
 fields = classType.fields()
 expect Some(nameField) = classType.field("name")
 println(nameField.fieldType().name().orPanic())
+println(nameField.isHidden())
 
 enumType EnumType[Status] = typeOf[Status].asEnum().orPanic()
 expect Some(pendingCase) = enumType.case("Pending")
@@ -287,7 +288,7 @@ Rules:
 - `typeOf[T]` is a built-in type metadata operator, not an index operation
 - `runtimeType` is available as a read-only synthetic field on values
 - `TypeKind` includes `Class`, `Shape`, `Enum`, `Interface`, `Single`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
-- field, method, parameter, and enum-case metadata are runtime values with methods such as `name()`, `fieldType()`, `params()`, and `returnType()`
+- field, method, parameter, and enum-case metadata are runtime values with methods such as `name()`, `fieldType()`, `isHidden()`, `params()`, and `returnType()`
 - annotation lookup is typed and reified: use `metadata.hasAnnotation[Route]()` and `metadata.annotation[Route]()`
 - reflective construction is supported for class and named shape metadata through `construct(args...)`
 - reflective enum case construction is supported through `EnumCase.construct(args...)`
