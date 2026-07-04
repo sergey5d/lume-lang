@@ -955,6 +955,32 @@ Generic bounds:
 def sort[T with Ordering[T]](value T) T = value
 ```
 
+Reified generic functions and methods:
+
+```txt
+def typeName[reified A](value A) Str =
+    typeOf[A].name().orPanic()
+
+def metadata[reified A]() Type[A] =
+    typeOf[A]
+
+name = typeName(User { name: "Ada" }) # A inferred from value
+userType = metadata[User]()           # explicit because no value carries A
+```
+
+`reified A` means the callable receives hidden runtime type evidence for `A`.
+Inside that callable, `typeOf[A]` is valid and returns the caller's concrete
+`Type[A]`.
+
+Rules:
+
+- `reified` is allowed only on function and method type parameters.
+- Generic type parameters are not reified by default.
+- `typeOf[A]` is rejected inside `def f[A]` unless `A` is marked `reified` or the function accepts an explicit `Type[A]` value.
+- If `A` appears in ordinary arguments, the call may infer it: `typeName(user)`.
+- If no argument determines `A`, pass it explicitly: `metadata[User]()`.
+- Type declarations cannot use `reified`: `class Box[reified A]` is invalid.
+
 Function and method parameters may end with one variadic list parameter:
 
 ```txt

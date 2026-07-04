@@ -11,7 +11,7 @@ use crate::{
         ElseBranch, ElseExprBranch, Expr, FieldDecl, ForBinding, FunctionDecl, IfConditionClause,
         IfStmt, ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase, MatchCaseBody, MatchStmt,
         MethodDecl, Param, Pattern, PatternBindingKind, PatternBindingStmt, Program, Stmt,
-        TypeDecl, TypeKind, TypeMember, TypeRef, Visibility,
+        TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
     },
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, ModuleLoadOptions,
@@ -291,10 +291,24 @@ struct ParamSig {
 
 #[derive(Debug, Clone)]
 struct FunctionSig {
+    type_params: Vec<String>,
+    reified_type_params: Vec<String>,
     params: Vec<ParamSig>,
     ret: Ty,
     visibility: Visibility,
     has_body: bool,
+}
+
+#[derive(Debug, Clone)]
+struct CallableSelection {
+    sig: FunctionSig,
+    explicit_type_args: Vec<Ty>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TypeParamScope {
+    names: HashSet<String>,
+    reified: HashSet<String>,
 }
 
 fn universal_member_type(name: &str) -> Option<Ty> {
@@ -310,12 +324,16 @@ fn universal_member_type(name: &str) -> Option<Ty> {
 fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
     let sig = match name {
         "toStr" => FunctionSig {
+            type_params: Vec::new(),
+            reified_type_params: Vec::new(),
             params: Vec::new(),
             ret: Ty::str(),
             visibility: Visibility::Default,
             has_body: true,
         },
         "equals" => FunctionSig {
+            type_params: Vec::new(),
+            reified_type_params: Vec::new(),
             params: vec![ParamSig {
                 name: "other".to_string(),
                 ty: Ty::any(),
@@ -704,7 +722,7 @@ struct Checker<'a> {
     module: &'a ModuleInfo,
     diagnostics: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, ValueInfo>>,
-    type_params: Vec<HashSet<String>>,
+    type_params: Vec<TypeParamScope>,
     current_return: Ty,
     current_owner: Option<TypeSig>,
     current_method: Option<String>,
@@ -818,7 +836,7 @@ impl<'a> Checker<'a> {
     fn check_function(&mut self, function: &FunctionDecl) {
         let previous_return = self.current_return.clone();
         let previous_defer_depth = self.defer_depth;
-        self.push_type_params(function.type_params.iter().map(|param| param.name.as_str()));
+        self.push_ast_type_params(&function.type_params);
         let expected_return = function
             .return_type
             .as_ref()
@@ -863,6 +881,20 @@ impl<'a> Checker<'a> {
         let Some(type_sig) = self.lookup_type_local(&decl.name) else {
             return;
         };
+        for param in &decl.type_params {
+            if param.reified {
+                self.add_error(
+                    "invalid_reified_type_parameter",
+                    format!(
+                        "{} '{}' cannot declare reified type parameter '{}'; use reified on generic functions or methods",
+                        type_kind_label(decl.kind),
+                        decl.name,
+                        param.name
+                    ),
+                    param.span,
+                );
+            }
+        }
         self.push_type_params(type_sig.type_params.iter().map(String::as_str));
 
         for member in &decl.members {
@@ -1172,7 +1204,7 @@ impl<'a> Checker<'a> {
         let previous_owner = self.current_owner.clone();
         let previous_method = self.current_method.clone();
         let previous_defer_depth = self.defer_depth;
-        self.push_type_params(method.type_params.iter().map(|param| param.name.as_str()));
+        self.push_ast_type_params(&method.type_params);
         let expected_return = method
             .return_type
             .as_ref()
@@ -3610,6 +3642,7 @@ impl<'a> Checker<'a> {
             }
             Expr::TypeOf { ty, .. } => {
                 let represented = self.ty_from_type_ref(ty);
+                self.check_typeof_type_ref(ty, &represented);
                 Ty::exact_runtime_type(represented)
             }
             Expr::If {
@@ -4213,10 +4246,10 @@ impl<'a> Checker<'a> {
         ) {
             return ty;
         }
-        if let Some((params, ret)) =
+        if let Some(selection) =
             self.callable_signature_for_args(callee, &normalized_args, uses_brace_syntax)
         {
-            return self.check_signature_call(&params, &ret, &normalized_args, span);
+            return self.check_callable_selection_call(&selection, callee, &normalized_args, span);
         }
         let callee_ty = self.check_expr(callee);
         match callee_ty {
@@ -4741,6 +4774,61 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
     ) -> Ty {
+        self.check_signature_call_with_subst(params, ret, args, span, HashMap::new())
+            .0
+    }
+
+    fn check_callable_selection_call(
+        &mut self,
+        selection: &CallableSelection,
+        callee: &Expr,
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) -> Ty {
+        let subst = self.explicit_type_arg_subst(
+            &selection.sig.type_params,
+            &selection.explicit_type_args,
+            span,
+        );
+        let (ret, subst) = self.check_signature_call_with_subst(
+            &selection.sig.params,
+            &selection.sig.ret,
+            args,
+            span,
+            subst,
+        );
+        let missing = selection
+            .sig
+            .reified_type_params
+            .iter()
+            .filter(|name| {
+                let ty = subst.get(*name).cloned().unwrap_or(Ty::Unknown);
+                matches!(ty, Ty::Unknown | Ty::TypeParam(_))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for name in missing {
+            let callee_name = callable_name_for_diagnostic(callee);
+            self.add_error(
+                "cannot_infer_reified_type",
+                format!(
+                    "cannot infer reified type parameter '{}'; pass an explicit type argument, for example {}[{}](...)",
+                    name, callee_name, name
+                ),
+                span,
+            );
+        }
+        ret
+    }
+
+    fn check_signature_call_with_subst(
+        &mut self,
+        params: &[ParamSig],
+        ret: &Ty,
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+        mut subst: HashMap<String, Ty>,
+    ) -> (Ty, HashMap<String, Ty>) {
         let arrangement = arrange_param_args(params, args);
         let min_required = params
             .iter()
@@ -4771,8 +4859,6 @@ impl<'a> Checker<'a> {
                 span,
             );
         }
-
-        let mut subst = HashMap::new();
         let mut checked_args = Vec::new();
         for (index, param) in params.iter().enumerate() {
             let slot = arrangement
@@ -4815,7 +4901,34 @@ impl<'a> Checker<'a> {
         }
 
         let ret = materialize_type(&substitute_type(ret, &subst));
-        self.capture_wildcards(ret)
+        (self.capture_wildcards(ret), subst)
+    }
+
+    fn explicit_type_arg_subst(
+        &mut self,
+        type_params: &[String],
+        explicit_type_args: &[Ty],
+        span: crate::source::Span,
+    ) -> HashMap<String, Ty> {
+        let mut subst = HashMap::new();
+        if explicit_type_args.is_empty() {
+            return subst;
+        }
+        if explicit_type_args.len() != type_params.len() {
+            self.add_error(
+                "invalid_type_argument_count",
+                format!(
+                    "call expects {} type arguments, got {}",
+                    type_params.len(),
+                    explicit_type_args.len()
+                ),
+                span,
+            );
+        }
+        for (name, ty) in type_params.iter().zip(explicit_type_args.iter()) {
+            subst.insert(name.clone(), ty.clone());
+        }
+        subst
     }
 
     fn try_check_constructor_call(
@@ -5451,7 +5564,8 @@ impl<'a> Checker<'a> {
         callee: &Expr,
         args: &[crate::ast::CallArg],
         _uses_brace_syntax: bool,
-    ) -> Option<(Vec<ParamSig>, Ty)> {
+    ) -> Option<CallableSelection> {
+        let (callee, explicit_type_args) = self.split_generic_call_callee(callee);
         match callee {
             Expr::Identifier { name, .. } => {
                 if let Some(functions) = self.lookup_functions(name) {
@@ -5459,14 +5573,20 @@ impl<'a> Checker<'a> {
                         .choose_overload(&functions, args)
                         .or_else(|| functions.first())?
                         .clone();
-                    return Some((sig.params, sig.ret));
+                    return Some(CallableSelection {
+                        sig,
+                        explicit_type_args,
+                    });
                 }
                 if let Some(methods) = self.lookup_implicit_method_functions(name) {
                     let sig = self
                         .choose_overload(&methods, args)
                         .or_else(|| methods.first())?
                         .clone();
-                    return Some((sig.params, sig.ret));
+                    return Some(CallableSelection {
+                        sig,
+                        explicit_type_args,
+                    });
                 }
                 None
             }
@@ -5483,7 +5603,10 @@ impl<'a> Checker<'a> {
                             .choose_overload(functions, args)
                             .or_else(|| functions.first())?
                             .clone();
-                        return Some((sig.params, sig.ret));
+                        return Some(CallableSelection {
+                            sig,
+                            explicit_type_args,
+                        });
                     }
                 }
                 if let Some(sigs) = self.static_method_sigs(receiver, name) {
@@ -5491,7 +5614,10 @@ impl<'a> Checker<'a> {
                         .choose_overload(&sigs, args)
                         .or_else(|| sigs.first())?
                         .clone();
-                    return Some((sig.params, sig.ret));
+                    return Some(CallableSelection {
+                        sig,
+                        explicit_type_args,
+                    });
                 }
                 let receiver_ty = self.check_expr(receiver);
                 let methods = self.member_method_sigs(&receiver_ty, name)?;
@@ -5499,7 +5625,10 @@ impl<'a> Checker<'a> {
                     .choose_overload(&methods, args)
                     .or_else(|| methods.first())?
                     .clone();
-                Some((method.params, method.ret))
+                Some(CallableSelection {
+                    sig: method,
+                    explicit_type_args,
+                })
             }
             _ => None,
         }
@@ -5511,6 +5640,7 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         _uses_brace_syntax: bool,
     ) -> Option<(Vec<ParamSig>, Ty)> {
+        let (callee, explicit_type_args) = self.split_generic_call_callee(callee);
         match callee {
             Expr::Identifier { name, .. } => {
                 if let Some(functions) = self.lookup_functions(name) {
@@ -5518,14 +5648,14 @@ impl<'a> Checker<'a> {
                         .choose_overload(&functions, args)
                         .or_else(|| functions.first())?
                         .clone();
-                    return Some((sig.params, sig.ret));
+                    return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
                 }
                 let methods = self.lookup_implicit_method_functions(name)?;
                 let sig = self
                     .choose_overload(&methods, args)
                     .or_else(|| methods.first())?
                     .clone();
-                Some((sig.params, sig.ret))
+                Some(function_sig_parts_for_probe(sig, &explicit_type_args))
             }
             Expr::Member { receiver, name, .. } => {
                 if let Some((module, member)) =
@@ -5540,7 +5670,7 @@ impl<'a> Checker<'a> {
                             .choose_overload(functions, args)
                             .or_else(|| functions.first())?
                             .clone();
-                        return Some((sig.params, sig.ret));
+                        return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
                     }
                 }
                 if let Some(sigs) = self.static_method_sigs(receiver, name) {
@@ -5548,7 +5678,7 @@ impl<'a> Checker<'a> {
                         .choose_overload(&sigs, args)
                         .or_else(|| sigs.first())?
                         .clone();
-                    return Some((sig.params, sig.ret));
+                    return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
                 }
                 let receiver_ty = self.probe_expr_type(receiver);
                 let methods = self.member_method_sigs(&receiver_ty, name)?;
@@ -5556,10 +5686,29 @@ impl<'a> Checker<'a> {
                     .choose_overload(&methods, args)
                     .or_else(|| methods.first())?
                     .clone();
-                Some((method.params, method.ret))
+                Some(function_sig_parts_for_probe(method, &explicit_type_args))
             }
             _ => None,
         }
+    }
+
+    fn split_generic_call_callee<'expr>(&self, callee: &'expr Expr) -> (&'expr Expr, Vec<Ty>) {
+        let Expr::Index {
+            receiver, index, ..
+        } = callee
+        else {
+            return (callee, Vec::new());
+        };
+        let Some(type_args) = type_arg_refs_from_expr(index) else {
+            return (callee, Vec::new());
+        };
+        (
+            receiver.as_ref(),
+            type_args
+                .iter()
+                .map(|arg| self.ty_from_type_ref(arg))
+                .collect(),
+        )
     }
 
     fn normalize_trailing_brace_call_args(
@@ -6230,6 +6379,8 @@ impl<'a> Checker<'a> {
                     methods
                         .into_iter()
                         .map(|method| FunctionSig {
+                            type_params: method.type_params,
+                            reified_type_params: method.reified_type_params,
                             params: method
                                 .params
                                 .into_iter()
@@ -6505,6 +6656,30 @@ impl<'a> Checker<'a> {
         }
 
         Ty::unit()
+    }
+
+    fn check_typeof_type_ref(&mut self, ty_ref: &TypeRef, represented: &Ty) {
+        match represented {
+            Ty::TypeParam(name) if self.is_reified_type_param(name) => {}
+            Ty::TypeParam(name) => {
+                self.add_error(
+                    "generic_type_not_reified",
+                    format!(
+                        "generic type '{}' is not available at runtime; pass a Type[{}] parameter or mark '{}' as reified",
+                        name, name, name
+                    ),
+                    ty_ref.span(),
+                );
+            }
+            other if type_contains_type_param(other) => {
+                self.add_error(
+                    "generic_type_not_reified",
+                    "typeOf currently supports reified type parameters only as direct type arguments, for example typeOf[A]",
+                    ty_ref.span(),
+                );
+            }
+            _ => {}
+        }
     }
 
     fn choose_overload<'b>(
@@ -7097,8 +7272,24 @@ impl<'a> Checker<'a> {
     }
 
     fn push_type_params<'b>(&mut self, params: impl Iterator<Item = &'b str>) {
-        self.type_params
-            .push(params.map(|name| name.to_string()).collect::<HashSet<_>>());
+        self.type_params.push(TypeParamScope {
+            names: params.map(|name| name.to_string()).collect::<HashSet<_>>(),
+            reified: HashSet::new(),
+        });
+    }
+
+    fn push_ast_type_params(&mut self, params: &[TypeParam]) {
+        self.type_params.push(TypeParamScope {
+            names: params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<HashSet<_>>(),
+            reified: params
+                .iter()
+                .filter(|param| param.reified)
+                .map(|param| param.name.clone())
+                .collect::<HashSet<_>>(),
+        });
     }
 
     fn pop_type_params(&mut self) {
@@ -7109,7 +7300,14 @@ impl<'a> Checker<'a> {
         self.type_params
             .iter()
             .rev()
-            .any(|scope| scope.contains(name))
+            .any(|scope| scope.names.contains(name))
+    }
+
+    fn is_reified_type_param(&self, name: &str) -> bool {
+        self.type_params
+            .iter()
+            .rev()
+            .any(|scope| scope.reified.contains(name))
     }
 
     fn require_assignable(
@@ -7400,6 +7598,17 @@ fn function_sig_from_function(
         .chain(owner_type_params.iter().cloned())
         .collect::<HashSet<_>>();
     FunctionSig {
+        type_params: function
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect(),
+        reified_type_params: function
+            .type_params
+            .iter()
+            .filter(|param| param.reified)
+            .map(|param| param.name.clone())
+            .collect(),
         params: function
             .params
             .iter()
@@ -7432,6 +7641,17 @@ fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -
         .chain(owner_type_params.iter().cloned())
         .collect::<HashSet<_>>();
     FunctionSig {
+        type_params: method
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect(),
+        reified_type_params: method
+            .type_params
+            .iter()
+            .filter(|param| param.reified)
+            .map(|param| param.name.clone())
+            .collect(),
         params: method
             .params
             .iter()
@@ -8082,6 +8302,72 @@ fn materialize_type(ty: &Ty) -> Ty {
             Box::new(materialize_type(ret)),
         ),
         Ty::Unknown => Ty::Unknown,
+    }
+}
+
+fn function_sig_parts_for_probe(
+    sig: FunctionSig,
+    explicit_type_args: &[Ty],
+) -> (Vec<ParamSig>, Ty) {
+    let mut subst = HashMap::new();
+    if explicit_type_args.len() == sig.type_params.len() {
+        for (name, ty) in sig.type_params.iter().zip(explicit_type_args.iter()) {
+            subst.insert(name.clone(), ty.clone());
+        }
+    }
+    let params = sig
+        .params
+        .into_iter()
+        .map(|mut param| {
+            param.ty = substitute_type(&param.ty, &subst);
+            param
+        })
+        .collect();
+    let ret = substitute_type(&sig.ret, &subst);
+    (params, ret)
+}
+
+fn type_arg_refs_from_expr(expr: &Expr) -> Option<Vec<TypeRef>> {
+    match expr {
+        Expr::TupleLiteral { items, .. } => items.iter().map(type_ref_from_expr).collect(),
+        Expr::Group { inner, .. } => type_arg_refs_from_expr(inner),
+        _ => Some(vec![type_ref_from_expr(expr)?]),
+    }
+}
+
+fn type_ref_from_expr(expr: &Expr) -> Option<TypeRef> {
+    match expr {
+        Expr::Identifier { name, span } => Some(TypeRef::Named {
+            name: name.clone(),
+            args: Vec::new(),
+            span: *span,
+        }),
+        Expr::Index {
+            receiver,
+            index,
+            span,
+        } => {
+            let TypeRef::Named { name, .. } = type_ref_from_expr(receiver)? else {
+                return None;
+            };
+            Some(TypeRef::Named {
+                name,
+                args: type_arg_refs_from_expr(index)?,
+                span: *span,
+            })
+        }
+        Expr::Group { inner, .. } => type_ref_from_expr(inner),
+        _ => None,
+    }
+}
+
+fn callable_name_for_diagnostic(expr: &Expr) -> String {
+    match expr {
+        Expr::Identifier { name, .. } => name.clone(),
+        Expr::Member { name, .. } => name.clone(),
+        Expr::Index { receiver, .. } => callable_name_for_diagnostic(receiver),
+        Expr::Group { inner, .. } => callable_name_for_diagnostic(inner),
+        _ => "callee".to_string(),
     }
 }
 

@@ -354,14 +354,25 @@ impl<'a> Lowerer<'a> {
         this_local: Option<(String, ir::Type)>,
         span: Span,
     ) -> ir::FunctionId {
+        let type_param_names = type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<Vec<_>>();
         let mut function = ir::Function::new(
             name.to_string(),
             kind,
-            return_type.map(lower_type_ref).unwrap_or(ir::Type::Unknown),
+            return_type
+                .map(|ty| lower_type_ref_with_type_params(ty, &type_param_names))
+                .unwrap_or(ir::Type::Unknown),
         );
         function.annotations = lower_annotations(annotations);
         function.visibility = visibility;
-        function.type_params = type_params.iter().map(|param| param.name.clone()).collect();
+        function.type_params = type_param_names.clone();
+        function.reified_type_params = type_params
+            .iter()
+            .filter(|param| param.reified)
+            .map(|param| param.name.clone())
+            .collect();
         function.span = Some(span);
         if let Some((this_name, this_ty)) = this_local {
             function.add_local(this_name, this_ty, false, ir::LocalKind::Capture);
@@ -370,7 +381,7 @@ impl<'a> Lowerer<'a> {
             let runtime_ty = param
                 .ty
                 .as_ref()
-                .map(lower_type_ref)
+                .map(|ty| lower_type_ref_with_type_params(ty, &type_param_names))
                 .unwrap_or(ir::Type::Unknown);
             function.add_param(param.name.clone(), runtime_ty);
             function.set_param_default(
@@ -381,6 +392,12 @@ impl<'a> Lowerer<'a> {
                     .and_then(|initializer| lower_field_initializer_constant(Some(initializer))),
             );
             function.set_param_variadic(index, param.variadic);
+        }
+        for name in function.reified_type_params.clone() {
+            function.add_param(
+                reified_type_param_local_name(&name),
+                ir_exact_runtime_type(ir::Type::TypeParam(name)),
+            );
         }
         self.program.add_function(function)
     }
@@ -452,6 +469,7 @@ impl<'a> Lowerer<'a> {
                     }
                 }
             }
+            lowerer.bind_reified_type_params();
             lowerer.lower_callable_body(&job.decl.body, job.decl.span);
         }
     }
@@ -478,6 +496,7 @@ impl<'a> Lowerer<'a> {
                     }
                 }
             }
+            lowerer.bind_reified_type_params();
             if let Some(body) = &job.decl.body {
                 lowerer.lower_callable_body(body, job.decl.span);
             } else if let Some(block) = lowerer.current_block_mut() {
@@ -735,6 +754,22 @@ impl<'a> FunctionLowerer<'a> {
         self.current_scope().insert(name.to_string(), local);
         if name == "this" {
             self.this_local = Some(local);
+        }
+    }
+
+    fn bind_reified_type_params(&mut self) {
+        let names = self.function().reified_type_params.clone();
+        for name in names {
+            let local_name = reified_type_param_local_name(&name);
+            let Some(local_id) = self.function().params.iter().copied().find(|param| {
+                self.function()
+                    .locals
+                    .get(param.0)
+                    .is_some_and(|local| local.name == local_name)
+            }) else {
+                continue;
+            };
+            self.bind_existing(&local_name, local_id);
         }
     }
 
@@ -3784,14 +3819,44 @@ impl<'a> FunctionLowerer<'a> {
                 style,
                 ..
             } => {
-                let normalized_args = self.normalize_trailing_brace_call_args(callee, args, *style);
+                let (candidate_callee, candidate_type_args) =
+                    self.split_generic_call_callee(callee);
+                let candidate_normalized_args =
+                    self.normalize_trailing_brace_call_args(candidate_callee, args, *style);
+                let use_generic_callee = !candidate_type_args.is_empty()
+                    && self
+                        .reified_call_target(candidate_callee, &candidate_normalized_args)
+                        .is_some();
+                let (call_callee, explicit_type_args, normalized_args) = if use_generic_callee {
+                    (
+                        candidate_callee,
+                        candidate_type_args,
+                        candidate_normalized_args,
+                    )
+                } else {
+                    (
+                        callee.as_ref(),
+                        Vec::new(),
+                        self.normalize_trailing_brace_call_args(callee, args, *style),
+                    )
+                };
+                let ordered_args = self
+                    .reorder_call_args(call_callee, &normalized_args)
+                    .into_iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let mut lowered_args = ordered_args
+                    .iter()
+                    .map(|arg| self.lower_expr(&arg.value))
+                    .collect::<Vec<_>>();
+                lowered_args.extend(self.reified_call_evidence_args(
+                    call_callee,
+                    &ordered_args,
+                    &explicit_type_args,
+                ));
                 Some(ir::RValue::Call {
-                    callee: self.lower_callee(callee),
-                    args: self
-                        .reorder_call_args(callee, &normalized_args)
-                        .into_iter()
-                        .map(|arg| self.lower_expr(&arg.value))
-                        .collect(),
+                    callee: self.lower_callee(call_callee),
+                    args: lowered_args,
                     structural: call_uses_structural_record_arg(&normalized_args, *style),
                 })
             }
@@ -3809,9 +3874,15 @@ impl<'a> FunctionLowerer<'a> {
                 operand: self.lower_expr(left),
                 ty: lower_type_ref(target),
             }),
-            Expr::TypeOf { ty, .. } => Some(ir::RValue::TypeOf {
-                ty: lower_type_ref(ty),
-            }),
+            Expr::TypeOf { ty, .. } => {
+                if let Some(operand) = self.reified_type_param_operand(ty) {
+                    Some(ir::RValue::Use(operand))
+                } else {
+                    Some(ir::RValue::TypeOf {
+                        ty: lower_type_ref(ty),
+                    })
+                }
+            }
             Expr::Lambda { params, body, span } => {
                 Some(self.lower_lambda_rvalue(params, body, *span))
             }
@@ -4185,6 +4256,156 @@ impl<'a> FunctionLowerer<'a> {
             .map(|place| ir::Operand::Copy(Box::new(place)))
     }
 
+    fn reified_type_param_operand(&mut self, ty: &TypeRef) -> Option<ir::Operand> {
+        let TypeRef::Named { name, args, .. } = ty else {
+            return None;
+        };
+        if !args.is_empty()
+            || !self
+                .function()
+                .reified_type_params
+                .iter()
+                .any(|param| param == name)
+        {
+            return None;
+        }
+        self.lookup_value(&reified_type_param_local_name(name))
+    }
+
+    fn split_generic_call_callee<'expr>(
+        &self,
+        callee: &'expr Expr,
+    ) -> (&'expr Expr, Vec<ir::Type>) {
+        let Expr::Index {
+            receiver, index, ..
+        } = callee
+        else {
+            return (callee, Vec::new());
+        };
+        let Some(type_args) = generic_call_type_arg_refs_from_expr(index) else {
+            return (callee, Vec::new());
+        };
+        (
+            receiver.as_ref(),
+            type_args.iter().map(lower_type_ref).collect(),
+        )
+    }
+
+    fn reified_call_evidence_args(
+        &mut self,
+        callee: &Expr,
+        args: &[core::CallArg],
+        explicit_type_args: &[ir::Type],
+    ) -> Vec<ir::Operand> {
+        let Some((function_id, mut subst)) = self.reified_call_target(callee, args) else {
+            return Vec::new();
+        };
+        let Some(function) = self.program.function(function_id).cloned() else {
+            return Vec::new();
+        };
+        if function.reified_type_params.is_empty() {
+            return Vec::new();
+        }
+        if explicit_type_args.len() == function.type_params.len() {
+            for (name, ty) in function.type_params.iter().zip(explicit_type_args.iter()) {
+                subst.insert(name.clone(), ty.clone());
+            }
+        }
+        for (arg, param_index) in args.iter().zip(source_param_indices(&function)) {
+            let Some(param) = function.params.get(param_index) else {
+                continue;
+            };
+            let Some(local) = function.locals.get(param.0) else {
+                continue;
+            };
+            let expected = substitute_ir_type(&local.ty, &subst);
+            let actual = self.infer_expr_type(&arg.value);
+            infer_ir_type_subst(&expected, &actual, &mut subst);
+        }
+        function
+            .reified_type_params
+            .iter()
+            .map(|name| {
+                let ty = subst.get(name).cloned().unwrap_or(ir::Type::Unknown);
+                self.runtime_type_operand(ty)
+            })
+            .collect()
+    }
+
+    fn reified_call_target(
+        &self,
+        callee: &Expr,
+        args: &[core::CallArg],
+    ) -> Option<(ir::FunctionId, HashMap<String, ir::Type>)> {
+        match callee {
+            Expr::Identifier { name, .. } => self
+                .functions
+                .get(name)
+                .copied()
+                .or_else(|| self.current_owner_method(name, args))
+                .map(|id| (id, HashMap::new())),
+            Expr::Member { receiver, name, .. } => {
+                let receiver_ty = self.infer_expr_type(receiver);
+                let ir::Type::Named {
+                    name: type_name,
+                    args: type_args,
+                } = receiver_ty
+                else {
+                    return None;
+                };
+                let ty = self.program.types.iter().find(|ty| ty.name == type_name)?;
+                let subst = ir_type_subst(ty, &type_args);
+                self.best_method_function(ty, name, args)
+                    .map(|id| (id, subst))
+            }
+            _ => None,
+        }
+    }
+
+    fn current_owner_method(&self, name: &str, args: &[core::CallArg]) -> Option<ir::FunctionId> {
+        let ir::FunctionKind::Method { owner } = self.function().kind else {
+            return None;
+        };
+        let ty = self.program.types.get(owner.0)?;
+        self.best_method_function(ty, name, args)
+    }
+
+    fn best_method_function(
+        &self,
+        ty: &ir::TypeDef,
+        name: &str,
+        args: &[core::CallArg],
+    ) -> Option<ir::FunctionId> {
+        let mut best: Option<(usize, ir::FunctionId)> = None;
+        for method_id in &ty.methods {
+            let Some(function) = self.program.function(*method_id) else {
+                continue;
+            };
+            if function.name != name {
+                continue;
+            }
+            let Some(score) = method_call_arity_score(function, args) else {
+                continue;
+            };
+            if best
+                .as_ref()
+                .map(|(best_score, _)| score > *best_score)
+                .unwrap_or(true)
+            {
+                best = Some((score, *method_id));
+            }
+        }
+        best.map(|(_, id)| id)
+    }
+
+    fn runtime_type_operand(&mut self, ty: ir::Type) -> ir::Operand {
+        self.emit_temp_from_rvalue(
+            ir::RValue::TypeOf { ty: ty.clone() },
+            ir_exact_runtime_type(ty),
+            None,
+        )
+    }
+
     fn lookup_place(&mut self, name: &str) -> Option<ir::Place> {
         self.lookup_scoped_or_captured_place(name)
             .or_else(|| self.lookup_global_place(name))
@@ -4390,6 +4611,47 @@ fn lower_type_ref(reference: &TypeRef) -> ir::Type {
         TypeRef::Function { params, ret, .. } => ir::Type::Function {
             params: params.iter().map(lower_type_ref).collect(),
             ret: Box::new(lower_type_ref(ret)),
+        },
+    }
+}
+
+fn lower_type_ref_with_type_params(reference: &TypeRef, type_params: &[String]) -> ir::Type {
+    match reference {
+        TypeRef::Named { name, args, .. }
+            if args.is_empty() && type_params.iter().any(|param| param == name) =>
+        {
+            ir::Type::TypeParam(name.clone())
+        }
+        TypeRef::Named { name, args, .. } if name == "Never" && args.is_empty() => ir::Type::Never,
+        TypeRef::Named { name, args, .. } => ir::Type::Named {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| lower_type_ref_with_type_params(arg, type_params))
+                .collect(),
+        },
+        TypeRef::Wildcard { .. } => ir::Type::Unknown,
+        TypeRef::Tuple { fields, .. } => ir::Type::Tuple(
+            fields
+                .iter()
+                .map(|field| lower_type_ref_with_type_params(&field.ty, type_params))
+                .collect(),
+        ),
+        TypeRef::Record { fields, .. } => ir::Type::Record(
+            fields
+                .iter()
+                .map(|field| ir::NamedType {
+                    name: field.name.clone(),
+                    ty: lower_type_ref_with_type_params(&field.ty, type_params),
+                })
+                .collect(),
+        ),
+        TypeRef::Function { params, ret, .. } => ir::Type::Function {
+            params: params
+                .iter()
+                .map(|param| lower_type_ref_with_type_params(param, type_params))
+                .collect(),
+            ret: Box::new(lower_type_ref_with_type_params(ret, type_params)),
         },
     }
 }
@@ -4972,18 +5234,21 @@ fn function_type_returns_unknown(ty: &ir::Type) -> bool {
 }
 
 fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> Option<usize> {
-    let param_count = function.params.len();
+    let param_indices = source_param_indices(function);
+    let param_count = param_indices.len();
     let mut slots = vec![0usize; param_count];
     let mut positional_index = 0usize;
     let mut used_variadic_positionally = false;
 
     for arg in args {
         if let Some(name) = &arg.name {
-            let index = function.params.iter().position(|param| {
-                function
-                    .locals
-                    .get(param.0)
-                    .is_some_and(|local| local.name == *name)
+            let index = param_indices.iter().position(|param_index| {
+                function.params.get(*param_index).is_some_and(|param| {
+                    function
+                        .locals
+                        .get(param.0)
+                        .is_some_and(|local| local.name == *name)
+                })
             })?;
             if slots[index] > 0 {
                 return None;
@@ -4993,9 +5258,9 @@ fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> O
         }
 
         while positional_index < param_count
-            && !function
-                .param_variadic
+            && !param_indices
                 .get(positional_index)
+                .and_then(|index| function.param_variadic.get(*index))
                 .copied()
                 .unwrap_or(false)
             && slots[positional_index] > 0
@@ -5003,9 +5268,12 @@ fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> O
             positional_index += 1;
         }
 
-        if function.param_variadic.last().copied().unwrap_or(false)
-            && positional_index >= param_count.saturating_sub(1)
-        {
+        let last_is_variadic = param_indices
+            .last()
+            .and_then(|index| function.param_variadic.get(*index))
+            .copied()
+            .unwrap_or(false);
+        if last_is_variadic && positional_index >= param_count.saturating_sub(1) {
             let slot = slots.last_mut()?;
             *slot += 1;
             used_variadic_positionally = true;
@@ -5014,9 +5282,9 @@ fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> O
                 return None;
             }
             slots[positional_index] = 1;
-            if !function
-                .param_variadic
+            if !param_indices
                 .get(positional_index)
+                .and_then(|index| function.param_variadic.get(*index))
                 .copied()
                 .unwrap_or(false)
             {
@@ -5028,7 +5296,8 @@ fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> O
     }
 
     let mut omitted_defaults = 0usize;
-    for (index, slot_count) in slots.iter().enumerate() {
+    for (source_index, slot_count) in slots.iter().enumerate() {
+        let index = param_indices[source_index];
         let variadic = function.param_variadic.get(index).copied().unwrap_or(false);
         let has_default = function
             .param_defaults
@@ -5047,7 +5316,13 @@ fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> O
         }
     }
 
-    let has_variadic = function.param_variadic.iter().any(|variadic| *variadic);
+    let has_variadic = param_indices.iter().any(|index| {
+        function
+            .param_variadic
+            .get(*index)
+            .copied()
+            .unwrap_or(false)
+    });
     if !has_variadic && args.len() == param_count {
         return Some(400 + args.len());
     }
@@ -5107,6 +5382,117 @@ fn substitute_ir_type(ty: &ir::Type, subst: &HashMap<String, ir::Type>) -> ir::T
         | ir::Type::Int
         | ir::Type::Float
         | ir::Type::Str => ty.clone(),
+    }
+}
+
+fn infer_ir_type_subst(
+    expected: &ir::Type,
+    actual: &ir::Type,
+    subst: &mut HashMap<String, ir::Type>,
+) {
+    match expected {
+        ir::Type::TypeParam(name) => {
+            subst
+                .entry(name.clone())
+                .and_modify(|existing| *existing = join_ir_types(existing.clone(), actual.clone()))
+                .or_insert_with(|| actual.clone());
+        }
+        ir::Type::Named {
+            name: expected_name,
+            args: expected_args,
+        } => {
+            if let ir::Type::Named {
+                name: actual_name,
+                args: actual_args,
+            } = actual
+            {
+                if expected_name == actual_name && expected_args.len() == actual_args.len() {
+                    for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
+                        infer_ir_type_subst(expected_arg, actual_arg, subst);
+                    }
+                }
+            }
+        }
+        ir::Type::Tuple(expected_items) => {
+            if let ir::Type::Tuple(actual_items) = actual {
+                for (expected_item, actual_item) in expected_items.iter().zip(actual_items.iter()) {
+                    infer_ir_type_subst(expected_item, actual_item, subst);
+                }
+            }
+        }
+        ir::Type::Record(expected_fields) => {
+            if let ir::Type::Record(actual_fields) = actual {
+                for expected_field in expected_fields {
+                    if let Some(actual_field) = actual_fields
+                        .iter()
+                        .find(|actual_field| actual_field.name == expected_field.name)
+                    {
+                        infer_ir_type_subst(&expected_field.ty, &actual_field.ty, subst);
+                    }
+                }
+            }
+        }
+        ir::Type::Function {
+            params: expected_params,
+            ret: expected_ret,
+        } => {
+            if let ir::Type::Function {
+                params: actual_params,
+                ret: actual_ret,
+            } = actual
+            {
+                if expected_params.len() == actual_params.len() {
+                    for (expected_param, actual_param) in
+                        expected_params.iter().zip(actual_params.iter())
+                    {
+                        infer_ir_type_subst(expected_param, actual_param, subst);
+                    }
+                }
+                infer_ir_type_subst(expected_ret, actual_ret, subst);
+            }
+        }
+        ir::Type::Unknown
+        | ir::Type::Never
+        | ir::Type::Unit
+        | ir::Type::Bool
+        | ir::Type::Int
+        | ir::Type::Float
+        | ir::Type::Str => {}
+    }
+}
+
+fn generic_call_type_arg_refs_from_expr(expr: &Expr) -> Option<Vec<TypeRef>> {
+    match expr {
+        Expr::TupleLiteral { items, .. } => items
+            .iter()
+            .map(generic_call_type_ref_from_expr)
+            .collect::<Option<Vec<_>>>(),
+        _ => Some(vec![generic_call_type_ref_from_expr(expr)?]),
+    }
+}
+
+fn generic_call_type_ref_from_expr(expr: &Expr) -> Option<TypeRef> {
+    match expr {
+        Expr::Identifier { name, span } => Some(TypeRef::Named {
+            name: name.clone(),
+            args: Vec::new(),
+            span: *span,
+        }),
+        Expr::Index {
+            receiver,
+            index,
+            span,
+        } => {
+            let TypeRef::Named { name, .. } = generic_call_type_ref_from_expr(receiver)? else {
+                return None;
+            };
+            Some(TypeRef::Named {
+                name,
+                args: generic_call_type_arg_refs_from_expr(index)?,
+                span: *span,
+            })
+        }
+        _ => None,
     }
 }
 
@@ -5466,7 +5852,31 @@ fn param_names_from_function(function: &ir::Function) -> Vec<String> {
         .params
         .iter()
         .filter_map(|param| function.locals.get(param.0))
+        .filter(|local| !is_reified_type_param_local(&local.name))
         .map(|local| local.name.clone())
+        .collect()
+}
+
+fn reified_type_param_local_name(name: &str) -> String {
+    format!("__type_{name}")
+}
+
+fn is_reified_type_param_local(name: &str) -> bool {
+    name.starts_with("__type_")
+}
+
+fn source_param_indices(function: &ir::Function) -> Vec<usize> {
+    function
+        .params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, param)| {
+            function
+                .locals
+                .get(param.0)
+                .is_some_and(|local| !is_reified_type_param_local(&local.name))
+                .then_some(index)
+        })
         .collect()
 }
 

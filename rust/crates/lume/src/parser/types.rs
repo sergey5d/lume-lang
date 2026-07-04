@@ -9,6 +9,8 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         if !self.at(TokenKind::RBracket) {
             loop {
+                let reified = self.match_keyword(Keyword::Reified);
+                let reified_span = reified.then(|| self.previous_span());
                 let (name, start) = self.expect_identifier("expected type parameter name")?;
                 let bounds = if self.match_keyword(Keyword::With) {
                     self.parse_type_ref_list()?
@@ -18,8 +20,9 @@ impl<'a> Parser<'a> {
                 let end = bounds.last().map(TypeRef::span).unwrap_or(start);
                 params.push(TypeParam {
                     name,
+                    reified,
                     bounds,
-                    span: start.cover(end),
+                    span: reified_span.unwrap_or(start).cover(end),
                 });
                 self.skip_newlines();
                 if !self.match_token(TokenKind::Comma) {

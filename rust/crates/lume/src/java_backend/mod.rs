@@ -272,6 +272,7 @@ fn java_library_type_decl(
             .iter()
             .map(|name| TypeParam {
                 name: name.clone(),
+                reified: false,
                 bounds: Vec::new(),
                 span,
             })
@@ -462,6 +463,7 @@ fn java_library_method(
             .iter()
             .map(|name| TypeParam {
                 name: name.clone(),
+                reified: false,
                 bounds: Vec::new(),
                 span,
             })

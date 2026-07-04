@@ -169,6 +169,7 @@ pub struct FieldDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeParam {
     pub name: String,
+    pub reified: bool,
     pub bounds: Vec<TypeRef>,
     pub span: Span,
 }

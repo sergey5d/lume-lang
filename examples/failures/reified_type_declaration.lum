@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*class 'Box' cannot declare reified type parameter 'A'; use reified on generic functions or methods.*
+
+class Box[reified A] {
+    value A
+}

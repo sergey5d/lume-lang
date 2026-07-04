@@ -585,6 +585,9 @@ fn invoker_erased_value_type(ty: &ir::Type, names: &JavaNames, type_params: &[St
             [_, _] => "java.util.function.BiFunction".to_string(),
             _ => "Object".to_string(),
         },
+        ir::Type::Named { name, .. } if is_reflection_type(name) => {
+            "lume.core.LumeType".to_string()
+        }
         ir::Type::Named { name, args } if is_builtin_container(name) && !args.is_empty() => {
             invoker_erased_container_type(name, names)
         }

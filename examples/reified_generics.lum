@@ -1,0 +1,33 @@
+# EXPECT:
+# User
+# User
+# User
+# 0
+
+class User {
+    name Str
+}
+
+def typeName[reified A](value A) Str =
+    typeOf[A].name().orPanic()
+
+class Inspector {
+}
+
+impl Inspector {
+    def valueTypeName[reified A](value A) Str =
+        typeOf[A].name().orPanic()
+
+    def namedTypeName[reified A]() Str =
+        typeOf[A].name().orPanic()
+}
+
+def main() Int {
+    user User = User { name: "Ada" }
+    inspector Inspector = Inspector {}
+
+    println(typeName(user))
+    println(inspector.valueTypeName(user))
+    println(inspector.namedTypeName[User]())
+    0
+}
