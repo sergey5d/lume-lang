@@ -2952,6 +2952,59 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_compiles_generic_list_appends() {
+        if !command_available("javac") {
+            eprintln!("skipping Java generic list append test because javac is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-generic-list-append");
+        let source = temp.join("generic_list_append.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/genericappend
+
+def mapItems[T](items [T], mapper (T) -> T) [T] {
+    out [T] = []
+
+    for item <- items {
+        out.add(mapper(item))
+    }
+
+    out
+}
+
+def main() Unit {
+}
+"#,
+        )
+        .expect("write source");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(generated.diagnostics.is_empty());
+
+        let module = fs::read_to_string(out.join("demo/genericappend/GenericappendModule.java"))
+            .expect("read module");
+        assert!(module.contains("out_"));
+        assert!(module.contains(".add(((T)"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_matches_interpreter_for_supported_program() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java parity test because javac/java is not available");

@@ -2535,6 +2535,7 @@ impl<'a> FunctionEmitter<'a> {
             return false;
         };
         args.is_empty()
+            && !self.function.type_params.iter().any(|param| param == name)
             && java_named_builtin_value(name).is_none()
             && !is_builtin_container(name)
             && !self.names.is_java_type(name)
