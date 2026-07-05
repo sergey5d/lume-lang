@@ -2239,7 +2239,7 @@ impl<'a> FunctionEmitter<'a> {
             ir::RValue::RecordSpread(_) => self.unsupported("anonymous shape spread"),
             ir::RValue::Lift { .. } => self.unsupported("lift expression"),
             ir::RValue::RecordUpdate { .. } => self.unsupported("shape update"),
-            ir::RValue::Index { .. } => self.unsupported("index expression"),
+            ir::RValue::Index { base, index } => self.emit_index(base, index),
             ir::RValue::TypeTest { .. } => self.unsupported("type test"),
             ir::RValue::Closure { function, captures } => self.emit_closure(*function, captures),
         }
@@ -2279,6 +2279,26 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 _ => None,
             })
+    }
+
+    fn emit_index(&self, base: &ir::Operand, index: &ir::Operand) -> Option<String> {
+        let base_ty = self.operand_type(base)?;
+        let base_expr = self.emit_operand(base)?;
+        let index_expr = self.emit_operand(index)?;
+
+        match base_ty {
+            ir::Type::Named { ref name, ref args }
+                if (name == "List" || name == "Array") && args.len() == 1 =>
+            {
+                let indexed =
+                    format!("lume.core.LumeRuntime.indexValue({base_expr}, {index_expr})");
+                Some(self.coerce_to_target_type(indexed, Some(ir::Type::Unknown), &args[0]))
+            }
+            ir::Type::Named { ref name, ref args } if name == "Map" && args.len() == 2 => {
+                Some(format!("{base_expr}.get({index_expr})"))
+            }
+            _ => self.unsupported("index expression"),
+        }
     }
 
     fn emit_binary(
@@ -2372,6 +2392,7 @@ impl<'a> FunctionEmitter<'a> {
                     let extracted =
                         format!("lume.core.LumeRuntime.extractSuccessValue({receiver_expr})");
                     Some(match self.success_value_type(receiver) {
+                        Some(target_ty) if is_java_void_type(&target_ty) => extracted,
                         Some(target_ty) => self.coerce_to_target_type(
                             extracted,
                             Some(ir::Type::Unknown),
@@ -2612,6 +2633,15 @@ impl<'a> FunctionEmitter<'a> {
                     .unwrap_or_else(|| java_string_literal("assertion failed"));
                 Some(format!(
                     "lume.core.LumeRuntime.assertTrue({condition}, {message})"
+                ))
+            }
+            ir::Intrinsic::Ensure => {
+                if args.len() != 2 {
+                    return None;
+                }
+                Some(format!(
+                    "lume.core.LumeRuntime.ensure({}, {})",
+                    args[0], args[1]
                 ))
             }
             ir::Intrinsic::ExtractSuccessIsSet => {
@@ -3445,6 +3475,10 @@ impl<'a> FunctionEmitter<'a> {
                     .ir
                     .function(*id)
                     .map(|function| function.return_ty.clone()),
+                ir::Callee::Intrinsic(ir::Intrinsic::Ensure) => Some(ir::Type::Named {
+                    name: "Result".to_string(),
+                    args: vec![ir::Type::Unit, ir::Type::Unknown],
+                }),
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue)
                 | ir::Callee::Intrinsic(ir::Intrinsic::VariantField(_)) => Some(ir::Type::Unknown),
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet)
@@ -3488,7 +3522,29 @@ impl<'a> FunctionEmitter<'a> {
                 interfaces.first().cloned()
             }
             ir::RValue::Cast { ty, .. } => Some(ty.clone()),
+            ir::RValue::Index { base, .. } => {
+                let base_ty = self.operand_type(base)?;
+                self.index_result_type(&base_ty)
+            }
             ir::RValue::TypeOf { ty } => Some(runtime_ir_type(ty.clone())),
+            _ => None,
+        }
+    }
+
+    fn index_result_type(&self, ty: &ir::Type) -> Option<ir::Type> {
+        match ty {
+            ir::Type::Named { name, args }
+                if (name == "Array" || name == "List") && args.len() == 1 =>
+            {
+                args.first().cloned()
+            }
+            ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
+                Some(ir::Type::Named {
+                    name: "Option".to_string(),
+                    args: vec![args[1].clone()],
+                })
+            }
+            ir::Type::Unknown => Some(ir::Type::Unknown),
             _ => None,
         }
     }
@@ -3542,6 +3598,9 @@ impl<'a> FunctionEmitter<'a> {
         source_ty: Option<ir::Type>,
         target_ty: &ir::Type,
     ) -> String {
+        if is_java_void_type(target_ty) {
+            return "lume.core.LumeUnit.INSTANCE".to_string();
+        }
         if is_named_builtin(target_ty, "Int32")
             && (source_ty.is_none() || source_is_wide_int(source_ty.as_ref()))
         {
@@ -3582,9 +3641,6 @@ impl<'a> FunctionEmitter<'a> {
         if !matches!(source_ty, Some(ir::Type::Unknown)) || matches!(target_ty, ir::Type::Unknown) {
             return expr;
         }
-        if is_java_void_type(target_ty) {
-            return expr;
-        }
         if !self.target_type_can_be_unchecked_cast(target_ty) {
             return expr;
         }
@@ -3593,7 +3649,7 @@ impl<'a> FunctionEmitter<'a> {
 
     fn target_type_needs_reference_cast(&self, ty: &ir::Type) -> bool {
         if is_java_void_type(ty) {
-            return true;
+            return false;
         }
         if self.type_param_is_unbound(ty) {
             return false;

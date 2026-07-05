@@ -65,4 +65,6 @@ impl single Json {
     def encode(value Any) JsonValue = JsonRuntime.encode(value)
 
     def stringify(value Any) Str = JsonRuntime.stringify(value)
+
+    def decode[reified T](text Str) Result[T, Str] = JsonRuntime.decode(text, typeOf[T])
 }

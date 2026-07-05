@@ -4348,6 +4348,26 @@ impl<'a> FunctionLowerer<'a> {
 
         match callee {
             Expr::Identifier { name, .. } => {
+                if name == "ensure" && ordered_args.len() == 2 {
+                    let error_ty = match expected {
+                        Some(ir::Type::Named { name, args })
+                            if name == "Result" && args.len() == 2 =>
+                        {
+                            args[1].clone()
+                        }
+                        _ => ir::Type::Unknown,
+                    };
+                    return Some(vec![
+                        Some(ExpectedArgSpec {
+                            ty: ir::Type::Bool,
+                            lazy: false,
+                        }),
+                        Some(ExpectedArgSpec {
+                            ty: error_ty,
+                            lazy: true,
+                        }),
+                    ]);
+                }
                 if let Some(id) = self
                     .functions
                     .get(name)
@@ -5276,6 +5296,7 @@ fn intrinsic_for_name(name: &str) -> Option<ir::Intrinsic> {
         "printf" => Some(ir::Intrinsic::Printf),
         "panic" => Some(ir::Intrinsic::Panic),
         "assert" => Some(ir::Intrinsic::Assert),
+        "ensure" => Some(ir::Intrinsic::Ensure),
         _ => None,
     }
 }

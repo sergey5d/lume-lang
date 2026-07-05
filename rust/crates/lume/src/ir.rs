@@ -539,6 +539,7 @@ pub enum Intrinsic {
     Printf,
     Panic,
     Assert,
+    Ensure,
     IterInit,
     IterHasNext,
     IterNext,

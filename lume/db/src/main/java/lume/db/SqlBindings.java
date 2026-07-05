@@ -8,6 +8,7 @@ import java.util.Map;
 
 import lume.core.LumeList;
 import lume.core.LumeMap;
+import lume.core.Option;
 import lume.core.Tuple2;
 import lume.core.Tuple3;
 import lume.core.Tuple4;
@@ -123,6 +124,20 @@ final class SqlBindings {
     }
 
     private static List<Object> nullableList(Object... values) {
-        return new ArrayList<>(Arrays.asList(values));
+        var out = new ArrayList<Object>(values.length);
+        for (var value : values) {
+            out.add(unwrap(value));
+        }
+        return out;
+    }
+
+    private static Object unwrap(Object value) {
+        if (value instanceof Option.Some<?> some) {
+            return some.value();
+        }
+        if (value instanceof Option.None<?>) {
+            return null;
+        }
+        return value;
     }
 }

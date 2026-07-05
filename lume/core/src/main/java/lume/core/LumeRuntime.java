@@ -2,6 +2,7 @@ package lume.core;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public final class LumeRuntime {
@@ -28,6 +29,13 @@ public final class LumeRuntime {
             throw new LumePanic(message);
         }
         return LumeUnit.INSTANCE;
+    }
+
+    public static <E> Result<LumeUnit, E> ensure(Boolean condition, Supplier<E> error) {
+        if (Boolean.TRUE.equals(condition)) {
+            return new Result.Ok<>(LumeUnit.INSTANCE);
+        }
+        return new Result.Err<>(error.get());
     }
 
     public static <T> Option<T> optionSome(T value) {
@@ -128,16 +136,42 @@ public final class LumeRuntime {
     }
 
     public static Object extractSuccessValue(Object value) {
-        if (value instanceof Option<?> option) {
-            return option.orPanic();
+        if (value instanceof Option.Some<?> some) {
+            return some.value();
         }
-        if (value instanceof Result<?, ?> result) {
-            return result.orPanic();
+        if (value instanceof Option.None<?>) {
+            throw new LumePanic("expected Option.Some");
         }
-        if (value instanceof Either<?, ?> either) {
-            return either.orPanic();
+        if (value instanceof Result.Ok<?, ?> ok) {
+            return ok.value();
+        }
+        if (value instanceof Result.Err<?, ?>) {
+            throw new LumePanic("expected Result.Ok");
+        }
+        if (value instanceof Either.Right<?, ?> right) {
+            return right.value();
+        }
+        if (value instanceof Either.Left<?, ?>) {
+            throw new LumePanic("expected Either.Right");
         }
         throw new LumePanic("expected success value");
+    }
+
+    public static Object indexValue(Object base, Object index) {
+        long offset = ((Number) index).longValue();
+        Option<?> value;
+        if (base instanceof LumeList<?> list) {
+            value = list.get(offset);
+        } else if (base instanceof LumeArray<?> array) {
+            value = array.get(offset);
+        } else {
+            throw new LumePanic("value is not indexable");
+        }
+
+        if (value instanceof Option.Some<?> some) {
+            return some.value();
+        }
+        throw new LumePanic("index out of bounds: " + offset);
     }
 
     public static LumeIterator<?> iterInit(Object source) {

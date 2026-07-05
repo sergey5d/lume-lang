@@ -3724,6 +3724,22 @@ impl<'a> Interpreter<'a> {
                 Err(self.runtime_error(span, message))
             }
             ir::Intrinsic::Assert => self.invoke_assert(args, span),
+            ir::Intrinsic::Ensure => {
+                if args.len() != 2 {
+                    return Err(self.runtime_error(span, "ensure expects 2 arguments"));
+                }
+                let condition = args[0].as_bool(self, span, "ensure condition")?;
+                if condition {
+                    Ok(self.result_ok(Value::Unit))
+                } else {
+                    let error = if self.value_is_zero_arg_closure(&args[1]) {
+                        self.invoke_value(args[1].clone(), Vec::new(), span)?
+                    } else {
+                        args[1].clone()
+                    };
+                    Ok(self.result_err(error))
+                }
+            }
             ir::Intrinsic::IterInit => {
                 if args.len() != 1 {
                     return Err(self.runtime_error(span, "IterInit expects 1 argument"));

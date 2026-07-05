@@ -20,6 +20,16 @@ annotation POST {
     contentType Str = "text/plain"
 }
 
+annotation PUT {
+    path Str
+    contentType Str = "text/plain"
+}
+
+annotation PATCH {
+    path Str
+    contentType Str = "text/plain"
+}
+
 shape HttpResponse {
     status Int = 200
     body Str
@@ -90,12 +100,66 @@ impl JavalinBackend {
                 if params.size() == 0 {
                     HttpResponder.render(ctx, method.invoke(controller), contentType)
                 } else {
-                    first Param = params.get(0).orPanic()
-                    paramType Type[_] = first.paramType()
-                    if paramType.name().getOr("") == "Context" {
-                        HttpResponder.render(ctx, method.invoke(controller, JavalinHttpContext(ctx)), contentType)
+                    if let Some(firstValue) = params.get(0) {
+                        first Param = firstValue
+                        paramType Type[_] = first.paramType()
+                        if paramType.name().getOr("") == "Context" {
+                            HttpResponder.render(ctx, method.invoke(controller, JavalinHttpContext(ctx)), contentType)
+                        } else {
+                            HttpResponder.render(ctx, method.invoke(controller, ctx.body()), contentType)
+                        }
                     } else {
-                        HttpResponder.render(ctx, method.invoke(controller, ctx.body()), contentType)
+                        HttpResponder.render(ctx, method.invoke(controller), contentType)
+                    }
+                }
+            }
+        })
+
+        this
+    }
+
+    def put(path Str, contentType Str, controller Any, method Method) JavalinBackend {
+        this.app.put(path, Handler {
+            def handle(ctx JavalinRawContext) Unit {
+                params [Param] = method.params()
+                if params.size() == 0 {
+                    HttpResponder.render(ctx, method.invoke(controller), contentType)
+                } else {
+                    if let Some(firstValue) = params.get(0) {
+                        first Param = firstValue
+                        paramType Type[_] = first.paramType()
+                        if paramType.name().getOr("") == "Context" {
+                            HttpResponder.render(ctx, method.invoke(controller, JavalinHttpContext(ctx)), contentType)
+                        } else {
+                            HttpResponder.render(ctx, method.invoke(controller, ctx.body()), contentType)
+                        }
+                    } else {
+                        HttpResponder.render(ctx, method.invoke(controller), contentType)
+                    }
+                }
+            }
+        })
+
+        this
+    }
+
+    def patch(path Str, contentType Str, controller Any, method Method) JavalinBackend {
+        this.app.patch(path, Handler {
+            def handle(ctx JavalinRawContext) Unit {
+                params [Param] = method.params()
+                if params.size() == 0 {
+                    HttpResponder.render(ctx, method.invoke(controller), contentType)
+                } else {
+                    if let Some(firstValue) = params.get(0) {
+                        first Param = firstValue
+                        paramType Type[_] = first.paramType()
+                        if paramType.name().getOr("") == "Context" {
+                            HttpResponder.render(ctx, method.invoke(controller, JavalinHttpContext(ctx)), contentType)
+                        } else {
+                            HttpResponder.render(ctx, method.invoke(controller, ctx.body()), contentType)
+                        }
+                    } else {
+                        HttpResponder.render(ctx, method.invoke(controller), contentType)
                     }
                 }
             }
@@ -123,12 +187,12 @@ impl HttpServer {
 
     def addController(controller Any) HttpServer {
         controllerType Type[_] = controller.runtimeType
-        classType ClassType[_] = controllerType.asClass().orPanic()
+        let Some(classType) = controllerType.asClass() else return this
         var prefix Str = ""
 
-        if controllerType.hasAnnotation[Controller]() {
-            controllerAnnotation AnnotationValue = controllerType.annotation[Controller]().orPanic()
-            prefix := controllerAnnotation.str("path").orPanic()
+        if let Some(controllerAnnotationValue) = controllerType.annotation[Controller]() {
+            controllerAnnotation AnnotationValue = controllerAnnotationValue
+            prefix := controllerAnnotation.str("path").getOr("")
         }
 
         methods [Method] = classType.methods()
@@ -136,17 +200,39 @@ impl HttpServer {
             method Method = methodValue
 
             if method.hasAnnotation[GET]() {
-                route AnnotationValue = method.annotation[GET]().orPanic()
-                path Str = prefix + route.str("path").orPanic()
-                contentType Str = route.str("contentType").getOr("text/plain")
-                this.backend.get(path, contentType, controller, method)
+                if let Some(routeValue) = method.annotation[GET]() {
+                    route AnnotationValue = routeValue
+                    path Str = prefix + route.str("path").getOr("")
+                    contentType Str = route.str("contentType").getOr("text/plain")
+                    this.backend.get(path, contentType, controller, method)
+                }
             }
 
             if method.hasAnnotation[POST]() {
-                route AnnotationValue = method.annotation[POST]().orPanic()
-                path Str = prefix + route.str("path").orPanic()
-                contentType Str = route.str("contentType").getOr("text/plain")
-                this.backend.post(path, contentType, controller, method)
+                if let Some(routeValue) = method.annotation[POST]() {
+                    route AnnotationValue = routeValue
+                    path Str = prefix + route.str("path").getOr("")
+                    contentType Str = route.str("contentType").getOr("text/plain")
+                    this.backend.post(path, contentType, controller, method)
+                }
+            }
+
+            if method.hasAnnotation[PUT]() {
+                if let Some(routeValue) = method.annotation[PUT]() {
+                    route AnnotationValue = routeValue
+                    path Str = prefix + route.str("path").getOr("")
+                    contentType Str = route.str("contentType").getOr("text/plain")
+                    this.backend.put(path, contentType, controller, method)
+                }
+            }
+
+            if method.hasAnnotation[PATCH]() {
+                if let Some(routeValue) = method.annotation[PATCH]() {
+                    route AnnotationValue = routeValue
+                    path Str = prefix + route.str("path").getOr("")
+                    contentType Str = route.str("contentType").getOr("text/plain")
+                    this.backend.patch(path, contentType, controller, method)
+                }
             }
         }
 

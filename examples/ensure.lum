@@ -1,0 +1,40 @@
+# EXPECT:
+# ok
+# int: 42
+# lazy error
+# error: too small
+
+def makeError(message Str) Str {
+    println("lazy error")
+    message
+}
+
+def requireLarge(value Int) Result[Unit, Str] {
+    try ensure(value > 10, makeError("too small"))
+    Ok(())
+}
+
+def requireLargeInt(value Int) Result[Int, Str] {
+    try ensure(value > 10, makeError("too small"))
+    Ok(value)
+}
+
+def main() Unit {
+    first Result[Unit, Str] = requireLarge(20)
+    match first {
+        case Ok(_) => println("ok")
+        case Err(error) => println("unexpected: " + error)
+    }
+
+    intResult Result[Int, Str] = requireLargeInt(42)
+    match intResult {
+        case Ok(value) => println("int: " + value.toStr())
+        case Err(error) => println("unexpected int error: " + error)
+    }
+
+    second Result[Unit, Str] = requireLarge(5)
+    match second {
+        case Ok(_) => println("unexpected ok")
+        case Err(error) => println("error: " + error)
+    }
+}

@@ -1,0 +1,9 @@
+# PRELUDE_SKIP
+# INTERPRETER
+
+def ensure[E](condition Bool, lazy error E) Result[Unit, E] =
+    if condition {
+        Ok(())
+    } else {
+        Err(error)
+    }

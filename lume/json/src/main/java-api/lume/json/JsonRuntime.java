@@ -1,6 +1,8 @@
 package lume.json;
 
 import lume.core.LumeList;
+import lume.core.LumeType;
+import lume.core.Result;
 
 public final class JsonRuntime {
     private JsonRuntime() {
@@ -43,6 +45,10 @@ public final class JsonRuntime {
     }
 
     public static String stringify(Object value) {
+        throw new UnsupportedOperationException("descriptor only");
+    }
+
+    public static <T> Result<T, String> decode(String text, LumeType targetType) {
         throw new UnsupportedOperationException("descriptor only");
     }
 }

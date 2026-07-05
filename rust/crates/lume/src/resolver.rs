@@ -178,6 +178,7 @@ impl AmbientRegistry {
         for value in [
             "List", "Map", "Set", "Array", "Range", "Int", "Int32", "Bool", "Rune", "Float",
             "Float32", "Str", "Unit", "Never", "print", "println", "printf", "panic", "assert",
+            "ensure",
         ] {
             registry.values.insert(value.to_string());
         }
