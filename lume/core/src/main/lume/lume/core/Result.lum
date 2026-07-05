@@ -31,6 +31,11 @@ impl Result[T, E] {
         case Err(error) => Err(error)
     }
 
+    def mapError[X](f (E) -> X) Result[T, X] = match this {
+        case Ok(value) => Ok(value)
+        case Err(error) => Err(f(error))
+    }
+
     def flatMap[X](f (T) -> Result[X, E]) Result[X, E] = match this {
         case Ok(value) => f(value)
         case Err(error) => Err(error)
