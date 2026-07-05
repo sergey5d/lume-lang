@@ -1044,6 +1044,11 @@ Rules:
 - Lazy argument expressions cannot contain non-local `return`, `break`, `continue`, or `try`.
 - Use an explicit `() -> T` parameter when the caller should pass, store, or return the thunk itself.
 
+Style:
+
+- Use `lazy` only for conditional-value APIs such as `assert`, `debug`, `getOr`, and `orElse`.
+- Use `() -> T` for callbacks, schedulers, retry operations, event handlers, and stored work.
+
 Forwarding rules:
 
 ```txt
