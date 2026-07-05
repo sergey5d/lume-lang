@@ -1,0 +1,42 @@
+# EXPECT:
+# option result Ada
+# option mapped missing user
+# result ok row-1
+# result mapped db: down
+# either ok 7
+# either mapped left: nope
+
+def findUser(found Bool) Option[Str] =
+    if found { Some("Ada") } else { None }
+
+def queryRow(ok Bool) Result[Str, Str] =
+    if ok { Ok("row-1") } else { Err("down") }
+
+def queryEither(ok Bool) Either[Str, Int] =
+    if ok { Right(7) } else { Left("nope") }
+
+def loadUser(found Bool) Result[Str, Str] {
+    user = try findUser(found) else "missing user"
+    Ok(user)
+}
+
+def loadRow(ok Bool) Result[Str, Str] {
+    row = try queryRow(ok) else err => "db: " + err
+    Ok(row)
+}
+
+def loadEither(ok Bool) Either[Str, Int] {
+    value = try queryEither(ok) else left => {
+        "left: " + left
+    }
+    Right(value)
+}
+
+def main() Unit {
+    println("option result " + loadUser(true).orPanic())
+    println("option mapped " + loadUser(false).getError())
+    println("result ok " + loadRow(true).orPanic())
+    println("result mapped " + loadRow(false).getError())
+    println("either ok " + loadEither(true).expectRight().toStr())
+    println("either mapped " + loadEither(false).expectLeft())
+}

@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*Result try else requires a failure binder; write 'else err => mappedFailure'.*
+
+def main() Result[Int, Str] {
+    result Result[Int, Str] = Err("bad")
+    value = try result else "mapped"
+    Ok(value)
+}

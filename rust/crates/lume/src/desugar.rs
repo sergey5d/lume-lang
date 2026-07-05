@@ -243,8 +243,19 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             methods: methods.iter().map(desugar_method_decl).collect(),
             span: *span,
         },
-        ast::Expr::Try { value, span } => core::Expr::Try {
+        ast::Expr::Try {
+            value,
+            handler,
+            span,
+        } => core::Expr::Try {
             value: Box::new(desugar_expr(value)),
+            handler: handler.as_ref().map(|handler| {
+                Box::new(core::TryElseHandler {
+                    binder: handler.binder.clone(),
+                    body: Box::new(desugar_expr(&handler.body)),
+                    span: handler.span,
+                })
+            }),
             span: *span,
         },
         ast::Expr::Lift { value, span } => core::Expr::Lift {

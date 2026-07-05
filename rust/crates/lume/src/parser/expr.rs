@@ -1040,9 +1040,18 @@ impl<'a> Parser<'a> {
             let start = self.previous_span();
             self.skip_newlines();
             let value = self.parse_unary_expr()?;
-            let span = start.cover(value.span());
+            let handler = if self.match_keyword(Keyword::Else) {
+                Some(Box::new(self.parse_try_else_handler()?))
+            } else {
+                None
+            };
+            let span = handler
+                .as_ref()
+                .map(|handler| start.cover(handler.span))
+                .unwrap_or_else(|| start.cover(value.span()));
             return Some(Expr::Try {
                 value: Box::new(value),
+                handler,
                 span,
             });
         }
@@ -1079,6 +1088,36 @@ impl<'a> Parser<'a> {
             });
         }
         self.parse_postfix_expr()
+    }
+
+    fn parse_try_else_handler(&mut self) -> Option<TryElseHandler> {
+        let start = self.previous_span();
+        self.skip_newlines();
+        let binder = if self.at(TokenKind::Identifier) && self.at_next(TokenKind::FatArrow) {
+            let (name, _) = self.expect_identifier("expected try else failure binding")?;
+            self.consume(
+                TokenKind::FatArrow,
+                "expected '=>' after try else failure binding",
+            )?;
+            Some(name)
+        } else {
+            None
+        };
+        let body = if self.at(TokenKind::LBrace) {
+            let block = self.parse_block()?;
+            Expr::Block {
+                span: block.span,
+                body: block,
+            }
+        } else {
+            self.parse_expr()?
+        };
+        let end = body.span();
+        Some(TryElseHandler {
+            binder,
+            body: Box::new(body),
+            span: start.cover(end),
+        })
     }
 
     pub(super) fn parse_postfix_expr(&mut self) -> Option<Expr> {

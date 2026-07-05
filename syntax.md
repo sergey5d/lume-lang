@@ -1836,6 +1836,36 @@ type:
 
 The success type may differ; the propagated failure side must still be compatible.
 
+Failure mapping:
+
+```txt
+value = try source else mappedFailure
+value = try source else failure => mappedFailure
+value = try source else failure => {
+    statement1
+    statement2
+    mappedFailure
+}
+```
+
+`try ... else` still unwraps the success side, but maps the failure payload
+before returning from the enclosing callable.
+
+- `Option[T]` has no failure payload, so it uses `else mappedFailure`.
+- `Result[T, E]` binds `Err(E)` with `else err => mappedFailure`.
+- `Either[L, R]` binds `Left(L)` with `else left => mappedFailure`.
+- The handler produces the target failure payload, not a full `Err(...)` or `Left(...)`.
+- The handler cannot contain `return`, `break`, `continue`, or another `try`.
+- The enclosing callable must return `Result[..., Failure]` or `Either[Failure, ...]`.
+
+Examples:
+
+```txt
+user = try Users.find(id) else AppError.NotFound(id)
+row = try Db.query(id) else err => AppError.Db(err)
+value = try sourceEither else left => AppError.FromLeft(left)
+```
+
 Multiple dependent unwraps can be written as sequential `let ... else` / `try`
 statements or as a grouped `let` block:
 

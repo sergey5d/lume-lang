@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*try else handler cannot contain return, break, continue, or another try; produce the mapped failure value instead.*
+
+def fallback() Result[Str, Str] = Err("fallback")
+
+def main() Result[Int, Str] {
+    result Result[Int, Str] = Err("bad")
+    value = try result else err => {
+        try fallback()
+    }
+    Ok(value)
+}

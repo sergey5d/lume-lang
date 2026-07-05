@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*Option try else has no failure payload; write 'else mappedFailure' without a binder.*
+
+def main() Result[Int, Str] {
+    maybe Option[Int] = None
+    value = try maybe else err => "missing"
+    Ok(value)
+}
