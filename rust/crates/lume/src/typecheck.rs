@@ -286,6 +286,7 @@ struct ParamSig {
     name: String,
     ty: Ty,
     variadic: bool,
+    lazy: bool,
     has_initializer: bool,
 }
 
@@ -338,6 +339,7 @@ fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
                 name: "other".to_string(),
                 ty: Ty::any(),
                 variadic: false,
+                lazy: false,
                 has_initializer: false,
             }],
             ret: Ty::bool(),
@@ -1377,6 +1379,20 @@ impl<'a> Checker<'a> {
         let mut seen_default = false;
         let mut seen_variadic = false;
         for (index, param) in params.iter().enumerate() {
+            if param.lazy && is_constructor {
+                self.add_error(
+                    "invalid_lazy_param",
+                    "constructor parameters cannot be lazy; use lazy only on function and method parameters",
+                    param.span,
+                );
+            }
+            if param.lazy && param.variadic {
+                self.add_error(
+                    "invalid_lazy_param",
+                    "lazy parameters cannot be vararg",
+                    param.span,
+                );
+            }
             if param.variadic && seen_variadic {
                 self.add_error(
                     "invalid_variadic_param",
@@ -4253,6 +4269,7 @@ impl<'a> Checker<'a> {
                         name: String::new(),
                         ty,
                         variadic: false,
+                        lazy: false,
                         has_initializer: false,
                     })
                     .collect::<Vec<_>>();
@@ -4864,6 +4881,15 @@ impl<'a> Checker<'a> {
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             for arg in slot {
+                if param.lazy {
+                    if let Some(reason_span) = lazy_arg_forbidden_control_flow_span(&arg.value) {
+                        self.add_error(
+                            "invalid_lazy_argument",
+                            "lazy argument expressions cannot contain return, break, continue, or try; make the control flow explicit before the call",
+                            reason_span,
+                        );
+                    }
+                }
                 let raw_expected =
                     call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
                 let expected = substitute_type(&raw_expected, &subst);
@@ -6393,6 +6419,7 @@ impl<'a> Checker<'a> {
                                     name: param.name,
                                     ty: substitute_type(&param.ty, &subst),
                                     variadic: param.variadic,
+                                    lazy: param.lazy,
                                     has_initializer: param.has_initializer,
                                 })
                                 .collect(),
@@ -7630,6 +7657,216 @@ fn constructor_stmt_delegates(stmt: &Stmt) -> bool {
     }
 }
 
+fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Span> {
+    match expr {
+        Expr::Try { span, .. } => Some(*span),
+        Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
+            items.iter().find_map(lazy_arg_forbidden_control_flow_span)
+        }
+        Expr::Call { callee, args, .. } => {
+            lazy_arg_forbidden_control_flow_span(callee).or_else(|| {
+                args.iter()
+                    .find_map(|arg| lazy_arg_forbidden_control_flow_span(&arg.value))
+            })
+        }
+        Expr::Member { receiver, .. } => lazy_arg_forbidden_control_flow_span(receiver),
+        Expr::Index {
+            receiver, index, ..
+        } => lazy_arg_forbidden_control_flow_span(receiver)
+            .or_else(|| lazy_arg_forbidden_control_flow_span(index)),
+        Expr::RecordUpdate {
+            receiver, patch, ..
+        } => lazy_arg_forbidden_control_flow_span(receiver)
+            .or_else(|| lazy_arg_forbidden_control_flow_span(patch)),
+        Expr::RecordLiteral { fields, values, .. } => fields
+            .iter()
+            .find_map(|field| lazy_arg_forbidden_control_flow_span(&field.value))
+            .or_else(|| values.iter().find_map(lazy_arg_forbidden_control_flow_span)),
+        Expr::Lift { value, .. } => lazy_arg_forbidden_control_flow_span(value),
+        Expr::Unary { expr, .. } => lazy_arg_forbidden_control_flow_span(expr),
+        Expr::Binary { left, right, .. } => lazy_arg_forbidden_control_flow_span(left)
+            .or_else(|| lazy_arg_forbidden_control_flow_span(right)),
+        Expr::Is { left, .. } => lazy_arg_forbidden_control_flow_span(left),
+        Expr::If {
+            condition,
+            then_block,
+            else_branch,
+            ..
+        } => lazy_arg_forbidden_control_flow_span(condition)
+            .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(then_block))
+            .or_else(|| match else_branch.as_ref() {
+                ElseExprBranch::If(expr) => lazy_arg_forbidden_control_flow_span(expr),
+                ElseExprBranch::Block(block) => {
+                    lazy_arg_forbidden_control_flow_span_in_block(block)
+                }
+            }),
+        Expr::Block { body, .. } => lazy_arg_forbidden_control_flow_span_in_block(body),
+        Expr::Match { value, cases, .. } => {
+            lazy_arg_forbidden_control_flow_span(value).or_else(|| {
+                cases.iter().find_map(|case| {
+                    case.guard
+                        .as_ref()
+                        .and_then(lazy_arg_forbidden_control_flow_span)
+                        .or_else(|| match &case.body {
+                            MatchCaseBody::Block(block) => {
+                                lazy_arg_forbidden_control_flow_span_in_block(block)
+                            }
+                            MatchCaseBody::Expr(expr) => lazy_arg_forbidden_control_flow_span(expr),
+                        })
+                })
+            })
+        }
+        Expr::ForYield {
+            bindings,
+            yield_body,
+            ..
+        } => bindings
+            .iter()
+            .find_map(|binding| {
+                binding
+                    .iterable
+                    .as_ref()
+                    .and_then(lazy_arg_forbidden_control_flow_span)
+                    .or_else(|| {
+                        binding
+                            .values
+                            .iter()
+                            .find_map(lazy_arg_forbidden_control_flow_span)
+                    })
+            })
+            .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(yield_body)),
+        Expr::LiftedChain { base, segments, .. } => lazy_arg_forbidden_control_flow_span(base)
+            .or_else(|| {
+                segments
+                    .iter()
+                    .find_map(|segment| lazy_arg_forbidden_control_flow_span(&segment.body))
+            }),
+        // Nested callables have their own control-flow boundary.
+        Expr::Lambda { .. } | Expr::AnonymousInterface { .. } => None,
+        Expr::Group { inner, .. } => lazy_arg_forbidden_control_flow_span(inner),
+        Expr::Identifier { .. }
+        | Expr::Placeholder { .. }
+        | Expr::Integer { .. }
+        | Expr::Float { .. }
+        | Expr::String { .. }
+        | Expr::Bool { .. }
+        | Expr::Unit { .. }
+        | Expr::TypeOf { .. } => None,
+    }
+}
+
+fn lazy_arg_forbidden_control_flow_span_in_block(block: &Block) -> Option<crate::source::Span> {
+    block
+        .statements
+        .iter()
+        .find_map(lazy_arg_forbidden_control_flow_span_in_stmt)
+}
+
+fn lazy_arg_forbidden_control_flow_span_in_stmt(stmt: &Stmt) -> Option<crate::source::Span> {
+    match stmt {
+        Stmt::Return(stmt) => Some(stmt.span),
+        Stmt::Break(stmt) => Some(stmt.span),
+        Stmt::Continue(stmt) => Some(stmt.span),
+        Stmt::Binding(stmt) => stmt
+            .values
+            .iter()
+            .find_map(lazy_arg_forbidden_control_flow_span),
+        Stmt::PatternBinding(stmt) => stmt
+            .clauses
+            .iter()
+            .find_map(|clause| lazy_arg_forbidden_control_flow_span(&clause.value))
+            .or_else(|| lazy_arg_forbidden_control_flow_span(&stmt.value)),
+        Stmt::Assignment(stmt) => stmt
+            .targets
+            .iter()
+            .chain(stmt.values.iter())
+            .find_map(lazy_arg_forbidden_control_flow_span),
+        Stmt::Defer(stmt) => match &stmt.action {
+            crate::ast::DeferAction::Call(expr) => lazy_arg_forbidden_control_flow_span(expr),
+            crate::ast::DeferAction::Block(block) => {
+                lazy_arg_forbidden_control_flow_span_in_block(block)
+            }
+        },
+        Stmt::If(stmt) => lazy_arg_forbidden_control_flow_span_in_if_stmt(stmt),
+        Stmt::Match(stmt) => lazy_arg_forbidden_control_flow_span(&stmt.value).or_else(|| {
+            stmt.cases.iter().find_map(|case| {
+                case.guard
+                    .as_ref()
+                    .and_then(lazy_arg_forbidden_control_flow_span)
+                    .or_else(|| match &case.body {
+                        MatchCaseBody::Block(block) => {
+                            lazy_arg_forbidden_control_flow_span_in_block(block)
+                        }
+                        MatchCaseBody::Expr(expr) => lazy_arg_forbidden_control_flow_span(expr),
+                    })
+            })
+        }),
+        Stmt::While(stmt) => lazy_arg_forbidden_control_flow_span(&stmt.condition)
+            .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(&stmt.body)),
+        Stmt::For(stmt) => stmt
+            .bindings
+            .iter()
+            .find_map(|binding| {
+                binding
+                    .iterable
+                    .as_ref()
+                    .and_then(lazy_arg_forbidden_control_flow_span)
+                    .or_else(|| {
+                        binding
+                            .values
+                            .iter()
+                            .find_map(lazy_arg_forbidden_control_flow_span)
+                    })
+            })
+            .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(&stmt.body)),
+        Stmt::LetElse(stmt) => stmt
+            .clauses
+            .iter()
+            .find_map(|clause| lazy_arg_forbidden_control_flow_span(&clause.value))
+            .or_else(|| lazy_arg_forbidden_control_flow_span(&stmt.value))
+            .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(&stmt.else_block)),
+        Stmt::Expr(stmt) => lazy_arg_forbidden_control_flow_span(&stmt.expr),
+        Stmt::LocalFunction(_) => None,
+    }
+}
+
+fn lazy_arg_forbidden_control_flow_span_in_if_stmt(stmt: &IfStmt) -> Option<crate::source::Span> {
+    stmt.condition
+        .as_ref()
+        .and_then(lazy_arg_forbidden_control_flow_span)
+        .or_else(|| {
+            stmt.condition_clauses
+                .iter()
+                .find_map(|clause| match clause {
+                    IfConditionClause::Let(clause) => {
+                        lazy_arg_forbidden_control_flow_span(&clause.value)
+                    }
+                    IfConditionClause::Expr(expr) => lazy_arg_forbidden_control_flow_span(expr),
+                })
+        })
+        .or_else(|| {
+            stmt.pattern_value
+                .as_ref()
+                .and_then(lazy_arg_forbidden_control_flow_span)
+        })
+        .or_else(|| {
+            stmt.pattern_clauses
+                .iter()
+                .find_map(|clause| lazy_arg_forbidden_control_flow_span(&clause.value))
+        })
+        .or_else(|| {
+            stmt.binding_value
+                .as_ref()
+                .and_then(lazy_arg_forbidden_control_flow_span)
+        })
+        .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(&stmt.then_block))
+        .or_else(|| match &stmt.else_branch {
+            Some(ElseBranch::If(stmt)) => lazy_arg_forbidden_control_flow_span_in_if_stmt(stmt),
+            Some(ElseBranch::Block(block)) => lazy_arg_forbidden_control_flow_span_in_block(block),
+            None => None,
+        })
+}
+
 fn is_constructor_delegation_expr(expr: &Expr) -> bool {
     match expr {
         Expr::Call { callee, .. } => {
@@ -7730,6 +7967,7 @@ fn function_sig_from_function(
                     .map(|ty| convert_type_ref(ty, &type_params))
                     .unwrap_or(Ty::Unknown),
                 variadic: param.variadic,
+                lazy: param.lazy,
                 has_initializer: param.initializer.is_some(),
             })
             .collect(),
@@ -7773,6 +8011,7 @@ fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -
                     .map(|ty| convert_type_ref(ty, &type_params))
                     .unwrap_or(Ty::Unknown),
                 variadic: param.variadic,
+                lazy: param.lazy,
                 has_initializer: param.initializer.is_some(),
             })
             .collect(),
@@ -10675,6 +10914,92 @@ def main() Unit {
             result.diagnostics.iter().any(|diag| {
                 diag.code == "invalid_placeholder_expr"
                     && diag.message.contains("'_' is not a value")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn accepts_lazy_function_parameters_and_forwarding() {
+        let program = parse_inline(
+            r#"
+def inner(lazy value Int) Int = value
+
+def outer(lazy value Int) Int =
+    inner(value)
+
+def main() Unit {
+    result Int = outer(5)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_lazy_constructor_and_vararg_parameters() {
+        let program = parse_inline(
+            r#"
+class Box {
+    value Int
+}
+
+impl Box {
+    new {
+        lazy value Int
+    } {
+        this.value = value
+    }
+}
+
+def bad(lazy values [Int] vararg) Unit = ()
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_lazy_param"
+                    && diag
+                        .message
+                        .contains("constructor parameters cannot be lazy")),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_lazy_param"
+                    && diag.message.contains("lazy parameters cannot be vararg")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_try_inside_lazy_argument_expression() {
+        let program = parse_inline(
+            r#"
+def delayed(lazy value Int) Int = value
+
+def load() Option[Int] = Some(1)
+
+def main() Unit {
+    result Int = delayed(try load())
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_lazy_argument"
+                    && diag
+                        .message
+                        .contains("lazy argument expressions cannot contain return")
             }),
             "{:#?}",
             result.diagnostics

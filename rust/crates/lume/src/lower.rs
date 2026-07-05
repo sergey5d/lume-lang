@@ -378,11 +378,16 @@ impl<'a> Lowerer<'a> {
             function.add_local(this_name, this_ty, false, ir::LocalKind::Capture);
         }
         for (index, param) in params.iter().enumerate() {
-            let runtime_ty = param
+            let source_ty = param
                 .ty
                 .as_ref()
                 .map(|ty| lower_type_ref_with_type_params(ty, &type_param_names))
                 .unwrap_or(ir::Type::Unknown);
+            let runtime_ty = if param.lazy {
+                lazy_storage_type(source_ty)
+            } else {
+                source_ty
+            };
             function.add_param(param.name.clone(), runtime_ty);
             function.set_param_default(
                 index,
@@ -392,6 +397,7 @@ impl<'a> Lowerer<'a> {
                     .and_then(|initializer| lower_field_initializer_constant(Some(initializer))),
             );
             function.set_param_variadic(index, param.variadic);
+            function.set_param_lazy(index, param.lazy);
         }
         for name in function.reified_type_params.clone() {
             function.add_param(
@@ -464,9 +470,7 @@ impl<'a> Lowerer<'a> {
             );
             for (index, param) in job.decl.params.iter().enumerate() {
                 if let Some(local_id) = lowerer.function().params.get(index).copied() {
-                    if param.name != "_" {
-                        lowerer.bind_existing(&param.name, local_id);
-                    }
+                    lowerer.bind_param(param, local_id);
                 }
             }
             lowerer.bind_reified_type_params();
@@ -491,9 +495,7 @@ impl<'a> Lowerer<'a> {
             lowerer.bind_existing("this", job.this_local);
             for (index, param) in job.decl.params.iter().enumerate() {
                 if let Some(local_id) = lowerer.function().params.get(index).copied() {
-                    if param.name != "_" {
-                        lowerer.bind_existing(&param.name, local_id);
-                    }
+                    lowerer.bind_param(param, local_id);
                 }
             }
             lowerer.bind_reified_type_params();
@@ -604,6 +606,7 @@ struct FunctionLowerer<'a> {
     capture_sources: HashMap<String, CaptureSource>,
     capture_locals: HashMap<String, ir::LocalId>,
     closure_captures: Vec<ir::Operand>,
+    lazy_values: HashMap<String, ir::Type>,
     this_local: Option<ir::LocalId>,
     loop_exits: Vec<ir::BlockId>,
     loop_continues: Vec<ir::BlockId>,
@@ -614,6 +617,13 @@ struct FunctionLowerer<'a> {
 struct CaptureSource {
     operand: ir::Operand,
     ty: ir::Type,
+    lazy_value_ty: Option<ir::Type>,
+}
+
+#[derive(Debug, Clone)]
+struct ExpectedArgSpec {
+    ty: ir::Type,
+    lazy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -694,6 +704,7 @@ impl<'a> FunctionLowerer<'a> {
             capture_sources: HashMap::new(),
             capture_locals: HashMap::new(),
             closure_captures: Vec::new(),
+            lazy_values: HashMap::new(),
             this_local: None,
             loop_exits: Vec::new(),
             loop_continues: Vec::new(),
@@ -754,6 +765,22 @@ impl<'a> FunctionLowerer<'a> {
         self.current_scope().insert(name.to_string(), local);
         if name == "this" {
             self.this_local = Some(local);
+        }
+    }
+
+    fn bind_param(&mut self, param: &core::Param, local: ir::LocalId) {
+        if param.name == "_" {
+            return;
+        }
+        self.bind_existing(&param.name, local);
+        if param.lazy {
+            let value_ty = self
+                .function()
+                .locals
+                .get(local.0)
+                .and_then(|local| lazy_value_type(&local.ty))
+                .unwrap_or(ir::Type::Unknown);
+            self.lazy_values.insert(param.name.clone(), value_ty);
         }
     }
 
@@ -1076,13 +1103,19 @@ impl<'a> FunctionLowerer<'a> {
         );
         nested.span = Some(function.span);
         for (index, param) in function.params.iter().enumerate() {
-            let runtime_ty = param
+            let source_ty = param
                 .ty
                 .as_ref()
                 .map(lower_type_ref)
                 .unwrap_or(ir::Type::Unknown);
+            let runtime_ty = if param.lazy {
+                lazy_storage_type(source_ty)
+            } else {
+                source_ty
+            };
             nested.add_param(param.name.clone(), runtime_ty);
             nested.set_param_variadic(index, param.variadic);
+            nested.set_param_lazy(index, param.lazy);
         }
         let function_id = self.program.add_function(nested);
         let capture_sources = self.visible_capture_sources(Some(&function.name));
@@ -1098,9 +1131,7 @@ impl<'a> FunctionLowerer<'a> {
             .with_capture_sources(capture_sources);
             for (index, param) in function.params.iter().enumerate() {
                 if let Some(local_id) = lowerer.function().params.get(index).copied() {
-                    if param.name != "_" {
-                        lowerer.bind_existing(&param.name, local_id);
-                    }
+                    lowerer.bind_param(param, local_id);
                 }
             }
             lowerer.lower_callable_body(&function.body, function.span);
@@ -1221,13 +1252,19 @@ impl<'a> FunctionLowerer<'a> {
         );
         nested.span = Some(span);
         for (index, param) in params.iter().enumerate() {
-            let runtime_ty = param
+            let source_ty = param
                 .ty
                 .as_ref()
                 .map(lower_type_ref)
                 .unwrap_or(ir::Type::Unknown);
+            let runtime_ty = if param.lazy {
+                lazy_storage_type(source_ty)
+            } else {
+                source_ty
+            };
             nested.add_param(param.name.clone(), runtime_ty);
             nested.set_param_variadic(index, param.variadic);
+            nested.set_param_lazy(index, param.lazy);
         }
         let function_id = self.program.add_function(nested);
         let capture_sources = self.visible_capture_sources(None);
@@ -1243,9 +1280,7 @@ impl<'a> FunctionLowerer<'a> {
             .with_capture_sources(capture_sources);
             for (index, param) in params.iter().enumerate() {
                 if let Some(local_id) = lowerer.function().params.get(index).copied() {
-                    if param.name != "_" {
-                        lowerer.bind_existing(&param.name, local_id);
-                    }
+                    lowerer.bind_param(param, local_id);
                 }
             }
             if let Some(body) = body {
@@ -1309,11 +1344,13 @@ impl<'a> FunctionLowerer<'a> {
                     .get(local.0)
                     .map(|local| local.ty.clone())
                     .unwrap_or(ir::Type::Unknown);
+                let lazy_value_ty = self.lazy_values.get(name).cloned();
                 sources.insert(
                     name.clone(),
                     CaptureSource {
                         operand: ir::Operand::Copy(Box::new(ir::Place::Local(*local))),
                         ty,
+                        lazy_value_ty,
                     },
                 );
             }
@@ -1329,6 +1366,7 @@ impl<'a> FunctionLowerer<'a> {
                         .get(this_local.0)
                         .map(|local| local.ty.clone())
                         .unwrap_or(ir::Type::Unknown),
+                    lazy_value_ty: None,
                 });
         }
         sources
@@ -2918,6 +2956,23 @@ impl<'a> FunctionLowerer<'a> {
         ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
     }
 
+    fn force_lazy_value(
+        &mut self,
+        thunk: ir::Operand,
+        value_ty: ir::Type,
+        span: Span,
+    ) -> ir::Operand {
+        self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Indirect(thunk),
+                args: Vec::new(),
+                structural: false,
+            },
+            value_ty,
+            Some(span),
+        )
+    }
+
     fn combine_conditions(&mut self, conditions: Vec<ir::Operand>, span: Span) -> ir::Operand {
         let mut iter = conditions.into_iter();
         let Some(first) = iter.next() else {
@@ -2973,9 +3028,14 @@ impl<'a> FunctionLowerer<'a> {
             return ir::Operand::Const(ir::Constant::Unit);
         }
         match expr {
-            Expr::Identifier { name, span } => self
-                .lookup_scoped_or_captured_value(name)
-                .unwrap_or_else(|| {
+            Expr::Identifier { name, span } => {
+                if let Some(value) = self.lookup_scoped_or_captured_value(name) {
+                    if let Some(value_ty) = self.lazy_values.get(name).cloned() {
+                        return self.force_lazy_value(value, value_ty, *span);
+                    }
+                    return value;
+                }
+                {
                     if let Some(place) = self.lookup_implicit_field_place(name) {
                         return ir::Operand::Copy(Box::new(place));
                     }
@@ -2996,7 +3056,8 @@ impl<'a> FunctionLowerer<'a> {
                         *span,
                     );
                     ir::Operand::Const(ir::Constant::Unit)
-                }),
+                }
+            }
             Expr::Integer { raw, .. } => raw
                 .parse::<i64>()
                 .map(ir::Constant::Int)
@@ -3475,6 +3536,9 @@ impl<'a> FunctionLowerer<'a> {
     fn lookup_scoped_type(&self, name: &str) -> Option<ir::Type> {
         for scope in self.scopes.iter().rev() {
             if let Some(local) = scope.get(name).copied() {
+                if let Some(value_ty) = self.lazy_values.get(name) {
+                    return Some(value_ty.clone());
+                }
                 return self
                     .function()
                     .locals
@@ -3482,9 +3546,12 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|local| local.ty.clone());
             }
         }
-        self.capture_sources
-            .get(name)
-            .map(|source| source.ty.clone())
+        self.capture_sources.get(name).map(|source| {
+            source
+                .lazy_value_ty
+                .clone()
+                .unwrap_or_else(|| source.ty.clone())
+        })
     }
 
     fn operand_type(&self, operand: &ir::Operand) -> Option<ir::Type> {
@@ -4011,18 +4078,16 @@ impl<'a> FunctionLowerer<'a> {
                     .cloned()
                     .collect::<Vec<_>>();
                 let expected_args =
-                    self.call_expected_arg_types(call_callee, &ordered_args, expected);
+                    self.call_expected_arg_specs(call_callee, &ordered_args, expected);
                 let mut lowered_args = ordered_args
                     .iter()
                     .enumerate()
                     .map(|(index, arg)| {
-                        self.lower_expr_with_expected(
-                            &arg.value,
-                            expected_args
-                                .as_ref()
-                                .and_then(|args| args.get(index))
-                                .and_then(Option::as_ref),
-                        )
+                        let spec = expected_args
+                            .as_ref()
+                            .and_then(|args| args.get(index))
+                            .and_then(Option::as_ref);
+                        self.lower_call_arg(arg, spec)
                     })
                     .collect::<Vec<_>>();
                 lowered_args.extend(self.reified_call_evidence_args(
@@ -4081,14 +4146,219 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn call_expected_arg_types(
+    fn lower_call_arg(
+        &mut self,
+        arg: &core::CallArg,
+        expected: Option<&ExpectedArgSpec>,
+    ) -> ir::Operand {
+        let Some(expected) = expected else {
+            return self.lower_expr(&arg.value);
+        };
+        if expected.lazy {
+            if let Some(thunk) = self.lazy_forward_operand(&arg.value) {
+                return thunk;
+            }
+            return self.lower_lazy_argument(&arg.value, expected.ty.clone(), arg.span);
+        }
+        self.lower_expr_with_expected(&arg.value, Some(&expected.ty))
+    }
+
+    fn lazy_forward_operand(&mut self, expr: &Expr) -> Option<ir::Operand> {
+        let Expr::Identifier { name, .. } = expr else {
+            return None;
+        };
+        self.lazy_values
+            .contains_key(name)
+            .then(|| self.lookup_scoped_or_captured_value(name))
+            .flatten()
+    }
+
+    fn lower_lazy_argument(&mut self, expr: &Expr, return_ty: ir::Type, span: Span) -> ir::Operand {
+        let rvalue = self.lower_lazy_argument_closure(expr, return_ty.clone(), span);
+        self.emit_temp_from_rvalue(rvalue, lazy_storage_type(return_ty), Some(span))
+    }
+
+    fn lower_lazy_argument_closure(
+        &mut self,
+        expr: &Expr,
+        return_ty: ir::Type,
+        span: Span,
+    ) -> ir::RValue {
+        let nested_name = format!(
+            "lazy${}${}",
+            self.function_id.0,
+            self.function().blocks.len()
+        );
+        let mut nested = ir::Function::new(nested_name, ir::FunctionKind::Lambda, return_ty);
+        nested.span = Some(span);
+        let function_id = self.program.add_function(nested);
+        let capture_sources = self.visible_capture_sources(None);
+        let captures = {
+            let mut lowerer = FunctionLowerer::new(
+                self.program,
+                function_id,
+                self.globals,
+                self.functions,
+                self.case_fields,
+                self.diagnostics,
+            )
+            .with_capture_sources(capture_sources);
+            lowerer.lower_callable_body(&CallableBody::Expr(expr.clone()), span);
+            lowerer.finish_closure_captures()
+        };
+        ir::RValue::Closure {
+            function: function_id,
+            captures,
+        }
+    }
+
+    fn call_expected_arg_specs(
         &self,
         callee: &Expr,
-        _ordered_args: &[core::CallArg],
+        ordered_args: &[core::CallArg],
         expected: Option<&ir::Type>,
-    ) -> Option<Vec<Option<ir::Type>>> {
-        self.enum_case_expected_arg_types(callee, expected?)
-            .map(|fields| fields.into_iter().map(Some).collect())
+    ) -> Option<Vec<Option<ExpectedArgSpec>>> {
+        if let Some(fields) =
+            expected.and_then(|expected| self.enum_case_expected_arg_types(callee, expected))
+        {
+            return Some(
+                fields
+                    .into_iter()
+                    .map(|ty| Some(ExpectedArgSpec { ty, lazy: false }))
+                    .collect(),
+            );
+        }
+
+        match callee {
+            Expr::Identifier { name, .. } => {
+                if let Some(id) = self
+                    .functions
+                    .get(name)
+                    .copied()
+                    .or_else(|| self.current_owner_method(name, ordered_args))
+                {
+                    return self.function_expected_arg_specs(id, &HashMap::new());
+                }
+            }
+            Expr::Member { receiver, name, .. } => {
+                let receiver_ty = self.infer_expr_type(receiver);
+                if let Some((id, subst)) =
+                    self.method_expected_arg_target(&receiver_ty, name, ordered_args)
+                {
+                    return self.function_expected_arg_specs(id, &subst);
+                }
+            }
+            _ => {}
+        }
+
+        if let Some(path) = expr_path(callee) {
+            if path.len() == 2 {
+                let owner = &path[0];
+                let member = &path[1];
+                if let Some((id, subst)) = self.named_method_expected_arg_target(
+                    owner,
+                    ast::TypeKind::Single,
+                    member,
+                    ordered_args,
+                ) {
+                    return self.function_expected_arg_specs(id, &subst);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn function_expected_arg_specs(
+        &self,
+        id: ir::FunctionId,
+        subst: &HashMap<String, ir::Type>,
+    ) -> Option<Vec<Option<ExpectedArgSpec>>> {
+        let function = self.program.function(id)?;
+        Some(
+            source_param_indices(function)
+                .into_iter()
+                .map(|index| {
+                    let local = function
+                        .params
+                        .get(index)
+                        .and_then(|param| function.locals.get(param.0))?;
+                    let lazy = function.param_lazy.get(index).copied().unwrap_or(false);
+                    let ty = if lazy {
+                        lazy_value_type(&local.ty).unwrap_or(ir::Type::Unknown)
+                    } else {
+                        local.ty.clone()
+                    };
+                    Some(ExpectedArgSpec {
+                        ty: substitute_ir_type(&ty, subst),
+                        lazy,
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    fn method_expected_arg_target(
+        &self,
+        receiver_ty: &ir::Type,
+        method: &str,
+        args: &[core::CallArg],
+    ) -> Option<(ir::FunctionId, HashMap<String, ir::Type>)> {
+        let ir::Type::Named {
+            name: type_name,
+            args: type_args,
+        } = receiver_ty
+        else {
+            return None;
+        };
+        let ty = self.program.types.iter().find(|ty| ty.name == *type_name)?;
+        let subst = ir_type_subst(ty, type_args);
+        self.find_method_expected_arg_target(ty, method, args)
+            .map(|id| (id, subst))
+    }
+
+    fn named_method_expected_arg_target(
+        &self,
+        owner: &str,
+        kind: ast::TypeKind,
+        method: &str,
+        args: &[core::CallArg],
+    ) -> Option<(ir::FunctionId, HashMap<String, ir::Type>)> {
+        let ty = self
+            .program
+            .types
+            .iter()
+            .find(|ty| ty.name == owner && ty.kind == kind)?;
+        self.find_method_expected_arg_target(ty, method, args)
+            .map(|id| (id, HashMap::new()))
+    }
+
+    fn find_method_expected_arg_target(
+        &self,
+        ty: &ir::TypeDef,
+        method: &str,
+        args: &[core::CallArg],
+    ) -> Option<ir::FunctionId> {
+        let mut best: Option<(usize, ir::FunctionId)> = None;
+        for method_id in &ty.methods {
+            let Some(function) = self.program.function(*method_id) else {
+                continue;
+            };
+            if function.name != method {
+                continue;
+            }
+            let Some(score) = method_call_arity_score(function, args) else {
+                continue;
+            };
+            if best
+                .as_ref()
+                .map(|(best_score, _)| score > *best_score)
+                .unwrap_or(true)
+            {
+                best = Some((score, *method_id));
+            }
+        }
+        best.map(|(_, id)| id)
     }
 
     fn enum_case_expected_arg_types(
@@ -4801,6 +5071,9 @@ impl<'a> FunctionLowerer<'a> {
         if name == "this" {
             self.this_local = Some(local);
         }
+        if let Some(value_ty) = source.lazy_value_ty {
+            self.lazy_values.insert(name.to_string(), value_ty);
+        }
         self.capture_locals.insert(name.to_string(), local);
         self.closure_captures.push(source.operand);
         Some(local)
@@ -4944,6 +5217,20 @@ fn lower_type_ref(reference: &TypeRef) -> ir::Type {
             params: params.iter().map(lower_type_ref).collect(),
             ret: Box::new(lower_type_ref(ret)),
         },
+    }
+}
+
+fn lazy_storage_type(value_ty: ir::Type) -> ir::Type {
+    ir::Type::Function {
+        params: Vec::new(),
+        ret: Box::new(value_ty),
+    }
+}
+
+fn lazy_value_type(storage_ty: &ir::Type) -> Option<ir::Type> {
+    match storage_ty {
+        ir::Type::Function { params, ret } if params.is_empty() => Some((**ret).clone()),
+        _ => None,
     }
 }
 

@@ -1024,6 +1024,47 @@ def printf(format Str, value [Str] vararg) Unit
 The parameter is available as `[T]` inside the body, and call sites pass the
 extra values positionally.
 
+Function and method parameters may be marked `lazy`:
+
+```txt
+def twice(lazy value Int) Int =
+    value + value
+
+def debug(lazy message Str) Unit
+```
+
+Rules:
+
+- `lazy` is allowed on function and method parameters only.
+- A lazy argument expression is captured as a zero-argument closure.
+- Reading the parameter evaluates that closure.
+- Lazy parameters are not memoized; each read evaluates the captured expression again.
+- Lazy parameters cannot be `vararg`.
+- Lazy argument expressions cannot contain non-local `return`, `break`, `continue`, or `try`.
+- Use an explicit `() -> T` parameter when the caller should pass, store, or return the thunk itself.
+
+Forwarding rules:
+
+```txt
+def inner(lazy value Int) Int = value
+
+def outer(lazy value Int) Int =
+    inner(value)
+```
+
+- Passing a lazy parameter to a normal parameter evaluates it first.
+- Passing a lazy parameter to another lazy parameter forwards the delayed expression.
+- Reading a lazy parameter in any other expression evaluates it immediately.
+
+If a callee needs one evaluation, bind the value explicitly:
+
+```txt
+def cached(lazy value Int) Int {
+    item = value
+    item + item
+}
+```
+
 Classes, enums, and singles can declare methods inline. Classes, shapes, enums, and singles can also attach behavior through top-level `impl` blocks. Shape bodies remain data-only, so shape methods must use `impl ShapeName { ... }`:
 
 ```txt

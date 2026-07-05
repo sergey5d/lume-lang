@@ -571,6 +571,31 @@ impl Path {
 }
 
 #[test]
+fn parses_lazy_function_and_method_parameters() {
+    let result = parse(
+        r#"
+def debug(lazy message Str) Unit = ()
+
+class Logger {}
+
+impl Logger {
+    def write(lazy message Str) Unit = ()
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function");
+    };
+    assert!(function.params[0].lazy);
+    let Item::Impl(block) = &program.items[2] else {
+        panic!("expected impl block");
+    };
+    assert!(block.methods[0].params[0].lazy);
+}
+
+#[test]
 fn rejects_ellipsis_constructor_parameter() {
     let result = parse(
         r#"

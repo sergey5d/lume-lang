@@ -1,0 +1,50 @@
+# EXPECT:
+# 3
+# 2
+# 3
+# 2
+
+class Counter {
+    hidden var value Int = 0
+}
+
+impl Counter {
+    def next() Int {
+        this.value := this.value + 1
+        this.value
+    }
+
+    def reset() Unit {
+        this.value := 0
+    }
+
+    def current() Int =
+        this.value
+}
+
+def twice(lazy value Int) Int =
+    value + value
+
+def inner(lazy value Int) Int =
+    value
+
+def outer(lazy value Int) Int =
+    inner(value) + inner(value)
+
+def cachedOnce(lazy value Int) Int {
+    cached Int = value
+    cached + cached
+}
+
+def main() Unit {
+    counter Counter = Counter()
+
+    println(twice(counter.next()))
+    println(counter.current())
+
+    counter.reset()
+    println(outer(counter.next()))
+
+    counter.reset()
+    println(cachedOnce(counter.next()))
+}

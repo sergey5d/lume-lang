@@ -41,27 +41,30 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         if !self.at(TokenKind::RParen) {
             loop {
+                let (lazy, variadic, modifier_start) = self.parse_param_modifiers();
                 let (name, start) = self.expect_identifier("expected parameter name")?;
                 let ty = if self.can_start_type_ref() {
                     Some(self.parse_type_ref()?)
                 } else {
                     None
                 };
-                let variadic = self.match_keyword(Keyword::Vararg);
+                if self.match_keyword(Keyword::Vararg) {
+                    self.error(
+                        "invalid_variadic_param",
+                        "vararg must appear before the parameter name, like 'vararg args [T]'",
+                        self.previous_span(),
+                    );
+                }
                 let span = start.cover(
-                    if variadic {
-                        Some(self.previous_span())
-                    } else {
-                        ty.as_ref().map(TypeRef::span)
-                    }
-                    .unwrap_or(start),
+                    ty.as_ref().map(TypeRef::span).unwrap_or(start),
                 );
                 params.push(Param {
                     name,
                     ty,
                     initializer: None,
                     variadic,
-                    span,
+                    lazy,
+                    span: modifier_start.unwrap_or(span).cover(span),
                 });
                 self.skip_newlines();
                 if !self.match_token(TokenKind::Comma) {
@@ -72,6 +75,24 @@ impl<'a> Parser<'a> {
         }
         self.consume(TokenKind::RParen, "expected ')' after parameters")?;
         Some(params)
+    }
+
+    pub(super) fn parse_param_modifiers(&mut self) -> (bool, bool, Option<crate::span::Span>) {
+        let mut lazy = false;
+        let mut variadic = false;
+        let mut start = None;
+        loop {
+            if self.match_keyword(Keyword::Lazy) {
+                start.get_or_insert(self.previous_span());
+                lazy = true;
+            } else if self.match_keyword(Keyword::Vararg) {
+                start.get_or_insert(self.previous_span());
+                variadic = true;
+            } else {
+                break;
+            }
+        }
+        (lazy, variadic, start)
     }
 
     pub(super) fn parse_optional_return_type(&mut self) -> Option<TypeRef> {

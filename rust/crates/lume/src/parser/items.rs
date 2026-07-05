@@ -663,6 +663,8 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         self.skip_newlines();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            let lazy = self.match_keyword(Keyword::Lazy);
+            let lazy_start = lazy.then(|| self.previous_span());
             let (name, start) = self.expect_identifier("expected constructor parameter name")?;
             let ty = if self.can_start_type_ref() {
                 Some(self.parse_type_ref()?)
@@ -687,7 +689,8 @@ impl<'a> Parser<'a> {
                 ty,
                 initializer,
                 variadic,
-                span: start.cover(end),
+                lazy,
+                span: lazy_start.unwrap_or(start).cover(end),
             });
             self.skip_newlines();
             if self.match_token(TokenKind::Comma) {

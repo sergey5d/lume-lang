@@ -783,6 +783,7 @@ fn java_library_method(
                 ty: param.ty.clone(),
                 initializer: None,
                 variadic: param.variadic,
+                lazy: false,
                 span,
             })
             .collect(),

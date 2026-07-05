@@ -181,6 +181,7 @@ pub struct Param {
     pub ty: Option<TypeRef>,
     pub initializer: Option<Expr>,
     pub variadic: bool,
+    pub lazy: bool,
     pub span: Span,
 }
 

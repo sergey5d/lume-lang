@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
 };
 
@@ -205,6 +205,7 @@ fn render_class(
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, false);
     push_fields(&mut out, ty, names);
+    push_class_field_initializer(&mut out, bundle, ty, names);
     push_class_constructors(&mut out, bundle, ty, names);
     push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     out.push_str("}\n");
@@ -1671,6 +1672,34 @@ fn emit_field_initializer_constructor_body(
         .emit_body()
 }
 
+fn push_class_field_initializer(
+    out: &mut String,
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    names: &JavaNames,
+) {
+    let Some(function) = ty.field_init.and_then(|id| bundle.ir.function(id)) else {
+        return;
+    };
+    let mut overrides = HashMap::new();
+    for param in &function.params {
+        let local = match function.locals.get(param.0) {
+            Some(local) if local.name == "this" => local,
+            _ => continue,
+        };
+        overrides.insert(local.id, "this".to_string());
+    }
+    let Some(body) = FunctionEmitter::new(bundle, function, names)
+        .with_capture_overrides(overrides)
+        .emit_body()
+    else {
+        return;
+    };
+    out.push('\n');
+    out.push_str("    private void __lume_field_init()");
+    out.push_str(&body);
+}
+
 fn push_class_constructors(
     out: &mut String,
     bundle: &BackendBundle,
@@ -1706,6 +1735,7 @@ fn push_explicit_class_constructor(
     out.push_str(&java_param_list(function, names, true));
     out.push(')');
     match FunctionEmitter::new(bundle, function, names)
+        .with_prologue_line(ty.field_init.map(|_| "this.__lume_field_init();"))
         .with_constructor_body()
         .emit_body()
     {
@@ -1716,10 +1746,15 @@ fn push_explicit_class_constructor(
 
 fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &JavaNames) {
     let name = java_type_name(&ty.name);
+    let has_field_init = ty.field_init.is_some();
     out.push('\n');
     out.push_str("    public ");
     out.push_str(&name);
-    out.push_str("() {}\n");
+    out.push_str("() {\n");
+    if has_field_init {
+        out.push_str("        this.__lume_field_init();\n");
+    }
+    out.push_str("    }\n");
     if ty.fields.is_empty() {
         return;
     }
@@ -1743,6 +1778,9 @@ fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &
             .join(", "),
     );
     out.push_str(") {\n");
+    if has_field_init {
+        out.push_str("        this.__lume_field_init();\n");
+    }
     for (index, field) in ty.fields.iter().enumerate() {
         out.push_str("        this.");
         out.push_str(&java_member_name(&field.name));
@@ -1765,7 +1803,11 @@ struct FunctionEmitter<'a> {
     constructor_body: bool,
     capture_overrides: HashMap<ir::LocalId, String>,
     inferred_local_types: HashMap<ir::LocalId, ir::Type>,
+    assignment_counts: HashMap<ir::LocalId, usize>,
+    captured_locals: HashSet<ir::LocalId>,
     control_var: String,
+    local_prefix: String,
+    prologue_lines: Vec<String>,
 }
 
 impl<'a> FunctionEmitter<'a> {
@@ -1778,8 +1820,13 @@ impl<'a> FunctionEmitter<'a> {
             constructor_body: false,
             capture_overrides: HashMap::new(),
             inferred_local_types: HashMap::new(),
+            assignment_counts: HashMap::new(),
+            captured_locals: HashSet::new(),
             control_var: "__block".to_string(),
+            local_prefix: String::new(),
+            prologue_lines: Vec::new(),
         };
+        emitter.index_local_usage();
         emitter.infer_local_types();
         emitter
     }
@@ -1797,6 +1844,42 @@ impl<'a> FunctionEmitter<'a> {
     fn with_control_var(mut self, control_var: impl Into<String>) -> Self {
         self.control_var = control_var.into();
         self
+    }
+
+    fn with_local_prefix(mut self, local_prefix: impl Into<String>) -> Self {
+        self.local_prefix = local_prefix.into();
+        self
+    }
+
+    fn with_prologue_line(mut self, line: Option<&str>) -> Self {
+        if let Some(line) = line {
+            self.prologue_lines.push(line.to_string());
+        }
+        self
+    }
+
+    fn index_local_usage(&mut self) {
+        for block in &self.function.blocks {
+            for statement in &block.statements {
+                let ir::StatementKind::Assign { target, value } = &statement.kind else {
+                    continue;
+                };
+                if let ir::Place::Local(local_id) = target {
+                    *self.assignment_counts.entry(*local_id).or_insert(0) += 1;
+                }
+                self.index_rvalue_usage(value);
+            }
+        }
+    }
+
+    fn index_rvalue_usage(&mut self, value: &ir::RValue) {
+        if let ir::RValue::Closure { captures, .. } = value {
+            for capture in captures {
+                if let Some(local_id) = operand_local_id(capture) {
+                    self.captured_locals.insert(local_id);
+                }
+            }
+        }
     }
 
     fn infer_local_types(&mut self) {
@@ -1838,6 +1921,11 @@ impl<'a> FunctionEmitter<'a> {
     fn emit_body(&self) -> Option<String> {
         let mut out = String::new();
         out.push_str(" {\n");
+        for line in &self.prologue_lines {
+            out.push_str("        ");
+            out.push_str(line);
+            out.push('\n');
+        }
         for local in &self.function.locals {
             if self.local_is_declared_elsewhere(local) {
                 continue;
@@ -1849,9 +1937,11 @@ impl<'a> FunctionEmitter<'a> {
             out.push_str("        ");
             out.push_str(&self.local_value_type(local_ty));
             out.push(' ');
-            out.push_str(&java_local_name(local));
-            out.push_str(" = ");
-            out.push_str(&java_default_value(local_ty));
+            out.push_str(&self.local_name(local));
+            if !self.local_can_be_effectively_final_capture(local) {
+                out.push_str(" = ");
+                out.push_str(&java_default_value(local_ty));
+            }
             out.push_str(";\n");
         }
 
@@ -1901,10 +1991,23 @@ impl<'a> FunctionEmitter<'a> {
     fn emit_statement(&self, out: &mut String, statement: &ir::Statement) -> Option<()> {
         match &statement.kind {
             ir::StatementKind::Assign { target, value } => {
+                let target_ty = self.place_type(target);
+                let value_ty = self.rvalue_type(value);
+                if target_ty.as_ref().is_some_and(is_java_void_type)
+                    && value_ty.as_ref().is_some_and(is_java_void_type)
+                    && rvalue_can_be_java_statement(value)
+                {
+                    out.push_str("                    ");
+                    out.push_str(&self.emit_rvalue(value)?);
+                    out.push_str(";\n");
+                    out.push_str("                    ");
+                    out.push_str(&self.emit_place(target)?);
+                    out.push_str(" = lume.core.LumeUnit.INSTANCE;\n");
+                    return Some(());
+                }
                 let mut value_expr = self.emit_rvalue(value)?;
-                if let Some(target_ty) = self.place_type(target) {
-                    value_expr =
-                        self.coerce_to_target_type(value_expr, self.rvalue_type(value), &target_ty);
+                if let Some(target_ty) = target_ty {
+                    value_expr = self.coerce_to_target_type(value_expr, value_ty, &target_ty);
                 }
                 out.push_str("                    ");
                 out.push_str(&self.emit_place(target)?);
@@ -2298,7 +2401,10 @@ impl<'a> FunctionEmitter<'a> {
             }
             [owner, method] if owner == "Int" && method == "parse" => {
                 let args = self.emit_operands(operands)?;
-                Some(format!("lume.core.LumeRuntime.parseInt({})", args.join(", ")))
+                Some(format!(
+                    "lume.core.LumeRuntime.parseInt({})",
+                    args.join(", ")
+                ))
             }
             [owner, method] if owner == "Float" && method == "parse" => {
                 let args = self.emit_operands(operands)?;
@@ -2566,15 +2672,14 @@ impl<'a> FunctionEmitter<'a> {
         function_id: ir::FunctionId,
         captures: &[ir::Operand],
     ) -> Option<String> {
-        if !captures.is_empty() {
-            return self.unsupported("closure value with captures");
-        }
         let function = self.bundle.ir.function(function_id)?;
+        let capture_overrides = self.closure_capture_overrides(function, captures)?;
+        let local_prefix = format!("lambda{}_", function_id.0);
         let params = function
             .params
             .iter()
             .filter_map(|param| function.locals.get(param.0))
-            .map(java_local_name)
+            .map(|local| format!("{local_prefix}{}", java_local_name(local)))
             .collect::<Vec<_>>();
         let params = match params.as_slice() {
             [] => "()".to_string(),
@@ -2582,9 +2687,31 @@ impl<'a> FunctionEmitter<'a> {
             _ => format!("({})", params.join(", ")),
         };
         let body = FunctionEmitter::new(self.bundle, function, self.names)
+            .with_capture_overrides(capture_overrides)
             .with_control_var(format!("__block_lambda_{}", function_id.0))
+            .with_local_prefix(local_prefix)
             .emit_body()?;
         Some(format!("{params} ->{body}"))
+    }
+
+    fn closure_capture_overrides(
+        &self,
+        function: &ir::Function,
+        captures: &[ir::Operand],
+    ) -> Option<HashMap<ir::LocalId, String>> {
+        let capture_locals = function
+            .locals
+            .iter()
+            .filter(|local| matches!(local.kind, ir::LocalKind::Capture))
+            .collect::<Vec<_>>();
+        if capture_locals.len() != captures.len() {
+            return None;
+        }
+        capture_locals
+            .iter()
+            .zip(captures)
+            .map(|(local, capture)| Some((local.id, self.emit_capture_initializer(capture)?)))
+            .collect()
     }
 
     fn emit_anonymous_interface(
@@ -3457,8 +3584,17 @@ impl<'a> FunctionEmitter<'a> {
         if matches!(local.kind, ir::LocalKind::Capture) && local.name == "this" {
             "this".to_string()
         } else {
-            java_local_name(local)
+            self.local_name(local)
         }
+    }
+
+    fn local_name(&self, local: &ir::Local) -> String {
+        format!("{}{}", self.local_prefix, java_local_name(local))
+    }
+
+    fn local_can_be_effectively_final_capture(&self, local: &ir::Local) -> bool {
+        self.captured_locals.contains(&local.id)
+            && self.assignment_counts.get(&local.id).copied().unwrap_or(0) == 1
     }
 
     fn local_is_declared_elsewhere(&self, local: &ir::Local) -> bool {
@@ -3473,6 +3609,16 @@ fn rvalue_can_be_java_statement(value: &ir::RValue) -> bool {
         value,
         ir::RValue::Call { .. } | ir::RValue::Construct { .. } | ir::RValue::Variant { .. }
     )
+}
+
+fn operand_local_id(operand: &ir::Operand) -> Option<ir::LocalId> {
+    match operand {
+        ir::Operand::Copy(place) | ir::Operand::Move(place) => match place.as_ref() {
+            ir::Place::Local(id) => Some(*id),
+            _ => None,
+        },
+        ir::Operand::Const(_) => None,
+    }
 }
 
 fn terminator_exits_case(kind: &ir::TerminatorKind) -> bool {
