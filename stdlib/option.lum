@@ -31,19 +31,9 @@ enum Option[T] {
         case Option.None => Err(error())
     }
 
-    def toResult[E](error E) Result[T, E] = match this {
-        case Some(value) => Ok(value)
-        case Option.None => Err(error)
-    }
-
     def toEither[L](left () -> L) Either[L, T] = match this {
         case Some(value) => Right(value)
         case Option.None => Left(left())
-    }
-
-    def toEither[L](left L) Either[L, T] = match this {
-        case Some(value) => Right(value)
-        case Option.None => Left(left)
     }
 
     def map[X](f (T) -> X) Option[X] = match this {

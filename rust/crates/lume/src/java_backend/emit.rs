@@ -1765,6 +1765,7 @@ struct FunctionEmitter<'a> {
     constructor_body: bool,
     capture_overrides: HashMap<ir::LocalId, String>,
     inferred_local_types: HashMap<ir::LocalId, ir::Type>,
+    control_var: String,
 }
 
 impl<'a> FunctionEmitter<'a> {
@@ -1777,6 +1778,7 @@ impl<'a> FunctionEmitter<'a> {
             constructor_body: false,
             capture_overrides: HashMap::new(),
             inferred_local_types: HashMap::new(),
+            control_var: "__block".to_string(),
         };
         emitter.infer_local_types();
         emitter
@@ -1789,6 +1791,11 @@ impl<'a> FunctionEmitter<'a> {
 
     fn with_capture_overrides(mut self, capture_overrides: HashMap<ir::LocalId, String>) -> Self {
         self.capture_overrides = capture_overrides;
+        self
+    }
+
+    fn with_control_var(mut self, control_var: impl Into<String>) -> Self {
+        self.control_var = control_var.into();
         self
     }
 
@@ -1849,16 +1856,24 @@ impl<'a> FunctionEmitter<'a> {
         }
 
         if !self.function.blocks.is_empty() {
-            out.push_str("        int __block = ");
+            out.push_str("        int ");
+            out.push_str(&self.control_var);
+            out.push_str(" = ");
             out.push_str(&self.function.entry.0.to_string());
             out.push_str(";\n");
             out.push_str("        while (true) {\n");
-            out.push_str("            switch (__block) {\n");
+            out.push_str("            switch (");
+            out.push_str(&self.control_var);
+            out.push_str(") {\n");
             for block in &self.function.blocks {
                 self.emit_block(&mut out, block)?;
             }
             out.push_str("                default:\n");
-            out.push_str("                    throw new IllegalStateException(\"unknown Lume block \" + __block);\n");
+            out.push_str(
+                "                    throw new IllegalStateException(\"unknown Lume block \" + ",
+            );
+            out.push_str(&self.control_var);
+            out.push_str(");\n");
             out.push_str("            }\n");
             out.push_str("        }\n");
         }
@@ -1914,7 +1929,9 @@ impl<'a> FunctionEmitter<'a> {
     fn emit_terminator(&self, out: &mut String, terminator: &ir::Terminator) -> Option<()> {
         match &terminator.kind {
             ir::TerminatorKind::Goto(target) => {
-                out.push_str("                    __block = ");
+                out.push_str("                    ");
+                out.push_str(&self.control_var);
+                out.push_str(" = ");
                 out.push_str(&target.0.to_string());
                 out.push_str(";\n");
                 Some(())
@@ -1933,11 +1950,15 @@ impl<'a> FunctionEmitter<'a> {
                 out.push_str("                    if (");
                 out.push_str(&condition_expr);
                 out.push_str(") {\n");
-                out.push_str("                        __block = ");
+                out.push_str("                        ");
+                out.push_str(&self.control_var);
+                out.push_str(" = ");
                 out.push_str(&then_block.0.to_string());
                 out.push_str(";\n");
                 out.push_str("                    } else {\n");
-                out.push_str("                        __block = ");
+                out.push_str("                        ");
+                out.push_str(&self.control_var);
+                out.push_str(" = ");
                 out.push_str(&else_block.0.to_string());
                 out.push_str(";\n");
                 out.push_str("                    }\n");
@@ -1955,13 +1976,17 @@ impl<'a> FunctionEmitter<'a> {
                     out.push_str("                    if (java.util.Objects.equals(__switch, ");
                     out.push_str(&self.emit_switch_value(&arm.value)?);
                     out.push_str(")) {\n");
-                    out.push_str("                        __block = ");
+                    out.push_str("                        ");
+                    out.push_str(&self.control_var);
+                    out.push_str(" = ");
                     out.push_str(&arm.target.0.to_string());
                     out.push_str(";\n");
                     out.push_str("                        break;\n");
                     out.push_str("                    }\n");
                 }
-                out.push_str("                    __block = ");
+                out.push_str("                    ");
+                out.push_str(&self.control_var);
+                out.push_str(" = ");
                 out.push_str(&default.0.to_string());
                 out.push_str(";\n");
                 Some(())
@@ -2052,7 +2077,7 @@ impl<'a> FunctionEmitter<'a> {
             ir::RValue::RecordUpdate { .. } => self.unsupported("shape update"),
             ir::RValue::Index { .. } => self.unsupported("index expression"),
             ir::RValue::TypeTest { .. } => self.unsupported("type test"),
-            ir::RValue::Closure { .. } => self.unsupported("closure value"),
+            ir::RValue::Closure { function, captures } => self.emit_closure(*function, captures),
         }
     }
 
@@ -2523,6 +2548,32 @@ impl<'a> FunctionEmitter<'a> {
             java_type_name(case_name),
             args.join(", ")
         ))
+    }
+
+    fn emit_closure(
+        &self,
+        function_id: ir::FunctionId,
+        captures: &[ir::Operand],
+    ) -> Option<String> {
+        if !captures.is_empty() {
+            return self.unsupported("closure value with captures");
+        }
+        let function = self.bundle.ir.function(function_id)?;
+        let params = function
+            .params
+            .iter()
+            .filter_map(|param| function.locals.get(param.0))
+            .map(java_local_name)
+            .collect::<Vec<_>>();
+        let params = match params.as_slice() {
+            [] => "()".to_string(),
+            [param] => param.clone(),
+            _ => format!("({})", params.join(", ")),
+        };
+        let body = FunctionEmitter::new(self.bundle, function, self.names)
+            .with_control_var(format!("__block_lambda_{}", function_id.0))
+            .emit_body()?;
+        Some(format!("{params} ->{body}"))
     }
 
     fn emit_anonymous_interface(
@@ -3159,6 +3210,18 @@ impl<'a> FunctionEmitter<'a> {
                 ir::Callee::Named { path } => self.named_runtime_call_return_type(path, args.len()),
                 _ => None,
             },
+            ir::RValue::Closure { function, .. } => {
+                let function = self.bundle.ir.function(*function)?;
+                Some(ir::Type::Function {
+                    params: function
+                        .params
+                        .iter()
+                        .filter_map(|param| function.locals.get(param.0))
+                        .map(|local| local.ty.clone())
+                        .collect(),
+                    ret: Box::new(function.return_ty.clone()),
+                })
+            }
             ir::RValue::Construct { ty, .. } => Some(ty.clone()),
             ir::RValue::Binary { op, left, right } => self.binary_value_type(*op, left, right),
             ir::RValue::List(items) => {
@@ -3239,6 +3302,13 @@ impl<'a> FunctionEmitter<'a> {
             && (source_ty.is_none() || source_is_wide_float(source_ty.as_ref()))
         {
             return format!("((float) ({expr}))");
+        }
+        if matches!(target_ty, ir::Type::Function { .. })
+            && source_ty.as_ref().is_some_and(|source| {
+                matches!(source, ir::Type::Function { .. } | ir::Type::Unknown)
+            })
+        {
+            return format!("(({}) ({expr}))", self.names.value_type(target_ty));
         }
         if source_ty.as_ref().is_some_and(|source| source != target_ty)
             && self.target_type_needs_reference_cast(target_ty)

@@ -174,7 +174,59 @@ Current behavior:
 - `Either[SourceL, ...]` can propagate only into `Either[TargetL, ...]` when `SourceL` is assignable to `TargetL`
 - wrapper-style error remapping during `try` is still not implemented
 
-### 9. Smarter Type Narrowing
+### 9. Lazy Method Parameters
+
+Current settled surface for lazy fallback/error values uses explicit thunks:
+
+```txt
+value = maybe.toResult(() -> makeError())
+fallback = maybe.toEither(() -> makeLeft())
+```
+
+Possible future ergonomic layer:
+
+```txt
+impl Option[T] {
+    def toResult[E](lazy error E) Result[T, E] = match this {
+        case Some(value) => Ok(value)
+        case None => Err(error)
+    }
+}
+
+value = maybe.toResult(makeError())
+```
+
+Possible lowering:
+
+```txt
+maybe.toResult(makeError())
+```
+
+could lower roughly to:
+
+```txt
+maybe.toResult(() -> makeError())
+```
+
+Motivation:
+- fallback/error values often should not be evaluated on the success path
+- explicit `() -> ...` is honest but can become noisy for common APIs like `Option.toResult`
+- a declaration-site marker keeps call sites clean while making laziness part of the API contract
+
+Design questions:
+- syntax: `lazy error E`, `error lazy E`, `error => E`, or another marker
+- semantics: whether each read of `error` re-evaluates the expression, or whether it is evaluated at most once and cached
+- whether lazy parameters are allowed only on methods/functions, or also constructors
+- whether lazy parameters may be variadic or defaulted; likely no at first
+- whether taking a lazy parameter as a first-class value requires explicit conversion to `() -> E`
+- how diagnostics should explain side effects when a lazy argument is not evaluated
+
+Current leaning:
+- keep explicit thunks as the core model
+- consider lazy parameters only as syntax sugar over hidden zero-argument function parameters
+- if the keyword is `lazy`, strongly consider evaluating at most once, because users may read "lazy" as memoized rather than "by-name"
+
+### 10. Smarter Type Narrowing
 
 Later improvements could include:
 - better narrowing after `is`
@@ -211,7 +263,7 @@ Main design question:
 - whether this should stay very local and conservative
 - or whether the checker should learn more control-flow-sensitive narrowing over time
 
-### 10. Reified Generic Follow-Ups
+### 11. Reified Generic Follow-Ups
 
 Settled syntax lives in `syntax.md`: generic functions and methods may mark
 individual type parameters as `reified`, which lowers to hidden `Type[A]`
@@ -280,7 +332,7 @@ Still rejected:
 - automatic reification of every generic parameter
 - reified type parameters on classes, shapes, enums, annotations, or singles
 
-### 11. Deferred Cleanup
+### 12. Deferred Cleanup
 
 `defer` is implemented as callable-scoped cleanup.
 
@@ -303,7 +355,7 @@ Open questions:
 - whether runtime errors should also run pending defers
 - whether future async/concurrency features need a stronger cleanup model
 
-### 12. Flow Control Composition
+### 13. Flow Control Composition
 
 Possible future surface:
 
@@ -333,7 +385,7 @@ Open questions:
 - how values produced inside one flow become visible to later composed flows
 - whether `&` should sequence unconditionally, short-circuit, or model dependency composition
 
-### 13. Explicit Tuple Projection
+### 14. Explicit Tuple Projection
 
 Settled rule:
 - tuple to known shape is allowed when the target shape is known

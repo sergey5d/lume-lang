@@ -2417,6 +2417,74 @@ def main() Unit {
     }
 
     #[test]
+    fn preserves_lazy_option_to_result_in_generated_java() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!(
+                "skipping lazy Option.toResult Java test because a JDK tool is not available"
+            );
+            return;
+        }
+
+        let temp = temp_path("lume-java-lazy-option-to-result");
+        let source = temp.join("lazy_option_to_result.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/lazyoption
+
+def fail() Str {
+    println("eager")
+    "bad"
+}
+
+def main() Unit {
+    maybe Option[Int] = Some(5)
+    result Result[Int, Str] = maybe.toResult(() -> fail())
+
+    match result {
+        case Ok(value) => println("ok")
+        case Err(error) => println(error)
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty());
+
+        let module = fs::read_to_string(out.join("demo/lazyoption/LazyoptionModule.java"))
+            .expect("read module");
+        assert!(module.contains(".toResult("));
+        assert!(module.contains("java.util.function.Supplier"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.lazyoption.LazyoptionMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "ok\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn emits_structured_java_for_simple_enum_match_methods() {
         let temp = temp_path("lume-java-enum-match-methods");
         let source = temp.join("maybe.lum");
