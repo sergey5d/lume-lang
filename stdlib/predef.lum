@@ -1,6 +1,10 @@
 # PRELUDE_SKIP
 # INTERPRETER
 
+def panic(vararg value [Any]) Never = panic()
+
+def assert(condition Bool, vararg message [Str]) Unit = assert(condition)
+
 def ensure[E](condition Bool, lazy error E) Result[Unit, E] =
     if condition {
         Ok(())

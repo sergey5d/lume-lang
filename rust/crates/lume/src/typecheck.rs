@@ -524,7 +524,7 @@ impl AmbientInfo {
         }
 
         if let Some(os) = ambient.singles.get("OS") {
-            for builtin in ["print", "println", "printf", "panic", "assert"] {
+            for builtin in ["print", "println", "printf"] {
                 if let Some(sigs) = os.methods.get(builtin) {
                     ambient.functions.insert(builtin.to_string(), sigs.clone());
                 }
@@ -6761,7 +6761,6 @@ impl<'a> Checker<'a> {
     fn is_builtin_panic_call(&self, callee: &Expr) -> bool {
         match callee {
             Expr::Identifier { name, .. } => name == "panic",
-            Expr::Member { receiver, name, .. } => name == "panic" && path_starts_with_os(receiver),
             _ => false,
         }
     }
@@ -6769,9 +6768,6 @@ impl<'a> Checker<'a> {
     fn is_builtin_assert_call(&self, callee: &Expr) -> bool {
         match callee {
             Expr::Identifier { name, .. } => name == "assert",
-            Expr::Member { receiver, name, .. } => {
-                name == "assert" && path_starts_with_os(receiver)
-            }
             _ => false,
         }
     }
@@ -9675,8 +9671,6 @@ def main() Unit {
 def main() Unit {
     assert(1 + 2 == 3)
     assert(true, "still true")
-    OS.assert(true)
-    OS.assert(true, "still true")
 }
 "#,
         );

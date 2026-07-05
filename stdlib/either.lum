@@ -19,7 +19,7 @@ enum Either[L, R] {
     def isRight() Bool = !this.isLeft()
 
     def expectRight() R = match this {
-       case Left(_) => OS.panic("Either has no right value")
+       case Left(_) => panic("Either has no right value")
        case Right(value) => value
     }
 
@@ -27,7 +27,7 @@ enum Either[L, R] {
 
     def expectLeft() L = match this {
        case Left(value) => value
-       case Right(_) => OS.panic("Either has no left value")
+       case Right(_) => panic("Either has no left value")
     }
 
     def getOr(lazy defaultValue R) R = match this {

@@ -3822,11 +3822,6 @@ impl<'a> Interpreter<'a> {
             "print" => self.invoke_print(false, args, span),
             "println" => self.invoke_print(true, args, span),
             "printf" => self.invoke_printf(args, span),
-            "panic" => {
-                let message = self.render_panic_message(&args, span)?;
-                Err(self.runtime_error(span, message))
-            }
-            "assert" => self.invoke_assert(args, span),
             _ => Err(self.runtime_error(span, format!("unknown OS method '{}'", method))),
         }
     }
@@ -7108,7 +7103,7 @@ $name
             def main() Unit {
                 split = "BTC-USD-5.0".split("-")
                 assert(split.size() == 3)
-                OS.assert(split.size() == 3, "split should have 3 parts")
+                assert(split.size() == 3, "split should have 3 parts")
                 OS.println("ok")
             }
             "#,

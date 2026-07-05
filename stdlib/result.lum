@@ -19,11 +19,11 @@ enum Result[T, E] {
 
     def orPanic() T = match this {
         case Ok(value) => value
-        case Err(_) => OS.panic("Result has no success value")
+        case Err(_) => panic("Result has no success value")
     }
 
     def getError() E = match this {
-        case Ok(_) => OS.panic("Result has no error value")
+        case Ok(_) => panic("Result has no error value")
         case Err(error) => error
     }
 

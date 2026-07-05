@@ -16,7 +16,7 @@ enum Option[T] {
 
     def orPanic() T = match this {
         case Some(value) => value
-        case Option.None => OS.panic("Option has no value")
+        case Option.None => panic("Option has no value")
     }
 
     def getOr(lazy defaultValue T) T = match this {

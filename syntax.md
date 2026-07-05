@@ -344,14 +344,19 @@ Console printing is available through `OS`:
 OS.print("hello")
 OS.println("hello")
 OS.printf("value=%d\n", 42)
-OS.panic("boom")
-OS.assert(ready)
-OS.assert(ready, "not ready")
 OS.stdout.println("hello")
 OS.stderr.println("oops")
 ```
 
 `OS.stdout` and `OS.stderr` implement `Printer`.
+
+`panic(...)` and `assert(...)` are prelude functions, not `OS` methods:
+
+```txt
+panic("boom")
+assert(ready)
+assert(ready, "not ready")
+```
 
 ## Use
 
@@ -382,7 +387,7 @@ Meaning:
 - `use module/sub/SingletonName/{printLn as printN, print}`
   use selected visible singleton methods from a singleton
 
-Built-in `OS` methods are available implicitly in every file, so `print(...)`, `println(...)`, `printf(...)`, `panic(...)`, and `assert(...)` work without writing `use OS/*`. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
+Built-in `OS` methods are available implicitly in every file, so `print(...)`, `println(...)`, and `printf(...)` work without writing `use OS/*`. Prelude functions like `panic(...)`, `assert(...)`, and `ensure(...)` are also available in every file. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
 
 ## Top-Level Declarations
 
@@ -1820,7 +1825,7 @@ expect {
 `expect` is statement-only and does not support `else`; use `let ... else`
 when you want an explicit fallback path.
 
-Use the runtime/prelude `assert(...)` method for plain boolean assertions:
+Use the runtime/prelude `assert(...)` function for plain boolean assertions:
 
 ```txt
 assert(split.size() == 3)

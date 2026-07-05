@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# panic: boom 7 at [0-9]+:[0-9]+
+# unknown_member at .*: type 'OS' has no field or method 'panic'
 
 def main() Unit {
     OS.panic("boom ", 7)
