@@ -1,8 +1,10 @@
 module lume/http/javalin
 
 use io/javalin/Javalin
-use io/javalin/http/{Context, Handler}
+use io/javalin/http/{Context as JavalinRawContext, Handler}
+use lume/http/{Context as HttpContext}
 use lume/http/javalin/runtime/HttpResponder
+use lume/http/javalin/runtime/{JavalinContext as JavalinRuntimeContext}
 
 annotation Controller {
     path Str = ""
@@ -35,6 +37,27 @@ hidden class JavalinBackend {
     port Int32
 }
 
+hidden class JavalinHttpContext with HttpContext {
+    hidden raw JavalinRawContext
+}
+
+impl JavalinHttpContext {
+    new {
+        raw JavalinRawContext
+    } {
+        this.raw = raw
+    }
+
+    def queryParam(name Str) Option[Str] =
+        JavalinRuntimeContext.queryParam(this.raw, name)
+
+    def header(name Str) Option[Str] =
+        JavalinRuntimeContext.header(this.raw, name)
+
+    def body() Str =
+        this.raw.body()
+}
+
 impl JavalinBackend {
     new {
         port Int32
@@ -45,11 +68,11 @@ impl JavalinBackend {
 
     def get(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.get(path, Handler {
-            def handle(ctx Context) Unit {
+            def handle(ctx JavalinRawContext) Unit {
                 if method.params().size() == 0 {
                     HttpResponder.render(ctx, method.invoke(controller), contentType)
                 } else {
-                    HttpResponder.render(ctx, method.invoke(controller, ctx), contentType)
+                    HttpResponder.render(ctx, method.invoke(controller, JavalinHttpContext(ctx)), contentType)
                 }
             }
         })
@@ -59,7 +82,7 @@ impl JavalinBackend {
 
     def post(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.post(path, Handler {
-            def handle(ctx Context) Unit {
+            def handle(ctx JavalinRawContext) Unit {
                 HttpResponder.render(ctx, method.invoke(controller, ctx.body()), contentType)
             }
         })

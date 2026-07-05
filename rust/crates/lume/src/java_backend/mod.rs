@@ -206,6 +206,7 @@ fn collect_java_external_symbols_from_import(
     let package = import.path.replace('/', ".");
     for symbol in &import.symbols {
         let qualified_name = format!("{package}.{}", symbol.name);
+        let lume_name = symbol.alias.clone().unwrap_or_else(|| symbol.name.clone());
         if discovered
             .symbols
             .iter()
@@ -215,7 +216,7 @@ fn collect_java_external_symbols_from_import(
         }
         discovered.symbols.push(JavaExternalSymbol {
             module_path: import.path.clone(),
-            lume_name: symbol.name.clone(),
+            lume_name,
             qualified_name,
             source_path: source_path.display().to_string(),
             span: symbol.span,
@@ -1284,6 +1285,9 @@ fn parse_javap_class(
     }
     if lume_generated && kind == TypeKind::Record {
         constructors.clear();
+    }
+    if lume_generated {
+        methods.retain(|method| method.name != "runtimeType");
     }
     if kind == TypeKind::Record && !fields.is_empty() {
         let field_names = fields

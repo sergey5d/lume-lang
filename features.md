@@ -146,9 +146,24 @@ Current leaning:
 - global functions are probably useful annotation targets for routing, tests, effects, permissions, and generated bindings
 - immutable top-level constants may be useful too, but annotation metadata should describe stable declarations, not changing state
 
+### 8. Primitive Type Definitions
+
+Primitive types such as `Int`, `Float`, `Str`, `Rune`, `Bool`, and `Unit` should eventually have their public companion/static-style signatures defined in Lume source instead of being scattered through checker, interpreter, and backend special cases.
+
+Possible direction:
+- define core/predef singleton-style surfaces such as `IntExt`, `FloatExt`, `StrExt`, `RuneExt`, and `BoolExt`
+- keep the user-facing syntax as `Int.parse(...)`, `Float.parse(...)`, etc.
+- lower or resolve those user-facing primitive companion calls to the corresponding Lume-defined implementation
+- keep tiny native bridges only where the platform boundary requires it, such as parsing through Java exceptions
+
+Goal:
+- make primitive APIs discoverable in ordinary Lume files
+- let typechecking, docs, and Java generation share the same signatures
+- reduce ad-hoc hardcoded primitive method knowledge in compiler phases
+
 ## Longer-Term Ideas
 
-### 8. Result / Either Style Error Values
+### 9. Result / Either Style Error Values
 
 `Option`, `Result`, `Either`, and `try`-based short-circuit propagation now exist.
 
@@ -174,7 +189,7 @@ Current behavior:
 - `Either[SourceL, ...]` can propagate only into `Either[TargetL, ...]` when `SourceL` is assignable to `TargetL`
 - wrapper-style error remapping during `try` is still not implemented
 
-### 9. Lazy Method Parameters
+### 10. Lazy Method Parameters
 
 Current settled surface for lazy fallback/error values uses explicit thunks:
 

@@ -467,14 +467,19 @@ fn load_module_with_options(
                     )
                 })?
             } else {
-                resolve_imported_symbol(child, symbol.name.as_str(), same_module).ok_or_else(
-                    || {
+                resolve_imported_symbol(child, symbol.name.as_str(), same_module)
+                    .or_else(|| {
+                        symbol
+                            .alias
+                            .as_deref()
+                            .and_then(|alias| resolve_imported_symbol(child, alias, same_module))
+                    })
+                    .ok_or_else(|| {
                         format!(
                             "use '{}' has no visible symbol '{}'",
                             import.path, symbol.name
                         )
-                    },
-                )?
+                    })?
             };
 
             if module.imports.contains_key(&local_name) {

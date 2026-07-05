@@ -5,6 +5,7 @@ plugins {
 val repoRoot = layout.projectDirectory.dir("../..")
 val localLume = repoRoot.file("rust/target/debug/lume")
 val lumeCoreJar = repoRoot.file("lume/core/build/libs/lume-core.jar")
+val lumeHttpJar = repoRoot.file("lume/http/build/libs/lume-http.jar")
 val lumeHttpJavalinJar = repoRoot.file("lume/http/javalin/build/libs/lume-http-javalin.jar")
 val selectedLumeExecutable = providers.environmentVariable("LUME")
     .orElse(localLume.asFile.absolutePath)
@@ -61,12 +62,12 @@ lumeJava {
     // The plugin itself defaults to installed `lume`; this sample points at the
     // checkout compiler unless LUME overrides it.
     lumeExecutable.set(selectedLumeExecutable)
-    runtimeClasspath.from(lumeCoreJar, lumeHttpJavalinJar)
+    runtimeClasspath.from(lumeCoreJar, lumeHttpJar, lumeHttpJavalinJar)
 }
 
 tasks.named("generateLumeJava") {
     dependsOn(buildLocalLumeCore, buildLocalLumeHttpJavalin)
-    inputs.files(lumeCoreJar, lumeHttpJavalinJar)
+    inputs.files(lumeCoreJar, lumeHttpJar, lumeHttpJavalinJar)
 }
 
 tasks.named("compileJava") {

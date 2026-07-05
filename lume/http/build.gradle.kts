@@ -2,22 +2,13 @@ plugins {
     java
 }
 
-val repoRoot = layout.projectDirectory.dir("../../..")
+val repoRoot = layout.projectDirectory.dir("../..")
 val coreJar = repoRoot.file("lume/core/build/libs/lume-core.jar")
-val httpJar = repoRoot.file("lume/http/build/libs/lume-http.jar")
-
-dependencies {
-    implementation(files(coreJar))
-    implementation(files(httpJar))
-    implementation("io.javalin:javalin:6.7.0")
-    runtimeOnly("org.slf4j:slf4j-simple:2.0.17")
-}
-
-val httpSource = layout.projectDirectory.file("src/main/lume/lume/http/javalin/HttpServer.lum")
+val httpSource = layout.projectDirectory.file("src/main/lume/lume/http/Http.lum")
 val httpLumeSources = layout.projectDirectory.dir("src/main/lume")
 val generatedLumeJava = layout.buildDirectory.dir("generated/sources/lume/java")
-val runtimeJavaClasses = layout.buildDirectory.dir("classes/java/httpRuntime")
 val lumeCompilerSources = repoRoot.dir("rust/crates/lume/src")
+val lumeCompilerManifest = repoRoot.file("rust/Cargo.toml")
 val lumeCompilerBinary = repoRoot.file("rust/target/debug/lume")
 val lumeExecutableOverride = providers.environmentVariable("LUME")
 val currentGradleExecutable = providers.provider {
@@ -30,6 +21,10 @@ val currentGradleExecutable = providers.provider {
 }
 val gradleExecutable = providers.environmentVariable("GRADLE").orElse(currentGradleExecutable)
 
+dependencies {
+    implementation(files(coreJar))
+}
+
 sourceSets {
     main {
         java.srcDir(generatedLumeJava)
@@ -37,7 +32,7 @@ sourceSets {
 }
 
 val buildLocalLumeCore = tasks.register<Exec>("buildLocalLumeCore") {
-    description = "Builds the repo-local Lume core jar used by Lume HTTP Javalin."
+    description = "Builds the repo-local Lume core jar used by Lume HTTP."
     group = "build"
 
     commandLine(
@@ -53,42 +48,6 @@ val buildLocalLumeCore = tasks.register<Exec>("buildLocalLumeCore") {
     outputs.file(coreJar)
 }
 
-val buildLocalLumeHttp = tasks.register<Exec>("buildLocalLumeHttp") {
-    description = "Builds the repo-local Lume HTTP jar used by Lume HTTP Javalin."
-    group = "build"
-    dependsOn(buildLocalLumeCore)
-
-    commandLine(
-        gradleExecutable.get(),
-        "-p",
-        repoRoot.dir("lume/http").asFile.absolutePath,
-        "jar"
-    )
-
-    inputs.file(repoRoot.file("lume/http/build.gradle.kts"))
-    inputs.file(repoRoot.file("lume/http/settings.gradle.kts"))
-    inputs.files(fileTree(repoRoot.dir("lume/http/src")))
-    outputs.file(httpJar)
-}
-
-val buildLumeCompiler = tasks.register<Exec>("buildLumeCompiler") {
-    description = "Builds the repo-local Lume compiler unless LUME points to an installed compiler."
-    group = "build"
-    onlyIf { !lumeExecutableOverride.isPresent }
-
-    inputs.files(fileTree(lumeCompilerSources))
-    outputs.file(lumeCompilerBinary)
-
-    commandLine(
-        "cargo",
-        "build",
-        "--manifest-path",
-        repoRoot.file("rust/Cargo.toml").asFile.absolutePath,
-        "-p",
-        "lume"
-    )
-}
-
 val cleanGeneratedLumeJava = tasks.register("cleanGeneratedLumeJava") {
     outputs.dir(generatedLumeJava)
 
@@ -99,25 +58,31 @@ val cleanGeneratedLumeJava = tasks.register("cleanGeneratedLumeJava") {
     }
 }
 
-val compileHttpRuntimeJava = tasks.register<JavaCompile>("compileHttpRuntimeJava") {
-    description = "Compiles Java runtime helpers used by Lume HTTP Javalin during generation."
+val buildLumeCompiler = tasks.register<Exec>("buildLumeCompiler") {
+    description = "Builds the repo-local Lume compiler unless LUME points to an installed compiler."
     group = "build"
-    dependsOn(buildLocalLumeCore, buildLocalLumeHttp)
+    onlyIf { !lumeExecutableOverride.isPresent }
 
-    source = fileTree(layout.projectDirectory.dir("src/main/java"))
-    classpath = configurations.compileClasspath.get()
-    destinationDirectory.set(runtimeJavaClasses)
+    inputs.file(lumeCompilerManifest)
+    inputs.files(fileTree(lumeCompilerSources))
+    outputs.file(lumeCompilerBinary)
+
+    commandLine(
+        "cargo",
+        "build",
+        "--manifest-path",
+        lumeCompilerManifest.asFile.absolutePath,
+        "-p",
+        "lume"
+    )
 }
 
-val generateHttpJavalinJava = tasks.register<Exec>("generateHttpJavalinJava") {
-    description = "Generates Java sources for Lume HTTP Javalin."
+val generateHttpJava = tasks.register<Exec>("generateHttpJava") {
+    description = "Generates Java sources for the base Lume HTTP API."
     group = "build"
-    dependsOn(buildLocalLumeCore, buildLocalLumeHttp, buildLumeCompiler, cleanGeneratedLumeJava, compileHttpRuntimeJava)
+    dependsOn(buildLocalLumeCore, buildLumeCompiler, cleanGeneratedLumeJava)
 
     inputs.files(fileTree(httpLumeSources))
-    inputs.file(coreJar)
-    inputs.file(httpJar)
-    inputs.files(fileTree(layout.projectDirectory.dir("src/main/java")))
     inputs.files(fileTree(lumeCompilerSources))
     inputs.property("lumeExecutable", lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath)
     if (!lumeExecutableOverride.isPresent) {
@@ -128,10 +93,6 @@ val generateHttpJavalinJava = tasks.register<Exec>("generateHttpJavalinJava") {
     doFirst {
         val outputDir = generatedLumeJava.get().asFile
         val lumeExecutable = lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath
-        val generationClasspath = files(
-            configurations.compileClasspath.get(),
-            runtimeJavaClasses.get().asFile
-        ).asPath
 
         commandLine(
             lumeExecutable,
@@ -140,17 +101,17 @@ val generateHttpJavalinJava = tasks.register<Exec>("generateHttpJavalinJava") {
             "--out",
             outputDir.absolutePath,
             "--classpath",
-            generationClasspath
+            coreJar.asFile.absolutePath
         )
     }
 }
 
 tasks.named<JavaCompile>("compileJava") {
-    dependsOn(generateHttpJavalinJava)
+    dependsOn(generateHttpJava)
 }
 
 tasks.named<Jar>("jar") {
-    archiveBaseName.set("lume-http-javalin")
+    archiveBaseName.set("lume-http")
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from({
         configurations.runtimeClasspath.get().map { dependency ->
