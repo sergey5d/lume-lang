@@ -1,24 +1,20 @@
 package lume.db;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.SQLException;
+
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 
 import lume.core.LumeList;
 import lume.core.LumeUnit;
 import lume.core.Result;
 
 public final class JdbcDatabase implements JdbcRunner {
-    private final String url;
-    private final String user;
-    private final String password;
-    private final Boolean hasCredentials;
+    private final HikariDataSource dataSource;
 
-    private JdbcDatabase(String url, String user, String password, Boolean hasCredentials) {
-        this.url = url;
-        this.user = user;
-        this.password = password;
-        this.hasCredentials = hasCredentials;
+    private JdbcDatabase(HikariDataSource dataSource) {
+        this.dataSource = dataSource;
     }
 
     public static Result<JdbcDatabase, DbError> connect(String url) {
@@ -35,11 +31,33 @@ public final class JdbcDatabase implements JdbcRunner {
         String password,
         Boolean hasCredentials
     ) {
-        var database = new JdbcDatabase(url, user, password, hasCredentials);
-        try (var ignored = database.openConnection()) {
-            return Jdbc.ok(database);
+        var config = new HikariConfig();
+        config.setJdbcUrl(url);
+        config.setPoolName("lume-db");
+        if (hasCredentials) {
+            config.setUsername(user);
+            config.setPassword(password);
+        }
+
+        HikariDataSource dataSource = null;
+        try {
+            dataSource = new HikariDataSource(config);
+            var database = new JdbcDatabase(dataSource);
+            try (var ignored = dataSource.getConnection()) {
+                return Jdbc.ok(database);
+            }
         } catch (SQLException err) {
+            closeQuietly(dataSource);
             return Jdbc.err(err);
+        } catch (RuntimeException err) {
+            closeQuietly(dataSource);
+            return new Result.Err<>(DbError.from(err));
+        }
+    }
+
+    private static void closeQuietly(HikariDataSource dataSource) {
+        if (dataSource != null) {
+            dataSource.close();
         }
     }
 
@@ -82,14 +100,12 @@ public final class JdbcDatabase implements JdbcRunner {
     }
 
     public Result<LumeUnit, DbError> close() {
+        dataSource.close();
         return Jdbc.ok(LumeUnit.INSTANCE);
     }
 
     Connection openConnection() throws SQLException {
-        if (hasCredentials) {
-            return DriverManager.getConnection(url, user, password);
-        }
-        return DriverManager.getConnection(url);
+        return dataSource.getConnection();
     }
 
     @Override

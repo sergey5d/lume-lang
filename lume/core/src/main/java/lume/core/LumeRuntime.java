@@ -38,6 +38,22 @@ public final class LumeRuntime {
         return new Option.None<>();
     }
 
+    public static Option<Long> parseInt(String text) {
+        try {
+            return optionSome(Long.parseLong(text));
+        } catch (NumberFormatException err) {
+            return optionNone();
+        }
+    }
+
+    public static Option<Double> parseFloat(String text) {
+        try {
+            return optionSome(Double.parseDouble(text));
+        } catch (NumberFormatException err) {
+            return optionNone();
+        }
+    }
+
     public static Boolean extractSuccessIsSet(Object value) {
         if (value instanceof Option<?> option) {
             return option.isDefined();

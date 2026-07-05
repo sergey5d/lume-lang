@@ -26,6 +26,7 @@ val gradleExecutable = providers.environmentVariable("GRADLE").orElse(currentGra
 
 dependencies {
     api(files(coreJar))
+    implementation("com.zaxxer:HikariCP:7.1.0")
 }
 
 sourceSets {
@@ -87,7 +88,7 @@ val compileJdbcJava = tasks.register<JavaCompile>("compileJdbcJava") {
     dependsOn(buildLocalLumeCore)
 
     source(fileTree(jdbcJava))
-    classpath = files(coreJar)
+    classpath = files(coreJar) + configurations.compileClasspath.get()
     destinationDirectory.set(jdbcClasses)
 }
 
@@ -110,7 +111,8 @@ val generateDbJava = tasks.register<Exec>("generateDbJava") {
         val lumeExecutable = lumeExecutableOverride.orNull ?: lumeCompilerBinary.asFile.absolutePath
         val generationClasspath = files(
             coreJar,
-            jdbcClasses
+            jdbcClasses,
+            configurations.runtimeClasspath.get()
         ).asPath
 
         commandLine(

@@ -2485,6 +2485,66 @@ def main() Unit {
     }
 
     #[test]
+    fn emits_predef_parse_calls_for_java_backend() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping predef parse Java test because a JDK tool is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-predef-parse");
+        let source = temp.join("predef_parse.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/predefparse
+
+def main() Unit {
+    parsedInt Option[Int] = Int.parse("41")
+    parsedFloat Option[Float] = Float.parse("1.5")
+
+    println(parsedInt.orPanic() + 1)
+    println(parsedFloat.orPanic() + 0.5)
+    println(Int.parse("oops").isEmpty())
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty());
+
+        let module = fs::read_to_string(out.join("demo/predefparse/PredefparseModule.java"))
+            .expect("read module");
+        assert!(module.contains("lume.core.LumeRuntime.parseInt("));
+        assert!(module.contains("lume.core.LumeRuntime.parseFloat("));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.predefparse.PredefparseMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "42\n2.0\ntrue\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn emits_structured_java_for_simple_enum_match_methods() {
         let temp = temp_path("lume-java-enum-match-methods");
         let source = temp.join("maybe.lum");

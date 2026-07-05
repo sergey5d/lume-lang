@@ -2296,6 +2296,17 @@ impl<'a> FunctionEmitter<'a> {
             [owner] if owner == "Set" && operands.is_empty() => {
                 Some("lume.core.LumeSet.empty()".to_string())
             }
+            [owner, method] if owner == "Int" && method == "parse" => {
+                let args = self.emit_operands(operands)?;
+                Some(format!("lume.core.LumeRuntime.parseInt({})", args.join(", ")))
+            }
+            [owner, method] if owner == "Float" && method == "parse" => {
+                let args = self.emit_operands(operands)?;
+                Some(format!(
+                    "lume.core.LumeRuntime.parseFloat({})",
+                    args.join(", ")
+                ))
+            }
             [owner] if self.names.is_java_type(owner) => {
                 let params = self
                     .constructor_param_specs(owner, operands)
@@ -2954,6 +2965,18 @@ impl<'a> FunctionEmitter<'a> {
                 name: "Set".to_string(),
                 args: vec![ir::Type::Unknown],
             }),
+            [owner, method] if owner == "Int" && method == "parse" && arg_len == 1 => {
+                Some(ir::Type::Named {
+                    name: "Option".to_string(),
+                    args: vec![ir::Type::Int],
+                })
+            }
+            [owner, method] if owner == "Float" && method == "parse" && arg_len == 1 => {
+                Some(ir::Type::Named {
+                    name: "Option".to_string(),
+                    args: vec![ir::Type::Float],
+                })
+            }
             [owner] if self.names.is_java_type(owner) || self.is_lume_constructible_type(owner) => {
                 Some(ir::Type::Named {
                     name: owner.clone(),
