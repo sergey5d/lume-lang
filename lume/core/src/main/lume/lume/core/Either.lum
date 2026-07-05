@@ -41,6 +41,16 @@ impl Either[L, R] {
         case Right(value) => value
     }
 
+    def toOption() Option[R] = match this {
+        case Left(_) => None
+        case Right(value) => Some(value)
+    }
+
+    def toResult() Result[R, L] = match this {
+        case Left(value) => Err(value)
+        case Right(value) => Ok(value)
+    }
+
     def expectLeft() L = match this {
         case Left(value) => value
         case Right(_) => panic("expected Either.Left")

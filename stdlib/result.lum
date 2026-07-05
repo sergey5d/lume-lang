@@ -32,6 +32,16 @@ enum Result[T, E] {
         case Err(_) => defaultValue
     }
 
+    def toOption() Option[T] = match this {
+        case Ok(value) => Some(value)
+        case Err(_) => None()
+    }
+
+    def toEither() Either[E, T] = match this {
+        case Ok(value) => Right(value)
+        case Err(error) => Left(error)
+    }
+
     def map[X](f (T) -> X) Result[X, E] = match this {
         case Ok(value) => Ok(f(value))
         case Err(error) => Err(error)

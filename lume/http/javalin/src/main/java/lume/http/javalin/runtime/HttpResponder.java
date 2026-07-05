@@ -49,7 +49,7 @@ public final class HttpResponder {
 
         ctx.status(500);
         ctx.contentType(DEFAULT_SHAPE_CONTENT_TYPE);
-        ctx.result(JsonText.error(String.valueOf(value)));
+        ctx.result(jsonError(String.valueOf(value)));
     }
 
     private static void renderResponseShape(Context ctx, Object value, int fallbackStatus, String fallbackContentType) {
@@ -120,5 +120,40 @@ public final class HttpResponder {
 
     private static String contentTypeOr(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String jsonError(String message) {
+        return "{\"error\":" + jsonQuote(message) + "}";
+    }
+
+    private static String jsonQuote(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return "\"" + escapeJson(value) + "\"";
+    }
+
+    private static String escapeJson(String value) {
+        var out = new StringBuilder(value.length() + 16);
+        for (var index = 0; index < value.length(); index++) {
+            var ch = value.charAt(index);
+            switch (ch) {
+                case '"' -> out.append("\\\"");
+                case '\\' -> out.append("\\\\");
+                case '\b' -> out.append("\\b");
+                case '\f' -> out.append("\\f");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                case '\t' -> out.append("\\t");
+                default -> {
+                    if (ch < 0x20) {
+                        out.append(String.format("\\u%04x", (int) ch));
+                    } else {
+                        out.append(ch);
+                    }
+                }
+            }
+        }
+        return out.toString();
     }
 }

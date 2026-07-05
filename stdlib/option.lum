@@ -26,6 +26,26 @@ enum Option[T] {
 
     def getOrElse(defaultValue T) T = this.getOr(defaultValue)
 
+    def toResult[E](error () -> E) Result[T, E] = match this {
+        case Some(value) => Ok(value)
+        case Option.None => Err(error())
+    }
+
+    def toResult[E](error E) Result[T, E] = match this {
+        case Some(value) => Ok(value)
+        case Option.None => Err(error)
+    }
+
+    def toEither[L](left () -> L) Either[L, T] = match this {
+        case Some(value) => Right(value)
+        case Option.None => Left(left())
+    }
+
+    def toEither[L](left L) Either[L, T] = match this {
+        case Some(value) => Right(value)
+        case Option.None => Left(left)
+    }
+
     def map[X](f (T) -> X) Option[X] = match this {
         case Some(value) => Some(f(value))
         case Option.None => None()

@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    ast::{self, TypeKind, Visibility},
+    ast::{self, TypeKind, TypeRef, Visibility},
     backend::BackendBundle,
     ir::{self, FunctionKind},
     java_backend::JavaExternalClass,
@@ -1180,6 +1180,48 @@ fn function_param_types(function: &ir::Function) -> Vec<ir::Type> {
         .collect()
 }
 
+#[derive(Clone)]
+struct JavaParamSpec {
+    ty: ir::Type,
+    variadic: bool,
+}
+
+fn function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
+    function
+        .params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, param)| {
+            let local = function.locals.get(param.0)?;
+            Some(JavaParamSpec {
+                ty: local.ty.clone(),
+                variadic: function.param_variadic.get(index).copied().unwrap_or(false),
+            })
+        })
+        .collect()
+}
+
+fn param_specs_from_types(params: Vec<ir::Type>) -> Vec<JavaParamSpec> {
+    params
+        .into_iter()
+        .map(|ty| JavaParamSpec {
+            ty,
+            variadic: false,
+        })
+        .collect()
+}
+
+fn function_accepts_arg_len(function: &ir::Function, arg_len: usize) -> bool {
+    param_specs_accept_arg_len(&function_param_specs(function), arg_len)
+}
+
+fn param_specs_accept_arg_len(params: &[JavaParamSpec], arg_len: usize) -> bool {
+    match params.iter().position(|param| param.variadic) {
+        Some(variadic_index) => arg_len >= variadic_index,
+        None => params.len() == arg_len,
+    }
+}
+
 fn push_function_body(
     out: &mut String,
     bundle: &BackendBundle,
@@ -1260,7 +1302,24 @@ fn find_source_method<'a>(
 }
 
 fn source_method_matches(method: &ast::MethodDecl, function: &ir::Function) -> bool {
-    method.name == function.name && method.params.len() == function.params.len()
+    if method.name != function.name || method.params.len() != function.params.len() {
+        return false;
+    }
+
+    method
+        .params
+        .iter()
+        .zip(function_param_types(function))
+        .all(|(param, ty)| source_param_shape_matches_ir(param, &ty))
+}
+
+fn source_param_shape_matches_ir(param: &ast::Param, ty: &ir::Type) -> bool {
+    match (&param.ty, ty) {
+        (Some(TypeRef::Function { .. }), ir::Type::Function { .. }) => true,
+        (Some(TypeRef::Function { .. }), _) => false,
+        (Some(_), ir::Type::Function { .. }) => false,
+        _ => true,
+    }
 }
 
 fn type_ref_base_name(ty: &ast::TypeRef) -> Option<&str> {
@@ -1443,6 +1502,9 @@ impl<'a> SourceBodyEmitter<'a> {
             ast::Expr::Identifier { name, .. } if self.enum_case(name).is_some() => {
                 Some(format!("new {}<>()", java_type_name(name)))
             }
+            ast::Expr::Identifier { name, .. } if core_enum_case_owner(name).is_some() => {
+                self.emit_core_enum_case(name, &[])
+            }
             ast::Expr::Identifier { name, .. } => bindings
                 .get(name)
                 .cloned()
@@ -1492,6 +1554,13 @@ impl<'a> SourceBodyEmitter<'a> {
                     args.join(", ")
                 ))
             }
+            ast::Expr::Identifier { name, .. } if core_enum_case_owner(name).is_some() => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.emit_expr(&arg.value, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                self.emit_core_enum_case(name, &args)
+            }
             ast::Expr::Identifier { name, .. } if self.function_param(name).is_some() => {
                 let args = args
                     .iter()
@@ -1530,6 +1599,16 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             _ => None,
         }
+    }
+
+    fn emit_core_enum_case(&self, case: &str, args: &[String]) -> Option<String> {
+        let owner = core_enum_case_owner(case)?;
+        Some(format!(
+            "new lume.core.{}.{}<>({})",
+            java_type_name(owner),
+            java_type_name(case),
+            args.join(", ")
+        ))
     }
 
     fn param_reference(&self, name: &str) -> Option<String> {
@@ -2048,7 +2127,7 @@ impl<'a> FunctionEmitter<'a> {
         match callee {
             ir::Callee::Direct(id) => {
                 let target = self.bundle.ir.function(*id)?;
-                let args = self.emit_operands_for_params(args, &function_param_types(target))?;
+                let args = self.emit_operands_for_function(args, target)?;
                 match target.kind {
                     ir::FunctionKind::TopLevel => {
                         let name = java_member_name(&target.name);
@@ -2114,9 +2193,9 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 _ => {
                     let params = self
-                        .method_param_types_for_receiver(receiver, method, args.len())
+                        .method_param_specs_for_receiver(receiver, method, args)
                         .unwrap_or_default();
-                    let args = self.emit_operands_for_params(args, &params)?;
+                    let args = self.emit_operands_for_param_specs(args, &params)?;
                     let receiver = self.emit_operand(receiver)?;
                     Some(format!(
                         "{}.{}({})",
@@ -2194,9 +2273,9 @@ impl<'a> FunctionEmitter<'a> {
             }
             [owner] if self.names.is_java_type(owner) => {
                 let params = self
-                    .constructor_param_types(owner, operands.len())
+                    .constructor_param_specs(owner, operands)
                     .unwrap_or_default();
-                let args = self.emit_operands_for_params(operands, &params)?;
+                let args = self.emit_operands_for_param_specs(operands, &params)?;
                 Some(format!(
                     "new {}{}({})",
                     self.names.named_type(owner),
@@ -2206,9 +2285,9 @@ impl<'a> FunctionEmitter<'a> {
             }
             [owner] if self.is_lume_constructible_type(owner) => {
                 let params = self
-                    .constructor_param_types(owner, operands.len())
+                    .constructor_param_specs(owner, operands)
                     .unwrap_or_default();
-                let args = self.emit_operands_for_params(operands, &params)?;
+                let args = self.emit_operands_for_param_specs(operands, &params)?;
                 Some(format!(
                     "new {}({})",
                     self.names.named_type(owner),
@@ -2217,9 +2296,10 @@ impl<'a> FunctionEmitter<'a> {
             }
             [owner, method] if self.names.is_java_single_type(owner) => {
                 let params = self
-                    .type_method_param_types(owner, method, operands.len())
+                    .external_method_param_specs(owner, method, operands)
+                    .or_else(|| self.type_method_param_specs(owner, method, operands))
                     .unwrap_or_default();
-                let args = self.emit_operands_for_params(operands, &params)?;
+                let args = self.emit_operands_for_param_specs(operands, &params)?;
                 Some(format!(
                     "{}.INSTANCE.{}({})",
                     self.names.named_type(owner),
@@ -2229,9 +2309,10 @@ impl<'a> FunctionEmitter<'a> {
             }
             [owner, method] if self.names.is_java_type(owner) => {
                 let params = self
-                    .type_method_param_types(owner, method, operands.len())
+                    .external_method_param_specs(owner, method, operands)
+                    .or_else(|| self.type_method_param_specs(owner, method, operands))
                     .unwrap_or_default();
-                let args = self.emit_operands_for_params(operands, &params)?;
+                let args = self.emit_operands_for_param_specs(operands, &params)?;
                 Some(format!(
                     "{}.{}({})",
                     self.names.named_type(owner),
@@ -2241,9 +2322,9 @@ impl<'a> FunctionEmitter<'a> {
             }
             [owner, method] if self.is_lume_single_type(owner) => {
                 let params = self
-                    .type_method_param_types(owner, method, operands.len())
+                    .type_method_param_specs(owner, method, operands)
                     .unwrap_or_default();
-                let args = self.emit_operands_for_params(operands, &params)?;
+                let args = self.emit_operands_for_param_specs(operands, &params)?;
                 Some(format!(
                     "{}.INSTANCE.{}({})",
                     self.names.named_type(owner),
@@ -2411,22 +2492,14 @@ impl<'a> FunctionEmitter<'a> {
         let ir::Type::Named { name, .. } = ty else {
             return self.unsupported("non-named construction");
         };
-        let params = self
-            .constructor_param_types(name, fields.len())
-            .unwrap_or_default();
-        let args = fields
+        let operands = fields
             .iter()
-            .enumerate()
-            .map(|(index, field)| {
-                let expr = self.emit_operand(&field.value)?;
-                Some(match params.get(index) {
-                    Some(target_ty) => {
-                        self.coerce_to_target_type(expr, self.operand_type(&field.value), target_ty)
-                    }
-                    None => expr,
-                })
-            })
-            .collect::<Option<Vec<_>>>()?;
+            .map(|field| field.value.clone())
+            .collect::<Vec<_>>();
+        let params = self
+            .constructor_param_specs(name, &operands)
+            .unwrap_or_default();
+        let args = self.emit_operands_for_param_specs(&operands, &params)?;
         Some(format!(
             "new {}({})",
             self.names.named_type(name),
@@ -2556,19 +2629,78 @@ impl<'a> FunctionEmitter<'a> {
         operands: &[ir::Operand],
         params: &[ir::Type],
     ) -> Option<Vec<String>> {
-        operands
-            .iter()
-            .enumerate()
-            .map(|(index, operand)| {
+        self.emit_operands_for_param_specs(operands, &param_specs_from_types(params.to_vec()))
+    }
+
+    fn emit_operands_for_function(
+        &self,
+        operands: &[ir::Operand],
+        function: &ir::Function,
+    ) -> Option<Vec<String>> {
+        self.emit_operands_for_param_specs(operands, &function_param_specs(function))
+    }
+
+    fn emit_operands_for_param_specs(
+        &self,
+        operands: &[ir::Operand],
+        params: &[JavaParamSpec],
+    ) -> Option<Vec<String>> {
+        let Some(variadic_index) = params.iter().position(|param| param.variadic) else {
+            return operands
+                .iter()
+                .enumerate()
+                .map(|(index, operand)| {
+                    let expr = self.emit_operand(operand)?;
+                    Some(match params.get(index) {
+                        Some(target) => {
+                            self.coerce_to_target_type(expr, self.operand_type(operand), &target.ty)
+                        }
+                        None => expr,
+                    })
+                })
+                .collect();
+        };
+
+        if operands.len() < variadic_index {
+            return None;
+        }
+
+        let mut args = Vec::new();
+        for (operand, target) in operands.iter().take(variadic_index).zip(params.iter()) {
+            let expr = self.emit_operand(operand)?;
+            args.push(self.coerce_to_target_type(expr, self.operand_type(operand), &target.ty));
+        }
+
+        let variadic_target = params.get(variadic_index)?;
+        if operands.len() == params.len() {
+            let operand = operands.get(variadic_index)?;
+            if self.operand_type_is_variadic_list(operand, &variadic_target.ty) {
                 let expr = self.emit_operand(operand)?;
-                Some(match params.get(index) {
+                args.push(self.coerce_to_target_type(
+                    expr,
+                    self.operand_type(operand),
+                    &variadic_target.ty,
+                ));
+                return Some(args);
+            }
+        }
+
+        let element_ty = variadic_element_type(&variadic_target.ty);
+        let items = operands
+            .iter()
+            .skip(variadic_index)
+            .map(|operand| {
+                let expr = self.emit_operand(operand)?;
+                Some(match element_ty {
                     Some(target_ty) => {
                         self.coerce_to_target_type(expr, self.operand_type(operand), target_ty)
                     }
                     None => expr,
                 })
             })
-            .collect()
+            .collect::<Option<Vec<_>>>()?;
+        args.push(format!("lume.core.LumeList.of({})", items.join(", ")));
+        Some(args)
     }
 
     fn emit_operand(&self, operand: &ir::Operand) -> Option<String> {
@@ -2634,8 +2766,29 @@ impl<'a> FunctionEmitter<'a> {
     fn operand_type(&self, operand: &ir::Operand) -> Option<ir::Type> {
         match operand {
             ir::Operand::Copy(place) | ir::Operand::Move(place) => self.place_type(place),
-            ir::Operand::Const(_) => None,
+            ir::Operand::Const(value) => Some(constant_type(value)),
         }
+    }
+
+    fn operand_type_is_variadic_list(&self, operand: &ir::Operand, target_ty: &ir::Type) -> bool {
+        let Some(source_ty) = self.operand_type(operand) else {
+            return false;
+        };
+        matches!(
+            (&source_ty, target_ty),
+            (
+                ir::Type::Named {
+                    name: source_name,
+                    args: source_args,
+                },
+                ir::Type::Named {
+                    name: target_name,
+                    args: target_args,
+                },
+            ) if source_name == "List"
+                && target_name == "List"
+                && source_args.len() == target_args.len()
+        )
     }
 
     fn field_type(&self, ty: &ir::Type, field_name: &str) -> Option<ir::Type> {
@@ -2654,45 +2807,55 @@ impl<'a> FunctionEmitter<'a> {
         }
     }
 
-    fn constructor_param_types(&self, type_name: &str, arg_len: usize) -> Option<Vec<ir::Type>> {
+    fn constructor_param_specs(
+        &self,
+        type_name: &str,
+        operands: &[ir::Operand],
+    ) -> Option<Vec<JavaParamSpec>> {
         let ty = self.type_def(type_name)?;
-        self.functions_named(ty, "new")
-            .find(|function| function.params.len() == arg_len)
-            .map(function_param_types)
+        self.function_named_for_operands(ty, "new", operands)
+            .map(function_param_specs)
     }
 
-    fn method_param_types_for_receiver(
+    fn method_param_specs_for_receiver(
         &self,
         receiver: &ir::Operand,
         method: &str,
-        arg_len: usize,
-    ) -> Option<Vec<ir::Type>> {
+        operands: &[ir::Operand],
+    ) -> Option<Vec<JavaParamSpec>> {
         let receiver_ty = self.operand_type(receiver)?;
-        if let Some(params) = builtin_method_param_types(&receiver_ty, method, arg_len) {
-            return Some(params);
+        if let Some(params) = builtin_method_param_types(&receiver_ty, method, operands.len()) {
+            return Some(param_specs_from_types(params));
         }
         let ir::Type::Named { name, args } = receiver_ty else {
             return None;
         };
-        let params = self.type_method_param_types(&name, method, arg_len)?;
+        let params = if self.names.is_java_type(&name) {
+            self.external_method_param_specs(&name, method, operands)
+                .or_else(|| self.type_method_param_specs(&name, method, operands))?
+        } else {
+            self.type_method_param_specs(&name, method, operands)?
+        };
         Some(
             params
                 .into_iter()
-                .map(|param| self.substitute_receiver_type_args(&name, &args, &param))
+                .map(|param| JavaParamSpec {
+                    ty: self.substitute_receiver_type_args(&name, &args, &param.ty),
+                    variadic: param.variadic,
+                })
                 .collect(),
         )
     }
 
-    fn type_method_param_types(
+    fn type_method_param_specs(
         &self,
         type_name: &str,
         method: &str,
-        arg_len: usize,
-    ) -> Option<Vec<ir::Type>> {
+        operands: &[ir::Operand],
+    ) -> Option<Vec<JavaParamSpec>> {
         let ty = self.type_def(type_name)?;
-        self.functions_named(ty, method)
-            .find(|function| function.params.len() == arg_len)
-            .map(function_param_types)
+        self.function_named_for_operands(ty, method, operands)
+            .map(function_param_specs)
     }
 
     fn method_return_type_for_receiver(
@@ -2716,9 +2879,54 @@ impl<'a> FunctionEmitter<'a> {
         arg_len: usize,
     ) -> Option<ir::Type> {
         let ty = self.type_def(type_name)?;
-        self.functions_named(ty, method)
-            .find(|function| function.params.len() == arg_len)
+        self.function_named_for_arg_len(ty, method, arg_len)
             .map(|function| function.return_ty.clone())
+    }
+
+    fn named_runtime_call_return_type(&self, path: &[String], arg_len: usize) -> Option<ir::Type> {
+        match path {
+            [case] if core_enum_case_owner(case).is_some() => self.core_enum_case_type(case),
+            [owner, case]
+                if core_enum_case_owner(case).is_some_and(|expected| expected == owner) =>
+            {
+                self.core_enum_case_type(case)
+            }
+            [owner] if owner == "List" => Some(ir::Type::Named {
+                name: "List".to_string(),
+                args: vec![ir::Type::Unknown],
+            }),
+            [owner] if owner == "Map" => Some(ir::Type::Named {
+                name: "Map".to_string(),
+                args: vec![ir::Type::Unknown, ir::Type::Unknown],
+            }),
+            [owner] if owner == "Set" => Some(ir::Type::Named {
+                name: "Set".to_string(),
+                args: vec![ir::Type::Unknown],
+            }),
+            [owner] if self.names.is_java_type(owner) || self.is_lume_constructible_type(owner) => {
+                Some(ir::Type::Named {
+                    name: owner.clone(),
+                    args: Vec::new(),
+                })
+            }
+            [owner, method]
+                if self.names.is_java_single_type(owner) || self.is_lume_single_type(owner) =>
+            {
+                self.type_method_return_type(owner, method, arg_len)
+                    .or_else(|| self.names.java_method_return_type(owner, method, arg_len))
+            }
+            [owner, method] if self.names.is_java_type(owner) => self
+                .type_method_return_type(owner, method, arg_len)
+                .or_else(|| self.names.java_method_return_type(owner, method, arg_len)),
+            _ => None,
+        }
+    }
+
+    fn core_enum_case_type(&self, case: &str) -> Option<ir::Type> {
+        core_enum_case_owner(case).map(|owner| ir::Type::Named {
+            name: owner.to_string(),
+            args: vec![ir::Type::Unknown],
+        })
     }
 
     fn substitute_receiver_type_args(
@@ -2763,6 +2971,171 @@ impl<'a> FunctionEmitter<'a> {
         })
     }
 
+    fn function_named_for_arg_len<'b>(
+        &'b self,
+        ty: &'b ir::TypeDef,
+        name: &'b str,
+        arg_len: usize,
+    ) -> Option<&'b ir::Function> {
+        let mut variadic_candidate = None;
+        for function in self.functions_named(ty, name) {
+            if function.params.len() == arg_len
+                && !function.param_variadic.iter().any(|variadic| *variadic)
+            {
+                return Some(function);
+            }
+            if function_accepts_arg_len(function, arg_len) && variadic_candidate.is_none() {
+                variadic_candidate = Some(function);
+            }
+        }
+        variadic_candidate
+    }
+
+    fn function_named_for_operands<'b>(
+        &'b self,
+        ty: &'b ir::TypeDef,
+        name: &'b str,
+        operands: &[ir::Operand],
+    ) -> Option<&'b ir::Function> {
+        let mut compatible_variadic = None;
+        let mut fallback_exact = None;
+        let mut fallback_variadic = None;
+
+        for function in self.functions_named(ty, name) {
+            if !function_accepts_arg_len(function, operands.len()) {
+                continue;
+            }
+
+            let is_variadic = function.param_variadic.iter().any(|variadic| *variadic);
+            let compatible = self.operands_match_function(function, operands);
+
+            if !is_variadic && function.params.len() == operands.len() {
+                if compatible {
+                    return Some(function);
+                }
+                fallback_exact.get_or_insert(function);
+            } else if is_variadic {
+                if compatible {
+                    compatible_variadic.get_or_insert(function);
+                }
+                fallback_variadic.get_or_insert(function);
+            }
+        }
+
+        compatible_variadic.or(fallback_exact).or(fallback_variadic)
+    }
+
+    fn operands_match_function(&self, function: &ir::Function, operands: &[ir::Operand]) -> bool {
+        self.param_specs_match_operands(&function_param_specs(function), operands)
+    }
+
+    fn external_method_param_specs(
+        &self,
+        owner: &str,
+        method: &str,
+        operands: &[ir::Operand],
+    ) -> Option<Vec<JavaParamSpec>> {
+        let candidates = self.names.java_method_param_candidates(owner, method)?;
+        self.param_specs_for_operands(candidates, operands)
+    }
+
+    fn param_specs_for_operands(
+        &self,
+        candidates: &[Vec<JavaParamSpec>],
+        operands: &[ir::Operand],
+    ) -> Option<Vec<JavaParamSpec>> {
+        let mut compatible_variadic = None;
+        let mut fallback_exact = None;
+        let mut fallback_variadic = None;
+
+        for params in candidates {
+            if !param_specs_accept_arg_len(params, operands.len()) {
+                continue;
+            }
+            let is_variadic = params.iter().any(|param| param.variadic);
+            let compatible = self.param_specs_match_operands(params, operands);
+
+            if !is_variadic && params.len() == operands.len() {
+                if compatible {
+                    return Some(params.clone());
+                }
+                fallback_exact.get_or_insert_with(|| params.clone());
+            } else if is_variadic {
+                if compatible {
+                    compatible_variadic.get_or_insert_with(|| params.clone());
+                }
+                fallback_variadic.get_or_insert_with(|| params.clone());
+            }
+        }
+
+        compatible_variadic.or(fallback_exact).or(fallback_variadic)
+    }
+
+    fn param_specs_match_operands(
+        &self,
+        params: &[JavaParamSpec],
+        operands: &[ir::Operand],
+    ) -> bool {
+        let Some(variadic_index) = params.iter().position(|param| param.variadic) else {
+            return params.len() == operands.len()
+                && operands
+                    .iter()
+                    .zip(params.iter())
+                    .all(|(operand, param)| self.operand_matches_target(operand, &param.ty));
+        };
+
+        if operands.len() < variadic_index {
+            return false;
+        }
+        if !operands
+            .iter()
+            .take(variadic_index)
+            .zip(params.iter())
+            .all(|(operand, param)| self.operand_matches_target(operand, &param.ty))
+        {
+            return false;
+        }
+
+        let Some(variadic_target) = params.get(variadic_index) else {
+            return false;
+        };
+        if operands.len() == params.len()
+            && operands.get(variadic_index).is_some_and(|operand| {
+                self.operand_type_is_variadic_list(operand, &variadic_target.ty)
+            })
+        {
+            return true;
+        }
+
+        let Some(element_ty) = variadic_element_type(&variadic_target.ty) else {
+            return true;
+        };
+        operands
+            .iter()
+            .skip(variadic_index)
+            .all(|operand| self.operand_matches_target(operand, element_ty))
+    }
+
+    fn operand_matches_target(&self, operand: &ir::Operand, target_ty: &ir::Type) -> bool {
+        if matches!(target_ty, ir::Type::Unknown | ir::Type::Never)
+            || is_named_builtin(target_ty, "Any")
+        {
+            return true;
+        }
+        let Some(source_ty) = self.operand_type(operand) else {
+            return !matches!(target_ty, ir::Type::Named { name, .. } if name == "List");
+        };
+        match target_ty {
+            ir::Type::Named { name, .. } if name == "List" => {
+                matches!(source_ty, ir::Type::Named { name, .. } if name == "List")
+            }
+            ir::Type::Function { .. } => {
+                matches!(source_ty, ir::Type::Function { .. } | ir::Type::Unknown)
+            }
+            _ => true,
+        }
+    }
+
     fn rvalue_type(&self, value: &ir::RValue) -> Option<ir::Type> {
         match value {
             ir::RValue::Use(operand) => self.operand_type(operand),
@@ -2783,15 +3156,71 @@ impl<'a> FunctionEmitter<'a> {
                     }
                     self.method_return_type_for_receiver(receiver, method, args.len())
                 }
+                ir::Callee::Named { path } => self.named_runtime_call_return_type(path, args.len()),
                 _ => None,
             },
             ir::RValue::Construct { ty, .. } => Some(ty.clone()),
+            ir::RValue::Binary { op, left, right } => self.binary_value_type(*op, left, right),
+            ir::RValue::List(items) => {
+                let element_ty = items
+                    .iter()
+                    .filter_map(|item| self.operand_type(item))
+                    .find(|ty| !matches!(ty, ir::Type::Unknown))
+                    .unwrap_or(ir::Type::Unknown);
+                Some(ir::Type::Named {
+                    name: "List".to_string(),
+                    args: vec![element_ty],
+                })
+            }
             ir::RValue::AnonymousInterface { interfaces, .. } if interfaces.len() == 1 => {
                 interfaces.first().cloned()
             }
             ir::RValue::Cast { ty, .. } => Some(ty.clone()),
             ir::RValue::TypeOf { ty } => Some(runtime_ir_type(ty.clone())),
             _ => None,
+        }
+    }
+
+    fn binary_value_type(
+        &self,
+        op: ir::BinaryOp,
+        left: &ir::Operand,
+        right: &ir::Operand,
+    ) -> Option<ir::Type> {
+        match op {
+            ir::BinaryOp::Eq
+            | ir::BinaryOp::NotEq
+            | ir::BinaryOp::Less
+            | ir::BinaryOp::LessEq
+            | ir::BinaryOp::Greater
+            | ir::BinaryOp::GreaterEq
+            | ir::BinaryOp::And
+            | ir::BinaryOp::Or => Some(ir::Type::Bool),
+            ir::BinaryOp::Add => {
+                let left_ty = self.operand_type(left);
+                let right_ty = self.operand_type(right);
+                if left_ty.as_ref().is_some_and(type_is_str)
+                    || right_ty.as_ref().is_some_and(type_is_str)
+                {
+                    return Some(ir::Type::Str);
+                }
+                if left_ty.as_ref().is_some_and(type_is_float_like)
+                    || right_ty.as_ref().is_some_and(type_is_float_like)
+                {
+                    return Some(ir::Type::Float);
+                }
+                left_ty.or(right_ty)
+            }
+            ir::BinaryOp::Sub | ir::BinaryOp::Mul | ir::BinaryOp::Div | ir::BinaryOp::Mod => {
+                let left_ty = self.operand_type(left);
+                let right_ty = self.operand_type(right);
+                if left_ty.as_ref().is_some_and(type_is_float_like)
+                    || right_ty.as_ref().is_some_and(type_is_float_like)
+                {
+                    return Some(ir::Type::Float);
+                }
+                left_ty.or(right_ty)
+            }
         }
     }
 
@@ -2991,6 +3420,8 @@ struct JavaNames {
     java_types: HashMap<String, String>,
     java_type_kinds: HashMap<String, TypeKind>,
     java_type_param_counts: HashMap<String, usize>,
+    java_method_params: HashMap<(String, String), Vec<Vec<JavaParamSpec>>>,
+    java_method_returns: HashMap<(String, String, usize), ir::Type>,
 }
 
 impl JavaNames {
@@ -3007,10 +3438,46 @@ impl JavaNames {
             .iter()
             .map(|(name, class)| (name.clone(), class.type_params.len()))
             .collect();
+        let mut java_method_params: HashMap<(String, String), Vec<Vec<JavaParamSpec>>> =
+            HashMap::new();
+        for (owner, class) in external_classes {
+            for method in &class.methods {
+                let params = method
+                    .params
+                    .iter()
+                    .map(|param| JavaParamSpec {
+                        ty: param
+                            .ty
+                            .as_ref()
+                            .map(type_ref_to_ir)
+                            .unwrap_or(ir::Type::Unknown),
+                        variadic: param.variadic,
+                    })
+                    .collect::<Vec<_>>();
+                java_method_params
+                    .entry((owner.clone(), method.name.clone()))
+                    .or_default()
+                    .push(params);
+            }
+        }
+        let java_method_returns = external_classes
+            .iter()
+            .flat_map(|(owner, class)| {
+                class.methods.iter().filter_map(move |method| {
+                    let ret = method.return_type.as_ref().map(type_ref_to_ir)?;
+                    Some((
+                        (owner.clone(), method.name.clone(), method.params.len()),
+                        ret,
+                    ))
+                })
+            })
+            .collect();
         Self {
             java_types,
             java_type_kinds,
             java_type_param_counts,
+            java_method_params,
+            java_method_returns,
         }
     }
 
@@ -3102,6 +3569,27 @@ impl JavaNames {
         } else {
             ""
         }
+    }
+
+    fn java_method_return_type(
+        &self,
+        owner: &str,
+        method: &str,
+        arg_len: usize,
+    ) -> Option<ir::Type> {
+        self.java_method_returns
+            .get(&(owner.to_string(), method.to_string(), arg_len))
+            .cloned()
+    }
+
+    fn java_method_param_candidates(
+        &self,
+        owner: &str,
+        method: &str,
+    ) -> Option<&[Vec<JavaParamSpec>]> {
+        self.java_method_params
+            .get(&(owner.to_string(), method.to_string()))
+            .map(Vec::as_slice)
     }
 
     fn builtin_container(&self, name: &str, args: &[ir::Type]) -> String {
@@ -3351,6 +3839,15 @@ fn is_named_builtin(ty: &ir::Type, expected: &str) -> bool {
     matches!(ty, ir::Type::Named { name, args } if name == expected && args.is_empty())
 }
 
+fn type_is_str(ty: &ir::Type) -> bool {
+    type_is_named_or_primitive(ty, "Str", |ty| matches!(ty, ir::Type::Str))
+}
+
+fn type_is_float_like(ty: &ir::Type) -> bool {
+    type_is_named_or_primitive(ty, "Float", |ty| matches!(ty, ir::Type::Float))
+        || is_named_builtin(ty, "Float32")
+}
+
 fn source_is_wide_int(ty: Option<&ir::Type>) -> bool {
     matches!(ty, Some(ir::Type::Int))
         || matches!(ty, Some(ir::Type::Named { name, args }) if name == "Int" && args.is_empty())
@@ -3501,6 +3998,47 @@ fn java_constant(constant: &ir::Constant) -> String {
                 .join(", ");
             format!("lume.core.LumeList.of({items})")
         }
+    }
+}
+
+fn constant_type(constant: &ir::Constant) -> ir::Type {
+    match constant {
+        ir::Constant::Unit => ir::Type::Unit,
+        ir::Constant::Bool(_) => ir::Type::Bool,
+        ir::Constant::Int(_) => ir::Type::Int,
+        ir::Constant::Float(_) => ir::Type::Float,
+        ir::Constant::String(_) => ir::Type::Str,
+        ir::Constant::List(_) => ir::Type::Unknown,
+    }
+}
+
+fn type_ref_to_ir(reference: &TypeRef) -> ir::Type {
+    match reference {
+        TypeRef::Wildcard { .. } => ir::Type::Unknown,
+        TypeRef::Named { name, args, .. } if name == "Never" && args.is_empty() => ir::Type::Never,
+        TypeRef::Named { name, args, .. } => ir::Type::Named {
+            name: name.clone(),
+            args: args.iter().map(type_ref_to_ir).collect(),
+        },
+        TypeRef::Tuple { fields, .. } => ir::Type::Tuple(
+            fields
+                .iter()
+                .map(|field| type_ref_to_ir(&field.ty))
+                .collect(),
+        ),
+        TypeRef::Record { fields, .. } => ir::Type::Record(
+            fields
+                .iter()
+                .map(|field| ir::NamedType {
+                    name: field.name.clone(),
+                    ty: type_ref_to_ir(&field.ty),
+                })
+                .collect(),
+        ),
+        TypeRef::Function { params, ret, .. } => ir::Type::Function {
+            params: params.iter().map(type_ref_to_ir).collect(),
+            ret: Box::new(type_ref_to_ir(ret)),
+        },
     }
 }
 

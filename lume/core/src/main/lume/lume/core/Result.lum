@@ -41,6 +41,16 @@ impl Result[T, E] {
         case Err(_) => fallback
     }
 
+    def toOption() Option[T] = match this {
+        case Ok(value) => Some(value)
+        case Err(_) => None
+    }
+
+    def toEither() Either[E, T] = match this {
+        case Ok(value) => Right(value)
+        case Err(error) => Left(error)
+    }
+
     def getError() E = match this {
         case Ok(_) => panic("Result has no error value")
         case Err(error) => error

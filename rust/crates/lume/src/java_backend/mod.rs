@@ -120,7 +120,7 @@ pub(crate) struct JavaExternalClass {
     inherit_qualified_names: Vec<String>,
     fields: Vec<JavaExternalField>,
     constructors: Vec<JavaExternalCallable>,
-    methods: Vec<JavaExternalCallable>,
+    pub(crate) methods: Vec<JavaExternalCallable>,
 }
 
 #[derive(Debug, Clone)]
@@ -131,16 +131,16 @@ struct JavaExternalField {
 }
 
 #[derive(Debug, Clone)]
-struct JavaExternalCallable {
-    name: String,
+pub(crate) struct JavaExternalCallable {
+    pub(crate) name: String,
     type_params: Vec<String>,
     reified_type_params: Vec<String>,
-    params: Vec<JavaExternalParam>,
-    return_type: Option<TypeRef>,
+    pub(crate) params: Vec<JavaExternalParam>,
+    pub(crate) return_type: Option<TypeRef>,
 }
 
 #[derive(Debug, Clone)]
-struct JavaExternalParam {
+pub(crate) struct JavaExternalParam {
     name: String,
     ty: Option<TypeRef>,
     variadic: bool,
@@ -2830,6 +2830,104 @@ def main() Unit {
     }
 
     #[test]
+    fn packs_external_lume_vararg_calls_from_jar() {
+        if !command_available("javac") || !command_available("jar") || !command_available("javap") {
+            eprintln!("skipping external Lume vararg test because a JDK tool is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-external-vararg");
+        let lib_source = temp.join("lib.lum");
+        let app_source = temp.join("app.lum");
+        let lib_out = temp.join("lib-out");
+        let lib_classes = temp.join("lib-classes");
+        let app_out = temp.join("app-out");
+        let app_classes = temp.join("app-classes");
+        let jar = temp.join("lume-lib.jar");
+        fs::create_dir_all(&temp).expect("create temp dir");
+
+        fs::write(
+            &lib_source,
+            r#"
+module demo/lib
+
+interface Binder {
+    def queryRow(sql Str, values [Any] vararg) Int
+}
+"#,
+        )
+        .expect("write lib source");
+
+        let generated_lib = generate_java_path(&lib_source, JavaBackendOptions::new(&lib_out))
+            .expect("generate lib");
+        assert!(generated_lib.diagnostics.is_empty());
+        let mut lib_sources = core_runtime_sources();
+        collect_java_sources(&lib_out, &mut lib_sources).expect("collect lib java");
+        fs::create_dir_all(&lib_classes).expect("create lib classes dir");
+        run_checked(
+            Command::new("javac")
+                .arg("-d")
+                .arg(&lib_classes)
+                .args(&lib_sources),
+            "javac",
+        );
+        run_checked(
+            Command::new("jar")
+                .arg("cf")
+                .arg(&jar)
+                .arg("-C")
+                .arg(&lib_classes)
+                .arg("."),
+            "jar",
+        );
+
+        fs::write(
+            &app_source,
+            r#"
+module demo/app
+
+use demo/lib/{Binder}
+
+class Client {
+    binder Binder
+}
+
+impl Client {
+    def run(sub Str) Int {
+        this.binder.queryRow("select ?", sub)
+    }
+}
+"#,
+        )
+        .expect("write app source");
+
+        let generated_app = generate_java_path(
+            &app_source,
+            JavaBackendOptions::new(&app_out).with_classpath_entry(&jar),
+        )
+        .expect("generate app");
+        assert!(generated_app.diagnostics.is_empty());
+        let client = fs::read_to_string(app_out.join("demo/app/Client.java")).expect("read client");
+        assert!(client.contains("queryRow(\"select ?\", lume.core.LumeList.of(sub_"));
+        assert!(!client.contains("((lume.core.LumeList<Object>) ((Object) sub_"));
+
+        let mut app_sources = core_runtime_sources();
+        collect_java_sources(&app_out, &mut app_sources).expect("collect app java");
+        fs::create_dir_all(&app_classes).expect("create app classes dir");
+        run_checked(
+            Command::new("javac")
+                .arg("-cp")
+                .arg(&jar)
+                .arg("-d")
+                .arg(&app_classes)
+                .args(&app_sources),
+            "javac",
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn validates_java_inherited_interface_methods_from_jar() {
         if !command_available("javac")
             || !command_available("java")
@@ -3141,10 +3239,10 @@ def main() Unit {
         assert!(!module.contains("UnsupportedOperationException"));
         assert!(module.contains("static Long add(Long left_0, Long right_1)"));
         assert!(module.contains("tmp3_3 = (left_0 + right_1);"));
-        assert!(module.contains("result_2 = ((Long) ((Object) tmp3_3));"));
+        assert!(module.contains("result_2 = tmp3_3;"));
         assert!(module.contains("return result_2;"));
         assert!(module.contains("if (flag_0)"));
-        assert!(module.contains("return ((Long) ((Object) tmp1_1));"));
+        assert!(module.contains("return tmp1_1;"));
         assert!(module.contains("tmp1_1 = add(2L, 3L);"));
         assert!(module.contains("value_0 = tmp1_1;"));
         assert!(module.contains("lume.core.LumeRuntime.println(value_0)"));
