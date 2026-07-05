@@ -571,7 +571,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\ncount %= 2\nlifted = value.->name()\nlift { value: Some(1) }\nspread [Str] vararg = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nitems = for value <- values yield value + 1\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\ncount %= 2\nlifted = value.->name()\nlift { value: Some(1) }\ndef spread(vararg value [Str]) Unit = ()\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();

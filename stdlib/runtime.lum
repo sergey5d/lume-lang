@@ -47,13 +47,13 @@ interface ClassType[A] with Type[A] {
     def methods() [Method]
     def field(name Str) Option[Field]
     def method(name Str) Option[Method]
-    def construct(args [Any] vararg) Result[A, ReflectionError]
+    def construct(vararg args [Any]) Result[A, ReflectionError]
 }
 
 interface ShapeType[A] with Type[A] {
     def fields() [Field]
     def methods() [Method]
-    def construct(args [Any] vararg) Result[A, ReflectionError]
+    def construct(vararg args [Any]) Result[A, ReflectionError]
 }
 
 interface EnumType[A] with Type[A] {
@@ -88,8 +88,8 @@ interface Method with Annotated {
     def name() Str
     def params() [Param]
     def returnType() Type[_]
-    def invoke(receiver Any, args [Any] vararg) Any
-    def call(receiver Any, args [Any] vararg) Result[Any, ReflectionError]
+    def invoke(receiver Any, vararg args [Any]) Any
+    def call(receiver Any, vararg args [Any]) Result[Any, ReflectionError]
 }
 
 interface Param {
@@ -100,5 +100,5 @@ interface Param {
 interface EnumCase with Annotated {
     def name() Str
     def fields() [Field]
-    def construct(args [Any] vararg) Result[Any, ReflectionError]
+    def construct(vararg args [Any]) Result[Any, ReflectionError]
 }

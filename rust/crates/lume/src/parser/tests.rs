@@ -554,7 +554,7 @@ class Path {
 
 impl Path {
     new {
-        segments [Str] vararg
+        vararg segments [Str]
     } {
         this.segments = segments
     }
@@ -568,6 +568,47 @@ impl Path {
     };
     assert_eq!(block.methods[0].params.len(), 1);
     assert!(block.methods[0].params[0].variadic);
+}
+
+#[test]
+fn rejects_suffix_variadic_parameter_marker() {
+    let result = parse(
+        r#"
+def bad(values [Str] vararg) Unit = ()
+
+class Path {
+    segments [Str]
+}
+
+impl Path {
+    new {
+        segments [Str] vararg
+    } {
+        this.segments = segments
+    }
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_variadic_param"
+                && diag
+                    .message
+                    .contains("vararg must appear before the parameter name")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_variadic_param"
+                && diag
+                    .message
+                    .contains("vararg must appear before the constructor field name")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]

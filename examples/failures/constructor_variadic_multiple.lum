@@ -8,8 +8,8 @@ class Bad {
 
 impl Bad {
     new {
-        left [Int] vararg
-        right [Int] vararg
+        vararg left [Int]
+        vararg right [Int]
     } {
         this.left = left
         this.right = right

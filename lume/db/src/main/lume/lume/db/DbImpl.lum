@@ -91,7 +91,7 @@ impl JdbcQuery {
         this.values = values
     }
 
-    def bind(values [Any] vararg) Query = JdbcQuery(this.runner, this.sql, values)
+    def bind(vararg values [Any]) Query = JdbcQuery(this.runner, this.sql, values)
 
     def rows() Result[[Row], DbError] {
         jdbcRows [JdbcRow] = try this.runner.query(this.sql, this.values)
@@ -174,7 +174,7 @@ impl JdbcRowQuery {
         this.values = values
     }
 
-    def bind(values [Any] vararg) RowQuery = JdbcRowQuery(this.runner, this.sql, values)
+    def bind(vararg values [Any]) RowQuery = JdbcRowQuery(this.runner, this.sql, values)
 
     def row() Result[Option[Row], DbError] {
         rows [Row] = try JdbcQuery(this.runner, this.sql, this.values).rows()
@@ -247,7 +247,7 @@ impl JdbcExec {
         this.sql = sql
     }
 
-    def bind(values [Any] vararg) BoundExec = JdbcBoundExec(this.runner, this.sql, values)
+    def bind(vararg values [Any]) BoundExec = JdbcBoundExec(this.runner, this.sql, values)
 
     def run() Result[Int, DbError] = this.runner.exec(this.sql)
 }
@@ -283,13 +283,13 @@ impl JdbcTransactionImpl {
         this.backend = backend
     }
 
-    def query(sql Str, values [Any] vararg) Query = JdbcQuery(this.backend, sql, values)
+    def query(sql Str, vararg values [Any]) Query = JdbcQuery(this.backend, sql, values)
 
-    def queryRow(sql Str, values [Any] vararg) RowQuery = JdbcRowQuery(this.backend, sql, values)
+    def queryRow(sql Str, vararg values [Any]) RowQuery = JdbcRowQuery(this.backend, sql, values)
 
     def exec(sql Str) Exec = JdbcExec(this.backend, sql)
 
-    def exec(sql Str, values [Any] vararg) Result[Int, DbError] = this.backend.exec(sql, values)
+    def exec(sql Str, vararg values [Any]) Result[Int, DbError] = this.backend.exec(sql, values)
 
     def commit() Result[Unit, DbError] = this.backend.commit()
 
@@ -309,13 +309,13 @@ impl JdbcDatabaseImpl {
         this.backend = backend
     }
 
-    def query(sql Str, values [Any] vararg) Query = JdbcQuery(this.backend, sql, values)
+    def query(sql Str, vararg values [Any]) Query = JdbcQuery(this.backend, sql, values)
 
-    def queryRow(sql Str, values [Any] vararg) RowQuery = JdbcRowQuery(this.backend, sql, values)
+    def queryRow(sql Str, vararg values [Any]) RowQuery = JdbcRowQuery(this.backend, sql, values)
 
     def exec(sql Str) Exec = JdbcExec(this.backend, sql)
 
-    def exec(sql Str, values [Any] vararg) Result[Int, DbError] = this.backend.exec(sql, values)
+    def exec(sql Str, vararg values [Any]) Result[Int, DbError] = this.backend.exec(sql, values)
 
     def beginTransaction() Result[Transaction, DbError] {
         backendTx JdbcTransaction = try this.backend.beginTransaction()

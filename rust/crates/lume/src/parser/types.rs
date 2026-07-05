@@ -49,15 +49,13 @@ impl<'a> Parser<'a> {
                     None
                 };
                 if self.match_keyword(Keyword::Vararg) {
-                    self.error(
+                    self.diagnostics.push(Diagnostic::error(
                         "invalid_variadic_param",
                         "vararg must appear before the parameter name, like 'vararg args [T]'",
                         self.previous_span(),
-                    );
+                    ));
                 }
-                let span = start.cover(
-                    ty.as_ref().map(TypeRef::span).unwrap_or(start),
-                );
+                let span = start.cover(ty.as_ref().map(TypeRef::span).unwrap_or(start));
                 params.push(Param {
                     name,
                     ty,
@@ -77,7 +75,7 @@ impl<'a> Parser<'a> {
         Some(params)
     }
 
-    pub(super) fn parse_param_modifiers(&mut self) -> (bool, bool, Option<crate::span::Span>) {
+    pub(super) fn parse_param_modifiers(&mut self) -> (bool, bool, Option<Span>) {
         let mut lazy = false;
         let mut variadic = false;
         let mut start = None;

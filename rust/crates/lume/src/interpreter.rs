@@ -6107,7 +6107,7 @@ mod tests {
 
             impl Path {
                 new {
-                    segments [Str] vararg
+                    vararg segments [Str]
                 } {
                     this.segments = segments
                 }

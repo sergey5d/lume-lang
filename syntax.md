@@ -845,7 +845,7 @@ Explicit constructor shape rules:
 - positional construction may omit only a trailing suffix whose fields all have defaults
 - positional construction never skips a defaulted field to reach a later required field
 - if any explicit `new` exists, implicit field construction is disabled for that class
-- explicit constructors may use one trailing variadic constructor shape field such as `items [T] vararg`
+- explicit constructors may use one trailing variadic constructor shape field such as `vararg items [T]`
 - a variadic constructor shape field receives the extra positional arguments as `[T]`
 - only one variadic constructor shape field is allowed
 - construction fields can target a variadic constructor shape field by passing a `[T]` value
@@ -1014,11 +1014,12 @@ Rules:
 - If no argument determines `A`, pass it explicitly: `metadata[User]()`.
 - Type declarations cannot use `reified`: `class Box[reified A]` is invalid.
 
-Function and method parameters may end with one variadic list parameter:
+Function and method parameters may end with one variadic list parameter. `vararg`
+is written before the parameter name:
 
 ```txt
-def println(value [Str] vararg) Unit
-def printf(format Str, value [Str] vararg) Unit
+def println(vararg value [Str]) Unit
+def printf(format Str, vararg value [Str]) Unit
 ```
 
 The parameter is available as `[T]` inside the body, and call sites pass the
@@ -1089,7 +1090,7 @@ Custom constructors are class-only and use a dedicated `new` block inside `impl`
 - named construction may omit any constructor shape field with a default
 - positional construction fills a prefix of constructor shape fields and may omit only trailing fields that all have defaults
 - positional construction never skips a defaulted field to reach a later required field
-- constructor shape fields may end with one variadic list field such as `items [Str] vararg`
+- constructor shape fields may end with one variadic list field such as `vararg items [Str]`
 - `hidden new { ... } { body }` declares a private constructor
 - each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
 - `new(...)` inside another constructor delegates positionally to another constructor of the same class
@@ -1142,7 +1143,7 @@ class Path {
 
 impl Path {
     new {
-        segments [Str] vararg = ["tmp"]
+        vararg segments [Str] = ["tmp"]
     } {
         this.segments = segments
     }

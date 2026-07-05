@@ -6751,7 +6751,7 @@ mod tests {
 
             impl Runner {
                 def exec(sql Str) Exec = Exec()
-                def exec(sql Str, first Any, rest [Any] vararg) Result[Int, Str] = Ok(1)
+                def exec(sql Str, first Any, vararg rest [Any]) Result[Int, Str] = Ok(1)
             }
 
             def main(r Runner) Unit {

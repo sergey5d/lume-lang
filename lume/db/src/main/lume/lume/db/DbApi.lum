@@ -23,7 +23,7 @@ interface Row {
 }
 
 interface Query {
-    def bind(values [Any] vararg) Query
+    def bind(vararg values [Any]) Query
     def rows() Result[[Row], DbError]
     def all() Result[[Row], DbError]
     def map[T](mapper (Row) -> T) Result[[T], DbError]
@@ -32,7 +32,7 @@ interface Query {
 }
 
 interface RowQuery {
-    def bind(values [Any] vararg) RowQuery
+    def bind(vararg values [Any]) RowQuery
     def row() Result[Option[Row], DbError]
     def map[T](mapper (Row) -> T) Result[Option[T], DbError]
     def flatMap[T](mapper (Row) -> Result[T, DbError]) Result[Option[T], DbError]
@@ -40,7 +40,7 @@ interface RowQuery {
 }
 
 interface Exec {
-    def bind(values [Any] vararg) BoundExec
+    def bind(vararg values [Any]) BoundExec
     def run() Result[Int, DbError]
 }
 
@@ -49,20 +49,20 @@ interface BoundExec {
 }
 
 interface Transaction {
-    def query(sql Str, values [Any] vararg) Query
-    def queryRow(sql Str, values [Any] vararg) RowQuery
+    def query(sql Str, vararg values [Any]) Query
+    def queryRow(sql Str, vararg values [Any]) RowQuery
     def exec(sql Str) Exec
-    def exec(sql Str, values [Any] vararg) Result[Int, DbError]
+    def exec(sql Str, vararg values [Any]) Result[Int, DbError]
     def commit() Result[Unit, DbError]
     def rollback() Result[Unit, DbError]
     def close() Result[Unit, DbError]
 }
 
 interface Database {
-    def query(sql Str, values [Any] vararg) Query
-    def queryRow(sql Str, values [Any] vararg) RowQuery
+    def query(sql Str, vararg values [Any]) Query
+    def queryRow(sql Str, vararg values [Any]) RowQuery
     def exec(sql Str) Exec
-    def exec(sql Str, values [Any] vararg) Result[Int, DbError]
+    def exec(sql Str, vararg values [Any]) Result[Int, DbError]
     def beginTransaction() Result[Transaction, DbError]
     def close() Result[Unit, DbError]
     def begin() Result[Transaction, DbError]

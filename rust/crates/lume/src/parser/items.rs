@@ -663,8 +663,7 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         self.skip_newlines();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let lazy = self.match_keyword(Keyword::Lazy);
-            let lazy_start = lazy.then(|| self.previous_span());
+            let (lazy, variadic, modifier_start) = self.parse_param_modifiers();
             let (name, start) = self.expect_identifier("expected constructor parameter name")?;
             let ty = if self.can_start_type_ref() {
                 Some(self.parse_type_ref()?)
@@ -672,7 +671,13 @@ impl<'a> Parser<'a> {
                 self.error_at_current("expected_type", "expected constructor parameter type");
                 return None;
             };
-            let variadic = self.match_keyword(Keyword::Vararg);
+            if self.match_keyword(Keyword::Vararg) {
+                self.diagnostics.push(Diagnostic::error(
+                    "invalid_variadic_param",
+                    "vararg must appear before the constructor field name, like 'vararg args [T]'",
+                    self.previous_span(),
+                ));
+            }
             let initializer = if self.match_token(TokenKind::Eq) {
                 Some(self.parse_expr()?)
             } else {
@@ -681,7 +686,6 @@ impl<'a> Parser<'a> {
             let end = initializer
                 .as_ref()
                 .map(Expr::span)
-                .or_else(|| variadic.then(|| self.previous_span()))
                 .or_else(|| ty.as_ref().map(TypeRef::span))
                 .unwrap_or(start);
             params.push(Param {
@@ -690,7 +694,7 @@ impl<'a> Parser<'a> {
                 initializer,
                 variadic,
                 lazy,
-                span: lazy_start.unwrap_or(start).cover(end),
+                span: modifier_start.unwrap_or(start).cover(end),
             });
             self.skip_newlines();
             if self.match_token(TokenKind::Comma) {
