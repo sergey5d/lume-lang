@@ -2448,9 +2448,15 @@ def fail() Str {
 def main() Unit {
     maybe Option[Int] = Some(5)
     result Result[Int, Str] = maybe.toResult(fail())
+    parsed Result[Int, Str] = Int.parse("7").toResult(fail())
 
     match result {
         case Ok(value) => println("ok")
+        case Err(error) => println(error)
+    }
+
+    match parsed {
+        case Ok(value) => println("parsed")
         case Err(error) => println(error)
     }
 }
@@ -2483,7 +2489,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "ok\n"
+            "ok\nparsed\n"
         );
 
         let _ = fs::remove_dir_all(temp);

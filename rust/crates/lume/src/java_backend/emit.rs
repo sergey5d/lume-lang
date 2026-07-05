@@ -1185,6 +1185,7 @@ fn function_param_types(function: &ir::Function) -> Vec<ir::Type> {
 struct JavaParamSpec {
     ty: ir::Type,
     variadic: bool,
+    lazy: bool,
 }
 
 fn function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
@@ -1197,6 +1198,7 @@ fn function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
             Some(JavaParamSpec {
                 ty: local.ty.clone(),
                 variadic: function.param_variadic.get(index).copied().unwrap_or(false),
+                lazy: function.param_lazy.get(index).copied().unwrap_or(false),
             })
         })
         .collect()
@@ -1208,8 +1210,24 @@ fn param_specs_from_types(params: Vec<ir::Type>) -> Vec<JavaParamSpec> {
         .map(|ty| JavaParamSpec {
             ty,
             variadic: false,
+            lazy: false,
         })
         .collect()
+}
+
+fn java_param_spec(ty: ir::Type, lazy: bool) -> JavaParamSpec {
+    JavaParamSpec {
+        ty,
+        variadic: false,
+        lazy,
+    }
+}
+
+fn lazy_param_value_type(ty: &ir::Type) -> &ir::Type {
+    match ty {
+        ir::Type::Function { params, ret } if params.is_empty() => ret.as_ref(),
+        _ => ty,
+    }
 }
 
 fn function_accepts_arg_len(function: &ir::Function, arg_len: usize) -> bool {
@@ -1594,6 +1612,7 @@ impl<'a> SourceBodyEmitter<'a> {
             {
                 Some("lume.core.LumeIterator.from(lume.core.LumeList.of())".to_string())
             }
+            ast::Expr::Member { name, .. } if lazy_core_member_call_name(name) => None,
             ast::Expr::Member { receiver, name, .. } => {
                 let receiver = self.emit_expr(receiver, bindings)?;
                 let args = args
@@ -2701,9 +2720,14 @@ impl<'a> FunctionEmitter<'a> {
             .iter()
             .map(|field| self.emit_operand(&field.value))
             .collect::<Option<Vec<_>>>()?;
+        let owner = if matches!(enum_name, "Option" | "Result" | "Either") {
+            format!("lume.core.{}", java_type_name(enum_name))
+        } else {
+            self.names.named_type(enum_name)
+        };
         Some(format!(
             "new {}.{}<>({})",
-            java_type_name(enum_name),
+            owner,
             java_type_name(case_name),
             args.join(", ")
         ))
@@ -2881,12 +2905,9 @@ impl<'a> FunctionEmitter<'a> {
                 .iter()
                 .enumerate()
                 .map(|(index, operand)| {
-                    let expr = self.emit_operand(operand)?;
                     Some(match params.get(index) {
-                        Some(target) => {
-                            self.coerce_to_target_type(expr, self.operand_type(operand), &target.ty)
-                        }
-                        None => expr,
+                        Some(target) => self.emit_operand_for_param_spec(operand, target)?,
+                        None => self.emit_operand(operand)?,
                     })
                 })
                 .collect();
@@ -2898,20 +2919,14 @@ impl<'a> FunctionEmitter<'a> {
 
         let mut args = Vec::new();
         for (operand, target) in operands.iter().take(variadic_index).zip(params.iter()) {
-            let expr = self.emit_operand(operand)?;
-            args.push(self.coerce_to_target_type(expr, self.operand_type(operand), &target.ty));
+            args.push(self.emit_operand_for_param_spec(operand, target)?);
         }
 
         let variadic_target = params.get(variadic_index)?;
         if operands.len() == params.len() {
             let operand = operands.get(variadic_index)?;
             if self.operand_type_is_variadic_list(operand, &variadic_target.ty) {
-                let expr = self.emit_operand(operand)?;
-                args.push(self.coerce_to_target_type(
-                    expr,
-                    self.operand_type(operand),
-                    &variadic_target.ty,
-                ));
+                args.push(self.emit_operand_for_param_spec(operand, variadic_target)?);
                 return Some(args);
             }
         }
@@ -2934,11 +2949,41 @@ impl<'a> FunctionEmitter<'a> {
         Some(args)
     }
 
+    fn emit_operand_for_param_spec(
+        &self,
+        operand: &ir::Operand,
+        target: &JavaParamSpec,
+    ) -> Option<String> {
+        if target.lazy && self.operand_is_zero_arg_function(operand) {
+            return self.emit_operand(operand);
+        }
+
+        let expr = self.emit_operand(operand)?;
+        let target_ty = if target.lazy {
+            lazy_param_value_type(&target.ty)
+        } else {
+            &target.ty
+        };
+        let expr = self.coerce_to_target_type(expr, self.operand_type(operand), target_ty);
+        if target.lazy {
+            Some(format!("() -> {expr}"))
+        } else {
+            Some(expr)
+        }
+    }
+
     fn emit_operand(&self, operand: &ir::Operand) -> Option<String> {
         match operand {
             ir::Operand::Copy(place) | ir::Operand::Move(place) => self.emit_place(place),
             ir::Operand::Const(constant) => Some(java_constant(constant)),
         }
+    }
+
+    fn operand_is_zero_arg_function(&self, operand: &ir::Operand) -> bool {
+        matches!(
+            self.operand_type(operand),
+            Some(ir::Type::Function { params, .. }) if params.is_empty()
+        )
     }
 
     fn emit_place(&self, place: &ir::Place) -> Option<String> {
@@ -3055,8 +3100,8 @@ impl<'a> FunctionEmitter<'a> {
         operands: &[ir::Operand],
     ) -> Option<Vec<JavaParamSpec>> {
         let receiver_ty = self.operand_type(receiver)?;
-        if let Some(params) = builtin_method_param_types(&receiver_ty, method, operands.len()) {
-            return Some(param_specs_from_types(params));
+        if let Some(params) = builtin_method_param_specs(&receiver_ty, method, operands.len()) {
+            return Some(params);
         }
         let ir::Type::Named { name, args } = receiver_ty else {
             return None;
@@ -3073,6 +3118,7 @@ impl<'a> FunctionEmitter<'a> {
                 .map(|param| JavaParamSpec {
                     ty: self.substitute_receiver_type_args(&name, &args, &param.ty),
                     variadic: param.variadic,
+                    lazy: param.lazy,
                 })
                 .collect(),
         )
@@ -3321,10 +3367,14 @@ impl<'a> FunctionEmitter<'a> {
     ) -> bool {
         let Some(variadic_index) = params.iter().position(|param| param.variadic) else {
             return params.len() == operands.len()
-                && operands
-                    .iter()
-                    .zip(params.iter())
-                    .all(|(operand, param)| self.operand_matches_target(operand, &param.ty));
+                && operands.iter().zip(params.iter()).all(|(operand, param)| {
+                    let target_ty = if param.lazy {
+                        lazy_param_value_type(&param.ty)
+                    } else {
+                        &param.ty
+                    };
+                    self.operand_matches_target(operand, target_ty)
+                });
         };
 
         if operands.len() < variadic_index {
@@ -3334,7 +3384,14 @@ impl<'a> FunctionEmitter<'a> {
             .iter()
             .take(variadic_index)
             .zip(params.iter())
-            .all(|(operand, param)| self.operand_matches_target(operand, &param.ty))
+            .all(|(operand, param)| {
+                let target_ty = if param.lazy {
+                    lazy_param_value_type(&param.ty)
+                } else {
+                    &param.ty
+                };
+                self.operand_matches_target(operand, target_ty)
+            })
         {
             return false;
         }
@@ -3749,6 +3806,7 @@ impl JavaNames {
                             .map(type_ref_to_ir)
                             .unwrap_or(ir::Type::Unknown),
                         variadic: param.variadic,
+                        lazy: false,
                     })
                     .collect::<Vec<_>>();
                 java_method_params
@@ -4032,6 +4090,13 @@ fn core_enum_case_owner(case: &str) -> Option<&'static str> {
     }
 }
 
+fn lazy_core_member_call_name(name: &str) -> bool {
+    matches!(
+        name,
+        "getOr" | "getOrElse" | "orElse" | "toResult" | "toEither"
+    )
+}
+
 fn builtin_method_param_types(
     receiver: &ir::Type,
     method: &str,
@@ -4056,6 +4121,40 @@ fn builtin_method_param_types(
             }
         }
         _ => None,
+    }
+}
+
+fn builtin_method_param_specs(
+    receiver: &ir::Type,
+    method: &str,
+    arg_len: usize,
+) -> Option<Vec<JavaParamSpec>> {
+    match receiver {
+        ir::Type::Named { name, args } if name == "Option" && args.len() == 1 => {
+            match (method, arg_len) {
+                ("getOr" | "getOrElse", 1) => Some(vec![java_param_spec(args[0].clone(), true)]),
+                ("orElse", 1) => Some(vec![java_param_spec(receiver.clone(), true)]),
+                ("toResult" | "toEither", 1) => {
+                    Some(vec![java_param_spec(ir::Type::Unknown, true)])
+                }
+                _ => None,
+            }
+        }
+        ir::Type::Named { name, args } if name == "Result" && args.len() == 2 => {
+            match (method, arg_len) {
+                ("getOr", 1) => Some(vec![java_param_spec(args[0].clone(), true)]),
+                ("orElse", 1) => Some(vec![java_param_spec(receiver.clone(), true)]),
+                _ => None,
+            }
+        }
+        ir::Type::Named { name, args } if name == "Either" && args.len() == 2 => {
+            match (method, arg_len) {
+                ("getOr", 1) => Some(vec![java_param_spec(args[1].clone(), true)]),
+                ("orElse", 1) => Some(vec![java_param_spec(receiver.clone(), true)]),
+                _ => None,
+            }
+        }
+        _ => builtin_method_param_types(receiver, method, arg_len).map(param_specs_from_types),
     }
 }
 

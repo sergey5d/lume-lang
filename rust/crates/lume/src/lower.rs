@@ -3541,12 +3541,28 @@ impl<'a> FunctionLowerer<'a> {
         if let Some(ty) = self.infer_member_call_type(callee, &normalized_args, overrides) {
             return ty;
         }
+        if let Some(ty) = self.infer_named_runtime_call_type(callee) {
+            return ty;
+        }
         match self.infer_expr_type_with_overrides(callee, overrides) {
             ir::Type::Function { ret, .. } => *ret,
             ir::Type::Named { name, args } if declared_type_exists(self.program, &name) => {
                 ir::Type::Named { name, args }
             }
             _ => ir::Type::Unknown,
+        }
+    }
+
+    fn infer_named_runtime_call_type(&self, callee: &Expr) -> Option<ir::Type> {
+        let path = expr_path(callee)?;
+        match path.as_slice() {
+            [owner, method] if owner == "Int" && method == "parse" => {
+                Some(ir::Type::option(ir::Type::Int))
+            }
+            [owner, method] if owner == "Float" && method == "parse" => {
+                Some(ir::Type::option(ir::Type::Float))
+            }
+            _ => None,
         }
     }
 
