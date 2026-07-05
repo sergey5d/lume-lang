@@ -27,9 +27,14 @@ enum Result[T, E] {
         case Err(error) => error
     }
 
-    def getOr(defaultValue T) T = match this {
+    def getOr(lazy defaultValue T) T = match this {
         case Ok(value) => value
         case Err(_) => defaultValue
+    }
+
+    def orElse(lazy fallback Result[T, E]) Result[T, E] = match this {
+        case Ok(value) => Ok(value)
+        case Err(_) => fallback
     }
 
     def toOption() Option[T] = match this {

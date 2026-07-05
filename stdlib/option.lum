@@ -19,21 +19,26 @@ enum Option[T] {
         case Option.None => OS.panic("Option has no value")
     }
 
-    def getOr(defaultValue T) T = match this {
+    def getOr(lazy defaultValue T) T = match this {
         case Some(value) => value
         case Option.None => defaultValue
     }
 
-    def getOrElse(defaultValue T) T = this.getOr(defaultValue)
+    def getOrElse(lazy defaultValue T) T = this.getOr(defaultValue)
 
-    def toResult[E](error () -> E) Result[T, E] = match this {
-        case Some(value) => Ok(value)
-        case Option.None => Err(error())
+    def orElse(lazy fallback Option[T]) Option[T] = match this {
+        case Some(value) => Some(value)
+        case Option.None => fallback
     }
 
-    def toEither[L](left () -> L) Either[L, T] = match this {
+    def toResult[E](lazy error E) Result[T, E] = match this {
+        case Some(value) => Ok(value)
+        case Option.None => Err(error)
+    }
+
+    def toEither[L](lazy left L) Either[L, T] = match this {
         case Some(value) => Right(value)
-        case Option.None => Left(left())
+        case Option.None => Left(left)
     }
 
     def map[X](f (T) -> X) Option[X] = match this {

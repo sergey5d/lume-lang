@@ -39,24 +39,29 @@ impl Option[T] {
         case None => None
     }
 
-    def getOr(fallback T) T = match this {
+    def getOr(lazy fallback T) T = match this {
         case Some(value) => value
         case None => fallback
     }
 
-    def getOrElse(fallback T) T = match this {
+    def getOrElse(lazy fallback T) T = match this {
         case Some(value) => value
         case None => fallback
     }
 
-    def toResult[E](error () -> E) Result[T, E] = match this {
+    def orElse(lazy fallback Option[T]) Option[T] = match this {
+        case Some(value) => Some(value)
+        case None => fallback
+    }
+
+    def toResult[E](lazy error E) Result[T, E] = match this {
         case Some(value) => Ok(value)
-        case None => Err(error())
+        case None => Err(error)
     }
 
-    def toEither[L](left () -> L) Either[L, T] = match this {
+    def toEither[L](lazy left L) Either[L, T] = match this {
         case Some(value) => Right(value)
-        case None => Left(left())
+        case None => Left(left)
     }
 
     def iterator() Iterator[T] = match this {

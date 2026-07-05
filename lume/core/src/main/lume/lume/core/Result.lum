@@ -41,8 +41,13 @@ impl Result[T, E] {
         case Err(error) => Err(error)
     }
 
-    def getOr(fallback T) T = match this {
+    def getOr(lazy fallback T) T = match this {
         case Ok(value) => value
+        case Err(_) => fallback
+    }
+
+    def orElse(lazy fallback Result[T, E]) Result[T, E] = match this {
+        case Ok(value) => Ok(value)
         case Err(_) => fallback
     }
 

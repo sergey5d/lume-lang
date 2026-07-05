@@ -36,6 +36,18 @@ pub(super) fn builtin_method(
     }
 }
 
+pub(super) fn force_lazy_arg(
+    interpreter: &mut Interpreter<'_>,
+    value: Value,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if interpreter.value_is_zero_arg_closure(&value) {
+        interpreter.invoke_value(value, Vec::new(), span)
+    } else {
+        Ok(value)
+    }
+}
+
 /// Returns builtin runtime types with placeholder ids.
 ///
 /// The main runtime builder assigns stable `RuntimeTypeId`s after combining

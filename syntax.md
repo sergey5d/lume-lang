@@ -1066,6 +1066,19 @@ def cached(lazy value Int) Int {
 }
 ```
 
+Core fallback APIs use `lazy` parameters so fallback work only runs on the
+fallback branch. Mapper callbacks such as `map`, `flatMap`, `mapLeft`, and
+`mapError` are ordinary function values; only the callback body is conditional
+on the container branch:
+
+```txt
+value = maybe.getOr(expensiveDefault())
+result = maybe.toResult(makeError())
+next = result.orElse(recover())
+mapped = maybe.map(value -> value + 1)
+leftMapped = either.mapLeft(error -> error.toStr())
+```
+
 Classes, enums, and singles can declare methods inline. Classes, shapes, enums, and singles can also attach behavior through top-level `impl` blocks. Shape bodies remain data-only, so shape methods must use `impl ShapeName { ... }`:
 
 ```txt

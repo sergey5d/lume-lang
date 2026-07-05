@@ -4348,6 +4348,10 @@ impl<'a> FunctionLowerer<'a> {
                 {
                     return self.function_expected_arg_specs(id, &subst);
                 }
+                if let Some(specs) = builtin_member_expected_arg_specs(&receiver_ty, name, expected)
+                {
+                    return Some(specs);
+                }
             }
             _ => {}
         }
@@ -5727,6 +5731,190 @@ fn index_result_ir_type(ty: &ir::Type) -> ir::Type {
     }
 }
 
+fn builtin_member_expected_arg_specs(
+    receiver: &ir::Type,
+    name: &str,
+    expected: Option<&ir::Type>,
+) -> Option<Vec<Option<ExpectedArgSpec>>> {
+    let ir::Type::Named {
+        name: type_name,
+        args,
+    } = receiver
+    else {
+        return None;
+    };
+    let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
+    let spec = |ty: ir::Type, lazy: bool| Some(ExpectedArgSpec { ty, lazy });
+    match (type_name.as_str(), name) {
+        ("Option", "map") => {
+            let mapped = match expected {
+                Some(ir::Type::Named { name, args }) if name == "Option" && args.len() == 1 => {
+                    args[0].clone()
+                }
+                _ => ir::Type::Unknown,
+            };
+            Some(vec![spec(
+                ir::Type::Function {
+                    params: vec![item.clone()],
+                    ret: Box::new(mapped),
+                },
+                false,
+            )])
+        }
+        ("Option", "flatMap") => {
+            let mapped = match expected {
+                Some(ir::Type::Named { name, args }) if name == "Option" && args.len() == 1 => {
+                    ir::Type::option(args[0].clone())
+                }
+                _ => ir::Type::option(ir::Type::Unknown),
+            };
+            Some(vec![spec(
+                ir::Type::Function {
+                    params: vec![item.clone()],
+                    ret: Box::new(mapped),
+                },
+                false,
+            )])
+        }
+        ("Option", "getOr" | "getOrElse") => Some(vec![spec(item, true)]),
+        ("Option", "orElse") => Some(vec![spec(receiver.clone(), true)]),
+        ("Option", "toResult") => {
+            let error = match expected {
+                Some(ir::Type::Named { name, args }) if name == "Result" && args.len() == 2 => {
+                    args[1].clone()
+                }
+                _ => ir::Type::Unknown,
+            };
+            Some(vec![spec(error, true)])
+        }
+        ("Option", "toEither") => {
+            let left = match expected {
+                Some(ir::Type::Named { name, args }) if name == "Either" && args.len() == 2 => {
+                    args[0].clone()
+                }
+                _ => ir::Type::Unknown,
+            };
+            Some(vec![spec(left, true)])
+        }
+        ("Result", "map") => {
+            let mapped = match expected {
+                Some(ir::Type::Named { name, args }) if name == "Result" && args.len() == 2 => {
+                    args[0].clone()
+                }
+                _ => ir::Type::Unknown,
+            };
+            Some(vec![spec(
+                ir::Type::Function {
+                    params: vec![item.clone()],
+                    ret: Box::new(mapped),
+                },
+                false,
+            )])
+        }
+        ("Result", "flatMap") => {
+            let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            let mapped = match expected {
+                Some(ir::Type::Named { name, args }) if name == "Result" && args.len() == 2 => {
+                    ir::Type::Named {
+                        name: "Result".to_string(),
+                        args: vec![args[0].clone(), error.clone()],
+                    }
+                }
+                _ => ir::Type::Named {
+                    name: "Result".to_string(),
+                    args: vec![ir::Type::Unknown, error],
+                },
+            };
+            Some(vec![spec(
+                ir::Type::Function {
+                    params: vec![item.clone()],
+                    ret: Box::new(mapped),
+                },
+                false,
+            )])
+        }
+        ("Result", "getOr") => Some(vec![spec(item, true)]),
+        ("Result", "orElse") => Some(vec![spec(receiver.clone(), true)]),
+        ("Result", "mapError") => {
+            let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            let mapped = match expected {
+                Some(ir::Type::Named { name, args }) if name == "Result" && args.len() == 2 => {
+                    args[1].clone()
+                }
+                _ => ir::Type::Unknown,
+            };
+            Some(vec![spec(
+                ir::Type::Function {
+                    params: vec![error],
+                    ret: Box::new(mapped),
+                },
+                false,
+            )])
+        }
+        ("Either", "map") => {
+            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            let mapped = match expected {
+                Some(ir::Type::Named { name, args }) if name == "Either" && args.len() == 2 => {
+                    args[1].clone()
+                }
+                _ => ir::Type::Unknown,
+            };
+            Some(vec![spec(
+                ir::Type::Function {
+                    params: vec![right],
+                    ret: Box::new(mapped),
+                },
+                false,
+            )])
+        }
+        ("Either", "flatMap") => {
+            let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
+            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            let mapped = match expected {
+                Some(ir::Type::Named { name, args }) if name == "Either" && args.len() == 2 => {
+                    ir::Type::Named {
+                        name: "Either".to_string(),
+                        args: vec![left.clone(), args[1].clone()],
+                    }
+                }
+                _ => ir::Type::Named {
+                    name: "Either".to_string(),
+                    args: vec![left, ir::Type::Unknown],
+                },
+            };
+            Some(vec![spec(
+                ir::Type::Function {
+                    params: vec![right],
+                    ret: Box::new(mapped),
+                },
+                false,
+            )])
+        }
+        ("Either", "getOr") => {
+            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            Some(vec![spec(right, true)])
+        }
+        ("Either", "orElse") => Some(vec![spec(receiver.clone(), true)]),
+        ("Either", "mapLeft") => {
+            let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
+            let mapped = match expected {
+                Some(ir::Type::Named { name, args }) if name == "Either" && args.len() == 2 => {
+                    args[0].clone()
+                }
+                _ => ir::Type::Unknown,
+            };
+            Some(vec![spec(
+                ir::Type::Function {
+                    params: vec![left],
+                    ret: Box::new(mapped),
+                },
+                false,
+            )])
+        }
+        _ => None,
+    }
+}
+
 fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
     if let Some(ty) = universal_member_type(name) {
         return Some(ty);
@@ -5741,6 +5929,42 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
     };
     let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
     match (type_name.as_str(), name) {
+        ("Option", "map") => Some(ir::Type::Function {
+            params: vec![ir::Type::Function {
+                params: vec![item.clone()],
+                ret: Box::new(ir::Type::Unknown),
+            }],
+            ret: Box::new(ir::Type::option(ir::Type::Unknown)),
+        }),
+        ("Option", "flatMap") => Some(ir::Type::Function {
+            params: vec![ir::Type::Function {
+                params: vec![item.clone()],
+                ret: Box::new(ir::Type::option(ir::Type::Unknown)),
+            }],
+            ret: Box::new(ir::Type::option(ir::Type::Unknown)),
+        }),
+        ("Option", "getOr" | "getOrElse") => Some(ir::Type::Function {
+            params: vec![item.clone()],
+            ret: Box::new(item),
+        }),
+        ("Option", "orElse") => Some(ir::Type::Function {
+            params: vec![receiver.clone()],
+            ret: Box::new(receiver.clone()),
+        }),
+        ("Option", "toResult") => Some(ir::Type::Function {
+            params: vec![ir::Type::Unknown],
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![item.clone(), ir::Type::Unknown],
+            }),
+        }),
+        ("Option", "toEither") => Some(ir::Type::Function {
+            params: vec![ir::Type::Unknown],
+            ret: Box::new(ir::Type::Named {
+                name: "Either".to_string(),
+                args: vec![ir::Type::Unknown, item.clone()],
+            }),
+        }),
         ("Option", "orPanic") => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(item),
@@ -5753,11 +5977,117 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: Vec::new(),
             ret: Box::new(item),
         }),
+        ("Result", "map") => {
+            let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            Some(ir::Type::Function {
+                params: vec![ir::Type::Function {
+                    params: vec![item.clone()],
+                    ret: Box::new(ir::Type::Unknown),
+                }],
+                ret: Box::new(ir::Type::Named {
+                    name: "Result".to_string(),
+                    args: vec![ir::Type::Unknown, error],
+                }),
+            })
+        }
+        ("Result", "flatMap") => {
+            let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            Some(ir::Type::Function {
+                params: vec![ir::Type::Function {
+                    params: vec![item.clone()],
+                    ret: Box::new(ir::Type::Named {
+                        name: "Result".to_string(),
+                        args: vec![ir::Type::Unknown, error.clone()],
+                    }),
+                }],
+                ret: Box::new(ir::Type::Named {
+                    name: "Result".to_string(),
+                    args: vec![ir::Type::Unknown, error],
+                }),
+            })
+        }
+        ("Result", "getOr") => Some(ir::Type::Function {
+            params: vec![item.clone()],
+            ret: Box::new(item),
+        }),
+        ("Result", "orElse") => Some(ir::Type::Function {
+            params: vec![receiver.clone()],
+            ret: Box::new(receiver.clone()),
+        }),
+        ("Result", "mapError") => {
+            let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            Some(ir::Type::Function {
+                params: vec![ir::Type::Function {
+                    params: vec![error],
+                    ret: Box::new(ir::Type::Unknown),
+                }],
+                ret: Box::new(ir::Type::Named {
+                    name: "Result".to_string(),
+                    args: vec![item.clone(), ir::Type::Unknown],
+                }),
+            })
+        }
         ("Either", "orPanic") => {
             let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
             Some(ir::Type::Function {
                 params: Vec::new(),
                 ret: Box::new(right),
+            })
+        }
+        ("Either", "map") => {
+            let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
+            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            Some(ir::Type::Function {
+                params: vec![ir::Type::Function {
+                    params: vec![right],
+                    ret: Box::new(ir::Type::Unknown),
+                }],
+                ret: Box::new(ir::Type::Named {
+                    name: "Either".to_string(),
+                    args: vec![left, ir::Type::Unknown],
+                }),
+            })
+        }
+        ("Either", "flatMap") => {
+            let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
+            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            Some(ir::Type::Function {
+                params: vec![ir::Type::Function {
+                    params: vec![right],
+                    ret: Box::new(ir::Type::Named {
+                        name: "Either".to_string(),
+                        args: vec![left.clone(), ir::Type::Unknown],
+                    }),
+                }],
+                ret: Box::new(ir::Type::Named {
+                    name: "Either".to_string(),
+                    args: vec![left, ir::Type::Unknown],
+                }),
+            })
+        }
+        ("Either", "getOr") => {
+            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            Some(ir::Type::Function {
+                params: vec![right.clone()],
+                ret: Box::new(right),
+            })
+        }
+        ("Either", "orElse") => Some(ir::Type::Function {
+            params: vec![receiver.clone()],
+            ret: Box::new(receiver.clone()),
+        }),
+        ("Either", "mapLeft") => {
+            let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
+            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+            Some(ir::Type::Function {
+                params: vec![ir::Type::Function {
+                    params: vec![left],
+                    ret: Box::new(ir::Type::Unknown),
+                }],
+                ret: Box::new(ir::Type::Named {
+                    name: "Either".to_string(),
+                    args: vec![ir::Type::Unknown, right],
+                }),
             })
         }
         ("Type", "name" | "qualifiedName") => Some(ir::Type::Function {

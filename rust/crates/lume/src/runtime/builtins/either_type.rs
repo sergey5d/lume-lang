@@ -5,7 +5,7 @@ use crate::{
     ir,
 };
 
-use super::builtin_method;
+use super::{builtin_method, force_lazy_arg};
 use crate::runtime::{
     RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeType, RuntimeTypeId,
 };
@@ -33,10 +33,11 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(3, "expectLeft", Vec::new(), either_expect_left),
             builtin_method(4, "expectRight", Vec::new(), either_expect_right),
             builtin_method(5, "getOr", vec![ir::Type::Unknown], either_get_or),
-            builtin_method(6, "isSuccess", Vec::new(), either_is_right),
-            builtin_method(7, "orPanic", Vec::new(), either_expect_right),
+            builtin_method(6, "orElse", vec![ir::Type::Unknown], either_or_else),
+            builtin_method(7, "isSuccess", Vec::new(), either_is_right),
+            builtin_method(8, "orPanic", Vec::new(), either_expect_right),
             builtin_method(
-                8,
+                9,
                 "flatMap",
                 vec![ir::Type::Function {
                     params: Vec::new(),
@@ -44,6 +45,17 @@ pub(super) fn define() -> RuntimeType {
                 }],
                 either_flat_map,
             ),
+            builtin_method(
+                10,
+                "mapLeft",
+                vec![ir::Type::Function {
+                    params: Vec::new(),
+                    ret: Box::new(ir::Type::Unknown),
+                }],
+                either_map_left,
+            ),
+            builtin_method(11, "toOption", Vec::new(), either_to_option),
+            builtin_method(12, "toResult", Vec::new(), either_to_result),
         ],
         enum_cases: vec![
             RuntimeEnumCase {
@@ -150,6 +162,28 @@ fn either_flat_map(
     }
 }
 
+fn either_map_left(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let [callback] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Either.mapLeft expects 1 argument"));
+    };
+    let (case_id, first_field) = either_case(&receiver);
+    if case_id == LEFT_CASE {
+        let mapped = interpreter.invoke_value(
+            callback.clone(),
+            vec![first_field.expect("Either.Left payload")],
+            span,
+        )?;
+        Ok(interpreter.either_left(mapped))
+    } else {
+        Ok(receiver)
+    }
+}
+
 fn either_expect_left(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
@@ -191,6 +225,57 @@ fn either_get_or(
     if case_id == RIGHT_CASE {
         Ok(first_field.expect("Either.Right payload"))
     } else {
-        Ok(args[0].clone())
+        force_lazy_arg(interpreter, args[0].clone(), span)
+    }
+}
+
+fn either_or_else(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if args.len() != 1 {
+        return Err(interpreter.runtime_error(span, "Either.orElse expects 1 argument"));
+    }
+    let (case_id, _) = either_case(&receiver);
+    if case_id == RIGHT_CASE {
+        Ok(receiver)
+    } else {
+        force_lazy_arg(interpreter, args[0].clone(), span)
+    }
+}
+
+fn either_to_option(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Either.toOption expects 0 arguments"));
+    }
+    let (case_id, first_field) = either_case(&receiver);
+    if case_id == RIGHT_CASE {
+        Ok(interpreter.option_some(first_field.expect("Either.Right payload")))
+    } else {
+        Ok(interpreter.option_none())
+    }
+}
+
+fn either_to_result(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Either.toResult expects 0 arguments"));
+    }
+    let (case_id, first_field) = either_case(&receiver);
+    if case_id == RIGHT_CASE {
+        Ok(interpreter.result_ok(first_field.expect("Either.Right payload")))
+    } else {
+        Ok(interpreter.result_err(first_field.expect("Either.Left payload")))
     }
 }

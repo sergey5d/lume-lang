@@ -5,7 +5,7 @@ use crate::{
     ir,
 };
 
-use super::builtin_method;
+use super::{builtin_method, force_lazy_arg};
 use crate::runtime::{
     RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeType, RuntimeTypeId,
 };
@@ -33,9 +33,10 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(3, "orPanic", Vec::new(), result_or_panic),
             builtin_method(4, "getError", Vec::new(), result_get_error),
             builtin_method(5, "getOr", vec![ir::Type::Unknown], result_get_or),
-            builtin_method(6, "isSuccess", Vec::new(), result_is_ok),
+            builtin_method(6, "orElse", vec![ir::Type::Unknown], result_or_else),
+            builtin_method(7, "isSuccess", Vec::new(), result_is_ok),
             builtin_method(
-                7,
+                8,
                 "flatMap",
                 vec![ir::Type::Function {
                     params: Vec::new(),
@@ -43,6 +44,17 @@ pub(super) fn define() -> RuntimeType {
                 }],
                 result_flat_map,
             ),
+            builtin_method(
+                9,
+                "mapError",
+                vec![ir::Type::Function {
+                    params: Vec::new(),
+                    ret: Box::new(ir::Type::Unknown),
+                }],
+                result_map_error,
+            ),
+            builtin_method(10, "toOption", Vec::new(), result_to_option),
+            builtin_method(11, "toEither", Vec::new(), result_to_either),
         ],
         enum_cases: vec![
             RuntimeEnumCase {
@@ -149,6 +161,28 @@ fn result_flat_map(
     }
 }
 
+fn result_map_error(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let [callback] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Result.mapError expects 1 argument"));
+    };
+    let (case_id, first_field) = result_case(&receiver);
+    if case_id == ERR_CASE {
+        let mapped = interpreter.invoke_value(
+            callback.clone(),
+            vec![first_field.expect("Result.Err payload")],
+            span,
+        )?;
+        Ok(interpreter.result_err(mapped))
+    } else {
+        Ok(receiver)
+    }
+}
+
 fn result_or_panic(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
@@ -190,6 +224,57 @@ fn result_get_or(
     if case_id == OK_CASE {
         Ok(first_field.expect("Result.Ok payload"))
     } else {
-        Ok(args[0].clone())
+        force_lazy_arg(interpreter, args[0].clone(), span)
+    }
+}
+
+fn result_or_else(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if args.len() != 1 {
+        return Err(interpreter.runtime_error(span, "Result.orElse expects 1 argument"));
+    }
+    let (case_id, _) = result_case(&receiver);
+    if case_id == OK_CASE {
+        Ok(receiver)
+    } else {
+        force_lazy_arg(interpreter, args[0].clone(), span)
+    }
+}
+
+fn result_to_option(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Result.toOption expects 0 arguments"));
+    }
+    let (case_id, first_field) = result_case(&receiver);
+    if case_id == OK_CASE {
+        Ok(interpreter.option_some(first_field.expect("Result.Ok payload")))
+    } else {
+        Ok(interpreter.option_none())
+    }
+}
+
+fn result_to_either(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Result.toEither expects 0 arguments"));
+    }
+    let (case_id, first_field) = result_case(&receiver);
+    if case_id == OK_CASE {
+        Ok(interpreter.either_right(first_field.expect("Result.Ok payload")))
+    } else {
+        Ok(interpreter.either_left(first_field.expect("Result.Err payload")))
     }
 }

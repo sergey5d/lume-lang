@@ -1,0 +1,115 @@
+# EXPECT:
+# option some 5
+# option fallback
+# option none 9
+# result ok 7
+# result fallback
+# result err 11
+# either right 3
+# either fallback
+# either left 4
+# toResult ok 5
+# toResult fallback
+# toResult err missing
+# toEither right 5
+# toEither fallback
+# toEither left missing
+# option orElse some 5
+# option orElse fallback
+# option orElse none 9
+# result orElse ok 7
+# result orElse fallback
+# result orElse err 11
+# either orElse right 3
+# either orElse fallback
+# either orElse left 4
+# mapError ok 7
+# mapError fallback
+# mapError err mapped
+# mapLeft right 3
+# mapLeft fallback
+# mapLeft left mapped
+
+def fallbackInt(label Str, value Int) Int {
+    println(label)
+    value
+}
+
+def fallbackStr(label Str, value Str) Str {
+    println(label)
+    value
+}
+
+def fallbackOption(label Str, value Int) Option[Int] {
+    println(label)
+    Some(value)
+}
+
+def fallbackResult(label Str, value Int) Result[Int, Str] {
+    println(label)
+    Ok(value)
+}
+
+def fallbackEither(label Str, value Int) Either[Str, Int] {
+    println(label)
+    Right(value)
+}
+
+def main() Unit {
+    some Option[Int] = Some(5)
+    none Option[Int] = None
+    ok Result[Int, Str] = Ok(7)
+    err Result[Int, Str] = Err("bad")
+    right Either[Str, Int] = Right(3)
+    left Either[Str, Int] = Left("bad")
+
+    optionSome Int = some.getOr(fallbackInt("option eager", 9))
+    println("option some ${optionSome}")
+    optionNone Int = none.getOr(fallbackInt("option fallback", 9))
+    println("option none ${optionNone}")
+
+    resultOk Int = ok.getOr(fallbackInt("result eager", 11))
+    println("result ok ${resultOk}")
+    resultErr Int = err.getOr(fallbackInt("result fallback", 11))
+    println("result err ${resultErr}")
+
+    eitherRight Int = right.getOr(fallbackInt("either eager", 4))
+    println("either right ${eitherRight}")
+    eitherLeft Int = left.getOr(fallbackInt("either fallback", 4))
+    println("either left ${eitherLeft}")
+
+    okFromSome Result[Int, Str] = some.toResult(fallbackStr("toResult eager", "missing"))
+    println("toResult ok ${okFromSome.orPanic()}")
+    errFromNone Result[Int, Str] = none.toResult(fallbackStr("toResult fallback", "missing"))
+    println("toResult err ${errFromNone.getError()}")
+
+    rightFromSome Either[Str, Int] = some.toEither(fallbackStr("toEither eager", "missing"))
+    println("toEither right ${rightFromSome.expectRight()}")
+    leftFromNone Either[Str, Int] = none.toEither(fallbackStr("toEither fallback", "missing"))
+    println("toEither left ${leftFromNone.expectLeft()}")
+
+    optionOrElseSome Int = some.orElse(fallbackOption("option orElse eager", 9)).orPanic()
+    println("option orElse some ${optionOrElseSome}")
+    optionOrElseNone Int = none.orElse(fallbackOption("option orElse fallback", 9)).orPanic()
+    println("option orElse none ${optionOrElseNone}")
+
+    resultOrElseOk Int = ok.orElse(fallbackResult("result orElse eager", 11)).orPanic()
+    println("result orElse ok ${resultOrElseOk}")
+    resultOrElseErr Int = err.orElse(fallbackResult("result orElse fallback", 11)).orPanic()
+    println("result orElse err ${resultOrElseErr}")
+
+    eitherOrElseRight Int = right.orElse(fallbackEither("either orElse eager", 4)).expectRight()
+    println("either orElse right ${eitherOrElseRight}")
+    eitherOrElseLeft Int = left.orElse(fallbackEither("either orElse fallback", 4)).expectRight()
+    println("either orElse left ${eitherOrElseLeft}")
+
+    mapErrorOk Result[Int, Str] = ok.mapError(error -> fallbackStr("mapError eager", "mapped"))
+    println("mapError ok ${mapErrorOk.orPanic()}")
+    mapErrorErr Result[Int, Str] = err.mapError(error -> fallbackStr("mapError fallback", "mapped"))
+    println("mapError err ${mapErrorErr.getError()}")
+
+    mapLeftRight Either[Str, Int] = right.mapLeft(error -> fallbackStr("mapLeft eager", "mapped"))
+    println("mapLeft right ${mapLeftRight.expectRight()}")
+    mapLeftLeft Either[Str, Int] = left.mapLeft(error -> fallbackStr("mapLeft fallback", "mapped"))
+    println("mapLeft left ${mapLeftLeft.expectLeft()}")
+}

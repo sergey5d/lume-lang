@@ -2562,6 +2562,15 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    pub(crate) fn value_is_zero_arg_closure(&self, value: &Value) -> bool {
+        let Value::Closure(closure) = value else {
+            return false;
+        };
+        self.program
+            .function(closure.function)
+            .is_some_and(|function| function.params.is_empty())
+    }
+
     fn invoke_named_path(
         &mut self,
         frame: Option<&Frame>,

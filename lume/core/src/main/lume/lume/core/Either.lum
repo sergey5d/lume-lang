@@ -41,9 +41,14 @@ impl Either[L, R] {
         case Right(value) => f(value)
     }
 
-    def getOr(fallback R) R = match this {
+    def getOr(lazy fallback R) R = match this {
         case Left(_) => fallback
         case Right(value) => value
+    }
+
+    def orElse(lazy fallback Either[L, R]) Either[L, R] = match this {
+        case Left(_) => fallback
+        case Right(value) => Right(value)
     }
 
     def toOption() Option[R] = match this {

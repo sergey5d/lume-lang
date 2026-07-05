@@ -2447,7 +2447,7 @@ def fail() Str {
 
 def main() Unit {
     maybe Option[Int] = Some(5)
-    result Result[Int, Str] = maybe.toResult(() -> fail())
+    result Result[Int, Str] = maybe.toResult(fail())
 
     match result {
         case Ok(value) => println("ok")

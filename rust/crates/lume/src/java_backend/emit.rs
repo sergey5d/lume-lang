@@ -1315,6 +1315,10 @@ fn source_method_matches(method: &ast::MethodDecl, function: &ir::Function) -> b
 }
 
 fn source_param_shape_matches_ir(param: &ast::Param, ty: &ir::Type) -> bool {
+    if param.lazy {
+        return matches!(ty, ir::Type::Function { params, .. } if params.is_empty());
+    }
+
     match (&param.ty, ty) {
         (Some(TypeRef::Function { .. }), ir::Type::Function { .. }) => true,
         (Some(TypeRef::Function { .. }), _) => false,
@@ -1509,6 +1513,7 @@ impl<'a> SourceBodyEmitter<'a> {
             ast::Expr::Identifier { name, .. } => bindings
                 .get(name)
                 .cloned()
+                .or_else(|| self.lazy_param_value_reference(name))
                 .or_else(|| self.param_reference(name)),
             ast::Expr::Bool { value, .. } => Some(value.to_string()),
             ast::Expr::Integer { raw, .. } => Some(format!("{raw}L")),
@@ -1567,7 +1572,11 @@ impl<'a> SourceBodyEmitter<'a> {
                     .iter()
                     .map(|arg| self.emit_expr(&arg.value, bindings))
                     .collect::<Option<Vec<_>>>()?;
-                let target = self.param_reference(name)?;
+                let target = if self.is_lazy_param(name) {
+                    format!("{}.get()", self.param_reference(name)?)
+                } else {
+                    self.param_reference(name)?
+                };
                 match args.as_slice() {
                     [] => Some(format!("{target}.get()")),
                     [arg] => Some(format!("{target}.apply({arg})")),
@@ -1627,6 +1636,39 @@ impl<'a> SourceBodyEmitter<'a> {
             .iter()
             .filter_map(|param| self.function.locals.get(param.0))
             .find(|local| local.name == name && matches!(local.ty, ir::Type::Function { .. }))
+    }
+
+    fn is_lazy_param(&self, name: &str) -> bool {
+        self.function
+            .params
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| {
+                self.function
+                    .param_lazy
+                    .get(*index)
+                    .copied()
+                    .unwrap_or(false)
+            })
+            .filter_map(|(_, param)| self.function.locals.get(param.0))
+            .any(|local| local.name == name)
+    }
+
+    fn lazy_param_value_reference(&self, name: &str) -> Option<String> {
+        self.function
+            .params
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| {
+                self.function
+                    .param_lazy
+                    .get(*index)
+                    .copied()
+                    .unwrap_or(false)
+            })
+            .filter_map(|(_, param)| self.function.locals.get(param.0))
+            .find(|local| local.name == name)
+            .map(|local| format!("{}.get()", java_local_name(local)))
     }
 }
 
@@ -3502,9 +3544,7 @@ impl<'a> FunctionEmitter<'a> {
         if self.is_unbound_named_type(ty) {
             return false;
         }
-        if java_type_contains_type_param(ty)
-            && !java_type_params_are_bound(ty, &self.function.type_params)
-        {
+        if java_type_contains_type_param(ty) && !self.type_params_are_bound(ty) {
             return false;
         }
         java_type_needs_reference_cast(ty)
@@ -3517,9 +3557,7 @@ impl<'a> FunctionEmitter<'a> {
         if self.is_unbound_named_type(ty) {
             return false;
         }
-        if java_type_contains_type_param(ty)
-            && !java_type_params_are_bound(ty, &self.function.type_params)
-        {
+        if java_type_contains_type_param(ty) && !self.type_params_are_bound(ty) {
             return false;
         }
         !matches!(ty, ir::Type::Unknown | ir::Type::Never | ir::Type::Unit)
@@ -3545,9 +3583,7 @@ impl<'a> FunctionEmitter<'a> {
     }
 
     fn local_value_type(&self, ty: &ir::Type) -> String {
-        if java_type_contains_type_param(ty)
-            && !java_type_params_are_bound(ty, &self.function.type_params)
-        {
+        if java_type_contains_type_param(ty) && !self.type_params_are_bound(ty) {
             return "Object".to_string();
         }
         if self.is_unbound_named_type(ty) {
@@ -3557,12 +3593,11 @@ impl<'a> FunctionEmitter<'a> {
     }
 
     fn type_param_is_unbound(&self, ty: &ir::Type) -> bool {
-        matches!(ty, ir::Type::TypeParam(name) if !self.function.type_params.iter().any(|param| param == name))
+        matches!(ty, ir::Type::TypeParam(name) if !self.type_param_is_bound(name))
     }
 
     fn type_has_unbound_type_params(&self, ty: &ir::Type) -> bool {
-        java_type_contains_type_param(ty)
-            && !java_type_params_are_bound(ty, &self.function.type_params)
+        java_type_contains_type_param(ty) && !self.type_params_are_bound(ty)
     }
 
     fn is_unbound_named_type(&self, ty: &ir::Type) -> bool {
@@ -3570,11 +3605,34 @@ impl<'a> FunctionEmitter<'a> {
             return false;
         };
         args.is_empty()
-            && !self.function.type_params.iter().any(|param| param == name)
+            && !self.type_param_is_bound(name)
             && java_named_builtin_value(name).is_none()
             && !is_builtin_container(name)
             && !self.names.is_java_type(name)
             && !self.bundle.ir.types.iter().any(|ty| ty.name == *name)
+    }
+
+    fn type_param_is_bound(&self, name: &str) -> bool {
+        self.function.type_params.iter().any(|param| param == name)
+            || match self.function.kind {
+                ir::FunctionKind::Method { owner } => self
+                    .bundle
+                    .ir
+                    .types
+                    .get(owner.0)
+                    .is_some_and(|ty| ty.type_params.iter().any(|param| param == name)),
+                _ => false,
+            }
+    }
+
+    fn type_params_are_bound(&self, ty: &ir::Type) -> bool {
+        let mut bound = self.function.type_params.clone();
+        if let ir::FunctionKind::Method { owner } = self.function.kind
+            && let Some(owner) = self.bundle.ir.types.get(owner.0)
+        {
+            bound.extend(owner.type_params.iter().cloned());
+        }
+        java_type_params_are_bound(ty, &bound)
     }
 
     fn local_reference(&self, local: &ir::Local) -> String {
