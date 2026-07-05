@@ -12,6 +12,10 @@ public final class JavalinContext {
         return optional(ctx.queryParam(name));
     }
 
+    public static Option<String> pathParam(Context ctx, String name) {
+        return optional(ctx.pathParam(name));
+    }
+
     public static Option<String> header(Context ctx, String name) {
         return optional(ctx.header(name));
     }
