@@ -66,5 +66,5 @@ interface Database {
     def beginTransaction() Result[Transaction, DbError]
     def close() Result[Unit, DbError]
     def begin() Result[Transaction, DbError]
-    def transactionally(work (Transaction) -> Result[Unit, DbError]) Result[Unit, DbError]
+    def transactionally[T](work (Transaction) -> Result[T, DbError]) Result[T, DbError]
 }

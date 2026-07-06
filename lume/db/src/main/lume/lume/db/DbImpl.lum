@@ -324,10 +324,10 @@ impl JdbcDatabaseImpl {
 
     def begin() Result[Transaction, DbError] = this.beginTransaction()
 
-    def transactionally(work (Transaction) -> Result[Unit, DbError]) Result[Unit, DbError] {
+    def transactionally[T](work (Transaction) -> Result[T, DbError]) Result[T, DbError] {
         tx Transaction = try this.beginTransaction()
 
-        worked Result[Unit, DbError] = work(tx)
+        worked Result[T, DbError] = work(tx)
         match worked {
             case Ok(value) => {
                 committed Result[Unit, DbError] = tx.commit()

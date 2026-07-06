@@ -1999,10 +1999,8 @@ impl<'a> FunctionEmitter<'a> {
             out.push_str(&self.local_value_type(local_ty));
             out.push(' ');
             out.push_str(&self.local_name(local));
-            if !self.local_can_be_effectively_final_capture(local) {
-                out.push_str(" = ");
-                out.push_str(&java_default_value(local_ty));
-            }
+            out.push_str(" = ");
+            out.push_str(&java_default_value(local_ty));
             out.push_str(";\n");
         }
 
@@ -2054,6 +2052,12 @@ impl<'a> FunctionEmitter<'a> {
             ir::StatementKind::Assign { target, value } => {
                 let target_ty = self.place_type(target);
                 let value_ty = self.rvalue_type(value);
+                let closure_capture_initializers = match value {
+                    ir::RValue::Closure { function, captures } => {
+                        Some(self.emit_closure_capture_snapshots(out, *function, captures)?)
+                    }
+                    _ => None,
+                };
                 if target_ty.as_ref().is_some_and(is_java_void_type)
                     && value_ty.as_ref().is_some_and(is_java_void_type)
                     && rvalue_can_be_java_statement(value)
@@ -2066,7 +2070,14 @@ impl<'a> FunctionEmitter<'a> {
                     out.push_str(" = lume.core.LumeUnit.INSTANCE;\n");
                     return Some(());
                 }
-                let mut value_expr = self.emit_rvalue(value)?;
+                let mut value_expr = match value {
+                    ir::RValue::Closure { function, captures } => self.emit_closure(
+                        *function,
+                        captures,
+                        closure_capture_initializers.as_deref(),
+                    )?,
+                    _ => self.emit_rvalue(value)?,
+                };
                 if let Some(target_ty) = target_ty {
                     value_expr = self.coerce_to_target_type(value_expr, value_ty, &target_ty);
                 }
@@ -2241,7 +2252,9 @@ impl<'a> FunctionEmitter<'a> {
             ir::RValue::RecordUpdate { .. } => self.unsupported("shape update"),
             ir::RValue::Index { base, index } => self.emit_index(base, index),
             ir::RValue::TypeTest { .. } => self.unsupported("type test"),
-            ir::RValue::Closure { function, captures } => self.emit_closure(*function, captures),
+            ir::RValue::Closure { function, captures } => {
+                self.emit_closure(*function, captures, None)
+            }
         }
     }
 
@@ -2773,31 +2786,78 @@ impl<'a> FunctionEmitter<'a> {
         &self,
         function_id: ir::FunctionId,
         captures: &[ir::Operand],
+        capture_initializers: Option<&[String]>,
     ) -> Option<String> {
         let function = self.bundle.ir.function(function_id)?;
-        let capture_overrides = self.closure_capture_overrides(function, captures)?;
         let local_prefix = format!("lambda{}_", function_id.0);
-        let params = function
+        let param_locals = function
             .params
             .iter()
             .filter_map(|param| function.locals.get(param.0))
-            .map(|local| format!("{local_prefix}{}", java_local_name(local)))
             .collect::<Vec<_>>();
-        let params = match params.as_slice() {
-            [] => "()".to_string(),
-            [param] => param.clone(),
-            _ => format!("({})", params.join(", ")),
+        let target_ty = ir::Type::Function {
+            params: param_locals.iter().map(|local| local.ty.clone()).collect(),
+            ret: Box::new(function.return_ty.clone()),
         };
+        let target_java_ty = self.names.value_type(&target_ty);
+        let return_java_ty = self.names.value_type(&function.return_ty);
+        let (method_name, method_params) = match param_locals.as_slice() {
+            [] => ("get", String::new()),
+            [param] => (
+                "apply",
+                format!(
+                    "{} {local_prefix}{}",
+                    self.local_value_type(&param.ty),
+                    java_local_name(param)
+                ),
+            ),
+            [left, right] => (
+                "apply",
+                format!(
+                    "{} {local_prefix}{}, {} {local_prefix}{}",
+                    self.local_value_type(&left.ty),
+                    java_local_name(left),
+                    self.local_value_type(&right.ty),
+                    java_local_name(right)
+                ),
+            ),
+            _ => return self.unsupported("lambda with more than two parameters"),
+        };
+        let capture_overrides =
+            self.closure_capture_field_overrides(function_id, function, captures)?;
         let body = FunctionEmitter::new(self.bundle, function, self.names)
             .with_capture_overrides(capture_overrides)
             .with_control_var(format!("__block_lambda_{}", function_id.0))
             .with_local_prefix(local_prefix)
             .emit_body()?;
-        Some(format!("{params} ->{body}"))
+
+        let mut out = String::new();
+        out.push_str("new ");
+        out.push_str(&target_java_ty);
+        out.push_str("() {\n");
+        self.push_closure_capture_fields(
+            &mut out,
+            function_id,
+            function,
+            captures,
+            capture_initializers,
+        )?;
+        out.push_str("        @Override\n");
+        out.push_str("        public ");
+        out.push_str(&return_java_ty);
+        out.push(' ');
+        out.push_str(method_name);
+        out.push('(');
+        out.push_str(&method_params);
+        out.push(')');
+        out.push_str(&body);
+        out.push_str("    }");
+        Some(out)
     }
 
-    fn closure_capture_overrides(
+    fn closure_capture_field_overrides(
         &self,
+        function_id: ir::FunctionId,
         function: &ir::Function,
         captures: &[ir::Operand],
     ) -> Option<HashMap<ir::LocalId, String>> {
@@ -2811,9 +2871,91 @@ impl<'a> FunctionEmitter<'a> {
         }
         capture_locals
             .iter()
-            .zip(captures)
-            .map(|(local, capture)| Some((local.id, self.emit_capture_initializer(capture)?)))
+            .enumerate()
+            .map(|(index, local)| {
+                Some((
+                    local.id,
+                    format!(
+                        "__capture_lambda_{}_{}_{}",
+                        function_id.0, local.id.0, index
+                    ),
+                ))
+            })
             .collect()
+    }
+
+    fn emit_closure_capture_snapshots(
+        &self,
+        out: &mut String,
+        function_id: ir::FunctionId,
+        captures: &[ir::Operand],
+    ) -> Option<Vec<String>> {
+        let function = self.bundle.ir.function(function_id)?;
+        let capture_locals = function
+            .locals
+            .iter()
+            .filter(|local| matches!(local.kind, ir::LocalKind::Capture))
+            .collect::<Vec<_>>();
+        if capture_locals.len() != captures.len() {
+            return None;
+        }
+
+        let mut snapshot_names = Vec::new();
+        for (index, (local, capture)) in capture_locals.iter().zip(captures).enumerate() {
+            let snapshot_name = format!(
+                "__capture_value_lambda_{}_{}_{}",
+                function_id.0, local.id.0, index
+            );
+            out.push_str("                    final ");
+            out.push_str(&self.local_value_type(&local.ty));
+            out.push(' ');
+            out.push_str(&snapshot_name);
+            out.push_str(" = ");
+            out.push_str(&self.emit_capture_initializer(capture)?);
+            out.push_str(";\n");
+            snapshot_names.push(snapshot_name);
+        }
+        Some(snapshot_names)
+    }
+
+    fn push_closure_capture_fields(
+        &self,
+        out: &mut String,
+        function_id: ir::FunctionId,
+        function: &ir::Function,
+        captures: &[ir::Operand],
+        capture_initializers: Option<&[String]>,
+    ) -> Option<()> {
+        let capture_locals = function
+            .locals
+            .iter()
+            .filter(|local| matches!(local.kind, ir::LocalKind::Capture))
+            .collect::<Vec<_>>();
+        if capture_locals.len() != captures.len() {
+            return None;
+        }
+
+        for (index, (local, capture)) in capture_locals.iter().zip(captures).enumerate() {
+            let field_name = format!(
+                "__capture_lambda_{}_{}_{}",
+                function_id.0, local.id.0, index
+            );
+            out.push_str("        private final ");
+            out.push_str(&self.local_value_type(&local.ty));
+            out.push(' ');
+            out.push_str(&field_name);
+            out.push_str(" = ");
+            let initializer = capture_initializers
+                .and_then(|values| values.get(index))
+                .cloned()
+                .unwrap_or(self.emit_capture_initializer(capture)?);
+            out.push_str(&initializer);
+            out.push_str(";\n");
+        }
+        if !capture_locals.is_empty() {
+            out.push('\n');
+        }
+        Some(())
     }
 
     fn emit_anonymous_interface(
@@ -3136,6 +3278,19 @@ impl<'a> FunctionEmitter<'a> {
         operands: &[ir::Operand],
     ) -> Option<Vec<JavaParamSpec>> {
         let receiver_ty = self.operand_type(receiver)?;
+        if method == "transactionally" && operands.len() == 1 {
+            if let ir::Type::Named { name, .. } = &receiver_ty {
+                if name == "Database" {
+                    return self.operand_type(&operands[0]).map(|ty| {
+                        vec![JavaParamSpec {
+                            ty,
+                            variadic: false,
+                            lazy: false,
+                        }]
+                    });
+                }
+            }
+        }
         if let Some(params) = builtin_method_param_specs(&receiver_ty, method, operands.len()) {
             return Some(params);
         }
@@ -3770,11 +3925,6 @@ impl<'a> FunctionEmitter<'a> {
 
     fn local_name(&self, local: &ir::Local) -> String {
         format!("{}{}", self.local_prefix, java_local_name(local))
-    }
-
-    fn local_can_be_effectively_final_capture(&self, local: &ir::Local) -> bool {
-        self.captured_locals.contains(&local.id)
-            && self.assignment_counts.get(&local.id).copied().unwrap_or(0) == 1
     }
 
     fn local_is_declared_elsewhere(&self, local: &ir::Local) -> bool {

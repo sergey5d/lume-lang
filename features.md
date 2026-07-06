@@ -132,7 +132,15 @@ Still open:
 - whether singleton methods should ever be usable directly beyond explicit `use module/Single/*` and builtin `OS` prelude behavior
 - if both a wide module use and a renamed selective use target the same module, the wide use should come first and the `as` use should come after it
 
-### 7. Annotation Targets
+### 7. Interface Method Conflict Resolution
+
+Open checker/runtime design:
+- decide how method resolution should work when a type implements multiple interfaces that inherit or declare conflicting method signatures
+- decide whether a derived class/type can explicitly call a specific inherited interface method implementation
+- choose syntax for qualified interface dispatch if needed, for example `InterfaceName.method(this, args)` or another explicit form
+- define diagnostics for ambiguous interface method calls so the compiler points users toward the disambiguation syntax
+
+### 8. Annotation Targets
 
 Annotations exist as compile-time metadata shapes. They currently attach to declarations and members, with annotation arguments restricted to literals, stable constants, and constant expressions.
 
@@ -146,7 +154,7 @@ Current leaning:
 - global functions are probably useful annotation targets for routing, tests, effects, permissions, and generated bindings
 - immutable top-level constants may be useful too, but annotation metadata should describe stable declarations, not changing state
 
-### 8. Primitive Type Definitions
+### 9. Primitive Type Definitions
 
 Primitive types such as `Int`, `Float`, `Str`, `Rune`, `Bool`, and `Unit` should eventually have their public companion/static-style signatures defined in Lume source instead of being scattered through checker, interpreter, and backend special cases.
 
@@ -163,7 +171,7 @@ Goal:
 
 ## Longer-Term Ideas
 
-### 9. Result / Either Style Error Values
+### 10. Result / Either Style Error Values
 
 `Option`, `Result`, `Either`, and `try`-based short-circuit propagation now exist.
 
@@ -189,7 +197,7 @@ Current behavior:
 - `Either[SourceL, ...]` can propagate only into `Either[TargetL, ...]` when `SourceL` is assignable to `TargetL`
 - wrapper-style error remapping during `try` is still not implemented
 
-### 10. Smarter Type Narrowing
+### 11. Smarter Type Narrowing
 
 Later improvements could include:
 - better narrowing after `is`
@@ -226,7 +234,7 @@ Main design question:
 - whether this should stay very local and conservative
 - or whether the checker should learn more control-flow-sensitive narrowing over time
 
-### 11. Reified Generic Follow-Ups
+### 12. Reified Generic Follow-Ups
 
 Settled syntax lives in `syntax.md`: generic functions and methods may mark
 individual type parameters as `reified`, which lowers to hidden `Type[A]`
@@ -295,7 +303,7 @@ Still rejected:
 - automatic reification of every generic parameter
 - reified type parameters on classes, shapes, enums, annotations, or singles
 
-### 12. Deferred Cleanup
+### 13. Deferred Cleanup
 
 `defer` is implemented as callable-scoped cleanup.
 
@@ -318,7 +326,7 @@ Open questions:
 - whether runtime errors should also run pending defers
 - whether future async/concurrency features need a stronger cleanup model
 
-### 13. Flow Control Composition
+### 14. Flow Control Composition
 
 Possible future surface:
 
@@ -348,7 +356,7 @@ Open questions:
 - how values produced inside one flow become visible to later composed flows
 - whether `&` should sequence unconditionally, short-circuit, or model dependency composition
 
-### 14. Explicit Tuple Projection
+### 15. Explicit Tuple Projection
 
 Settled rule:
 - tuple to known shape is allowed when the target shape is known

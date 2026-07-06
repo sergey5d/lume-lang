@@ -1148,14 +1148,18 @@ impl<'a> FunctionLowerer<'a> {
         params: &[core::LambdaParam],
         body: &Expr,
         span: Span,
+        expected_return: Option<ir::Type>,
     ) -> ir::RValue {
         let nested_name = format!(
             "lambda${}${}",
             self.function_id.0,
             self.function().blocks.len()
         );
-        let mut nested =
-            ir::Function::new(nested_name, ir::FunctionKind::Lambda, ir::Type::Unknown);
+        let mut nested = ir::Function::new(
+            nested_name,
+            ir::FunctionKind::Lambda,
+            expected_return.unwrap_or(ir::Type::Unknown),
+        );
         nested.span = Some(span);
         for (index, param) in params.iter().enumerate() {
             nested.add_param(
@@ -3016,7 +3020,7 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Block { body, .. } => self
                 .lower_block_value_with_expected(body, Some(expected))
                 .unwrap_or(ir::Operand::Const(ir::Constant::Unit)),
-            Expr::Call { .. } | Expr::RecordLiteral { .. } => {
+            Expr::Call { .. } | Expr::RecordLiteral { .. } | Expr::Lambda { .. } => {
                 self.lower_expr_from_rvalue_with_expected(expr, Some(expected))
             }
             _ => self.lower_expr(expr),
@@ -3172,7 +3176,7 @@ impl<'a> FunctionLowerer<'a> {
         span: Span,
     ) -> ir::Operand {
         let source_ty = self.infer_expr_type(value);
-        let source = self.lower_expr(value);
+        let source = self.lower_expr_with_expected(value, Some(&source_ty));
         let source_local = self.add_temp(ir::Type::Unknown);
         self.push_statement(ir::Statement {
             span: Some(value.span()),
@@ -4245,7 +4249,11 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             Expr::Lambda { params, body, span } => {
-                Some(self.lower_lambda_rvalue(params, body, *span))
+                let expected_return = match expected {
+                    Some(ir::Type::Function { ret, .. }) => Some(ret.as_ref().clone()),
+                    _ => None,
+                };
+                Some(self.lower_lambda_rvalue(params, body, *span, expected_return))
             }
             Expr::AnonymousInterface {
                 interfaces,
@@ -4378,6 +4386,14 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             Expr::Member { receiver, name, .. } => {
+                if name == "transactionally" && ordered_args.len() == 1 {
+                    let value_ty =
+                        transactionally_result_value_type(expected).unwrap_or(ir::Type::Unknown);
+                    return Some(vec![Some(ExpectedArgSpec {
+                        ty: transactional_work_type(value_ty),
+                        lazy: false,
+                    })]);
+                }
                 let receiver_ty = self.infer_expr_type(receiver);
                 if let Some((id, subst)) =
                     self.method_expected_arg_target(&receiver_ty, name, ordered_args)
@@ -5784,6 +5800,10 @@ fn builtin_member_expected_arg_specs(
     let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
     let spec = |ty: ir::Type, lazy: bool| Some(ExpectedArgSpec { ty, lazy });
     match (type_name.as_str(), name) {
+        ("Database", "transactionally") => {
+            let value_ty = transactionally_result_value_type(expected).unwrap_or(ir::Type::Unknown);
+            Some(vec![spec(transactional_work_type(value_ty), false)])
+        }
         ("Option", "map") => {
             let mapped = match expected {
                 Some(ir::Type::Named { name, args }) if name == "Option" && args.len() == 1 => {
@@ -5953,6 +5973,38 @@ fn builtin_member_expected_arg_specs(
     }
 }
 
+fn transactionally_result_value_type(expected: Option<&ir::Type>) -> Option<ir::Type> {
+    match expected {
+        Some(ir::Type::Named { name, args }) if name == "Result" && args.len() == 2 => {
+            Some(args[0].clone())
+        }
+        _ => None,
+    }
+}
+
+fn transactional_work_type(value_ty: ir::Type) -> ir::Type {
+    ir::Type::Function {
+        params: vec![ir::Type::Named {
+            name: "Transaction".to_string(),
+            args: Vec::new(),
+        }],
+        ret: Box::new(result_db_error_type(value_ty)),
+    }
+}
+
+fn result_db_error_type(value_ty: ir::Type) -> ir::Type {
+    ir::Type::Named {
+        name: "Result".to_string(),
+        args: vec![
+            value_ty,
+            ir::Type::Named {
+                name: "DbError".to_string(),
+                args: Vec::new(),
+            },
+        ],
+    }
+}
+
 fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
     if let Some(ty) = universal_member_type(name) {
         return Some(ty);
@@ -5967,6 +6019,10 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
     };
     let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
     match (type_name.as_str(), name) {
+        ("Database", "transactionally") => Some(ir::Type::Function {
+            params: vec![transactional_work_type(ir::Type::Unknown)],
+            ret: Box::new(result_db_error_type(ir::Type::Unknown)),
+        }),
         ("Option", "map") => Some(ir::Type::Function {
             params: vec![ir::Type::Function {
                 params: vec![item.clone()],
