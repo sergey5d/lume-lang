@@ -1198,6 +1198,59 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
+    fn lower_callable_reference_rvalue(
+        &mut self,
+        reference: &Expr,
+        expected: &ir::Type,
+    ) -> ir::RValue {
+        let ir::Type::Function { params, ret } = expected else {
+            return ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit));
+        };
+        let nested_name = format!(
+            "methodref${}${}",
+            self.function_id.0,
+            self.function().blocks.len()
+        );
+        let mut nested =
+            ir::Function::new(nested_name, ir::FunctionKind::Lambda, ret.as_ref().clone());
+        let span = reference.span();
+        nested.span = Some(span);
+        let param_names = params
+            .iter()
+            .enumerate()
+            .map(|(index, ty)| {
+                let name = format!("__method_ref_arg{index}");
+                nested.add_param(name.clone(), ty.clone());
+                name
+            })
+            .collect::<Vec<_>>();
+        let function_id = self.program.add_function(nested);
+        let body = callable_reference_call_expr(reference, &param_names, span);
+        let capture_sources = self.visible_capture_sources(None);
+        let captures = {
+            let mut lowerer = FunctionLowerer::new(
+                self.program,
+                function_id,
+                self.globals,
+                self.functions,
+                self.case_fields,
+                self.diagnostics,
+            )
+            .with_capture_sources(capture_sources);
+            for (index, name) in param_names.iter().enumerate() {
+                if let Some(local_id) = lowerer.function().params.get(index).copied() {
+                    lowerer.bind_existing(name, local_id);
+                }
+            }
+            lowerer.lower_callable_body(&CallableBody::Expr(body), span);
+            lowerer.finish_closure_captures()
+        };
+        ir::RValue::Closure {
+            function: function_id,
+            captures,
+        }
+    }
+
     fn lower_lifted_segment_closure(
         &mut self,
         param: &str,
@@ -3023,6 +3076,12 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Call { .. } | Expr::RecordLiteral { .. } | Expr::Lambda { .. } => {
                 self.lower_expr_from_rvalue_with_expected(expr, Some(expected))
             }
+            Expr::Identifier { .. } | Expr::Member { .. }
+                if matches!(expected, ir::Type::Function { .. })
+                    && self.is_callable_reference_expr(expr) =>
+            {
+                self.lower_expr_from_rvalue_with_expected(expr, Some(expected))
+            }
             _ => self.lower_expr(expr),
         }
     }
@@ -3030,6 +3089,9 @@ impl<'a> FunctionLowerer<'a> {
     fn lower_expr(&mut self, expr: &Expr) -> ir::Operand {
         if self.current_block.is_none() {
             return ir::Operand::Const(ir::Constant::Unit);
+        }
+        if let Some(reference_ty) = self.callable_reference_type(expr) {
+            return self.lower_expr_from_rvalue_with_expected(expr, Some(&reference_ty));
         }
         match expr {
             Expr::Identifier { name, span } => {
@@ -3804,6 +3866,85 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
+    fn is_callable_reference_expr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Identifier { name, .. } => self.is_top_level_function_reference(name),
+            Expr::Member { receiver, name, .. } => self.is_bound_method_reference(receiver, name),
+            _ => false,
+        }
+    }
+
+    fn callable_reference_type(&self, expr: &Expr) -> Option<ir::Type> {
+        if !self.is_callable_reference_expr(expr) {
+            return None;
+        }
+        match expr {
+            Expr::Identifier { name, .. } => self.lookup_function_type(name),
+            Expr::Member { receiver, name, .. } => {
+                self.callable_reference_member_type(receiver, name)
+            }
+            _ => None,
+        }
+    }
+
+    fn is_top_level_function_reference(&self, name: &str) -> bool {
+        if self.lookup_scoped_type(name).is_some()
+            || self.lookup_implicit_field_type(name).is_some()
+            || self.lookup_global_type(name).is_some()
+            || self.lookup_bare_enum_case_type(name).is_some()
+            || self.lookup_declared_type_value(name).is_some()
+        {
+            return false;
+        }
+        self.functions.contains_key(name)
+    }
+
+    fn is_bound_method_reference(&self, receiver: &Expr, name: &str) -> bool {
+        self.callable_reference_member_type(receiver, name)
+            .is_some()
+    }
+
+    fn callable_reference_member_type(&self, receiver: &Expr, name: &str) -> Option<ir::Type> {
+        let (ty, args) = self.callable_reference_receiver_type_def(receiver)?;
+        if ty.fields.iter().any(|field| field.name == name) {
+            return None;
+        }
+        let subst = ir_type_subst(ty, &args);
+        self.find_method_function(ty, name)
+            .and_then(|function| self.function_type_with_subst(function, &subst))
+    }
+
+    fn callable_reference_receiver_type_def(
+        &self,
+        receiver: &Expr,
+    ) -> Option<(&ir::TypeDef, Vec<ir::Type>)> {
+        if let Expr::Identifier { name, .. } = receiver {
+            let value_in_scope = self.lookup_scoped_type(name).is_some()
+                || self.lookup_implicit_field_type(name).is_some()
+                || self.lookup_global_type(name).is_some();
+            if !value_in_scope && single_type_exists(self.program, name) {
+                let ty = self
+                    .program
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == *name && ty.kind == ast::TypeKind::Single)?;
+                return Some((ty, Vec::new()));
+            }
+            if self.lookup_scoped_type(name).is_none()
+                && self.lookup_implicit_field_type(name).is_none()
+                && self.lookup_global_type(name).is_none()
+                && declared_type_exists(self.program, name)
+            {
+                return None;
+            }
+        }
+        let ir::Type::Named { name, args } = self.infer_expr_type(receiver) else {
+            return None;
+        };
+        let ty = self.program.types.iter().find(|ty| ty.name == name)?;
+        Some((ty, args))
+    }
+
     fn infer_member_call_type(
         &self,
         callee: &Expr,
@@ -4100,6 +4241,13 @@ impl<'a> FunctionLowerer<'a> {
         expr: &Expr,
         expected: Option<&ir::Type>,
     ) -> Option<ir::RValue> {
+        if let Some(expected) = expected {
+            if matches!(expected, ir::Type::Function { .. })
+                && self.is_callable_reference_expr(expr)
+            {
+                return Some(self.lower_callable_reference_rvalue(expr, expected));
+            }
+        }
         if let Some(path) = expr_path(expr) {
             if path.len() > 1 && is_named_runtime_value_path(self.program, &path) {
                 return Some(ir::RValue::NamedValue { path });
@@ -6866,6 +7014,26 @@ fn expr_path(expr: &Expr) -> Option<Vec<String>> {
             Some(path)
         }
         _ => None,
+    }
+}
+
+fn callable_reference_call_expr(reference: &Expr, param_names: &[String], span: Span) -> Expr {
+    Expr::Call {
+        callee: Box::new(reference.clone()),
+        args: param_names
+            .iter()
+            .map(|name| core::CallArg {
+                name: None,
+                ty: None,
+                value: Expr::Identifier {
+                    name: name.clone(),
+                    span,
+                },
+                span,
+            })
+            .collect(),
+        style: core::CallStyle::Paren,
+        span,
     }
 }
 

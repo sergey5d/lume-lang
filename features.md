@@ -410,18 +410,15 @@ x -> x + 1
 Open question:
 - should lambda declarations stay keyword-free
 - or should the language grow an explicit `lambda` keyword for some or all lambda forms
-- whether method/function references are useful enough to support, for example `list.map(&identity)`
 
 Possible motivations for revisiting this:
 - making lambdas more visually explicit to new readers
 - reducing ambiguity in more complex nested expressions
 - giving room for future lambda-surface variants if the arrow-only form starts feeling overloaded
-- avoiding small forwarding lambdas when a named function already has the desired shape, for example `x -> identity(x)`
 
 Current leaning:
 - keep the current keyword-free arrow form unless real readability problems show up
 - only add a `lambda` keyword if it solves a concrete ambiguity or makes larger expressions meaningfully clearer
-- do not add method-reference syntax unless real code shows that forwarding lambdas are noisy enough to justify another callable form
 
 ### Anonymous-Shape Binding From String Templates
 

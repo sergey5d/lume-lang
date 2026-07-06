@@ -1271,6 +1271,38 @@ Rules:
 - tuple, class, and anonymous-shape values are destructured inside the lambda body with normal `let`
 - `let` destructuring is not allowed in lambda parameter lists
 
+Callable references can be passed where a function value is expected. They are
+eta-expanded to the same forwarding lambda you would otherwise write:
+
+```txt
+def mapUser(user User) UserDto =
+    UserDto { id: user.id, name: user.name }
+
+dtos = users.map(mapUser)
+# same as: users.map(user -> mapUser(user))
+
+mapper UserMapper = UserMapper()
+dtos = users.map(mapper.mapUser)
+# same as: users.map(user -> mapper.mapUser(user))
+
+dtos = users.map(this.mapUser)
+# same as: users.map(user -> this.mapUser(user))
+
+dtos = users.map(User.toDto)
+# single method reference
+```
+
+Supported callable references:
+
+- top-level function name
+- bound instance method, such as `mapper.mapUser`
+- bound `this` method, such as `this.mapUser`
+- bound `single` method, such as `User.toDto`
+
+Fields still win over methods when names collide. A member field whose value is
+already a function is passed as that function value, not eta-expanded as a
+method reference.
+
 Block lambda:
 
 ```txt
