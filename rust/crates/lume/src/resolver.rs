@@ -178,7 +178,7 @@ impl AmbientRegistry {
         for value in [
             "List", "Map", "Set", "Array", "Range", "Int", "Int32", "Bool", "Rune", "Float",
             "Float32", "Str", "Unit", "Never", "print", "println", "printf", "panic", "assert",
-            "ensure",
+            "ensure", "identity",
         ] {
             registry.values.insert(value.to_string());
         }
@@ -202,6 +202,11 @@ impl AmbientRegistry {
             }
             let program = parse_program_from_path(&path)?;
             let decls = collect_top_level_decls(&program);
+            for (name, decl) in &decls.functions {
+                if decl.visibility != Visibility::Hidden {
+                    registry.values.insert(name.clone());
+                }
+            }
             for (name, info) in decls.types {
                 registry.values.insert(name.clone());
                 registry.types.insert(name.clone(), info.clone());

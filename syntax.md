@@ -387,7 +387,7 @@ Meaning:
 - `use module/sub/SingletonName/{printLn as printN, print}`
   use selected visible singleton methods from a singleton
 
-Built-in `OS` methods are available implicitly in every file, so `print(...)`, `println(...)`, and `printf(...)` work without writing `use OS/*`. Prelude functions like `panic(...)`, `assert(...)`, and `ensure(...)` are also available in every file. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
+Built-in `OS` methods are available implicitly in every file, so `print(...)`, `println(...)`, and `printf(...)` work without writing `use OS/*`. Prelude functions like `panic(...)`, `assert(...)`, `ensure(...)`, and `identity(...)` are also available in every file. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
 
 ## Top-Level Declarations
 

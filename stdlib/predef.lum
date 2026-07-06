@@ -5,6 +5,8 @@ def panic(vararg value [Any]) Never = panic()
 
 def assert(condition Bool, vararg message [Str]) Unit = assert(condition)
 
+def identity[T](value T) T = value
+
 def ensure[E](condition Bool, lazy error E) Result[Unit, E] =
     if condition {
         Ok(())

@@ -1,0 +1,13 @@
+# EXPECT:
+# 5
+# hi
+# 6
+
+def main() Unit {
+    value Int = identity(5)
+    text Str = identity("hi")
+
+    println(value)
+    println(text)
+    println(identity(value + 1))
+}

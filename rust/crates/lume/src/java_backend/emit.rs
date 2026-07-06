@@ -2644,6 +2644,12 @@ impl<'a> FunctionEmitter<'a> {
                     args[0], args[1]
                 ))
             }
+            ir::Intrinsic::Identity => {
+                if args.len() != 1 {
+                    return None;
+                }
+                Some(args[0].clone())
+            }
             ir::Intrinsic::ExtractSuccessIsSet => {
                 if args.len() != 1 {
                     return None;
@@ -3479,6 +3485,9 @@ impl<'a> FunctionEmitter<'a> {
                     name: "Result".to_string(),
                     args: vec![ir::Type::Unit, ir::Type::Unknown],
                 }),
+                ir::Callee::Intrinsic(ir::Intrinsic::Identity) => {
+                    args.first().and_then(|arg| self.operand_type(arg))
+                }
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue)
                 | ir::Callee::Intrinsic(ir::Intrinsic::VariantField(_)) => Some(ir::Type::Unknown),
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet)

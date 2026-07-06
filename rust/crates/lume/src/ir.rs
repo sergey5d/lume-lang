@@ -540,6 +540,7 @@ pub enum Intrinsic {
     Panic,
     Assert,
     Ensure,
+    Identity,
     IterInit,
     IterHasNext,
     IterNext,

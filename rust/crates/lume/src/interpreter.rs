@@ -3740,6 +3740,12 @@ impl<'a> Interpreter<'a> {
                     Ok(self.result_err(error))
                 }
             }
+            ir::Intrinsic::Identity => {
+                if args.len() != 1 {
+                    return Err(self.runtime_error(span, "identity expects 1 argument"));
+                }
+                Ok(args.into_iter().next().expect("identity arg"))
+            }
             ir::Intrinsic::IterInit => {
                 if args.len() != 1 {
                     return Err(self.runtime_error(span, "IterInit expects 1 argument"));

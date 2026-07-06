@@ -5297,6 +5297,7 @@ fn intrinsic_for_name(name: &str) -> Option<ir::Intrinsic> {
         "panic" => Some(ir::Intrinsic::Panic),
         "assert" => Some(ir::Intrinsic::Assert),
         "ensure" => Some(ir::Intrinsic::Ensure),
+        "identity" => Some(ir::Intrinsic::Identity),
         _ => None,
     }
 }
