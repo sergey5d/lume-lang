@@ -1,144 +1,26 @@
 # Syntax Cleanup Notes
 
-This file captures readability-oriented syntax ideas against the current Lume
-surface. It is intentionally secondary to `syntax.md`, which is the reference
-for what works today.
+This file is a lightweight readability watchlist. It is intentionally secondary
+to `syntax.md`, which is the reference for what works today. Unsettled feature
+work belongs in `features.md`.
 
-## Current Direction
-
-The language is strongest when it keeps one obvious form for each major idea:
-
-- `class` for nominal instance types
-- `annotation` for data-only metadata shapes
-- `single` for singleton namespaces/values
-- `enum` for tagged sums
-- `interface` for contracts
-- `impl Type { ... }` and `impl single Name { ... }` for behavior
-- `use` for module imports
-- `new { ... } { body }` for explicit constructors, where `new { ... }` declares the constructor input shape
-- `Type { field: value }` for named construction
-- `{ field: value }` for anonymous shapes
-- `try` for propagation
-- `expect` for assertive refutable binding
-- `assert(...)` for runtime/prelude boolean assertions
-- explicit lambdas such as `value -> value + 1`
-
-The main cleanup principle still stands:
+Cleanup principle:
 
 - prefer regularity over clever compactness
 - keep punctuation meaningful
-- avoid adding a second spelling unless it buys real readability
+- avoid a second spelling unless it buys real readability
 
 ## Settled Cleanup
 
 These older surfaces should stay out of new examples and docs:
 
-- `import`; use `use`
-- legacy named structural declarations; use `shape` for structural data or `class` for nominal types
-- legacy anonymous structural wrappers; use plain `{ ... }`
-- construction fields with `=` inside construction; use `field: value`
-- language-level `unwrap` forms; use `let ... else`, `expect`, or `try`
-- placeholder expression lambdas like `_ + 1`; use `x -> x + 1`
-- class-to-tuple destructuring; use class/anonymous-shape brace destructuring
-- `Type({ ... })` nominal conversion; use explicit construction or a future `anon as Type` form if adopted
+- class-to-tuple destructuring; use brace destructuring
+- anonymous-shape-to-class conversion; construct the class explicitly
+- `OS.println(...)` in examples; use prelude `println(...)`
 
-## Keep
+### Symbolic Operators
 
-These still feel like strong surface choices:
-
-- `def`
-- `var`
-- `class`
-- `single`
-- `enum`
-- `interface`
-- `hidden`
-- `match` with mandatory `case`
-- `partial` as the partial-match form
-- `let`
-- `expect`
-- `assert(...)`
-- `defer`
-- `@Annotation(...)`
-- `Type { ... }`
-- `use module/path`
-- `->` for lambdas and function types
-- string interpolation
-- `with`
-
-Notes:
-
-- `case` makes `match` blocks easier to scan.
-- `hidden` is the readable private marker; default visibility does not need a keyword.
-- `expect` is a better assertive word than reviving `unwrap` syntax.
-
-## Places To Keep Watching
-
-### 1. Method Placement
-
-Current preferred style:
-
-```txt
-class Person {
-    name Str
-    age Int
-}
-
-impl Person {
-    def label() Str = this.name + " " + this.age
-}
-```
-
-Settled rule:
-
-- classes, enums, and singles may declare methods in the declaration body
-- classes, shapes, enums, and singles may also attach methods through `impl`
-- prefer `impl` for medium and large types when it makes the stored fields easier to scan
-- declaration-body methods remain useful for small types and method-only singles
-
-### 2. Constructor Surface
-
-Current direction:
-
-Structural construction when no explicit `new` exists:
-
-```txt
-class User {
-    name Str
-    age Int
-}
-
-user User = User { name: "Ada", age: 10 }
-```
-
-Explicit constructor calls when `new` exists:
-
-```txt
-class NamedUser {
-    name Str
-    age Int
-}
-
-impl NamedUser {
-    new {
-        name Str
-    } {
-        this.name = name
-        this.age = 0
-    }
-}
-
-user NamedUser = NamedUser("Ada")
-```
-
-Open questions:
-
-- should same-named `single` factories get any privileged access?
-- do we need more explicit syntax for hiding generated construction paths?
-
-### 3. Symbolic Operators
-
-Operator overloading exists, but it should stay conservative.
+Operator overloading exists, but should stay conservative.
 
 Good candidates:
 
@@ -152,51 +34,29 @@ Risky candidates:
 - aliases for ordinary named methods
 - clever collection punctuation when `add`, `addAll`, `from`, or `put` reads better
 
-## Preferred Example Style
+### Lambda Surface
+
+The keyword-free lambda surface is currently good:
 
 ```txt
-use model/user/User
-
-class Person {
-    name Str
-    age Int
-}
-
-impl Person {
-    new {
-        name Str
-    } {
-        this.name = name
-        this.age = 0
-    }
-
-    def label() Str = this.name + " " + this.age
-}
-
-def classify(value Option[Int]) Int =
-    match value {
-        case Some(x) => x
-        case None => 0
-    }
-
-anon = {
-    name: "Ada"
-    age: 10
-}
-
-person Person = Person { name: anon.name, age: anon.age }
-
-for i <- Range(0, 10) {
-    OS.println(i)
-}
+x -> x + 1
+(x, y) -> x + y
+users.map(mapUser)
+users.map(User.toDto)
 ```
+
+Still worth watching:
+
+- whether nested lambdas ever become visually noisy enough to justify a `lambda` keyword
+- current leaning: do not add a keyword unless examples show clear readability pain
+
 
 ## Summary
 
-The syntax should keep moving toward:
+Keep moving toward:
 
 - fewer alternate forms
 - less contextual sugar
 - explicit behavior homes
 - clear construction syntax
-- explicit lambdas unless a shorthand is obviously better
+- explicit lambdas plus callable references for obvious forwarding cases

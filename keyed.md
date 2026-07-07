@@ -15,6 +15,10 @@ impl single CustomHashMap {
 
         map
     }
+
+    keyed new[K, V](vararg entries [(K, V)]) {
+        
+    }
 }
 ```
 
