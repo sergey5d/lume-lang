@@ -1,11 +1,34 @@
 # EXPECT:
-# partial 5
+# partial value 5
+# partial missing true
+# partial statement 4
 
-def main() Unit {
-    value Option[Int] = partial match Some(5) {
-        case Some(item) => item
+enum MaybeInt {
+    case NoneX
+    case SomeX {
+        value Int
+    }
+}
+
+def partialValue(value MaybeInt) Option[Int] =
+    partial match value {
+        case SomeX(item) => item
     }
 
+def main() Unit {
+    value = partialValue(MaybeInt.SomeX(5))
+    missing = partialValue(MaybeInt.NoneX)
+
     expect item <- value
-    println("partial", item)
+    println("partial value", item)
+    println("partial missing", missing.isEmpty())
+
+    var partialStmt = 0
+    partial match MaybeInt.SomeX(4) {
+        case SomeX(next) => partialStmt += next
+    }
+    partial match MaybeInt.NoneX {
+        case SomeX(next) => partialStmt += next
+    }
+    println("partial statement", partialStmt)
 }
