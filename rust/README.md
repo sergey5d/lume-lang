@@ -69,7 +69,7 @@ rust/
 From the repository root:
 
 ```bash
-cargo run --manifest-path rust/Cargo.toml -p lume -- tokens hello.lum
+cargo run --manifest-path rust/Cargo.toml -p lume -- tokens examples/os.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- parse examples/random_code/bumper.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- check examples/import_forms.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- run examples/range.lum
