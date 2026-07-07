@@ -1,0 +1,8 @@
+# EXPECT:
+# module ok
+
+module examples/features/module_keyword
+
+def main() Unit {
+    println("module ok")
+}

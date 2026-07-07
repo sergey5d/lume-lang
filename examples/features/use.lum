@@ -1,0 +1,9 @@
+# EXPECT:
+# use A
+
+use use_support/A
+
+def main() Unit {
+    value A = A {}
+    println("use", value.label())
+}

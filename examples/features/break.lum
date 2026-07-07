@@ -1,0 +1,15 @@
+# EXPECT:
+# break 3
+
+def main() Unit {
+    var count Int = 0
+
+    while count < 10 {
+        if count == 3 {
+            break
+        }
+        count := count + 1
+    }
+
+    println("break", count)
+}

@@ -1,0 +1,16 @@
+# EXPECT:
+# case large
+
+enum Size {
+    case Small
+    case Large
+}
+
+def main() Unit {
+    size Size = Size.Large
+    label = match size {
+        case Size.Small => "small"
+        case Size.Large => "large"
+    }
+    println("case", label)
+}

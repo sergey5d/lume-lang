@@ -1,0 +1,12 @@
+# EXPECT:
+# lift 3
+
+def main() Unit {
+    lifted Option[{ left Int, right Int }] = lift {
+        left: Some(1)
+        right: Some(2)
+    }
+
+    expect value <- lifted
+    println("lift", value.left + value.right)
+}

@@ -1,0 +1,9 @@
+# EXPECT:
+# yield 6
+
+def main() Unit {
+    values = for value <- [1, 2, 3] yield value * 2
+
+    expect third <- values.get(2)
+    println("yield", third)
+}

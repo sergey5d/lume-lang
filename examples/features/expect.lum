@@ -1,0 +1,8 @@
+# EXPECT:
+# expect 7
+
+def main() Unit {
+    maybe Option[Int] = Some(7)
+    expect value <- maybe
+    println("expect", value)
+}

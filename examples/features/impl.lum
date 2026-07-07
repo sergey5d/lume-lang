@@ -1,0 +1,16 @@
+# EXPECT:
+# impl hello Ada
+
+class Greeter {
+    name Str
+}
+
+impl Greeter {
+    def greet() Str =
+        "hello " + this.name
+}
+
+def main() Unit {
+    greeter Greeter = Greeter { name: "Ada" }
+    println("impl", greeter.greet())
+}

@@ -1,0 +1,12 @@
+# EXPECT:
+# try 3
+
+def increment(value Option[Int]) Option[Int] {
+    item = try value
+    Some(item + 1)
+}
+
+def main() Unit {
+    expect value <- increment(Some(2))
+    println("try", value)
+}

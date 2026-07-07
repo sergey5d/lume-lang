@@ -1,0 +1,15 @@
+# EXPECT:
+# is worker
+
+class Worker {
+}
+
+def main() Unit {
+    value Any = Worker {}
+
+    if value is Worker {
+        println("is worker")
+    } else {
+        println("is other")
+    }
+}

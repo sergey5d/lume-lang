@@ -1,0 +1,14 @@
+# EXPECT:
+# hidden secret
+
+class SecretBox {
+    hidden value Str = "secret"
+
+    def reveal() Str =
+        this.value
+}
+
+def main() Unit {
+    box SecretBox = SecretBox {}
+    println("hidden", box.reveal())
+}

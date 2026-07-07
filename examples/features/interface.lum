@@ -1,0 +1,23 @@
+# EXPECT:
+# interface Ada
+
+interface Named {
+    def name() Str
+}
+
+class Person with Named {
+    name Str
+}
+
+impl Person {
+    def name() Str =
+        this.name
+}
+
+def describe(value Named) Str =
+    value.name()
+
+def main() Unit {
+    person Person = Person { name: "Ada" }
+    println("interface", describe(person))
+}

@@ -1,0 +1,12 @@
+# EXPECT:
+# else branch
+
+def main() Unit {
+    value = if 2 > 3 {
+        "if"
+    } else {
+        "branch"
+    }
+
+    println("else", value)
+}

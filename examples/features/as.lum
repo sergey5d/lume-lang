@@ -1,0 +1,12 @@
+# EXPECT:
+# as Tampa
+
+def main() Unit {
+    user = {
+        name: "Ada"
+        location: "Tampa"
+    }
+
+    let { location as loc } = user
+    println("as", loc)
+}

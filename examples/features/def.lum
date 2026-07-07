@@ -1,0 +1,9 @@
+# EXPECT:
+# def function
+
+def keywordFunction() Str =
+    "function"
+
+def main() Unit {
+    println("def", keywordFunction())
+}

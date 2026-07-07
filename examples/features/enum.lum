@@ -1,0 +1,16 @@
+# EXPECT:
+# enum South
+
+enum Direction {
+    case North
+    case South
+}
+
+def main() Unit {
+    direction Direction = Direction.South
+    label = match direction {
+        case Direction.North => "North"
+        case Direction.South => "South"
+    }
+    println("enum", label)
+}

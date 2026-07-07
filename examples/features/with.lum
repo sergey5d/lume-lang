@@ -1,0 +1,20 @@
+# EXPECT:
+# with Ada
+
+interface Named {
+    def name() Str
+}
+
+class Person with Named {
+    name Str
+}
+
+impl Person {
+    def name() Str =
+        this.name
+}
+
+def main() Unit {
+    person Person = Person { name: "Ada" }
+    println("with", person.name())
+}

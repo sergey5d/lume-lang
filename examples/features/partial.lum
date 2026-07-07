@@ -1,0 +1,11 @@
+# EXPECT:
+# partial 5
+
+def main() Unit {
+    value Option[Int] = partial match Some(5) {
+        case Some(item) => item
+    }
+
+    expect item <- value
+    println("partial", item)
+}

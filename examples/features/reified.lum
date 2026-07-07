@@ -1,0 +1,16 @@
+# EXPECT:
+# reified User
+
+class User {
+    name Str
+}
+
+def typeLabel[reified A](value A) Str {
+    expect name <- typeOf[A].name()
+    name
+}
+
+def main() Unit {
+    user User = User { name: "Ada" }
+    println("reified", typeLabel(user))
+}

@@ -1,0 +1,11 @@
+# EXPECT:
+# match five
+
+def main() Unit {
+    label = match 5 {
+        case 5 => "five"
+        case _ => "other"
+    }
+
+    println("match", label)
+}

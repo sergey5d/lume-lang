@@ -1,0 +1,11 @@
+# EXPECT:
+# class box
+
+class KeywordBox {
+    value Str
+}
+
+def main() Unit {
+    box KeywordBox = KeywordBox { value: "box" }
+    println("class", box.value)
+}

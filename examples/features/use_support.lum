@@ -1,0 +1,10 @@
+# IGNORE
+
+module use_support
+
+class A {
+}
+
+impl A {
+    def label() Str = "A"
+}

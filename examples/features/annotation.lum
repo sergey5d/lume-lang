@@ -1,0 +1,15 @@
+# EXPECT:
+# annotation ok
+
+annotation FeatureTag {
+    name Str
+}
+
+@FeatureTag { name: "sample" }
+class TaggedFeature {
+}
+
+def main() Unit {
+    value TaggedFeature = TaggedFeature {}
+    println("annotation ok")
+}

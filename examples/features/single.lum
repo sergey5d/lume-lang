@@ -1,0 +1,13 @@
+# EXPECT:
+# single settings
+
+single Settings {
+    name Str = "settings"
+
+    def label() Str =
+        this.name
+}
+
+def main() Unit {
+    println("single", Settings.label())
+}
