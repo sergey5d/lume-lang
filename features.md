@@ -140,6 +140,12 @@ Open checker/runtime design:
 - choose syntax for qualified interface dispatch if needed, for example `InterfaceName.method(this, args)` or another explicit form
 - define diagnostics for ambiguous interface method calls so the compiler points users toward the disambiguation syntax
 
+Related syntax question:
+- the language previously experimented with a dedicated interface-implementation marker such as `impl def label() Str = "box"` inside `impl Type { ... }`
+- current decision: do not support `impl def`; interface methods inside `impl Type { ... }` blocks use ordinary `def`
+- keep watching whether explicit implementation/override markers would add enough readability in large types to justify extra syntax
+- current leaning: plain `def` plus normal conformance checking is the cleaner long-term surface
+
 ### 8. Annotation Targets
 
 Annotations exist as compile-time metadata shapes. They currently attach to declarations and members, with annotation arguments restricted to literals, stable constants, and constant expressions.
