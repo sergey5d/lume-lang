@@ -108,7 +108,11 @@ final class SqlBindings {
     }
 
     private static SqlBindings positional(List<Object> values) {
-        return new SqlBindings(values, null);
+        var out = new ArrayList<Object>(values.size());
+        for (var value : values) {
+            out.add(unwrap(value));
+        }
+        return new SqlBindings(out, null);
     }
 
     private static SqlBindings namedMap(LumeMap<?, ?> map) {
@@ -118,7 +122,7 @@ final class SqlBindings {
             if (!(key instanceof String name)) {
                 throw new IllegalArgumentException("named SQL bind keys must be Str");
             }
-            out.put(name, entry.getValue());
+            out.put(name, unwrap(entry.getValue()));
         }
         return new SqlBindings(List.of(), out);
     }
