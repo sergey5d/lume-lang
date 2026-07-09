@@ -2056,7 +2056,7 @@ items = for {
 }
 ```
 
-`yield` also accepts a same-line expression without `:`:
+`yield` also accepts a same-line expression:
 
 ```txt
 items = for item <- [1, 2, 3] yield item * 2
