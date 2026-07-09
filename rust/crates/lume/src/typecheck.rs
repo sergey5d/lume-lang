@@ -907,6 +907,14 @@ impl<'a> Checker<'a> {
         }
         self.push_type_params(type_sig.type_params.iter().map(String::as_str));
 
+        if decl.kind == TypeKind::Enum && type_sig.enum_cases.is_empty() {
+            self.add_error(
+                "empty_enum",
+                format!("enum '{}' must declare at least one case", decl.name),
+                decl.span,
+            );
+        }
+
         for member in &decl.members {
             match member {
                 TypeMember::Field(field) => {

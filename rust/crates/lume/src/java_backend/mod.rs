@@ -15,6 +15,7 @@ use crate::{
     },
     backend::bundle::build_backend_bundle_with_load_options,
     resolver::{LibraryModule, LocatedDiagnostic, ModuleLoadOptions, parse_program_from_path},
+    source::{LineColumn, Span},
 };
 
 #[derive(Debug, Clone)]
@@ -71,8 +72,18 @@ pub fn generate_java_path(
     let bundle = bundled
         .bundle
         .expect("backend bundle after successful build");
+    let sources = emit::render_declaration_skeletons(&bundle, &external_resolution.classes);
+    let unsupported_diagnostics =
+        unsupported_java_body_diagnostics(&bundle.root_display_path, &sources);
+    if !unsupported_diagnostics.is_empty() {
+        return Ok(JavaBackendResult {
+            diagnostics: unsupported_diagnostics,
+            written_files: Vec::new(),
+        });
+    }
+
     let mut written_files = Vec::new();
-    for source in emit::render_declaration_skeletons(&bundle, &external_resolution.classes) {
+    for source in sources {
         let path = options.output_dir.join(source.relative_path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -87,6 +98,30 @@ pub fn generate_java_path(
         diagnostics: Vec::new(),
         written_files,
     })
+}
+
+fn unsupported_java_body_diagnostics(
+    root_display_path: &str,
+    sources: &[emit::JavaSource],
+) -> Vec<LocatedDiagnostic> {
+    sources
+        .iter()
+        .filter(|source| source.contents.contains(emit::JAVA_UNSUPPORTED_STUB_MARKER))
+        .map(|source| LocatedDiagnostic {
+            path: root_display_path.to_string(),
+            diagnostic: Diagnostic::error(
+                "java_backend_unsupported_body",
+                format!(
+                    "Java backend cannot generate every method body in '{}'",
+                    source.relative_path.display()
+                ),
+                Span::new(0, 0, LineColumn::new(1, 1), LineColumn::new(1, 1)),
+            )
+            .with_label("Java generation stopped here")
+            .with_note("previous versions emitted a runtime UnsupportedOperationException stub; this is now a compile-time error")
+            .with_help("simplify the Lume method body or implement the missing Java backend emission path"),
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Default)]
@@ -149,12 +184,17 @@ pub(crate) struct JavaExternalParam {
 fn discover_java_external_symbols(path: &Path) -> Result<JavaExternalSymbols, String> {
     let mut discovered = JavaExternalSymbols::default();
     let mut visited = HashSet::new();
-    discover_java_external_symbols_from_path(path, &mut visited, &mut discovered)?;
+    let source_root = path
+        .parent()
+        .ok_or_else(|| format!("resolve module base for {}", path.display()))?
+        .to_path_buf();
+    discover_java_external_symbols_from_path(path, &source_root, &mut visited, &mut discovered)?;
     Ok(discovered)
 }
 
 fn discover_java_external_symbols_from_path(
     path: &Path,
+    source_root: &Path,
     visited: &mut HashSet<PathBuf>,
     discovered: &mut JavaExternalSymbols,
 ) -> Result<(), String> {
@@ -169,9 +209,23 @@ fn discover_java_external_symbols_from_path(
         .parent()
         .ok_or_else(|| format!("resolve module base for {}", abs.display()))?;
     for import in &program.imports {
-        let child_path = base_dir.join(format!("{}.lum", import.path));
-        if child_path.exists() {
-            discover_java_external_symbols_from_path(&child_path, visited, discovered)?;
+        let module_file = format!("{}.lum", import.path);
+        let rooted_child_path = source_root.join(&module_file);
+        let relative_child_path = base_dir.join(&module_file);
+        let child_path = if rooted_child_path.exists() {
+            Some(rooted_child_path)
+        } else if relative_child_path.exists() {
+            Some(relative_child_path)
+        } else {
+            None
+        };
+        if let Some(child_path) = child_path {
+            discover_java_external_symbols_from_path(
+                &child_path,
+                source_root,
+                visited,
+                discovered,
+            )?;
         } else {
             collect_java_external_symbols_from_import(import, &abs, discovered);
         }
@@ -1891,8 +1945,25 @@ fn java_function_type_to_lume_type_ref(
                 span: ctx.span,
             })
         }
-        _ => None,
+        _ => {
+            let arity = lume_function_type_arity(base)?;
+            if args.len() != arity + 1 {
+                return None;
+            }
+            Some(TypeRef::Function {
+                params: args[..arity].to_vec(),
+                ret: Box::new(args[arity].clone()),
+                span: ctx.span,
+            })
+        }
     }
+}
+
+fn lume_function_type_arity(base: &str) -> Option<usize> {
+    let short = base.strip_prefix("lume.core.").unwrap_or(base);
+    let suffix = short.strip_prefix("Function")?;
+    let arity = suffix.parse::<usize>().ok()?;
+    (3..=12).contains(&arity).then_some(arity)
 }
 
 fn java_tuple_type_to_lume_type_ref(
@@ -2417,6 +2488,66 @@ def main() Unit {
             fs::read_to_string(out.join("demo/app/Named.java")).expect("read interface");
         assert!(interface.contains("interface Named"));
         assert!(interface.contains("String name();"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn discovers_nested_local_imports_from_source_root() {
+        let temp = temp_path("lume-java-nested-imports");
+        let source = temp.join("main.lum");
+        let out = temp.join("out");
+        let feature_dir = temp.join("feature");
+        fs::create_dir_all(&feature_dir).expect("create feature dir");
+        fs::write(
+            &source,
+            r#"
+module demo/app
+
+use common/{Shared}
+use feature/repo/{FeatureRepo}
+
+def main() Unit {
+    repo FeatureRepo = FeatureRepo(Shared("ok"))
+    println(repo.shared.name)
+}
+"#,
+        )
+        .expect("write main source");
+        fs::write(
+            temp.join("common.lum"),
+            r#"
+module common
+
+class Shared {
+    name Str
+}
+"#,
+        )
+        .expect("write common source");
+        fs::write(
+            feature_dir.join("repo.lum"),
+            r#"
+module feature/repo
+
+use common/{Shared}
+
+class FeatureRepo {
+    shared Shared
+}
+"#,
+        )
+        .expect("write repo source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        assert!(
+            result
+                .written_files
+                .iter()
+                .any(|path| path.ends_with("FeatureRepo.java"))
+        );
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -3765,6 +3896,68 @@ def main() Unit {
         run_checked(
             Command::new("javac").arg("-d").arg(&classes).args(&sources),
             "javac",
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_supports_high_arity_lambdas() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java high-arity lambda test because a JDK tool is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-high-arity-lambda");
+        let source = temp.join("high_arity_lambda.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/higharity
+
+def apply7(f (Int, Int, Int, Int, Int, Int, Int) -> Int) Int {
+    f(1, 2, 3, 4, 5, 6, 7)
+}
+
+def main() Unit {
+    total Int = apply7((a, b, c, d, e, g, h) -> a + b + c + d + e + g + h)
+    println(total)
+}
+"#,
+        )
+        .expect("write source");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(generated.diagnostics.is_empty());
+
+        let module = fs::read_to_string(out.join("demo/higharity/HigharityModule.java"))
+            .expect("read module");
+        assert!(module.contains("lume.core.Function7<"));
+        assert!(module.contains(".apply(1L, 2L, 3L, 4L, 5L, 6L, 7L)"));
+        assert!(module.contains("public Long apply("));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.higharity.HigharityMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            ""
         );
 
         let _ = fs::remove_dir_all(temp);

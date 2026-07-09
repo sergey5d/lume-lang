@@ -73,7 +73,9 @@ pub(crate) fn resolve_path_with_options(
     let stdlib_dir = find_stdlib_dir(root.parent().unwrap_or_else(|| Path::new(".")))?;
     let ambient = AmbientRegistry::load_from_stdlib(&stdlib_dir)?;
     let mut graph = ModuleGraph::default();
-    let root_path = load_module_with_options(root, &mut graph, &mut HashSet::new(), options)?;
+    let source_root = source_root_for_path(root)?;
+    let root_path =
+        load_module_with_options(root, &source_root, &mut graph, &mut HashSet::new(), options)?;
 
     let mut visited = HashSet::new();
     let mut order = Vec::new();
@@ -111,7 +113,14 @@ pub(crate) fn load_module_graph_with_options(
     options: &ModuleLoadOptions,
 ) -> Result<(ModuleGraph, PathBuf), String> {
     let mut graph = ModuleGraph::default();
-    let root = load_module_with_options(path.as_ref(), &mut graph, &mut HashSet::new(), options)?;
+    let source_root = source_root_for_path(path.as_ref())?;
+    let root = load_module_with_options(
+        path.as_ref(),
+        &source_root,
+        &mut graph,
+        &mut HashSet::new(),
+        options,
+    )?;
     Ok((graph, root))
 }
 
@@ -359,6 +368,7 @@ struct ModuleNamespace {
 
 fn load_module_with_options(
     path: &Path,
+    source_root: &Path,
     graph: &mut ModuleGraph,
     loading: &mut HashSet<PathBuf>,
     options: &ModuleLoadOptions,
@@ -396,13 +406,13 @@ fn load_module_with_options(
         .map(|module| module.name.as_str());
     let imports = module.program.imports.clone();
     for import in imports {
-        let child_path = base_dir.join(format!("{}.lum", import.path));
+        let child_path = local_module_path(source_root, base_dir, &import.path);
         let library_import =
             !child_path.exists() && options.library_modules.contains_key(&import.path);
         let child_abs = if library_import {
             ensure_library_module(&import.path, graph, options)?
         } else {
-            load_module_with_options(&child_path, graph, loading, options)?
+            load_module_with_options(&child_path, source_root, graph, loading, options)?
         };
         let child = graph
             .modules
@@ -509,6 +519,28 @@ fn load_module_with_options(
     loading.remove(&abs);
     graph.modules.insert(abs.clone(), module);
     Ok(abs)
+}
+
+fn source_root_for_path(path: &Path) -> Result<PathBuf, String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("resolve module base for {}", path.display()))?;
+    fs::canonicalize(parent).map_err(|err| format!("resolve {}: {err}", parent.display()))
+}
+
+fn local_module_path(source_root: &Path, base_dir: &Path, module_path: &str) -> PathBuf {
+    let module_file = format!("{module_path}.lum");
+    let rooted = source_root.join(&module_file);
+    if rooted.exists() {
+        return rooted;
+    }
+
+    let relative = base_dir.join(&module_file);
+    if relative.exists() {
+        return relative;
+    }
+
+    rooted
 }
 
 pub(crate) fn parse_program_from_path(path: &Path) -> Result<Program, String> {

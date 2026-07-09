@@ -1,0 +1,5 @@
+# FAIL_REGEX:
+# .*enum 'Empty' must declare at least one case.*
+
+enum Empty {
+}

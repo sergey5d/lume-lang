@@ -15,6 +15,9 @@ pub(crate) struct JavaSource {
     pub(crate) contents: String,
 }
 
+pub(crate) const JAVA_UNSUPPORTED_STUB_MARKER: &str = "unsupported Lume Java backend method body";
+const MAX_JAVA_FUNCTION_ARITY: usize = 12;
+
 pub(crate) fn render_declaration_skeletons(
     bundle: &BackendBundle,
     external_classes: &HashMap<String, JavaExternalClass>,
@@ -700,12 +703,7 @@ fn invoker_erased_value_type(ty: &ir::Type, names: &JavaNames, type_params: &[St
         ir::Type::Int => "Long".to_string(),
         ir::Type::Float => "Double".to_string(),
         ir::Type::Str => "String".to_string(),
-        ir::Type::Function { params, .. } => match params.as_slice() {
-            [] => "java.util.function.Supplier".to_string(),
-            [_] => "java.util.function.Function".to_string(),
-            [_, _] => "java.util.function.BiFunction".to_string(),
-            _ => "Object".to_string(),
-        },
+        ir::Type::Function { params, .. } => erased_function_type_name(params.len()),
         ir::Type::Named { name, .. } if is_reflection_type(name) => {
             "lume.core.LumeType".to_string()
         }
@@ -722,6 +720,27 @@ fn invoker_erased_value_type(ty: &ir::Type, names: &JavaNames, type_params: &[St
             .unwrap_or_else(|| java_type_name(name)),
         ir::Type::Named { name, .. } => names.named_type(name),
         ir::Type::Tuple(_) | ir::Type::Record(_) => "Object".to_string(),
+    }
+}
+
+fn erased_function_type_name(arity: usize) -> String {
+    match arity {
+        0 => "java.util.function.Supplier".to_string(),
+        1 => "java.util.function.Function".to_string(),
+        2 => "java.util.function.BiFunction".to_string(),
+        3..=MAX_JAVA_FUNCTION_ARITY => format!("lume.core.Function{arity}"),
+        _ => "Object".to_string(),
+    }
+}
+
+fn emit_functional_call(target: &str, args: &[String]) -> Option<String> {
+    if args.len() > MAX_JAVA_FUNCTION_ARITY {
+        return None;
+    }
+    if args.is_empty() {
+        Some(format!("{target}.get()"))
+    } else {
+        Some(format!("{target}.apply({})", args.join(", ")))
     }
 }
 
@@ -1595,12 +1614,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 } else {
                     self.param_reference(name)?
                 };
-                match args.as_slice() {
-                    [] => Some(format!("{target}.get()")),
-                    [arg] => Some(format!("{target}.apply({arg})")),
-                    [left, right] => Some(format!("{target}.apply({left}, {right})")),
-                    _ => None,
-                }
+                emit_functional_call(&target, &args)
             }
             ast::Expr::Member { receiver, name, .. }
                 if name == "iterator"
@@ -1711,7 +1725,9 @@ fn java_wildcard_type_args(count: usize) -> String {
 
 fn push_stub_body(out: &mut String) {
     out.push_str(" {\n");
-    out.push_str("        throw new UnsupportedOperationException(\"Lume Java body generation is not implemented yet\");\n");
+    out.push_str("        throw new UnsupportedOperationException(\"");
+    out.push_str(JAVA_UNSUPPORTED_STUB_MARKER);
+    out.push_str("\");\n");
     out.push_str("    }\n");
 }
 
@@ -2444,12 +2460,10 @@ impl<'a> FunctionEmitter<'a> {
         };
         let args = self.emit_operands_for_params(args, &params)?;
         let callee = self.emit_operand(callee)?;
-        match args.as_slice() {
-            [] => Some(format!("{callee}.get()")),
-            [arg] => Some(format!("{callee}.apply({arg})")),
-            [left, right] => Some(format!("{callee}.apply({left}, {right})")),
-            _ => self.unsupported("function call with more than two arguments"),
+        if args.len() > MAX_JAVA_FUNCTION_ARITY {
+            return self.unsupported("function call with more than 12 arguments");
         }
+        emit_functional_call(&callee, &args)
     }
 
     fn emit_to_string_call(&self, receiver: &ir::Operand) -> Option<String> {
@@ -2801,28 +2815,25 @@ impl<'a> FunctionEmitter<'a> {
         };
         let target_java_ty = self.names.value_type(&target_ty);
         let return_java_ty = self.names.value_type(&function.return_ty);
-        let (method_name, method_params) = match param_locals.as_slice() {
-            [] => ("get", String::new()),
-            [param] => (
-                "apply",
+        if param_locals.len() > MAX_JAVA_FUNCTION_ARITY {
+            return self.unsupported("lambda with more than 12 parameters");
+        }
+        let method_name = if param_locals.is_empty() {
+            "get"
+        } else {
+            "apply"
+        };
+        let method_params = param_locals
+            .iter()
+            .map(|param| {
                 format!(
                     "{} {local_prefix}{}",
                     self.local_value_type(&param.ty),
                     java_local_name(param)
-                ),
-            ),
-            [left, right] => (
-                "apply",
-                format!(
-                    "{} {local_prefix}{}, {} {local_prefix}{}",
-                    self.local_value_type(&left.ty),
-                    java_local_name(left),
-                    self.local_value_type(&right.ty),
-                    java_local_name(right)
-                ),
-            ),
-            _ => return self.unsupported("lambda with more than two parameters"),
-        };
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
         let capture_overrides =
             self.closure_capture_field_overrides(function_id, function, captures)?;
         let body = FunctionEmitter::new(self.bundle, function, self.names)
@@ -4211,19 +4222,28 @@ impl JavaNames {
     }
 
     fn function_type(&self, params: &[ir::Type], ret: &ir::Type) -> String {
-        match params {
-            [] => format!("java.util.function.Supplier<{}>", self.value_type(ret)),
-            [param] => format!(
+        match params.len() {
+            0 => format!("java.util.function.Supplier<{}>", self.value_type(ret)),
+            1 => format!(
                 "java.util.function.Function<{}, {}>",
-                self.value_type(param),
+                self.value_type(&params[0]),
                 self.value_type(ret)
             ),
-            [left, right] => format!(
+            2 => format!(
                 "java.util.function.BiFunction<{}, {}, {}>",
-                self.value_type(left),
-                self.value_type(right),
+                self.value_type(&params[0]),
+                self.value_type(&params[1]),
                 self.value_type(ret)
             ),
+            3..=MAX_JAVA_FUNCTION_ARITY => {
+                let args = params
+                    .iter()
+                    .map(|param| self.value_type(param))
+                    .chain(std::iter::once(self.value_type(ret)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("lume.core.Function{}<{}>", params.len(), args)
+            }
             _ => "Object".to_string(),
         }
     }

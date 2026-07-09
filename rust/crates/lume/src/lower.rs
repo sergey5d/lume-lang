@@ -1148,6 +1148,7 @@ impl<'a> FunctionLowerer<'a> {
         params: &[core::LambdaParam],
         body: &Expr,
         span: Span,
+        expected_params: Option<&[ir::Type]>,
         expected_return: Option<ir::Type>,
     ) -> ir::RValue {
         let nested_name = format!(
@@ -1164,7 +1165,10 @@ impl<'a> FunctionLowerer<'a> {
         for (index, param) in params.iter().enumerate() {
             nested.add_param(
                 lower_lambda_param_name(param, index),
-                lower_lambda_param_type(param),
+                lower_lambda_param_type(
+                    param,
+                    expected_params.and_then(|params| params.get(index)),
+                ),
             );
         }
         let function_id = self.program.add_function(nested);
@@ -4397,11 +4401,19 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             Expr::Lambda { params, body, span } => {
-                let expected_return = match expected {
-                    Some(ir::Type::Function { ret, .. }) => Some(ret.as_ref().clone()),
-                    _ => None,
+                let (expected_params, expected_return) = match expected {
+                    Some(ir::Type::Function { params, ret }) => {
+                        (Some(params.as_slice()), Some(ret.as_ref().clone()))
+                    }
+                    _ => (None, None),
                 };
-                Some(self.lower_lambda_rvalue(params, body, *span, expected_return))
+                Some(self.lower_lambda_rvalue(
+                    params,
+                    body,
+                    *span,
+                    expected_params,
+                    expected_return,
+                ))
             }
             Expr::AnonymousInterface {
                 interfaces,
@@ -5722,13 +5734,16 @@ fn annotation_string_value(raw: &str) -> String {
         .to_string()
 }
 
-fn lower_lambda_param_type(param: &core::LambdaParam) -> ir::Type {
+fn lower_lambda_param_type(param: &core::LambdaParam, expected: Option<&ir::Type>) -> ir::Type {
     if let Some(ty) = &param.ty {
         return lower_type_ref(ty);
     }
     let Some(destructure) = &param.destructure else {
-        return ir::Type::Unknown;
+        return expected.cloned().unwrap_or(ir::Type::Unknown);
     };
+    if let Some(expected) = expected {
+        return expected.clone();
+    }
     match destructure.kind {
         DestructureKind::Tuple => ir::Type::Tuple(
             destructure
