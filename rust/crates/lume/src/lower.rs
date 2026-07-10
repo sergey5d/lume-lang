@@ -4889,6 +4889,7 @@ impl<'a> FunctionLowerer<'a> {
     ) -> Vec<core::CallArg> {
         if style == core::CallStyle::Brace
             && (self.brace_call_targets_explicit_constructor(callee)
+                || self.brace_call_targets_implicit_constructor(callee)
                 || self.brace_call_targets_current_constructor(callee)
                 || self.brace_call_targets_enum_case(callee))
         {
@@ -4917,6 +4918,24 @@ impl<'a> FunctionLowerer<'a> {
                         .is_some_and(|function| function.name == "new")
                 })
             })
+    }
+
+    fn brace_call_targets_implicit_constructor(&self, callee: &Expr) -> bool {
+        let Some(path) = expr_path(callee) else {
+            return false;
+        };
+        if path.len() != 1 {
+            return false;
+        }
+        self.program.types.iter().any(|ty| {
+            ty.name == path[0]
+                && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+                && !ty.methods.iter().copied().any(|id| {
+                    self.program
+                        .function(id)
+                        .is_some_and(|function| function.name == "new")
+                })
+        })
     }
 
     fn brace_call_targets_current_constructor(&self, callee: &Expr) -> bool {
@@ -5111,7 +5130,17 @@ impl<'a> FunctionLowerer<'a> {
                 return Some(names);
             }
         }
-        let _ = has_explicit_constructor;
+        if !has_explicit_constructor {
+            let names = ty
+                .fields
+                .iter()
+                .filter(|field| field.visibility != ast::Visibility::Hidden)
+                .map(|field| field.name.clone())
+                .collect::<Vec<_>>();
+            if arrange_named_call_args(&names, args).is_some() || args.len() == names.len() {
+                return Some(names);
+            }
+        }
         None
     }
 

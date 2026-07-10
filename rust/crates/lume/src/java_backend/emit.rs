@@ -2092,6 +2092,10 @@ impl<'a> FunctionEmitter<'a> {
                         captures,
                         closure_capture_initializers.as_deref(),
                     )?,
+                    ir::RValue::Record(fields) => {
+                        let target_ty = target_ty.as_ref()?;
+                        self.emit_record_as_named_construct(target_ty, fields)?
+                    }
                     _ => self.emit_rvalue(value)?,
                 };
                 if let Some(target_ty) = target_ty {
@@ -2498,6 +2502,19 @@ impl<'a> FunctionEmitter<'a> {
             {
                 self.emit_core_enum_case_call(case, operands)
             }
+            [owner, case] if self.enum_case(owner, case).is_some() => {
+                self.emit_enum_case_call(owner, case, operands)
+            }
+            [owner, case, method] if self.enum_case(owner, case).is_some() => {
+                let args = self.emit_operands(operands)?;
+                let receiver = self.emit_enum_case_call(owner, case, &[])?;
+                Some(format!(
+                    "{}.{}({})",
+                    receiver,
+                    java_member_name(method),
+                    args.join(", ")
+                ))
+            }
             [owner] if owner == "List" => {
                 let args = self.emit_operands(operands)?;
                 Some(format!("lume.core.LumeList.of({})", args.join(", ")))
@@ -2593,7 +2610,7 @@ impl<'a> FunctionEmitter<'a> {
                 };
                 Some(format!("{target}({})", args.join(", ")))
             }
-            _ => self.unsupported("named runtime call"),
+            _ => self.unsupported(&format!("named runtime call {}", path.join("."))),
         }
     }
 
@@ -2606,6 +2623,9 @@ impl<'a> FunctionEmitter<'a> {
                 if core_enum_case_owner(case).is_some_and(|expected| expected == owner) =>
             {
                 self.emit_core_enum_case_call(case, &[])
+            }
+            [owner, case] if self.enum_case(owner, case).is_some() => {
+                self.emit_enum_case_call(owner, case, &[])
             }
             _ => self.unsupported("named runtime value"),
         }
@@ -2622,11 +2642,45 @@ impl<'a> FunctionEmitter<'a> {
         ))
     }
 
+    fn emit_enum_case_call(
+        &self,
+        enum_name: &str,
+        case_name: &str,
+        operands: &[ir::Operand],
+    ) -> Option<String> {
+        let args = self.emit_operands(operands)?;
+        Some(format!(
+            "new {}.{}{}({})",
+            self.names.named_type(enum_name),
+            java_type_name(case_name),
+            self.lume_constructor_type_args(enum_name),
+            args.join(", ")
+        ))
+    }
+
+    fn enum_case(&self, enum_name: &str, case_name: &str) -> Option<&ir::EnumCase> {
+        self.type_def(enum_name)?
+            .enum_cases
+            .iter()
+            .find(|case| case.name == case_name)
+    }
+
     fn is_lume_constructible_type(&self, name: &str) -> bool {
         self.bundle.ir.types.iter().any(|ty| {
             ty.name == name
                 && matches!(ty.kind, TypeKind::Class | TypeKind::Record | TypeKind::Enum)
         })
+    }
+
+    fn lume_constructor_type_args(&self, name: &str) -> &'static str {
+        if self
+            .type_def(name)
+            .is_some_and(|ty| !ty.type_params.is_empty())
+        {
+            "<>"
+        } else {
+            ""
+        }
     }
 
     fn is_lume_single_type(&self, name: &str) -> bool {
@@ -2773,6 +2827,58 @@ impl<'a> FunctionEmitter<'a> {
         ))
     }
 
+    fn emit_record_as_named_construct(
+        &self,
+        ty: &ir::Type,
+        fields: &[ir::NamedOperand],
+    ) -> Option<String> {
+        let ir::Type::Named { name, args } = ty else {
+            return self.unsupported(&format!(
+                "anonymous shape literal {{{}}}",
+                fields
+                    .iter()
+                    .map(|field| field.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        };
+        let type_def = self.type_def(name)?;
+        if !matches!(type_def.kind, TypeKind::Class | TypeKind::Record) {
+            return None;
+        }
+        let subst = type_def
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        let mut constructor_args = Vec::new();
+        for field in &type_def.fields {
+            let field_ty = substitute_java_emit_type(&field.ty, &subst);
+            if let Some(value) = fields.iter().find(|value| value.name == field.name) {
+                constructor_args.push(self.emit_operand_for_param_spec(
+                    &value.value,
+                    &JavaParamSpec {
+                        ty: field_ty,
+                        variadic: false,
+                        lazy: false,
+                    },
+                )?);
+            } else if let Some(initializer) = &field.initializer {
+                constructor_args.push(java_constant(initializer));
+            } else if field.has_initializer {
+                constructor_args.push(java_default_value(&field_ty));
+            } else {
+                return None;
+            }
+        }
+        Some(format!(
+            "new {}({})",
+            self.names.named_type(name),
+            constructor_args.join(", ")
+        ))
+    }
+
     fn emit_variant(
         &self,
         enum_name: &str,
@@ -2789,9 +2895,10 @@ impl<'a> FunctionEmitter<'a> {
             self.names.named_type(enum_name)
         };
         Some(format!(
-            "new {}.{}<>({})",
+            "new {}.{}{}({})",
             owner,
             java_type_name(case_name),
+            self.lume_constructor_type_args(enum_name),
             args.join(", ")
         ))
     }
@@ -3278,8 +3385,32 @@ impl<'a> FunctionEmitter<'a> {
         operands: &[ir::Operand],
     ) -> Option<Vec<JavaParamSpec>> {
         let ty = self.type_def(type_name)?;
-        self.function_named_for_operands(ty, "new", operands)
-            .map(function_param_specs)
+        if let Some(function) = self.function_named_for_operands(ty, "new", operands) {
+            return Some(function_param_specs(function));
+        }
+        if ty.methods.iter().any(|function_id| {
+            self.bundle
+                .ir
+                .function(*function_id)
+                .is_some_and(|f| f.name == "new")
+        }) {
+            return None;
+        }
+        let params = ty
+            .fields
+            .iter()
+            .filter(|field| field.visibility != Visibility::Hidden)
+            .map(|field| JavaParamSpec {
+                ty: field.ty.clone(),
+                variadic: false,
+                lazy: false,
+            })
+            .collect::<Vec<_>>();
+        if param_specs_accept_arg_len(&params, operands.len()) {
+            Some(params)
+        } else {
+            None
+        }
     }
 
     fn method_param_specs_for_receiver(
@@ -3369,6 +3500,13 @@ impl<'a> FunctionEmitter<'a> {
                 if core_enum_case_owner(case).is_some_and(|expected| expected == owner) =>
             {
                 self.core_enum_case_type(case)
+            }
+            [owner, case] if self.enum_case(owner, case).is_some() => Some(ir::Type::Named {
+                name: owner.clone(),
+                args: Vec::new(),
+            }),
+            [owner, case, method] if self.enum_case(owner, case).is_some() => {
+                self.type_method_return_type(owner, method, arg_len)
             }
             [owner] if owner == "List" => Some(ir::Type::Named {
                 name: "List".to_string(),
