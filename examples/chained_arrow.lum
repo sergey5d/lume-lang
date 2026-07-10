@@ -5,6 +5,7 @@
 # Ada
 # Ada
 # Ada
+# Ada
 # 1
 # Ada
 # Ada
@@ -92,41 +93,45 @@ def main() Unit {
         .->first
     println(eitherName.expectRight())
 
-    # Normal dots after .-> stay inside the current lifted segment.
-    displayName Option[Str] = optionSource.->profile().primaryName().display()
+    # Each .-> hop crosses exactly one lifted boundary.
+    displayName Option[Str] = optionSource.->profile().->primaryName().->display()
     println(displayName.orPanic())
+
+    containerGetOr Str = optionSource.->profile().->primaryName().->display().getOr("unknown")
+    println(containerGetOr)
 
     mixedFirstName Option[Str] = optionSource
         .->profileOpt()
-        .->users.head()
+        .->users
+        .->head()
         .->name()
-        .first
+        .->first
     println(mixedFirstName.orPanic())
 
-    parenthesizedContainerMethod Str = (optionSource.->profile().primaryName()).orPanic().first
+    parenthesizedContainerMethod Str = (optionSource.->profile().->primaryName()).orPanic().first
     println(parenthesizedContainerMethod)
 
     differentFamilyMaps Option[Result[Int, ParseError]] = optionSource
         .->profile()
-        .primaryName()
-        .parseFirstResult()
+        .->primaryName()
+        .->parseFirstResult()
     println(differentFamilyMaps.orPanic().orPanic())
 
     lineLeadingDisplayName Option[Str] = optionSource
         .->profile()
-        .primaryName()
-        .display()
+        .->primaryName()
+        .->display()
     println(lineLeadingDisplayName.orPanic())
 
     lineLeadingFirstName Option[Str] = optionSource
         .->profileOpt()
         .->name()
-        .first
+        .->first
     println(lineLeadingFirstName.orPanic())
 
-    # This becomes: userBoxOpt.flatMap(x -> x.user().profile().nameOpt()).map(y -> y.first)
+    # This crosses each plain or lifted member one hop at a time.
     userBoxOpt Option[UserBox] = Some(UserBox { userValue: user })
-    firstName Option[Str] = userBoxOpt.->user().profile().nameOpt().->first
+    firstName Option[Str] = userBoxOpt.->user().->profile().->nameOpt().->first
     println(firstName.orPanic())
 
     profileSource Option[Profile] = Some(user.profile())

@@ -4054,7 +4054,7 @@ impl<'a> Checker<'a> {
         self.add_error(
             "incompatible_lifted_error",
             format!(
-                "lifted segment returns '{}', but the current chain is '{}'; '{}' is not assignable to '{}'; convert the error explicitly before using .->",
+                "lifted hop returns '{}', but the current chain is '{}'; '{}' is not assignable to '{}'; convert the error explicitly before using .->",
                 segment_ty.describe(),
                 current.describe(),
                 actual_error.describe(),
@@ -6724,10 +6724,7 @@ impl<'a> Checker<'a> {
             );
         }
 
-        if self.lifted_segment_depth > 0
-            && !matches!(receiver_ty, Ty::Unknown)
-            && self.unwrap_lifted_type(receiver_ty).is_some()
-        {
+        if !matches!(receiver_ty, Ty::Unknown) && self.unwrap_lifted_type(receiver_ty).is_some() {
             return format!(
                 "cannot access member '{}' on lifted value '{}'; use '.->{}' to continue through the lifted value",
                 name,

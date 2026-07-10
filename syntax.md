@@ -103,79 +103,44 @@ example `value -> value + 1`.
 
 ## Lifted Access Operator
 
-Use `.->` to continue an access chain inside a lifted value: `Option[T]`,
-`Result[T, E]`, or `Either[E, T]`.
-The lifted access operator is one token; whitespace inside `.->` is invalid.
+Use `.->` to access a member of the value inside a lifted container:
+`Option[T]`, `Result[T, E]`, or `Either[L, T]`. The lifted access operator is
+one token; whitespace inside `.->` is invalid.
+
+Each `.->` is one hop. The member resolves against the inner success type,
+together with any immediately following call or index postfixes:
 
 ```txt
 firstName = userOpt
-    .->profileOpt()
-    .->users.head()
+    .->profile
     .->name()
-    .first
-```
-
-Each `.->` starts a lifted segment. Normal `.`, calls, and indexes after it stay
-inside the current segment until another `.->` appears or the expression ends.
-
-```txt
-userOpt
-    .->profileOpt()
-    .->users.head()
-    .->name()
-    .first
-```
-
-has these lifted segments:
-
-```txt
-profileOpt()
-users.head()
-name().first
-```
-
-Use `.->first` only when `first` itself must start a new lifted segment.
-
-Each segment is typechecked against the successful value inside the current
-container. If a segment returns a plain value, `.->` lowers to `map`:
-
-```txt
-userOpt.->name().first
-userOpt.map(user -> user.name().first)
-```
-
-If a segment returns the same lifted family, `.->` lowers to `flatMap`:
-
-```txt
-userOpt.->profileOpt()
-userOpt.flatMap(user -> user.profileOpt())
-```
-
-Only same-family results flatten:
-
-```txt
-Option[A]    + Option[B]    => Option[B]
-Result[A, E] + Result[B, E] => Result[B, E]
-Either[E, A] + Either[E, B] => Either[E, B]
-
-Option[A] + Result[B, E] => Option[Result[B, E]]
+    .->first
 ```
 
 Rules:
 
-- `.->member` starts a lifted chain segment
-- normal `.member` calls after `.->` stay inside the current segment until the next `.->`
-- the compiler chooses `map` or `flatMap` for each segment from that segment's type
-- `Result` and `Either` flatten only when the segment failure type is assignable to the current failure type
-- ordinary `.` inside a segment is not lifted; use another `.->` to cross another lifted result
-- `.` and `.->` may start the next line inside an active expression
+- `x.->m` requires `x` to be `Option`, `Result`, or `Either`; `m` resolves
+  against the inner type
+- a hop is one member plus its immediate `(...)` / `[...]` postfixes; the
+  next `.` or `.->` starts the next hop
+- if the hop result is plain, the hop lowers to `map`
+- if the hop result is the same lifted family the hop lowers to
+  `flatMap`
+- otherwise the result nests; there is no cross-family flattening
+- plain `.m` on a lifted value is an ordinary method call on the container
+  type itself, for example `userOpt.->name().getOr("unknown")`
 
 ```txt
-userOpt.->profileOpt().name    # invalid: .name is applied to Option[Profile]
-userOpt.->profileOpt().->name  # valid
+userOpt.->profileOpt().->name   # inner access on every hop
+userOpt.->profileOpt().name     # error: Option[Profile] has no member
+                                # 'name'; use '.->name'
+```
 
-(userOpt.->name()).orPanic()   # call orPanic on Option[Name]
-userOpt.->name().orPanic()     # call orPanic inside the segment
+Chains normally stay lifted and are consumed by `try`, `let`,
+`if let`, or `match`:
+
+```txt
+name = try userOpt.->profile.->name
 ```
 
 ## Lift Expression
@@ -2365,7 +2330,7 @@ Other operators / constructs:
 - `<-` for `for` iteration and success-case extraction in `if let`, `let ... else`, and `expect`
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases
-- `.->` for lifted access through `Option`, `Result`, and `Either`
+- `.->` for per-hop lifted access through `Option`, `Result`, and `Either`
 - `with` for interface implementation and generic bounds
 - `:` for ordinary pair expressions, where `left: right` constructs a 2-tuple
 - `:<` for class, shape, and anonymous-shape update
@@ -2485,7 +2450,7 @@ size = "hello"
 name = userOpt
     .->profileOpt()
     .->name()
-    .first
+    .->first
 ```
 
 ## Visibility

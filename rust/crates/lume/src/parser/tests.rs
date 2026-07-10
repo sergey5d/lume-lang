@@ -2279,7 +2279,7 @@ def make() Unit = values.map { (left, right) -> left + right }
 }
 
 #[test]
-fn parses_arrow_chain_as_lifted_segments() {
+fn parses_arrow_chain_as_lifted_hops() {
     fn segment_member_name(expr: &Expr) -> &str {
         match expr {
             Expr::Call { callee, .. } => {
@@ -2305,6 +2305,29 @@ fn parses_arrow_chain_as_lifted_segments() {
     assert_eq!(segment_member_name(&segments[0].body), "profileOpt");
     assert_eq!(segment_member_name(&segments[1].body), "nameOpt");
     assert_eq!(segment_member_name(&segments[2].body), "first");
+}
+
+#[test]
+fn parses_plain_dot_after_lifted_hop_as_container_access() {
+    let expr = parse_expr_only(r#"source.->profileOpt().name"#);
+    let Expr::Member { receiver, name, .. } = expr else {
+        panic!("expected member access after lifted hop, got {expr:#?}");
+    };
+    assert_eq!(name, "name");
+
+    let Expr::LiftedChain { base, segments, .. } = receiver.as_ref() else {
+        panic!("expected lifted chain receiver, got {receiver:#?}");
+    };
+    assert!(matches!(base.as_ref(), Expr::Identifier { name, .. } if name == "source"));
+    assert_eq!(segments.len(), 1);
+
+    let Expr::Call { callee, .. } = &segments[0].body else {
+        panic!("expected called lifted hop, got {:#?}", segments[0].body);
+    };
+    let Expr::Member { name, .. } = callee.as_ref() else {
+        panic!("expected lifted hop member call, got {callee:#?}");
+    };
+    assert_eq!(name, "profileOpt");
 }
 
 #[test]

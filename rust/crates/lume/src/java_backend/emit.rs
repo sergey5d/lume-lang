@@ -4464,10 +4464,7 @@ fn core_enum_case_owner(case: &str) -> Option<&'static str> {
 }
 
 fn lazy_core_member_call_name(name: &str) -> bool {
-    matches!(
-        name,
-        "getOr" | "orElse" | "toResult" | "toEither"
-    )
+    matches!(name, "getOr" | "orElse" | "toResult" | "toEither")
 }
 
 fn builtin_method_param_types(

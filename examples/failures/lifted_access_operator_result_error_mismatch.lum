@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*lifted segment returns 'Result\[Profile, ProfileError\]', but the current chain is 'Result\[User, UserError\]'; 'ProfileError' is not assignable to 'UserError'.*
+# .*lifted hop returns 'Result\[Profile, ProfileError\]', but the current chain is 'Result\[User, UserError\]'; 'ProfileError' is not assignable to 'UserError'.*
 
 class UserError {
     message Str
