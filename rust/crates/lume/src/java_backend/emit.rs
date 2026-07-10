@@ -4466,7 +4466,7 @@ fn core_enum_case_owner(case: &str) -> Option<&'static str> {
 fn lazy_core_member_call_name(name: &str) -> bool {
     matches!(
         name,
-        "getOr" | "getOrElse" | "orElse" | "toResult" | "toEither"
+        "getOr" | "orElse" | "toResult" | "toEither"
     )
 }
 
@@ -4505,7 +4505,7 @@ fn builtin_method_param_specs(
     match receiver {
         ir::Type::Named { name, args } if name == "Option" && args.len() == 1 => {
             match (method, arg_len) {
-                ("getOr" | "getOrElse", 1) => Some(vec![java_param_spec(args[0].clone(), true)]),
+                ("getOr", 1) => Some(vec![java_param_spec(args[0].clone(), true)]),
                 ("orElse", 1) => Some(vec![java_param_spec(receiver.clone(), true)]),
                 ("toResult" | "toEither", 1) => {
                     Some(vec![java_param_spec(ir::Type::Unknown, true)])

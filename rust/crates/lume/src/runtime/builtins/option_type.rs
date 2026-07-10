@@ -32,14 +32,13 @@ pub(super) fn define() -> RuntimeType {
             ),
             builtin_method(3, "orPanic", Vec::new(), option_or_panic),
             builtin_method(4, "getOr", vec![ir::Type::Unknown], option_get_or),
-            builtin_method(5, "getOrElse", vec![ir::Type::Unknown], option_get_or_else),
-            builtin_method(6, "orElse", vec![ir::Type::Unknown], option_or_else),
-            builtin_method(7, "toResult", vec![ir::Type::Unknown], option_to_result),
-            builtin_method(8, "toEither", vec![ir::Type::Unknown], option_to_either),
-            builtin_method(9, "iterator", Vec::new(), option_iterator),
-            builtin_method(10, "isSuccess", Vec::new(), option_is_set),
+            builtin_method(5, "orElse", vec![ir::Type::Unknown], option_or_else),
+            builtin_method(6, "toResult", vec![ir::Type::Unknown], option_to_result),
+            builtin_method(7, "toEither", vec![ir::Type::Unknown], option_to_either),
+            builtin_method(8, "iterator", Vec::new(), option_iterator),
+            builtin_method(9, "isSuccess", Vec::new(), option_is_set),
             builtin_method(
-                11,
+                10,
                 "flatMap",
                 vec![ir::Type::Function {
                     params: Vec::new(),
@@ -171,23 +170,6 @@ fn option_get_or(
 ) -> Result<Value, Diagnostic> {
     if args.len() != 1 {
         return Err(interpreter.runtime_error(span, "Option.getOr expects 1 argument"));
-    }
-    let (case_id, first_field) = option_case(&receiver);
-    if case_id == SOME_CASE {
-        Ok(first_field.expect("Option.Some payload"))
-    } else {
-        force_lazy_arg(interpreter, args[0].clone(), span)
-    }
-}
-
-fn option_get_or_else(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    if args.len() != 1 {
-        return Err(interpreter.runtime_error(span, "Option.getOrElse expects 1 argument"));
     }
     let (case_id, first_field) = option_case(&receiver);
     if case_id == SOME_CASE {

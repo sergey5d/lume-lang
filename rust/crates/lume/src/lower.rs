@@ -6026,7 +6026,7 @@ fn builtin_member_expected_arg_specs(
                 false,
             )])
         }
-        ("Option", "getOr" | "getOrElse") => Some(vec![spec(item, true)]),
+        ("Option", "getOr") => Some(vec![spec(item, true)]),
         ("Option", "orElse") => Some(vec![spec(receiver.clone(), true)]),
         ("Option", "toResult") => {
             let error = match expected {
@@ -6229,7 +6229,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             }],
             ret: Box::new(ir::Type::option(ir::Type::Unknown)),
         }),
-        ("Option", "getOr" | "getOrElse") => Some(ir::Type::Function {
+        ("Option", "getOr") => Some(ir::Type::Function {
             params: vec![item.clone()],
             ret: Box::new(item),
         }),

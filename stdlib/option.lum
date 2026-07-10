@@ -24,8 +24,6 @@ enum Option[T] {
         case Option.None => defaultValue
     }
 
-    def getOrElse(lazy defaultValue T) T = this.getOr(defaultValue)
-
     def orElse(lazy fallback Option[T]) Option[T] = match this {
         case Some(value) => Some(value)
         case Option.None => fallback

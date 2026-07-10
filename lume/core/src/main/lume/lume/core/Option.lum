@@ -44,11 +44,6 @@ impl Option[T] {
         case None => fallback
     }
 
-    def getOrElse(lazy fallback T) T = match this {
-        case Some(value) => value
-        case None => fallback
-    }
-
     def orElse(lazy fallback Option[T]) Option[T] = match this {
         case Some(value) => Some(value)
         case None => fallback

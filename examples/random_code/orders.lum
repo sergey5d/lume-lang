@@ -69,7 +69,7 @@ impl OrderManager {
             this.map.put(parsedOrder.id, parsedOrder)
         }
 
-        order = savedOrder.getOrElse(parsedOrder)
+        order = savedOrder.getOr(parsedOrder)
 
         match parsedOrder.status {
             case "NEW" => 
