@@ -1040,8 +1040,8 @@ impl<'a> Parser<'a> {
             let start = self.previous_span();
             self.skip_newlines();
             let value = self.parse_unary_expr()?;
-            let handler = if self.match_keyword(Keyword::Else) {
-                Some(Box::new(self.parse_try_else_handler()?))
+            let handler = if self.match_keyword(Keyword::Catch) {
+                Some(Box::new(self.parse_try_catch_handler()?))
             } else {
                 None
             };
@@ -1090,14 +1090,14 @@ impl<'a> Parser<'a> {
         self.parse_postfix_expr()
     }
 
-    fn parse_try_else_handler(&mut self) -> Option<TryElseHandler> {
+    fn parse_try_catch_handler(&mut self) -> Option<TryCatchHandler> {
         let start = self.previous_span();
         self.skip_newlines();
         let binder = if self.at(TokenKind::Identifier) && self.at_next(TokenKind::FatArrow) {
-            let (name, _) = self.expect_identifier("expected try else failure binding")?;
+            let (name, _) = self.expect_identifier("expected try catch failure binding")?;
             self.consume(
                 TokenKind::FatArrow,
-                "expected '=>' after try else failure binding",
+                "expected '=>' after try catch failure binding",
             )?;
             Some(name)
         } else {
@@ -1113,7 +1113,7 @@ impl<'a> Parser<'a> {
             self.parse_expr()?
         };
         let end = body.span();
-        Some(TryElseHandler {
+        Some(TryCatchHandler {
             binder,
             body: Box::new(body),
             span: start.cover(end),

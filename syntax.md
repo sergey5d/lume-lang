@@ -1859,21 +1859,21 @@ The success type may differ; the propagated failure side must still be compatibl
 Failure mapping:
 
 ```txt
-value = try source else mappedFailure
-value = try source else failure => mappedFailure
-value = try source else failure => {
+value = try source catch mappedFailure
+value = try source catch failure => mappedFailure
+value = try source catch failure => {
     statement1
     statement2
     mappedFailure
 }
 ```
 
-`try ... else` still unwraps the success side, but maps the failure payload
+`try ... catch` still unwraps the success side, but maps the failure payload
 before returning from the enclosing callable.
 
-- `Option[T]` has no failure payload, so it uses `else mappedFailure`.
-- `Result[T, E]` binds `Err(E)` with `else err => mappedFailure`.
-- `Either[L, R]` binds `Left(L)` with `else left => mappedFailure`.
+- `Option[T]` has no failure payload, so it uses `catch mappedFailure`.
+- `Result[T, E]` binds `Err(E)` with `catch err => mappedFailure`.
+- `Either[L, R]` binds `Left(L)` with `catch left => mappedFailure`.
 - The handler produces the target failure payload, not a full `Err(...)` or `Left(...)`.
 - The handler cannot contain `return`, `break`, `continue`, or another `try`.
 - The enclosing callable must return `Result[..., Failure]` or `Either[Failure, ...]`.
@@ -1881,9 +1881,9 @@ before returning from the enclosing callable.
 Examples:
 
 ```txt
-user = try Users.find(id) else AppError.NotFound(id)
-row = try Db.query(id) else err => AppError.Db(err)
-value = try sourceEither else left => AppError.FromLeft(left)
+user = try Users.find(id) catch AppError.NotFound(id)
+row = try Db.query(id) catch err => AppError.Db(err)
+value = try sourceEither catch left => AppError.FromLeft(left)
 ```
 
 Multiple dependent unwraps can be written as sequential `let ... else` / `try`

@@ -15,7 +15,7 @@ class GreetingController {
 }
 
 def main() Unit {
-    server HttpServer = HttpServer(7070)
+    server HttpServer = HttpServer(7070).virtualThreads()
     server.addController(GreetingController())
     server.run()
 }

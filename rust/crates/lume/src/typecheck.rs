@@ -6219,7 +6219,7 @@ impl<'a> Checker<'a> {
     fn check_try_expr(
         &mut self,
         value: &Expr,
-        handler: Option<&crate::ast::TryElseHandler>,
+        handler: Option<&crate::ast::TryCatchHandler>,
         span: crate::source::Span,
     ) -> Ty {
         if self.current_return == Ty::Unknown {
@@ -6256,14 +6256,14 @@ impl<'a> Checker<'a> {
             return inner;
         };
 
-        self.check_try_else_handler(&value_ty, handler, span);
+        self.check_try_catch_handler(&value_ty, handler, span);
         inner
     }
 
-    fn check_try_else_handler(
+    fn check_try_catch_handler(
         &mut self,
         source_ty: &Ty,
-        handler: &crate::ast::TryElseHandler,
+        handler: &crate::ast::TryCatchHandler,
         span: crate::source::Span,
     ) {
         let source_failure = self.try_source_failure_payload(source_ty);
@@ -6271,7 +6271,7 @@ impl<'a> Checker<'a> {
             (TrySourceFailure::Option, Some(_)) => {
                 self.add_error(
                     "invalid_try",
-                    "Option try else has no failure payload; write 'else mappedFailure' without a binder",
+                    "Option try catch has no failure payload; write 'catch mappedFailure' without a binder",
                     handler.span,
                 );
             }
@@ -6279,7 +6279,7 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "invalid_try",
                     format!(
-                        "{family} try else requires a failure binder; write 'else err => mappedFailure'"
+                        "{family} try catch requires a failure binder; write 'catch err => mappedFailure'"
                     ),
                     handler.span,
                 );
@@ -6293,7 +6293,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "invalid_try",
                 format!(
-                    "try else can only map failures into enclosing Result or Either returns, got '{}'",
+                    "try catch can only map failures into enclosing Result or Either returns, got '{}'",
                     self.current_return.describe()
                 ),
                 span,
@@ -6304,8 +6304,8 @@ impl<'a> Checker<'a> {
 
         if let Some(reason_span) = lazy_arg_forbidden_control_flow_span(&handler.body) {
             self.add_error(
-                "invalid_try_else",
-                "try else handler cannot contain return, break, continue, or another try; produce the mapped failure value instead",
+                "invalid_try_catch",
+                "try catch handler cannot contain return, break, continue, or another try; produce the mapped failure value instead",
                 reason_span,
             );
         }
@@ -6322,9 +6322,9 @@ impl<'a> Checker<'a> {
             &actual,
             &target_failure,
             handler.body.span(),
-            "invalid_try_else",
+            "invalid_try_catch",
             format!(
-                "try else handler must produce the {target_case} failure payload type {}, got {}",
+                "try catch handler must produce the {target_case} failure payload type {}, got {}",
                 self.diagnostic_type_phrase(&target_failure),
                 self.diagnostic_type_phrase(&actual)
             ),

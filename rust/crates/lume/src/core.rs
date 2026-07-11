@@ -334,7 +334,7 @@ pub enum Expr {
     },
     Try {
         value: Box<Expr>,
-        handler: Option<Box<TryElseHandler>>,
+        handler: Option<Box<TryCatchHandler>>,
         span: Span,
     },
     Lift {
@@ -395,7 +395,7 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TryElseHandler {
+pub struct TryCatchHandler {
     pub binder: Option<String>,
     pub body: Box<Expr>,
     pub span: Span,

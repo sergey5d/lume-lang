@@ -250,7 +250,7 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
         } => core::Expr::Try {
             value: Box::new(desugar_expr(value)),
             handler: handler.as_ref().map(|handler| {
-                Box::new(core::TryElseHandler {
+                Box::new(core::TryCatchHandler {
                     binder: handler.binder.clone(),
                     body: Box::new(desugar_expr(&handler.body)),
                     span: handler.span,

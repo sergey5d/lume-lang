@@ -202,7 +202,7 @@ Current behavior:
 - `Option[...]` can propagate only into `Option[...]`
 - `Result[..., SourceE]` can propagate only into `Result[..., TargetE]` when `SourceE` is assignable to `TargetE`
 - `Either[SourceL, ...]` can propagate only into `Either[TargetL, ...]` when `SourceL` is assignable to `TargetL`
-- wrapper-style error remapping during `try` is still not implemented
+- explicit wrapper-style error remapping is supported with `try source catch err => mappedFailure`
 
 ### 11. Smarter Type Narrowing
 

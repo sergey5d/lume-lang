@@ -5,6 +5,7 @@ use io/javalin/http/{Context as JavalinRawContext, Handler}
 use lume/http/{Context as HttpContext}
 use lume/http/javalin/runtime/HttpResponder
 use lume/http/javalin/runtime/{JavalinContext as JavalinRuntimeContext}
+use lume/http/javalin/runtime/JavalinRuntime
 
 annotation Controller {
     path Str = ""
@@ -77,6 +78,11 @@ impl JavalinBackend {
     } {
         this.app = Javalin.create()
         this.port = port
+    }
+
+    def virtualThreads() JavalinBackend {
+        JavalinRuntime.enableVirtualThreads(this.app)
+        this
     }
 
     def get(path Str, contentType Str, controller Any, method Method) JavalinBackend {
@@ -183,6 +189,11 @@ impl HttpServer {
         port Int32
     } {
         this.backend = JavalinBackend(port)
+    }
+
+    def virtualThreads() HttpServer {
+        this.backend.virtualThreads()
+        this
     }
 
     def addController(controller Any) HttpServer {

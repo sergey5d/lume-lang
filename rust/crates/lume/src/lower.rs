@@ -3238,7 +3238,7 @@ impl<'a> FunctionLowerer<'a> {
     fn lower_try_expr(
         &mut self,
         value: &Expr,
-        handler: Option<&core::TryElseHandler>,
+        handler: Option<&core::TryCatchHandler>,
         span: Span,
     ) -> ir::Operand {
         let source_ty = self.infer_expr_type(value);
@@ -3304,7 +3304,7 @@ impl<'a> FunctionLowerer<'a> {
 
         self.current_block = Some(failure_block);
         let failure = if let Some(handler) = handler {
-            self.lower_try_else_failure(
+            self.lower_try_catch_failure(
                 handler,
                 source_local,
                 &source_ty,
@@ -3323,9 +3323,9 @@ impl<'a> FunctionLowerer<'a> {
         ir::Operand::Copy(Box::new(ir::Place::Local(result)))
     }
 
-    fn lower_try_else_failure(
+    fn lower_try_catch_failure(
         &mut self,
-        handler: &core::TryElseHandler,
+        handler: &core::TryCatchHandler,
         source_local: ir::LocalId,
         source_ty: &ir::Type,
         return_ty: ir::Type,

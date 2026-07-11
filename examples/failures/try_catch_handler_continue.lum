@@ -1,10 +1,10 @@
 # FAIL_REGEX:
-# .*try else handler cannot contain return, break, continue, or another try; produce the mapped failure value instead.*
+# .*try catch handler cannot contain return, break, continue, or another try; produce the mapped failure value instead.*
 
 def main() Result[Int, Str] {
     result Result[Int, Str] = Err("bad")
     while true {
-        value = try result else err => {
+        value = try result catch err => {
             continue
         }
         return Ok(value)
