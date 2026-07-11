@@ -3,6 +3,6 @@
 
 def main() Result[Int, Str] {
     result Result[Int, Str] = Err("bad")
-    value = try result catch "mapped"
+    value = try result catch => "mapped"
     Ok(value)
 }

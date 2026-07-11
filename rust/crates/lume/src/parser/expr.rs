@@ -1101,6 +1101,10 @@ impl<'a> Parser<'a> {
             )?;
             Some(name)
         } else {
+            self.consume(
+                TokenKind::FatArrow,
+                "expected '=>' or failure binding after 'catch'",
+            )?;
             None
         };
         let body = if self.at(TokenKind::LBrace) {

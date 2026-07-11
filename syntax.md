@@ -1859,7 +1859,7 @@ The success type may differ; the propagated failure side must still be compatibl
 Failure mapping:
 
 ```txt
-value = try source catch mappedFailure
+value = try source catch => mappedFailure
 value = try source catch failure => mappedFailure
 value = try source catch failure => {
     statement1
@@ -1871,7 +1871,7 @@ value = try source catch failure => {
 `try ... catch` still unwraps the success side, but maps the failure payload
 before returning from the enclosing callable.
 
-- `Option[T]` has no failure payload, so it uses `catch mappedFailure`.
+- `Option[T]` has no failure payload, so it uses `catch => mappedFailure`.
 - `Result[T, E]` binds `Err(E)` with `catch err => mappedFailure`.
 - `Either[L, R]` binds `Left(L)` with `catch left => mappedFailure`.
 - The handler produces the target failure payload, not a full `Err(...)` or `Left(...)`.
@@ -1881,7 +1881,7 @@ before returning from the enclosing callable.
 Examples:
 
 ```txt
-user = try Users.find(id) catch AppError.NotFound(id)
+user = try Users.find(id) catch => AppError.NotFound(id)
 row = try Db.query(id) catch err => AppError.Db(err)
 value = try sourceEither catch left => AppError.FromLeft(left)
 ```

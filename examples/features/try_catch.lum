@@ -16,7 +16,7 @@ def queryEither(ok Bool) Either[Str, Int] =
     if ok { Right(7) } else { Left("nope") }
 
 def loadUser(found Bool) Result[Str, Str] {
-    user = try findUser(found) catch "missing user"
+    user = try findUser(found) catch => "missing user"
     Ok(user)
 }
 

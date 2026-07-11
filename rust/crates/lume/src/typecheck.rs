@@ -6271,7 +6271,7 @@ impl<'a> Checker<'a> {
             (TrySourceFailure::Option, Some(_)) => {
                 self.add_error(
                     "invalid_try",
-                    "Option try catch has no failure payload; write 'catch mappedFailure' without a binder",
+                    "Option try catch has no failure payload; write 'catch => mappedFailure' without a binder",
                     handler.span,
                 );
             }

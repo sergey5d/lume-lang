@@ -1215,6 +1215,41 @@ def run(user User) Unit {
 }
 
 #[test]
+fn parses_try_catch_without_option_failure_binding() {
+    match parse_expr_only(r#"try maybe catch => "missing""#) {
+        Expr::Try {
+            handler: Some(handler),
+            ..
+        } => {
+            assert_eq!(handler.binder, None);
+            assert!(matches!(*handler.body, Expr::String { .. }));
+        }
+        other => panic!("expected try catch expression, got {other:#?}"),
+    }
+}
+
+#[test]
+fn rejects_try_catch_without_handler_arrow() {
+    let result = parse(
+        r#"
+def run() Result[Int, Str] {
+    value = try maybe catch "missing"
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "unexpected_token"
+                && diag
+                    .message
+                    .contains("expected '=>' or failure binding after 'catch'")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_single_expression_function_body() {
     let result = parse("def zero() Int = 0\n");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
