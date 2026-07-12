@@ -4,6 +4,7 @@
 # next 3
 # money $5
 # mix world-4
+# identifier shapes Ada hidden second Ada $user_name
 # multiline:
 # hello world
 # count 3
@@ -19,12 +20,16 @@
 def main() Unit {
     name Str = "world"
     count Int = 2
+    user_name Str = "Ada"
+    _name Str = "hidden"
+    name2 Str = "second"
 
     println("regular:")
     println("hello $name")
     println("next ${count + 1}")
     println("money \$${count + 3}")
     println("mix $name-${count + 2}")
+    println("identifier shapes $user_name $_name $name2 ${user_name} \$user_name")
 
     text Str = """hello $name
 count ${count + 1}

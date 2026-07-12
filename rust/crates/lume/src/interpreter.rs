@@ -6433,6 +6433,24 @@ $name
     }
 
     #[test]
+    fn runs_simple_string_interpolation_identifier_shapes() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                user_name Str = "Ada"
+                _name Str = "hidden"
+                name2 Str = "second"
+                OS.println("$user_name $_name $name2 ${user_name} \$user_name")
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "Ada hidden second Ada $user_name\n");
+    }
+
+    #[test]
     fn runs_string_rune_access_methods() {
         let program = lower_inline(
             r#"

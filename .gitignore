@@ -4,3 +4,4 @@ bin/
 rust/target/
 **/build/
 .gradle/
+*.vsix

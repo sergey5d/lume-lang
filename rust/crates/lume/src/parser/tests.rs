@@ -2759,6 +2759,34 @@ def run(name Str, count Int) Str {
 }
 
 #[test]
+fn simple_string_interpolation_uses_identifier_rules() {
+    fn collect_identifiers(expr: &Expr, out: &mut Vec<String>) {
+        match expr {
+            Expr::Identifier { name, .. } => out.push(name.clone()),
+            Expr::Binary { left, right, .. } => {
+                collect_identifiers(left, out);
+                collect_identifiers(right, out);
+            }
+            _ => {}
+        }
+    }
+
+    let expr = parse_expr_only(r#""$user_name $_name $name2 ${user_name} \$user_name""#);
+    let mut identifiers = Vec::new();
+    collect_identifiers(&expr, &mut identifiers);
+
+    assert_eq!(
+        identifiers,
+        vec![
+            "user_name".to_string(),
+            "_name".to_string(),
+            "name2".to_string(),
+            "user_name".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn parses_multiline_string_interpolation_as_binary_concat() {
     let result = parse(
         r#"

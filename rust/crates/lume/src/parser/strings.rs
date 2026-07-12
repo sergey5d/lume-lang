@@ -214,12 +214,12 @@ fn parse_interpolated_string_parts(body: &str) -> Result<Vec<InterpolatedStringP
                     i = end + 1;
                     continue;
                 }
-                if !runes[i + 1].is_ascii_alphabetic() {
+                if !is_ascii_identifier_start(runes[i + 1]) {
                     return Err("expected identifier or '{' after '$'".to_string());
                 }
                 let start = i + 1;
                 let mut end = start + 1;
-                while end < runes.len() && runes[end].is_ascii_alphanumeric() {
+                while end < runes.len() && is_ascii_identifier_continue(runes[end]) {
                     end += 1;
                 }
                 parts.push(InterpolatedStringPart {
@@ -237,6 +237,14 @@ fn parse_interpolated_string_parts(body: &str) -> Result<Vec<InterpolatedStringP
 
     flush_literal(&mut parts, &mut literal);
     Ok(parts)
+}
+
+fn is_ascii_identifier_start(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphabetic()
+}
+
+fn is_ascii_identifier_continue(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 fn find_interpolated_expr_end(runes: &[char], start: usize) -> Result<usize, String> {
