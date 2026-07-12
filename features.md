@@ -138,8 +138,13 @@ Still open:
 
 Open checker/runtime design:
 - decide how method resolution should work when a type implements multiple interfaces that inherit or declare conflicting method signatures
-- decide whether a derived class/type can explicitly call a specific inherited interface method implementation
-- choose syntax for qualified interface dispatch if needed, for example `InterfaceName.method(this, args)` or another explicit form
+- decide whether a class/type implementation can explicitly call a specific inherited interface/default method implementation from inside its own method body
+- choose syntax for qualified interface dispatch if needed
+- possible call forms to compare:
+  - `super.method(args)` if there is exactly one unambiguous inherited implementation
+  - `InterfaceName.method(this, args)` as an explicit static-looking dispatch form
+  - `InterfaceName.super.method(args)` as a Java-like qualified-super form
+  - another Lume-specific form if the above read too foreign or imply the wrong object model
 - define diagnostics for ambiguous interface method calls so the compiler points users toward the disambiguation syntax
 
 Related syntax question:
