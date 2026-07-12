@@ -153,7 +153,31 @@ Related syntax question:
 - keep watching whether explicit implementation/override markers would add enough readability in large types to justify extra syntax
 - current leaning: plain `def` plus normal conformance checking is the cleaner long-term surface
 
-### 8. Annotation Targets
+### 8. Function Type Variance
+
+Open checker work:
+- make sure function/lambda type assignability follows the usual variance rule
+- parameter types are contravariant
+- return types are covariant
+
+Example:
+
+```txt
+# If Dog <: Animal, then this is safe:
+expected (Dog) -> Animal = (animal Animal) -> Dog()
+```
+
+Reason:
+- the assigned function can accept at least every argument the caller may pass
+- the assigned function returns a value no wider than the expected return type
+
+This is the same core rule used by Scala function types such as
+`Function1[-A, +B]`. Java does not have first-class function types in quite the
+same way, but functional-interface APIs express the same idea through wildcard
+positions such as `? super T` for consumed argument types and `? extends R` for
+produced return types.
+
+### 9. Annotation Targets
 
 Annotations exist as compile-time metadata shapes. They currently attach to declarations and members, with annotation arguments restricted to literals, stable constants, and constant expressions.
 
@@ -167,7 +191,7 @@ Current leaning:
 - global functions are probably useful annotation targets for routing, tests, effects, permissions, and generated bindings
 - immutable top-level constants may be useful too, but annotation metadata should describe stable declarations, not changing state
 
-### 9. Primitive Type Definitions
+### 10. Primitive Type Definitions
 
 Primitive types such as `Int`, `Float`, `Str`, `Rune`, `Bool`, and `Unit` should eventually have their public companion/static-style signatures defined in Lume source instead of being scattered through checker, interpreter, and backend special cases.
 
@@ -184,7 +208,7 @@ Goal:
 
 ## Longer-Term Ideas
 
-### 10. Result / Either Style Error Values
+### 11. Result / Either Style Error Values
 
 `Option`, `Result`, `Either`, and `try`-based short-circuit propagation now exist.
 
@@ -210,7 +234,7 @@ Current behavior:
 - `Either[SourceL, ...]` can propagate only into `Either[TargetL, ...]` when `SourceL` is assignable to `TargetL`
 - explicit wrapper-style error remapping is supported with `try source catch err => mappedFailure`
 
-### 11. Smarter Type Narrowing
+### 12. Smarter Type Narrowing
 
 Later improvements could include:
 - better narrowing after `is`
@@ -247,7 +271,7 @@ Main design question:
 - whether this should stay very local and conservative
 - or whether the checker should learn more control-flow-sensitive narrowing over time
 
-### 12. Reified Generic Follow-Ups
+### 13. Reified Generic Follow-Ups
 
 Settled syntax lives in `syntax.md`: generic functions and methods may mark
 individual type parameters as `reified`, which lowers to hidden `Type[A]`
@@ -316,7 +340,7 @@ Still rejected:
 - automatic reification of every generic parameter
 - reified type parameters on classes, shapes, enums, annotations, or singles
 
-### 13. Deferred Cleanup
+### 14. Deferred Cleanup
 
 `defer` is implemented as callable-scoped cleanup.
 
