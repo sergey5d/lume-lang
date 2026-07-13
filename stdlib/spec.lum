@@ -1,21 +1,9 @@
 # PRELUDE_SKIP
 # JAVA_SKIP
 
-interface TestRunner {
-    def it(title Str, block () -> Unit)
+interface Spec {
+    def it()
 }
-
-single Test with TestRunner {}
-
-impl single Test {
-    def it(title Str, block () -> Unit) Unit {
-        println("it " + title)
-        block()
-    }
-}
-
-def it(title Str, block () -> Unit) Unit =
-    Test.it(title, block)
 
 ext Bool {
     def shouldBe(expected Bool) Unit {

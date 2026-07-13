@@ -56,6 +56,22 @@ pub fn run_program_entry(program: &ir::Program, requested_entry: Option<&str>) -
     }
 }
 
+pub fn run_program_specs(program: &ir::Program) -> RunResult {
+    let mut interpreter = Interpreter::new(program);
+    match interpreter.run_specs() {
+        Ok(()) => RunResult {
+            diagnostics: Vec::new(),
+            output: interpreter.output,
+            return_value: None,
+        },
+        Err(diagnostic) => RunResult {
+            diagnostics: vec![diagnostic],
+            output: interpreter.output,
+            return_value: None,
+        },
+    }
+}
+
 pub fn run_path(
     path: impl AsRef<Path>,
     requested_entry: Option<&str>,
@@ -97,6 +113,58 @@ pub fn run_path(
         .program
         .expect("ir program after successful lowering");
     let run = run_program_entry(&lowered_program, requested_entry);
+    Ok(PathRunResult {
+        diagnostics: run
+            .diagnostics
+            .into_iter()
+            .map(|diagnostic| LocatedDiagnostic {
+                path: root_module.display_path.clone(),
+                diagnostic,
+            })
+            .collect(),
+        output: run.output,
+        return_value: run.return_value,
+    })
+}
+
+pub fn test_path(path: impl AsRef<Path>) -> Result<PathRunResult, String> {
+    let path = path.as_ref();
+    let checked = check_path(path)?;
+    if !checked.diagnostics.is_empty() {
+        return Ok(PathRunResult {
+            diagnostics: checked.diagnostics,
+            output: String::new(),
+            return_value: None,
+        });
+    }
+
+    let (graph, root_path) = load_module_graph(path)?;
+    let root_module = graph
+        .modules
+        .get(&root_path)
+        .ok_or_else(|| format!("loaded root module missing {}", root_path.display()))?;
+    let program = merged_runtime_program(&graph, &root_path)?;
+
+    let lowered = lower_program(&program);
+    if !lowered.diagnostics.is_empty() {
+        return Ok(PathRunResult {
+            diagnostics: lowered
+                .diagnostics
+                .into_iter()
+                .map(|diagnostic| LocatedDiagnostic {
+                    path: root_module.display_path.clone(),
+                    diagnostic,
+                })
+                .collect(),
+            output: String::new(),
+            return_value: None,
+        });
+    }
+
+    let lowered_program = lowered
+        .program
+        .expect("ir program after successful lowering");
+    let run = run_program_specs(&lowered_program);
     Ok(PathRunResult {
         diagnostics: run
             .diagnostics
@@ -1043,6 +1111,13 @@ struct Frame {
     defers: Vec<Rc<ClosureValue>>,
 }
 
+#[derive(Debug, Clone)]
+struct SpecCandidate {
+    name: String,
+    kind: ast::TypeKind,
+    span: Option<Span>,
+}
+
 pub(crate) struct Interpreter<'a> {
     program: &'a ir::Program,
     runtime: runtime::RuntimeProgram,
@@ -1078,6 +1153,82 @@ impl<'a> Interpreter<'a> {
         let entry = self.select_entry(requested_entry)?;
         let value = self.call_function(entry, None, None, Vec::new(), None)?;
         Ok((!matches!(value, Value::Unit)).then_some(value))
+    }
+
+    fn run_specs(&mut self) -> Result<(), Diagnostic> {
+        self.ensure_globals()?;
+        if self
+            .lookup_type_by_kind("Spec", ast::TypeKind::Interface)
+            .is_none()
+        {
+            return Err(self.runtime_error(
+                None,
+                "test runner requires interface 'Spec'; import 'spec/*' or declare Spec",
+            ));
+        }
+
+        let specs = self.discover_specs();
+        if specs.is_empty() {
+            return Err(self.runtime_error(
+                None,
+                "no specs found; define a class or single that implements Spec",
+            ));
+        }
+
+        for spec in specs {
+            self.output.push_str(&spec.name);
+            self.output.push('\n');
+            let receiver = self.instantiate_spec_receiver(&spec)?;
+            let Some(method) = self.find_method_overload_for_kind(&spec.name, spec.kind, "it", &[])
+            else {
+                return Err(self.runtime_error(
+                    spec.span,
+                    format!("spec '{}' does not provide it()", spec.name),
+                ));
+            };
+            let _ = self.call_function(method, Some(receiver), None, Vec::new(), spec.span)?;
+        }
+
+        Ok(())
+    }
+
+    fn discover_specs(&self) -> Vec<SpecCandidate> {
+        self.runtime
+            .types
+            .iter()
+            .filter(|ty| matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Single))
+            .filter(|ty| self.aggregate_matches_named_type(&ty.name, ty.kind, "Spec"))
+            .map(|ty| SpecCandidate {
+                name: ty.name.clone(),
+                kind: ty.kind,
+                span: self
+                    .program
+                    .types
+                    .iter()
+                    .find(|ir_ty| ir_ty.name == ty.name && ir_ty.kind == ty.kind)
+                    .and_then(|ir_ty| ir_ty.span),
+            })
+            .collect()
+    }
+
+    fn instantiate_spec_receiver(&mut self, spec: &SpecCandidate) -> Result<Value, Diagnostic> {
+        match spec.kind {
+            ast::TypeKind::Class => self
+                .construct_named_type(&spec.name, Vec::new(), spec.span, false)?
+                .ok_or_else(|| {
+                    self.runtime_error(spec.span, format!("cannot construct spec '{}'", spec.name))
+                }),
+            ast::TypeKind::Single => {
+                self.lookup_singleton(&spec.name, spec.span)?
+                    .ok_or_else(|| {
+                        self.runtime_error(spec.span, format!("unknown single '{}'", spec.name))
+                    })
+            }
+            _ => Err(self.runtime_error(
+                spec.span,
+                format!("type '{}' cannot be used as a spec", spec.name),
+            )),
+        }
     }
 
     fn select_entry(&self, requested_entry: Option<&str>) -> Result<ir::FunctionId, Diagnostic> {
@@ -6647,23 +6798,26 @@ $name
             }
 
             let expected_output = parse_comment_block(&text, "# EXPECT:");
+            let expected_test_output = parse_comment_block(&text, "# TEST_EXPECT:");
             let expected_failure = parse_comment_block(&text, "# FAIL:");
             let expected_failure_regex = parse_comment_block(&text, "# FAIL_REGEX:");
 
             if count_defined(&[
                 expected_output.is_some(),
+                expected_test_output.is_some(),
                 expected_failure.is_some(),
                 expected_failure_regex.is_some(),
             ]) > 1
             {
                 failures.push(format!(
-                    "{}\nexample cannot declare more than one of # EXPECT, # FAIL, or # FAIL_REGEX",
+                    "{}\nexample cannot declare more than one of # EXPECT, # TEST_EXPECT, # FAIL, or # FAIL_REGEX",
                     path.strip_prefix(&root).unwrap_or(&path).display()
                 ));
                 continue;
             }
 
             if expected_output.is_none()
+                && expected_test_output.is_none()
                 && expected_failure.is_none()
                 && expected_failure_regex.is_none()
             {
@@ -6703,6 +6857,42 @@ $name
                     ));
                 } else {
                     passed.push(relative);
+                }
+                continue;
+            }
+
+            if let Some(expected) = expected_test_output {
+                match test_path(&path) {
+                    Ok(result) => {
+                        if !result.diagnostics.is_empty() {
+                            let rendered = result
+                                .diagnostics
+                                .iter()
+                                .map(render_located_diagnostic_for_example)
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            failures.push(format!(
+                                "{}\nexpected test output:\n{}\nactual diagnostics:\n{}",
+                                relative, expected, rendered
+                            ));
+                            continue;
+                        }
+
+                        if normalize_example_output(&result.output)
+                            != normalize_example_output(&expected)
+                        {
+                            failures.push(format!(
+                                "{}\nexpected test output:\n{}\nactual:\n{}",
+                                relative, expected, result.output
+                            ));
+                        } else {
+                            passed.push(relative);
+                        }
+                    }
+                    Err(err) => failures.push(format!(
+                        "{}\nexpected test output:\n{}\ntest_path error:\n{}",
+                        relative, expected, err
+                    )),
                 }
                 continue;
             }
@@ -7474,13 +7664,10 @@ $name
     }
 
     #[test]
-    fn run_path_executes_unit_test_support_module() {
+    fn test_path_discovers_and_runs_specs() {
         let path = repo_root().join("examples/unit_tests.lum");
-        let run = run_path(path, None).expect("run unit tests");
+        let run = test_path(path).expect("run unit tests");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(
-            run.output,
-            "it compares primitives\nit supports explicit block callbacks\n"
-        );
+        assert_eq!(run.output, "PrimitiveSpec\nAnotherSpec\n");
     }
 }

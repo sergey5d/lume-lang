@@ -359,21 +359,25 @@ the module where the `ext` block is declared and in files that write
 `use module/sub/*`. Selective imports such as `use module/sub/Name` do not import
 extension methods.
 
-The standard test helper module is imported explicitly:
+The standard spec helper module is imported explicitly by test files. It is not
+part of the prelude; specs are executed by the test runner:
 
 ```txt
-use test/*
+use spec/*
 
-def main() Unit {
-    it("compares values", {
+class PrimitiveSpec with Spec {}
+
+impl PrimitiveSpec {
+    def it() Unit {
         5.shouldBe(5)
         "ok".shouldBe("ok")
-    })
+    }
 }
 ```
 
-`test` provides `TestRunner.it(title Str, block () -> Unit)` and primitive
-`shouldBe` extension methods. A failed `shouldBe` panics.
+`spec` provides `Spec` and primitive `shouldBe` extension methods. A failed
+`shouldBe` panics. `lume test file.lum` discovers every class or single that
+implements `Spec`, constructs it, and calls `it()`.
 
 ## Top-Level Declarations
 
@@ -1369,8 +1373,8 @@ completed `(...)` call; that would imply currying or calling the result of the
 first call.
 
 ```txt
-it("compares values", {
-    5.shouldBe(5)
+processNamed("compares values", {
+    println("inside callback")
 })
 ```
 

@@ -20,7 +20,10 @@ pub use backend::{BackendBundle, BackendBundleResult, BackendDescriptors, build_
 pub use desugar::{desugar_block, desugar_callable_body, desugar_expr, desugar_function_decl};
 pub use diagnostic::{Diagnostic, Severity};
 pub use diagnostic_render::{render_diagnostic, render_path_diagnostic, render_path_diagnostics};
-pub use interpreter::{PathRunResult, RunResult, run_path, run_program, run_program_entry};
+pub use interpreter::{
+    PathRunResult, RunResult, run_path, run_program, run_program_entry, run_program_specs,
+    test_path,
+};
 pub use java_backend::{JavaBackendOptions, JavaBackendResult, generate_java_path};
 pub use lexer::{Keyword, LexResult, Token, TokenKind, lex};
 pub use lower::{LowerResult, lower_program};

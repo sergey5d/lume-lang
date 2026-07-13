@@ -1,11 +1,13 @@
-# EXPECT:
-# it compares primitives
-# it supports explicit block callbacks
+# TEST_EXPECT:
+# PrimitiveSpec
+# AnotherSpec
 
-use test/*
+use spec/*
 
-def main() Unit {
-    it("compares primitives", {
+class PrimitiveSpec with Spec {}
+
+impl PrimitiveSpec {
+    def it() Unit {
         5.shouldBe(5)
         true.shouldBe(true)
         "lume".shouldBe("lume")
@@ -13,9 +15,13 @@ def main() Unit {
 
         first Rune = "rune".expectRuneAt(0)
         first.shouldBe(first)
-    })
+    }
+}
 
-    it("supports explicit block callbacks", {
+class AnotherSpec with Spec {}
+
+impl AnotherSpec {
+    def it() Unit {
         (2 + 3).shouldBe(5)
-    })
+    }
 }

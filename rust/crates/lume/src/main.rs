@@ -2,7 +2,7 @@ use std::{env, fs, path::Path, process::ExitCode};
 
 use lume::{
     Diagnostic, JavaBackendOptions, LocatedDiagnostic, SourceFile, check_path, generate_java_path,
-    lex, parse_program, render_diagnostic, render_path_diagnostic, run_path,
+    lex, parse_program, render_diagnostic, render_path_diagnostic, run_path, test_path,
 };
 
 fn main() -> ExitCode {
@@ -17,6 +17,7 @@ fn main() -> ExitCode {
         "parse" => parse_command(&mut args),
         "check" => check_command(&mut args),
         "run" => run_command(&mut args),
+        "test" => test_command(&mut args),
         "gen" => gen_command(&mut args),
         _ => {
             eprintln!("unknown command '{command}'");
@@ -119,6 +120,28 @@ fn run_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
     }
 }
 
+fn test_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
+    let path = match read_path_arg(args, "test") {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+
+    match test_path(&path) {
+        Ok(result) => {
+            if !result.diagnostics.is_empty() {
+                print_path_diagnostics(&result.diagnostics);
+                return ExitCode::from(1);
+            }
+            print!("{}", result.output);
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn gen_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
     let path = match read_path_arg(args, "gen") {
         Ok(path) => path,
@@ -153,6 +176,7 @@ fn print_usage() {
     eprintln!("  lume parse <file>");
     eprintln!("  lume check <file>");
     eprintln!("  lume run <file> [entry]");
+    eprintln!("  lume test <file>");
     eprintln!("  lume gen <file> --out <dir> [--classpath <path>]");
 }
 
