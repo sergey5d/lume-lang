@@ -1,7 +1,7 @@
 # SKIP
 #
-# Legacy class shape from before the class/shape grammar switch, kept only as
-# a comparison artifact.
+# Current inline class-method shape, kept as a comparison artifact against the
+# separated `class` + `impl` examples.
 
 class Person with Named, Aged {
     firstName Str
@@ -12,7 +12,11 @@ class Person with Named, Aged {
     hidden var archived Bool = false
     hidden var internalScore Int = 0
 
-    def new(fullName Str, age Int, city Str) {
+    new {
+        fullName Str
+        age Int
+        city Str
+    } {
         parts = fullName.split(" ")
         this.firstName = parts.get(0).getOr("")
         this.lastName = parts.get(1).getOr("")
@@ -20,7 +24,10 @@ class Person with Named, Aged {
         this.city = city
     }
 
-    def new(firstName Str, lastName Str) {
+    new {
+        firstName Str
+        lastName Str
+    } {
         this.firstName = firstName
         this.lastName = lastName
         this.age = 18
