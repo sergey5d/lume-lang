@@ -31,7 +31,7 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         match self.current_kind() {
             TokenKind::Keyword(Keyword::Def) => {
-                let function = self.parse_function_decl(Vec::new(), Visibility::Default)?;
+                let function = self.parse_function_decl(Vec::new(), Visibility::Default, false)?;
                 Some(Stmt::LocalFunction(function))
             }
             TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt(false).map(Stmt::Match),

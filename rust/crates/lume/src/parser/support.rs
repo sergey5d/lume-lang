@@ -138,6 +138,45 @@ impl<'a> Parser<'a> {
         Some((name.to_string(), token.span))
     }
 
+    pub(super) fn starts_callable_decl(&self) -> bool {
+        self.starts_callable_decl_at(self.index)
+    }
+
+    pub(super) fn starts_callable_decl_at(&self, start: usize) -> bool {
+        let mut parser = Parser {
+            tokens: self.tokens,
+            index: start,
+            diagnostics: Vec::new(),
+            allow_trailing_block_call: self.allow_trailing_block_call,
+            allow_shape_update_operator: self.allow_shape_update_operator,
+        };
+
+        let Some((_, name_span)) = parser.parse_callable_name("expected callable name") else {
+            return false;
+        };
+
+        let mut head_end = name_span;
+        if parser.at(TokenKind::LBracket) {
+            if !spans_touch(head_end, parser.current_span()) {
+                return false;
+            }
+            if parser.parse_type_params().is_none() {
+                return false;
+            }
+            head_end = parser.previous_span();
+        }
+
+        if !parser.at(TokenKind::LParen) || !spans_touch(head_end, parser.current_span()) {
+            return false;
+        }
+
+        if parser.parse_param_list().is_none() {
+            return false;
+        }
+
+        true
+    }
+
     pub(super) fn match_keyword(&mut self, keyword: Keyword) -> bool {
         if self.at_keyword(keyword) {
             self.advance();
@@ -399,4 +438,8 @@ impl<'a> Parser<'a> {
         self.diagnostics
             .push(Diagnostic::error(code, message, span));
     }
+}
+
+fn spans_touch(left: Span, right: Span) -> bool {
+    left.end == right.start
 }

@@ -110,7 +110,7 @@ Operator overloading now exists and is mainly intended for compact value-oriente
 - interface-driven abstractions that want symbolic operators over implementing types
 
 Constraint:
-- use ordinary callable body syntax: `def ... = expr` or `def ... { ... }`
+- use ordinary callable body syntax: `method(...) = expr` or `method(...) { ... }`; `def` remains accepted but optional
 - do not introduce operator-specific body forms
 
 Finalized policy:
@@ -151,9 +151,9 @@ Open checker/runtime design:
 
 Related syntax question:
 - the language previously experimented with a dedicated interface-implementation marker such as `impl def label() Str = "box"` inside `impl Type { ... }`
-- current decision: do not support `impl def`; interface methods inside `impl Type { ... }` blocks use ordinary `def`
+- current decision: do not support `impl def`; interface methods inside `impl Type { ... }` blocks use ordinary method declarations, with optional `def`
 - keep watching whether explicit implementation/override markers would add enough readability in large types to justify extra syntax
-- current leaning: plain `def` plus normal conformance checking is the cleaner long-term surface
+- current leaning: plain method declarations plus normal conformance checking are the cleaner long-term surface
 
 ### 8. Function Type Variance
 

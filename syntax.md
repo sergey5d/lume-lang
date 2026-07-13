@@ -535,7 +535,7 @@ enum OptionX[T] {
 }
 ```
 
-Arbitrary statements such as `if`, `for`, `match`, `defer`, `expect`, or expression statements are not valid at top level. Put executable code inside a function such as `def main() { ... }`.
+Arbitrary statements such as `if`, `for`, `match`, `defer`, `expect`, or expression statements are not valid at top level. Put executable code inside a function such as `main() { ... }`.
 
 ## Variable Declarations
 
@@ -897,7 +897,7 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 { expr }                         # block expression
 Type { field: value }            # brace field construction or enum field payload
 call { x -> ... }                # trailing lambda
-Interface with Other { def ... } # anonymous interface implementation
+Interface with Other { method(...) ... } # anonymous interface implementation
 new { field Type }               # constructor input shape declaration
 ```
 
@@ -955,16 +955,29 @@ user = {
 
 ## Functions and Methods
 
+`def` is optional for top-level functions and methods. Both forms are valid,
+and declarations are recognized by the callable header shape
+`name[TypeParams](params)`:
+
+```txt
+greet(name Str) Str = "hello, " + name
+def greet(name Str) Str = "hello, " + name
+```
+
+The parameter list is attached to the callable name. `name(...)` starts a
+callable declaration; `name (...)` does not, which keeps fields such as
+`pair (Int, Int)` and `mapper (Int) -> Int` unambiguous.
+
 Expression-bodied function:
 
 ```txt
-def greet(name Str) Str = "hello, " + name
+greet(name Str) Str = "hello, " + name
 ```
 
 Block-bodied function:
 
 ```txt
-def add(left Int, right Int) Int {
+add(left Int, right Int) Int {
     return left + right
 }
 ```
@@ -975,22 +988,22 @@ expression positions, but not directly after a callable-body `=`.
 Generic function:
 
 ```txt
-def id[T](value T) T = value
+id[T](value T) T = value
 ```
 
 Generic bounds:
 
 ```txt
-def sort[T with Ordering[T]](value T) T = value
+sort[T with Ordering[T]](value T) T = value
 ```
 
 Reified generic functions and methods:
 
 ```txt
-def typeName[reified A](value A) Str =
+typeName[reified A](value A) Str =
     typeOf[A].name().orPanic()
 
-def metadata[reified A]() Type[A] =
+metadata[reified A]() Type[A] =
     typeOf[A]
 
 name = typeName(User { name: "Ada" }) # A inferred from value
@@ -1005,7 +1018,7 @@ Rules:
 
 - `reified` is allowed only on function and method type parameters.
 - Generic type parameters are not reified by default.
-- `typeOf[A]` is rejected inside `def f[A]` unless `A` is marked `reified` or the function accepts an explicit `Type[A]` value.
+- `typeOf[A]` is rejected inside `f[A]` unless `A` is marked `reified` or the function accepts an explicit `Type[A]` value.
 - If `A` appears in ordinary arguments, the call may infer it: `typeName(user)`.
 - If no argument determines `A`, pass it explicitly: `metadata[User]()`.
 - Type declarations cannot use `reified`: `class Box[reified A]` is invalid.
@@ -1014,8 +1027,8 @@ Function and method parameters may end with one variadic list parameter. `vararg
 is written before the parameter name:
 
 ```txt
-def println(vararg value [Str]) Unit
-def printf(format Str, vararg value [Str]) Unit
+println(vararg value [Str]) Unit
+printf(format Str, vararg value [Str]) Unit
 ```
 
 The parameter is available as `[T]` inside the body, and call sites pass the
@@ -1088,7 +1101,7 @@ class Counter {
 }
 
 impl Counter {
-    def inc() Int = this.value + 1
+    inc() Int = this.value + 1
 }
 ```
 
@@ -1097,7 +1110,7 @@ own implementation:
 
 ```txt
 ext Counter {
-    def doubled() Int = this.value * 2
+    doubled() Int = this.value * 2
 }
 
 counter = Counter { value: 3 }
@@ -1106,7 +1119,7 @@ println(counter.doubled())
 
 Extension rules:
 
-- extension blocks use `ext TypeName { def method(...) ... }`
+- extension blocks use `ext TypeName { method(...) ... }`; `def` is still accepted but optional
 - extension targets may be classes, shapes, enums, interfaces, or built-in primitive types such as `Int`, `Float`, `Bool`, `Str`, and `Rune`
 - extension targets cannot be singles, annotations, or enum cases
 - extension blocks cannot declare constructors
@@ -1150,7 +1163,7 @@ Custom constructors are class-only and use a dedicated `new` block inside `impl`
 - member order is storage first, constructors next, methods last
 - class, shape, enum, and single bodies list storage fields before behavior
 - enum cases count as enum storage and must appear before enum methods
-- class impl blocks list all `new` constructors before ordinary `def` methods
+- class impl blocks list all `new` constructors before ordinary methods
 
 ```txt
 class Person {
@@ -1427,7 +1440,7 @@ Rules:
 
 - braced blocks may appear as standalone statements or as expressions
 - block expressions evaluate to the value of their last statement
-- block expressions are not valid directly after callable-body `=`; write `def name(...) { ... }` for a callable block body
+- block expressions are not valid directly after callable-body `=`; write `name(...) { ... }` for a callable block body
 - if you want a block value, the last statement must be value-producing
 - value-producing tail forms currently include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
@@ -1442,11 +1455,11 @@ class Box[T] with Named {
 }
 
 impl Box[T] {
-    def label() Str = "box"
+    label() Str = "box"
 }
 ```
 
-When a class or singleton implements an interface method inside its body or an `impl ... { ... }` block, it uses ordinary `def`.
+When a class or singleton implements an interface method inside its body or an `impl ... { ... }` block, it uses an ordinary method declaration. `def` is optional.
 
 Singleton:
 
@@ -1454,11 +1467,11 @@ Singleton:
 single MathBox {
     value Int = 5
 
-    def valuePlusOne() Int = this.value + 1
+    valuePlusOne() Int = this.value + 1
 }
 
 impl single MathBox {
-    def double(value Int) Int = value * 2
+    double(value Int) Int = value * 2
 }
 
 box = MathBox
@@ -1480,7 +1493,7 @@ class Amount with Named {
 }
 
 impl Amount {
-    def label() Str = this.label
+    label() Str = this.label
 }
 ```
 
@@ -1488,7 +1501,7 @@ Interfaces:
 
 ```txt
 interface Named {
-    def label() Str
+    label() Str
 }
 ```
 
@@ -1496,23 +1509,23 @@ Interfaces may also provide default methods by attaching a body:
 
 ```txt
 interface Named {
-    def label() Str
-    def greeting() Str = "Hello " + this.label()
+    label() Str
+    greeting() Str = "Hello " + this.label()
 }
 ```
 
-Methods that satisfy an interface just use ordinary `def`:
+Methods that satisfy an interface just use ordinary method declarations:
 
 ```txt
 interface Named {
-    def label() Str
+    label() Str
 }
 
 class Box with Named {
 }
 
 impl Box {
-    def label() Str = "box"
+    label() Str = "box"
 }
 ```
 
@@ -1520,8 +1533,8 @@ Anonymous interface implementation expressions:
 
 ```txt
 handler = Reader with Closer {
-    def read() Str = "x"
-    def close() Unit = ()
+    read() Str = "x"
+    close() Unit = ()
 }
 ```
 
@@ -2478,9 +2491,10 @@ Newline continuation:
 - Delimited forms allow layout after opening delimiters and after commas, but they do not make leading binary/update operators valid by themselves.
 - Binding/callable `=` may start its expression on the same line or the next indented line.
 - Callable bodies have two forms:
-  - `def name(...) { ... }` for block bodies
-  - `def name(...) = expr` for expression bodies
-  - `def name(...) = { ... }` is invalid even though blocks are expressions elsewhere; callable block bodies omit `=`
+  - `name(...) { ... }` for block bodies
+  - `name(...) = expr` for expression bodies
+  - `name(...) = { ... }` is invalid even though blocks are expressions elsewhere; callable block bodies omit `=`
+  - `def name(...) ...` remains accepted as the explicit keyword form
 - Inline-body introducers such as `else` and `yield` may take a same-line body without braces; if that body moves to the next line, a `{ ... }` block is required.
 - So this is valid:
 

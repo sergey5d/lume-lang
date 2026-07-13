@@ -1,17 +1,31 @@
-# SKIP
-#
+# EXPECT:
+# Ada Lovelace
+# true
+# person
+# Ada Lovelace@London:19:11:false
+
 # Candidate class + impl shape where ordinary method definitions omit `def`.
 # Constructors still use `new { ... }`; method-like declarations are visually
 # separated from storage by being inside `impl`.
 
+interface Named {
+    fullName() Str
+}
+
+interface Aged {
+    isAdult() Bool
+}
+
 hidden class Person with Named, Aged {
     firstName Str
     lastName Str
-    age Int
-    city Str
+    var age Int
+    var city Str
 
     hidden var archived Bool
     var internalScore Int = 1
+
+    kind() Str = "person"
 }
 
 impl Person {
@@ -49,4 +63,17 @@ impl Person {
 
     debugLabel() Str =
         fullName() + "@" + this.city + ":" + this.age + ":" + this.internalScore + ":" + this.archived
+}
+
+makePerson(firstName Str, lastName Str) Person =
+    Person(firstName, lastName)
+
+main() Unit {
+    person Person = makePerson("Ada", "Lovelace")
+    println(person.fullName())
+    println(person.isAdult())
+    println(person.kind())
+    person.moveTo("London")
+    person.celebrateBirthday()
+    println(person.debugLabel())
 }

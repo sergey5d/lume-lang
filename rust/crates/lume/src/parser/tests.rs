@@ -180,6 +180,63 @@ def run(limit Int) Int {
 }
 
 #[test]
+fn parses_top_level_function_without_def() {
+    let result = parse(
+        r#"
+main() Unit {
+    println("ok")
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    assert_eq!(program.items.len(), 1);
+    match &program.items[0] {
+        Item::Function(function) => assert_eq!(function.name, "main"),
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_methods_without_def_in_declaration_contexts() {
+    let result = parse(
+        r#"
+interface Named {
+    label() Str
+}
+
+class Box with Named {
+    value Int
+
+    doubled() Int = this.value * 2
+}
+
+impl Box {
+    label() Str = "box"
+}
+
+ext Box {
+    tripled() Int = this.value * 3
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn optional_def_does_not_reclassify_tuple_or_function_fields() {
+    let result = parse(
+        r#"
+class Holder {
+    pair (Int, Int)
+    mapper (Int) -> Int
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
 fn rejects_for_tuple_destructuring_in_generator() {
     let result = parse(
         r#"

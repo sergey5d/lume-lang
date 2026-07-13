@@ -799,11 +799,11 @@ impl<'a> Parser<'a> {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let annotations = self.parse_annotations()?;
             let visibility = self.parse_visibility();
-            if !self.at_keyword(Keyword::Def) {
+            if !self.at_keyword(Keyword::Def) && !self.starts_callable_decl() {
                 self.error_at_current("unexpected_token", "expected anonymous interface member");
                 return None;
             }
-            methods.push(self.parse_method_decl(annotations, visibility, false)?);
+            methods.push(self.parse_method_decl(annotations, visibility, false, true)?);
             self.skip_newlines();
         }
         let end = self.consume(

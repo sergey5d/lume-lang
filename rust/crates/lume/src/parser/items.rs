@@ -114,7 +114,7 @@ impl<'a> Parser<'a> {
         let visibility = self.parse_visibility();
         match self.current_kind() {
             TokenKind::Keyword(Keyword::Def) => {
-                let function = self.parse_function_decl(annotations, visibility)?;
+                let function = self.parse_function_decl(annotations, visibility, true)?;
                 Some(Item::Function(function))
             }
             TokenKind::Keyword(Keyword::Annotation)
@@ -163,6 +163,10 @@ impl<'a> Parser<'a> {
                 Some(Item::Extension(block))
             }
             _ => {
+                if self.starts_callable_decl() {
+                    let function = self.parse_function_decl(annotations, visibility, true)?;
+                    return Some(Item::Function(function));
+                }
                 if self.at_keyword(Keyword::Var) {
                     self.error_at_current(
                         "top_level_mutable_binding",
@@ -284,8 +288,16 @@ impl<'a> Parser<'a> {
         &mut self,
         annotations: Vec<Annotation>,
         visibility: Visibility,
+        allow_omitted_def: bool,
     ) -> Option<FunctionDecl> {
-        let start = self.consume_keyword(Keyword::Def, "expected 'def'")?;
+        let start = if self.match_keyword(Keyword::Def) {
+            self.previous_span()
+        } else if allow_omitted_def {
+            self.current_span()
+        } else {
+            self.error_at_current("unexpected_token", "expected 'def'");
+            return None;
+        };
         let (name, _) = self.parse_callable_name("expected function name")?;
         let type_params = self.parse_type_params()?;
         let params = self.parse_param_list()?;
@@ -412,7 +424,9 @@ impl<'a> Parser<'a> {
 
             let member_visibility = self.parse_visibility();
             match self.current_kind() {
-                TokenKind::Identifier if self.current().lexeme == "new" => {
+                TokenKind::Identifier
+                    if self.current().lexeme == "new" && self.at_next(TokenKind::LBrace) =>
+                {
                     let constructor =
                         self.parse_constructor_decl(member_annotations, member_visibility)?;
                     if body_order == TypeBodyOrder::Method {
@@ -452,7 +466,40 @@ impl<'a> Parser<'a> {
                         member_annotations,
                         member_visibility,
                         kind == TypeKind::Interface,
+                        true,
                     )?;
+                    body_order = TypeBodyOrder::Method;
+                    members.push(TypeMember::Method(method));
+                }
+                _ if self.starts_callable_decl() => {
+                    let body_method_error = match kind {
+                        TypeKind::Annotation => Some(format!(
+                            "annotation '{}' cannot declare methods; annotations are data-only metadata shapes",
+                            name
+                        )),
+                        TypeKind::Record => Some(format!(
+                            "shape '{}' cannot declare methods in its body; use 'impl {}'",
+                            name, name
+                        )),
+                        _ => None,
+                    };
+                    if let Some(message) = body_method_error {
+                        self.error_at_current("unexpected_method_decl", message);
+                        return None;
+                    }
+                    let method = self.parse_method_decl(
+                        member_annotations,
+                        member_visibility,
+                        kind == TypeKind::Interface,
+                        true,
+                    )?;
+                    if method.name == "new" {
+                        self.diagnostics.push(Diagnostic::error(
+                            "old_constructor_syntax",
+                            "constructors use `new { params } { body }`; replace `new(...)` with `new { ... } { ... }`",
+                            method.span,
+                        ));
+                    }
                     body_order = TypeBodyOrder::Method;
                     members.push(TypeMember::Method(method));
                 }
@@ -611,7 +658,10 @@ impl<'a> Parser<'a> {
             }
             let annotations = self.parse_annotations()?;
             let visibility = self.parse_visibility();
-            let method = if self.at(TokenKind::Identifier) && self.current().lexeme == "new" {
+            let method = if self.at(TokenKind::Identifier)
+                && self.current().lexeme == "new"
+                && self.at_next(TokenKind::LBrace)
+            {
                 let constructor = self.parse_constructor_decl(annotations, visibility)?;
                 if body_order == ImplBodyOrder::Method {
                     self.diagnostics.push(Diagnostic::error(
@@ -625,7 +675,7 @@ impl<'a> Parser<'a> {
                 }
                 constructor
             } else {
-                let method = self.parse_method_decl(annotations, visibility, false)?;
+                let method = self.parse_method_decl(annotations, visibility, false, true)?;
                 if method.name == "new" {
                     self.diagnostics.push(Diagnostic::error(
                         "old_constructor_syntax",
@@ -678,18 +728,21 @@ impl<'a> Parser<'a> {
             }
             let annotations = self.parse_annotations()?;
             let visibility = self.parse_visibility();
-            if self.at(TokenKind::Identifier) && self.current().lexeme == "new" {
+            if self.at(TokenKind::Identifier)
+                && self.current().lexeme == "new"
+                && self.at_next(TokenKind::LBrace)
+            {
                 self.error_at_current(
                     "invalid_extension_constructor",
-                    "extension blocks cannot declare constructors; use 'def' to add methods",
+                    "extension blocks cannot declare constructors",
                 );
                 return None;
             }
-            let method = self.parse_method_decl(annotations, visibility, false)?;
+            let method = self.parse_method_decl(annotations, visibility, false, true)?;
             if method.name == "new" {
                 self.diagnostics.push(Diagnostic::error(
                     "invalid_extension_constructor",
-                    "extension blocks cannot declare constructors; use 'def' to add methods",
+                    "extension blocks cannot declare constructors",
                     method.span,
                 ));
             }
@@ -787,8 +840,16 @@ impl<'a> Parser<'a> {
         annotations: Vec<Annotation>,
         visibility: Visibility,
         allow_signature_only: bool,
+        allow_omitted_def: bool,
     ) -> Option<MethodDecl> {
-        let start = self.consume_keyword(Keyword::Def, "expected 'def'")?;
+        let start = if self.match_keyword(Keyword::Def) {
+            self.previous_span()
+        } else if allow_omitted_def {
+            self.current_span()
+        } else {
+            self.error_at_current("unexpected_token", "expected 'def'");
+            return None;
+        };
         let (name, _) = if self.at(TokenKind::Keyword(Keyword::Expect)) {
             let token = self.current().clone();
             self.advance();
