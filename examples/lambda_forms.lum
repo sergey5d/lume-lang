@@ -8,6 +8,7 @@
 # block 16
 # trailing 4
 # inlineZero 20
+# implicitZero 26
 # inlineBare 21
 # inlineParen 22
 # inlinePair 23
@@ -82,6 +83,9 @@ def main() Unit {
 
     runner = LambdaRunner {}
     println("inlineZero " + runner.zero(() -> 20))
+    println("implicitZero " + runner.zero {
+        26
+    })
     println("inlineBare " + runner.one(x -> x + 1, 20))
     println("inlineParen " + runner.one((x) -> x + 2, 20))
     println("inlinePair " + runner.two((x, y) -> x + y, 11, 12))

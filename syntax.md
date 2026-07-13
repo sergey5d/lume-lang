@@ -1316,7 +1316,7 @@ Block lambda:
 }
 ```
 
-Trailing block-lambda call syntax is also allowed when passing a lambda as an argument. The lambda head must start on the same line as the opening `{`:
+Trailing block-lambda call syntax is also allowed when passing a lambda as an argument. For lambdas with parameters, the lambda head must start on the same line as the opening `{`:
 
 ```txt
 items.map { x -> x + 1 }
@@ -1336,6 +1336,15 @@ items.map { (x Int) ->
 
 items.zipMap { (left,
     right) -> left + right }
+```
+
+If the expected argument type is a zero-argument function, the lambda head may
+be omitted and the trailing block is treated as `() -> { ... }`:
+
+```txt
+process {
+    println("hehe")
+}
 ```
 
 Trailing brace call syntax on non-constructor calls is only for lambda arguments.

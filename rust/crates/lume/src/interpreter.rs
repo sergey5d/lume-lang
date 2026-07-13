@@ -6112,6 +6112,29 @@ mod tests {
     }
 
     #[test]
+    fn runs_trailing_block_as_zero_arg_lambda_argument() {
+        let program = lower_inline(
+            r#"
+            def process(f () -> Unit) Unit = f()
+            def compute(f () -> Int) Int = f()
+
+            def main() Unit {
+                process {
+                    println("hehe")
+                }
+                println(compute {
+                    42
+                })
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "hehe\n42\n");
+    }
+
+    #[test]
     fn runs_range_loops_and_println() {
         let program = lower_inline(
             r#"
