@@ -4424,15 +4424,10 @@ impl<'a> FunctionLowerer<'a> {
                 style,
                 ..
             } => {
-                let (surface_callee, surface_args) =
-                    self.append_trailing_brace_call_args(callee, args, *style);
                 let (candidate_callee, candidate_type_args) =
-                    self.split_generic_call_callee(surface_callee);
-                let candidate_normalized_args = self.normalize_trailing_brace_call_args(
-                    candidate_callee,
-                    &surface_args,
-                    *style,
-                );
+                    self.split_generic_call_callee(callee);
+                let candidate_normalized_args =
+                    self.normalize_trailing_brace_call_args(candidate_callee, args, *style);
                 let use_generic_callee = !candidate_type_args.is_empty()
                     && (self
                         .reified_call_target(candidate_callee, &candidate_normalized_args)
@@ -4446,13 +4441,9 @@ impl<'a> FunctionLowerer<'a> {
                     )
                 } else {
                     (
-                        surface_callee,
+                        callee.as_ref(),
                         Vec::new(),
-                        self.normalize_trailing_brace_call_args(
-                            surface_callee,
-                            &surface_args,
-                            *style,
-                        ),
+                        self.normalize_trailing_brace_call_args(callee, args, *style),
                     )
                 };
                 let ordered_args = self
@@ -5038,28 +5029,6 @@ impl<'a> FunctionLowerer<'a> {
             }
         }
         args.to_vec()
-    }
-
-    fn append_trailing_brace_call_args<'expr>(
-        &self,
-        callee: &'expr Expr,
-        args: &[core::CallArg],
-        style: core::CallStyle,
-    ) -> (&'expr Expr, Vec<core::CallArg>) {
-        if style == core::CallStyle::Brace {
-            if let Expr::Call {
-                callee: inner_callee,
-                args: inner_args,
-                style: core::CallStyle::Paren,
-                ..
-            } = callee
-            {
-                let mut combined = inner_args.clone();
-                combined.extend(args.iter().cloned());
-                return (inner_callee.as_ref(), combined);
-            }
-        }
-        (callee, args.to_vec())
     }
 
     fn brace_call_targets_explicit_constructor(&self, callee: &Expr) -> bool {

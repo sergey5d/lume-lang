@@ -4377,15 +4377,28 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
         expected: &Ty,
     ) -> Ty {
-        let (call_callee, appended_args) =
-            self.append_trailing_brace_call_args(callee, args, uses_brace_syntax);
         if uses_brace_syntax
-            && self.brace_call_type_sig(call_callee).is_none()
-            && !self.brace_call_targets_current_constructor(call_callee)
-            && !self.brace_call_targets_enum_case(call_callee)
-            && !trailing_brace_call_has_lambda_arg(&appended_args)
-            && !self
-                .trailing_brace_call_accepts_implicit_zero_arg_lambda(call_callee, &appended_args)
+            && matches!(
+                callee,
+                Expr::Call {
+                    uses_brace_syntax: false,
+                    ..
+                }
+            )
+        {
+            self.add_error(
+                "invalid_trailing_brace_call",
+                "trailing block cannot follow an already completed call; pass the callback inside the same argument list",
+                span,
+            );
+            return Ty::Unknown;
+        }
+        if uses_brace_syntax
+            && self.brace_call_type_sig(callee).is_none()
+            && !self.brace_call_targets_current_constructor(callee)
+            && !self.brace_call_targets_enum_case(callee)
+            && !trailing_brace_call_has_lambda_arg(args)
+            && !self.trailing_brace_call_accepts_implicit_zero_arg_lambda(callee, args)
         {
             self.add_error(
                 "invalid_trailing_brace_call",
@@ -4396,36 +4409,33 @@ impl<'a> Checker<'a> {
         }
 
         let normalized_args =
-            self.normalize_trailing_brace_call_args(call_callee, &appended_args, uses_brace_syntax);
-        if self.is_builtin_panic_call(call_callee) {
+            self.normalize_trailing_brace_call_args(callee, args, uses_brace_syntax);
+        if self.is_builtin_panic_call(callee) {
             for arg in &normalized_args {
                 self.check_expr(&arg.value);
             }
             return Ty::never();
         }
-        if self.is_builtin_print_call(call_callee) {
+        if self.is_builtin_print_call(callee) {
             for arg in &normalized_args {
                 self.check_expr(&arg.value);
             }
             return Ty::unit();
         }
-        if self.is_builtin_assert_call(call_callee) {
+        if self.is_builtin_assert_call(callee) {
             return self.check_builtin_assert_call(&normalized_args, span);
         }
-        if let Some(ty) = self.check_builtin_static_method_call(call_callee, &normalized_args, span)
-        {
+        if let Some(ty) = self.check_builtin_static_method_call(callee, &normalized_args, span) {
             return ty;
         }
-        if let Some(ty) =
-            self.check_builtin_static_factory_call(call_callee, &normalized_args, span)
-        {
+        if let Some(ty) = self.check_builtin_static_factory_call(callee, &normalized_args, span) {
             return ty;
         }
-        if self.check_extension_hidden_method_call(call_callee, &normalized_args) {
+        if self.check_extension_hidden_method_call(callee, &normalized_args) {
             return Ty::Unknown;
         }
         if let Some(ty) = self.try_check_constructor_call(
-            call_callee,
+            callee,
             &normalized_args,
             uses_brace_syntax,
             span,
@@ -4434,16 +4444,11 @@ impl<'a> Checker<'a> {
             return ty;
         }
         if let Some(selection) =
-            self.callable_signature_for_args(call_callee, &normalized_args, uses_brace_syntax)
+            self.callable_signature_for_args(callee, &normalized_args, uses_brace_syntax)
         {
-            return self.check_callable_selection_call(
-                &selection,
-                call_callee,
-                &normalized_args,
-                span,
-            );
+            return self.check_callable_selection_call(&selection, callee, &normalized_args, span);
         }
-        let callee_ty = self.check_expr(call_callee);
+        let callee_ty = self.check_expr(callee);
         match callee_ty {
             Ty::Function(params, ret) => {
                 let sig_params = params
@@ -4540,28 +4545,6 @@ impl<'a> Checker<'a> {
             return false;
         };
         matches!(&param.ty, Ty::Function(fn_params, _) if fn_params.is_empty())
-    }
-
-    fn append_trailing_brace_call_args<'expr>(
-        &self,
-        callee: &'expr Expr,
-        args: &[crate::ast::CallArg],
-        uses_brace_syntax: bool,
-    ) -> (&'expr Expr, Vec<crate::ast::CallArg>) {
-        if uses_brace_syntax {
-            if let Expr::Call {
-                callee: inner_callee,
-                args: inner_args,
-                uses_brace_syntax: false,
-                ..
-            } = callee
-            {
-                let mut combined = inner_args.clone();
-                combined.extend(args.iter().cloned());
-                return (inner_callee.as_ref(), combined);
-            }
-        }
-        (callee, args.to_vec())
     }
 
     fn interface_sig_from_type_ref(&mut self, interface: &TypeRef) -> Option<TypeSig> {

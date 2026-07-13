@@ -7480,7 +7480,7 @@ $name
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(
             run.output,
-            "it compares primitives\nit supports no-arg trailing test blocks\n"
+            "it compares primitives\nit supports explicit block callbacks\n"
         );
     }
 }

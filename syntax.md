@@ -365,10 +365,10 @@ The standard test helper module is imported explicitly:
 use test/*
 
 def main() Unit {
-    it("compares values") {
+    it("compares values", {
         5.shouldBe(5)
         "ok".shouldBe("ok")
-    }
+    })
 }
 ```
 
@@ -1363,13 +1363,15 @@ process {
 }
 ```
 
-If a trailing block follows an existing parenthesized call, it is appended as
-the final argument. This is useful for APIs whose last parameter is a callback:
+If a callback is passed alongside ordinary arguments, include it in the same
+parenthesized argument list. Do not write a trailing block after an already
+completed `(...)` call; that would imply currying or calling the result of the
+first call.
 
 ```txt
-it("compares values") {
+it("compares values", {
     5.shouldBe(5)
-}
+})
 ```
 
 Trailing brace call syntax on non-constructor calls is only for lambda arguments.
