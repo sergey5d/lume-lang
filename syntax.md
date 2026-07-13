@@ -340,7 +340,7 @@ Meaning:
 - `use module/sub`
   qualified access through the module name, for example `sub.A`
 - `use module/sub/*`
-  use all visible symbols unqualified
+  use all visible symbols unqualified; extension methods declared by that module are also available as receiver methods in this file
 - `use module/sub/A`
   use one symbol unqualified
 - `use module/sub/A as B`
@@ -353,6 +353,11 @@ Meaning:
   use selected visible singleton methods from a singleton
 
 Built-in `OS` methods are available implicitly in every file, so `print(...)`, `println(...)`, and `printf(...)` work without writing `use OS/*`. Prelude functions like `panic(...)`, `assert(...)`, `ensure(...)`, and `identity(...)` are also available in every file. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
+
+Extension methods are imported only by wildcard module use. They are visible in
+the module where the `ext` block is declared and in files that write
+`use module/sub/*`. Selective imports such as `use module/sub/Name` do not import
+extension methods.
 
 ## Top-Level Declarations
 
@@ -454,6 +459,7 @@ Top-level forms:
 - `shape`
 - `single`
 - `enum`
+- `ext TypeName`
 - `name Type = expr`
 - `hidden def`
 - `hidden name Type = expr`
@@ -1064,6 +1070,39 @@ class Counter {
 impl Counter {
     def inc() Int = this.value + 1
 }
+```
+
+Extension methods attach receiver-call syntax from outside the target type's
+own implementation:
+
+```txt
+ext Counter {
+    def doubled() Int = this.value * 2
+}
+
+counter = Counter { value: 3 }
+println(counter.doubled())
+```
+
+Extension rules:
+
+- extension blocks use `ext TypeName { def method(...) ... }`
+- extension targets may be classes, shapes, enums, or interfaces
+- extension targets cannot be singles, annotations, or enum cases
+- extension blocks cannot declare constructors
+- a module may declare multiple `ext` blocks for the same target type
+- extension methods use the same call syntax as regular methods
+- `this` is the extended receiver
+- extension methods can access only the visible members available from the extension module
+- extension methods are visible in their declaring module and in files that import that module with `use module/*`
+- extension imports are file-local; importing a module that imports extensions does not re-export those extension methods
+
+```txt
+use model/user/{User}
+use model/user_extensions/*
+
+user User = User { name: "Ada" }
+label = user.displayName()
 ```
 
 Custom constructors are class-only and use a dedicated `new` block inside `impl`.

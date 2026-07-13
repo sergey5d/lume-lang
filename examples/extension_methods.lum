@@ -1,0 +1,14 @@
+# EXPECT:
+# Ada (36)
+# true
+
+module app
+
+use model/user/{Person}
+use model/user_extensions/*
+
+def main() Unit {
+    person = Person { name: "Ada", age: 36 }
+    println(person.displayName())
+    println(person.isAdult())
+}

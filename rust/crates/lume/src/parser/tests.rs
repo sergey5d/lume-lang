@@ -374,6 +374,33 @@ impl Counter {
 }
 
 #[test]
+fn parses_extension_block() {
+    let result = parse(
+        r#"
+class User {
+    name Str
+}
+
+ext User {
+    def label() Str = this.name
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    assert_eq!(program.items.len(), 2);
+    let Item::Extension(block) = &program.items[1] else {
+        panic!("expected extension block, got {:#?}", program.items[1]);
+    };
+    match &block.target {
+        TypeRef::Named { name, .. } => assert_eq!(name, "User"),
+        other => panic!("expected named extension target, got {other:#?}"),
+    }
+    assert_eq!(block.methods.len(), 1);
+    assert_eq!(block.methods[0].name, "label");
+}
+
+#[test]
 fn rejects_class_field_after_method() {
     let result = parse(
         r#"

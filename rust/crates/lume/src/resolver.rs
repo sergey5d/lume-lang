@@ -8,10 +8,11 @@ use crate::{
     Diagnostic,
     ast::{
         Annotation, AssignOp, AssignmentStmt, Binding, Block, CallableBody, ElseBranch,
-        ElseExprBranch, Expr, ExprStmt, ForBinding, ForStmt, FunctionDecl, IfConditionClause,
-        IfStmt, ImplBlock, ImplTargetKind, ImportSymbol, LambdaBody, LetElseStmt, MatchCase,
-        MatchCaseBody, MethodDecl, Pattern, PatternBindingStmt, Program, RecordTypeField, Stmt,
-        TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility, WhileStmt,
+        ElseExprBranch, Expr, ExprStmt, ExtensionBlock, ForBinding, ForStmt, FunctionDecl,
+        IfConditionClause, IfStmt, ImplBlock, ImplTargetKind, ImportSymbol, LambdaBody,
+        LetElseStmt, MatchCase, MatchCaseBody, MethodDecl, Pattern, PatternBindingStmt, Program,
+        RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
+        WhileStmt,
     },
     lexer::lex,
     parser::parse_program,
@@ -52,6 +53,7 @@ pub fn resolve_program(program: &Program) -> CheckResult {
         typecheck_only_types: HashSet::new(),
         imports: HashMap::new(),
         symbol_imports: HashMap::new(),
+        extension_imports: Vec::new(),
         dependencies: Vec::new(),
     };
     let mut resolver = Resolver::new("<memory>", &module, &modules, &ambient);
@@ -149,6 +151,7 @@ pub(crate) struct LoadedModule {
     pub(crate) typecheck_only_types: HashSet<String>,
     pub(crate) imports: HashMap<String, PathBuf>,
     pub(crate) symbol_imports: HashMap<String, ImportedSymbol>,
+    pub(crate) extension_imports: Vec<PathBuf>,
     pub(crate) dependencies: Vec<PathBuf>,
 }
 
@@ -347,6 +350,7 @@ struct TypeInfo {
 struct SymbolicField {
     name: &'static str,
     mutable: bool,
+    visibility: Visibility,
 }
 
 impl SymbolicField {
@@ -354,6 +358,7 @@ impl SymbolicField {
         Self {
             name: Box::leak(field.name.to_string().into_boxed_str()),
             mutable: field.mutable,
+            visibility: field.visibility,
         }
     }
 }
@@ -395,6 +400,7 @@ fn load_module_with_options(
         typecheck_only_types: HashSet::new(),
         imports: HashMap::new(),
         symbol_imports: HashMap::new(),
+        extension_imports: Vec::new(),
         dependencies: Vec::new(),
     };
 
@@ -464,6 +470,9 @@ fn load_module_with_options(
                 symbols = exported_single_members(child, single_name, same_module);
             }
         } else if import.wildcard {
+            if !module.extension_imports.contains(&child_abs) {
+                module.extension_imports.push(child_abs.clone());
+            }
             symbols = exported_symbols(child, same_module);
         }
 
@@ -604,6 +613,7 @@ fn ensure_library_module(
                 typecheck_only_types: library.typecheck_only_types.clone(),
                 imports: HashMap::new(),
                 symbol_imports: HashMap::new(),
+                extension_imports: Vec::new(),
                 dependencies: Vec::new(),
             },
         );
@@ -1219,6 +1229,7 @@ impl<'a> Resolver<'a> {
                 crate::ast::Item::Function(function) => self.resolve_function(function),
                 crate::ast::Item::Type(decl) => self.resolve_type_decl(decl),
                 crate::ast::Item::Impl(block) => self.resolve_impl(block),
+                crate::ast::Item::Extension(block) => self.resolve_extension(block),
                 crate::ast::Item::Statement(Stmt::Binding(_)) => {}
                 crate::ast::Item::Statement(statement) => self.resolve_stmt(statement),
             }
@@ -1495,6 +1506,39 @@ impl<'a> Resolver<'a> {
         self.pop_type_scope();
     }
 
+    fn resolve_extension(&mut self, block: &ExtensionBlock) {
+        self.push_type_scope();
+        self.install_impl_target_type_params(&block.target);
+        self.resolve_extension_target(block);
+        let target_name = type_ref_name(&block.target);
+        let target_fields = target_name.and_then(|name| self.lookup_type(name).cloned());
+
+        self.push_scope();
+        if let Some(info) = &target_fields {
+            self.push_field_hints(
+                info.kind,
+                info.fields
+                    .iter()
+                    .filter(|field| field.visibility != Visibility::Hidden)
+                    .map(|field| field.name),
+            );
+        } else {
+            self.push_field_hints(TypeKind::Class, std::iter::empty());
+        }
+        self.push_method_hints(
+            target_fields
+                .iter()
+                .flat_map(|info| info.methods.keys().map(String::as_str)),
+        );
+        for method in &block.methods {
+            self.resolve_method(method);
+        }
+        self.pop_method_hints();
+        self.pop_field_hints();
+        self.pop_scope();
+        self.pop_type_scope();
+    }
+
     fn install_impl_target_type_params(&mut self, target: &TypeRef) {
         if let TypeRef::Named { args, .. } = target {
             for arg in args {
@@ -1569,6 +1613,47 @@ impl<'a> Resolver<'a> {
                             );
                         }
                     }
+                }
+            }
+            other => self.resolve_type_ref(Some(other)),
+        }
+    }
+
+    fn resolve_extension_target(&mut self, block: &ExtensionBlock) {
+        let target = &block.target;
+        match target {
+            TypeRef::Named { name, args, span } => {
+                for arg in args {
+                    self.resolve_type_ref(Some(arg));
+                }
+                let Some(info) = self.lookup_type(name).cloned() else {
+                    self.add_error(
+                        "undefined_type",
+                        format!("undefined extension target '{}'", name),
+                        *span,
+                    );
+                    return;
+                };
+                if matches!(info.kind, TypeKind::Annotation | TypeKind::Single) {
+                    self.add_error(
+                        "invalid_extension_target",
+                        format!(
+                            "extension target '{}' must be a class, shape, enum, or interface",
+                            name
+                        ),
+                        *span,
+                    );
+                }
+                if args.len() != info.arity {
+                    self.add_error(
+                        "invalid_type_arity",
+                        format!(
+                            "type '{}' expects {} type arguments",
+                            name,
+                            arity_label(info.arity)
+                        ),
+                        *span,
+                    );
                 }
             }
             other => self.resolve_type_ref(Some(other)),

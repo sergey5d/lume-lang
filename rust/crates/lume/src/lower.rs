@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{self, BinaryOp as AstBinaryOp, ImplBlock, ImplTargetKind, Item, TypeDecl, TypeMember},
+    ast::{
+        self, BinaryOp as AstBinaryOp, ExtensionBlock, ImplBlock, ImplTargetKind, Item, TypeDecl,
+        TypeMember,
+    },
     core::{
         self, AssignOp, AssignmentStmt, Block, CallableBody, DestructureKind, ElseBranch,
         ElseExprBranch, Expr, FunctionDecl, MatchCaseBody, MethodDecl, Pattern, Stmt, TypeRef,
@@ -177,6 +180,7 @@ impl<'a> Lowerer<'a> {
             match item {
                 Item::Type(decl) => self.define_type_decl(&decl),
                 Item::Impl(block) => self.define_impl_block(&block),
+                Item::Extension(block) => self.define_extension_block(&block),
                 _ => {}
             }
         }
@@ -326,6 +330,42 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    fn define_extension_block(&mut self, block: &ExtensionBlock) {
+        let Some(target_name) = named_type_name(&block.target) else {
+            self.add_error(
+                "lower_invariant",
+                "extension target should be resolved to a named type before lowering",
+                block.span,
+            );
+            return;
+        };
+        let Some(type_id) = self.extension_target_type_id(target_name) else {
+            self.add_error(
+                "lower_invariant",
+                format!(
+                    "extension target '{}' should be declared before lowering methods",
+                    target_name
+                ),
+                block.span,
+            );
+            return;
+        };
+        let mut method_ids = Vec::new();
+        for method in &block.methods {
+            let (id, this_local) = self.declare_method_function(type_id, target_name, method);
+            method_ids.push(id);
+            self.method_work.push(MethodWork {
+                id,
+                decl: desugar::desugar_method_decl(method),
+                this_local,
+            });
+        }
+
+        if let Some(ty) = self.program.types.get_mut(type_id.0) {
+            ty.methods.extend(method_ids);
+        }
+    }
+
     fn impl_target_type_id(
         &self,
         target_name: &str,
@@ -340,6 +380,20 @@ impl<'a> Lowerer<'a> {
                 (name == target_name && *kind != ast::TypeKind::Single).then_some(*id)
             }),
         }
+    }
+
+    fn extension_target_type_id(&self, target_name: &str) -> Option<ir::TypeId> {
+        self.type_ids.iter().find_map(|((name, kind), id)| {
+            (name == target_name
+                && matches!(
+                    kind,
+                    ast::TypeKind::Class
+                        | ast::TypeKind::Record
+                        | ast::TypeKind::Enum
+                        | ast::TypeKind::Interface
+                ))
+            .then_some(*id)
+        })
     }
 
     fn declare_function(

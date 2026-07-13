@@ -204,6 +204,7 @@ fn rewrite_item_for_runtime(item: &mut ast::Item, module: &LoadedModule, graph: 
         ast::Item::Function(function) => rewrite_function_for_runtime(function, module, graph),
         ast::Item::Type(decl) => rewrite_type_decl_for_runtime(decl, module, graph),
         ast::Item::Impl(block) => rewrite_impl_block_for_runtime(block, module, graph),
+        ast::Item::Extension(block) => rewrite_extension_block_for_runtime(block, module, graph),
         ast::Item::Statement(stmt) => rewrite_stmt_for_runtime(stmt, module, graph),
     }
 }
@@ -243,6 +244,17 @@ fn rewrite_type_decl_for_runtime(
 
 fn rewrite_impl_block_for_runtime(
     block: &mut ast::ImplBlock,
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) {
+    rewrite_type_ref_for_runtime(&mut block.target, module);
+    for method in &mut block.methods {
+        rewrite_method_for_runtime(method, module, graph);
+    }
+}
+
+fn rewrite_extension_block_for_runtime(
+    block: &mut ast::ExtensionBlock,
     module: &LoadedModule,
     graph: &ModuleGraph,
 ) {
@@ -6075,6 +6087,31 @@ mod tests {
     }
 
     #[test]
+    fn runs_local_extension_methods() {
+        let program = lower_inline(
+            r#"
+            class User {
+                name Str
+                age Int
+            }
+
+            ext User {
+                def label() Str = this.name + ":" + this.age.toStr()
+            }
+
+            def main() Unit {
+                user = User { name: "Ada", age: 36 }
+                println(user.label())
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "Ada:36\n");
+    }
+
+    #[test]
     fn runs_range_loops_and_println() {
         let program = lower_inline(
             r#"
@@ -7391,5 +7428,13 @@ $name
         let run = run_path(path, None).expect("run default exports");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "hello, Ada\nhello!\n");
+    }
+
+    #[test]
+    fn run_path_executes_imported_extension_methods() {
+        let path = repo_root().join("examples/extension_methods.lum");
+        let run = run_path(path, None).expect("run extension methods");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "Ada (36)\ntrue\n");
     }
 }

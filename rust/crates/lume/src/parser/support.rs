@@ -15,7 +15,8 @@ impl<'a> Parser<'a> {
                 | TokenKind::Keyword(Keyword::Single)
                 | TokenKind::Keyword(Keyword::Interface)
                 | TokenKind::Keyword(Keyword::Enum)
-                | TokenKind::Keyword(Keyword::Impl) => return,
+                | TokenKind::Keyword(Keyword::Impl)
+                | TokenKind::Keyword(Keyword::Ext) => return,
                 _ => self.advance(),
             }
         }
@@ -366,6 +367,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Single) => "SINGLE",
             TokenKind::Keyword(Keyword::Interface) => "INTERFACE",
             TokenKind::Keyword(Keyword::Enum) => "ENUM",
+            TokenKind::Keyword(Keyword::Ext) => "EXT",
             TokenKind::Keyword(Keyword::Hidden) => "PRIVATE",
             TokenKind::Keyword(Keyword::Var) => "VAR",
             TokenKind::LBrace => "{",

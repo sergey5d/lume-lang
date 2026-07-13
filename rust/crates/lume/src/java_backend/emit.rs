@@ -1333,6 +1333,15 @@ fn find_source_method<'a>(
                     }
                 }
             }
+            ast::Item::Extension(ext_block)
+                if type_ref_base_name(&ext_block.target).is_some_and(|name| name == owner.name) =>
+            {
+                for method in &ext_block.methods {
+                    if source_method_matches(method, function) {
+                        return Some(method);
+                    }
+                }
+            }
             _ => {}
         }
     }

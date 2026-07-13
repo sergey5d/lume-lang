@@ -1,0 +1,11 @@
+# IGNORE
+
+module user_extensions
+
+use model/user/{Person}
+
+ext Person {
+    def displayName() Str = this.name + " (" + this.age.toStr() + ")"
+
+    def isAdult() Bool = this.age >= 18
+}

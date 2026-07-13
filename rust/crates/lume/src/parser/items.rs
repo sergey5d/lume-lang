@@ -144,6 +144,24 @@ impl<'a> Parser<'a> {
                 let block = self.parse_impl_block()?;
                 Some(Item::Impl(block))
             }
+            TokenKind::Keyword(Keyword::Ext) => {
+                if !annotations.is_empty() {
+                    self.error_at_current(
+                        "unexpected_annotation",
+                        "ext blocks do not accept annotations",
+                    );
+                    return None;
+                }
+                if visibility != Visibility::Default {
+                    self.error_at_current(
+                        "unexpected_visibility",
+                        "ext blocks do not accept visibility modifiers",
+                    );
+                    return None;
+                }
+                let block = self.parse_extension_block()?;
+                Some(Item::Extension(block))
+            }
             _ => {
                 if self.at_keyword(Keyword::Var) {
                     self.error_at_current(
@@ -624,6 +642,62 @@ impl<'a> Parser<'a> {
         let end = self.consume(TokenKind::RBrace, "expected '}' after impl body")?;
         Some(ImplBlock {
             target_kind,
+            target,
+            methods,
+            span: start.cover(end),
+        })
+    }
+
+    pub(super) fn parse_extension_block(&mut self) -> Option<ExtensionBlock> {
+        let start = self.consume_keyword(Keyword::Ext, "expected 'ext'")?;
+        let target = self.parse_type_ref()?;
+        if self.match_token(TokenKind::Dot) {
+            let _ = self.expect_identifier("expected enum case name after '.'")?;
+            let owner = match &target {
+                TypeRef::Named { name, .. } => name.as_str(),
+                _ => "enum",
+            };
+            self.error_at_current(
+                "unexpected_extension_target",
+                format!(
+                    "enum cases cannot be extended directly; put extension methods on enum '{}'",
+                    owner
+                ),
+            );
+            return None;
+        }
+        self.skip_newlines();
+        self.consume(TokenKind::LBrace, "expected '{' after ext target")?;
+        self.skip_newlines();
+
+        let mut methods = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            self.skip_newlines();
+            if self.at(TokenKind::RBrace) {
+                break;
+            }
+            let annotations = self.parse_annotations()?;
+            let visibility = self.parse_visibility();
+            if self.at(TokenKind::Identifier) && self.current().lexeme == "new" {
+                self.error_at_current(
+                    "invalid_extension_constructor",
+                    "extension blocks cannot declare constructors; use 'def' to add methods",
+                );
+                return None;
+            }
+            let method = self.parse_method_decl(annotations, visibility, false)?;
+            if method.name == "new" {
+                self.diagnostics.push(Diagnostic::error(
+                    "invalid_extension_constructor",
+                    "extension blocks cannot declare constructors; use 'def' to add methods",
+                    method.span,
+                ));
+            }
+            methods.push(method);
+            self.skip_newlines();
+        }
+        let end = self.consume(TokenKind::RBrace, "expected '}' after ext body")?;
+        Some(ExtensionBlock {
             target,
             methods,
             span: start.cover(end),

@@ -527,6 +527,12 @@ fn java_library_imports(
 
 fn collect_java_library_item_type_refs(item: &Item, names: &mut HashSet<String>) {
     let Item::Type(decl) = item else {
+        if let Item::Extension(block) = item {
+            collect_java_library_type_ref(&block.target, names);
+            for method in &block.methods {
+                collect_java_library_method_type_refs(method, names);
+            }
+        }
         return;
     };
     for bound in &decl.with_bounds {
@@ -544,21 +550,7 @@ fn collect_java_library_item_type_refs(item: &Item, names: &mut HashSet<String>)
                     collect_java_library_type_ref(ty, names);
                 }
             }
-            TypeMember::Method(method) => {
-                for type_param in &method.type_params {
-                    for bound in &type_param.bounds {
-                        collect_java_library_type_ref(bound, names);
-                    }
-                }
-                for param in &method.params {
-                    if let Some(ty) = &param.ty {
-                        collect_java_library_type_ref(ty, names);
-                    }
-                }
-                if let Some(ret) = &method.return_type {
-                    collect_java_library_type_ref(ret, names);
-                }
-            }
+            TypeMember::Method(method) => collect_java_library_method_type_refs(method, names),
             TypeMember::Case(case) => {
                 for field in &case.fields {
                     if let Some(ty) = &field.ty {
@@ -567,6 +559,22 @@ fn collect_java_library_item_type_refs(item: &Item, names: &mut HashSet<String>)
                 }
             }
         }
+    }
+}
+
+fn collect_java_library_method_type_refs(method: &MethodDecl, names: &mut HashSet<String>) {
+    for type_param in &method.type_params {
+        for bound in &type_param.bounds {
+            collect_java_library_type_ref(bound, names);
+        }
+    }
+    for param in &method.params {
+        if let Some(ty) = &param.ty {
+            collect_java_library_type_ref(ty, names);
+        }
+    }
+    if let Some(ret) = &method.return_type {
+        collect_java_library_type_ref(ret, names);
     }
 }
 

@@ -53,6 +53,7 @@ pub enum Item {
     Function(FunctionDecl),
     Type(TypeDecl),
     Impl(ImplBlock),
+    Extension(ExtensionBlock),
     Statement(Stmt),
 }
 
@@ -115,6 +116,14 @@ pub struct EnumCaseDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplBlock {
     pub target_kind: ImplTargetKind,
+    pub target: TypeRef,
+    pub methods: Vec<MethodDecl>,
+    pub span: Span,
+}
+
+/// An `ext Type { ... }` block that makes methods available through imports.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtensionBlock {
     pub target: TypeRef,
     pub methods: Vec<MethodDecl>,
     pub span: Span,

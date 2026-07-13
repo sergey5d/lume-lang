@@ -133,6 +133,8 @@ Still open:
 - whether singleton methods should ever be usable directly beyond explicit `use module/Single/*` and builtin `OS` prelude behavior
 - if both a wide module use and a renamed selective use target the same module, the wide use should come first and the `as` use should come after it
 - decide how enum cases are imported: if `EnumA` is imported, should users write `EnumA.CaseA`, or should `CaseA` also become directly available
+- decide whether extension-method imports should keep using ordinary wildcard module use, or get a dedicated import surface such as `use ext app/module/*` or `use ext app/module/TypeName`
+- decide whether extension methods should also be allowed on `single` types, or whether `impl single Name { ... }` is enough and keeps singleton behavior explicit
 
 ### 7. Interface Method Conflict Resolution
 

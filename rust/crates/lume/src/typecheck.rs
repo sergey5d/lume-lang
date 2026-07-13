@@ -8,10 +8,11 @@ use crate::{
     Diagnostic,
     ast::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
-        ElseBranch, ElseExprBranch, Expr, FieldDecl, ForBinding, FunctionDecl, IfConditionClause,
-        IfStmt, ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase, MatchCaseBody, MatchStmt,
-        MethodDecl, Param, Pattern, PatternBindingKind, PatternBindingStmt, Program, Stmt,
-        TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
+        ElseBranch, ElseExprBranch, Expr, ExtensionBlock, FieldDecl, ForBinding, FunctionDecl,
+        IfConditionClause, IfStmt, ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase,
+        MatchCaseBody, MatchStmt, MethodDecl, Param, Pattern, PatternBindingKind,
+        PatternBindingStmt, Program, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef,
+        Visibility,
     },
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, ModuleLoadOptions,
@@ -393,9 +394,11 @@ struct ModuleInfo {
     program: Program,
     imports: HashMap<String, PathBuf>,
     symbol_imports: HashMap<String, ImportedSymbol>,
+    extension_imports: Vec<PathBuf>,
     functions: HashMap<String, Vec<FunctionSig>>,
     types: HashMap<String, TypeSig>,
     singles: HashMap<String, TypeSig>,
+    extensions: HashMap<String, HashMap<String, Vec<FunctionSig>>>,
     global_binding_stmts: Vec<crate::ast::BindingStmt>,
 }
 
@@ -407,9 +410,11 @@ impl ModuleInfo {
             program: module.program.clone(),
             imports: module.imports.clone(),
             symbol_imports: module.symbol_imports.clone(),
+            extension_imports: module.extension_imports.clone(),
             functions: HashMap::new(),
             types: HashMap::new(),
             singles: HashMap::new(),
+            extensions: HashMap::new(),
             global_binding_stmts: Vec::new(),
         };
         info.collect_items();
@@ -423,9 +428,11 @@ impl ModuleInfo {
             program: program.clone(),
             imports: HashMap::new(),
             symbol_imports: HashMap::new(),
+            extension_imports: Vec::new(),
             functions: HashMap::new(),
             types: HashMap::new(),
             singles: HashMap::new(),
+            extensions: HashMap::new(),
             global_binding_stmts: Vec::new(),
         };
         info.collect_items();
@@ -453,6 +460,9 @@ impl ModuleInfo {
                 Item::Statement(Stmt::Binding(binding)) => {
                     self.global_binding_stmts.push(binding.clone());
                 }
+                Item::Extension(block) => {
+                    self.collect_extension(block);
+                }
                 _ => {}
             }
         }
@@ -479,6 +489,20 @@ impl ModuleInfo {
                     .or_default()
                     .push(function_sig_from_method(method, &target_type_params));
             }
+        }
+    }
+
+    fn collect_extension(&mut self, block: &ExtensionBlock) {
+        let Some(target_name) = type_ref_named_name(&block.target) else {
+            return;
+        };
+        let target_type_params = impl_target_type_params(&block.target);
+        let methods = self.extensions.entry(target_name.to_string()).or_default();
+        for method in &block.methods {
+            methods
+                .entry(method.name.clone())
+                .or_default()
+                .push(function_sig_from_method(method, &target_type_params));
         }
     }
 }
@@ -613,6 +637,7 @@ impl World {
                                 typecheck_only_types: HashSet::new(),
                                 imports: module.imports.clone(),
                                 symbol_imports: module.symbol_imports.clone(),
+                                extension_imports: module.extension_imports.clone(),
                                 dependencies: Vec::new(),
                             },
                         )
@@ -703,6 +728,35 @@ impl World {
         }
         self.ambient.enum_cases.get(name).cloned()
     }
+
+    fn extension_method_sigs(
+        &self,
+        module: &ModuleInfo,
+        type_name: &str,
+        method: &str,
+    ) -> Vec<FunctionSig> {
+        let mut out = Vec::new();
+        if let Some(methods) = module
+            .extensions
+            .get(type_name)
+            .and_then(|methods| methods.get(method))
+        {
+            out.extend(methods.clone());
+        }
+        for import_path in &module.extension_imports {
+            let Some(imported) = self.modules.get(import_path) else {
+                continue;
+            };
+            if let Some(methods) = imported
+                .extensions
+                .get(type_name)
+                .and_then(|methods| methods.get(method))
+            {
+                out.extend(methods.clone());
+            }
+        }
+        out
+    }
 }
 
 fn visit_order(
@@ -736,6 +790,7 @@ struct Checker<'a> {
     current_return: Ty,
     current_owner: Option<TypeSig>,
     current_method: Option<String>,
+    current_extension_target: Option<String>,
     loop_depth: usize,
     defer_depth: usize,
     lifted_segment_depth: usize,
@@ -755,6 +810,7 @@ impl<'a> Checker<'a> {
             current_return: Ty::Unknown,
             current_owner: None,
             current_method: None,
+            current_extension_target: None,
             loop_depth: 0,
             defer_depth: 0,
             lifted_segment_depth: 0,
@@ -771,6 +827,7 @@ impl<'a> Checker<'a> {
                 Item::Function(function) => self.check_function(function),
                 Item::Type(decl) => self.check_type_decl(decl),
                 Item::Impl(block) => self.check_impl(block),
+                Item::Extension(block) => self.check_extension(block),
                 _ => {}
             }
         }
@@ -1215,6 +1272,47 @@ impl<'a> Checker<'a> {
             self.check_method(method, &type_sig);
         }
         self.pop_type_params();
+    }
+
+    fn check_extension(&mut self, block: &ExtensionBlock) {
+        let Some(target_name) = type_ref_named_name(&block.target) else {
+            return;
+        };
+        let Some(type_sig) = self.lookup_any_type(target_name) else {
+            self.add_error(
+                "unknown_extension_target",
+                format!("unknown extension target '{}'", target_name),
+                block.span,
+            );
+            return;
+        };
+        if matches!(type_sig.kind, TypeKind::Annotation | TypeKind::Single) {
+            self.add_error(
+                "invalid_extension_target",
+                format!(
+                    "extension target '{}' must be a class, shape, enum, or interface",
+                    target_name
+                ),
+                block.span,
+            );
+            return;
+        }
+        let previous_extension_target = self.current_extension_target.clone();
+        self.current_extension_target = Some(target_name.to_string());
+        self.push_type_params(type_sig.type_params.iter().map(String::as_str));
+        for method in &block.methods {
+            if method.name == "new" {
+                self.add_error(
+                    "invalid_extension_constructor",
+                    "extension blocks cannot declare constructors",
+                    method.span,
+                );
+                continue;
+            }
+            self.check_method(method, &type_sig);
+        }
+        self.pop_type_params();
+        self.current_extension_target = previous_extension_target;
     }
 
     fn check_method(&mut self, method: &MethodDecl, owner: &TypeSig) {
@@ -3204,6 +3302,10 @@ impl<'a> Checker<'a> {
             } => {
                 let receiver_ty = self.check_expr(receiver);
                 if let Some(field) = self.field_sig_for_member(&receiver_ty, name) {
+                    if self.extension_this_hidden_field(receiver, &receiver_ty, name) {
+                        self.add_extension_hidden_access_error("field", name, *span);
+                        return Ty::Unknown;
+                    }
                     let can_initialize =
                         self.can_initialize_field_in_constructor(receiver, &receiver_ty, name);
                     if operator == AssignOp::Assign {
@@ -3442,6 +3544,14 @@ impl<'a> Checker<'a> {
                 let receiver_ty = self.check_expr(receiver);
                 if name == "runtimeType" {
                     return Ty::value_runtime_type(receiver_ty);
+                }
+                if self.extension_this_hidden_field(receiver, &receiver_ty, name) {
+                    self.add_extension_hidden_access_error("field", name, *span);
+                    return Ty::Unknown;
+                }
+                if self.extension_this_hidden_method(receiver, &receiver_ty, name) {
+                    self.add_extension_hidden_access_error("method", name, *span);
+                    return Ty::Unknown;
                 }
                 self.member_type(&receiver_ty, name).unwrap_or_else(|| {
                     self.add_error(
@@ -4236,6 +4346,9 @@ impl<'a> Checker<'a> {
         }
         if let Some(ty) = self.check_builtin_static_factory_call(callee, &normalized_args, span) {
             return ty;
+        }
+        if self.check_extension_hidden_method_call(callee, &normalized_args) {
+            return Ty::Unknown;
         }
         if let Some(ty) = self.try_check_constructor_call(
             callee,
@@ -6457,6 +6570,93 @@ impl<'a> Checker<'a> {
         sig.fields.iter().find(|field| field.name == name).cloned()
     }
 
+    fn extension_this_hidden_field(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> bool {
+        if !matches!(receiver, Expr::Identifier { name: receiver_name, .. } if receiver_name == "this")
+        {
+            return false;
+        }
+        let Some(target_name) = &self.current_extension_target else {
+            return false;
+        };
+        let Ty::Named(receiver_name, _) = receiver_ty else {
+            return false;
+        };
+        if receiver_name != target_name {
+            return false;
+        }
+        self.field_sig_for_member(receiver_ty, name)
+            .is_some_and(|field| field.hidden)
+    }
+
+    fn extension_this_hidden_method(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> bool {
+        if !matches!(receiver, Expr::Identifier { name: receiver_name, .. } if receiver_name == "this")
+        {
+            return false;
+        }
+        let Some(target_name) = &self.current_extension_target else {
+            return false;
+        };
+        let Ty::Named(receiver_name, _) = receiver_ty else {
+            return false;
+        };
+        if receiver_name != target_name {
+            return false;
+        }
+        self.lookup_any_type(receiver_name).is_some_and(|sig| {
+            sig.methods.get(name).is_some_and(|methods| {
+                methods
+                    .iter()
+                    .any(|method| method.visibility == Visibility::Hidden)
+            })
+        })
+    }
+
+    fn check_extension_hidden_method_call(
+        &mut self,
+        callee: &Expr,
+        args: &[crate::ast::CallArg],
+    ) -> bool {
+        let Expr::Member {
+            receiver,
+            name,
+            span,
+        } = callee
+        else {
+            return false;
+        };
+        if self.current_extension_target.is_none() {
+            return false;
+        }
+        let receiver_ty = self.check_expr(receiver);
+        if !self.extension_this_hidden_method(receiver, &receiver_ty, name) {
+            return false;
+        }
+        self.add_extension_hidden_access_error("method", name, *span);
+        for arg in args {
+            self.check_expr(&arg.value);
+        }
+        true
+    }
+
+    fn add_extension_hidden_access_error(
+        &mut self,
+        member_kind: &str,
+        member_name: &str,
+        span: crate::source::Span,
+    ) {
+        let target_name = self
+            .current_extension_target
+            .as_deref()
+            .unwrap_or("extended type");
+        self.add_error(
+            "invalid_extension_access",
+            format!(
+                "extension method cannot access hidden {member_kind} '{member_name}'; extension methods can access only visible members of '{target_name}'"
+            ),
+            span,
+        );
+    }
+
     fn can_initialize_field_in_constructor(
         &self,
         receiver: &Expr,
@@ -6513,6 +6713,14 @@ impl<'a> Checker<'a> {
                         Box::new(substitute_type(&first.ret, &subst)),
                     ));
                 }
+                let extension_methods =
+                    self.extension_method_sigs_for_named_type(type_name, args, name);
+                if let Some(first) = extension_methods.first() {
+                    return Some(Ty::Function(
+                        first.params.iter().map(|param| param.ty.clone()).collect(),
+                        Box::new(first.ret.clone()),
+                    ));
+                }
                 universal_member_type(name)
             }
             Ty::Record(fields) => fields
@@ -6538,7 +6746,12 @@ impl<'a> Checker<'a> {
                     return universal_method_sigs(name);
                 };
                 let Some(methods) = self.method_sigs_for_type(&sig, name) else {
-                    return universal_method_sigs(name);
+                    let extension_methods =
+                        self.extension_method_sigs_for_named_type(type_name, args, name);
+                    if extension_methods.is_empty() {
+                        return universal_method_sigs(name);
+                    }
+                    return Some(extension_methods);
                 };
                 let subst = sig
                     .type_params
@@ -6573,6 +6786,45 @@ impl<'a> Checker<'a> {
             Ty::Unknown => universal_method_sigs(name),
             _ => universal_method_sigs(name),
         }
+    }
+
+    fn extension_method_sigs_for_named_type(
+        &self,
+        type_name: &str,
+        args: &[Ty],
+        name: &str,
+    ) -> Vec<FunctionSig> {
+        let Some(sig) = self.lookup_any_type(type_name) else {
+            return Vec::new();
+        };
+        let subst = sig
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        self.world
+            .extension_method_sigs(self.module, type_name, name)
+            .into_iter()
+            .map(|method| FunctionSig {
+                type_params: method.type_params,
+                reified_type_params: method.reified_type_params,
+                params: method
+                    .params
+                    .into_iter()
+                    .map(|param| ParamSig {
+                        name: param.name,
+                        ty: substitute_type(&param.ty, &subst),
+                        variadic: param.variadic,
+                        lazy: param.lazy,
+                        has_initializer: param.has_initializer,
+                    })
+                    .collect(),
+                ret: substitute_type(&method.ret, &subst),
+                visibility: method.visibility,
+                has_body: method.has_body,
+            })
+            .collect()
     }
 
     fn method_sigs_for_type(&self, sig: &TypeSig, name: &str) -> Option<Vec<FunctionSig>> {
@@ -9145,6 +9397,111 @@ def main() Unit {
         let result = check_path(workspace_root().join("examples/random_code/bumper.lum"))
             .expect("typecheck");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_extension_methods_example() {
+        let result =
+            check_path(workspace_root().join("examples/extension_methods.lum")).expect("typecheck");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_extension_methods_on_singles() {
+        let program = parse_inline(
+            r#"
+single Tools {
+}
+
+ext Tools {
+    def label() Str = "tools"
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_extension_target"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_extension_methods_on_annotations() {
+        let program = parse_inline(
+            r#"
+annotation Route {
+    path Str
+}
+
+ext Route {
+    def label() Str = this.path
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_extension_target"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_extension_methods_reading_hidden_fields() {
+        let program = parse_inline(
+            r#"
+class User {
+    hidden token Str = "secret"
+    name Str
+}
+
+ext User {
+    def reveal() Str = this.token
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_extension_access"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_extension_methods_calling_hidden_methods() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+
+    hidden def secret() Str = this.name
+}
+
+ext User {
+    def reveal() Str = this.secret()
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_extension_access"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
