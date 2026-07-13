@@ -116,25 +116,26 @@ impl RuntimeProgram {
 
         // First assign stable runtime ids for every lowered type so later passes
         // can refer to types densely instead of rediscovering them by name.
-        let indexes = Self::build_indexes(program, types.len());
+        // Synthetic primitive extension buckets merge into existing builtin
+        // runtime types instead of shadowing methods like Str.size().
+        let indexes = Self::build_indexes(program, types.len(), &by_name_kind);
         by_name_kind.extend(indexes.by_name_kind.clone());
 
         // Then convert each IR type definition into the compact runtime shape
         // the interpreter uses on its hot path.
-        types.extend(
-            program
-                .types
-                .iter()
-                .map(|ir_ty| {
-                    let runtime_id = indexes
-                        .by_ir_type
-                        .get(ir_ty.id.0)
-                        .copied()
-                        .unwrap_or(RuntimeTypeId(usize::MAX));
-                    Self::build_runtime_type(program, ir_ty, runtime_id)
-                })
-                .collect::<Vec<_>>(),
-        );
+        for ir_ty in &program.types {
+            let runtime_id = indexes
+                .by_ir_type
+                .get(ir_ty.id.0)
+                .copied()
+                .unwrap_or(RuntimeTypeId(usize::MAX));
+            if Self::is_builtin_merge_target(ir_ty) && runtime_id.0 < types.len() {
+                let methods = Self::build_methods(program, &ir_ty.methods);
+                types[runtime_id.0].methods.extend(methods);
+                continue;
+            }
+            types.push(Self::build_runtime_type(program, ir_ty, runtime_id));
+        }
 
         // Finally resolve interface/with-bound metadata once all runtime ids are
         // known, so aggregate instances can answer type-relationship questions
@@ -148,13 +149,31 @@ impl RuntimeProgram {
         }
     }
 
-    fn build_indexes(program: &ir::Program, start_index: usize) -> RuntimeIndexes {
+    fn build_indexes(
+        program: &ir::Program,
+        start_index: usize,
+        builtin_by_name_kind: &HashMap<(String, TypeKind), RuntimeTypeId>,
+    ) -> RuntimeIndexes {
         let mut by_name_kind = HashMap::with_capacity(program.types.len());
         let mut by_ir_type = vec![RuntimeTypeId(usize::MAX); program.types.len()];
+        let mut next_index = start_index;
 
-        for (index, ir_ty) in program.types.iter().enumerate() {
-            let runtime_id = RuntimeTypeId(start_index + index);
-            by_name_kind.insert((ir_ty.name.clone(), ir_ty.kind), runtime_id);
+        for ir_ty in &program.types {
+            let runtime_id = if Self::is_builtin_merge_target(ir_ty) {
+                builtin_by_name_kind
+                    .get(&(ir_ty.name.clone(), ir_ty.kind))
+                    .copied()
+                    .unwrap_or_else(|| {
+                        let id = RuntimeTypeId(next_index);
+                        next_index += 1;
+                        id
+                    })
+            } else {
+                let id = RuntimeTypeId(next_index);
+                next_index += 1;
+                by_name_kind.insert((ir_ty.name.clone(), ir_ty.kind), id);
+                id
+            };
             if ir_ty.id.0 < by_ir_type.len() {
                 by_ir_type[ir_ty.id.0] = runtime_id;
             }
@@ -164,6 +183,17 @@ impl RuntimeProgram {
             by_name_kind,
             by_ir_type,
         }
+    }
+
+    fn is_builtin_merge_target(ir_ty: &ir::TypeDef) -> bool {
+        ir_ty.kind == TypeKind::Class
+            && matches!(
+                ir_ty.name.as_str(),
+                "Bool" | "Float" | "Float32" | "Int" | "Int32" | "Rune" | "Str"
+            )
+            && ir_ty.fields.is_empty()
+            && ir_ty.enum_cases.is_empty()
+            && ir_ty.field_init.is_none()
     }
 
     fn build_runtime_type(

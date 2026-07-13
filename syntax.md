@@ -359,6 +359,22 @@ the module where the `ext` block is declared and in files that write
 `use module/sub/*`. Selective imports such as `use module/sub/Name` do not import
 extension methods.
 
+The standard test helper module is imported explicitly:
+
+```txt
+use test/*
+
+def main() Unit {
+    it("compares values") {
+        5.shouldBe(5)
+        "ok".shouldBe("ok")
+    }
+}
+```
+
+`test` provides `TestRunner.it(title Str, block () -> Unit)` and primitive
+`shouldBe` extension methods. A failed `shouldBe` panics.
+
 ## Top-Level Declarations
 
 Annotations are declared with `annotation`. They are shape-like metadata types:
@@ -1087,7 +1103,7 @@ println(counter.doubled())
 Extension rules:
 
 - extension blocks use `ext TypeName { def method(...) ... }`
-- extension targets may be classes, shapes, enums, or interfaces
+- extension targets may be classes, shapes, enums, interfaces, or built-in primitive types such as `Int`, `Float`, `Bool`, `Str`, and `Rune`
 - extension targets cannot be singles, annotations, or enum cases
 - extension blocks cannot declare constructors
 - a module may declare multiple `ext` blocks for the same target type
@@ -1344,6 +1360,15 @@ be omitted and the trailing block is treated as `() -> { ... }`:
 ```txt
 process {
     println("hehe")
+}
+```
+
+If a trailing block follows an existing parenthesized call, it is appended as
+the final argument. This is useful for APIs whose last parameter is a callback:
+
+```txt
+it("compares values") {
+    5.shouldBe(5)
 }
 ```
 

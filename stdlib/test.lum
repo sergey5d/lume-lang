@@ -1,0 +1,74 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+
+interface TestRunner {
+    def it(title Str, block () -> Unit)
+}
+
+single Test with TestRunner {}
+
+impl single Test {
+    def it(title Str, block () -> Unit) Unit {
+        println("it " + title)
+        block()
+    }
+}
+
+def it(title Str, block () -> Unit) Unit =
+    Test.it(title, block)
+
+ext Bool {
+    def shouldBe(expected Bool) Unit {
+        if this != expected {
+            panic("expected " + expected.toStr() + ", got " + this.toStr())
+        }
+    }
+}
+
+ext Int {
+    def shouldBe(expected Int) Unit {
+        if this != expected {
+            panic("expected " + expected.toStr() + ", got " + this.toStr())
+        }
+    }
+}
+
+ext Int32 {
+    def shouldBe(expected Int32) Unit {
+        if this != expected {
+            panic("expected " + expected.toStr() + ", got " + this.toStr())
+        }
+    }
+}
+
+ext Float {
+    def shouldBe(expected Float) Unit {
+        if this != expected {
+            panic("expected " + expected.toStr() + ", got " + this.toStr())
+        }
+    }
+}
+
+ext Float32 {
+    def shouldBe(expected Float32) Unit {
+        if this != expected {
+            panic("expected " + expected.toStr() + ", got " + this.toStr())
+        }
+    }
+}
+
+ext Rune {
+    def shouldBe(expected Rune) Unit {
+        if this != expected {
+            panic("expected " + expected.toStr() + ", got " + this.toStr())
+        }
+    }
+}
+
+ext Str {
+    def shouldBe(expected Str) Unit {
+        if this != expected {
+            panic("expected " + expected + ", got " + this)
+        }
+    }
+}

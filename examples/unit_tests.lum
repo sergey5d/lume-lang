@@ -1,0 +1,21 @@
+# EXPECT:
+# it compares primitives
+# it supports no-arg trailing test blocks
+
+use test/*
+
+def main() Unit {
+    it("compares primitives") {
+        5.shouldBe(5)
+        true.shouldBe(true)
+        "lume".shouldBe("lume")
+        1.5.shouldBe(1.5)
+
+        first Rune = "rune".expectRuneAt(0)
+        first.shouldBe(first)
+    }
+
+    it("supports no-arg trailing test blocks") {
+        (2 + 3).shouldBe(5)
+    }
+}

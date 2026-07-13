@@ -513,6 +513,7 @@ struct AmbientInfo {
     types: HashMap<String, TypeSig>,
     singles: HashMap<String, TypeSig>,
     enum_cases: HashMap<String, EnumCaseSig>,
+    extensions: HashMap<String, HashMap<String, Vec<FunctionSig>>>,
 }
 
 impl AmbientInfo {
@@ -534,6 +535,12 @@ impl AmbientInfo {
             let program = parse_program_from_path(&path)?;
             let module = ModuleInfo::from_program(&path.display().to_string(), &program);
             ambient.functions.extend(module.functions.clone());
+            for (target, methods) in module.extensions.clone() {
+                let target_methods = ambient.extensions.entry(target).or_default();
+                for (name, overloads) in methods {
+                    target_methods.entry(name).or_default().extend(overloads);
+                }
+            }
             for (name, sig) in module.types {
                 for (case_name, case_sig) in &sig.enum_cases {
                     ambient
@@ -594,6 +601,24 @@ fn custom_constructor_error(sig: &TypeSig) -> String {
         ),
         TypeKind::Class => format!("class '{}' can declare custom constructors", sig.name),
     }
+}
+
+fn builtin_extension_type_sig(name: &str) -> Option<TypeSig> {
+    if !matches!(
+        name,
+        "Bool" | "Float" | "Float32" | "Int" | "Int32" | "Rune" | "Str"
+    ) {
+        return None;
+    }
+    Some(TypeSig {
+        kind: TypeKind::Class,
+        name: name.to_string(),
+        type_params: Vec::new(),
+        with_bounds: Vec::new(),
+        fields: Vec::new(),
+        methods: HashMap::new(),
+        enum_cases: HashMap::new(),
+    })
 }
 
 #[derive(Debug, Clone, Default)]
@@ -736,6 +761,14 @@ impl World {
         method: &str,
     ) -> Vec<FunctionSig> {
         let mut out = Vec::new();
+        if let Some(methods) = self
+            .ambient
+            .extensions
+            .get(type_name)
+            .and_then(|methods| methods.get(method))
+        {
+            out.extend(methods.clone());
+        }
         if let Some(methods) = module
             .extensions
             .get(type_name)
@@ -1278,7 +1311,10 @@ impl<'a> Checker<'a> {
         let Some(target_name) = type_ref_named_name(&block.target) else {
             return;
         };
-        let Some(type_sig) = self.lookup_any_type(target_name) else {
+        let Some(type_sig) = self
+            .lookup_any_type(target_name)
+            .or_else(|| builtin_extension_type_sig(target_name))
+        else {
             self.add_error(
                 "unknown_extension_target",
                 format!("unknown extension target '{}'", target_name),
@@ -4341,12 +4377,15 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
         expected: &Ty,
     ) -> Ty {
+        let (call_callee, appended_args) =
+            self.append_trailing_brace_call_args(callee, args, uses_brace_syntax);
         if uses_brace_syntax
-            && self.brace_call_type_sig(callee).is_none()
-            && !self.brace_call_targets_current_constructor(callee)
-            && !self.brace_call_targets_enum_case(callee)
-            && !trailing_brace_call_has_lambda_arg(args)
-            && !self.trailing_brace_call_accepts_implicit_zero_arg_lambda(callee, args)
+            && self.brace_call_type_sig(call_callee).is_none()
+            && !self.brace_call_targets_current_constructor(call_callee)
+            && !self.brace_call_targets_enum_case(call_callee)
+            && !trailing_brace_call_has_lambda_arg(&appended_args)
+            && !self
+                .trailing_brace_call_accepts_implicit_zero_arg_lambda(call_callee, &appended_args)
         {
             self.add_error(
                 "invalid_trailing_brace_call",
@@ -4357,33 +4396,36 @@ impl<'a> Checker<'a> {
         }
 
         let normalized_args =
-            self.normalize_trailing_brace_call_args(callee, args, uses_brace_syntax);
-        if self.is_builtin_panic_call(callee) {
+            self.normalize_trailing_brace_call_args(call_callee, &appended_args, uses_brace_syntax);
+        if self.is_builtin_panic_call(call_callee) {
             for arg in &normalized_args {
                 self.check_expr(&arg.value);
             }
             return Ty::never();
         }
-        if self.is_builtin_print_call(callee) {
+        if self.is_builtin_print_call(call_callee) {
             for arg in &normalized_args {
                 self.check_expr(&arg.value);
             }
             return Ty::unit();
         }
-        if self.is_builtin_assert_call(callee) {
+        if self.is_builtin_assert_call(call_callee) {
             return self.check_builtin_assert_call(&normalized_args, span);
         }
-        if let Some(ty) = self.check_builtin_static_method_call(callee, &normalized_args, span) {
+        if let Some(ty) = self.check_builtin_static_method_call(call_callee, &normalized_args, span)
+        {
             return ty;
         }
-        if let Some(ty) = self.check_builtin_static_factory_call(callee, &normalized_args, span) {
+        if let Some(ty) =
+            self.check_builtin_static_factory_call(call_callee, &normalized_args, span)
+        {
             return ty;
         }
-        if self.check_extension_hidden_method_call(callee, &normalized_args) {
+        if self.check_extension_hidden_method_call(call_callee, &normalized_args) {
             return Ty::Unknown;
         }
         if let Some(ty) = self.try_check_constructor_call(
-            callee,
+            call_callee,
             &normalized_args,
             uses_brace_syntax,
             span,
@@ -4392,11 +4434,16 @@ impl<'a> Checker<'a> {
             return ty;
         }
         if let Some(selection) =
-            self.callable_signature_for_args(callee, &normalized_args, uses_brace_syntax)
+            self.callable_signature_for_args(call_callee, &normalized_args, uses_brace_syntax)
         {
-            return self.check_callable_selection_call(&selection, callee, &normalized_args, span);
+            return self.check_callable_selection_call(
+                &selection,
+                call_callee,
+                &normalized_args,
+                span,
+            );
         }
-        let callee_ty = self.check_expr(callee);
+        let callee_ty = self.check_expr(call_callee);
         match callee_ty {
             Ty::Function(params, ret) => {
                 let sig_params = params
@@ -4480,7 +4527,7 @@ impl<'a> Checker<'a> {
         callee: &Expr,
         args: &[crate::ast::CallArg],
     ) -> bool {
-        let [arg] = args else {
+        let Some(arg) = args.last() else {
             return false;
         };
         if arg.name.is_some() || !matches!(arg.value, Expr::Block { .. }) {
@@ -4489,10 +4536,32 @@ impl<'a> Checker<'a> {
         let Some((params, _)) = self.callable_signature_for_args_probe(callee, args, true) else {
             return false;
         };
-        let Some(param) = params.first() else {
+        let Some(param) = params.get(args.len().saturating_sub(1)) else {
             return false;
         };
         matches!(&param.ty, Ty::Function(fn_params, _) if fn_params.is_empty())
+    }
+
+    fn append_trailing_brace_call_args<'expr>(
+        &self,
+        callee: &'expr Expr,
+        args: &[crate::ast::CallArg],
+        uses_brace_syntax: bool,
+    ) -> (&'expr Expr, Vec<crate::ast::CallArg>) {
+        if uses_brace_syntax {
+            if let Expr::Call {
+                callee: inner_callee,
+                args: inner_args,
+                uses_brace_syntax: false,
+                ..
+            } = callee
+            {
+                let mut combined = inner_args.clone();
+                combined.extend(args.iter().cloned());
+                return (inner_callee.as_ref(), combined);
+            }
+        }
+        (callee, args.to_vec())
     }
 
     fn interface_sig_from_type_ref(&mut self, interface: &TypeRef) -> Option<TypeSig> {
@@ -6740,6 +6809,14 @@ impl<'a> Checker<'a> {
         match receiver {
             Ty::Named(type_name, args) => {
                 let Some(sig) = self.lookup_any_type(type_name) else {
+                    let extension_methods =
+                        self.extension_method_sigs_for_named_type(type_name, args, name);
+                    if let Some(first) = extension_methods.first() {
+                        return Some(Ty::Function(
+                            first.params.iter().map(|param| param.ty.clone()).collect(),
+                            Box::new(first.ret.clone()),
+                        ));
+                    }
                     return universal_member_type(name);
                 };
                 let subst = sig
@@ -6795,7 +6872,12 @@ impl<'a> Checker<'a> {
         match receiver {
             Ty::Named(type_name, args) => {
                 let Some(sig) = self.lookup_any_type(type_name) else {
-                    return universal_method_sigs(name);
+                    let extension_methods =
+                        self.extension_method_sigs_for_named_type(type_name, args, name);
+                    if extension_methods.is_empty() {
+                        return universal_method_sigs(name);
+                    }
+                    return Some(extension_methods);
                 };
                 let Some(methods) = self.method_sigs_for_type(&sig, name) else {
                     let extension_methods =
@@ -6846,15 +6928,16 @@ impl<'a> Checker<'a> {
         args: &[Ty],
         name: &str,
     ) -> Vec<FunctionSig> {
-        let Some(sig) = self.lookup_any_type(type_name) else {
-            return Vec::new();
-        };
-        let subst = sig
-            .type_params
-            .iter()
-            .cloned()
-            .zip(args.iter().cloned())
-            .collect::<HashMap<_, _>>();
+        let subst = self
+            .lookup_any_type(type_name)
+            .map(|sig| {
+                sig.type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
         self.world
             .extension_method_sigs(self.module, type_name, name)
             .into_iter()

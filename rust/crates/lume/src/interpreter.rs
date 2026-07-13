@@ -1805,6 +1805,18 @@ impl<'a> Interpreter<'a> {
 
     fn runtime_type_id_for_value(&self, value: &Value) -> Option<runtime::RuntimeTypeId> {
         match value {
+            Value::Bool(_) => self
+                .runtime
+                .type_id_by_name_kind("Bool", crate::ast::TypeKind::Class),
+            Value::Int(_) => self
+                .runtime
+                .type_id_by_name_kind("Int", crate::ast::TypeKind::Class),
+            Value::Float(_) => self
+                .runtime
+                .type_id_by_name_kind("Float", crate::ast::TypeKind::Class),
+            Value::Rune(_) => self
+                .runtime
+                .type_id_by_name_kind("Rune", crate::ast::TypeKind::Class),
             Value::List(_) => self
                 .runtime
                 .type_id_by_name_kind("List", crate::ast::TypeKind::Class),
@@ -7459,5 +7471,16 @@ $name
         let run = run_path(path, None).expect("run extension methods");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "Ada (36)\ntrue\n");
+    }
+
+    #[test]
+    fn run_path_executes_unit_test_support_module() {
+        let path = repo_root().join("examples/unit_tests.lum");
+        let run = run_path(path, None).expect("run unit tests");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "it compares primitives\nit supports no-arg trailing test blocks\n"
+        );
     }
 }

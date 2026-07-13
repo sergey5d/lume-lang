@@ -122,6 +122,7 @@ impl<'a> Lowerer<'a> {
                     let id = self.program.add_type(ty);
                     self.type_ids.insert(key, id);
                 }
+                Item::Extension(block) => self.declare_builtin_extension_target(block),
                 Item::Function(function) => {
                     if self.function_ids.contains_key(&function.name) {
                         continue;
@@ -172,6 +173,24 @@ impl<'a> Lowerer<'a> {
                 _ => {}
             }
         }
+    }
+
+    fn declare_builtin_extension_target(&mut self, block: &ExtensionBlock) {
+        let Some(target_name) = named_type_name(&block.target) else {
+            return;
+        };
+        if !is_builtin_extension_target(target_name) {
+            return;
+        }
+        let key = (target_name.to_string(), ast::TypeKind::Class);
+        if self.type_ids.contains_key(&key) {
+            return;
+        }
+        let mut ty = ir::TypeDef::new(ast::TypeKind::Class, target_name);
+        ty.visibility = ast::Visibility::Default;
+        ty.span = Some(block.span);
+        let id = self.program.add_type(ty);
+        self.type_ids.insert(key, id);
     }
 
     fn define_items(&mut self) {
@@ -3898,7 +3917,9 @@ impl<'a> FunctionLowerer<'a> {
                 args,
             } => {
                 let Some(ty) = self.program.types.iter().find(|ty| ty.name == *type_name) else {
-                    return builtin_member_type(receiver, name);
+                    return self
+                        .extension_member_type(type_name, args, name)
+                        .or_else(|| builtin_member_type(receiver, name));
                 };
                 let subst = ir_type_subst(ty, args);
                 if let Some(field) = ty.fields.iter().find(|field| field.name == name) {
@@ -3915,6 +3936,11 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 builtin_member_type(receiver, name)
             }
+            ir::Type::Bool | ir::Type::Int | ir::Type::Float | ir::Type::Str => {
+                let type_name = builtin_extension_receiver_name(receiver)?;
+                self.extension_member_type(type_name, &[], name)
+                    .or_else(|| builtin_member_type(receiver, name))
+            }
             ir::Type::Record(fields) => fields
                 .iter()
                 .find(|field| field.name == name)
@@ -3922,6 +3948,27 @@ impl<'a> FunctionLowerer<'a> {
             ir::Type::Unknown => Some(ir::Type::Unknown),
             _ => builtin_member_type(receiver, name),
         }
+    }
+
+    fn extension_member_type(
+        &self,
+        type_name: &str,
+        args: &[ir::Type],
+        name: &str,
+    ) -> Option<ir::Type> {
+        let ty = self.program.types.iter().find(|ty| {
+            ty.name == type_name
+                && matches!(
+                    ty.kind,
+                    ast::TypeKind::Class
+                        | ast::TypeKind::Record
+                        | ast::TypeKind::Enum
+                        | ast::TypeKind::Interface
+                )
+        })?;
+        let subst = ir_type_subst(ty, args);
+        let function = self.find_method_function(ty, name)?;
+        self.function_type_with_subst(function, &subst)
     }
 
     fn is_callable_reference_expr(&self, expr: &Expr) -> bool {
@@ -4377,10 +4424,15 @@ impl<'a> FunctionLowerer<'a> {
                 style,
                 ..
             } => {
+                let (surface_callee, surface_args) =
+                    self.append_trailing_brace_call_args(callee, args, *style);
                 let (candidate_callee, candidate_type_args) =
-                    self.split_generic_call_callee(callee);
-                let candidate_normalized_args =
-                    self.normalize_trailing_brace_call_args(candidate_callee, args, *style);
+                    self.split_generic_call_callee(surface_callee);
+                let candidate_normalized_args = self.normalize_trailing_brace_call_args(
+                    candidate_callee,
+                    &surface_args,
+                    *style,
+                );
                 let use_generic_callee = !candidate_type_args.is_empty()
                     && (self
                         .reified_call_target(candidate_callee, &candidate_normalized_args)
@@ -4394,9 +4446,13 @@ impl<'a> FunctionLowerer<'a> {
                     )
                 } else {
                     (
-                        callee.as_ref(),
+                        surface_callee,
                         Vec::new(),
-                        self.normalize_trailing_brace_call_args(callee, args, *style),
+                        self.normalize_trailing_brace_call_args(
+                            surface_callee,
+                            &surface_args,
+                            *style,
+                        ),
                     )
                 };
                 let ordered_args = self
@@ -4982,6 +5038,28 @@ impl<'a> FunctionLowerer<'a> {
             }
         }
         args.to_vec()
+    }
+
+    fn append_trailing_brace_call_args<'expr>(
+        &self,
+        callee: &'expr Expr,
+        args: &[core::CallArg],
+        style: core::CallStyle,
+    ) -> (&'expr Expr, Vec<core::CallArg>) {
+        if style == core::CallStyle::Brace {
+            if let Expr::Call {
+                callee: inner_callee,
+                args: inner_args,
+                style: core::CallStyle::Paren,
+                ..
+            } = callee
+            {
+                let mut combined = inner_args.clone();
+                combined.extend(args.iter().cloned());
+                return (inner_callee.as_ref(), combined);
+            }
+        }
+        (callee, args.to_vec())
     }
 
     fn brace_call_targets_explicit_constructor(&self, callee: &Expr) -> bool {
@@ -5662,6 +5740,23 @@ fn lazy_storage_type(value_ty: ir::Type) -> ir::Type {
 fn lazy_value_type(storage_ty: &ir::Type) -> Option<ir::Type> {
     match storage_ty {
         ir::Type::Function { params, ret } if params.is_empty() => Some((**ret).clone()),
+        _ => None,
+    }
+}
+
+fn is_builtin_extension_target(name: &str) -> bool {
+    matches!(
+        name,
+        "Bool" | "Float" | "Float32" | "Int" | "Int32" | "Rune" | "Str"
+    )
+}
+
+fn builtin_extension_receiver_name(ty: &ir::Type) -> Option<&'static str> {
+    match ty {
+        ir::Type::Bool => Some("Bool"),
+        ir::Type::Int => Some("Int"),
+        ir::Type::Float => Some("Float"),
+        ir::Type::Str => Some("Str"),
         _ => None,
     }
 }

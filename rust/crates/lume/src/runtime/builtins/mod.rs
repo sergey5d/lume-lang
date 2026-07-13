@@ -54,6 +54,12 @@ pub(super) fn force_lazy_arg(
 /// these definitions with user-defined IR-derived types.
 pub(super) fn builtin_types() -> Vec<RuntimeType> {
     vec![
+        empty_builtin_type("Bool"),
+        empty_builtin_type("Float"),
+        empty_builtin_type("Float32"),
+        empty_builtin_type("Int"),
+        empty_builtin_type("Int32"),
+        empty_builtin_type("Rune"),
         str_type::define(),
         option_type::define(),
         result_type::define(),
@@ -62,6 +68,20 @@ pub(super) fn builtin_types() -> Vec<RuntimeType> {
         set_type::define(),
         map_type::define(),
     ]
+}
+
+fn empty_builtin_type(name: &str) -> RuntimeType {
+    RuntimeType {
+        id: RuntimeTypeId(usize::MAX),
+        ir_type_id: None,
+        kind: crate::ast::TypeKind::Class,
+        name: name.to_string(),
+        fields: Vec::new(),
+        field_init: None,
+        methods: Vec::new(),
+        enum_cases: Vec::new(),
+        with_bounds: Vec::new(),
+    }
 }
 
 pub(super) fn assign_type_ids(types: &mut [RuntimeType], start: usize) {
