@@ -62,7 +62,7 @@ curl -X POST http://localhost:7070/api/echo -d 'from curl'
 The sample imports the Lume HTTP API as:
 
 ```txt
-use lume/http/javalin/{HttpServer, Controller, GET, POST}
+use lume/http/javalin/{HttpServer, Controller, Get, Post}
 ```
 
 The controller is pure Lume:
@@ -70,7 +70,7 @@ The controller is pure Lume:
 ```txt
 @Controller { path: "/api" }
 class GreetingController {
-    @GET { path: "/health" }
+    @Get { path: "/health" }
     def health() Str = "ok"
 }
 ```
@@ -78,4 +78,4 @@ class GreetingController {
 `HttpServer.addController(controller)` is written in Lume. It inspects Lume
 annotations through runtime metadata and registers discovered routes on a tiny
 Java `JavalinBackend`. The Java backend knows how to expose `get`, `post`, and
-`run`; it does not know application paths or controllers.
+the other HTTP verbs plus `run`; it does not know application paths or controllers.

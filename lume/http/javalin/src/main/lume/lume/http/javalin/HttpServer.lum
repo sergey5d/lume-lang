@@ -11,22 +11,27 @@ annotation Controller {
     path Str = ""
 }
 
-annotation GET {
+annotation Get {
     path Str
     contentType Str = "text/plain"
 }
 
-annotation POST {
+annotation Post {
     path Str
     contentType Str = "text/plain"
 }
 
-annotation PUT {
+annotation Put {
     path Str
     contentType Str = "text/plain"
 }
 
-annotation PATCH {
+annotation Patch {
+    path Str
+    contentType Str = "text/plain"
+}
+
+annotation Delete {
     path Str
     contentType Str = "text/plain"
 }
@@ -174,6 +179,31 @@ impl JavalinBackend {
         this
     }
 
+    def delete(path Str, contentType Str, controller Any, method Method) JavalinBackend {
+        this.app.delete(path, Handler {
+            def handle(ctx JavalinRawContext) Unit {
+                params [Param] = method.params()
+                if params.size() == 0 {
+                    HttpResponder.render(ctx, method.invoke(controller), contentType)
+                } else {
+                    if let Some(firstValue) = params.get(0) {
+                        first Param = firstValue
+                        paramType Type[_] = first.paramType()
+                        if paramType.name().getOr("") == "Context" {
+                            HttpResponder.render(ctx, method.invoke(controller, JavalinHttpContext(ctx)), contentType)
+                        } else {
+                            HttpResponder.render(ctx, method.invoke(controller, ctx.body()), contentType)
+                        }
+                    } else {
+                        HttpResponder.render(ctx, method.invoke(controller), contentType)
+                    }
+                }
+            }
+        })
+
+        this
+    }
+
     def run() JavalinBackend {
         this.app.start(this.port)
         this
@@ -210,8 +240,8 @@ impl HttpServer {
         for methodValue <- methods {
             method Method = methodValue
 
-            if method.hasAnnotation[GET]() {
-                if let Some(routeValue) = method.annotation[GET]() {
+            if method.hasAnnotation[Get]() {
+                if let Some(routeValue) = method.annotation[Get]() {
                     route AnnotationValue = routeValue
                     path Str = prefix + route.str("path").getOr("")
                     contentType Str = route.str("contentType").getOr("text/plain")
@@ -219,8 +249,8 @@ impl HttpServer {
                 }
             }
 
-            if method.hasAnnotation[POST]() {
-                if let Some(routeValue) = method.annotation[POST]() {
+            if method.hasAnnotation[Post]() {
+                if let Some(routeValue) = method.annotation[Post]() {
                     route AnnotationValue = routeValue
                     path Str = prefix + route.str("path").getOr("")
                     contentType Str = route.str("contentType").getOr("text/plain")
@@ -228,8 +258,8 @@ impl HttpServer {
                 }
             }
 
-            if method.hasAnnotation[PUT]() {
-                if let Some(routeValue) = method.annotation[PUT]() {
+            if method.hasAnnotation[Put]() {
+                if let Some(routeValue) = method.annotation[Put]() {
                     route AnnotationValue = routeValue
                     path Str = prefix + route.str("path").getOr("")
                     contentType Str = route.str("contentType").getOr("text/plain")
@@ -237,12 +267,21 @@ impl HttpServer {
                 }
             }
 
-            if method.hasAnnotation[PATCH]() {
-                if let Some(routeValue) = method.annotation[PATCH]() {
+            if method.hasAnnotation[Patch]() {
+                if let Some(routeValue) = method.annotation[Patch]() {
                     route AnnotationValue = routeValue
                     path Str = prefix + route.str("path").getOr("")
                     contentType Str = route.str("contentType").getOr("text/plain")
                     this.backend.patch(path, contentType, controller, method)
+                }
+            }
+
+            if method.hasAnnotation[Delete]() {
+                if let Some(routeValue) = method.annotation[Delete]() {
+                    route AnnotationValue = routeValue
+                    path Str = prefix + route.str("path").getOr("")
+                    contentType Str = route.str("contentType").getOr("text/plain")
+                    this.backend.delete(path, contentType, controller, method)
                 }
             }
         }

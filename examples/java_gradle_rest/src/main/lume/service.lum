@@ -1,16 +1,16 @@
 module examples/java_gradle_rest
 
-use lume/http/javalin/{HttpServer, Controller, GET, POST}
+use lume/http/javalin/{HttpServer, Controller, Get, Post}
 
 @Controller { path: "/api" }
 class GreetingController {
-    @GET { path: "/health" }
+    @Get { path: "/health" }
     def health() Str = "ok"
 
-    @GET { path: "/hello" }
+    @Get { path: "/hello" }
     def hello() Str = "{ \"message\": \"hello from Lume via Gradle\" }"
 
-    @POST { path: "/echo" }
+    @Post { path: "/echo" }
     def echo(body Str) Str = """{ "echo": "$body" }"""
 }
 

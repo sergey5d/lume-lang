@@ -10,7 +10,7 @@ three report queries currently run sequentially, which means the endpoint pays
 roughly three database round trips. With `fork`, those queries can overlap:
 
 ```lume
-@GET { path: "/reports/summary", contentType: "application/json" }
+@Get { path: "/reports/summary", contentType: "application/json" }
 def summary(ctx Context) Result[HttpResponse, HttpError] {
     orgId OrgId = try this.orgId(ctx)
 
