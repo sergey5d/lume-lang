@@ -2695,6 +2695,70 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_compiles_tuple_destructuring() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping tuple destructuring Java test because a JDK tool is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-tuple-destructuring");
+        let source = temp.join("tuple_destructuring.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/tupledestructuring
+
+def pick(flag Bool) (Int, Int) =
+    if flag {
+        (1, 2)
+    } else {
+        (3, 4)
+    }
+
+def main() Unit {
+    let (left Int, right Int) = pick(true)
+    println(left + right)
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module =
+            fs::read_to_string(out.join("demo/tupledestructuring/TupledestructuringModule.java"))
+                .expect("read module");
+        assert!(module.contains(".first()"));
+        assert!(module.contains(".second()"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.tupledestructuring.TupledestructuringMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "3\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn emits_structured_java_for_simple_enum_match_methods() {
         let temp = temp_path("lume-java-enum-match-methods");
         let source = temp.join("maybe.lum");

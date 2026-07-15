@@ -236,6 +236,13 @@ Current behavior:
 - `Either[SourceL, ...]` can propagate only into `Either[TargetL, ...]` when `SourceL` is assignable to `TargetL`
 - explicit wrapper-style error remapping is supported with `try source catch err => mappedFailure`
 
+Open `try catch` ergonomics question:
+- currently the `catch` handler produces the failure payload, and the compiler wraps it into `Err(...)` or `Left(...)` based on the enclosing return type
+- consider whether the handler should instead allow or require returning the full failure container, such as `Err(mappedFailure)`, and reject success containers like `Ok(...)`
+- the payload-only model keeps handlers compact and avoids accidentally returning success from a failure path
+- the explicit-container model may read more directly to programmers who think of `catch` as "return this failure"
+- if explicit containers are allowed, diagnostics should prevent confusing forms such as producing `Ok(...)` from a `catch` handler unless we deliberately choose a broader recovery/fallback feature
+
 ### 12. Smarter Type Narrowing
 
 Later improvements could include:

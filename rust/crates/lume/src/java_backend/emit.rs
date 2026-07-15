@@ -2260,11 +2260,18 @@ impl<'a> FunctionEmitter<'a> {
             ir::RValue::Field { base, name } if name == "runtimeType" => {
                 self.emit_runtime_type_for_operand(base)
             }
-            ir::RValue::Field { base, name } => Some(format!(
-                "{}.{}",
-                self.emit_operand(base)?,
-                java_member_name(name)
-            )),
+            ir::RValue::Field { base, name } => {
+                let base_expr = self.emit_operand(base)?;
+                if self
+                    .operand_type(base)
+                    .is_some_and(|ty| matches!(ty, ir::Type::Tuple(_)))
+                {
+                    let accessor = tuple_accessor_name(name)?;
+                    Some(format!("{base_expr}.{accessor}()"))
+                } else {
+                    Some(format!("{base_expr}.{}", java_member_name(name)))
+                }
+            }
             ir::RValue::TypeOf { ty } => Some(type_value_expr(ty, self.names)),
             ir::RValue::Cast { operand, .. } => self.emit_operand(operand),
             ir::RValue::NamedValue { path } => self.emit_named_runtime_value(path),
@@ -3384,6 +3391,9 @@ impl<'a> FunctionEmitter<'a> {
                 .iter()
                 .find(|field| field.name == field_name)
                 .map(|field| field.ty.clone()),
+            ir::Type::Tuple(items) => tuple_field_index(field_name)
+                .and_then(|index| items.get(index))
+                .cloned(),
             _ => None,
         }
     }
@@ -3850,6 +3860,10 @@ impl<'a> FunctionEmitter<'a> {
                 interfaces.first().cloned()
             }
             ir::RValue::Cast { ty, .. } => Some(ty.clone()),
+            ir::RValue::Field { base, name } => {
+                let base_ty = self.operand_type(base)?;
+                self.field_type(&base_ty, name)
+            }
             ir::RValue::Index { base, .. } => {
                 let base_ty = self.operand_type(base)?;
                 self.index_result_type(&base_ty)
@@ -4579,6 +4593,25 @@ fn java_type_name(name: &str) -> String {
 
 fn java_member_name(name: &str) -> String {
     sanitize_identifier(name, IdentifierStyle::Member)
+}
+
+fn tuple_field_index(name: &str) -> Option<usize> {
+    let index = name.strip_prefix('_')?.parse::<usize>().ok()?;
+    (1..=8).contains(&index).then_some(index - 1)
+}
+
+fn tuple_accessor_name(name: &str) -> Option<&'static str> {
+    match tuple_field_index(name)? {
+        0 => Some("first"),
+        1 => Some("second"),
+        2 => Some("third"),
+        3 => Some("fourth"),
+        4 => Some("fifth"),
+        5 => Some("sixth"),
+        6 => Some("seventh"),
+        7 => Some("eighth"),
+        _ => None,
+    }
 }
 
 fn java_local_name(local: &ir::Local) -> String {
