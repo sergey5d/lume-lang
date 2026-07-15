@@ -135,9 +135,9 @@ def main() Unit {
     println(firstName.orPanic())
 
     profileSource Option[Profile] = Some(user.profile())
-    let Some(boundName) = profileSource.->nameOpt().->first else return ()
+    guard Some(boundName) = profileSource.->nameOpt().->first else return ()
     println(boundName)
 
-    let extractedName Str <- profileSource.->nameOpt().->first else return ()
+    guard extractedName Str <- profileSource.->nameOpt().->first else return ()
     println(extractedName)
 }

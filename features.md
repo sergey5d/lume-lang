@@ -428,11 +428,11 @@ refutable:
 - `if let PATTERN = value { ... }` for testing and binding with a branch
 - `if let { PATTERN = value ... } { ... }` for multiple sequential refutable bindings in one condition
 - `if let PATTERN = value && let OTHER = next && ready { ... }` for mixed refutable and boolean checks in one condition
-- `let PATTERN = value else { ... }` for refutable binding with an explicit failure path
-- `let { PATTERN = value ... } else { ... }` for multiple sequential refutable bindings sharing one fallback
+- `guard PATTERN = value else { ... }` for refutable binding with an explicit failure path
+- `guard { PATTERN = value ... } else { ... }` for multiple sequential refutable bindings sharing one fallback
 - `expect PATTERN = value` for assertive refutable binding that panics on mismatch; if the binding is irrefutable, use `let`
 - `assert(condition)` and `assert(condition, message)` for boolean assertions that panic when false
-- `PATTERN <- source` as shorthand for the success case inside `if let`, `let ... else`, and `expect`
+- `PATTERN <- source` as shorthand for the success case inside `if let`, `guard ... else`, and `expect`
   `Some(PATTERN)` for `Option`, `Ok(PATTERN)` for `Result`, and `Right(PATTERN)` for `Either`
   plain `let` accepts this form only when the source expression itself proves the success case, such as `let item <- Some(5)`
 - `value = try source` for propagation from `Option`, `Result`, and `Either`

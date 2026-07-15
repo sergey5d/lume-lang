@@ -321,7 +321,7 @@ pub struct Binding {
     pub span: Span,
 }
 
-/// One `PATTERN = value` clause inside grouped `let { ... } else ...` or
+/// One `PATTERN = value` clause inside grouped `guard { ... } else ...` or
 /// `if let { ... } { ... }` syntax.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RefutableClause {
@@ -435,8 +435,8 @@ pub struct ForStmt {
     pub span: Span,
 }
 
-/// A `let PATTERN = expr else { ... }` statement, or a grouped
-/// `let { ... } else { ... }`, whose fallback must exit the current control
+/// A `guard PATTERN = expr else { ... }` statement, or a grouped
+/// `guard { ... } else { ... }`, whose fallback must exit the current control
 /// flow path on match failure, either explicitly or through a `Never`-returning
 /// call.
 #[derive(Debug, Clone, PartialEq)]

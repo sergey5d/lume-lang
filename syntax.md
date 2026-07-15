@@ -136,7 +136,7 @@ userOpt.->profileOpt().name     # error: Option[Profile] has no member
                                 # 'name'; use '.->name'
 ```
 
-Chains normally stay lifted and are consumed by `try`, `let`,
+Chains normally stay lifted and are consumed by `try`, `guard`,
 `if let`, or `match`:
 
 ```txt
@@ -535,7 +535,7 @@ enum OptionX[T] {
 }
 ```
 
-Arbitrary statements such as `if`, `for`, `match`, `defer`, `expect`, or expression statements are not valid at top level. Put executable code inside a function such as `main() { ... }`.
+Arbitrary statements such as `if`, `for`, `match`, `defer`, `guard`, `expect`, or expression statements are not valid at top level. Put executable code inside a function such as `main() { ... }`.
 
 ## Variable Declarations
 
@@ -1681,6 +1681,8 @@ Main statement forms:
 - `for`
 - `while`
 - `defer`
+- `guard`
+- `expect`
 - `return`
 - `break`
 - `continue`
@@ -1818,10 +1820,10 @@ let (left, right) = pair
 If the pattern can fail, plain `let` is rejected. Use a refutable binding form
 instead.
 
-`let ... else` is the refutable binding form with an explicit fallback path:
+`guard ... else` is the refutable binding form with an explicit fallback path:
 
 ```txt
-let Some(item) = maybeValue else {
+guard Some(item) = maybeValue else {
     return Err("missing")
 }
 ```
@@ -1829,15 +1831,15 @@ let Some(item) = maybeValue else {
 For success-carrying values, `<-` is shorthand for the success case:
 
 ```txt
-let item <- maybeValue else {
+guard item <- maybeValue else {
     return Err("missing")
 }
 ```
 
 This is equivalent to:
-- `let Some(item) = maybeValue else { ... }` for `Option[T]`
-- `let Ok(item) = maybeResult else { ... }` for `Result[T, E]`
-- `let Right(item) = maybeEither else { ... }` for `Either[L, R]`
+- `guard Some(item) = maybeValue else { ... }` for `Option[T]`
+- `guard Ok(item) = maybeResult else { ... }` for `Result[T, E]`
+- `guard Right(item) = maybeEither else { ... }` for `Either[L, R]`
 
 The shorthand requires the source type to be statically known as one of these
 forms. If the source type is unknown, use an explicit pattern instead.
@@ -1845,11 +1847,11 @@ forms. If the source type is unknown, use an explicit pattern instead.
 Type-pattern binding is also supported:
 
 ```txt
-let worker Worker = value else {
+guard worker Worker = value else {
     return Err("wrong kind")
 }
 
-let _ Worker = value else {
+guard _ Worker = value else {
     return Err("wrong kind")
 }
 ```
@@ -1857,7 +1859,7 @@ let _ Worker = value else {
 Grouped refutable bindings share one fallback:
 
 ```txt
-let {
+guard {
     Some(left) = maybeLeft
     Some(right) = maybeRight
 } else {
@@ -1865,7 +1867,7 @@ let {
 }
 ```
 
-`let ... else` is statement-oriented:
+`guard ... else` is statement-oriented:
 - the pattern is matched against the right-hand value
 - if the match succeeds, bindings remain visible after the statement
 - if the match fails, the `else` block is evaluated and must exit the current control-flow path, typically with `return`, `break`, `continue`, or a call whose return type is `Never`
@@ -1911,7 +1913,7 @@ expect {
 }
 ```
 
-`expect` is statement-only and does not support `else`; use `let ... else`
+`expect` is statement-only and does not support `else`; use `guard ... else`
 when you want an explicit fallback path.
 
 Use the runtime/prelude `assert(...)` function for plain boolean assertions:
@@ -1978,17 +1980,17 @@ row = try Db.query(id) catch err => AppError.Db(err)
 value = try sourceEither catch left => AppError.FromLeft(left)
 ```
 
-Multiple dependent unwraps can be written as sequential `let ... else` / `try`
-statements or as a grouped `let` block:
+Multiple dependent unwraps can be written as sequential `guard ... else` / `try`
+statements or as a grouped `guard` block:
 
 ```txt
 left = try maybeLeft
 
-let Some(right) = maybeRight else {
+guard Some(right) = maybeRight else {
     return Err("missing")
 }
 
-let {
+guard {
     Some(left) = maybeLeft
     Some(right) = maybeRight
 } else {
@@ -2077,7 +2079,7 @@ Refutable logic goes in the loop body:
 
 ```txt
 for maybeItem <- items {
-    let Some(item) = maybeItem else {
+    guard Some(item) = maybeItem else {
         continue
     }
     OS.println(item)
@@ -2144,7 +2146,7 @@ values = for {
 } yield x + y
 ```
 
-Refutable `let`, `let ... else`, `expect`, reassignment, mutation, expression
+Refutable `guard`, `expect`, reassignment, mutation, expression
 statements, and guards are not clause forms. Put that logic in the body or use
 helpers such as `filterMap`:
 
@@ -2159,6 +2161,7 @@ Mental model:
 ```txt
 for      = pulls values from iterables
 let      = destructures irrefutable values
+guard    = exits early from refutable bindings in the loop body
 match    = handles refutable cases
 yield    = produces values
 ```
@@ -2419,7 +2422,7 @@ Other operators / constructs:
 
 - `is` for runtime type checks
 - `lift` for assembling shapes or tuples inside `Option`, `Result`, or `Either`
-- `<-` for `for` iteration and success-case extraction in `if let`, `let ... else`, and `expect`
+- `<-` for `for` iteration and success-case extraction in `if let`, `guard ... else`, and `expect`
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases
 - `.->` for per-hop lifted access through `Option`, `Result`, and `Either`

@@ -7,6 +7,7 @@
 # tuple colon 30 colon
 # tuple skip only unused
 # tuple skip 14 xxx
+# tuple if 1 2
 # 0
 
 def main() Int {
@@ -34,6 +35,13 @@ def main() Int {
 
     let (skippedTupleLeft Int, _, skippedTupleRight Str) = (14, "drop", "xxx")
     println("tuple skip", skippedTupleLeft, skippedTupleRight)
+
+    let (ifTupleLeft Int, ifTupleRight Int) = if true {
+        (1, 2)
+    } else {
+        (3, 4)
+    }
+    println("tuple if", ifTupleLeft, ifTupleRight)
 
     0
 }

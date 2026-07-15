@@ -1,12 +1,12 @@
 # FAIL_REGEX:
-# .*for yield let clauses cannot use 'else'.*
+# .*for yield clauses do not support 'guard'.*
 
 def main() Unit {
     values [Option[Int]] = [Some(1)]
 
     mapped = for {
         maybe <- values
-        let Some(value) = maybe else {
+        guard Some(value) = maybe else {
             value = 0
         }
     } yield value

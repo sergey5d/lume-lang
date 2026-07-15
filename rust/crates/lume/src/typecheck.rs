@@ -2565,8 +2565,8 @@ impl<'a> Checker<'a> {
     fn check_let_else_stmt(&mut self, stmt: &crate::ast::LetElseStmt) {
         if self.current_return == Ty::Unknown {
             self.add_error(
-                "invalid_let_else",
-                "let-else used outside callable body",
+                "invalid_guard",
+                "guard used outside callable body",
                 stmt.span,
             );
             return;
@@ -2574,8 +2574,8 @@ impl<'a> Checker<'a> {
         self.check_block(&stmt.else_block);
         if !self.block_guarantees_control_exit(&stmt.else_block) {
             self.add_error(
-                "non_diverging_let_else",
-                "let-else fallback must exit control flow with 'return', 'break', 'continue', or a call returning Never",
+                "non_diverging_guard",
+                "guard fallback must exit control flow with 'return', 'break', 'continue', or a call returning Never",
                 stmt.else_block.span,
             );
         }
@@ -2763,7 +2763,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "refutable_let_pattern",
                 format!(
-                    "plain 'let' pattern may fail for value of type '{}'; use 'let ... else ...' instead",
+                    "plain 'let' pattern may fail for value of type '{}'; use 'guard ... else ...' instead",
                     scrutinee.describe()
                 ),
                 span,
@@ -11529,12 +11529,12 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_non_diverging_let_else() {
+    fn rejects_non_diverging_guard() {
         let program = parse_inline(
             r#"
 def main() Unit {
     value Option[Int] = Some(1)
-    let Some(item) = value else {
+    guard Some(item) = value else {
         ()
     }
     OS.println(item)
@@ -11544,7 +11544,7 @@ def main() Unit {
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diag| {
-                diag.code == "non_diverging_let_else"
+                diag.code == "non_diverging_guard"
                     && diag
                         .message
                         .contains("must exit control flow with 'return', 'break', 'continue', or a call returning Never")
@@ -11706,7 +11706,7 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_diverging_let_else_with_continue() {
+    fn allows_diverging_guard_with_continue() {
         let program = parse_inline(
             r#"
 enum MaybeInt {
@@ -11719,7 +11719,7 @@ enum MaybeInt {
 def main() Unit {
     values List[MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX]
     for value <- values {
-        let SomeX(item) = value else continue
+        guard SomeX(item) = value else continue
         OS.println(item)
     }
 }
@@ -11730,7 +11730,7 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_let_else_with_never_call_fallback() {
+    fn allows_guard_with_never_call_fallback() {
         let program = parse_inline(
             r#"
 enum MaybeInt {
@@ -11743,7 +11743,7 @@ enum MaybeInt {
 def fail() Never = panic("boom")
 
 def main(value MaybeInt) Unit {
-    let SomeX(item) = value else fail()
+    guard SomeX(item) = value else fail()
     OS.println(item)
 }
 "#,
@@ -11761,8 +11761,8 @@ def main(
     resultValue Result[Int, Str],
     eitherValue Either[Str, Int]
 ) Int {
-    let optionItem <- optionValue else return 0
-    let resultItem <- resultValue else return 1
+    guard optionItem <- optionValue else return 0
+    guard resultItem <- resultValue else return 1
     expect eitherItem <- eitherValue
     expect {
         left <- optionValue
@@ -12029,7 +12029,7 @@ def main(
             .iter()
             .filter(|diag| {
                 diag.code == "refutable_let_pattern"
-                    && diag.message.contains("use 'let ... else ...' instead")
+                    && diag.message.contains("use 'guard ... else ...' instead")
             })
             .count();
         assert_eq!(matches, 6, "{:#?}", result.diagnostics);
@@ -12040,7 +12040,7 @@ def main(
         let program = parse_inline(
             r#"
 def main(value) Int {
-    let item <- value else return 0
+    guard item <- value else return 0
     return 0
 }
 "#,

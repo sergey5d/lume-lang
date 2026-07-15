@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# non_diverging_guard at .*: guard fallback must exit control flow with 'return', 'break', 'continue', or a call returning Never
+
+enum MaybeInt {
+    case NoneX
+    case SomeX {
+        value Int
+    }
+}
+
+def main() Unit {
+    value MaybeInt = MaybeInt.NoneX
+    guard SomeX(item) = value else ()
+    println(item)
+}

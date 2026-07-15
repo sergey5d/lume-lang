@@ -22,9 +22,9 @@ def main() Unit {
         }
     )
 
-    let Some(first) = extracted.get(0) else return ()
-    let Some(second) = extracted.get(1) else return ()
-    let Some(third) = extracted.get(2) else return ()
+    guard Some(first) = extracted.get(0) else return ()
+    guard Some(second) = extracted.get(1) else return ()
+    guard Some(third) = extracted.get(2) else return ()
 
     println("first " + first.getOr(0))
     println("second " + second.isEmpty())

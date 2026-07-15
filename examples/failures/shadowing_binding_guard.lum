@@ -3,6 +3,6 @@
 
 def main() Int {
     item = 1
-    let Some(item) = Some(2) else return item
+    guard Some(item) = Some(2) else return item
     item
 }

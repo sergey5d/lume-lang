@@ -7156,8 +7156,8 @@ $name
                 OS.println(match pair {
                     case PairBox(left, right) => left + right
                 })
-                let Some(first) = partialMapped.get(0) else return ()
-                let Some(second) = partialMapped.get(1) else return ()
+                guard Some(first) = partialMapped.get(0) else return ()
+                guard Some(second) = partialMapped.get(1) else return ()
                 OS.println(first.getOr(0))
                 OS.println(second.isEmpty())
             }

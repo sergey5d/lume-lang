@@ -7649,7 +7649,7 @@ mod tests {
             }
 
             def unwrap(maybe Option[Row]) Int {
-                let row <- maybe else return 0
+                guard row <- maybe else return 0
                 1
             }
             "#,

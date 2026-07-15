@@ -2818,12 +2818,12 @@ impl Maybe[T] {
 module demo/extract
 
 def length(maybe Option[Str]) Int {
-    let Some(text) = maybe else return 0
+    guard Some(text) = maybe else return 0
     text.size()
 }
 
 def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
-    let Ok(value) = result else return result
+    guard Ok(value) = result else return result
     Ok(value)
 }
 "#,
