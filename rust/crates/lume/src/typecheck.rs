@@ -1528,6 +1528,29 @@ impl<'a> Checker<'a> {
         let mut seen_default = false;
         let mut seen_variadic = false;
         for (index, param) in params.iter().enumerate() {
+            if !is_constructor {
+                if let Some(ty) = &param.ty {
+                    if is_unit_type_ref(ty) {
+                        self.add_error(
+                            "invalid_parameter_type",
+                            format!(
+                                "parameter '{}' cannot have type Unit; omit the parameter or use '() -> T' for a no-argument callback",
+                                param.name
+                            ),
+                            ty.span(),
+                        );
+                    } else if let Some(unit_span) = unit_function_param_span(ty) {
+                        self.add_error(
+                            "invalid_parameter_type",
+                            format!(
+                                "function parameter '{}' cannot use Unit as a callback parameter; write '() -> T' for a no-argument function type",
+                                param.name
+                            ),
+                            unit_span,
+                        );
+                    }
+                }
+            }
             if param.lazy && is_constructor {
                 self.add_error(
                     "invalid_lazy_param",
@@ -8702,6 +8725,30 @@ fn type_ref_named_name(reference: &TypeRef) -> Option<&str> {
 
 fn is_list_type_ref(reference: &TypeRef) -> bool {
     matches!(reference, TypeRef::Named { name, args, .. } if name == "List" && args.len() == 1)
+}
+
+fn is_unit_type_ref(reference: &TypeRef) -> bool {
+    matches!(reference, TypeRef::Named { name, args, .. } if name == "Unit" && args.is_empty())
+}
+
+fn unit_function_param_span(reference: &TypeRef) -> Option<crate::source::Span> {
+    match reference {
+        TypeRef::Function { params, .. } => params.iter().find_map(|param| {
+            if is_unit_type_ref(param) {
+                Some(param.span())
+            } else {
+                unit_function_param_span(param)
+            }
+        }),
+        TypeRef::Named { args, .. } => args.iter().find_map(unit_function_param_span),
+        TypeRef::Tuple { fields, .. } => fields
+            .iter()
+            .find_map(|field| unit_function_param_span(&field.ty)),
+        TypeRef::Record { fields, .. } => fields
+            .iter()
+            .find_map(|field| unit_function_param_span(&field.ty)),
+        TypeRef::Wildcard { .. } => None,
+    }
 }
 
 fn variadic_arg_ty(ty: &Ty) -> Option<Ty> {
