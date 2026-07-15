@@ -3798,6 +3798,12 @@ impl<'a> FunctionEmitter<'a> {
                     name: "Result".to_string(),
                     args: vec![ir::Type::Unit, ir::Type::Unknown],
                 }),
+                ir::Callee::Intrinsic(
+                    ir::Intrinsic::Print
+                    | ir::Intrinsic::Println
+                    | ir::Intrinsic::Printf
+                    | ir::Intrinsic::Assert,
+                ) => Some(ir::Type::Unit),
                 ir::Callee::Intrinsic(ir::Intrinsic::Identity) => {
                     args.first().and_then(|arg| self.operand_type(arg))
                 }

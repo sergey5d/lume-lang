@@ -909,7 +909,7 @@ impl<'a> FunctionLowerer<'a> {
                         break;
                     }
                     Stmt::If(if_stmt) => {
-                        if let Some(value) = self.lower_if_stmt_tail_value(if_stmt) {
+                        if let Some(value) = self.lower_if_stmt_tail_value(if_stmt, expected) {
                             tail = Some(value);
                             break;
                         }
@@ -1950,23 +1950,137 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn lower_if_stmt_tail_value(&mut self, stmt: &core::IfStmt) -> Option<ir::Operand> {
-        let condition = stmt.condition.clone()?;
-        if !stmt.condition_clauses.is_empty()
-            || !stmt.pattern_clauses.is_empty()
-            || !stmt.bindings.is_empty()
-            || stmt.binding_value.is_some()
-        {
+    fn lower_if_stmt_tail_value(
+        &mut self,
+        stmt: &core::IfStmt,
+        expected: Option<&ir::Type>,
+    ) -> Option<ir::Operand> {
+        let else_branch = stmt.else_branch.as_ref()?;
+        let result = self.add_temp(expected.cloned().unwrap_or(ir::Type::Unknown));
+        let then_block = self.add_block();
+        let else_block = self.add_block();
+        let join_block = self.add_block();
+        let mut then_scope_pushed = false;
+
+        if !stmt.condition_clauses.is_empty() {
+            self.push_scope();
+            then_scope_pushed = true;
+            self.lower_if_condition_clause_chain(&stmt.condition_clauses, then_block, else_block);
+        } else if !stmt.pattern_clauses.is_empty() {
+            self.push_scope();
+            then_scope_pushed = true;
+            self.lower_refutable_clause_chain(&stmt.pattern_clauses, then_block, else_block);
+        } else if let (Some(pattern), Some(value)) = (&stmt.pattern, &stmt.pattern_value) {
+            let scrutinee = self.lower_expr(value);
+            let plan = self.lower_pattern_plan(scrutinee, pattern);
+            self.terminate(ir::Terminator {
+                span: Some(stmt.span),
+                kind: ir::TerminatorKind::Branch {
+                    condition: plan.condition,
+                    then_block,
+                    else_block,
+                },
+            });
+            self.current_block = Some(then_block);
+            self.push_scope();
+            then_scope_pushed = true;
+            self.apply_pending_bindings(plan.bindings);
+        } else if let Some(value) = &stmt.binding_value {
+            let source = self.lower_expr(value);
+            let source_local = self.add_temp(ir::Type::Unknown);
+            self.push_statement(ir::Statement {
+                span: Some(value.span()),
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Local(source_local),
+                    value: ir::RValue::Use(source),
+                },
+            });
+            let present = self.emit_temp_from_rvalue(
+                ir::RValue::Call {
+                    callee: ir::Callee::Method {
+                        receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
+                        method: "isSuccess".to_string(),
+                    },
+                    args: Vec::new(),
+                    structural: false,
+                },
+                ir::Type::Bool,
+                Some(stmt.span),
+            );
+            self.terminate(ir::Terminator {
+                span: Some(stmt.span),
+                kind: ir::TerminatorKind::Branch {
+                    condition: present,
+                    then_block,
+                    else_block,
+                },
+            });
+            self.current_block = Some(then_block);
+            let inner = self.emit_temp_from_rvalue(
+                ir::RValue::Call {
+                    callee: ir::Callee::Method {
+                        receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
+                        method: "orPanic".to_string(),
+                    },
+                    args: Vec::new(),
+                    structural: false,
+                },
+                ir::Type::Unknown,
+                Some(stmt.span),
+            );
+            self.push_scope();
+            then_scope_pushed = true;
+            self.bind_unwrap_values(&stmt.bindings, inner);
+        } else if let Some(condition) = &stmt.condition {
+            let cond = self.lower_expr(condition);
+            self.terminate(ir::Terminator {
+                span: Some(stmt.span),
+                kind: ir::TerminatorKind::Branch {
+                    condition: cond,
+                    then_block,
+                    else_block,
+                },
+            });
+            self.current_block = Some(then_block);
+        } else {
             return None;
         }
-        let else_branch = lower_if_stmt_else_expr(stmt.else_branch.as_ref()?)?;
-        let expr = Expr::If {
-            condition: Box::new(condition),
-            then_block: stmt.then_block.clone(),
-            else_branch: Box::new(else_branch),
-            span: stmt.span,
+
+        if let Some(value) = self.lower_block_value_with_expected(&stmt.then_block, expected) {
+            self.assign_if_result(result, value, stmt.then_block.span);
+        }
+        if then_scope_pushed {
+            self.pop_scope();
+        }
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        self.current_block = Some(else_block);
+        let else_value = match else_branch {
+            ElseBranch::If(stmt) => self.lower_if_stmt_tail_value(stmt, expected),
+            ElseBranch::Block(block) => self.lower_block_value_with_expected(block, expected),
         };
-        Some(self.lower_expr(&expr))
+        if let Some(value) = else_value {
+            self.assign_if_result(result, value, stmt.span);
+        }
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        let join_used = self.block_has_predecessor(join_block);
+        self.current_block = if join_used { Some(join_block) } else { None };
+        Some(ir::Operand::Copy(Box::new(ir::Place::Local(result))))
+    }
+
+    fn assign_if_result(&mut self, target: ir::LocalId, value: ir::Operand, span: Span) {
+        self.push_statement(ir::Statement {
+            span: Some(span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(target),
+                value: ir::RValue::Use(value),
+            },
+        });
     }
 
     fn lower_while_stmt(&mut self, stmt: &core::WhileStmt) {
@@ -7363,31 +7477,6 @@ fn enum_case_pattern_fields(case: &ir::EnumCase, arity: usize) -> Option<Vec<Str
             .map(|field| field.name.clone())
             .collect(),
     )
-}
-
-fn lower_if_stmt_else_expr(branch: &ElseBranch) -> Option<ElseExprBranch> {
-    match branch {
-        ElseBranch::Block(block) => Some(ElseExprBranch::Block(block.clone())),
-        ElseBranch::If(stmt) => {
-            let condition = stmt.condition.clone()?;
-            if !stmt.condition_clauses.is_empty()
-                || !stmt.pattern_clauses.is_empty()
-                || stmt.pattern.is_some()
-                || stmt.pattern_value.is_some()
-                || !stmt.bindings.is_empty()
-                || stmt.binding_value.is_some()
-            {
-                return None;
-            }
-            let else_branch = lower_if_stmt_else_expr(stmt.else_branch.as_ref()?)?;
-            Some(ElseExprBranch::If(Box::new(Expr::If {
-                condition: Box::new(condition),
-                then_block: stmt.then_block.clone(),
-                else_branch: Box::new(else_branch),
-                span: stmt.span,
-            })))
-        }
-    }
 }
 
 fn arrange_named_call_args<'a>(

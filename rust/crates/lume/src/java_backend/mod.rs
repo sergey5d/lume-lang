@@ -2774,7 +2774,7 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
         assert!(module.contains("String text_"));
         assert!(!module.contains("Object text_"));
         assert!(module.contains("lume.core.LumeUnit value_"));
-        assert!(module.contains("((lume.core.LumeUnit)"));
+        assert!(module.contains("new lume.core.Result.Ok<>(value_"));
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -3529,6 +3529,50 @@ def main() Unit {
     }
 
     #[test]
+    fn lowers_tail_if_let_value_inside_lambda_body() {
+        let temp = temp_path("lume-java-tail-if-let-lambda");
+        let source = temp.join("tail_if_let_lambda.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/tail_if_let_lambda
+
+def applyMaybe(work (Option[Int]) -> Result[Int, Str]) Result[Int, Str] {
+    work(Some(5))
+}
+
+def main() Unit {
+    result Result[Int, Str] = applyMaybe((existing Option[Int]) -> {
+        if let None = existing {
+            Ok(0)
+        } else {
+            Ok(1)
+        }
+    })
+    println("ok")
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty());
+        let module =
+            fs::read_to_string(out.join("demo/tail_if_let_lambda/Tail_if_let_lambdaModule.java"))
+                .expect("read module");
+        assert!(!module.contains(
+            "return ((lume.core.Result<Object, String>) ((Object) lume.core.LumeUnit.INSTANCE));"
+        ));
+        assert!(module.contains("new lume.core.Result.Ok<>(0L)"));
+        assert!(module.contains("new lume.core.Result.Ok<>(1L)"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn emits_named_shape_payloads_for_result_cases() {
         let temp = temp_path("lume-java-result-shape-payload");
         let source = temp.join("result_shape.lum");
@@ -3965,7 +4009,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            ""
+            "28\n"
         );
 
         let _ = fs::remove_dir_all(temp);
