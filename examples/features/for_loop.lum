@@ -13,7 +13,18 @@
 # combo 12
 # combo 22
 # combo size 4
+# pair 3
+# pair 7
+# user Ada 36
+# user Bob 42
+# products 2
+# products 12
 # 0
+
+class User {
+    name Str
+    age Int
+}
 
 def main() Int {
     var total Int = 0
@@ -50,5 +61,24 @@ def main() Int {
     }
 
     println("combo size " + combos.size())
+
+    pairs List[(Int, Int)] = [(1, 2), (3, 4)]
+    for let (left, right) <- pairs {
+        println("pair " + (left + right))
+    }
+
+    users List[User] = [User("Ada", 36), User("Bob", 42)]
+    for let { name, age } <- users {
+        println("user " + name + " " + age)
+    }
+
+    products = for {
+        let (left, right) <- pairs
+    } yield left * right
+
+    for product <- products {
+        println("products " + product)
+    }
+
     0
 }

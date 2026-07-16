@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*for let generator heads only support irrefutable tuple or shape destructuring before '<-'.*
+
+def main() Unit {
+    values List[Option[Int]] = [Some(1), None]
+
+    for let Some(value) <- values {
+        println(value)
+    }
+}

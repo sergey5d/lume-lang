@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*for yield clauses only support 'name <- iterable', 'name = expr', and 'let pattern = expr'.*
+# .*for yield clauses only support 'name <- iterable', 'let \(x, y\) <- iterable', 'let \{ \.\.\. \} <- iterable', 'name = expr', and 'let pattern = expr'.*
 
 def main() Unit {
     var total = 0

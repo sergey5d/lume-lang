@@ -345,6 +345,23 @@ Open follow-ups:
 - for now, prefer `if let Some(row) = rows.get(0) { ... }` and destructure `row` on the next line inside the branch
 - keep `if let` chaining limited to `&&` joins; if we ever extend it, do that deliberately rather than broadening it implicitly through general boolean syntax
 
+Open `guard` surface question:
+- current early-exit refutable binding starts directly with the pattern, for example `guard Some(item) = maybeValue else { ... }`
+- consider requiring `guard let` instead, so the binding family is visually consistent:
+  - `let PATTERN = value` for irrefutable binding
+  - `if let PATTERN = value { ... }` for refutable branching
+  - `guard let PATTERN = value else { ... }` for refutable early exit
+  - `expect PATTERN = value` for assertive matching
+- if `guard` keeps the current pattern-first form, consider adding boolean guards too:
+
+```txt
+guard ready else {
+    return Err("not ready")
+}
+```
+
+- without boolean guards, the keyword may read broader than the feature, because many readers expect `guard` to guard a condition as well as destructure a value
+
 ### Lambda Surface
 
 Possible explicit lambda keyword direction:

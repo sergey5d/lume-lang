@@ -2051,26 +2051,32 @@ for i <- Range(0, 10) {
 
 `Range(start, end)` is start-inclusive and end-exclusive. With two arguments it automatically chooses a step of `1` or `-1` based on the bounds, and `Range(start, end, step)` allows an explicit step.
 
-Generator heads bind one plain identifier. Destructure inside the body with
-`let`:
+Generator heads normally bind one plain identifier:
 
 ```txt
 for row <- rows {
-    let (x, y, char) = row
+    OS.println(row)
+}
+```
+
+Use `for let` for explicitly marked irrefutable tuple or shape
+destructuring:
+
+```txt
+for let (x, y, char) <- rows {
     OS.println(char)
 }
 ```
 
-The same rule applies to class and anonymous-shape values:
+The same rule applies to class and anonymous-shape values. Shape
+destructuring matches by field name, not by position:
 
 ```txt
-for user <- users {
-    let { name, location } = user
+for let { name, location } <- users {
     OS.println(name, location)
 }
 
-for user <- users {
-    let { location as loc, name } = user
+for let { location as loc, name } <- users {
     OS.println(name, loc)
 }
 ```
@@ -2092,6 +2098,7 @@ These generator heads are invalid:
 for (x, y) <- pairs { ... }
 for { name, age } <- users { ... }
 for Some(item) <- values { ... }
+for let Some(item) <- values { ... }
 for item Int <- items { ... }
 ```
 
@@ -2125,6 +2132,8 @@ Only these clause kinds are allowed inside `for { ... } yield`:
 
 ```txt
 name <- iterable
+let (x, y) <- iterable
+let { name, age } <- iterable
 name = expr
 let (x, y) = pair
 let { name, age } = user

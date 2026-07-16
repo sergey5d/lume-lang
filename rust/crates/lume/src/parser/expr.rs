@@ -410,7 +410,7 @@ impl<'a> Parser<'a> {
                     if binding.name == "_" || binding.ty.is_some() {
                         self.error_at_current(
                             "invalid_for_generator",
-                            "for generator must bind a plain identifier before '<-'; type annotations and destructuring belong in a 'let' inside the body",
+                            "for generator must bind a plain identifier before '<-'; use 'let (...) <-' or 'let { ... } <-' for irrefutable destructuring",
                         );
                         return None;
                     }
@@ -441,7 +441,7 @@ impl<'a> Parser<'a> {
                 } else {
                     self.error_at_current(
                         "invalid_for_clause",
-                        "for yield clauses only support 'name <- iterable', 'name = expr', and 'let pattern = expr'",
+                        "for yield clauses only support 'name <- iterable', 'let (x, y) <- iterable', 'let { ... } <- iterable', 'name = expr', and 'let pattern = expr'",
                     );
                     return None;
                 }
@@ -460,17 +460,11 @@ impl<'a> Parser<'a> {
                 TokenKind::RBrace,
                 "expected '}' after destructuring bindings",
             )?;
-            self.consume_for_let_equals()?;
-            let value = self.parse_for_let_value()?;
-            let end = value.span();
-            return Some(ForBinding {
+            return self.parse_for_destructure_clause_tail(
                 bindings,
-                destructure: Some(DestructureKind::Record),
-                pattern: None,
-                iterable: None,
-                values: vec![value],
-                span: start.cover(end),
-            });
+                DestructureKind::Record,
+                start,
+            );
         }
 
         if self.match_token(TokenKind::LParen) {
@@ -480,17 +474,7 @@ impl<'a> Parser<'a> {
                 TokenKind::RParen,
                 "expected ')' after destructuring bindings",
             )?;
-            self.consume_for_let_equals()?;
-            let value = self.parse_for_let_value()?;
-            let end = value.span();
-            return Some(ForBinding {
-                bindings,
-                destructure: Some(DestructureKind::Tuple),
-                pattern: None,
-                iterable: None,
-                values: vec![value],
-                span: start.cover(end),
-            });
+            return self.parse_for_destructure_clause_tail(bindings, DestructureKind::Tuple, start);
         }
 
         let pattern = self.parse_pattern()?;
@@ -506,7 +490,7 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenKind::LeftArrow) {
             self.error_at_current(
                 "invalid_for_clause",
-                "for yield let clauses use '='; use 'name <- iterable' for generator clauses",
+                "for yield 'let ... <-' clauses only support irrefutable tuple or shape destructuring; use 'name <- iterable' for plain generators and guard/match for refutable patterns",
             );
             return None;
         }
@@ -524,13 +508,45 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_for_destructure_clause_tail(
+        &mut self,
+        bindings: Vec<Binding>,
+        destructure: DestructureKind,
+        start: Span,
+    ) -> Option<ForBinding> {
+        if self.match_token(TokenKind::LeftArrow) {
+            let iterable = self.parse_expr_without_trailing_block_call()?;
+            let end = iterable.span();
+            return Some(ForBinding {
+                bindings,
+                destructure: Some(destructure),
+                pattern: None,
+                iterable: Some(iterable),
+                values: Vec::new(),
+                span: start.cover(end),
+            });
+        }
+
+        self.consume_for_let_equals()?;
+        let value = self.parse_for_let_value()?;
+        let end = value.span();
+        Some(ForBinding {
+            bindings,
+            destructure: Some(destructure),
+            pattern: None,
+            iterable: None,
+            values: vec![value],
+            span: start.cover(end),
+        })
+    }
+
     fn consume_for_let_equals(&mut self) -> Option<Span> {
         if self.match_token(TokenKind::Eq) {
             Some(self.previous_span())
         } else {
             self.error_at_current(
                 "invalid_for_clause",
-                "for yield clauses only support 'name <- iterable', 'name = expr', and 'let pattern = expr'",
+                "for yield clauses only support 'name <- iterable', 'let (x, y) <- iterable', 'let { ... } <- iterable', 'name = expr', and 'let pattern = expr'",
             );
             None
         }
