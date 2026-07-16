@@ -16,7 +16,7 @@ Open checker/runtime work:
 
 ### 2. Enum Ergonomics
 
-Enums exist, but they still want:
+Enum follow-ups:
 - better generic type-pattern ergonomics
 - type-aware rejection of obsolete empty-payload calls in patterns, such as `Option.None()` in `match`; bare cases like `None` should be the only valid form
 
@@ -54,14 +54,7 @@ This reduces boilerplate and helps stdlib types feel native.
 
 ### 4. Collection / Query APIs
 
-The language now has `for ... yield`, `map`, `flatMap`, `filter`, `fold`, `reduce`, `exists`, `forAll`, and `forEach`, but stdlib collection ergonomics still need growth.
-
-Current collection conveniences:
-- `Map` indexing exists: `map[key]` acts as lookup and returns `Option[V]`
-- `List` and `Array` have `zip` and `zipWithIndex`
-- `List`, `Set`, and `Map` have broad higher-order method coverage
-
-Likely remaining gaps:
+Open stdlib collection/query ergonomics:
 - clearer `Map` update ergonomics beyond `put`
 - maybe collection partitioning helpers
 - maybe unzip style helpers later
@@ -69,67 +62,28 @@ Likely remaining gaps:
 
 These can mostly live in the stdlib, but may still need runtime support in places.
 
-Shape/object construction ergonomics to consider:
-- field spread exists for anonymous-shape copy, extension, and distinct-field merge
-- `:<` remains the settled update operator for existing fields
-- current anonymous-shape spread syntax:
-
-```txt
-extended = {
-    ...existingShape
-    newField: 42
-}
-
-merged = {
-    ...leftShape
-    ...rightShape
-}
-
-updated = existingShape :< {
-    existingField: 42
-}
-```
-
-Open questions:
+Open shape/construction ergonomics:
 - whether spread should be extended to named construction fields, for example `User { ...anon }`
 - whether `User { ...anon }` should construct only when `anon` exactly matches the accepted constructor shape, or whether extra fields may be ignored
 
-Construction direction:
-- avoid `apply` call magic for collections and similar surfaces
-- prefer explicit factory names like `of`, `from`, or `empty`
-- when a type wants custom construction sugar, prefer descriptive helpers like `create`, `from`, or `make`
+Open construction helper naming direction:
+- whether collection/custom construction helpers should consistently prefer names like `of`, `from`, `empty`, `create`, or `make`
+- whether any collection-like type deserves special construction sugar, or whether descriptive factory names are enough
 
 ## Medium Priority
 
-### 5. Operator Overloading
+### 5. Word Equality Operators
 
-Operator overloading now exists and is mainly intended for compact value-oriented declared types such as:
-- numeric-like wrappers
-- vectors / matrices / geometry values
-- class domain values like `Money`, `Distance`, or `Duration`
-- interface-driven abstractions that want symbolic operators over implementing types
-
-Constraint:
-- use ordinary callable body syntax: `method(...) = expr` or `method(...) { ... }`; `def` remains accepted but optional
-- do not introduce operator-specific body forms
-
-Finalized policy:
-- operator overloading is limited to interfaces, classes, and enums
-- singles do not participate
-- top-level functions do not participate
+Open equality spelling question:
+- consider adding word operators `eq` and `neq` as readable aliases for `==` and `!=`
+- `left eq right` would mean exactly `left == right`
+- `left neq right` would mean exactly `left != right`
+- if added, they should share equality precedence and lowering rather than becoming separately overloadable operators
+- decide whether this improves readability enough to justify another spelling for equality
 
 ### 6. Module / Visibility Polish
 
-Current module/use support is usable.
-
-Settled direction:
-- top-level functions are exported by default
-- top-level immutable bindings are exported by default
-- top-level types are exported by default
-- `hidden` makes top-level functions, constants, and types private
-- top-level mutable bindings are not allowed; mutable module state belongs inside `single`, class instances, or function locals
-
-Still open:
+Open module/use questions:
 - whether singleton methods should ever be usable directly beyond explicit `use module/Single/*` and builtin `OS` prelude behavior
 - if both a wide module use and a renamed selective use target the same module, the wide use should come first and the `as` use should come after it
 - decide how enum cases are imported: if `EnumA` is imported, should users write `EnumA.CaseA`, or should `CaseA` also become directly available
@@ -150,10 +104,9 @@ Open checker/runtime design:
 - define diagnostics for ambiguous interface method calls so the compiler points users toward the disambiguation syntax
 
 Related syntax question:
-- the language previously experimented with a dedicated interface-implementation marker such as `impl def label() Str = "box"` inside `impl Type { ... }`
-- current decision: do not support `impl def`; interface methods inside `impl Type { ... }` blocks use ordinary method declarations, with optional `def`
-- keep watching whether explicit implementation/override markers would add enough readability in large types to justify extra syntax
-- current leaning: plain method declarations plus normal conformance checking are the cleaner long-term surface
+- whether explicit implementation/override markers would add enough readability in large types to justify extra syntax
+- if added, decide whether they should mark interface satisfaction, override of a concrete method, or both
+- define diagnostics for accidental signature mismatches even if no marker is added
 
 ### 8. Function Type Variance
 
@@ -181,15 +134,13 @@ produced return types.
 
 ### 9. Annotation Targets
 
-Annotations exist as compile-time metadata shapes. They currently attach to declarations and members, with annotation arguments restricted to literals, stable constants, and constant expressions.
-
 Open question:
 - do we want annotations on global functions/method-like top-level `def` declarations as a first-class supported target
 - do we want annotations on global variables/top-level bindings
 - if top-level bindings become annotatable, immutable constants are the only viable target because top-level mutable bindings are not allowed
 - whether annotated globals should affect module export/import metadata, runtime reflection, generated code, or only checker/tooling behavior
 
-Current leaning:
+Leaning:
 - global functions are probably useful annotation targets for routing, tests, effects, permissions, and generated bindings
 - immutable top-level constants may be useful too, but annotation metadata should describe stable declarations, not changing state
 
@@ -212,14 +163,12 @@ Goal:
 
 ### 11. Result / Either Style Error Values
 
-`Option`, `Result`, `Either`, and `try`-based short-circuit propagation now exist.
-
 Still open:
 - whether `try`-style propagation should stay hardcoded to these builtins or later grow a broader protocol
 
 Important design constraint:
 - expressing "same container family, different success type" is hard without higher-kinded types
-- so the current propagation model relies on compiler help for propagation checks
+- a future generalized propagation protocol would need a way to express compatible container families and failure conversion without losing clarity
 
 Clarification on "failure conversion":
 - this does not necessarily mean superclass/subclass conversion
@@ -229,15 +178,7 @@ Clarification on "failure conversion":
   - enclosing function returns `Result[Int, AppError]`
   - failure conversion would mean allowing `IoError` to be turned into something like `AppError.Io(...)` during propagation
 
-Current behavior:
-- same-family propagation with a different success type is supported
-- `Option[...]` can propagate only into `Option[...]`
-- `Result[..., SourceE]` can propagate only into `Result[..., TargetE]` when `SourceE` is assignable to `TargetE`
-- `Either[SourceL, ...]` can propagate only into `Either[TargetL, ...]` when `SourceL` is assignable to `TargetL`
-- explicit wrapper-style error remapping is supported with `try source catch err => mappedFailure`
-
 Open `try catch` ergonomics question:
-- currently the `catch` handler produces the failure payload, and the compiler wraps it into `Err(...)` or `Left(...)` based on the enclosing return type
 - consider whether the handler should instead allow or require returning the full failure container, such as `Err(mappedFailure)`, and reject success containers like `Ok(...)`
 - the payload-only model keeps handlers compact and avoids accidentally returning success from a failure path
 - the explicit-container model may read more directly to programmers who think of `catch` as "return this failure"
@@ -282,13 +223,9 @@ Main design question:
 
 ### 13. Reified Generic Follow-Ups
 
-Settled syntax lives in `syntax.md`: generic functions and methods may mark
-individual type parameters as `reified`, which lowers to hidden `Type[A]`
-evidence.
-
-Still intentionally unsettled:
+Open reified-generic follow-ups:
 - whether expected return types should help infer a reified parameter when no ordinary argument carries it
-- whether explicit multi-type-argument call syntax needs a dedicated parser form beyond the current `call[Type](...)` shape
+- whether explicit multi-type-argument call syntax needs a dedicated parser form beyond `call[Type](...)`
 - which additional library APIs should use `[reified A]` instead of explicit `Type[A]` values
 
 Possible target-typed inference rule:
@@ -345,34 +282,17 @@ The critical distinction:
 - `Type[SomeInterface]` means metadata for the interface itself, not the runtime implementer
 - `Type[_]` should not be produced by reified inference, because `_` is an existential capture, not a runtime type name
 
-Still rejected:
+Constraints to preserve:
 - automatic reification of every generic parameter
 - reified type parameters on classes, shapes, enums, annotations, or singles
 
-### 14. Deferred Cleanup
-
-`defer` is implemented as callable-scoped cleanup.
-
-Supported shape:
-- `defer close()`
-- `defer { cleanup() }`
-
-Current behavior:
-- deferred actions run in LIFO order when the enclosing function, method, or lambda returns
-- `defer` is not block-scoped
-- lambdas have their own defer queue
-- deferred blocks may not contain `return`, `break`, or `continue`
-
-Main use cases:
-- resource cleanup
-- structured teardown
-- keeping setup and cleanup close together in imperative code
+### 14. Deferred Cleanup Follow-Ups
 
 Open questions:
 - whether runtime errors should also run pending defers
 - whether future async/concurrency features need a stronger cleanup model
 
-### 14. Flow Control Composition
+### 15. Flow Control Composition
 
 Possible future surface:
 
@@ -402,11 +322,7 @@ Open questions:
 - how values produced inside one flow become visible to later composed flows
 - whether `&` should sequence unconditionally, short-circuit, or model dependency composition
 
-### 15. Explicit Tuple Projection
-
-Settled rule:
-- tuple to known shape is allowed when the target shape is known
-- class/shape to tuple is not implicit
+### 16. Explicit Tuple Projection
 
 Possible later syntax:
 
@@ -422,21 +338,6 @@ Open question:
 
 ### Irrefutable and Refutable Binding
 
-Binding syntax is organized around whether the pattern is irrefutable or
-refutable:
-- `let PATTERN = value` for irrefutable binding
-- `if let PATTERN = value { ... }` for testing and binding with a branch
-- `if let { PATTERN = value ... } { ... }` for multiple sequential refutable bindings in one condition
-- `if let PATTERN = value && let OTHER = next && ready { ... }` for mixed refutable and boolean checks in one condition
-- `guard PATTERN = value else { ... }` for refutable binding with an explicit failure path
-- `guard { PATTERN = value ... } else { ... }` for multiple sequential refutable bindings sharing one fallback
-- `expect PATTERN = value` for assertive refutable binding that panics on mismatch; if the binding is irrefutable, use `let`
-- `assert(condition)` and `assert(condition, message)` for boolean assertions that panic when false
-- `PATTERN <- source` as shorthand for the success case inside `if let`, `guard ... else`, and `expect`
-  `Some(PATTERN)` for `Option`, `Ok(PATTERN)` for `Result`, and `Right(PATTERN)` for `Either`
-  plain `let` accepts this form only when the source expression itself proves the success case, such as `let item <- Some(5)`
-- `value = try source` for propagation from `Option`, `Result`, and `Either`
-
 Open follow-ups:
 - consider removing `orPanic` from `Option`, `Result`, and `Either`, or at least discouraging it, because `expect value <- source` is the clearer assertive extraction form
 - if `orPanic` stays, treat it as a low-level/interoperability escape hatch rather than normal application style
@@ -446,7 +347,7 @@ Open follow-ups:
 
 ### Lambda Surface
 
-The language currently uses arrow-based lambda syntax directly, for example:
+Possible explicit lambda keyword direction:
 
 ```txt
 x -> x + 1
@@ -462,8 +363,8 @@ Possible motivations for revisiting this:
 - reducing ambiguity in more complex nested expressions
 - giving room for future lambda-surface variants if the arrow-only form starts feeling overloaded
 
-Current leaning:
-- keep the current keyword-free arrow form unless real readability problems show up
+Leaning:
+- keep the keyword-free arrow form unless real readability problems show up
 - only add a `lambda` keyword if it solves a concrete ambiguity or makes larger expressions meaningfully clearer
 
 ### Anonymous-Shape Binding From String Templates
@@ -504,7 +405,7 @@ Open questions:
 - whether same-named `single` declarations should act as privileged factory companions
 - whether singleton factory methods should ever get hidden-field access to class internals
 
-Current leaning:
+Leaning:
 - `single` factory methods are useful as ordinary namespaced helpers, but hidden-field companion privileges should be a separate deliberate decision
 
 ## Suggested Priority Order
@@ -512,4 +413,4 @@ Current leaning:
 1. enum + pattern ergonomics
 2. derived `Eq` / `Hashed`
 3. stdlib collection/query growth
-4. operator overloading
+4. word equality operators
