@@ -85,10 +85,6 @@ public final class JdbcRow {
         return intValue(column);
     }
 
-    public Result<Integer, DbError> int32(String column) {
-        return convert(column, value -> Math.toIntExact(toLong(value)));
-    }
-
     public Result<Option<Long>, DbError> intOpt(String column) {
         return convertOpt(column, JdbcRow::toLong);
     }
@@ -99,10 +95,6 @@ public final class JdbcRow {
 
     public Result<Double, DbError> float64(String column) {
         return floatValue(column);
-    }
-
-    public Result<Float, DbError> float32(String column) {
-        return convert(column, value -> toDouble(value).floatValue());
     }
 
     public Result<Option<Double>, DbError> floatOpt(String column) {
@@ -178,9 +170,8 @@ public final class JdbcRow {
         return switch (descriptor) {
             case "Str" -> String.valueOf(value);
             case "Int", "Int64" -> toLong(value);
-            case "Int32", "Rune" -> Math.toIntExact(toLong(value));
+            case "Rune" -> Math.toIntExact(toLong(value));
             case "Float", "Float64" -> toDouble(value);
-            case "Float32" -> toDouble(value).floatValue();
             case "Bool" -> toBool(value);
             default -> value;
         };

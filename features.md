@@ -263,7 +263,7 @@ recover the hidden concrete implementation type behind an interface value.
 
 Reifiable type arguments should probably include every closed type that has a
 runtime descriptor:
-- primitive types such as `Int`, `Int32`, `Float`, `Float32`, `Bool`, `Str`, `Rune`, and `Unit`
+- primitive types such as `Int`, `Float`, `Bool`, `Str`, `Rune`, and `Unit`
 - classes, enums, enum payload cases through their enum type, singles, annotations, and named shapes
 - interfaces, as interface metadata only
 - tuples and function types, if their component types are also reifiable

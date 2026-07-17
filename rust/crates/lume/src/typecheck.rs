@@ -232,19 +232,11 @@ impl Ty {
     }
 
     fn is_int_like(&self) -> bool {
-        matches!(self, Ty::Named(name, args) if args.is_empty() && (name == "Int" || name == "Int32"))
-    }
-
-    fn is_int32(&self) -> bool {
-        matches!(self, Ty::Named(name, args) if name == "Int32" && args.is_empty())
+        matches!(self, Ty::Named(name, args) if args.is_empty() && name == "Int")
     }
 
     fn is_float_like(&self) -> bool {
-        matches!(self, Ty::Named(name, args) if args.is_empty() && (name == "Float" || name == "Float32"))
-    }
-
-    fn is_float32(&self) -> bool {
-        matches!(self, Ty::Named(name, args) if name == "Float32" && args.is_empty())
+        matches!(self, Ty::Named(name, args) if args.is_empty() && name == "Float")
     }
 
     fn is_numeric(&self) -> bool {
@@ -597,10 +589,7 @@ fn custom_constructor_error(sig: &TypeSig) -> String {
 }
 
 fn builtin_extension_type_sig(name: &str) -> Option<TypeSig> {
-    if !matches!(
-        name,
-        "Bool" | "Float" | "Float32" | "Int" | "Int32" | "Rune" | "Str"
-    ) {
+    if !matches!(name, "Bool" | "Float" | "Int" | "Rune" | "Str") {
         return None;
     }
     Some(TypeSig {
@@ -3554,9 +3543,7 @@ impl<'a> Checker<'a> {
                 let _ = expected;
                 Ty::Unknown
             }
-            Expr::Integer { .. } if expected.is_int32() => expected.clone(),
             Expr::Integer { .. } => Ty::int(),
-            Expr::Float { .. } if expected.is_float32() => expected.clone(),
             Expr::Float { .. } => Ty::float(),
             Expr::String { .. } => Ty::str(),
             Expr::Bool { .. } => Ty::bool(),
@@ -7169,7 +7156,8 @@ impl<'a> Checker<'a> {
     }
 
     fn arg_matches_expected(&self, arg: &crate::ast::CallArg, actual: &Ty, expected: &Ty) -> bool {
-        self.is_assignable(actual, expected) || literal_fits_expected_type(&arg.value, expected)
+        let _ = arg;
+        self.is_assignable(actual, expected)
     }
 
     fn probe_expr_type(&self, expr: &Expr) -> Ty {
@@ -9144,16 +9132,6 @@ fn callable_name_for_diagnostic(expr: &Expr) -> String {
     }
 }
 
-fn literal_fits_expected_type(expr: &Expr, expected: &Ty) -> bool {
-    match expr {
-        Expr::Integer { raw, .. } if expected.is_int32() => raw
-            .parse::<i64>()
-            .is_ok_and(|value| (i32::MIN as i64..=i32::MAX as i64).contains(&value)),
-        Expr::Float { raw, .. } if expected.is_float32() => raw.parse::<f32>().is_ok(),
-        _ => false,
-    }
-}
-
 fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
     if matches!(expected, Ty::Wildcard) {
         return true;
@@ -9553,34 +9531,6 @@ class User {
 
 def main() Unit {
     _ User = User("Ada")
-}
-"#,
-        );
-        let result = check_program(&program);
-        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    }
-
-    #[test]
-    fn allows_integer_literals_for_int32_call_arguments() {
-        let program = parse_inline(
-            r#"
-class Server {
-    port Int32
-}
-
-impl Server {
-    new {
-        port Int32
-    } {
-        this.port = port
-    }
-
-    def bind(port Int32) Unit {}
-}
-
-def main() Unit {
-    server Server = Server(7070)
-    server.bind(8080)
 }
 "#,
         );

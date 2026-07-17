@@ -21,24 +21,8 @@ ext Int {
     }
 }
 
-ext Int32 {
-    def shouldBe(expected Int32) Unit {
-        if this != expected {
-            panic("expected " + expected.toStr() + ", got " + this.toStr())
-        }
-    }
-}
-
 ext Float {
     def shouldBe(expected Float) Unit {
-        if this != expected {
-            panic("expected " + expected.toStr() + ", got " + this.toStr())
-        }
-    }
-}
-
-ext Float32 {
-    def shouldBe(expected Float32) Unit {
         if this != expected {
             panic("expected " + expected.toStr() + ", got " + this.toStr())
         }

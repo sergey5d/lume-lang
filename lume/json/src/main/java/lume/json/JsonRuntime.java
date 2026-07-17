@@ -340,9 +340,8 @@ public final class JsonRuntime {
             case "Any" -> value;
             case "Str" -> value == null ? "" : String.valueOf(value);
             case "Int", "Int64" -> toLong(value, trimmed);
-            case "Int32", "Rune" -> Math.toIntExact(toLong(value, trimmed));
+            case "Rune" -> Math.toIntExact(toLong(value, trimmed));
             case "Float", "Float64" -> toDouble(value, trimmed);
-            case "Float32" -> toDouble(value, trimmed).floatValue();
             case "Bool" -> toBool(value, trimmed);
             default -> decodeStructured(value, loadType(trimmed, contextPackage));
         };
@@ -488,9 +487,8 @@ public final class JsonRuntime {
         return switch (trimmed) {
             case "Str" -> "";
             case "Int", "Int64" -> 0L;
-            case "Int32", "Rune" -> 0;
+            case "Rune" -> 0;
             case "Float", "Float64" -> 0.0;
-            case "Float32" -> 0.0f;
             case "Bool" -> false;
             default -> NO_DEFAULT;
         };

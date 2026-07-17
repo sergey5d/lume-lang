@@ -57,15 +57,11 @@ impl JdbcRowImpl {
 
     def int64(column Str) Result[Int, DbError] = this.backend.int64(column)
 
-    def int32(column Str) Result[Int32, DbError] = this.backend.int32(column)
-
     def intOpt(column Str) Result[Option[Int], DbError] = this.backend.intOpt(column)
 
     def float(column Str) Result[Float, DbError] = this.backend.floatValue(column)
 
     def float64(column Str) Result[Float, DbError] = this.backend.float64(column)
-
-    def float32(column Str) Result[Float32, DbError] = this.backend.float32(column)
 
     def floatOpt(column Str) Result[Option[Float], DbError] = this.backend.floatOpt(column)
 
@@ -222,7 +218,7 @@ impl JdbcRowQuery {
         } else if count > 1 {
             Err(DbError("queryRow expected at most one row, got " + count))
         } else {
-            let Some(jdbcRow) = jdbcRows.get(0) else return Err(DbError("queryRow returned one row but row access failed"))
+            guard Some(jdbcRow) = jdbcRows.get(0) else return Err(DbError("queryRow returned one row but row access failed"))
             decoder JdbcRowDecoder = try JdbcRowDecoderCache.decoder(typeOf[T])
             decoded Result[T, DbError] = decoder.decode(jdbcRow)
             match decoded {

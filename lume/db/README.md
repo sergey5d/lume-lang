@@ -66,7 +66,7 @@ Reified row decoding:
 - `decodeAll[T]()` and `decodeOne[T]()` use the hidden `Type[T]` evidence from `[reified T]`.
 - `T` must currently be a generated Lume class or named shape with a public positional constructor.
 - Row columns are matched to visible field names case-insensitively; SQL column order does not matter.
-- Primitive fields are converted for `Str`, `Int`, `Int32`, `Float`, `Float32`, `Bool`, and `Rune`.
+- Primitive fields are converted for `Str`, `Int`, `Float`, `Bool`, and `Rune`.
 - Nullable columns map to `Option[...]` fields as `None`; non-null values become `Some(value)`.
 - Use manual `map` / `flatMap` when decoding needs custom column names, joins, nested objects, interfaces, enums, or validation logic.
 

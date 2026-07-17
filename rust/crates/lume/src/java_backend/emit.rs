@@ -7,7 +7,7 @@ use crate::{
     ast::{self, TypeKind, TypeRef, Visibility},
     backend::BackendBundle,
     ir::{self, FunctionKind},
-    java_backend::JavaExternalClass,
+    java_backend::{JavaExternalClass, JavaPrimitiveCoercion},
 };
 
 pub(crate) struct JavaSource {
@@ -1205,6 +1205,7 @@ struct JavaParamSpec {
     ty: ir::Type,
     variadic: bool,
     lazy: bool,
+    coercion: Option<JavaPrimitiveCoercion>,
 }
 
 fn function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
@@ -1218,6 +1219,7 @@ fn function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
                 ty: local.ty.clone(),
                 variadic: function.param_variadic.get(index).copied().unwrap_or(false),
                 lazy: function.param_lazy.get(index).copied().unwrap_or(false),
+                coercion: None,
             })
         })
         .collect()
@@ -1230,6 +1232,7 @@ fn param_specs_from_types(params: Vec<ir::Type>) -> Vec<JavaParamSpec> {
             ty,
             variadic: false,
             lazy: false,
+            coercion: None,
         })
         .collect()
 }
@@ -1239,6 +1242,7 @@ fn java_param_spec(ty: ir::Type, lazy: bool) -> JavaParamSpec {
         ty,
         variadic: false,
         lazy,
+        coercion: None,
     }
 }
 
@@ -2878,6 +2882,7 @@ impl<'a> FunctionEmitter<'a> {
                         ty: field_ty,
                         variadic: false,
                         lazy: false,
+                        coercion: None,
                     },
                 )?);
             } else if let Some(initializer) = &field.initializer {
@@ -3277,6 +3282,7 @@ impl<'a> FunctionEmitter<'a> {
             &target.ty
         };
         let expr = self.coerce_to_target_type(expr, self.operand_type(operand), target_ty);
+        let expr = coerce_to_java_primitive(expr, target.coercion);
         if target.lazy {
             Some(format!("() -> {expr}"))
         } else {
@@ -3423,6 +3429,7 @@ impl<'a> FunctionEmitter<'a> {
                 ty: field.ty.clone(),
                 variadic: false,
                 lazy: false,
+                coercion: None,
             })
             .collect::<Vec<_>>();
         if param_specs_accept_arg_len(&params, operands.len()) {
@@ -3447,6 +3454,7 @@ impl<'a> FunctionEmitter<'a> {
                             ty,
                             variadic: false,
                             lazy: false,
+                            coercion: None,
                         }]
                     });
                 }
@@ -3471,6 +3479,7 @@ impl<'a> FunctionEmitter<'a> {
                     ty: self.substitute_receiver_type_args(&name, &args, &param.ty),
                     variadic: param.variadic,
                     lazy: param.lazy,
+                    coercion: param.coercion,
                 })
                 .collect(),
         )
@@ -3943,16 +3952,6 @@ impl<'a> FunctionEmitter<'a> {
         if is_java_void_type(target_ty) {
             return "lume.core.LumeUnit.INSTANCE".to_string();
         }
-        if is_named_builtin(target_ty, "Int32")
-            && (source_ty.is_none() || source_is_wide_int(source_ty.as_ref()))
-        {
-            return format!("((int) ({expr}))");
-        }
-        if is_named_builtin(target_ty, "Float32")
-            && (source_ty.is_none() || source_is_wide_float(source_ty.as_ref()))
-        {
-            return format!("((float) ({expr}))");
-        }
         if matches!(target_ty, ir::Type::Function { .. })
             && source_ty.as_ref().is_some_and(|source| {
                 matches!(source, ir::Type::Function { .. } | ir::Type::Unknown)
@@ -4200,6 +4199,7 @@ impl JavaNames {
                             .unwrap_or(ir::Type::Unknown),
                         variadic: param.variadic,
                         lazy: false,
+                        coercion: param.coercion,
                     })
                     .collect::<Vec<_>>();
                 java_method_params
@@ -4422,9 +4422,7 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Unit" => Some("lume.core.LumeUnit".to_string()),
         "Bool" => Some("Boolean".to_string()),
         "Int" => Some("Long".to_string()),
-        "Int32" => Some("Integer".to_string()),
         "Float" => Some("Double".to_string()),
-        "Float32" => Some("Float".to_string()),
         "Str" => Some("String".to_string()),
         "Rune" => Some("Integer".to_string()),
         "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
@@ -4467,9 +4465,7 @@ fn java_named_builtin_annotation(name: &str) -> Option<String> {
     match name {
         "Bool" => Some("boolean".to_string()),
         "Int" => Some("long".to_string()),
-        "Int32" => Some("int".to_string()),
         "Float" => Some("double".to_string()),
-        "Float32" => Some("float".to_string()),
         "Str" => Some("String".to_string()),
         "Rune" => Some("int".to_string()),
         _ => None,
@@ -4591,6 +4587,16 @@ fn java_type_name(name: &str) -> String {
     sanitize_identifier(name, IdentifierStyle::Type)
 }
 
+fn coerce_to_java_primitive(expr: String, coercion: Option<JavaPrimitiveCoercion>) -> String {
+    match coercion {
+        Some(JavaPrimitiveCoercion::Byte) => format!("((Number) ({expr})).byteValue()"),
+        Some(JavaPrimitiveCoercion::Short) => format!("((Number) ({expr})).shortValue()"),
+        Some(JavaPrimitiveCoercion::Int) => format!("((Number) ({expr})).intValue()"),
+        Some(JavaPrimitiveCoercion::Float) => format!("((Number) ({expr})).floatValue()"),
+        None => expr,
+    }
+}
+
 fn java_member_name(name: &str) -> String {
     sanitize_identifier(name, IdentifierStyle::Member)
 }
@@ -4659,17 +4665,6 @@ fn type_is_str(ty: &ir::Type) -> bool {
 
 fn type_is_float_like(ty: &ir::Type) -> bool {
     type_is_named_or_primitive(ty, "Float", |ty| matches!(ty, ir::Type::Float))
-        || is_named_builtin(ty, "Float32")
-}
-
-fn source_is_wide_int(ty: Option<&ir::Type>) -> bool {
-    matches!(ty, Some(ir::Type::Int))
-        || matches!(ty, Some(ir::Type::Named { name, args }) if name == "Int" && args.is_empty())
-}
-
-fn source_is_wide_float(ty: Option<&ir::Type>) -> bool {
-    matches!(ty, Some(ir::Type::Float))
-        || matches!(ty, Some(ir::Type::Named { name, args }) if name == "Float" && args.is_empty())
 }
 
 fn java_type_contains_type_param(ty: &ir::Type) -> bool {

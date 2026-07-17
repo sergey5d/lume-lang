@@ -5729,10 +5729,7 @@ fn lazy_value_type(storage_ty: &ir::Type) -> Option<ir::Type> {
 }
 
 fn is_builtin_extension_target(name: &str) -> bool {
-    matches!(
-        name,
-        "Bool" | "Float" | "Float32" | "Int" | "Int32" | "Rune" | "Str"
-    )
+    matches!(name, "Bool" | "Float" | "Int" | "Rune" | "Str")
 }
 
 fn builtin_extension_receiver_name(ty: &ir::Type) -> Option<&'static str> {
@@ -7169,12 +7166,10 @@ fn default_constant_for_type(ty: &ir::Type) -> ir::Constant {
         ir::Type::Float => ir::Constant::Float(0.0),
         ir::Type::Str => ir::Constant::String(String::new()),
         ir::Type::Named { name, .. } if name == "Bool" => ir::Constant::Bool(false),
-        ir::Type::Named { name, .. } if matches!(name.as_str(), "Int" | "Int32" | "Rune") => {
+        ir::Type::Named { name, .. } if matches!(name.as_str(), "Int" | "Rune") => {
             ir::Constant::Int(0)
         }
-        ir::Type::Named { name, .. } if matches!(name.as_str(), "Float" | "Float32") => {
-            ir::Constant::Float(0.0)
-        }
+        ir::Type::Named { name, .. } if name == "Float" => ir::Constant::Float(0.0),
         ir::Type::Named { name, .. } if name == "Str" => ir::Constant::String(String::new()),
         _ => ir::Constant::Unit,
     }

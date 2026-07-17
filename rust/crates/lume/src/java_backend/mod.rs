@@ -179,6 +179,15 @@ pub(crate) struct JavaExternalParam {
     name: String,
     ty: Option<TypeRef>,
     variadic: bool,
+    pub(crate) coercion: Option<JavaPrimitiveCoercion>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JavaPrimitiveCoercion {
+    Byte,
+    Short,
+    Int,
+    Float,
 }
 
 fn discover_java_external_symbols(path: &Path) -> Result<JavaExternalSymbols, String> {
@@ -459,9 +468,7 @@ fn java_library_name_is_exposed(name: &str, exposed_names: &HashSet<String>) -> 
         "Any"
             | "Bool"
             | "Int"
-            | "Int32"
             | "Float"
-            | "Float32"
             | "Rune"
             | "Str"
             | "Unit"
@@ -672,6 +679,7 @@ fn sanitize_java_callable_for_library(
                     .as_ref()
                     .map(|ty| sanitize_java_type_ref_for_library(ty, exposed_names, span)),
                 variadic: param.variadic,
+                coercion: param.coercion,
             })
             .collect(),
         return_type: callable
@@ -792,18 +800,16 @@ fn java_library_default_initializer_marker(
         Some(TypeRef::Named { name, .. }) if name == "Bool" => {
             crate::ast::Expr::Bool { value: false, span }
         }
-        Some(TypeRef::Named { name, .. }) if matches!(name.as_str(), "Int" | "Int32" | "Rune") => {
+        Some(TypeRef::Named { name, .. }) if matches!(name.as_str(), "Int" | "Rune") => {
             crate::ast::Expr::Integer {
                 raw: "0".to_string(),
                 span,
             }
         }
-        Some(TypeRef::Named { name, .. }) if matches!(name.as_str(), "Float" | "Float32") => {
-            crate::ast::Expr::Float {
-                raw: "0.0".to_string(),
-                span,
-            }
-        }
+        Some(TypeRef::Named { name, .. }) if name == "Float" => crate::ast::Expr::Float {
+            raw: "0.0".to_string(),
+            span,
+        },
         Some(TypeRef::Named { name, .. }) if name == "Unit" => crate::ast::Expr::Unit { span },
         _ => crate::ast::Expr::String {
             raw: String::new(),
@@ -1033,6 +1039,7 @@ fn substitute_java_callable(
                     .as_ref()
                     .map(|ty| substitute_java_type_ref(ty, subst)),
                 variadic: param.variadic,
+                coercion: param.coercion,
             })
             .collect(),
         return_type: callable
@@ -1585,7 +1592,7 @@ fn is_lume_builtin_java_bound(name: &str, args: &[TypeRef]) -> bool {
     args.is_empty()
         && matches!(
             name,
-            "Any" | "Bool" | "Int" | "Int32" | "Float" | "Float32" | "Rune" | "Str" | "Unit"
+            "Any" | "Bool" | "Int" | "Float" | "Rune" | "Str" | "Unit"
         )
         || matches!(name, "List" | "Set" | "Map" | "Option")
 }
@@ -1771,9 +1778,20 @@ fn parse_javap_params(params: &[&str], ctx: &JavaTypeContext<'_>) -> Vec<JavaExt
                 name: format!("arg{index}"),
                 ty,
                 variadic,
+                coercion: java_primitive_coercion(raw_ty),
             }
         })
         .collect()
+}
+
+fn java_primitive_coercion(raw_ty: &str) -> Option<JavaPrimitiveCoercion> {
+    match raw_ty {
+        "byte" | "java.lang.Byte" | "Byte" => Some(JavaPrimitiveCoercion::Byte),
+        "short" | "java.lang.Short" | "Short" => Some(JavaPrimitiveCoercion::Short),
+        "int" | "java.lang.Integer" | "Integer" => Some(JavaPrimitiveCoercion::Int),
+        "float" | "java.lang.Float" | "Float" => Some(JavaPrimitiveCoercion::Float),
+        _ => None,
+    }
 }
 
 fn strip_java_modifiers(mut value: &str) -> &str {
@@ -2009,10 +2027,10 @@ fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static 
         "java.lang.Object" | "Object" if arg_count == 0 => Some("Any"),
         "boolean" | "java.lang.Boolean" | "Boolean" => Some("Bool"),
         "byte" | "short" | "int" | "java.lang.Byte" | "java.lang.Short" | "java.lang.Integer"
-        | "Byte" | "Short" | "Integer" => Some("Int32"),
-        "long" | "java.lang.Long" | "Long" => Some("Int"),
-        "float" | "java.lang.Float" | "Float" => Some("Float32"),
-        "double" | "java.lang.Double" | "Double" => Some("Float"),
+        | "Byte" | "Short" | "Integer" | "long" | "java.lang.Long" | "Long" => Some("Int"),
+        "float" | "java.lang.Float" | "Float" | "double" | "java.lang.Double" | "Double" => {
+            Some("Float")
+        }
         "char" | "java.lang.Character" | "Character" => Some("Rune"),
         "java.lang.String" | "String" => Some("Str"),
         "java.util.List"

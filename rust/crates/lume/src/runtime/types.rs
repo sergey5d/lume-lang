@@ -189,7 +189,7 @@ impl RuntimeProgram {
         ir_ty.kind == TypeKind::Class
             && matches!(
                 ir_ty.name.as_str(),
-                "Bool" | "Float" | "Float32" | "Int" | "Int32" | "Rune" | "Str"
+                "Bool" | "Float" | "Int" | "Rune" | "Str"
             )
             && ir_ty.fields.is_empty()
             && ir_ty.enum_cases.is_empty()

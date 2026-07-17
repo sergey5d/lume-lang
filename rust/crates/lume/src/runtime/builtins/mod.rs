@@ -56,9 +56,7 @@ pub(super) fn builtin_types() -> Vec<RuntimeType> {
     vec![
         empty_builtin_type("Bool"),
         empty_builtin_type("Float"),
-        empty_builtin_type("Float32"),
         empty_builtin_type("Int"),
-        empty_builtin_type("Int32"),
         empty_builtin_type("Rune"),
         str_type::define(),
         option_type::define(),

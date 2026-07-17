@@ -50,7 +50,7 @@ shape HttpError {
 
 hidden class JavalinBackend {
     app Javalin
-    port Int32
+    port Int
 }
 
 hidden class JavalinHttpContext with HttpContext {
@@ -79,7 +79,7 @@ impl JavalinHttpContext {
 
 impl JavalinBackend {
     new {
-        port Int32
+        port Int
     } {
         this.app = Javalin.create()
         this.port = port
@@ -216,7 +216,7 @@ class HttpServer {
 
 impl HttpServer {
     new {
-        port Int32
+        port Int
     } {
         this.backend = JavalinBackend(port)
     }
@@ -228,7 +228,7 @@ impl HttpServer {
 
     def addController(controller Any) HttpServer {
         controllerType Type[_] = controller.runtimeType
-        let Some(classType) = controllerType.asClass() else return this
+        guard Some(classType) = controllerType.asClass() else return this
         var prefix Str = ""
 
         if let Some(controllerAnnotationValue) = controllerType.annotation[Controller]() {

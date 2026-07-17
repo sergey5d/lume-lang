@@ -197,9 +197,8 @@ impl AmbientRegistry {
     fn with_builtin_values() -> Self {
         let mut registry = AmbientRegistry::default();
         for value in [
-            "List", "Map", "Set", "Array", "Range", "Int", "Int32", "Bool", "Rune", "Float",
-            "Float32", "Str", "Unit", "Never", "print", "println", "printf", "panic", "assert",
-            "ensure", "identity",
+            "List", "Map", "Set", "Array", "Range", "Int", "Bool", "Rune", "Float", "Str", "Unit",
+            "Never", "print", "println", "printf", "panic", "assert", "ensure", "identity",
         ] {
             registry.values.insert(value.to_string());
         }
@@ -2883,17 +2882,13 @@ fn type_ref_name(reference: &TypeRef) -> Option<&str> {
 
 fn builtin_type_arity(name: &str) -> Option<usize> {
     match name {
-        "Any" | "Int" | "Int32" | "Bool" | "Rune" | "Float" | "Float32" | "Str" | "Unit"
-        | "Never" => Some(0),
+        "Any" | "Int" | "Bool" | "Rune" | "Float" | "Str" | "Unit" | "Never" => Some(0),
         _ => None,
     }
 }
 
 fn is_builtin_extension_target(name: &str) -> bool {
-    matches!(
-        name,
-        "Bool" | "Float" | "Float32" | "Int" | "Int32" | "Rune" | "Str"
-    )
+    matches!(name, "Bool" | "Float" | "Int" | "Rune" | "Str")
 }
 
 fn arity_label(arity: usize) -> &'static str {

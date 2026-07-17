@@ -4899,8 +4899,8 @@ impl<'a> Interpreter<'a> {
                 }
                 Value::String(_) => name == "Str",
                 Value::Rune(_) => name == "Rune",
-                Value::Int(_) => name == "Int" || name == "Int32",
-                Value::Float(_) => name == "Float" || name == "Float32",
+                Value::Int(_) => name == "Int",
+                Value::Float(_) => name == "Float",
                 Value::Bool(_) => name == "Bool",
                 Value::Unit => name == "Unit",
                 Value::RuntimeType(runtime_type) => match name.as_str() {
@@ -5883,10 +5883,7 @@ fn value_as_f64(value: &Value) -> Option<f64> {
 }
 
 fn is_primitive_type_name(name: &str) -> bool {
-    matches!(
-        name,
-        "Bool" | "Float" | "Float32" | "Int" | "Int32" | "Never" | "Rune" | "Unit"
-    )
+    matches!(name, "Bool" | "Float" | "Int" | "Never" | "Rune" | "Unit")
 }
 
 fn render_ir_type(ty: &ir::Type) -> String {
