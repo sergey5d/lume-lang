@@ -26,18 +26,26 @@ List shorthand can be nested, for example:
 - `[[[(Str, Int)]]]`
 
 Common stdlib/prelude types:
-- `Any`
 - `Option[T]`
 - `Result[T, E]`
 - `Either[L, R]`
 - `Iterable[T]`
 - `Iterator[T]`
 - `Type[T]`
-- `Type[_]`
 - `TypeKind`
 - `Ordering[T]`
 - `Printer`
 - `OS`
+
+## Any Type
+
+`Any` is the top value type: any value can be assigned to `Any`, but `Any` is
+not assignable back to a narrower type without an explicit safe form.
+
+Universal value operations:
+
+- `value.toStr()` returns a `Str` rendering of the value
+- `value.equals(other)` returns `Bool` and has the same equality semantics as `value == other`
 
 ## Wildcard Capture
 
@@ -79,12 +87,6 @@ a.add(7)              # rejected; add expects the captured element type, not Int
 value Any = a[0]      # allowed
 value SomeType = a[0] # rejected; captured element type is not SomeType
 ```
-
-Universal value operations:
-
-- `value.toStr()` returns a `Str` rendering of the value
-- `value.equals(other)` returns `Bool` and has the same equality semantics as `value == other`
-- `Any` is the top value type: any value can be assigned to `Any`, but `Any` is not assignable back to a narrower type without an explicit safe form
 
 Tuple types:
 
@@ -663,7 +665,7 @@ copy = { ...value }
 
 extended = {
     ...value
-    location: "Tampa"
+    location: "New York"
 }
 
 merged = {
@@ -2447,7 +2449,7 @@ Shape copy, extension, and distinct merge:
 copy = { ...user }
 extended = {
     ...user
-    location: "Tampa"
+    location: "New York"
 }
 merged = {
     ...named
