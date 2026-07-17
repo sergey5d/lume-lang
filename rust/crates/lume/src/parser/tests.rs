@@ -1445,21 +1445,17 @@ def run(user User) Unit {
 }
 
 #[test]
-fn parses_try_catch_without_option_failure_binding() {
-    match parse_expr_only(r#"try maybe catch => "missing""#) {
-        Expr::Try {
-            handler: Some(handler),
-            ..
-        } => {
-            assert_eq!(handler.binder, None);
-            assert!(matches!(*handler.body, Expr::String { .. }));
+fn parses_try_with_mapped_source() {
+    match parse_expr_only(r#"try source.mapError { err -> mapped(err) }"#) {
+        Expr::Try { value, .. } => {
+            assert!(matches!(*value, Expr::Call { .. }));
         }
-        other => panic!("expected try catch expression, got {other:#?}"),
+        other => panic!("expected try expression, got {other:#?}"),
     }
 }
 
 #[test]
-fn rejects_try_catch_without_handler_arrow() {
+fn rejects_removed_try_catch_syntax() {
     let result = parse(
         r#"
 def run() Result[Int, Str] {
@@ -1469,10 +1465,8 @@ def run() Result[Int, Str] {
     );
     assert!(
         result.diagnostics.iter().any(|diag| {
-            diag.code == "unexpected_token"
-                && diag
-                    .message
-                    .contains("expected '=>' or failure binding after 'catch'")
+            diag.code == "removed_try_catch"
+                && diag.message.contains("transform the source before try")
         }),
         "{:#?}",
         result.diagnostics

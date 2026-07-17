@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*try catch syntax was removed; transform the source before try.*
+
+def main() Result[Int, Str] {
+    result Result[Int, Str] = Err("bad")
+    value = try result catch err => "mapped"
+    Ok(value)
+}

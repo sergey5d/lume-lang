@@ -1062,18 +1062,15 @@ impl<'a> Parser<'a> {
             let start = self.previous_span();
             self.skip_newlines();
             let value = self.parse_unary_expr()?;
-            let handler = if self.match_keyword(Keyword::Catch) {
-                Some(Box::new(self.parse_try_catch_handler()?))
-            } else {
-                None
-            };
-            let span = handler
-                .as_ref()
-                .map(|handler| start.cover(handler.span))
-                .unwrap_or_else(|| start.cover(value.span()));
+            if self.at(TokenKind::Identifier) && self.current().lexeme == "catch" {
+                self.error_at_current(
+                    "removed_try_catch",
+                    "try catch syntax was removed; transform the source before try, for example 'try source.mapError { err -> mappedFailure }'",
+                );
+            }
+            let span = start.cover(value.span());
             return Some(Expr::Try {
                 value: Box::new(value),
-                handler,
                 span,
             });
         }
@@ -1110,40 +1107,6 @@ impl<'a> Parser<'a> {
             });
         }
         self.parse_postfix_expr()
-    }
-
-    fn parse_try_catch_handler(&mut self) -> Option<TryCatchHandler> {
-        let start = self.previous_span();
-        self.skip_newlines();
-        let binder = if self.at(TokenKind::Identifier) && self.at_next(TokenKind::FatArrow) {
-            let (name, _) = self.expect_identifier("expected try catch failure binding")?;
-            self.consume(
-                TokenKind::FatArrow,
-                "expected '=>' after try catch failure binding",
-            )?;
-            Some(name)
-        } else {
-            self.consume(
-                TokenKind::FatArrow,
-                "expected '=>' or failure binding after 'catch'",
-            )?;
-            None
-        };
-        let body = if self.at(TokenKind::LBrace) {
-            let block = self.parse_block()?;
-            Expr::Block {
-                span: block.span,
-                body: block,
-            }
-        } else {
-            self.parse_expr()?
-        };
-        let end = body.span();
-        Some(TryCatchHandler {
-            binder,
-            body: Box::new(body),
-            span: start.cover(end),
-        })
     }
 
     pub(super) fn parse_postfix_expr(&mut self) -> Option<Expr> {

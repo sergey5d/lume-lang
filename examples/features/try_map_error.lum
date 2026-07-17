@@ -16,17 +16,17 @@ def queryEither(ok Bool) Either[Str, Int] =
     if ok { Right(7) } else { Left("nope") }
 
 def loadUser(found Bool) Result[Str, Str] {
-    user = try findUser(found) catch => "missing user"
+    user = try findUser(found).toResult("missing user")
     Ok(user)
 }
 
 def loadRow(ok Bool) Result[Str, Str] {
-    row = try queryRow(ok) catch err => "db: " + err
+    row = try queryRow(ok).mapError { err -> "db: " + err }
     Ok(row)
 }
 
 def loadEither(ok Bool) Either[Str, Int] {
-    value = try queryEither(ok) catch left => {
+    value = try queryEither(ok).mapLeft { left ->
         "left: " + left
     }
     Right(value)

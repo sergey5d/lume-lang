@@ -178,12 +178,6 @@ Clarification on "failure conversion":
   - enclosing function returns `Result[Int, AppError]`
   - failure conversion would mean allowing `IoError` to be turned into something like `AppError.Io(...)` during propagation
 
-Open `try catch` ergonomics question:
-- consider whether the handler should instead allow or require returning the full failure container, such as `Err(mappedFailure)`, and reject success containers like `Ok(...)`
-- the payload-only model keeps handlers compact and avoids accidentally returning success from a failure path
-- the explicit-container model may read more directly to programmers who think of `catch` as "return this failure"
-- if explicit containers are allowed, diagnostics should prevent confusing forms such as producing `Ok(...)` from a `catch` handler unless we deliberately choose a broader recovery/fallback feature
-
 ### 12. Smarter Type Narrowing
 
 Later improvements could include:

@@ -2140,24 +2140,8 @@ impl<'a> Resolver<'a> {
                     self.resolve_method(method);
                 }
             }
-            Expr::Try { value, handler, .. } => {
+            Expr::Try { value, .. } => {
                 self.resolve_expr(value);
-                if let Some(handler) = handler {
-                    self.push_scope();
-                    if let Some(name) = &handler.binder {
-                        self.define_local_value(
-                            name,
-                            handler.span,
-                            false,
-                            SymbolKind::Binding,
-                            "duplicate_binding",
-                            format!("duplicate binding '{}'", name),
-                            false,
-                        );
-                    }
-                    self.resolve_expr(&handler.body);
-                    self.pop_scope();
-                }
             }
             Expr::Lift { value, .. } => self.resolve_expr(value),
             Expr::Unary { expr, .. } => self.resolve_expr(expr),

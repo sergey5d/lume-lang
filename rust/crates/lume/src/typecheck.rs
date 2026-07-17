@@ -122,13 +122,6 @@ enum LiftedFamily {
     Either { left: Ty },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum TrySourceFailure {
-    Option,
-    Payload { family: &'static str, ty: Ty },
-    Unknown,
-}
-
 impl Ty {
     fn named(name: impl Into<String>) -> Self {
         Self::Named(name.into(), Vec::new())
@@ -3759,11 +3752,7 @@ impl<'a> Checker<'a> {
                 methods,
                 span,
             } => self.check_anonymous_interface_expr(interfaces, methods, *span, expected),
-            Expr::Try {
-                value,
-                handler,
-                span,
-            } => self.check_try_expr(value, handler.as_deref(), *span),
+            Expr::Try { value, span } => self.check_try_expr(value, *span),
             Expr::Lift { value, span } => self.check_lift_expr(value, *span),
             Expr::Unary { op, expr, span } => {
                 let inner = self.check_expr(expr);
@@ -6456,12 +6445,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_try_expr(
-        &mut self,
-        value: &Expr,
-        handler: Option<&crate::ast::TryCatchHandler>,
-        span: crate::source::Span,
-    ) -> Ty {
+    fn check_try_expr(&mut self, value: &Expr, span: crate::source::Span) -> Ty {
         if self.current_return == Ty::Unknown {
             self.add_error("invalid_try", "try used outside callable body", span);
             return Ty::Unknown;
@@ -6481,128 +6465,18 @@ impl<'a> Checker<'a> {
             return inner;
         }
 
-        let Some(handler) = handler else {
-            if !self.try_propagates_from(&value_ty, &self.current_return) {
-                self.add_error(
-                    "invalid_try",
-                    format!(
-                        "try on '{}' cannot propagate from enclosing return type '{}'",
-                        value_ty.describe(),
-                        self.current_return.describe()
-                    ),
-                    span,
-                );
-            }
-            return inner;
-        };
-
-        self.check_try_catch_handler(&value_ty, handler, span);
-        inner
-    }
-
-    fn check_try_catch_handler(
-        &mut self,
-        source_ty: &Ty,
-        handler: &crate::ast::TryCatchHandler,
-        span: crate::source::Span,
-    ) {
-        let source_failure = self.try_source_failure_payload(source_ty);
-        match (&source_failure, handler.binder.as_ref()) {
-            (TrySourceFailure::Option, Some(_)) => {
-                self.add_error(
-                    "invalid_try",
-                    "Option try catch has no failure payload; write 'catch => mappedFailure' without a binder",
-                    handler.span,
-                );
-            }
-            (TrySourceFailure::Payload { family, .. }, None) => {
-                self.add_error(
-                    "invalid_try",
-                    format!(
-                        "{family} try catch requires a failure binder; write 'catch err => mappedFailure'"
-                    ),
-                    handler.span,
-                );
-            }
-            _ => {}
-        }
-
-        let Some((target_case, target_failure)) =
-            self.try_target_failure_payload(&self.current_return)
-        else {
+        if !self.try_propagates_from(&value_ty, &self.current_return) {
             self.add_error(
                 "invalid_try",
                 format!(
-                    "try catch can only map failures into enclosing Result or Either returns, got '{}'",
+                    "try on '{}' cannot propagate from enclosing return type '{}'",
+                    value_ty.describe(),
                     self.current_return.describe()
                 ),
                 span,
             );
-            self.check_expr(&handler.body);
-            return;
-        };
-
-        if let Some(reason_span) = lazy_arg_forbidden_control_flow_span(&handler.body) {
-            self.add_error(
-                "invalid_try_catch",
-                "try catch handler cannot contain return, break, continue, or another try; produce the mapped failure value instead",
-                reason_span,
-            );
         }
-
-        self.push_scope();
-        if let (TrySourceFailure::Payload { ty, .. }, Some(name)) =
-            (&source_failure, handler.binder.as_ref())
-        {
-            self.define_local(name, ty.clone(), false);
-        }
-        let actual = self.check_expr_against(&handler.body, &target_failure);
-        self.pop_scope();
-        self.require_assignable(
-            &actual,
-            &target_failure,
-            handler.body.span(),
-            "invalid_try_catch",
-            format!(
-                "try catch handler must produce the {target_case} failure payload type {}, got {}",
-                self.diagnostic_type_phrase(&target_failure),
-                self.diagnostic_type_phrase(&actual)
-            ),
-        );
-    }
-
-    fn try_source_failure_payload(&self, source: &Ty) -> TrySourceFailure {
-        match source {
-            Ty::Named(name, args) if name == "Option" && args.len() == 1 => {
-                TrySourceFailure::Option
-            }
-            Ty::Named(name, args) if name == "Result" && args.len() == 2 => {
-                TrySourceFailure::Payload {
-                    family: "Result",
-                    ty: args[1].clone(),
-                }
-            }
-            Ty::Named(name, args) if name == "Either" && args.len() == 2 => {
-                TrySourceFailure::Payload {
-                    family: "Either",
-                    ty: args[0].clone(),
-                }
-            }
-            _ => TrySourceFailure::Unknown,
-        }
-    }
-
-    fn try_target_failure_payload(&self, target: &Ty) -> Option<(&'static str, Ty)> {
-        match target {
-            Ty::Unknown => Some(("mapped", Ty::Unknown)),
-            Ty::Named(name, args) if name == "Result" && args.len() == 2 => {
-                Some(("Err", args[1].clone()))
-            }
-            Ty::Named(name, args) if name == "Either" && args.len() == 2 => {
-                Some(("Left", args[0].clone()))
-            }
-            _ => None,
-        }
+        inner
     }
 
     fn extract_pattern_inner_type(&mut self, scrutinee: &Ty, span: crate::source::Span) -> Ty {

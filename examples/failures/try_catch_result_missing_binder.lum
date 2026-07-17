@@ -1,8 +1,0 @@
-# FAIL_REGEX:
-# .*Result try catch requires a failure binder; write 'catch err => mappedFailure'.*
-
-def main() Result[Int, Str] {
-    result Result[Int, Str] = Err("bad")
-    value = try result catch => "mapped"
-    Ok(value)
-}

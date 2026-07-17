@@ -3346,11 +3346,7 @@ impl<'a> FunctionLowerer<'a> {
                 else_branch,
                 span,
             } => self.lower_if_expr(condition, then_block, else_branch, *span),
-            Expr::Try {
-                value,
-                handler,
-                span,
-            } => self.lower_try_expr(value, handler.as_deref(), *span),
+            Expr::Try { value, span } => self.lower_try_expr(value, *span),
             Expr::Block { body, .. } => self.lower_block_expr(body),
             Expr::Match {
                 partial,
@@ -3422,12 +3418,7 @@ impl<'a> FunctionLowerer<'a> {
         ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
     }
 
-    fn lower_try_expr(
-        &mut self,
-        value: &Expr,
-        handler: Option<&core::TryCatchHandler>,
-        span: Span,
-    ) -> ir::Operand {
+    fn lower_try_expr(&mut self, value: &Expr, span: Span) -> ir::Operand {
         let source_ty = self.infer_expr_type(value);
         let source = self.lower_expr_with_expected(value, Some(&source_ty));
         let source_local = self.add_temp(ir::Type::Unknown);
@@ -3490,17 +3481,7 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         self.current_block = Some(failure_block);
-        let failure = if let Some(handler) = handler {
-            self.lower_try_catch_failure(
-                handler,
-                source_local,
-                &source_ty,
-                self.function().return_ty.clone(),
-                span,
-            )
-        } else {
-            ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))
-        };
+        let failure = ir::Operand::Copy(Box::new(ir::Place::Local(source_local)));
         if self.current_block.is_some() {
             self.terminate(ir::Terminator::ret(Some(failure)));
         }
@@ -3508,86 +3489,6 @@ impl<'a> FunctionLowerer<'a> {
         let join_used = self.block_has_predecessor(join_block);
         self.current_block = if join_used { Some(join_block) } else { None };
         ir::Operand::Copy(Box::new(ir::Place::Local(result)))
-    }
-
-    fn lower_try_catch_failure(
-        &mut self,
-        handler: &core::TryCatchHandler,
-        source_local: ir::LocalId,
-        source_ty: &ir::Type,
-        return_ty: ir::Type,
-        span: Span,
-    ) -> ir::Operand {
-        self.push_scope();
-        if let Some(name) = &handler.binder {
-            if let Some((field_name, field_ty)) = try_source_failure_ir_field(source_ty) {
-                let payload = self.emit_temp_from_rvalue(
-                    ir::RValue::Call {
-                        callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantField(
-                            field_name.to_string(),
-                        )),
-                        args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
-                        structural: false,
-                    },
-                    field_ty.clone(),
-                    Some(handler.span),
-                );
-                let local = self.add_local(name.clone(), field_ty, false, ir::LocalKind::Binding);
-                self.bind_existing(name, local);
-                self.push_statement(ir::Statement {
-                    span: Some(handler.span),
-                    kind: ir::StatementKind::Assign {
-                        target: ir::Place::Local(local),
-                        value: ir::RValue::Use(payload),
-                    },
-                });
-            }
-        }
-        let expected_failure = try_target_failure_ir_type(&return_ty);
-        let mapped = if let Some(expected) = expected_failure.as_ref() {
-            self.lower_expr_with_expected(&handler.body, Some(expected))
-        } else {
-            self.lower_expr(&handler.body)
-        };
-        self.pop_scope();
-        self.wrap_try_mapped_failure(mapped, &return_ty, span)
-    }
-
-    fn wrap_try_mapped_failure(
-        &mut self,
-        mapped: ir::Operand,
-        return_ty: &ir::Type,
-        span: Span,
-    ) -> ir::Operand {
-        match return_ty {
-            ir::Type::Named { name, args } if name == "Result" && args.len() == 2 => self
-                .emit_temp_from_rvalue(
-                    ir::RValue::Variant {
-                        enum_name: "Result".to_string(),
-                        case_name: "Err".to_string(),
-                        fields: vec![ir::NamedOperand {
-                            name: "error".to_string(),
-                            value: mapped,
-                        }],
-                    },
-                    return_ty.clone(),
-                    Some(span),
-                ),
-            ir::Type::Named { name, args } if name == "Either" && args.len() == 2 => self
-                .emit_temp_from_rvalue(
-                    ir::RValue::Variant {
-                        enum_name: "Either".to_string(),
-                        case_name: "Left".to_string(),
-                        fields: vec![ir::NamedOperand {
-                            name: "value".to_string(),
-                            value: mapped,
-                        }],
-                    },
-                    return_ty.clone(),
-                    Some(span),
-                ),
-            _ => mapped,
-        }
     }
 
     fn lower_lifted_chain_expr(
@@ -6115,31 +6016,6 @@ fn unwrap_lifted_ir_type(ty: &ir::Type) -> Option<(LiftedIrFamily, ir::Type)> {
             args[1].clone(),
         )),
         ir::Type::Unknown => Some((LiftedIrFamily::Option, ir::Type::Unknown)),
-        _ => None,
-    }
-}
-
-fn try_source_failure_ir_field(source_ty: &ir::Type) -> Option<(&'static str, ir::Type)> {
-    match source_ty {
-        ir::Type::Named { name, args } if name == "Result" && args.len() == 2 => {
-            Some(("error", args[1].clone()))
-        }
-        ir::Type::Named { name, args } if name == "Either" && args.len() == 2 => {
-            Some(("value", args[0].clone()))
-        }
-        _ => None,
-    }
-}
-
-fn try_target_failure_ir_type(return_ty: &ir::Type) -> Option<ir::Type> {
-    match return_ty {
-        ir::Type::Named { name, args } if name == "Result" && args.len() == 2 => {
-            Some(args[1].clone())
-        }
-        ir::Type::Named { name, args } if name == "Either" && args.len() == 2 => {
-            Some(args[0].clone())
-        }
-        ir::Type::Unknown => Some(ir::Type::Unknown),
         _ => None,
     }
 }

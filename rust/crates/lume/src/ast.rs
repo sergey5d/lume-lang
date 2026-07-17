@@ -624,7 +624,6 @@ pub enum Expr {
     },
     Try {
         value: Box<Expr>,
-        handler: Option<Box<TryCatchHandler>>,
         span: Span,
     },
     Lift {
@@ -721,13 +720,6 @@ impl Expr {
             | Expr::Group { span, .. } => *span,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TryCatchHandler {
-    pub binder: Option<String>,
-    pub body: Box<Expr>,
-    pub span: Span,
 }
 
 /// The alternative branch of an expression-form `if`.

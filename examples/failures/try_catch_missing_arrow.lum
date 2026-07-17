@@ -1,8 +1,0 @@
-# FAIL_REGEX:
-# .*expected '=>' or failure binding after 'catch'.*
-
-def main() Result[Int, Str] {
-    maybe Option[Int] = None
-    value = try maybe catch "missing"
-    Ok(value)
-}

@@ -8,7 +8,6 @@ pub enum Keyword {
     Annotation,
     As,
     Break,
-    Catch,
     Continue,
     Case,
     Class,
@@ -298,7 +297,6 @@ impl<'a> Lexer<'a> {
             "annotation" => TokenKind::Keyword(Keyword::Annotation),
             "as" => TokenKind::Keyword(Keyword::As),
             "break" => TokenKind::Keyword(Keyword::Break),
-            "catch" => TokenKind::Keyword(Keyword::Catch),
             "continue" => TokenKind::Keyword(Keyword::Continue),
             "case" => TokenKind::Keyword(Keyword::Case),
             "class" => TokenKind::Keyword(Keyword::Class),
@@ -577,13 +575,12 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nitems = for value <- values yield value + 1\nvalue = try source catch err => mapped(err)\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\ncount %= 2\nlifted = value.->name()\nlift { value: Some(1) }\ndef spread(vararg value [Str]) Unit = ()\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err -> mapped(err) }\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\ncount %= 2\nlifted = value.->name()\nlift { value: Some(1) }\ndef spread(vararg value [Str]) Unit = ()\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Annotation)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::As)));
-        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Catch)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Ext)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Lift)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Reified)));

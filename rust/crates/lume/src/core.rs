@@ -334,7 +334,6 @@ pub enum Expr {
     },
     Try {
         value: Box<Expr>,
-        handler: Option<Box<TryCatchHandler>>,
         span: Span,
     },
     Lift {
@@ -392,13 +391,6 @@ pub enum Expr {
         segments: Vec<LiftedChainSegment>,
         span: Span,
     },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TryCatchHandler {
-    pub binder: Option<String>,
-    pub body: Box<Expr>,
-    pub span: Span,
 }
 
 impl Expr {

@@ -1950,34 +1950,26 @@ type:
 
 The success type may differ; the propagated failure side must still be compatible.
 
-Failure mapping:
+Failure mapping is ordinary container transformation before `try`:
 
 ```txt
-value = try source catch => mappedFailure
-value = try source catch failure => mappedFailure
-value = try source catch failure => {
-    statement1
-    statement2
-    mappedFailure
-}
+user = try maybeUser.toResult(AppError.NotFound(id))
+row = try Db.query(id).mapError { err -> AppError.Db(err) }
+value = try sourceEither.mapLeft { left -> AppError.FromLeft(left) }
 ```
 
-`try ... catch` still unwraps the success side, but maps the failure payload
-before returning from the enclosing callable.
+`try` propagates the value it receives. If the source has the wrong failure type,
+transform the container first:
 
-- `Option[T]` has no failure payload, so it uses `catch => mappedFailure`.
-- `Result[T, E]` binds `Err(E)` with `catch err => mappedFailure`.
-- `Either[L, R]` binds `Left(L)` with `catch left => mappedFailure`.
-- The handler produces the target failure payload, not a full `Err(...)` or `Left(...)`.
-- The handler cannot contain `return`, `break`, `continue`, or another `try`.
-- The enclosing callable must return `Result[..., Failure]` or `Either[Failure, ...]`.
+- `Option[T].toResult(error)` converts absence into `Err(error)`.
+- `Result[T, E].mapError(f)` maps `Err(E)` into another error type.
+- `Either[L, R].mapLeft(f)` maps `Left(L)` into another left type.
 
-Examples:
+When the chain gets visually noisy, split before the mapping call:
 
 ```txt
-user = try Users.find(id) catch => AppError.NotFound(id)
-row = try Db.query(id) catch err => AppError.Db(err)
-value = try sourceEither catch left => AppError.FromLeft(left)
+row = try Db.query(id)
+    .mapError { err -> AppError.Db(err) }
 ```
 
 Multiple dependent unwraps can be written as sequential `guard ... else` / `try`

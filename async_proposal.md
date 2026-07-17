@@ -19,9 +19,9 @@ def summary(ctx Context) Result[HttpResponse, HttpError] {
         expenseTask = fork this.repo().expenseTotals(orgId)
         agingTask   = fork this.repo().arAging(orgId)
 
-        revenue = try revenueTask.join() catch error => ApiResult.httpError(500, error.toStr())
-        expenses = try expenseTask.join() catch error => ApiResult.httpError(500, error.toStr())
-        aging   = try agingTask.join() catch error => ApiResult.httpError(500, error.toStr())
+        revenue = try revenueTask.join().mapError { error -> ApiResult.httpError(500, error.toStr()) }
+        expenses = try expenseTask.join().mapError { error -> ApiResult.httpError(500, error.toStr()) }
+        aging = try agingTask.join().mapError { error -> ApiResult.httpError(500, error.toStr()) }
 
         Ok({ body: Json.stringify({ revenue: revenue, expenses: expenses, aging: aging }) })
     }
@@ -34,7 +34,7 @@ Mental model:
 - Each fork can run on a virtual thread.
 - Each database query grabs its own Hikari connection, so independent queries can genuinely run at the same time.
 - `scope { ... }` guarantees all child tasks finish or are cancelled before the block exits.
-- `join()` returns through the language's normal `Result` flow, so existing `try ... catch` failure mapping still works.
+- `join()` returns through the language's normal `Result` flow, so failures can be mapped before `try`.
 
 This keeps parallelism explicit without making the endpoint callback-shaped.
 

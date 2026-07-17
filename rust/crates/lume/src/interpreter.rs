@@ -642,11 +642,8 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
             }
         }
         ast::Expr::Unary { expr: inner, .. } => rewrite_expr_for_runtime(inner, module, graph),
-        ast::Expr::Try { value, handler, .. } => {
+        ast::Expr::Try { value, .. } => {
             rewrite_expr_for_runtime(value, module, graph);
-            if let Some(handler) = handler {
-                rewrite_expr_for_runtime(&mut handler.body, module, graph);
-            }
         }
         ast::Expr::Lift { value, .. } => rewrite_expr_for_runtime(value, module, graph),
         ast::Expr::Binary { left, right, .. } => {

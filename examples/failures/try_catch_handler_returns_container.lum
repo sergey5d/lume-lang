@@ -1,8 +1,0 @@
-# FAIL_REGEX:
-# .*try catch handler must produce the Err failure payload type 'Str', got 'Result.*
-
-def main() Result[Int, Str] {
-    result Result[Int, Str] = Err("bad")
-    value = try result catch err => Err("mapped")
-    Ok(value)
-}
