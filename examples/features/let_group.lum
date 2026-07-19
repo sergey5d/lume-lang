@@ -1,11 +1,11 @@
 # EXPECT:
-# grouped guard 8
-# grouped guard fail 9
+# grouped let else 8
+# grouped let else fail 9
 # grouped if 15
 # chained if let 8
 
-def groupedGuard(value Option[Int]) Int {
-    guard {
+def groupedLetElse(value Option[Int]) Int {
+    let {
         Some(a) = value
         Some(b) = Some(a + 4)
     } else {
@@ -25,8 +25,8 @@ def groupedIf(value Option[Int]) Int {
 }
 
 def main() Unit {
-    println("grouped guard ${groupedGuard(Some(2))}")
-    println("grouped guard fail ${groupedGuard(None)}")
+    println("grouped let else ${groupedLetElse(Some(2))}")
+    println("grouped let else fail ${groupedLetElse(None)}")
     println("grouped if ${groupedIf(Some(4))}")
     if let Some(a) = Some(3) && let Ok(b) = Ok(5) && b == 5 {
         println("chained if let ${a + b}")

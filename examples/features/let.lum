@@ -9,7 +9,7 @@
 # prefix 6
 
 def plusOne(value Option[Int]) Result[Int, Str] {
-    guard Some(item) = value else {
+    let Some(item) = value else {
         return Err("missing")
     }
     Ok(item + 1)
@@ -21,14 +21,14 @@ def plusThree(value Option[Int]) Option[Int] {
 }
 
 def pairwise(left Option[Int], right Option[Str]) { count Int, label Str } {
-    guard Some(count) = left else {
+    let Some(count) = left else {
         return { count: 0, label: "no-left" }
     }
-    guard Some(label) = right else {
+    let Some(label) = right else {
         return (count, "no-right")
     }
 
-    guard {
+    let {
         Some(groupedCount) = left
         Some(groupedLabel) = right
     } else {
@@ -39,15 +39,15 @@ def pairwise(left Option[Int], right Option[Str]) { count Int, label Str } {
 }
 
 def sumBoth(left Option[Int], right Option[Int]) Result[Int, Str] {
-    guard Some(a) = left else return Err("sum-missing")
-    guard Some(b) = right else return Err("sum-missing")
+    let Some(a) = left else return Err("sum-missing")
+    let Some(b) = right else return Err("sum-missing")
     Ok(a + b)
 }
 
 def sumPrefix(values List[Option[Int]]) Int {
     var total Int = 0
     for value <- values {
-        guard Some(item) = value else break
+        let Some(item) = value else break
         total := total + item
     }
     total

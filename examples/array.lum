@@ -28,9 +28,9 @@ def main() Unit {
     values.forEach(item -> println("each " + item))
     println("index " + values[0] + " " + values[2])
 
-    guard Some(middle) = values.get(1) else return ()
-    guard Some(first) = values.first() else return ()
-    guard Some(last) = values.last() else return ()
+    let Some(middle) = values.get(1) else return ()
+    let Some(first) = values.first() else return ()
+    let Some(last) = values.last() else return ()
 
     pairs = values.zip(labels)
     indexed = values.zipWithIndex()

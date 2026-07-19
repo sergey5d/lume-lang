@@ -1,16 +1,16 @@
 # EXPECT:
-# guard option 6
-# guard option missing
-# guard group 9
-# guard group missing
+# let else option 6
+# let else option missing
+# let else group 9
+# let else group missing
 
 def plusOne(value Option[Int]) Result[Int, Str] {
-    guard Some(item) = value else return Err("missing")
+    let Some(item) = value else return Err("missing")
     Ok(item + 1)
 }
 
 def sumBoth(left Option[Int], right Option[Int]) Result[Int, Str] {
-    guard {
+    let {
         Some(a) = left
         Some(b) = right
     } else return Err("missing")
@@ -25,8 +25,8 @@ def printResult(label Str, value Result[Int, Str]) Unit {
 }
 
 def main() Unit {
-    printResult("guard option", plusOne(Some(5)))
-    printResult("guard option", plusOne(None))
-    printResult("guard group", sumBoth(Some(4), Some(5)))
-    printResult("guard group", sumBoth(Some(4), None))
+    printResult("let else option", plusOne(Some(5)))
+    printResult("let else option", plusOne(None))
+    printResult("let else group", sumBoth(Some(4), Some(5)))
+    printResult("let else group", sumBoth(Some(4), None))
 }

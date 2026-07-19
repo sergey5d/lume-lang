@@ -7,7 +7,7 @@ class Counter {
 
 impl Counter {
     def bad() Int {
-        guard Some(count) = Some(1) else return this.count
+        let Some(count) = Some(1) else return this.count
         this.count
     }
 }

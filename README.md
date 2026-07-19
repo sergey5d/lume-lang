@@ -35,7 +35,7 @@ Construction is its own idea:
 Control flow is expression-friendly but still explicit:
 
 - `match` is exhaustive; `partial match` returns `Option`.
-- `let`, `guard`, `if let`, and `expect` are pattern-oriented binding forms;
+- `let`, `if let`, and `expect` are pattern-oriented binding forms;
   `assert(...)` handles boolean assertions.
 - `try`, `lift`, and lifted access (`.->`) handle `Option`, `Result`, and `Either` flow
   without turning every method call into special syntax.

@@ -45,8 +45,20 @@ impl<'a> Parser<'a> {
                 self.restore(checkpoint);
                 self.parse_let_stmt()
             }
-            TokenKind::Keyword(Keyword::Guard) => self.parse_guard_stmt(),
             TokenKind::Keyword(Keyword::Expect) => self.parse_expect_stmt(),
+            TokenKind::Identifier
+                if self.current().lexeme == "guard"
+                    && matches!(
+                        self.next_significant_token().kind,
+                        TokenKind::Identifier | TokenKind::LBrace
+                    ) =>
+            {
+                self.error_at_current(
+                    "guard_removed",
+                    "guard binding syntax was removed; use 'let PATTERN = value else ...' for recoverable refutable bindings",
+                );
+                None
+            }
             TokenKind::Keyword(Keyword::Var) => {
                 let stmt = self.parse_binding_stmt_after_var()?;
                 Some(Stmt::Binding(stmt))
@@ -172,11 +184,15 @@ impl<'a> Parser<'a> {
             }
             let (clauses, clauses_end) = self.parse_refutable_clause_block("let")?;
             if self.match_keyword(Keyword::Else) {
-                self.error_at_current(
-                    "guard_required",
-                    "recoverable refutable bindings use 'guard { ... } else ...'; keep 'let' for irrefutable destructuring",
-                );
-                return None;
+                let else_block = self.parse_block_or_inline_stmt_body("let else")?;
+                let end = else_block.span;
+                return Some(Stmt::LetElse(LetElseStmt {
+                    clauses,
+                    pattern: Pattern::Wildcard { span: clauses_end },
+                    value: Expr::Unit { span: clauses_end },
+                    else_block,
+                    span: start.cover(end),
+                }));
             }
             return Some(Stmt::PatternBinding(PatternBindingStmt {
                 kind: PatternBindingKind::Let,
@@ -232,7 +248,7 @@ impl<'a> Parser<'a> {
                         } else {
                             self.error_at_current(
                                 "unexpected_token",
-                                "plain 'let name = value' bindings do not support 'else'; use a refutable pattern like 'guard Some(name) = value else { ... }'",
+                                "plain 'let name = value' bindings do not support 'else'; use a refutable pattern like 'let Some(name) = value else { ... }'",
                             );
                             return None;
                         }
@@ -268,11 +284,15 @@ impl<'a> Parser<'a> {
         }
         let value = self.parse_expr()?;
         if self.match_keyword(Keyword::Else) {
-            self.error_at_current(
-                "guard_required",
-                "recoverable refutable bindings use 'guard Pattern = value else ...'; keep 'let' for irrefutable destructuring",
-            );
-            return None;
+            let else_block = self.parse_block_or_inline_stmt_body("let else")?;
+            let end = else_block.span;
+            return Some(Stmt::LetElse(LetElseStmt {
+                clauses: Vec::new(),
+                pattern,
+                value,
+                else_block,
+                span: start.cover(end),
+            }));
         }
         let end = value.span();
         Some(Stmt::PatternBinding(PatternBindingStmt {
@@ -280,50 +300,6 @@ impl<'a> Parser<'a> {
             clauses: Vec::new(),
             pattern,
             value,
-            span: start.cover(end),
-        }))
-    }
-
-    pub(super) fn parse_guard_stmt(&mut self) -> Option<Stmt> {
-        let start = self.consume_keyword(Keyword::Guard, "expected 'guard'")?;
-
-        if self.at(TokenKind::LBrace) {
-            let (clauses, clauses_end) = self.parse_refutable_clause_block("guard")?;
-            if !self.match_keyword(Keyword::Else) {
-                self.error_at_current("expected_else", "guard bindings require an 'else' fallback");
-                return None;
-            }
-            let else_block = self.parse_block_or_inline_stmt_body("guard else")?;
-            let end = else_block.span;
-            return Some(Stmt::LetElse(LetElseStmt {
-                clauses,
-                pattern: Pattern::Wildcard { span: clauses_end },
-                value: Expr::Unit { span: clauses_end },
-                else_block,
-                span: start.cover(end),
-            }));
-        }
-
-        let (pattern, operator) = self.parse_refutable_pattern_head("guard")?;
-        if operator != "=" && self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                format!("expected expression on same line after \"{operator}\""),
-            );
-            return None;
-        }
-        let value = self.parse_expr()?;
-        if !self.match_keyword(Keyword::Else) {
-            self.error_at_current("expected_else", "guard bindings require an 'else' fallback");
-            return None;
-        }
-        let else_block = self.parse_block_or_inline_stmt_body("guard else")?;
-        let end = else_block.span;
-        Some(Stmt::LetElse(LetElseStmt {
-            clauses: Vec::new(),
-            pattern,
-            value,
-            else_block,
             span: start.cover(end),
         }))
     }
@@ -336,7 +312,7 @@ impl<'a> Parser<'a> {
             if self.match_keyword(Keyword::Else) {
                 self.error_at_current(
                     "unexpected_token",
-                    "expect does not support 'else'; use 'guard ... else ...' for recoverable pattern matching",
+                    "expect does not support 'else'; use 'let ... else ...' for recoverable pattern matching",
                 );
                 return None;
             }
@@ -373,7 +349,7 @@ impl<'a> Parser<'a> {
             if self.match_keyword(Keyword::Else) {
                 self.error_at_current(
                     "unexpected_token",
-                    "expect does not support 'else'; use 'guard ... else ...' for recoverable pattern matching",
+                    "expect does not support 'else'; use 'let ... else ...' for recoverable pattern matching",
                 );
                 return None;
             }

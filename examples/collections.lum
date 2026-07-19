@@ -8,7 +8,7 @@ def main() Int {
 	items = for item <- values yield {
 		item + 1
 	}
-	guard Some(first) = items.get(0) else return 0
+	let Some(first) = items.get(0) else return 0
 	println("found " + first)
 
 	var total Int = 0

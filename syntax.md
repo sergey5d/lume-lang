@@ -26,6 +26,7 @@ List shorthand can be nested, for example:
 - `[[[(Str, Int)]]]`
 
 Common stdlib/prelude types:
+
 - `Option[T]`
 - `Result[T, E]`
 - `Either[L, R]`
@@ -136,7 +137,7 @@ userOpt.->profileOpt().name     # error: Option[Profile] has no member
                                 # 'name'; use '.->name'
 ```
 
-Chains normally stay lifted and are consumed by `try`, `guard`,
+Chains normally stay lifted and are consumed by `try`, `let ... else`,
 `if let`, or `match`:
 
 ```txt
@@ -206,13 +207,14 @@ Runtime metadata types are generic over the represented type:
 
 ```txt
 Type[A]   # exact typed metadata for A
-Type[_]   # metadata for some captured unknown represented type
 Type[Any] # exact typed metadata specifically for Any
 ```
 
 `typeOf[T]` returns `Type[T]`. `value.runtimeType` returns `Type[A]` for a
 concrete statically known value type `A`. If the value is statically `Any` or
-otherwise not known precisely, `runtimeType` returns `Type[_]`.
+otherwise not known precisely, the represented type is captured and may be
+written at use sites as `Type[_]`. This is still `Type[T]` with wildcard
+capture, not a separate metadata type.
 
 Common metadata operations:
 
@@ -354,13 +356,13 @@ Meaning:
 
 Built-in `OS` methods are available implicitly in every file, so `print(...)`, `println(...)`, and `printf(...)` work without writing `use OS/*`. Prelude functions like `panic(...)`, `assert(...)`, `ensure(...)`, and `identity(...)` are also available in every file. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
 
-Extension methods are imported only by wildcard module use. They are visible in
+Extension methods are made available only by wildcard module use. They are visible in
 the module where the `ext` block is declared and in files that write
-`use module/sub/*`. Selective imports such as `use module/sub/Name` do not import
-extension methods.
+`use module/sub/*`. Selective use forms such as `use module/sub/Name` do not
+make extension methods available.
 
-The standard spec helper module is imported explicitly by test files. It is not
-part of the prelude; specs are executed by the test runner:
+The standard spec helper module is brought in explicitly by test files. It is
+not part of the prelude; specs are executed by the test runner:
 
 ```txt
 use spec/*
@@ -446,15 +448,15 @@ is ordinary field access on that stable singleton value.
 
 Annotation arguments are compile-time metadata values. They may only be literals, stable constants, aggregate literals made from allowed values, or constant expressions composed from allowed values:
 
-- immutable top-level constants, including imported constants
+- immutable top-level constants, including constants brought in with `use`
 - immutable fields on `single` values, such as `Routes.health`; this is allowed because `single Name { ... }` declares the singleton value `Name`
 - immutable constants through a module alias, such as `routes.healthPath`
 - enum cases, such as `RouteVisibility.External`
 - arithmetic, comparison, boolean, and string-concatenation expressions whose operands are also annotation-safe
 
-Calls, constructors, indexing, mutable singleton fields, ordinary object field reads, `try`, `for ... yield`, `match`, `if`, lambdas, and blocks are rejected in annotation arguments. Top-level mutable bindings are not allowed at all, so they are rejected before annotation argument checking.
+Calls, constructors, indexing, mutable single fields, ordinary instance field reads, `try`, `for ... yield`, `match`, `if`, lambdas, and blocks are rejected in annotation arguments. Top-level mutable bindings are not allowed at all, so they are rejected before annotation argument checking.
 
-Supported targets currently include:
+Supported annotation targets:
 
 - top-level `def`, `annotation`, `interface`, `class`, `shape`, `single`, `enum`
 - fields
@@ -535,7 +537,7 @@ enum OptionX[T] {
 }
 ```
 
-Arbitrary statements such as `if`, `for`, `match`, `defer`, `guard`, `expect`, or expression statements are not valid at top level. Put executable code inside a function such as `main() { ... }`.
+Arbitrary statements such as `if`, `for`, `match`, `defer`, `expect`, or expression statements are not valid at top level. Put executable code inside a function such as `main() { ... }`.
 
 ## Variable Declarations
 
@@ -585,7 +587,7 @@ single Greeter {
 }
 ```
 
-Visible class fields, shape fields, enum fields, and singleton fields still require explicit field types.
+Visible class fields, shape fields, enum fields, and single fields still require explicit field types.
 
 ## Assignment and Update
 
@@ -826,8 +828,6 @@ General construction rules:
 - tuple values cannot construct classes; write `User(...)` or `User { ... }`
 - tuple values can construct anonymous or named shapes only when the target shape type is known
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
-- `Type({ ... })` is not supported; use construction fields or positional values directly
-- `shape(...)` expression syntax is not supported; use tuple-to-shape construction instead
 
 Explicit constructor shape rules:
 
@@ -1093,7 +1093,10 @@ mapped = maybe.map(value -> value + 1)
 leftMapped = either.mapLeft(error -> error.toStr())
 ```
 
-Classes, enums, and singles can declare methods inline. Classes, shapes, enums, and singles can also attach behavior through top-level `impl` blocks. Shape bodies remain data-only, so shape methods must use `impl ShapeName { ... }`:
+Classes, enums, and singles can declare methods in their declaration bodies.
+Classes, shapes, enums, and singles can also attach behavior through top-level
+`impl` blocks. Shape bodies remain data-only, so shape methods must use
+`impl ShapeName { ... }`:
 
 ```txt
 class Counter {
@@ -1127,8 +1130,8 @@ Extension rules:
 - extension methods use the same call syntax as regular methods
 - `this` is the extended receiver
 - extension methods can access only the visible members available from the extension module
-- extension methods are visible in their declaring module and in files that import that module with `use module/*`
-- extension imports are file-local; importing a module that imports extensions does not re-export those extension methods
+- extension methods are visible in their declaring module and in files that use that module with `use module/*`
+- extension visibility is file-local; using a module that itself uses extensions does not re-export those extension methods
 
 ```txt
 use model/user/{User}
@@ -1442,7 +1445,7 @@ Rules:
 - block expressions evaluate to the value of their last statement
 - block expressions are not valid directly after callable-body `=`; write `name(...) { ... }` for a callable block body
 - if you want a block value, the last statement must be value-producing
-- value-producing tail forms currently include ordinary expressions, `if / else`, `match`, and `for ... yield`
+- value-producing tail forms include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
 
 ## Classes, Shapes, Singles, Interfaces, Enums
@@ -1459,7 +1462,9 @@ impl Box[T] {
 }
 ```
 
-When a class or singleton implements an interface method inside its body or an `impl ... { ... }` block, it uses an ordinary method declaration. `def` is optional.
+When a class or single implements an interface method inside its body or an
+`impl ... { ... }` block, it uses an ordinary method declaration. `def` is
+optional.
 
 Singleton:
 
@@ -1574,7 +1579,9 @@ Enum cases are data-only:
 - payload and shared fields with defaults may be omitted from enum case constructors
 - `None()`-style calls for zero-payload cases are invalid
 
-Behavior for enums belongs on the enum itself, either inline or in `impl Enum { ... }` blocks, and case-specific behavior should be expressed with `match`.
+Behavior for enums belongs on the enum itself, either in the enum declaration
+body or in `impl Enum { ... }` blocks. Case-specific behavior should be
+expressed with `match`.
 
 ## Calls
 
@@ -1681,7 +1688,6 @@ Main statement forms:
 - `for`
 - `while`
 - `defer`
-- `guard`
 - `expect`
 - `return`
 - `break`
@@ -1694,7 +1700,7 @@ Standalone nested blocks are valid expression statements:
 
 ```txt
 {
-    OS.println("xxx")
+    println("xxx")
 }
 ```
 
@@ -1715,7 +1721,7 @@ Supported forms:
 defer cleanup()
 
 defer {
-    OS.println("closing")
+    println("closing")
 }
 ```
 
@@ -1728,9 +1734,9 @@ Statement form:
 
 ```txt
 if value > 0 {
-    OS.println("positive")
+    println("positive")
 } else {
-    OS.println("non-positive")
+    println("non-positive")
 }
 ```
 
@@ -1738,7 +1744,7 @@ Pattern-test form:
 
 ```txt
 if let Some(item) = maybeValue {
-    OS.println(item)
+    println(item)
 }
 ```
 
@@ -1746,7 +1752,7 @@ if let Some(item) = maybeValue {
 
 ```txt
 if let item <- maybeValue {
-    OS.println(item)
+    println(item)
 }
 ```
 
@@ -1754,11 +1760,11 @@ Runtime type patterns also work in `if let`:
 
 ```txt
 if let worker Worker = value {
-    OS.println(worker)
+    println(worker)
 }
 
 if let _ Worker = value {
-    OS.println("value is a Worker")
+    println("value is a Worker")
 }
 ```
 
@@ -1771,12 +1777,10 @@ When the payload needs more destructuring, prefer doing that on the next line in
 ```txt
 if let Some(pair) = maybePair {
     let (x, y) = pair
-    OS.println(x)
-    OS.println(y)
+    println(x)
+    println(y)
 }
 ```
-
-Direct nested payload destructuring in the `if let` pattern itself is still a possible future extension.
 
 Statement form may omit `else`:
 
@@ -1817,13 +1821,13 @@ pair (Int, Int) = (1, 2)
 let (left, right) = pair
 ```
 
-If the pattern can fail, plain `let` is rejected. Use a refutable binding form
-instead.
+If the pattern can fail, plain `let` without `else` is rejected. Add an `else`
+fallback for recoverable refutable binding.
 
-`guard ... else` is the refutable binding form with an explicit fallback path:
+`let ... else` is the refutable binding form with an explicit fallback path:
 
 ```txt
-guard Some(item) = maybeValue else {
+let Some(item) = maybeValue else {
     return Err("missing")
 }
 ```
@@ -1831,15 +1835,15 @@ guard Some(item) = maybeValue else {
 For success-carrying values, `<-` is shorthand for the success case:
 
 ```txt
-guard item <- maybeValue else {
+let item <- maybeValue else {
     return Err("missing")
 }
 ```
 
 This is equivalent to:
-- `guard Some(item) = maybeValue else { ... }` for `Option[T]`
-- `guard Ok(item) = maybeResult else { ... }` for `Result[T, E]`
-- `guard Right(item) = maybeEither else { ... }` for `Either[L, R]`
+- `let Some(item) = maybeValue else { ... }` for `Option[T]`
+- `let Ok(item) = maybeResult else { ... }` for `Result[T, E]`
+- `let Right(item) = maybeEither else { ... }` for `Either[L, R]`
 
 The shorthand requires the source type to be statically known as one of these
 forms. If the source type is unknown, use an explicit pattern instead.
@@ -1847,11 +1851,11 @@ forms. If the source type is unknown, use an explicit pattern instead.
 Type-pattern binding is also supported:
 
 ```txt
-guard worker Worker = value else {
+let worker Worker = value else {
     return Err("wrong kind")
 }
 
-guard _ Worker = value else {
+let _ Worker = value else {
     return Err("wrong kind")
 }
 ```
@@ -1859,7 +1863,7 @@ guard _ Worker = value else {
 Grouped refutable bindings share one fallback:
 
 ```txt
-guard {
+let {
     Some(left) = maybeLeft
     Some(right) = maybeRight
 } else {
@@ -1867,7 +1871,7 @@ guard {
 }
 ```
 
-`guard ... else` is statement-oriented:
+`let ... else` is statement-oriented:
 - the pattern is matched against the right-hand value
 - if the match succeeds, bindings remain visible after the statement
 - if the match fails, the `else` block is evaluated and must exit the current control-flow path, typically with `return`, `break`, `continue`, or a call whose return type is `Never`
@@ -1913,7 +1917,7 @@ expect {
 }
 ```
 
-`expect` is statement-only and does not support `else`; use `guard ... else`
+`expect` is statement-only and does not support `else`; use `let ... else`
 when you want an explicit fallback path.
 
 Use the runtime/prelude `assert(...)` function for plain boolean assertions:
@@ -1925,7 +1929,6 @@ assert(split.size() == 3, "split must have 3 parts")
 
 The first argument must be `Bool`. When the condition is `false`, `assert`
 panics. The optional second argument is the panic message.
-Statement-style `assert condition` is not supported.
 Boolean checks are intentionally not written with `expect`; `expect` is reserved
 for pattern/assertive binding.
 
@@ -1972,17 +1975,17 @@ row = try Db.query(id)
     .mapError { err -> AppError.Db(err) }
 ```
 
-Multiple dependent unwraps can be written as sequential `guard ... else` / `try`
-statements or as a grouped `guard` block:
+Multiple dependent unwraps can be written as sequential `let ... else` / `try`
+statements or as a grouped `let` block with `else`:
 
 ```txt
 left = try maybeLeft
 
-guard Some(right) = maybeRight else {
+let Some(right) = maybeRight else {
     return Err("missing")
 }
 
-guard {
+let {
     Some(left) = maybeLeft
     Some(right) = maybeRight
 } else {
@@ -1997,7 +2000,7 @@ if let {
     Some(left) = maybeLeft
     Some(right) = maybeRight
 } {
-    OS.println(left + right)
+    println(left + right)
 }
 ```
 
@@ -2008,7 +2011,7 @@ if let {
     left <- maybeLeft
     right <- maybeRight
 } {
-    OS.println(left + right)
+    println(left + right)
 }
 ```
 
@@ -2017,7 +2020,7 @@ earlier bindings:
 
 ```txt
 if let Some(left) = maybeLeft && let Ok(right) = compute() && right > left {
-    OS.println(left + right)
+    println(left + right)
 }
 ```
 
@@ -2029,7 +2032,7 @@ Simple loop:
 
 ```txt
 for item <- [1, 2, 3] {
-    OS.println(item)
+    println(item)
 }
 ```
 
@@ -2037,7 +2040,7 @@ Range loop:
 
 ```txt
 for i <- Range(0, 10) {
-    OS.println(i)
+    println(i)
 }
 ```
 
@@ -2047,7 +2050,7 @@ Generator heads normally bind one plain identifier:
 
 ```txt
 for row <- rows {
-    OS.println(row)
+    println(row)
 }
 ```
 
@@ -2056,7 +2059,7 @@ destructuring:
 
 ```txt
 for let (x, y, char) <- rows {
-    OS.println(char)
+    println(char)
 }
 ```
 
@@ -2065,11 +2068,11 @@ destructuring matches by field name, not by position:
 
 ```txt
 for let { name, location } <- users {
-    OS.println(name, location)
+    println(name, location)
 }
 
 for let { location as loc, name } <- users {
-    OS.println(name, loc)
+    println(name, loc)
 }
 ```
 
@@ -2077,10 +2080,10 @@ Refutable logic goes in the loop body:
 
 ```txt
 for maybeItem <- items {
-    guard Some(item) = maybeItem else {
+    let Some(item) = maybeItem else {
         continue
     }
-    OS.println(item)
+    println(item)
 }
 ```
 
@@ -2147,8 +2150,8 @@ values = for {
 } yield x + y
 ```
 
-Refutable `guard`, `expect`, reassignment, mutation, expression
-statements, and guards are not clause forms. Put that logic in the body or use
+Refutable `let ... else`, `expect`, reassignment, mutation, and expression
+statements are not clause forms. Put that logic in the body or use
 helpers such as `filterMap`:
 
 ```txt
@@ -2161,8 +2164,7 @@ Mental model:
 
 ```txt
 for      = pulls values from iterables
-let      = destructures irrefutable values
-guard    = exits early from refutable bindings in the loop body
+let      = destructures irrefutable values, or exits early with `else`
 match    = handles refutable cases
 yield    = produces values
 ```
@@ -2218,7 +2220,7 @@ for item <- [1, 2, 3] {
     if item == 2 {
         continue
     }
-    OS.println(item)
+    println(item)
 }
 ```
 
@@ -2229,10 +2231,10 @@ Statement form:
 ```txt
 match value {
     case SomeX(x) => {
-        OS.println(x)
+        println(x)
     }
     case OptionX.NoneX => {
-        OS.println("none")
+        println("none")
     }
 }
 ```
@@ -2282,10 +2284,7 @@ values.map(value -> partial match value {
 ```
 
 `match` and `partial match` always require an explicit value and a block of cases.
-Omitted-scrutinee shorthand such as `match { ... }` is not supported.
-Postfix match syntax such as `value match { ... }` is not supported; use prefix
 `match value { ... }`.
-Inline `match value: ...` shorthand is not supported.
 
 Every `match` and `partial match` branch must start with `case`.
 
@@ -2296,9 +2295,9 @@ match value {
     case Skip => ()
     case Empty => {}
     case Log(message) => {
-        OS.println(message)
+        println(message)
     }
-    case Other(message) => OS.println(message)
+    case Other(message) => println(message)
 }
 ```
 
@@ -2325,12 +2324,12 @@ match value {
 
 Generic arguments inside runtime type patterns are intentionally rejected for now, so use `_ Box` rather than `_ Box[Int]`.
 
-Current notes:
+Rules:
 
 - enum exhaustiveness is checked
 - expression `partial match` skips exhaustiveness checking and wraps the result in `Option[...]`
 - statement `partial match` skips exhaustiveness checking and does nothing when no case matches
-- bare singleton enum cases should still be written in qualified form when needed, for example `MaybeInt.NoneX`
+- bare zero-payload enum cases should still be written in qualified form when needed, for example `MaybeInt.NoneX`
 
 ## Destructuring
 
@@ -2423,7 +2422,7 @@ Other operators / constructs:
 
 - `is` for runtime type checks
 - `lift` for assembling shapes or tuples inside `Option`, `Result`, or `Either`
-- `<-` for `for` iteration and success-case extraction in `if let`, `guard ... else`, and `expect`
+- `<-` for `for` iteration and success-case extraction in `if let`, `let ... else`, and `expect`
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases
 - `.->` for per-hop lifted access through `Option`, `Result`, and `Either`

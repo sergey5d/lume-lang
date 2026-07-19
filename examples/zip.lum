@@ -17,12 +17,12 @@ def main() Unit {
     listPairs = items.zip(List("a", "b"))
     listIndexed = items.zipWithIndex()
 
-    guard Some(firstPair) = listPairs.get(0) else {
+    let Some(firstPair) = listPairs.get(0) else {
         return ()
     }
-    guard Some(secondPair) = listPairs.get(1) else return ()
+    let Some(secondPair) = listPairs.get(1) else return ()
 
-    guard Some(indexedPair) = listIndexed.get(2) else return ()
+    let Some(indexedPair) = listIndexed.get(2) else return ()
 
     let (firstLeft, firstRight) = firstPair
     let (secondLeft, secondRight) = secondPair
@@ -46,10 +46,10 @@ def main() Unit {
     rangePairs = Range(10, 13).zip(List("p", "q"))
     rangeIndexed = Range(7, 9).zipWithIndex()
 
-    guard Some(rangePair) = rangePairs.get(1) else {
+    let Some(rangePair) = rangePairs.get(1) else {
         return ()
     }
-    guard Some(rangeIndexedPair) = rangeIndexed.get(1) else {
+    let Some(rangeIndexedPair) = rangeIndexed.get(1) else {
         return ()
     }
     let (rangeLeft, rangeRight) = rangePair

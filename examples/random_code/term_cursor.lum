@@ -142,7 +142,7 @@ def toBeOrNotToBe() Unit {
             var failed = false
 
             while c1.isValid() && loc1.docId == currDocId && !c2Stack.isEmpty() {
-                guard Some(c2Loc) = c2Stack.removeLast() else panic()
+                let Some(c2Loc) = c2Stack.removeLast() else panic()
                 if c2Loc < loc1.position {
                     failed := true
                     break

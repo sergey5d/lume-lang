@@ -1,12 +1,12 @@
 # EXPECT:
-# guardOptionSome 15
-# guardOptionNone 0
-# guardResultOk 21
-# guardResultErr -2
-# guardEitherRight 32
-# guardEitherLeft -3
-# guardGroup 15
-# guardGroupFail -1
+# letElseOptionSome 15
+# letElseOptionNone 0
+# letElseResultOk 21
+# letElseResultErr -2
+# letElseEitherRight 32
+# letElseEitherLeft -3
+# letElseGroup 15
+# letElseGroupFail -1
 # expectOption 8
 # expectResult 34
 # expectEither 55
@@ -14,23 +14,23 @@
 # ifLet 89
 # plainKnownExtract 124
 
-def guardOption(value Option[Int]) Int {
-    guard item <- value else return 0
+def letElseOption(value Option[Int]) Int {
+    let item <- value else return 0
     item + 10
 }
 
-def guardResult(value Result[Int, Str]) Int {
-    guard item <- value else return -2
+def letElseResult(value Result[Int, Str]) Int {
+    let item <- value else return -2
     item + 20
 }
 
-def guardEither(value Either[Str, Int]) Int {
-    guard item <- value else return -3
+def letElseEither(value Either[Str, Int]) Int {
+    let item <- value else return -3
     item + 30
 }
 
-def guardGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
-    guard {
+def letElseGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
+    let {
         a <- left
         b <- middle
         c <- right
@@ -75,14 +75,14 @@ def plainKnownExtract(value Int) Int {
 }
 
 def main() Unit {
-    println("guardOptionSome " + guardOption(Some(5)))
-    println("guardOptionNone " + guardOption(None))
-    println("guardResultOk " + guardResult(Ok(1)))
-    println("guardResultErr " + guardResult(Err("bad")))
-    println("guardEitherRight " + guardEither(Right(2)))
-    println("guardEitherLeft " + guardEither(Left("bad")))
-    println("guardGroup " + guardGroup(Some(4), Ok(5), Right(6)))
-    println("guardGroupFail " + guardGroup(Some(4), Err("bad"), Right(6)))
+    println("letElseOptionSome " + letElseOption(Some(5)))
+    println("letElseOptionNone " + letElseOption(None))
+    println("letElseResultOk " + letElseResult(Ok(1)))
+    println("letElseResultErr " + letElseResult(Err("bad")))
+    println("letElseEitherRight " + letElseEither(Right(2)))
+    println("letElseEitherLeft " + letElseEither(Left("bad")))
+    println("letElseGroup " + letElseGroup(Some(4), Ok(5), Right(6)))
+    println("letElseGroupFail " + letElseGroup(Some(4), Err("bad"), Right(6)))
     println("expectOption " + expectOption(Some(8)))
     println("expectResult " + expectResult(Ok(34)))
     println("expectEither " + expectEither(Right(55)))

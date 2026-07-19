@@ -228,7 +228,7 @@ impl HttpServer {
 
     def addController(controller Any) HttpServer {
         controllerType Type[_] = controller.runtimeType
-        guard Some(classType) = controllerType.asClass() else return this
+        let Some(classType) = controllerType.asClass() else return this
         var prefix Str = ""
 
         if let Some(controllerAnnotationValue) = controllerType.annotation[Controller]() {

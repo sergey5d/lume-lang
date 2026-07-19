@@ -1,8 +1,8 @@
 # EXPECT:
 # if-let binding true
 # if-let wildcard true
-# guard binding true
-# guard wildcard true
+# let-else binding true
+# let-else wildcard true
 # 0
 
 interface CounterPrecursor {
@@ -20,15 +20,15 @@ def run(value CounterPrecursor) Int {
         println("if-let wildcard true")
     }
 
-    guard counter Counter = value else {
+    let counter Counter = value else {
         return 1
     }
-    println("guard binding " + (counter is Counter))
+    println("let-else binding " + (counter is Counter))
 
-    guard _ Counter = value else {
+    let _ Counter = value else {
         return 2
     }
-    println("guard wildcard true")
+    println("let-else wildcard true")
 
     0
 }

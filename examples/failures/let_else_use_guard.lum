@@ -1,8 +1,0 @@
-# FAIL_REGEX:
-# .*recoverable refutable bindings use 'guard Pattern = value else \.\.\.'.*
-
-def main() Unit {
-    value Option[Int] = Some(1)
-    let Some(item) = value else return ()
-    println(item)
-}

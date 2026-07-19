@@ -1651,17 +1651,17 @@ def run(value Worker) Unit {
 }
 
 #[test]
-fn parses_guard_type_patterns() {
+fn parses_let_else_type_patterns() {
     let result = parse(
         r#"
 class Worker {
 }
 
 def run(value Worker) Int {
-    guard item Worker = value else {
+    let item Worker = value else {
         return 1
     }
-    guard _ Worker = value else {
+    let _ Worker = value else {
         return 2
     }
     return 0
@@ -1679,18 +1679,18 @@ def run(value Worker) Int {
             match &block.statements[0] {
                 Stmt::LetElse(stmt) => match &stmt.pattern {
                     Pattern::Type { name, .. } => assert_eq!(name.as_deref(), Some("item")),
-                    other => panic!("expected first guard type pattern, got {other:#?}"),
+                    other => panic!("expected first let else type pattern, got {other:#?}"),
                 },
-                other => panic!("expected guard statement, got {other:#?}"),
+                other => panic!("expected let else statement, got {other:#?}"),
             }
             match &block.statements[1] {
                 Stmt::LetElse(stmt) => match &stmt.pattern {
                     Pattern::Type { name, .. } => assert!(name.is_none()),
                     other => {
-                        panic!("expected second guard wildcard type pattern, got {other:#?}")
+                        panic!("expected second let else wildcard type pattern, got {other:#?}")
                     }
                 },
-                other => panic!("expected guard statement, got {other:#?}"),
+                other => panic!("expected let else statement, got {other:#?}"),
             }
         }
         other => panic!("expected block body, got {other:#?}"),
@@ -1698,11 +1698,11 @@ def run(value Worker) Int {
 }
 
 #[test]
-fn parses_inline_guard_return_body() {
+fn parses_inline_let_else_return_body() {
     let result = parse(
         r#"
 def run(value Option[Int]) Unit {
-    guard Some(item) = value else return ()
+    let Some(item) = value else return ()
     OS.println(item)
 }
 "#,
@@ -1722,14 +1722,14 @@ def run(value Option[Int]) Unit {
                     other => panic!("expected inline return body, got {other:#?}"),
                 }
             }
-            other => panic!("expected guard statement, got {other:#?}"),
+            other => panic!("expected let else statement, got {other:#?}"),
         },
         other => panic!("expected block body, got {other:#?}"),
     }
 }
 
 #[test]
-fn rejects_old_let_else_recoverable_binding() {
+fn parses_let_else_recoverable_binding() {
     let result = parse(
         r#"
 def run(value Option[Int]) Unit {
@@ -1738,24 +1738,15 @@ def run(value Option[Int]) Unit {
 }
 "#,
     );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "guard_required"
-                && diag
-                    .message
-                    .contains("use 'guard Pattern = value else ...'")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]
-fn parses_option_extract_guard_shorthand() {
+fn parses_option_extract_let_else_shorthand() {
     let result = parse(
         r#"
 def run(value Option[Int]) Unit {
-    guard item <- value else return ()
+    let item <- value else return ()
     OS.println(item)
 }
 "#,
@@ -1776,7 +1767,7 @@ def run(value Option[Int]) Unit {
                 }
                 other => panic!("expected extract shorthand pattern, got {other:#?}"),
             },
-            other => panic!("expected guard statement, got {other:#?}"),
+            other => panic!("expected let else statement, got {other:#?}"),
         },
         other => panic!("expected block body, got {other:#?}"),
     }
@@ -2030,7 +2021,7 @@ fn parses_grouped_option_extract_shorthand() {
     let result = parse(
         r#"
 def run(left Option[Int], right Option[Int]) Int {
-    guard {
+    let {
         first <- left
         second <- right
     } else return 0
@@ -2059,7 +2050,7 @@ def run(left Option[Int], right Option[Int]) Int {
                     }
                 }
             }
-            other => panic!("expected guard statement, got {other:#?}"),
+            other => panic!("expected let else statement, got {other:#?}"),
         },
         other => panic!("expected block body, got {other:#?}"),
     }

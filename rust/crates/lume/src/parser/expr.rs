@@ -398,12 +398,6 @@ impl<'a> Parser<'a> {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             if self.match_keyword(Keyword::Let) {
                 bindings.push(self.parse_for_let_clause()?);
-            } else if self.match_keyword(Keyword::Guard) {
-                self.error_at_current(
-                    "invalid_for_clause",
-                    "for yield clauses do not support 'guard'; move refutable logic into the body",
-                );
-                return None;
             } else {
                 let binding = self.parse_binding(false)?;
                 if self.match_token(TokenKind::LeftArrow) {
@@ -490,7 +484,7 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenKind::LeftArrow) {
             self.error_at_current(
                 "invalid_for_clause",
-                "for yield 'let ... <-' clauses only support irrefutable tuple or shape destructuring; use 'name <- iterable' for plain generators and guard/match for refutable patterns",
+                "for yield 'let ... <-' clauses only support irrefutable tuple or shape destructuring; use 'name <- iterable' for plain generators and match for refutable patterns",
             );
             return None;
         }

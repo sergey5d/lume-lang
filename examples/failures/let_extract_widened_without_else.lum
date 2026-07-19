@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*plain 'let' pattern may fail for value of type 'Option\[Int\]'; use 'guard \.\.\. else \.\.\.' instead.*
+# .*plain 'let' pattern may fail for value of type 'Option\[Int\]'; add an 'else' fallback.*
 
 def main() Int {
     value Option[Int] = Some(5)
