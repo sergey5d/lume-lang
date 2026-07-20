@@ -39,7 +39,7 @@ impl AssetPrices {
 
             fromAsset = split[0]
             toAsset = split[1]
-            expect Some(price) = Float.parse(split[2])
+            let Some(price) = Float.parse(split[2]) else panic("expected price")
 
             if !result.contains(fromAsset) {
                 result.put(fromAsset, [])
@@ -51,7 +51,7 @@ impl AssetPrices {
                 result.put(toAsset, [])
             }
 
-            expect toPrices <- result.get(toAsset)
+            let toPrices <- result.get(toAsset) else panic("expected destination price list")
             toPrices.add((fromAsset, price))
         }
 

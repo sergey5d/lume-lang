@@ -1793,7 +1793,6 @@ def run(value Option[Int]) Int {
         CallableBody::Block(block) => match &block.statements[0] {
             Stmt::PatternBinding(stmt) => match &stmt.pattern {
                 Pattern::Constructor { path, args, .. } => {
-                    assert_eq!(stmt.kind, PatternBindingKind::Let);
                     assert_eq!(path, &vec!["Some".to_string()]);
                     assert_eq!(args.len(), 1);
                 }
@@ -1845,7 +1844,6 @@ def run(value Option[Int]) Int {
         CallableBody::Block(block) => match &block.statements[0] {
             Stmt::PatternBinding(stmt) => match &stmt.pattern {
                 Pattern::Extract { inner, .. } => {
-                    assert_eq!(stmt.kind, PatternBindingKind::Let);
                     assert!(
                         matches!(inner.as_ref(), Pattern::Binding { name, .. } if name == "item")
                     );
@@ -1879,7 +1877,6 @@ def run(value Option[Int]) Int {
     match &function.body {
         CallableBody::Block(block) => match &block.statements[0] {
             Stmt::PatternBinding(stmt) => {
-                assert_eq!(stmt.kind, PatternBindingKind::Let);
                 assert_eq!(stmt.clauses.len(), 1);
                 assert!(matches!(stmt.clauses[0].pattern, Pattern::Extract { .. }));
             }
@@ -1890,7 +1887,7 @@ def run(value Option[Int]) Int {
 }
 
 #[test]
-fn parses_expect_pattern_binding() {
+fn rejects_removed_expect_pattern_binding() {
     let result = parse(
         r#"
 def run(value Option[Int]) Int {
@@ -1899,32 +1896,20 @@ def run(value Option[Int]) Int {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    let function = match &program.items[0] {
-        Item::Function(function) => function,
-        other => panic!("expected function, got {other:#?}"),
-    };
-    match &function.body {
-        CallableBody::Block(block) => match &block.statements[0] {
-            Stmt::PatternBinding(stmt) => {
-                assert_eq!(stmt.kind, PatternBindingKind::Expect);
-                match &stmt.pattern {
-                    Pattern::Constructor { path, args, .. } => {
-                        assert_eq!(path, &vec!["Some".to_string()]);
-                        assert_eq!(args.len(), 1);
-                    }
-                    other => panic!("expected pattern binding, got {other:#?}"),
-                }
-            }
-            other => panic!("expected pattern binding statement, got {other:#?}"),
-        },
-        other => panic!("expected block body, got {other:#?}"),
-    }
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "expect_removed"
+                && diag
+                    .message
+                    .contains("use 'let PATTERN = value else panic(...)'")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
-fn parses_expect_option_extract_shorthand() {
+fn rejects_removed_expect_option_extract_shorthand() {
     let result = parse(
         r#"
 def run(value Option[Int]) Int {
@@ -1933,29 +1918,14 @@ def run(value Option[Int]) Int {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    let function = match &program.items[0] {
-        Item::Function(function) => function,
-        other => panic!("expected function, got {other:#?}"),
-    };
-    match &function.body {
-        CallableBody::Block(block) => match &block.statements[0] {
-            Stmt::PatternBinding(stmt) => {
-                assert_eq!(stmt.kind, PatternBindingKind::Expect);
-                match &stmt.pattern {
-                    Pattern::Extract { inner, .. } => {
-                        assert!(
-                            matches!(inner.as_ref(), Pattern::Binding { name, .. } if name == "item")
-                        );
-                    }
-                    other => panic!("expected extract shorthand pattern, got {other:#?}"),
-                }
-            }
-            other => panic!("expected pattern binding statement, got {other:#?}"),
-        },
-        other => panic!("expected block body, got {other:#?}"),
-    }
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "expect_removed"),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
@@ -2158,10 +2128,8 @@ def run(split [Str]) Unit {
     );
     assert!(
         result.diagnostics.iter().any(|diag| {
-            diag.code == "expected_pattern_binding"
-                && diag
-                    .message
-                    .contains("use assert(condition) for boolean assertions")
+            diag.code == "expect_removed"
+                && diag.message.contains("expect binding syntax was removed")
         }),
         "{:#?}",
         result.diagnostics

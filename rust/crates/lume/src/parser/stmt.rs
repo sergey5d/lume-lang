@@ -45,7 +45,6 @@ impl<'a> Parser<'a> {
                 self.restore(checkpoint);
                 self.parse_let_stmt()
             }
-            TokenKind::Keyword(Keyword::Expect) => self.parse_expect_stmt(),
             TokenKind::Identifier
                 if self.current().lexeme == "guard"
                     && matches!(
@@ -83,6 +82,13 @@ impl<'a> Parser<'a> {
                     self.error_at_current(
                         "removed_assert_statement",
                         "assert statement syntax was removed; use assert(condition) or assert(condition, message)",
+                    );
+                    return None;
+                }
+                if self.at_removed_expect_statement() {
+                    self.error_at_current(
+                        "expect_removed",
+                        "expect binding syntax was removed; use 'let PATTERN = value else panic(...)' for assertive refutable bindings",
                     );
                     return None;
                 }
@@ -195,7 +201,6 @@ impl<'a> Parser<'a> {
                 }));
             }
             return Some(Stmt::PatternBinding(PatternBindingStmt {
-                kind: PatternBindingKind::Let,
                 clauses,
                 pattern: Pattern::Wildcard { span: clauses_end },
                 value: Expr::Unit { span: clauses_end },
@@ -296,78 +301,11 @@ impl<'a> Parser<'a> {
         }
         let end = value.span();
         Some(Stmt::PatternBinding(PatternBindingStmt {
-            kind: PatternBindingKind::Let,
             clauses: Vec::new(),
             pattern,
             value,
             span: start.cover(end),
         }))
-    }
-
-    pub(super) fn parse_expect_stmt(&mut self) -> Option<Stmt> {
-        let start = self.consume_keyword(Keyword::Expect, "expected 'expect'")?;
-
-        if self.at(TokenKind::LBrace) {
-            let (clauses, clauses_end) = self.parse_refutable_clause_block("expect")?;
-            if self.match_keyword(Keyword::Else) {
-                self.error_at_current(
-                    "unexpected_token",
-                    "expect does not support 'else'; use 'let ... else ...' for recoverable pattern matching",
-                );
-                return None;
-            }
-            return Some(Stmt::PatternBinding(PatternBindingStmt {
-                kind: PatternBindingKind::Expect,
-                clauses,
-                pattern: Pattern::Wildcard { span: clauses_end },
-                value: Expr::Unit { span: clauses_end },
-                span: start.cover(clauses_end),
-            }));
-        }
-
-        let checkpoint = self.checkpoint();
-        if let Some(pattern) = self.parse_pattern() {
-            let (pattern, operator) = if self.match_token(TokenKind::Eq) {
-                (pattern, "=")
-            } else if self.match_token(TokenKind::LeftArrow) {
-                (self.wrap_extract_pattern(pattern), "<-")
-            } else {
-                self.error_at_current(
-                    "expected_pattern_binding",
-                    "expect only supports pattern/assertive binding; use assert(condition) for boolean assertions",
-                );
-                return None;
-            };
-            if operator != "=" && self.at(TokenKind::Newline) {
-                self.error_at_current(
-                    "expected_expression",
-                    format!("expected expression on same line after \"{operator}\""),
-                );
-                return None;
-            }
-            let value = self.parse_expr()?;
-            if self.match_keyword(Keyword::Else) {
-                self.error_at_current(
-                    "unexpected_token",
-                    "expect does not support 'else'; use 'let ... else ...' for recoverable pattern matching",
-                );
-                return None;
-            }
-            let end = value.span();
-            return Some(Stmt::PatternBinding(PatternBindingStmt {
-                kind: PatternBindingKind::Expect,
-                clauses: Vec::new(),
-                pattern,
-                value,
-                span: start.cover(end),
-            }));
-        }
-        self.restore(checkpoint);
-        self.error_at_current(
-            "expected_pattern_binding",
-            "expect only supports pattern/assertive binding; use assert(condition) for boolean assertions",
-        );
-        None
     }
 
     pub(super) fn try_parse_binding_stmt(&mut self) -> Option<BindingStmt> {
@@ -416,6 +354,27 @@ impl<'a> Parser<'a> {
                         | TokenKind::String
                         | TokenKind::Bang
                         | TokenKind::Minus
+                        | TokenKind::LBracket
+                        | TokenKind::LBrace
+                        | TokenKind::Keyword(Keyword::True)
+                        | TokenKind::Keyword(Keyword::False)
+                )
+            )
+    }
+
+    fn at_removed_expect_statement(&self) -> bool {
+        self.current_kind() == TokenKind::Identifier
+            && self.current().lexeme == "expect"
+            && matches!(
+                self.tokens.get(self.index + 1).map(|token| token.kind),
+                Some(
+                    TokenKind::Identifier
+                        | TokenKind::Integer
+                        | TokenKind::Float
+                        | TokenKind::String
+                        | TokenKind::Bang
+                        | TokenKind::Minus
+                        | TokenKind::LParen
                         | TokenKind::LBracket
                         | TokenKind::LBrace
                         | TokenKind::Keyword(Keyword::True)

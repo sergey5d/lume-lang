@@ -448,21 +448,10 @@ pub struct LetElseStmt {
     pub span: Span,
 }
 
-/// Distinguishes the surface keyword used for a pattern binding statement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PatternBindingKind {
-    Let,
-    Expect,
-}
-
-/// A `let PATTERN = expr` / `expect PATTERN = expr` statement, or grouped
-/// `let { ... }` / `expect { ... }`.
-///
-/// `expect` remains assertive and panics on mismatch. Plain `let` is only
-/// valid when the pattern is irrefutable.
+/// A `let PATTERN = expr` statement, or grouped `let { ... }`.
+/// Plain `let` without `else` is only valid when the pattern is irrefutable.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PatternBindingStmt {
-    pub kind: PatternBindingKind,
     pub clauses: Vec<RefutableClause>,
     pub pattern: Pattern,
     pub value: Expr,

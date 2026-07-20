@@ -173,7 +173,7 @@
         },
         {
           "name": "keyword.control.lume",
-          "match": "\\b(?:if|else|for|while|yield|match|return|break|continue|expect|is|try|lift|defer)\\b"
+          "match": "\\b(?:if|else|for|while|yield|match|return|break|continue|is|try|lift|defer)\\b"
         },
         {
           "name": "keyword.declaration.lume",

@@ -217,15 +217,8 @@ pub struct LetElseStmt {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PatternBindingKind {
-    Let,
-    Expect,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct PatternBindingStmt {
-    pub kind: PatternBindingKind,
     pub clauses: Vec<RefutableClause>,
     pub pattern: Pattern,
     pub value: Expr,

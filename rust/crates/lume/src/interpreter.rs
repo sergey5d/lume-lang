@@ -6495,7 +6495,7 @@ mod tests {
                         quantity: 7
                     }
                 )
-                expect Some(order) = maybeOrder
+                let Some(order) = maybeOrder else panic("expected order")
                 return order.quantity
             }
             "#,
@@ -6674,7 +6674,7 @@ $name
             def main() Unit {
                 word Str = "apple"
                 first Rune = word.expectRuneAt(0)
-                expect second <- word.runeAt(1)
+                let second <- word.runeAt(1) else panic("expected second rune")
                 missing = word.runeAt(9)
 
                 OS.println(first)
@@ -7080,8 +7080,8 @@ $name
             r#"
             def main() Unit {
                 values = ["btc", "usd"]
-                expect Some(parsedFloat) = Float.parse("1.2")
-                expect Some(parsedInt) = Int.parse("7")
+                let Some(parsedFloat) = Float.parse("1.2") else panic("expected float")
+                let Some(parsedInt) = Int.parse("7") else panic("expected int")
                 OS.println(parsedFloat + 0.8)
                 OS.println(parsedInt + 1)
                 OS.println(Float.parse("oops").isEmpty())
@@ -7319,12 +7319,12 @@ $name
 
                 allSome = [Some(5), Some(6)]
                 for maybeItem <- allSome {
-                    expect Some(loopItem) = maybeItem
+                    let Some(loopItem) = maybeItem else panic("expected loop item")
                     OS.println("known", loopItem)
                 }
 
                 knownMapped = for maybeItem <- allSome yield {
-                    expect Some(mappedItem) = maybeItem
+                    let Some(mappedItem) = maybeItem else panic("expected mapped item")
                     mappedItem + 1
                 }
 
@@ -7360,20 +7360,20 @@ $name
     }
 
     #[test]
-    fn runs_expect_pattern_bindings() {
+    fn runs_let_else_panic_pattern_bindings() {
         let program = lower_inline(
             r#"
             def main() Unit {
                 first Option[Int] = Some(5)
-                expect Some(value) = first
-                OS.println("expect", value)
+                let Some(value) = first else panic("expected first value")
+                OS.println("let-panic", value)
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "expect 5\n");
+        assert_eq!(run.output, "let-panic 5\n");
     }
 
     #[test]

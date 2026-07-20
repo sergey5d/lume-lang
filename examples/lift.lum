@@ -31,7 +31,7 @@ def main() Unit {
         id Int: maybeId()
         name Str: maybeName()
     }
-    expect Some(profile) = optionProfile
+    let Some(profile) = optionProfile else panic("expected lifted option profile")
     println("${profile.name} ${profile.id}")
 
     missing Option[{ id Int, name Str }] = lift {
@@ -41,7 +41,7 @@ def main() Unit {
     println(missing.isEmpty())
 
     resultPair Result[(Int, Str), Str] = lift (okId(), okName())
-    expect Ok(pair) = resultPair
+    let Ok(pair) = resultPair else panic("expected lifted result pair")
     let (id, name) = pair
     println("${name} ${id}")
 
@@ -49,21 +49,21 @@ def main() Unit {
         id: okId()
         name: badName()
     }
-    expect Err(message) = failedResult
+    let Err(message) = failedResult else panic("expected failed result")
     println(message)
 
     eitherProfile Either[Str, { id Int, name Str }] = lift {
         id: rightId()
         name: rightName()
     }
-    expect Right(eitherShape) = eitherProfile
+    let Right(eitherShape) = eitherProfile else panic("expected lifted either profile")
     println("${eitherShape.name} ${eitherShape.id}")
 
     failedEither Either[Str, { id Int, name Str }] = lift {
         id: rightId()
         name: leftName()
     }
-    expect Left(leftMessage) = failedEither
+    let Left(leftMessage) = failedEither else panic("expected failed either")
     println(leftMessage)
 
     optionParts = {
@@ -73,7 +73,7 @@ def main() Unit {
     spreadProfile Option[{ id Int, name Str }] = lift {
         ...optionParts
     }
-    expect Some(spreadShape) = spreadProfile
+    let Some(spreadShape) = spreadProfile else panic("expected spread profile")
     println("${spreadShape.name} ${spreadShape.id}")
 
     overwrittenParts = optionParts :< {
@@ -82,6 +82,6 @@ def main() Unit {
     overwritten Option[{ id Int, name Str }] = lift {
         ...overwrittenParts
     }
-    expect Some(overwrittenShape) = overwritten
+    let Some(overwrittenShape) = overwritten else panic("expected overwritten profile")
     println("${overwrittenShape.name} ${overwrittenShape.id}")
 }

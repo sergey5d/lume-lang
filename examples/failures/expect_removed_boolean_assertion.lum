@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*expect binding syntax was removed; use 'let PATTERN = value else panic\(\.\.\.\)' for assertive refutable bindings.*
+
+def main() Unit {
+    expect 1 + 2 == 3
+}

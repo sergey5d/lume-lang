@@ -1,6 +1,0 @@
-# FAIL_REGEX:
-# .*expect only supports pattern/assertive binding; use assert\(condition\) for boolean assertions.*
-
-def main() Unit {
-    expect 1 + 2 == 3
-}

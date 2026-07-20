@@ -10,9 +10,8 @@ use crate::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
         ElseBranch, ElseExprBranch, Expr, ExtensionBlock, FieldDecl, ForBinding, FunctionDecl,
         IfConditionClause, IfStmt, ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase,
-        MatchCaseBody, MatchStmt, MethodDecl, Param, Pattern, PatternBindingKind,
-        PatternBindingStmt, Program, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef,
-        Visibility,
+        MatchCaseBody, MatchStmt, MethodDecl, Param, Pattern, PatternBindingStmt, Program, Stmt,
+        TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
     },
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, ModuleLoadOptions,
@@ -2576,41 +2575,18 @@ impl<'a> Checker<'a> {
         if !stmt.clauses.is_empty() {
             for clause in &stmt.clauses {
                 let value_ty = self.check_expr(&clause.value);
-                if matches!(stmt.kind, PatternBindingKind::Let) {
-                    self.require_safe_let_pattern(
-                        &clause.pattern,
-                        &value_ty,
-                        &clause.value,
-                        clause.pattern.span(),
-                    );
-                } else if matches!(stmt.kind, PatternBindingKind::Expect) {
-                    self.require_refutable_expect_pattern(
-                        &clause.pattern,
-                        &value_ty,
-                        &clause.value,
-                        clause.pattern.span(),
-                    );
-                }
+                self.require_safe_let_pattern(
+                    &clause.pattern,
+                    &value_ty,
+                    &clause.value,
+                    clause.pattern.span(),
+                );
                 self.bind_pattern(&clause.pattern, &value_ty);
             }
             return;
         }
         let value_ty = self.check_expr(&stmt.value);
-        if matches!(stmt.kind, PatternBindingKind::Let) {
-            self.require_safe_let_pattern(
-                &stmt.pattern,
-                &value_ty,
-                &stmt.value,
-                stmt.pattern.span(),
-            );
-        } else if matches!(stmt.kind, PatternBindingKind::Expect) {
-            self.require_refutable_expect_pattern(
-                &stmt.pattern,
-                &value_ty,
-                &stmt.value,
-                stmt.pattern.span(),
-            );
-        }
+        self.require_safe_let_pattern(&stmt.pattern, &value_ty, &stmt.value, stmt.pattern.span());
         self.bind_pattern(&stmt.pattern, &value_ty);
     }
 
@@ -2748,24 +2724,6 @@ impl<'a> Checker<'a> {
                     "plain 'let' pattern may fail for value of type '{}'; add an 'else' fallback",
                     scrutinee.describe()
                 ),
-                span,
-            );
-        }
-    }
-
-    fn require_refutable_expect_pattern(
-        &mut self,
-        pattern: &Pattern,
-        scrutinee: &Ty,
-        source: &Expr,
-        span: crate::source::Span,
-    ) {
-        if self.pattern_is_irrefutable(pattern, scrutinee)
-            || self.source_expr_proves_pattern_match(pattern, source)
-        {
-            self.add_error(
-                "irrefutable_expect_binding",
-                "expect binding is irrefutable; use 'let' instead",
                 span,
             );
         }
@@ -10137,31 +10095,6 @@ impl Route {
     }
 
     #[test]
-    fn rejects_irrefutable_expect_binding() {
-        let program = parse_inline(
-            r#"
-def main(value Option[Int]) Unit {
-    pair (Int, Int) = (1, 2)
-    expect (left, right) = pair
-    expect item <- Some(5)
-    expect Some(other) = Some(6)
-    expect Some(stillRefutable) = value
-}
-"#,
-        );
-        let result = check_program(&program);
-        let matches = result
-            .diagnostics
-            .iter()
-            .filter(|diag| {
-                diag.code == "irrefutable_expect_binding"
-                    && diag.message.contains("use 'let' instead")
-            })
-            .count();
-        assert_eq!(matches, 3, "{:#?}", result.diagnostics);
-    }
-
-    #[test]
     fn allows_single_statement_match_arms_without_braces() {
         let program = parse_inline(
             r#"
@@ -11587,12 +11520,12 @@ def main(
 ) Int {
     let optionItem <- optionValue else return 0
     let resultItem <- resultValue else return 1
-    expect eitherItem <- eitherValue
-    expect {
+    let eitherItem <- eitherValue else return 2
+    let {
         left <- optionValue
         middle <- resultValue
         right <- eitherValue
-    }
+    } else return 3
     if let branch <- optionValue {
         return optionItem + resultItem + eitherItem + left + middle + right + branch
     }

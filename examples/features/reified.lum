@@ -6,7 +6,7 @@ class User {
 }
 
 def typeLabel[reified A](value A) Str {
-    expect name <- typeOf[A].name()
+    let name <- typeOf[A].name() else panic("expected type name")
     name
 }
 

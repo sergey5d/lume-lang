@@ -224,12 +224,12 @@ println(typeOf[User].kind())
 
 classType ClassType[User] = typeOf[User].asClass().orPanic()
 fields = classType.fields()
-expect Some(nameField) = classType.field("name")
+let Some(nameField) = classType.field("name") else panic("expected name field")
 println(nameField.fieldType().name().orPanic())
 println(nameField.isHidden())
 
 enumType EnumType[Status] = typeOf[Status].asEnum().orPanic()
-expect Some(pendingCase) = enumType.case("Pending")
+let Some(pendingCase) = enumType.case("Pending") else panic("expected Pending case")
 println(pendingCase.name())
 constructedCase Result[Any, ReflectionError] = pendingCase.construct()
 ```
@@ -242,7 +242,7 @@ constructed Result[User, ReflectionError] = classType.construct("Ada", 42)
 user User = constructed.orPanic()
 nameValue Result[Any, ReflectionError] = nameField.get(user)
 
-expect Some(greetMethod) = classType.method("greet")
+let Some(greetMethod) = classType.method("greet") else panic("expected greet method")
 greeting Result[Any, ReflectionError] = greetMethod.call(user)
 ```
 
@@ -537,7 +537,7 @@ enum OptionX[T] {
 }
 ```
 
-Arbitrary statements such as `if`, `for`, `match`, `defer`, `expect`, or expression statements are not valid at top level. Put executable code inside a function such as `main() { ... }`.
+Arbitrary statements such as `if`, `for`, `match`, `defer`, or expression statements are not valid at top level. Put executable code inside a function such as `main() { ... }`.
 
 ## Variable Declarations
 
@@ -1688,7 +1688,6 @@ Main statement forms:
 - `for`
 - `while`
 - `defer`
-- `expect`
 - `return`
 - `break`
 - `continue`
@@ -1887,38 +1886,21 @@ maybe Option[Int] = Some(5)
 let item <- maybe          # error: maybe has type Option[Int], so extraction can fail
 ```
 
-`expect` is the assertive refutable binding form. It matches the pattern, binds
-on success, and panics on mismatch:
+For assertive extraction, write an explicit `panic(...)` fallback:
 
 ```txt
-expect Some(item) = maybeValue
+let Some(item) = maybeValue else panic("expected Some")
+let item <- maybeValue else panic("expected value")
 ```
 
-If the binding is irrefutable, use `let` instead. That includes patterns that
-are irrefutable from the value type and patterns whose source expression visibly
-proves success:
+Grouped assertive extraction uses the same `let { ... } else` form:
 
 ```txt
-expect item <- Some(5)     # error: use let item <- Some(5)
-```
-
-And the matching shorthand:
-
-```txt
-expect item <- maybeValue
-```
-
-Grouped `expect` works the same way:
-
-```txt
-expect {
+let {
     Some(left) = maybeLeft
     Some(right) = maybeRight
-}
+} else panic("expected both values")
 ```
-
-`expect` is statement-only and does not support `else`; use `let ... else`
-when you want an explicit fallback path.
 
 Use the runtime/prelude `assert(...)` function for plain boolean assertions:
 
@@ -1929,8 +1911,6 @@ assert(split.size() == 3, "split must have 3 parts")
 
 The first argument must be `Bool`. When the condition is `false`, `assert`
 panics. The optional second argument is the panic message.
-Boolean checks are intentionally not written with `expect`; `expect` is reserved
-for pattern/assertive binding.
 
 Propagation form:
 
@@ -2150,9 +2130,8 @@ values = for {
 } yield x + y
 ```
 
-Refutable `let ... else`, `expect`, reassignment, mutation, and expression
-statements are not clause forms. Put that logic in the body or use
-helpers such as `filterMap`:
+Refutable `let ... else`, reassignment, mutation, and expression statements are
+not clause forms. Put that logic in the body or use helpers such as `filterMap`:
 
 ```txt
 result = items.filterMap(item -> partial match item {
@@ -2422,7 +2401,7 @@ Other operators / constructs:
 
 - `is` for runtime type checks
 - `lift` for assembling shapes or tuples inside `Option`, `Result`, or `Either`
-- `<-` for `for` iteration and success-case extraction in `if let`, `let ... else`, and `expect`
+- `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases
 - `.->` for per-hop lifted access through `Option`, `Result`, and `Either`

@@ -24,7 +24,6 @@ impl<'a> Parser<'a> {
         let message = match owner {
             "if let" => "expected '=' or '<-' after if pattern",
             "let" => "expected '=' or '<-' after let pattern",
-            "expect" => "expected '=' or '<-' after expect pattern",
             _ => "expected '=' or '<-' after pattern",
         };
         self.error_at_current("unexpected_token", message);
@@ -80,7 +79,6 @@ impl<'a> Parser<'a> {
         let open_message = match owner {
             "if let" => "expected '{' after if let",
             "let" => "expected '{' after let",
-            "expect" => "expected '{' after expect",
             _ => "expected '{' before clause block",
         };
         let open = self.consume(TokenKind::LBrace, open_message)?;
@@ -102,7 +100,6 @@ impl<'a> Parser<'a> {
         let close_message = match owner {
             "if let" => "expected '}' after if let clause block",
             "let" => "expected '}' after let clause block",
-            "expect" => "expected '}' after expect clause block",
             _ => "expected '}' after clause block",
         };
         let close = self.consume(TokenKind::RBrace, close_message)?;

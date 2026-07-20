@@ -7,10 +7,10 @@
 # letElseEitherLeft -3
 # letElseGroup 15
 # letElseGroupFail -1
-# expectOption 8
-# expectResult 34
-# expectEither 55
-# expectGroup 18
+# panicOption 8
+# panicResult 34
+# panicEither 55
+# panicGroup 18
 # ifLet 89
 # plainKnownExtract 124
 
@@ -38,27 +38,27 @@ def letElseGroup(left Option[Int], middle Result[Int, Str], right Either[Str, In
     a + b + c
 }
 
-def expectOption(value Option[Int]) Int {
-    expect item <- value
+def panicOption(value Option[Int]) Int {
+    let item <- value else panic("expected option")
     item
 }
 
-def expectResult(value Result[Int, Str]) Int {
-    expect item <- value
+def panicResult(value Result[Int, Str]) Int {
+    let item <- value else panic("expected result")
     item
 }
 
-def expectEither(value Either[Str, Int]) Int {
-    expect item <- value
+def panicEither(value Either[Str, Int]) Int {
+    let item <- value else panic("expected either")
     item
 }
 
-def expectGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
-    expect {
+def panicGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
+    let {
         a <- left
         b <- middle
         c <- right
-    }
+    } else panic("expected group")
     a + b + c
 }
 
@@ -83,10 +83,10 @@ def main() Unit {
     println("letElseEitherLeft " + letElseEither(Left("bad")))
     println("letElseGroup " + letElseGroup(Some(4), Ok(5), Right(6)))
     println("letElseGroupFail " + letElseGroup(Some(4), Err("bad"), Right(6)))
-    println("expectOption " + expectOption(Some(8)))
-    println("expectResult " + expectResult(Ok(34)))
-    println("expectEither " + expectEither(Right(55)))
-    println("expectGroup " + expectGroup(Some(5), Ok(6), Right(7)))
+    println("panicOption " + panicOption(Some(8)))
+    println("panicResult " + panicResult(Ok(34)))
+    println("panicEither " + panicEither(Right(55)))
+    println("panicGroup " + panicGroup(Some(5), Ok(6), Right(7)))
     println("ifLet " + ifLetValue(Some(89)))
     println("plainKnownExtract " + plainKnownExtract(123))
 }

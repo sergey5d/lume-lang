@@ -850,13 +850,7 @@ impl<'a> Parser<'a> {
             self.error_at_current("unexpected_token", "expected 'def'");
             return None;
         };
-        let (name, _) = if self.at(TokenKind::Keyword(Keyword::Expect)) {
-            let token = self.current().clone();
-            self.advance();
-            (token.lexeme, token.span)
-        } else {
-            self.parse_callable_name("expected method name")?
-        };
+        let (name, _) = self.parse_callable_name("expected method name")?;
         let type_params = self.parse_type_params()?;
         let params = self.parse_param_list()?;
         let return_type = if self.callable_body_starts_here() {

@@ -7,6 +7,6 @@ def main() Unit {
         right: Some(2)
     }
 
-    expect value <- lifted
+    let value <- lifted else panic("expected lifted value")
     println("lift", value.left + value.right)
 }

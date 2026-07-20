@@ -1657,70 +1657,18 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_pattern_binding_stmt(&mut self, stmt: &core::PatternBindingStmt) {
-        match stmt.kind {
-            core::PatternBindingKind::Let => {
-                if !stmt.clauses.is_empty() {
-                    for clause in &stmt.clauses {
-                        let scrutinee = self.lower_expr(&clause.value);
-                        let plan = self.lower_pattern_plan(scrutinee, &clause.pattern);
-                        self.apply_pending_bindings(plan.bindings);
-                    }
-                    return;
-                }
-
-                let scrutinee = self.lower_expr(&stmt.value);
-                let plan = self.lower_pattern_plan(scrutinee, &stmt.pattern);
+        if !stmt.clauses.is_empty() {
+            for clause in &stmt.clauses {
+                let scrutinee = self.lower_expr(&clause.value);
+                let plan = self.lower_pattern_plan(scrutinee, &clause.pattern);
                 self.apply_pending_bindings(plan.bindings);
             }
-            core::PatternBindingKind::Expect => {
-                if !stmt.clauses.is_empty() {
-                    let failure_block = self.add_block();
-                    let continue_block = self.add_block();
-
-                    self.lower_refutable_clause_chain(&stmt.clauses, continue_block, failure_block);
-
-                    self.current_block = Some(failure_block);
-                    self.emit_panic("expect pattern did not match", stmt.span);
-                    self.terminate(ir::Terminator {
-                        span: Some(stmt.span),
-                        kind: ir::TerminatorKind::Unreachable,
-                    });
-
-                    self.current_block = Some(continue_block);
-                    return;
-                }
-
-                let scrutinee = self.lower_expr(&stmt.value);
-                let plan = self.lower_pattern_plan(scrutinee, &stmt.pattern);
-                let success_block = self.add_block();
-                let failure_block = self.add_block();
-                let continue_block = self.add_block();
-
-                self.terminate(ir::Terminator {
-                    span: Some(stmt.span),
-                    kind: ir::TerminatorKind::Branch {
-                        condition: plan.condition,
-                        then_block: success_block,
-                        else_block: failure_block,
-                    },
-                });
-
-                self.current_block = Some(success_block);
-                self.apply_pending_bindings(plan.bindings);
-                if self.current_block.is_some() {
-                    self.terminate(ir::Terminator::goto(continue_block));
-                }
-
-                self.current_block = Some(failure_block);
-                self.emit_panic("expect pattern did not match", stmt.span);
-                self.terminate(ir::Terminator {
-                    span: Some(stmt.span),
-                    kind: ir::TerminatorKind::Unreachable,
-                });
-
-                self.current_block = Some(continue_block);
-            }
+            return;
         }
+
+        let scrutinee = self.lower_expr(&stmt.value);
+        let plan = self.lower_pattern_plan(scrutinee, &stmt.pattern);
+        self.apply_pending_bindings(plan.bindings);
     }
 
     fn lower_let_else_stmt(&mut self, stmt: &core::LetElseStmt) {

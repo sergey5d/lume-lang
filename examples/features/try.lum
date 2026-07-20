@@ -7,6 +7,6 @@ def increment(value Option[Int]) Option[Int] {
 }
 
 def main() Unit {
-    expect value <- increment(Some(2))
+    let value <- increment(Some(2)) else panic("expected incremented value")
     println("try", value)
 }

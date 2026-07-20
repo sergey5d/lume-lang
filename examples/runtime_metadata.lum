@@ -37,8 +37,8 @@ def main() Unit {
     fields = classType.fields()
     println(fields.size())
 
-    expect Some(nameField) = fields.get(0)
-    expect Some(ageField) = fields.get(1)
+    let Some(nameField) = fields.get(0) else panic("expected name field")
+    let Some(ageField) = fields.get(1) else panic("expected age field")
 
     println(nameField.name())
     println(nameField.fieldType().name().orPanic())

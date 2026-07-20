@@ -19,7 +19,7 @@ def main() Unit {
     value = partialValue(MaybeInt.SomeX(5))
     missing = partialValue(MaybeInt.NoneX)
 
-    expect item <- value
+    let item <- value else panic("expected partial value")
     println("partial value", item)
     println("partial missing", missing.isEmpty())
 

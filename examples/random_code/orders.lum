@@ -28,7 +28,7 @@ impl OrderManager {
         buySell = arr[1]
         asset = arr[2]
 
-        expect quantity <- Int.parse(arr[3])
+        let quantity <- Int.parse(arr[3]) else panic("expected quantity")
         
         status = arr[4]
 
@@ -61,7 +61,7 @@ impl OrderManager {
 
         checkQueuedOrders()
 
-        expect Some(parsedOrder) = parseOrder(str)
+        let Some(parsedOrder) = parseOrder(str) else panic("expected order")
 
         savedOrder = this.map.get(parsedOrder.id)
 
@@ -125,7 +125,7 @@ def main() {
     }
 
     for id <- [1234, 1254] {
-        expect Some(order) = manager.map.get(id)
+        let Some(order) = manager.map.get(id) else panic("expected saved order")
         println("order: " + order)
     }
 
