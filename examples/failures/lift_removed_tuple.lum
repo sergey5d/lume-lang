@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*lift operator was removed; use explicit try/let extraction and construct the value directly.*
+
+def main() Unit {
+    value = lift (Some(1), Some(2))
+}

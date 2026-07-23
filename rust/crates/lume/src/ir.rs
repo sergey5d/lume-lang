@@ -576,9 +576,6 @@ pub enum RValue {
     List(Vec<Operand>),
     Record(Vec<NamedOperand>),
     RecordSpread(Vec<RecordSpreadPart>),
-    Lift {
-        value: Operand,
-    },
     AnonymousInterface {
         interfaces: Vec<Type>,
         methods: Vec<AnonymousInterfaceMethod>,

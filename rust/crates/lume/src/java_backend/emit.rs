@@ -2288,7 +2288,6 @@ impl<'a> FunctionEmitter<'a> {
                     .join(", ")
             )),
             ir::RValue::RecordSpread(_) => self.unsupported("anonymous shape spread"),
-            ir::RValue::Lift { .. } => self.unsupported("lift expression"),
             ir::RValue::RecordUpdate { .. } => self.unsupported("shape update"),
             ir::RValue::Index { base, index } => self.emit_index(base, index),
             ir::RValue::TypeTest { .. } => self.unsupported("type test"),

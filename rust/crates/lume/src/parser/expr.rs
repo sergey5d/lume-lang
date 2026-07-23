@@ -1,3 +1,4 @@
+use super::support::spans_touch;
 use super::*;
 
 struct ChainSegment {
@@ -1068,15 +1069,12 @@ impl<'a> Parser<'a> {
                 span,
             });
         }
-        if self.match_keyword(Keyword::Lift) {
-            let start = self.previous_span();
-            self.skip_newlines();
-            let value = self.parse_unary_expr()?;
-            let span = start.cover(value.span());
-            return Some(Expr::Lift {
-                value: Box::new(value),
-                span,
-            });
+        if self.at_removed_lift_operator() {
+            self.error_at_current(
+                "lift_removed",
+                "lift operator was removed; use explicit try/let extraction and construct the value directly",
+            );
+            return None;
         }
         if self.match_token(TokenKind::Bang) {
             let start = self.previous_span();
@@ -1280,6 +1278,19 @@ impl<'a> Parser<'a> {
             break;
         }
         Some(body)
+    }
+
+    fn at_removed_lift_operator(&self) -> bool {
+        if self.current_kind() != TokenKind::Identifier || self.current().lexeme != "lift" {
+            return false;
+        }
+        let Some(next) = self.tokens.get(self.index + 1) else {
+            return false;
+        };
+        if next.kind == TokenKind::LBrace {
+            return true;
+        }
+        next.kind == TokenKind::LParen && !spans_touch(self.current_span(), next.span)
     }
 
     fn parse_member_name(&mut self, message: &'static str) -> Option<(String, Span)> {

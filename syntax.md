@@ -144,47 +144,6 @@ Chains normally stay lifted and are consumed by `try`, `let ... else`,
 name = try userOpt.->profile.->name
 ```
 
-## Lift Expression
-
-Use `lift` to turn a shape or tuple whose members are all the same success
-container family into one container of the assembled value.
-
-```txt
-profile Option[{ id Int, name Str }] = lift {
-    id: maybeId()
-    name: maybeName()
-}
-
-pair Result[(Int, Str), Str] = lift (okId(), okName())
-
-spreadProfile Option[{ id Int, name Str }] = lift {
-    ...optionParts
-}
-```
-
-Rules:
-
-- `lift { ... }` accepts named shape fields only
-- shape spread is allowed; spread fields are checked as lifted members in source order
-- `lift (...)` accepts tuple literals
-- every member must be `Option[T]`, `Result[T, E]`, or `Either[L, T]`
-- all members must use the same wrapper family
-- `Result` error types and `Either` left types must be mutually compatible
-- empty shapes and tuples are rejected because the wrapper family cannot be inferred
-
-The result keeps the same wrapper family:
-
-```txt
-lift { id: Option[Int], name: Option[Str] }
-# Option[{ id Int, name Str }]
-
-lift (Result[Int, E], Result[Str, E])
-# Result[(Int, Str), E]
-
-lift { id: Either[L, Int], name: Either[L, Str] }
-# Either[L, { id Int, name Str }]
-```
-
 ## Runtime Metadata
 
 Runtime metadata is exposed through the `Type[A]` hierarchy declared in
@@ -2400,7 +2359,6 @@ Boolean:
 Other operators / constructs:
 
 - `is` for runtime type checks
-- `lift` for assembling shapes or tuples inside `Option`, `Result`, or `Either`
 - `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
 - `->` for parenthesized function types and lambdas
 - `=>` for match cases
@@ -2466,7 +2424,7 @@ Newline continuation:
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
   - shape/update operators: `:<`
-  - unary prefixes: unary `-`, `!`, `try`, `lift`
+  - unary prefixes: unary `-`, `!`, `try`
   - runtime type check keyword: `is`
   - match arrow: `=>`
   - separators / chaining markers: `,`, `.`, `.->`

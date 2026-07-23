@@ -1,8 +1,0 @@
-# FAIL_REGEX:
-# .*invalid_lift.*lift field 'id' must be Option\[T\], Result\[T, E\], or Either\[L, T\], got 'Int'.*
-
-def main() Unit {
-    value = lift {
-        id: 1
-    }
-}

@@ -2590,25 +2590,37 @@ def run(userOpt Option[User]) Unit {
 }
 
 #[test]
-fn parses_lift_shape_and_tuple_expressions() {
-    let shape = parse_expr_only(r#"lift { id: maybeId(), name: maybeName() }"#);
-    let Expr::Lift { value, .. } = shape else {
-        panic!("expected lift expression, got {shape:#?}");
-    };
-    let Expr::RecordLiteral { fields, values, .. } = value.as_ref() else {
-        panic!("expected lifted shape literal, got {value:#?}");
-    };
-    assert_eq!(fields.len(), 2);
-    assert!(values.is_empty());
+fn rejects_removed_lift_shape_expression() {
+    let file = SourceFile::new("test.lum", "lift { id: maybeId() }");
+    let lexed = lex(&file);
+    let mut parser = Parser::new(&lexed.tokens);
+    let expr = parser.parse_expr();
+    assert!(expr.is_none(), "{expr:#?}");
+    assert!(
+        parser
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "lift_removed"),
+        "{:#?}",
+        parser.diagnostics
+    );
+}
 
-    let tuple = parse_expr_only(r#"lift (maybeId(), maybeName())"#);
-    let Expr::Lift { value, .. } = tuple else {
-        panic!("expected lift expression, got {tuple:#?}");
-    };
-    let Expr::TupleLiteral { items, .. } = value.as_ref() else {
-        panic!("expected lifted tuple literal, got {value:#?}");
-    };
-    assert_eq!(items.len(), 2);
+#[test]
+fn rejects_removed_spaced_lift_tuple_expression() {
+    let file = SourceFile::new("test.lum", "lift (maybeId(), maybeName())");
+    let lexed = lex(&file);
+    let mut parser = Parser::new(&lexed.tokens);
+    let expr = parser.parse_expr();
+    assert!(expr.is_none(), "{expr:#?}");
+    assert!(
+        parser
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "lift_removed"),
+        "{:#?}",
+        parser.diagnostics
+    );
 }
 
 #[test]

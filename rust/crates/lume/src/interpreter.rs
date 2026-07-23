@@ -645,7 +645,6 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
         ast::Expr::Try { value, .. } => {
             rewrite_expr_for_runtime(value, module, graph);
         }
-        ast::Expr::Lift { value, .. } => rewrite_expr_for_runtime(value, module, graph),
         ast::Expr::Binary { left, right, .. } => {
             rewrite_expr_for_runtime(left, module, graph);
             rewrite_expr_for_runtime(right, module, graph);
@@ -1068,24 +1067,6 @@ pub(crate) struct AggregateValue {
 pub(crate) struct ClosureValue {
     function: ir::FunctionId,
     captures: Vec<Value>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RuntimeLiftFamily {
-    Option,
-    Result,
-    Either,
-}
-
-enum RuntimeLiftMember {
-    Success {
-        family: RuntimeLiftFamily,
-        value: Value,
-    },
-    Failure {
-        family: RuntimeLiftFamily,
-        value: Option<Value>,
-    },
 }
 
 #[derive(Debug, Clone)]
@@ -1669,10 +1650,6 @@ impl<'a> Interpreter<'a> {
                     .collect::<Result<Vec<_>, Diagnostic>>()?,
             )))),
             ir::RValue::RecordSpread(parts) => self.record_spread_value(frame, parts, span),
-            ir::RValue::Lift { value } => {
-                let value = self.eval_operand_ref(frame, value, span)?;
-                self.lift_value(value, span)
-            }
             ir::RValue::AnonymousInterface { methods, .. } => {
                 Ok(Value::Record(Rc::new(RefCell::new(
                     methods
@@ -3613,166 +3590,6 @@ impl<'a> Interpreter<'a> {
                     other.render()
                 ),
             )),
-        }
-    }
-
-    fn lift_value(&mut self, value: Value, span: Option<Span>) -> Result<Value, Diagnostic> {
-        match value {
-            Value::Record(fields) => {
-                let fields = fields.borrow().clone();
-                if fields.is_empty() {
-                    return Err(self.runtime_error(span, "lift requires at least one shape field"));
-                }
-                let mut family = None;
-                let mut lifted = Vec::new();
-                for (name, value) in fields {
-                    match self.unwrap_runtime_lift_member(value, span)? {
-                        RuntimeLiftMember::Success {
-                            family: next_family,
-                            value,
-                        } => {
-                            self.merge_runtime_lift_family(&mut family, next_family, span)?;
-                            lifted.push((name, value));
-                        }
-                        RuntimeLiftMember::Failure {
-                            family: next_family,
-                            value,
-                        } => {
-                            self.merge_runtime_lift_family(&mut family, next_family, span)?;
-                            return Ok(self.wrap_runtime_lift_failure(next_family, value));
-                        }
-                    }
-                }
-                let family = family.expect("non-empty lift established a family");
-                Ok(self.wrap_runtime_lift_success(
-                    family,
-                    Value::Record(Rc::new(RefCell::new(lifted))),
-                ))
-            }
-            Value::Tuple(items) => {
-                if items.is_empty() {
-                    return Err(self.runtime_error(span, "lift requires at least one tuple item"));
-                }
-                let mut family = None;
-                let mut lifted = Vec::new();
-                for value in items {
-                    match self.unwrap_runtime_lift_member(value, span)? {
-                        RuntimeLiftMember::Success {
-                            family: next_family,
-                            value,
-                        } => {
-                            self.merge_runtime_lift_family(&mut family, next_family, span)?;
-                            lifted.push(value);
-                        }
-                        RuntimeLiftMember::Failure {
-                            family: next_family,
-                            value,
-                        } => {
-                            self.merge_runtime_lift_family(&mut family, next_family, span)?;
-                            return Ok(self.wrap_runtime_lift_failure(next_family, value));
-                        }
-                    }
-                }
-                let family = family.expect("non-empty lift established a family");
-                Ok(self.wrap_runtime_lift_success(family, Value::Tuple(lifted)))
-            }
-            other => Err(self.runtime_error(
-                span,
-                format!(
-                    "lift expects a shape or tuple value, got {}",
-                    other.render()
-                ),
-            )),
-        }
-    }
-
-    fn unwrap_runtime_lift_member(
-        &self,
-        value: Value,
-        span: Option<Span>,
-    ) -> Result<RuntimeLiftMember, Diagnostic> {
-        let Value::Aggregate(aggregate) = value else {
-            return Err(self.runtime_error(
-                span,
-                "lift members must be Option, Result, or Either values",
-            ));
-        };
-        let (type_name, case_name, fields) = {
-            let aggregate = aggregate.borrow();
-            (
-                aggregate.type_name.clone(),
-                aggregate.case_name.clone(),
-                aggregate.fields.clone(),
-            )
-        };
-        let first_field = fields.first().cloned();
-        match (type_name.as_str(), case_name.as_deref()) {
-            ("Option", Some("Some")) => Ok(RuntimeLiftMember::Success {
-                family: RuntimeLiftFamily::Option,
-                value: first_field.expect("Option.Some payload"),
-            }),
-            ("Option", Some("None")) => Ok(RuntimeLiftMember::Failure {
-                family: RuntimeLiftFamily::Option,
-                value: None,
-            }),
-            ("Result", Some("Ok")) => Ok(RuntimeLiftMember::Success {
-                family: RuntimeLiftFamily::Result,
-                value: first_field.expect("Result.Ok payload"),
-            }),
-            ("Result", Some("Err")) => Ok(RuntimeLiftMember::Failure {
-                family: RuntimeLiftFamily::Result,
-                value: Some(first_field.expect("Result.Err payload")),
-            }),
-            ("Either", Some("Right")) => Ok(RuntimeLiftMember::Success {
-                family: RuntimeLiftFamily::Either,
-                value: first_field.expect("Either.Right payload"),
-            }),
-            ("Either", Some("Left")) => Ok(RuntimeLiftMember::Failure {
-                family: RuntimeLiftFamily::Either,
-                value: Some(first_field.expect("Either.Left payload")),
-            }),
-            _ => Err(self.runtime_error(
-                span,
-                format!(
-                    "lift cannot unwrap {}.{}",
-                    type_name,
-                    case_name.unwrap_or_default()
-                ),
-            )),
-        }
-    }
-
-    fn merge_runtime_lift_family(
-        &self,
-        family: &mut Option<RuntimeLiftFamily>,
-        next: RuntimeLiftFamily,
-        span: Option<Span>,
-    ) -> Result<(), Diagnostic> {
-        if let Some(current) = family {
-            if *current != next {
-                return Err(
-                    self.runtime_error(span, "lift members must use the same wrapper family")
-                );
-            }
-        } else {
-            *family = Some(next);
-        }
-        Ok(())
-    }
-
-    fn wrap_runtime_lift_success(&self, family: RuntimeLiftFamily, value: Value) -> Value {
-        match family {
-            RuntimeLiftFamily::Option => self.option_some(value),
-            RuntimeLiftFamily::Result => self.result_ok(value),
-            RuntimeLiftFamily::Either => self.either_right(value),
-        }
-    }
-
-    fn wrap_runtime_lift_failure(&self, family: RuntimeLiftFamily, value: Option<Value>) -> Value {
-        match family {
-            RuntimeLiftFamily::Option => self.option_none(),
-            RuntimeLiftFamily::Result => self.result_err(value.unwrap_or(Value::Unit)),
-            RuntimeLiftFamily::Either => self.either_left(value.unwrap_or(Value::Unit)),
         }
     }
 

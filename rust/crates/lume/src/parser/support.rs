@@ -440,6 +440,6 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn spans_touch(left: Span, right: Span) -> bool {
+pub(super) fn spans_touch(left: Span, right: Span) -> bool {
     left.end == right.start
 }
