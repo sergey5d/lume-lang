@@ -1,6 +1,7 @@
 # Keyed Construction
 
-This note sketches a possible keyed construction feature for map-like types.
+Keyed construction lets map-like types accept brace entries whose keys are
+expressions rather than construction field labels.
 
 ## Shape
 
@@ -9,15 +10,11 @@ impl single CustomHashMap {
     keyed[K, V](entries [(K, V)]) CustomHashMap[K, V] {
         map = CustomHashMap[K, V] {}
 
-        for (key, value) <- entries {
+        for let (key, value) <- entries {
             map.put(key, value)
         }
 
         map
-    }
-
-    keyed new[K, V](vararg entries [(K, V)]) {
-        
     }
 }
 ```
@@ -46,18 +43,7 @@ Conceptually:
 keyed constructor = constructor from key/value entries
 ```
 
-## Why `keyed` Instead Of Magic `fromEntries`
-
-Using a magic method name is workable:
-
-```txt
-def fromEntries(...)
-```
-
-But it is less language-like because the compiler has to know that this method
-name is special.
-
-A dedicated constructor kind is clearer:
+## Why `keyed`
 
 ```txt
 keyed[K, V](entries [(K, V)]) CustomHashMap[K, V]
@@ -77,15 +63,13 @@ For:
 T { key: value }
 ```
 
-Resolution should be:
+Resolution:
 
-1. If `T` has normal field or constructor-shape construction, treat keys as
-   field labels.
-2. Else if `T` has a `keyed` constructor, treat keys as expressions and values
-   as expressions.
-3. Collect keyed entries into `[(K, V)]`.
-4. Call the keyed constructor.
-5. Otherwise, report an error.
+1. Identifier entries such as `name: value` are construction fields.
+2. Expression-key entries such as `"name": value`, `42: value`, or `(key): value` are keyed entries.
+3. The compiler collects keyed entries into `[(K, V)]`.
+4. The compiler calls `T.keyed(entries)`.
+5. If `T` has no matching `keyed` method, report an error.
 
 Example:
 
@@ -105,7 +89,7 @@ Compiler checks:
 entries [(Str, Int)]
 ```
 
-Then calls:
+Then calls roughly:
 
 ```txt
 CustomHashMap.keyed[Str, Int]([
@@ -181,7 +165,7 @@ Pair values stay ordinary tuples:
 x = ("a", 1)
 ```
 
-## Preferred Syntax
+## Summary
 
 ```txt
 impl single Map {
@@ -191,7 +175,7 @@ impl single Map {
 }
 ```
 
-So `keyed` as a constructor kind accepting a list of tuples is a solid design:
+`keyed` as a constructor kind accepting a list of tuples is the settled design:
 
 - cleaner than magic `fromEntries`
 - cleaner than overloading `:`

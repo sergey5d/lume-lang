@@ -10,7 +10,7 @@ def plusOne(entries Map[Str, Int], key Str) Option[Int] {
 }
 
 def main() Unit {
-    entries = Map("a": 1, "b": 2)
+    entries = Map { "a": 1, "b": 2 }
     present = entries["a"]
     missing = entries["z"]
     plusOneValue = plusOne(entries, "a")

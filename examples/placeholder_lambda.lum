@@ -28,7 +28,7 @@ def main() Unit {
         let (_, value) = pair
         value * 2
     })
-    entries = Map("a": 1, "bbb": 2)
+    entries = Map { "a": 1, "bbb": 2 }
     mapMapped = entries.map((key, value) -> key.size() + value)
     tuple4s = List((1, 2, 3, 4), (4, 5, 6, 7))
     tuple4Mapped = tuple4s.map(tuple -> {

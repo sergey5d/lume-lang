@@ -3833,10 +3833,10 @@ impl<'a> Checker<'a> {
                     }
                     if !values.is_empty() {
                         self.add_error(
-                            "missing_shape_context",
-                            "positional anonymous shape construction requires an expected shape type; assign a tuple to an explicitly typed shape",
-                            expr.span(),
-                        );
+	                            "missing_shape_context",
+	                            "anonymous shape literals require field labels; keyed entries require a construction target like 'Map { key: value }'",
+	                            expr.span(),
+	                        );
                     }
                     Ty::Record(Vec::new())
                 }
@@ -4684,6 +4684,39 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Ty::Unknown);
                 Some(Ty::Named("Array".to_string(), vec![item_ty]))
             }
+            ("Map", "keyed") => {
+                if args.len() != 1 {
+                    self.add_error(
+                        "invalid_argument_count",
+                        format!("Map.keyed expects 1 argument, got {}", args.len()),
+                        span,
+                    );
+                }
+                let entry_ty = args
+                    .first()
+                    .map(|arg| {
+                        let entries_ty = self.check_expr(&arg.value);
+                        self.iterable_item_type(&entries_ty)
+                    })
+                    .unwrap_or(Ty::Unknown);
+                let (key_ty, value_ty) = match entry_ty {
+                    Ty::Tuple(items) if items.len() == 2 => (items[0].clone(), items[1].clone()),
+                    Ty::Unknown => (Ty::Unknown, Ty::Unknown),
+                    other => {
+                        let arg_span = args.first().map(|arg| arg.span).unwrap_or(span);
+                        self.add_error(
+                            "invalid_argument_type",
+                            format!(
+                                "Map.keyed expects an iterable of tuple pairs, got entries of type '{}'",
+                                other.describe()
+                            ),
+                            arg_span,
+                        );
+                        (Ty::Unknown, Ty::Unknown)
+                    }
+                };
+                Some(Ty::Named("Map".to_string(), vec![key_ty, value_ty]))
+            }
             ("Int", "parse") => {
                 if args.len() != 1 {
                     self.add_error(
@@ -5268,32 +5301,21 @@ impl<'a> Checker<'a> {
                 let mut key = Ty::Unknown;
                 let mut value = Ty::Unknown;
                 for arg in args {
-                    match &arg.value {
-                        Expr::Binary {
-                            left,
-                            op: BinaryOp::Colon,
-                            right,
-                            ..
-                        } => {
-                            key = join_types(&key, &self.check_expr(left));
-                            value = join_types(&value, &self.check_expr(right));
+                    match self.check_expr(&arg.value) {
+                        Ty::Tuple(items) if items.len() == 2 => {
+                            key = join_types(&key, &items[0]);
+                            value = join_types(&value, &items[1]);
                         }
-                        _ => match self.check_expr(&arg.value) {
-                            Ty::Tuple(items) if items.len() == 2 => {
-                                key = join_types(&key, &items[0]);
-                                value = join_types(&value, &items[1]);
-                            }
-                            other => {
-                                self.add_error(
-                                    "invalid_argument_type",
-                                    format!(
-                                        "Map constructor expects tuple pair arguments, got '{}'",
-                                        other.describe()
-                                    ),
-                                    arg.span,
-                                );
-                            }
-                        },
+                        other => {
+                            self.add_error(
+                                "invalid_argument_type",
+                                format!(
+                                    "Map constructor expects tuple pair arguments, got '{}'",
+                                    other.describe()
+                                ),
+                                arg.span,
+                            );
+                        }
                     }
                 }
                 Some(Ty::Named("Map".to_string(), vec![key, value]))
@@ -6017,7 +6039,14 @@ impl<'a> Checker<'a> {
                 }
                 Ty::bool()
             }
-            BinaryOp::Colon => Ty::Tuple(vec![left.clone(), right.clone()]),
+            BinaryOp::Colon => {
+                self.add_error(
+                    "removed_pair_expression",
+                    "':' pair expressions are no longer supported; use '(left, right)' for tuple pairs or keyed construction inside 'Type { key: value }'",
+                    span,
+                );
+                Ty::Unknown
+            }
         }
     }
 

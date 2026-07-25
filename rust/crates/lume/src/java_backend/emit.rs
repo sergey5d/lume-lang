@@ -2541,6 +2541,17 @@ impl<'a> FunctionEmitter<'a> {
             [owner] if owner == "Map" && operands.is_empty() => {
                 Some("lume.core.LumeMap.empty()".to_string())
             }
+            [owner, method] if owner == "Map" && method == "keyed" => {
+                let args = self.emit_operands(operands)?;
+                if args.len() == 1 {
+                    Some(format!("lume.core.LumeMap.fromEntries({})", args[0]))
+                } else {
+                    Some(format!(
+                        "lume.core.LumeMap.fromEntries(lume.core.LumeList.of({}))",
+                        args.join(", ")
+                    ))
+                }
+            }
             [owner] if owner == "Set" && operands.is_empty() => {
                 Some("lume.core.LumeSet.empty()".to_string())
             }
@@ -3543,6 +3554,12 @@ impl<'a> FunctionEmitter<'a> {
                 name: "Map".to_string(),
                 args: vec![ir::Type::Unknown, ir::Type::Unknown],
             }),
+            [owner, method] if owner == "Map" && method == "keyed" && arg_len == 1 => {
+                Some(ir::Type::Named {
+                    name: "Map".to_string(),
+                    args: vec![ir::Type::Unknown, ir::Type::Unknown],
+                })
+            }
             [owner] if owner == "Set" => Some(ir::Type::Named {
                 name: "Set".to_string(),
                 args: vec![ir::Type::Unknown],

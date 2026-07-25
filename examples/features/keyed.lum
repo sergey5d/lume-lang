@@ -1,0 +1,36 @@
+# EXPECT:
+# built-in two 2
+# custom Ada 10
+# 0
+
+class NameScores {
+    entries Map[Str, Int]
+}
+
+single NameScores {}
+
+impl single NameScores {
+    keyed(entries [(Str, Int)]) NameScores {
+        NameScores { entries: Map.keyed(entries) }
+    }
+}
+
+def main() Int {
+    builtIn Map[Str, Int] = Map {
+        "one": 1
+        "two": 2
+    }
+
+    let Some(two) = builtIn["two"] else return 1
+    println("built-in two", two)
+
+    custom NameScores = NameScores {
+        "Ada": 10
+        "Bob": 12
+    }
+
+    let Some(ada) = custom.entries["Ada"] else return 1
+    println("custom Ada", ada)
+
+    0
+}

@@ -587,22 +587,6 @@ impl<'a> Parser<'a> {
         self.finish_brace_record_literal_expr(start)
     }
 
-    fn reject_unparenthesized_pair_field_initializer(&mut self, value: &Expr) {
-        if matches!(
-            value,
-            Expr::Binary {
-                op: BinaryOp::Colon,
-                ..
-            }
-        ) {
-            self.diagnostics.push(Diagnostic::error(
-                "invalid_pair_expression",
-                "pair expressions inside field initializers must be parenthesized",
-                value.span(),
-            ));
-        }
-    }
-
     pub(super) fn finish_brace_record_literal_expr(&mut self, start: Span) -> Option<Expr> {
         enum RecordEntry {
             Field {
@@ -612,6 +596,11 @@ impl<'a> Parser<'a> {
                 span: Span,
             },
             Spread {
+                value: Expr,
+                span: Span,
+            },
+            Keyed {
+                key: Expr,
                 value: Expr,
                 span: Span,
             },
@@ -635,7 +624,6 @@ impl<'a> Parser<'a> {
                 let (name, name_span) = self.expect_identifier("expected shape field name")?;
                 if self.match_token(TokenKind::Colon) {
                     let value = self.parse_expr()?;
-                    self.reject_unparenthesized_pair_field_initializer(&value);
                     RecordEntry::Field {
                         name,
                         ty: None,
@@ -647,7 +635,6 @@ impl<'a> Parser<'a> {
                     if let Some(ty) = ty {
                         if self.match_token(TokenKind::Colon) {
                             let value = self.parse_expr()?;
-                            self.reject_unparenthesized_pair_field_initializer(&value);
                             RecordEntry::Field {
                                 name,
                                 ty: Some(ty),
@@ -670,8 +657,19 @@ impl<'a> Parser<'a> {
                     RecordEntry::Positional { span: value.span() }
                 }
             } else {
-                let value = self.parse_expr()?;
-                RecordEntry::Positional { span: value.span() }
+                let key_or_value = self.parse_or_expr()?;
+                if self.match_token(TokenKind::Colon) {
+                    let value = self.parse_expr()?;
+                    RecordEntry::Keyed {
+                        span: key_or_value.span().cover(value.span()),
+                        key: key_or_value,
+                        value,
+                    }
+                } else {
+                    RecordEntry::Positional {
+                        span: key_or_value.span(),
+                    }
+                }
             };
             entries.push(entry);
             let separated_by_comma = self.match_token(TokenKind::Comma);
@@ -691,7 +689,7 @@ impl<'a> Parser<'a> {
             if !separated_by_comma && !separated_by_newline {
                 self.error_at_current(
                     "unexpected_token",
-                    "expected ',' or newline between anonymous shape fields",
+                    "expected ',' or newline between brace entries",
                 );
                 return None;
             }
@@ -703,7 +701,19 @@ impl<'a> Parser<'a> {
                 RecordEntry::Field { .. } | RecordEntry::Spread { .. }
             )
         });
+        let has_keyed = entries
+            .iter()
+            .any(|entry| matches!(entry, RecordEntry::Keyed { .. }));
+        if has_named && has_keyed {
+            self.diagnostics.push(Diagnostic::error(
+                "mixed_brace_entries",
+                "cannot mix construction fields and keyed entries in the same brace payload",
+                start.cover(end),
+            ));
+            return None;
+        }
         let mut fields = Vec::new();
+        let mut values = Vec::new();
         if has_named {
             for entry in entries {
                 match entry {
@@ -728,6 +738,7 @@ impl<'a> Parser<'a> {
                             span,
                         });
                     }
+                    RecordEntry::Keyed { .. } => unreachable!("keyed entries were rejected above"),
                     RecordEntry::Positional { span, .. } => {
                         self.diagnostics.push(Diagnostic::error(
                             "unexpected_token",
@@ -735,6 +746,28 @@ impl<'a> Parser<'a> {
                             span,
                         ));
                         return None;
+                    }
+                }
+            }
+        } else if has_keyed {
+            for entry in entries {
+                match entry {
+                    RecordEntry::Keyed { key, value, span } => {
+                        values.push(Expr::TupleLiteral {
+                            items: vec![key, value],
+                            span,
+                        });
+                    }
+                    RecordEntry::Positional { span, .. } => {
+                        self.diagnostics.push(Diagnostic::error(
+                            "unexpected_token",
+                            "cannot mix keyed entries and positional brace values",
+                            span,
+                        ));
+                        return None;
+                    }
+                    RecordEntry::Field { .. } | RecordEntry::Spread { .. } => {
+                        unreachable!("named entries were rejected above")
                     }
                 }
             }
@@ -750,8 +783,41 @@ impl<'a> Parser<'a> {
         }
         Some(Expr::RecordLiteral {
             fields,
-            values: Vec::new(),
+            values,
             span: start.cover(end),
+        })
+    }
+
+    fn keyed_record_literal_call(&self, callee: Expr, record: Expr, start: Span) -> Option<Expr> {
+        let Expr::RecordLiteral {
+            fields,
+            values,
+            span: record_span,
+        } = record
+        else {
+            return None;
+        };
+        if !fields.is_empty() || values.is_empty() {
+            return None;
+        }
+        let member_span = callee.span().cover(record_span);
+        Some(Expr::Call {
+            callee: Box::new(Expr::Member {
+                receiver: Box::new(callee),
+                name: "keyed".to_string(),
+                span: member_span,
+            }),
+            args: vec![CallArg {
+                name: None,
+                ty: None,
+                value: Expr::ListLiteral {
+                    items: values,
+                    span: record_span,
+                },
+                span: record_span,
+            }],
+            uses_brace_syntax: false,
+            span: start.cover(record_span),
         })
     }
 
@@ -901,17 +967,13 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_colon_expr(&mut self) -> Option<Expr> {
         let mut expr = self.parse_or_expr()?;
-        let mut saw_pair = false;
         loop {
             let op = if self.match_token(TokenKind::Colon) {
-                if saw_pair {
-                    self.diagnostics.push(Diagnostic::error(
-                        "invalid_pair_expression",
-                        "':' pair expressions are non-associative; parenthesize nested pairs",
-                        self.previous_span(),
-                    ));
-                }
-                saw_pair = true;
+                self.diagnostics.push(Diagnostic::error(
+                    "removed_pair_expression",
+                    "':' pair expressions are no longer supported; use '(left, right)' for tuple pairs or keyed construction inside 'Type { key: value }'",
+                    self.previous_span(),
+                ));
                 BinaryOp::Colon
             } else {
                 break;
@@ -1232,17 +1294,23 @@ impl<'a> Parser<'a> {
                     }
                 };
                 let arg_span = arg.span();
-                expr = Expr::Call {
-                    callee: Box::new(expr),
-                    args: vec![CallArg {
-                        name: None,
-                        ty: None,
-                        span: arg_span,
-                        value: arg,
-                    }],
-                    uses_brace_syntax: true,
-                    span: start.cover(arg_span),
-                };
+                if let Some(keyed_call) =
+                    self.keyed_record_literal_call(expr.clone(), arg.clone(), start)
+                {
+                    expr = keyed_call;
+                } else {
+                    expr = Expr::Call {
+                        callee: Box::new(expr),
+                        args: vec![CallArg {
+                            name: None,
+                            ty: None,
+                            span: arg_span,
+                            value: arg,
+                        }],
+                        uses_brace_syntax: true,
+                        span: start.cover(arg_span),
+                    };
+                }
                 continue;
             }
             break;
@@ -1570,6 +1638,9 @@ impl<'a> Parser<'a> {
                 TokenKind::LBracket => nested_brackets += 1,
                 TokenKind::RBracket => nested_brackets = nested_brackets.saturating_sub(1),
                 TokenKind::Comma if depth == 1 && nested_parens == 0 && nested_brackets == 0 => {
+                    return true;
+                }
+                TokenKind::Colon if depth == 1 && nested_parens == 0 && nested_brackets == 0 => {
                     return true;
                 }
                 _ => {}

@@ -2,5 +2,5 @@
 # .*':' pair expressions are no longer supported.*
 
 def main() Unit {
-    triple = "a": 1: true
+    entries = Map("a": 1)
 }

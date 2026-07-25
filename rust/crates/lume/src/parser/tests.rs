@@ -1080,15 +1080,20 @@ fn parses_shape_literal_forms() {
         other => panic!("expected tuple literal, got {other:#?}"),
     }
 
-    match parse_expr_only(r#""a": 1"#) {
-        Expr::Binary {
-            op: BinaryOp::Colon,
-            ..
-        } => {}
-        other => panic!("expected pair expression, got {other:#?}"),
-    }
+    let file = SourceFile::new("test.lum", r#""a": 1"#);
+    let lexed = lex(&file);
+    let mut parser = Parser::new(&lexed.tokens);
+    let _ = parser.parse_expr().expect("expression");
+    assert!(
+        parser
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "removed_pair_expression"),
+        "expected removed pair expression diagnostic, got {:#?}",
+        parser.diagnostics
+    );
 
-    match parse_expr_only(r#"{ entry: ("a": 1) }"#) {
+    match parse_expr_only(r#"{ entry: ("a", 1) }"#) {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(values.is_empty());
             assert_eq!(fields.len(), 1);
@@ -1123,6 +1128,35 @@ fn parses_shape_literal_forms() {
             }
         }
         other => panic!("expected call, got {other:#?}"),
+    }
+
+    match parse_expr_only(r#"Map { "a": 1, "bbb": 2 }"#) {
+        Expr::Call {
+            callee,
+            args,
+            uses_brace_syntax,
+            ..
+        } => {
+            assert!(!uses_brace_syntax);
+            assert_eq!(args.len(), 1);
+            match callee.as_ref() {
+                Expr::Member { receiver, name, .. } => {
+                    assert_eq!(name, "keyed");
+                    assert!(
+                        matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "Map")
+                    );
+                }
+                other => panic!("expected keyed member callee, got {other:#?}"),
+            }
+            match &args[0].value {
+                Expr::ListLiteral { items, .. } => {
+                    assert_eq!(items.len(), 2);
+                    assert!(matches!(items[0], Expr::TupleLiteral { .. }));
+                }
+                other => panic!("expected list of tuple entries, got {other:#?}"),
+            }
+        }
+        other => panic!("expected keyed call, got {other:#?}"),
     }
 
     match parse_expr_only("Settings {}") {
@@ -1174,7 +1208,7 @@ fn parses_shape_literal_forms() {
 }
 
 #[test]
-fn rejects_chained_pair_expression_without_parentheses() {
+fn rejects_chained_removed_pair_expression() {
     let result = parse(
         r#"
 def main() Unit {
@@ -1183,16 +1217,17 @@ def main() Unit {
 "#,
     );
     assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_pair_expression" && diag.message.contains("non-associative")
-        }),
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "removed_pair_expression"),
         "{:#?}",
         result.diagnostics
     );
 }
 
 #[test]
-fn rejects_unparenthesized_pair_field_initializer() {
+fn rejects_removed_pair_field_initializer() {
     let result = parse(
         r#"
 def main() Unit {
@@ -1203,12 +1238,10 @@ def main() Unit {
 "#,
     );
     assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_pair_expression"
-                && diag
-                    .message
-                    .contains("field initializers must be parenthesized")
-        }),
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "removed_pair_expression"),
         "{:#?}",
         result.diagnostics
     );
@@ -1270,7 +1303,7 @@ fn rejects_same_line_shape_update_fields_without_separator() {
             diag.code == "unexpected_token"
                 && diag
                     .message
-                    .contains("expected ',' or newline between anonymous shape fields")
+                    .contains("expected ',' or newline between brace entries")
         }),
         "{:#?}",
         result.diagnostics
@@ -1299,7 +1332,7 @@ fn rejects_equals_in_shape_update_fields() {
             diag.code == "unexpected_token"
                 && diag
                     .message
-                    .contains("expected ',' or newline between anonymous shape fields")
+                    .contains("expected ',' or newline between brace entries")
         }),
         "{:#?}",
         result.diagnostics

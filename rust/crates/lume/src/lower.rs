@@ -3826,6 +3826,10 @@ impl<'a> FunctionLowerer<'a> {
             [owner, method] if owner == "Float" && method == "parse" => {
                 Some(ir::Type::option(ir::Type::Float))
             }
+            [owner, method] if owner == "Map" && method == "keyed" => Some(ir::Type::Named {
+                name: "Map".to_string(),
+                args: vec![ir::Type::Unknown, ir::Type::Unknown],
+            }),
             _ => None,
         }
     }
@@ -7881,11 +7885,11 @@ mod tests {
     }
 
     #[test]
-    fn lowers_map_constructor_pairs_without_binary_operator_errors() {
+    fn lowers_keyed_map_construction_without_binary_operator_errors() {
         let program = parse_inline(
             r#"
             def main() Unit {
-                entries = Map("a": 1, "bbb": 2)
+                entries = Map { "a": 1, "bbb": 2 }
                 OS.println(entries)
             }
             "#,

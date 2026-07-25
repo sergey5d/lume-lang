@@ -46,7 +46,7 @@ Supported binding styles:
 - Positional varargs: `db.query(sql).bind("Ada", 42)`
 - Positional tuple: `db.query(sql).bind(("Ada", 42))`
 - Positional list: `db.query(sql).bind(values)`
-- Named SQL parameters through maps: `db.query(sql).bind(Map("name": "Ada"))`
+- Named SQL parameters through maps: `db.query(sql).bind(Map { "name": "Ada" })`
 
 Main execution forms:
 

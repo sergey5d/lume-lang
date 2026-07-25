@@ -2713,6 +2713,39 @@ def main() Unit {
     }
 
     #[test]
+    fn emits_keyed_map_construction_for_java_backend() {
+        let temp = temp_path("lume-java-keyed-map");
+        let source = temp.join("keyed_map.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/keyedmap
+
+def main() Unit {
+    entries Map[Str, Int] = Map {
+        "one": 1
+        "two": 2
+    }
+    println(entries.size())
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let module =
+            fs::read_to_string(out.join("demo/keyedmap/KeyedmapModule.java")).expect("read module");
+        assert!(module.contains("lume.core.LumeMap.fromEntries("));
+        assert!(module.contains("new lume.core.Tuple2<>("));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_compiles_tuple_destructuring() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping tuple destructuring Java test because a JDK tool is not available");

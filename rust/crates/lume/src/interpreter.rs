@@ -2843,6 +2843,18 @@ impl<'a> Interpreter<'a> {
             return Ok(Value::set(unique_values(values)));
         }
 
+        if path[0] == "Map" && path.len() == 2 && path[1] == "keyed" {
+            if args.len() != 1 {
+                return Err(self.runtime_error(
+                    span,
+                    format!("Map.keyed expects 1 argument, got {}", args.len()),
+                ));
+            }
+            let values = iterable_values(args[0].clone(), span, self)?;
+            let entries = map_entries_from_tuple_values(values, span, self)?;
+            return Ok(Value::Map(Rc::new(RefCell::new(entries))));
+        }
+
         if path[0] == "Int" && path.len() == 2 && path[1] == "parse" {
             if args.len() != 1 {
                 return Err(self.runtime_error(
@@ -3075,16 +3087,7 @@ impl<'a> Interpreter<'a> {
                 args.to_vec(),
             ))))),
             "Map" => {
-                let mut entries = Vec::new();
-                for arg in args {
-                    let Value::Tuple(items) = arg else {
-                        return Err(self.runtime_error(span, "Map expects tuple pair arguments"));
-                    };
-                    if items.len() != 2 {
-                        return Err(self.runtime_error(span, "Map expects tuple pair arguments"));
-                    }
-                    map_put_entry(&mut entries, items[0].clone(), items[1].clone());
-                }
+                let entries = map_entries_from_tuple_values(args.to_vec(), span, self)?;
                 Some(Value::Map(Rc::new(RefCell::new(entries))))
             }
             "Some" => {
@@ -5230,6 +5233,24 @@ pub(crate) fn map_put_entry(entries: &mut Vec<(Value, Value)>, key: Value, value
     }
 }
 
+fn map_entries_from_tuple_values(
+    values: Vec<Value>,
+    span: Option<Span>,
+    in_: &Interpreter<'_>,
+) -> Result<Vec<(Value, Value)>, Diagnostic> {
+    let mut entries = Vec::new();
+    for value in values {
+        let Value::Tuple(items) = value else {
+            return Err(in_.runtime_error(span, "Map expects tuple pair arguments"));
+        };
+        if items.len() != 2 {
+            return Err(in_.runtime_error(span, "Map expects tuple pair arguments"));
+        }
+        map_put_entry(&mut entries, items[0].clone(), items[1].clone());
+    }
+    Ok(entries)
+}
+
 fn iterator_values(
     iterator: &Rc<RefCell<IteratorState>>,
     _span: Option<Span>,
@@ -6226,7 +6247,7 @@ mod tests {
                 seen.add(3)
                 OS.println(seen.size())
 
-                pairs = Map("a": 1)
+                pairs = Map { "a": 1 }
                 pairs.put("b", 2)
                 OS.println(pairs.size())
 

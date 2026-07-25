@@ -1605,33 +1605,70 @@ takeArray(Array(4, 5, 6))
 Map construction:
 
 ```txt
-entries Map[Str, Int] = Map("a": 1, "b": 2)
+entries Map[Str, Int] = Map {
+    "a": 1
+    "b": 2
+}
 value Option[Int] = entries["a"]
 ```
 
-`Map(...)` accepts tuple-pair arguments. The `key: value` form is a general
-pair expression, not syntax that only exists inside `Map(...)`.
+Map-like types can opt into keyed construction by declaring `keyed` on their
+single:
+
+```txt
+impl single CustomHashMap {
+    keyed[K, V](entries [(K, V)]) CustomHashMap[K, V] {
+        map = CustomHashMap[K, V] {}
+
+        for let (key, value) <- entries {
+            map.put(key, value)
+        }
+
+        map
+    }
+}
+
+map = CustomHashMap {
+    "one": 1
+    "two": 2
+}
+```
+
+Brace entries are interpreted by syntax first:
+
+- Identifier entries such as `name: value` are construction fields.
+- Expression-key entries such as `"name": value`, `42: value`, or `(key): value` are keyed entries.
+
+For keyed construction, the compiler collects entries into `[(K, V)]` and calls
+`Type.keyed(entries)`.
+
+Bare identifier keys are parsed as construction field labels. If the key is an
+identifier value, parenthesize it:
+
+```txt
+map = CustomHashMap {
+    (dynamicKey): value
+}
+```
 
 Tuple literal:
 
 ```txt
 (1, "x")
-pair (Str, Int) = "a": 1
+pair (Str, Int) = ("a", 1)
 ```
 
-`:` has two roles depending on grammar context:
+`:` is not a general expression operator. It appears only inside brace entry
+lists:
 
-- in brace field lists, `field: value` binds a value to a construction field
-- in ordinary expressions, `left: right` constructs a 2-tuple pair value
+- `field: value` binds a value to a construction field
+- `keyExpr: valueExpr` supplies one keyed construction entry
 
-Pair expressions are non-associative. Use `(a, b, c)` for TupleN values, and
-use parentheses when intentionally nesting pairs: `(a: b): c` or `a: (b: c)`.
-
-Pair values inside field initializers should be parenthesized for readability:
+Tuple values inside field initializers should use tuple syntax:
 
 ```txt
 holder = Holder {
-    entry: ("a": 1)
+    entry: ("a", 1)
 }
 ```
 
@@ -2394,7 +2431,7 @@ Other operators / constructs:
 - `=>` for match cases
 - `.->` for per-hop lifted access through `Option`, `Result`, and `Either`
 - `with` for interface implementation and generic bounds
-- `:` for ordinary pair expressions, where `left: right` constructs a 2-tuple
+- `:` inside brace entry lists for construction fields and keyed construction entries
 - `:<` for class, shape, and anonymous-shape update
 
 Examples:
@@ -2406,7 +2443,7 @@ for item <- items {
 (Int) -> Str
 SomeX(x) => x
 class Box[T] with Named
-pair = "a": 1
+pair = ("a", 1)
 ```
 
 Shape copy, extension, and distinct merge:
@@ -2444,7 +2481,7 @@ Current operator overloading constraints:
 - Comparison operators are intended to work through `Ordering[T]` rather than custom operator declarations.
 - Equality is intended to work through `Eq[T]` rather than custom operator declarations.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
-- `:` is a built-in pair expression operator only, not an overloadable collection/custom operator.
+- `:` is brace-entry syntax only, not an overloadable operator.
 - The spellings `:+`, `:-`, `++`, `--`, and `::` are removed from the language surface and currently produce `unsupported_operator` lexer diagnostics.
 
 Newline continuation:
