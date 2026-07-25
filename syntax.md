@@ -2062,10 +2062,37 @@ items = for {
 items = for item <- [1, 2, 3] yield item * 2
 ```
 
+`for ... yield` may also pull success values from lifted containers:
+`Option[T]`, `Result[T, E]`, and `Either[L, T]`. The first generator source
+chooses the result family:
+
+```txt
+maybeName Option[Str] =
+    for user <- maybeUser yield user.name
+
+total Result[Int, DbError] =
+    for {
+        left <- loadLeft()
+        right <- loadRight()
+    } yield left + right
+```
+
+For lifted comprehensions, every `<-` generator must use the same lifted
+family. `Result` failure types and `Either` left types from later generators
+must be assignable to the first generator's failure or left type. Convert
+failures explicitly before the generator when needed:
+
+```txt
+value = for {
+    row <- dbRow.mapError(err -> AppError.Db(err))
+    user <- decodeUser(row)
+} yield user
+```
+
 Only these clause kinds are allowed inside `for { ... } yield`:
 
 ```txt
-name <- iterable
+name <- source
 let (x, y) <- iterable
 let { name, age } <- iterable
 name = expr
@@ -2101,7 +2128,7 @@ result = items.filterMap(item -> partial match item {
 Mental model:
 
 ```txt
-for      = pulls values from iterables
+for      = pulls values from iterables; in yield form, also from lifted success values
 let      = destructures irrefutable values, or exits early with `else`
 match    = handles refutable cases
 yield    = produces values
@@ -2109,6 +2136,9 @@ yield    = produces values
 
 `for item <- items yield item * 2` lowers approximately to
 `items.map(item -> item * 2)`.
+
+If `items` is `Option`, `Result`, or `Either`, the same spelling lowers to that
+type's `map`.
 
 Nested generators lower approximately through `flatMap` and `map`:
 

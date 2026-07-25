@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*for-yield generators must use one source family; cannot mix Option with Result.*
+
+def main() Unit {
+    value = for {
+        x <- Some(1)
+        y <- Ok(2)
+    } yield x + y
+
+    println(value)
+}

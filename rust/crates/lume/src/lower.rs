@@ -2092,6 +2092,10 @@ impl<'a> FunctionLowerer<'a> {
         yield_body: &Block,
         span: Span,
     ) -> ir::Operand {
+        if let Some(family) = self.first_lifted_for_yield_family(bindings) {
+            return self.lower_lifted_for_yield_bindings(bindings, yield_body, &family, span);
+        }
+
         let result = self.add_temp(ir::Type::list(ir::Type::Unknown));
         self.push_statement(ir::Statement {
             span: Some(span),
@@ -2159,6 +2163,162 @@ impl<'a> FunctionLowerer<'a> {
         );
 
         ir::Operand::Copy(Box::new(ir::Place::Local(result)))
+    }
+
+    fn first_lifted_for_yield_family(
+        &self,
+        bindings: &[core::ForBinding],
+    ) -> Option<LiftedIrFamily> {
+        bindings.iter().find_map(|binding| {
+            let iterable = binding.iterable.as_ref()?;
+            let source_ty = self.infer_expr_type(iterable);
+            known_lifted_ir_type(&source_ty).map(|(family, _)| family)
+        })
+    }
+
+    fn lower_lifted_for_yield_bindings(
+        &mut self,
+        bindings: &[core::ForBinding],
+        yield_body: &Block,
+        family: &LiftedIrFamily,
+        span: Span,
+    ) -> ir::Operand {
+        let Some(generator_index) = bindings
+            .iter()
+            .position(|binding| binding.iterable.is_some())
+        else {
+            return self
+                .lower_block_value(yield_body)
+                .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
+        };
+
+        if generator_index > 0 {
+            let result = self.add_temp(wrap_lifted_ir_type(family, ir::Type::Unknown));
+            self.lower_for_bindings(
+                &bindings[..generator_index],
+                &|this| {
+                    let value = this.lower_lifted_for_yield_bindings(
+                        &bindings[generator_index..],
+                        yield_body,
+                        family,
+                        span,
+                    );
+                    this.push_statement(ir::Statement {
+                        span: Some(span),
+                        kind: ir::StatementKind::Assign {
+                            target: ir::Place::Local(result),
+                            value: ir::RValue::Use(value),
+                        },
+                    });
+                },
+                span,
+            );
+            return ir::Operand::Copy(Box::new(ir::Place::Local(result)));
+        }
+
+        self.lower_lifted_for_yield_generator(
+            &bindings[0],
+            &bindings[1..],
+            yield_body,
+            family,
+            span,
+        )
+    }
+
+    fn lower_lifted_for_yield_generator(
+        &mut self,
+        binding: &core::ForBinding,
+        rest: &[core::ForBinding],
+        yield_body: &Block,
+        family: &LiftedIrFamily,
+        span: Span,
+    ) -> ir::Operand {
+        let Some(source_expr) = binding.iterable.as_ref() else {
+            self.invariant(
+                "lifted for-yield generator should have an iterable source",
+                binding.span,
+            );
+            return ir::Operand::Const(ir::Constant::Unit);
+        };
+        let source_ty = self.infer_expr_type(source_expr);
+        let Some((_, inner_ty)) = known_lifted_ir_type(&source_ty) else {
+            self.invariant(
+                "lifted for-yield source should have a lifted type before lowering",
+                source_expr.span(),
+            );
+            return self.lower_expr(source_expr);
+        };
+
+        let source = self.lower_expr_with_expected(source_expr, Some(&source_ty));
+        let rest_has_generator = rest.iter().any(|binding| binding.iterable.is_some());
+        let method = if rest_has_generator { "flatMap" } else { "map" };
+        let closure = self.lower_lifted_for_yield_closure(
+            binding,
+            rest,
+            yield_body,
+            family.clone(),
+            inner_ty,
+            span,
+        );
+        let closure_operand = self.emit_temp_from_rvalue(closure, ir::Type::Unknown, Some(span));
+        self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Method {
+                    receiver: source,
+                    method: method.to_string(),
+                },
+                args: vec![closure_operand],
+                structural: false,
+            },
+            wrap_lifted_ir_type(family, ir::Type::Unknown),
+            Some(span),
+        )
+    }
+
+    fn lower_lifted_for_yield_closure(
+        &mut self,
+        binding: &core::ForBinding,
+        rest: &[core::ForBinding],
+        yield_body: &Block,
+        family: LiftedIrFamily,
+        param_ty: ir::Type,
+        span: Span,
+    ) -> ir::RValue {
+        let nested_name = format!(
+            "foryield${}${}",
+            self.function_id.0,
+            self.function().blocks.len()
+        );
+        let mut nested =
+            ir::Function::new(nested_name, ir::FunctionKind::Lambda, ir::Type::Unknown);
+        nested.span = Some(span);
+        nested.add_param("__for_item".to_string(), param_ty);
+        let function_id = self.program.add_function(nested);
+        let capture_sources = self.visible_capture_sources(None);
+        let captures = {
+            let mut lowerer = FunctionLowerer::new(
+                self.program,
+                function_id,
+                self.globals,
+                self.functions,
+                self.case_fields,
+                self.diagnostics,
+            )
+            .with_capture_sources(capture_sources);
+            if let Some(local_id) = lowerer.function().params.first().copied() {
+                let item = ir::Operand::Copy(Box::new(ir::Place::Local(local_id)));
+                lowerer.bind_for_values(binding, item);
+            }
+            let value = lowerer.lower_lifted_for_yield_bindings(rest, yield_body, &family, span);
+            if lowerer.current_block.is_some() {
+                lowerer.terminate(ir::Terminator::ret(Some(value)));
+            }
+            lowerer.finish_closure_captures()
+        };
+        ir::RValue::Closure {
+            function: function_id,
+            captures,
+        }
     }
 
     fn lower_for_bindings(
@@ -5957,6 +6117,13 @@ fn unwrap_lifted_ir_type(ty: &ir::Type) -> Option<(LiftedIrFamily, ir::Type)> {
         )),
         ir::Type::Unknown => Some((LiftedIrFamily::Option, ir::Type::Unknown)),
         _ => None,
+    }
+}
+
+fn known_lifted_ir_type(ty: &ir::Type) -> Option<(LiftedIrFamily, ir::Type)> {
+    match ty {
+        ir::Type::Unknown => None,
+        _ => unwrap_lifted_ir_type(ty),
     }
 }
 

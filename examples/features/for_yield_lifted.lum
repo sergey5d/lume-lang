@@ -1,0 +1,43 @@
+# EXPECT:
+# option 7
+# option none true
+# result 7
+# either 7
+# 0
+
+def optionAdd(left Option[Int], right Option[Int]) Option[Int] =
+    for {
+        x <- left
+        y <- right
+    } yield x + y
+
+def resultAdd(left Result[Int, Str], right Result[Int, Str]) Result[Int, Str] =
+    for {
+        x <- left
+        y <- right
+    } yield x + y
+
+def eitherAdd(left Either[Str, Int], right Either[Str, Int]) Either[Str, Int] =
+    for {
+        x <- left
+        y <- right
+    } yield x + y
+
+def main() Int {
+    optionValue Option[Int] = optionAdd(Some(2), Some(5))
+    let Some(optionNumber) = optionValue else return 1
+    println("option " + optionNumber)
+
+    optionNone Option[Int] = optionAdd(Some(2), None)
+    println("option none " + optionNone.isEmpty())
+
+    resultValue Result[Int, Str] = resultAdd(Ok(2), Ok(5))
+    let Ok(resultNumber) = resultValue else return 1
+    println("result " + resultNumber)
+
+    eitherValue Either[Str, Int] = eitherAdd(Right(2), Right(5))
+    let Right(eitherNumber) = eitherValue else return 1
+    println("either " + eitherNumber)
+
+    0
+}

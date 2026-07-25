@@ -121,6 +121,25 @@ enum LiftedFamily {
     Either { left: Ty },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ForYieldFamily {
+    Iterable,
+    Option,
+    Result { error: Ty },
+    Either { left: Ty },
+    Unknown,
+}
+
+fn describe_for_yield_family(family: &ForYieldFamily) -> &'static str {
+    match family {
+        ForYieldFamily::Iterable => "iterable",
+        ForYieldFamily::Option => "Option",
+        ForYieldFamily::Result { .. } => "Result",
+        ForYieldFamily::Either { .. } => "Either",
+        ForYieldFamily::Unknown => "unknown",
+    }
+}
+
 impl Ty {
     fn named(name: impl Into<String>) -> Self {
         Self::Named(name.into(), Vec::new())
@@ -2420,7 +2439,7 @@ impl<'a> Checker<'a> {
                 self.push_scope();
                 self.loop_depth += 1;
                 for binding in &stmt.bindings {
-                    self.check_for_binding(binding);
+                    self.check_for_binding(binding, false);
                 }
                 self.check_block(&stmt.body);
                 self.loop_depth -= 1;
@@ -2928,17 +2947,24 @@ impl<'a> Checker<'a> {
         ty
     }
 
-    fn check_for_binding(&mut self, binding: &ForBinding) {
+    fn check_for_binding(
+        &mut self,
+        binding: &ForBinding,
+        allow_lifted: bool,
+    ) -> Option<ForYieldFamily> {
         if let Some(pattern) = &binding.pattern {
-            let value_ty = if let Some(iterable) = &binding.iterable {
+            let (value_ty, family) = if let Some(iterable) = &binding.iterable {
                 let iterable_ty = self.check_expr(iterable);
-                self.iterable_item_type(&iterable_ty)
+                self.for_generator_source(&iterable_ty, allow_lifted, iterable.span())
             } else {
-                binding
-                    .values
-                    .first()
-                    .map(|expr| self.check_expr(expr))
-                    .unwrap_or(Ty::Unknown)
+                (
+                    binding
+                        .values
+                        .first()
+                        .map(|expr| self.check_expr(expr))
+                        .unwrap_or(Ty::Unknown),
+                    None,
+                )
             };
             let source = binding
                 .iterable
@@ -2947,11 +2973,14 @@ impl<'a> Checker<'a> {
                 .expect("pattern-based for binding should have a source");
             self.require_irrefutable_for_pattern(pattern, &value_ty, source, pattern.span());
             self.bind_pattern(pattern, &value_ty);
-            return;
+            return family;
         }
+        let mut generator_family = None;
         let slot_types = if let Some(iterable) = &binding.iterable {
             let iterable_ty = self.check_expr(iterable);
-            let item_ty = self.iterable_item_type(&iterable_ty);
+            let (item_ty, family) =
+                self.for_generator_source(&iterable_ty, allow_lifted, iterable.span());
+            generator_family = family;
             if let Some(kind) = binding.destructure {
                 self.check_destructure_source(&item_ty, kind, binding.bindings.len(), binding.span);
                 if kind == DestructureKind::Record {
@@ -3013,6 +3042,135 @@ impl<'a> Checker<'a> {
             let explicit = local.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
             let ty = explicit.clone().unwrap_or_else(|| inferred.clone());
             self.define_local(&local.name, ty, local.mutable);
+        }
+        generator_family
+    }
+
+    fn for_generator_source(
+        &mut self,
+        source_ty: &Ty,
+        allow_lifted: bool,
+        span: crate::source::Span,
+    ) -> (Ty, Option<ForYieldFamily>) {
+        if let Some(item_ty) = self.known_iterable_item_type(source_ty) {
+            return (item_ty, Some(ForYieldFamily::Iterable));
+        }
+        if allow_lifted {
+            if let Some((family, item_ty)) = self.unwrap_known_lifted_type(source_ty) {
+                return (item_ty, Some(family));
+            }
+        }
+        if matches!(source_ty, Ty::Unknown) {
+            return (Ty::Unknown, Some(ForYieldFamily::Unknown));
+        }
+        let allowed = if allow_lifted {
+            "Iterable, Iterator, Option, Result, or Either"
+        } else {
+            "Iterable or Iterator"
+        };
+        self.add_error(
+            "invalid_for_generator_source",
+            format!(
+                "for generator source must be {allowed}, got '{}'",
+                source_ty.describe()
+            ),
+            span,
+        );
+        (Ty::Unknown, None)
+    }
+
+    fn unwrap_known_lifted_type(&self, ty: &Ty) -> Option<(ForYieldFamily, Ty)> {
+        match ty {
+            Ty::Named(name, args) if name == "Option" && args.len() == 1 => {
+                Some((ForYieldFamily::Option, args[0].clone()))
+            }
+            Ty::Named(name, args) if name == "Result" && args.len() == 2 => Some((
+                ForYieldFamily::Result {
+                    error: args[1].clone(),
+                },
+                args[0].clone(),
+            )),
+            Ty::Named(name, args) if name == "Either" && args.len() == 2 => Some((
+                ForYieldFamily::Either {
+                    left: args[0].clone(),
+                },
+                args[1].clone(),
+            )),
+            _ => None,
+        }
+    }
+
+    fn choose_for_yield_family(
+        &mut self,
+        current: Option<ForYieldFamily>,
+        next: ForYieldFamily,
+        span: crate::source::Span,
+    ) -> Option<ForYieldFamily> {
+        let Some(current_family) = current else {
+            return Some(next);
+        };
+        match (&current_family, &next) {
+            (ForYieldFamily::Unknown, _) => Some(next),
+            (_, ForYieldFamily::Unknown) => Some(current_family),
+            (ForYieldFamily::Iterable, ForYieldFamily::Iterable) => Some(current_family),
+            (ForYieldFamily::Option, ForYieldFamily::Option) => Some(current_family),
+            (ForYieldFamily::Result { error }, ForYieldFamily::Result { error: next_error }) => {
+                if self.is_assignable(next_error, error) {
+                    Some(current_family)
+                } else {
+                    self.add_error(
+                        "incompatible_for_yield_generator",
+                        format!(
+                            "for-yield Result generator has failure type '{}', but the comprehension already uses Result failure type '{}'; convert the failure explicitly before the generator",
+                            next_error.describe(),
+                            error.describe()
+                        ),
+                        span,
+                    );
+                    Some(current_family)
+                }
+            }
+            (ForYieldFamily::Either { left }, ForYieldFamily::Either { left: next_left }) => {
+                if self.is_assignable(next_left, left) {
+                    Some(current_family)
+                } else {
+                    self.add_error(
+                        "incompatible_for_yield_generator",
+                        format!(
+                            "for-yield Either generator has left type '{}', but the comprehension already uses Either left type '{}'; convert the left value explicitly before the generator",
+                            next_left.describe(),
+                            left.describe()
+                        ),
+                        span,
+                    );
+                    Some(current_family)
+                }
+            }
+            _ => {
+                self.add_error(
+                    "incompatible_for_yield_generator",
+                    format!(
+                        "for-yield generators must use one source family; cannot mix {} with {}",
+                        describe_for_yield_family(&current_family),
+                        describe_for_yield_family(&next)
+                    ),
+                    span,
+                );
+                Some(current_family)
+            }
+        }
+    }
+
+    fn wrap_for_yield_type(&self, family: Option<&ForYieldFamily>, inner: Ty) -> Ty {
+        match family {
+            Some(ForYieldFamily::Option) => Ty::Named("Option".to_string(), vec![inner]),
+            Some(ForYieldFamily::Result { error }) => {
+                Ty::Named("Result".to_string(), vec![inner, error.clone()])
+            }
+            Some(ForYieldFamily::Either { left }) => {
+                Ty::Named("Either".to_string(), vec![left.clone(), inner])
+            }
+            _ => Ty::list(inner),
         }
     }
 
@@ -3780,13 +3938,16 @@ impl<'a> Checker<'a> {
             } => {
                 self.push_scope();
                 self.loop_depth += 1;
+                let mut family = None;
                 for binding in bindings {
-                    self.check_for_binding(binding);
+                    if let Some(next) = self.check_for_binding(binding, true) {
+                        family = self.choose_for_yield_family(family, next, binding.span);
+                    }
                 }
                 let yield_ty = self.check_block(yield_body);
                 self.loop_depth -= 1;
                 self.pop_scope();
-                Ty::list(yield_ty)
+                self.wrap_for_yield_type(family.as_ref(), yield_ty)
             }
             Expr::Lambda { params, body, .. } => self.check_lambda_expr(params, body, expected),
             Expr::LiftedChain { base, segments, .. } => self.check_lifted_chain(base, segments),
@@ -6232,7 +6393,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn iterable_item_type(&self, ty: &Ty) -> Ty {
+    fn known_iterable_item_type(&self, ty: &Ty) -> Option<Ty> {
         match ty {
             Ty::Named(name, args)
                 if (name == "List"
@@ -6242,12 +6403,18 @@ impl<'a> Checker<'a> {
                     || name == "Iterator")
                     && args.len() == 1 =>
             {
-                args[0].clone()
+                Some(args[0].clone())
             }
-            Ty::Named(name, args) if name == "IntRange" && args.is_empty() => Ty::int(),
-            Ty::Unknown => Ty::Unknown,
-            _ => Ty::Unknown,
+            Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
+                Some(Ty::Tuple(vec![args[0].clone(), args[1].clone()]))
+            }
+            Ty::Named(name, args) if name == "IntRange" && args.is_empty() => Some(Ty::int()),
+            _ => None,
         }
+    }
+
+    fn iterable_item_type(&self, ty: &Ty) -> Ty {
+        self.known_iterable_item_type(ty).unwrap_or(Ty::Unknown)
     }
 
     fn index_result_type(&self, ty: &Ty) -> Ty {
