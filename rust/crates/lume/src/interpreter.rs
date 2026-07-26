@@ -6054,9 +6054,7 @@ mod tests {
             }
 
             impl Counter {
-                new {
-                    count Int
-                } {
+                new(count Int) {
                     this.count = count
                 }
 
@@ -6160,10 +6158,7 @@ mod tests {
             }
 
             impl User {
-                new {
-                    name Str
-                    age Int = 0
-                } {
+                new(name Str, age Int = 0) {
                     this.name = name
                     this.age = age
                 }
@@ -6192,9 +6187,7 @@ mod tests {
             }
 
             impl Path {
-                new {
-                    vararg segments [Str]
-                } {
+                new(vararg segments [Str]) {
                     this.segments = segments
                 }
 
@@ -6225,10 +6218,7 @@ mod tests {
             }
 
             impl Vec {
-                new {
-                    left Int
-                    right Int
-                } {
+                new(left Int, right Int) {
                     this.items = Array(left, right)
                 }
 
@@ -6394,11 +6384,7 @@ mod tests {
             }
 
             impl SecretUser {
-                new {
-                    name Str
-                    token Str
-                    location Str
-                } {
+                new(name Str, token Str, location Str) {
                     this.name = name
                     this.token = token
                     this.location = location
@@ -7052,8 +7038,7 @@ $name
             }
 
             impl Portfolio {
-                new {
-                } {
+                new() {
                     this.total = this.assetCount + 1
                 }
             }

@@ -6,9 +6,7 @@ shape Point {
 }
 
 impl Point {
-    new {
-        x Int
-    } {
+    new(x Int) {
         this.x = x
     }
 }

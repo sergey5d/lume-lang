@@ -9,10 +9,7 @@ class Vec {
 }
 
 impl Vec {
-    new {
-        left Int
-        right Int
-    } {
+    new(left Int, right Int) {
         this.items = Array(left, right)
     }
 

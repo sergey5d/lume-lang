@@ -16,10 +16,7 @@ class SlidingWindowLimiter {
 }
 
 impl SlidingWindowLimiter {
-    new {
-        capacity Int
-        windowSize Int
-    } {
+    new(capacity Int, windowSize Int) {
         this.capacity = capacity
         this.windowSize = windowSize
         this.accepted = []

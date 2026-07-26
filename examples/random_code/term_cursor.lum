@@ -37,10 +37,7 @@ class Cursor {
 }
 
 impl Cursor {
-    new {
-        term Str
-        documents List[Str]
-    } {
+    new(term Str, documents List[Str]) {
         this.term = term
         this.documents = documents
         this.current = Location(-1, -1)

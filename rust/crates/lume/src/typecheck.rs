@@ -9461,9 +9461,7 @@ class SecretUser {
 }
 
 impl SecretUser {
-    new {
-        name Str
-    } {
+    new(name Str) {
         this.name = name
         this.token = "secret"
     }
@@ -9488,9 +9486,7 @@ class SecretUser {
 }
 
 impl SecretUser {
-    new {
-        name Str
-    } {
+    new(name Str) {
         this.name = name
     }
 }
@@ -9547,10 +9543,7 @@ class Article {
 }
 
 impl Article {
-    new {
-        body Str = "body"
-        title Str
-    } {
+    new(body Str = "body", title Str) {
         this.body = body
         this.title = title
     }
@@ -9583,10 +9576,7 @@ class Article {
 }
 
 impl Article {
-    new {
-        body Str = "body"
-        title Str
-    } {
+    new(body Str = "body", title Str) {
         this.body = body
         this.title = title
     }
@@ -9824,9 +9814,7 @@ class Counter {
 }
 
 impl Counter {
-    new {
-        initial Int
-    } {
+    new(initial Int) {
         this.count = initial
     }
 
@@ -10154,9 +10142,7 @@ class User {
 }
 
 impl User {
-    new {
-        name Str
-    } {
+    new(name Str) {
         this.name = name
     }
 }
@@ -10180,10 +10166,7 @@ class User {
 }
 
 impl User {
-    new {
-        name Str
-        age Int = 0
-    } {
+    new(name Str, age Int = 0) {
         this.name = name
         this.age = age
     }
@@ -10208,9 +10191,7 @@ class Path {
 }
 
 impl Path {
-    new {
-        vararg segments [Str]
-    } {
+    new(vararg segments [Str]) {
         this.segments = segments
     }
 }
@@ -10235,9 +10216,7 @@ class Path {
 }
 
 impl Path {
-    new {
-        vararg segments [Str] = ["tmp"]
-    } {
+    new(vararg segments [Str] = ["tmp"]) {
         this.segments = segments
     }
 }
@@ -10263,10 +10242,7 @@ class Bad {
 }
 
 impl Bad {
-    new {
-        vararg items [Int]
-        suffix Int
-    } {
+    new(vararg items [Int], suffix Int) {
         this.items = items
         this.suffix = suffix
     }
@@ -10296,10 +10272,7 @@ class Bad {
 }
 
 impl Bad {
-    new {
-        vararg left [Int]
-        vararg right [Int]
-    } {
+    new(vararg left [Int], vararg right [Int]) {
         this.left = left
         this.right = right
     }
@@ -10348,10 +10321,7 @@ class Bucket {
 }
 
 impl Bucket {
-    new {
-        prefix Int = 0
-        vararg items [Int]
-    } {
+    new(prefix Int = 0, vararg items [Int]) {
         this.items = items
     }
 }
@@ -10374,9 +10344,7 @@ class Bad {
 }
 
 impl Bad {
-    new {
-        vararg items Int
-    } {
+    new(vararg items Int) {
         this.items = items
     }
 }
@@ -10404,9 +10372,7 @@ class Path {
 }
 
 impl Path {
-    new {
-        vararg segments [Str]
-    } {
+    new(vararg segments [Str]) {
         this.segments = segments
     }
 }
@@ -10429,9 +10395,7 @@ class User {
 }
 
 impl User {
-    hidden new {
-        name Str
-    } {
+    hidden new(name Str) {
         this.name = name
     }
 }
@@ -10476,10 +10440,7 @@ class Counter {
 }
 
 impl Counter {
-    new {
-        count Int
-        name Str
-    } {
+    new(count Int, name Str) {
         this.count = count
         this.name = name
     }
@@ -10503,9 +10464,7 @@ class Counter {
 }
 
 impl Counter {
-    new {
-        count Int
-    } {
+    new(count Int) {
         this.count := count
     }
 }
@@ -10801,11 +10760,7 @@ class SecretUser {
 }
 
 impl SecretUser {
-    new {
-        name Str
-        token Str
-        location Str
-    } {
+    new(name Str, token Str, location Str) {
         this.name = name
         this.token = token
         this.location = location
@@ -11303,9 +11258,7 @@ class Box {
 }
 
 impl Box {
-    new {
-        lazy value Int
-    } {
+    new(lazy value Int) {
         this.value = value
     }
 }
@@ -11534,7 +11487,7 @@ shape Point {
 }
 
 impl Point {
-    new { x Int } {
+    new(x Int) {
         this.x = x
     }
 }
@@ -11546,7 +11499,7 @@ enum Status {
 }
 
 impl Status {
-    new { value Int } = Status.Ready(value)
+    new(value Int) = Status.Ready(value)
 }
 
 annotation Route {
@@ -11554,14 +11507,14 @@ annotation Route {
 }
 
 impl Route {
-    new { path Str } {}
+    new(path Str) {}
 }
 
 single Config {
 }
 
 impl single Config {
-    new {} {}
+    new() {}
 }
 "#,
         );

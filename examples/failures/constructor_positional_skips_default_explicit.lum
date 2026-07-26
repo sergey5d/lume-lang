@@ -7,10 +7,7 @@ class Article {
 }
 
 impl Article {
-    new {
-        body Str = "body"
-        title Str
-    } {
+    new(body Str = "body", title Str) {
         this.body = body
         this.title = title
     }

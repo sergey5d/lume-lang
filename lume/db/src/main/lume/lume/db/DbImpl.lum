@@ -30,9 +30,7 @@ hidden class JdbcRowImpl with Row {
 }
 
 impl JdbcRowImpl {
-    new {
-        backend JdbcRow
-    } {
+    new(backend JdbcRow) {
         this.backend = backend
     }
 
@@ -77,11 +75,7 @@ hidden class JdbcQuery with Query {
 }
 
 impl JdbcQuery {
-    new {
-        runner JdbcRunner
-        sql Str
-        values [Any] = []
-    } {
+    new(runner JdbcRunner, sql Str, values [Any] = []) {
         this.runner = runner
         this.sql = sql
         this.values = values
@@ -160,11 +154,7 @@ hidden class JdbcRowQuery with RowQuery {
 }
 
 impl JdbcRowQuery {
-    new {
-        runner JdbcRunner
-        sql Str
-        values [Any] = []
-    } {
+    new(runner JdbcRunner, sql Str, values [Any] = []) {
         this.runner = runner
         this.sql = sql
         this.values = values
@@ -235,10 +225,7 @@ hidden class JdbcExec with Exec {
 }
 
 impl JdbcExec {
-    new {
-        runner JdbcRunner
-        sql Str
-    } {
+    new(runner JdbcRunner, sql Str) {
         this.runner = runner
         this.sql = sql
     }
@@ -255,11 +242,7 @@ hidden class JdbcBoundExec with BoundExec {
 }
 
 impl JdbcBoundExec {
-    new {
-        runner JdbcRunner
-        sql Str
-        values [Any] = []
-    } {
+    new(runner JdbcRunner, sql Str, values [Any] = []) {
         this.runner = runner
         this.sql = sql
         this.values = values
@@ -273,9 +256,7 @@ hidden class JdbcTransactionImpl with Transaction {
 }
 
 impl JdbcTransactionImpl {
-    new {
-        backend JdbcTransaction
-    } {
+    new(backend JdbcTransaction) {
         this.backend = backend
     }
 
@@ -299,9 +280,7 @@ hidden class JdbcDatabaseImpl with Database {
 }
 
 impl JdbcDatabaseImpl {
-    new {
-        backend JdbcDatabase
-    } {
+    new(backend JdbcDatabase) {
         this.backend = backend
     }
 

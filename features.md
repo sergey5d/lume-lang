@@ -64,7 +64,7 @@ These can mostly live in the stdlib, but may still need runtime support in place
 
 Open shape/construction ergonomics:
 - whether spread should be extended to named construction fields, for example `User { ...anon }`
-- whether `User { ...anon }` should construct only when `anon` exactly matches the accepted constructor shape, or whether extra fields may be ignored
+- whether `User { ...anon }` should construct only when `anon` exactly matches the accepted constructor inputs, or whether extra fields may be ignored
 
 Open construction helper naming direction:
 - whether collection/custom construction helpers should consistently prefer names like `of`, `from`, `empty`, `create`, or `make`

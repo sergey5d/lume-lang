@@ -12,10 +12,7 @@ class ArrayListIterator[T] with Iterator[T] {
 }
 
 impl ArrayListIterator[T] {
-    new {
-        items List[T]
-        limit Int
-    } {
+    new(items List[T], limit Int) {
         this.items = items
         this.limit = limit
     }
@@ -35,9 +32,7 @@ class ArrayList[T] with Iterable[T] {
 }
 
 impl ArrayList[T] {
-    new {
-        capacity Int
-    } {
+    new(capacity Int) {
         this.items = List()
     }
 

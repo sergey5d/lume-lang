@@ -1,0 +1,16 @@
+# FAIL_REGEX:
+# .*constructors use `new\(params\).*replace `new \{ \.\.\. \}` with `new\(\.\.\.\)`.*
+
+class User {
+    name Str
+}
+
+impl User {
+    new {
+        name Str
+    } {
+        this.name = name
+    }
+}
+
+def main() Unit = ()

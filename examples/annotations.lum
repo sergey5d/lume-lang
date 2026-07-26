@@ -60,8 +60,7 @@ class Service {
 
 impl Service {
     @Route { path: routePath }
-    new {
-    } {
+    new() {
         this.name = "ok"
     }
 

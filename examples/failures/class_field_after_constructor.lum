@@ -2,9 +2,7 @@
 # .*storage fields must appear before constructors in class 'User'.*field 'name'.*
 
 class User {
-    new {
-        name Str
-    } {
+    new(name Str) {
         this.name = name
     }
 

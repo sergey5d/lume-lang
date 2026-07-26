@@ -13,9 +13,7 @@ class Counter {
 }
 
 impl Counter {
-    new {
-        initial Int
-    } {
+    new(initial Int) {
         this.count = initial
     }
 

@@ -17,12 +17,12 @@
 # - constructor setup may write the same mutable field more than once with `=`
 # - later field mutation uses `:=`
 # - nested writes through an initialized field still use `:=`
-# - constructor shape fields and construction fields may be comma separated
+# - constructor parameters and construction fields may be comma separated
 # - `new(...)` delegates to another constructor positionally
 # - `new { field: value }` delegates to another constructor by construction fields
-# - positional construction fills constructor shape fields from the beginning in order
-# - named construction can omit any constructor shape field that has a default
-# - a trailing `vararg items [T]` constructor shape field receives positional varargs as `[T]`
+# - positional construction fills constructor parameters from the beginning in order
+# - named construction can omit any constructor parameter that has a default
+# - a trailing `vararg items [T]` constructor parameter receives positional varargs as `[T]`
 # - construction fields can pass a vararg as a single `[T]` value
 # - defaulted varargs are used when the vararg is omitted
 
@@ -33,10 +33,7 @@ class Profile {
 }
 
 impl Profile {
-    new {
-        name Str
-        visits Int
-    } {
+    new(name Str, visits Int) {
         this.name = name
         this.visits = 0
         this.visits = visits
@@ -57,9 +54,7 @@ class Stock {
 }
 
 impl Stock {
-    new {
-        count Int
-    } {
+    new(count Int) {
         this.count = count
     }
 
@@ -71,10 +66,7 @@ class Slots {
 }
 
 impl Slots {
-    new {
-        left Int
-        right Int
-    } {
+    new(left Int, right Int) {
         this.items = Array(left, right)
     }
 
@@ -89,17 +81,17 @@ class Account {
 }
 
 impl Account {
-    new { name Str, age Int = 0 } {
+    new(name Str, age Int = 0) {
         this.name = name
         this.age = age
     }
 
-    new { label Str } = new {
+    new(label Str) = new {
         name: label
         age: 0
     }
 
-    new { years Int } = new("unknown", years)
+    new(years Int) = new("unknown", years)
 
     def label() Str = this.name + " " + this.age
 }
@@ -109,9 +101,7 @@ class Path {
 }
 
 impl Path {
-    new {
-        vararg segments [Str] = ["default"]
-    } {
+    new(vararg segments [Str] = ["default"]) {
         this.segments = segments
     }
 

@@ -6,7 +6,5 @@ annotation Route {
 }
 
 impl Route {
-    new {
-        path Str
-    } {}
+    new(path Str) {}
 }

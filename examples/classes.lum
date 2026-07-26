@@ -43,17 +43,12 @@ class A {
 }
 
 impl A {
-    new {
-        age Int
-        name Str
-    } {
+    new(age Int, name Str) {
         this.age = age
         this.name = name
     }
 
-    new {
-        maturity Int
-    } = new(maturity - 15, "5")
+    new(maturity Int) = new(maturity - 15, "5")
 
     def trueAge() Int = this.age
 
@@ -69,10 +64,7 @@ class B {
 }
 
 impl B {
-    new {
-        age Int
-        name Str = "Bobby"
-    } {
+    new(age Int, name Str = "Bobby") {
         this.age = age
         this.name = name
         this.unassigned = 1.1

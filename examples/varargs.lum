@@ -30,9 +30,7 @@ class Reporter {
 }
 
 impl Reporter {
-    new {
-        prefix Str
-    } {
+    new(prefix Str) {
         this.prefix = prefix
     }
 
@@ -47,10 +45,7 @@ class Path {
 }
 
 impl Path {
-    new {
-        label Str
-        vararg segments [Str] = ["default"]
-    } {
+    new(label Str, vararg segments [Str] = ["default"]) {
         this.label = label
         this.segments = segments
     }

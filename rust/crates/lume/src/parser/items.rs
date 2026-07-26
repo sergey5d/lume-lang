@@ -425,7 +425,8 @@ impl<'a> Parser<'a> {
             let member_visibility = self.parse_visibility();
             match self.current_kind() {
                 TokenKind::Identifier
-                    if self.current().lexeme == "new" && self.at_next(TokenKind::LBrace) =>
+                    if self.current().lexeme == "new"
+                        && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::LBrace)) =>
                 {
                     let constructor =
                         self.parse_constructor_decl(member_annotations, member_visibility)?;
@@ -496,7 +497,7 @@ impl<'a> Parser<'a> {
                     if method.name == "new" {
                         self.diagnostics.push(Diagnostic::error(
                             "old_constructor_syntax",
-                            "constructors use `new { params } { body }`; replace `new(...)` with `new { ... } { ... }`",
+                            "constructors omit 'def'; use `new(params) { body }` or `new(params) = expression`",
                             method.span,
                         ));
                     }
@@ -660,7 +661,7 @@ impl<'a> Parser<'a> {
             let visibility = self.parse_visibility();
             let method = if self.at(TokenKind::Identifier)
                 && self.current().lexeme == "new"
-                && self.at_next(TokenKind::LBrace)
+                && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::LBrace))
             {
                 let constructor = self.parse_constructor_decl(annotations, visibility)?;
                 if body_order == ImplBodyOrder::Method {
@@ -679,7 +680,7 @@ impl<'a> Parser<'a> {
                 if method.name == "new" {
                     self.diagnostics.push(Diagnostic::error(
                         "old_constructor_syntax",
-                        "constructors use `new { params } { body }`; replace `def new(...)` with `new { ... } { ... }`",
+                        "constructors omit 'def'; use `new(params) { body }` or `new(params) = expression`",
                         method.span,
                     ));
                 }
@@ -730,7 +731,7 @@ impl<'a> Parser<'a> {
             let visibility = self.parse_visibility();
             if self.at(TokenKind::Identifier)
                 && self.current().lexeme == "new"
-                && self.at_next(TokenKind::LBrace)
+                && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::LBrace))
             {
                 self.error_at_current(
                     "invalid_extension_constructor",
@@ -767,7 +768,16 @@ impl<'a> Parser<'a> {
             self.error_at_current("expected_constructor", "expected 'new'");
             return None;
         }
-        let params = self.parse_constructor_param_block()?;
+        let params = if self.at(TokenKind::LBrace) {
+            self.diagnostics.push(Diagnostic::error(
+                "old_constructor_syntax",
+                "constructors use `new(params) { body }` or `new(params) = expression`; replace `new { ... }` with `new(...)`",
+                self.current_span(),
+            ));
+            self.parse_constructor_param_block()?
+        } else {
+            self.parse_constructor_param_list()?
+        };
         let body = self.parse_callable_body()?;
         let end = body.span();
         Some(MethodDecl {
@@ -782,6 +792,30 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_constructor_param_list(&mut self) -> Option<Vec<Param>> {
+        self.consume(
+            TokenKind::LParen,
+            "expected '(' before constructor parameters",
+        )?;
+        let mut params = Vec::new();
+        self.skip_newlines();
+        if !self.at(TokenKind::RParen) {
+            loop {
+                params.push(self.parse_constructor_param(TokenKind::RParen)?);
+                self.skip_newlines();
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+                self.skip_newlines();
+            }
+        }
+        self.consume(
+            TokenKind::RParen,
+            "expected ')' after constructor parameters",
+        )?;
+        Some(params)
+    }
+
     fn parse_constructor_param_block(&mut self) -> Option<Vec<Param>> {
         self.consume(
             TokenKind::LBrace,
@@ -790,39 +824,7 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         self.skip_newlines();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let (lazy, variadic, modifier_start) = self.parse_param_modifiers();
-            let (name, start) = self.expect_identifier("expected constructor parameter name")?;
-            let ty = if self.can_start_type_ref() {
-                Some(self.parse_type_ref()?)
-            } else {
-                self.error_at_current("expected_type", "expected constructor parameter type");
-                return None;
-            };
-            if self.match_keyword(Keyword::Vararg) {
-                self.diagnostics.push(Diagnostic::error(
-                    "invalid_variadic_param",
-                    "vararg must appear before the constructor field name, like 'vararg args [T]'",
-                    self.previous_span(),
-                ));
-            }
-            let initializer = if self.match_token(TokenKind::Eq) {
-                Some(self.parse_expr()?)
-            } else {
-                None
-            };
-            let end = initializer
-                .as_ref()
-                .map(Expr::span)
-                .or_else(|| ty.as_ref().map(TypeRef::span))
-                .unwrap_or(start);
-            params.push(Param {
-                name,
-                ty,
-                initializer,
-                variadic,
-                lazy,
-                span: modifier_start.unwrap_or(start).cover(end),
-            });
+            params.push(self.parse_constructor_param(TokenKind::RBrace)?);
             self.skip_newlines();
             if self.match_token(TokenKind::Comma) {
                 self.skip_newlines();
@@ -833,6 +835,49 @@ impl<'a> Parser<'a> {
             "expected '}' after constructor parameters",
         )?;
         Some(params)
+    }
+
+    fn parse_constructor_param(&mut self, terminator: TokenKind) -> Option<Param> {
+        let (lazy, variadic, modifier_start) = self.parse_param_modifiers();
+        let (name, start) = self.expect_identifier("expected constructor parameter name")?;
+        let ty = if self.can_start_type_ref() {
+            Some(self.parse_type_ref()?)
+        } else {
+            self.error_at_current("expected_type", "expected constructor parameter type");
+            return None;
+        };
+        if self.match_keyword(Keyword::Vararg) {
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_variadic_param",
+                "vararg must appear before the constructor parameter name, like 'vararg args [T]'",
+                self.previous_span(),
+            ));
+        }
+        let initializer = if self.match_token(TokenKind::Eq) {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+        if !self.at(TokenKind::Comma) && !self.at(terminator) && !self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "unexpected_token",
+                "expected ',' between constructor parameters",
+            );
+            return None;
+        }
+        let end = initializer
+            .as_ref()
+            .map(Expr::span)
+            .or_else(|| ty.as_ref().map(TypeRef::span))
+            .unwrap_or(start);
+        Some(Param {
+            name,
+            ty,
+            initializer,
+            variadic,
+            lazy,
+            span: modifier_start.unwrap_or(start).cover(end),
+        })
     }
 
     pub(super) fn parse_method_decl(

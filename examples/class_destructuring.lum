@@ -40,11 +40,7 @@ class SecretUser {
 }
 
 impl SecretUser {
-    new {
-        name Str
-        token Str
-        location Str
-    } {
+    new(name Str, token Str, location Str) {
         this.name = name
         this.token = token
         this.location = location

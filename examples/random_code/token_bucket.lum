@@ -16,10 +16,7 @@ class TokenBucket {
 }
 
 impl TokenBucket {
-    new {
-        capacity Int
-        refillPerTick Int
-    } {
+    new(capacity Int, refillPerTick Int) {
         this.capacity = capacity
         this.refillPerTick = refillPerTick
         # Token buckets usually start full so they allow an initial burst.

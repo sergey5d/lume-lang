@@ -26,9 +26,9 @@ Lume separates the main concepts deliberately:
 
 Construction is its own idea:
 
-- `new { ... }` declares the input shape accepted by a class constructor.
-- `Type { field: value }` fills that constructor shape by field name.
-- `Type(value)` fills the same constructor shape by declaration order.
+- `new(name Type, other Type = default)` declares the inputs accepted by a class constructor.
+- `Type { field: value }` fills constructor inputs by field name.
+- `Type(value)` fills constructor inputs by declaration order.
 - If a class has no explicit `new`, the compiler synthesizes field construction
   from visible fields.
 
@@ -71,17 +71,12 @@ class User {
 }
 
 impl User {
-    new {
-        name Str
-        home Point
-    } {
+    new(name Str, home Point) {
         this.name = name
         this.home = home
     }
 
-    new {
-        label Str
-    } = new(label, Point { x: 0, y: 0 })
+    new(label Str) = new(label, Point { x: 0, y: 0 })
 
     def moved(dx Int, dy Int) User = User {
         name: this.name

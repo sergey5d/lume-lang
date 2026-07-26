@@ -8,7 +8,5 @@ enum Status {
 }
 
 impl Status {
-    new {
-        value Int
-    } = Status.Ready(value)
+    new(value Int) = Status.Ready(value)
 }

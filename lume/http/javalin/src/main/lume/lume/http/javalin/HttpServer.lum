@@ -58,9 +58,7 @@ hidden class JavalinHttpContext with HttpContext {
 }
 
 impl JavalinHttpContext {
-    new {
-        raw JavalinRawContext
-    } {
+    new(raw JavalinRawContext) {
         this.raw = raw
     }
 
@@ -78,9 +76,7 @@ impl JavalinHttpContext {
 }
 
 impl JavalinBackend {
-    new {
-        port Int
-    } {
+    new(port Int) {
         this.app = Javalin.create()
         this.port = port
     }
@@ -215,9 +211,7 @@ class HttpServer {
 }
 
 impl HttpServer {
-    new {
-        port Int
-    } {
+    new(port Int) {
         this.backend = JavalinBackend(port)
     }
 

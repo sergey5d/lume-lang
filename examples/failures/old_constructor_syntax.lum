@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*constructors use .*replace .*def new.*
+# .*constructors omit 'def'.*
 
 class User {
     name Str

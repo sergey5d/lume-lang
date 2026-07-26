@@ -776,35 +776,35 @@ Construction rules:
 
 General construction rules:
 
-- a constructor shape declares the fields accepted by construction
+- a constructor declaration lists the inputs accepted by construction
 - constructor parentheses accept positional arguments only; use braces for construction fields
 - function and method calls may still use named arguments in parentheses
 - `Type { value }` is not valid; use `Type(value)`
 - anonymous shapes use `{ field: value }` for field construction and tuple values for contextual positional construction
 - builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` use parentheses
-- `Type { ... }` and `Type(...)` both resolve through the available explicit `new` shape or implicit field-construction shape
+- `Type { ... }` and `Type(...)` both resolve through the available explicit `new(...)` declaration or implicit field-construction inputs
 - class construction is nominal and constructor-gated; shape construction is structural
 - tuple values cannot construct classes; write `User(...)` or `User { ... }`
 - tuple values can construct anonymous or named shapes only when the target shape type is known
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
 
-Explicit constructor shape rules:
+Explicit constructor rules:
 
-- `new { field Type, other Type = default } { ... }` declares an explicit constructor input shape with required and defaulted fields
-- constructor input fields do not have to be class fields; they are inputs to the constructor body
-- `Type { field: value, other: value }` matches the explicit constructor input shape by field name
-- `Type(value, otherValue)` fills the same explicit constructor input shape by declaration order
-- constructor input fields may be declared in the author's preferred order; defaults do not have to trail required fields
-- named construction may omit any constructor input field that has a default
-- positional construction fills a prefix of constructor input fields in declaration order
-- positional construction may omit only a trailing suffix whose fields all have defaults
-- positional construction never skips a defaulted field to reach a later required field
+- `new(field Type, other Type = default) { ... }` declares explicit constructor inputs with required and defaulted parameters
+- constructor parameters do not have to be class fields; they are inputs to the constructor body
+- `Type { field: value, other: value }` matches explicit constructor inputs by parameter name
+- `Type(value, otherValue)` fills the same explicit constructor inputs by declaration order
+- constructor parameters may be declared in the author's preferred order; defaults do not have to trail required parameters
+- named construction may omit any constructor parameter that has a default
+- positional construction fills a prefix of constructor parameters in declaration order
+- positional construction may omit only a trailing suffix whose parameters all have defaults
+- positional construction never skips a defaulted parameter to reach a later required parameter
 - if any explicit `new` exists, implicit field construction is disabled for that class
-- explicit constructors may use one trailing variadic constructor shape field such as `vararg items [T]`
-- a variadic constructor shape field receives the extra positional arguments as `[T]`
-- only one variadic constructor shape field is allowed
-- construction fields can target a variadic constructor shape field by passing a `[T]` value
-- variadic constructor shape fields may have a default `[T]` value
+- explicit constructors may use one trailing variadic constructor parameter such as `vararg items [T]`
+- a variadic constructor parameter receives the extra positional arguments as `[T]`
+- only one variadic constructor parameter is allowed
+- construction fields can target a variadic constructor parameter by passing a `[T]` value
+- variadic constructor parameters may have a default `[T]` value
 
 ```txt
 class Article {
@@ -813,10 +813,7 @@ class Article {
 }
 
 impl Article {
-    new {
-        body Str = "body"
-        title Str
-    } {
+    new(body Str = "body", title Str) {
         this.body = body
         this.title = title
     }
@@ -832,11 +829,11 @@ bad Article = Article("Intro")
 
 Implicit field construction rules:
 
-- if a class has no explicit `new`, the compiler synthesizes a constructor shape from visible fields
+- if a class has no explicit `new`, the compiler synthesizes constructor inputs from visible fields
 - construction braces check the synthesized visible-field shape
 - visible fields without initializers are required
 - visible fields with initializers are optional
-- hidden fields are excluded from the synthesized constructor shape
+- hidden fields are excluded from the synthesized constructor inputs
 - hidden fields without initializers suppress implicit field constructors; define `new` to initialize them
 - `Type {}` works when the synthesized field-construction shape has no required fields
 - positional construction follows declared visible-field order
@@ -857,7 +854,7 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 Type { field: value }            # brace field construction or enum field payload
 call { x -> ... }                # trailing lambda
 Interface with Other { method(...) ... } # anonymous interface implementation
-new { field Type }               # constructor input shape declaration
+new(field Type)                  # constructor declaration
 ```
 
 Single-expression braces such as `{ value }` are block expressions, not anonymous shapes. To construct an anonymous shape, use construction fields with `:`.
@@ -1100,20 +1097,20 @@ user User = User { name: "Ada" }
 label = user.displayName()
 ```
 
-Custom constructors are class-only and use a dedicated `new` block inside `impl`.
+Custom constructors are class-only and use a dedicated `new(...)` declaration inside `impl`.
 
-- `new { ... }` declares the constructor input shape
-- `new { ... } { body }` declares a block-bodied constructor
-- `new { ... } = expression` declares an expression-bodied constructor
+- `new(...)` declares constructor inputs
+- `new(...) { body }` declares a block-bodied constructor
+- `new(...) = expression` declares an expression-bodied constructor
 - shape, enum, enum case, single, annotation, and interface declarations cannot define custom `new` constructors
-- constructor shape fields use `name Type`, with optional defaults such as `age Int = 0`
-- `Type { field: value }` constructs by matching the constructor input shape by field name
-- `Type(value)` constructs by filling the same constructor input shape positionally by declaration order
-- named construction may omit any constructor shape field with a default
-- positional construction fills a prefix of constructor shape fields and may omit only trailing fields that all have defaults
-- positional construction never skips a defaulted field to reach a later required field
-- constructor shape fields may end with one variadic list field such as `vararg items [Str]`
-- `hidden new { ... } { body }` declares a private constructor
+- constructor parameters use `name Type`, with optional defaults such as `age Int = 0`
+- `Type { field: value }` constructs by matching constructor parameters by field name
+- `Type(value)` constructs by filling constructor parameters positionally by declaration order
+- named construction may omit any constructor parameter with a default
+- positional construction fills a prefix of constructor parameters and may omit only trailing parameters that all have defaults
+- positional construction never skips a defaulted parameter to reach a later required parameter
+- constructor parameters may end with one variadic list parameter such as `vararg items [Str]`
+- `hidden new(...) { body }` declares a private constructor
 - each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
 - `new(...)` inside another constructor delegates positionally to another constructor of the same class
 - `new { field: value }` inside another constructor delegates with construction fields to another constructor of the same class
@@ -1134,28 +1131,21 @@ class Person {
 }
 
 impl Person {
-    new {
-        age Int
-        name Str
-    } {
+    new(age Int, name Str) {
         this.age = age
         this.name = name
     }
 
-    new {
-        age Int
-    } = new(age, "unknown")
+    new(age Int) = new(age, "unknown")
 
-    new {
-        name Str
-    } = new {
+    new(name Str) = new {
         age: 0
         name: name
     }
 }
 ```
 
-Variadic constructor shape fields collect positional arguments into a `[T]`
+Variadic constructor parameters collect positional arguments into a `[T]`
 inside the constructor body:
 
 ```txt
@@ -1164,9 +1154,7 @@ class Path {
 }
 
 impl Path {
-    new {
-        vararg segments [Str] = ["tmp"]
-    } {
+    new(vararg segments [Str] = ["tmp"]) {
         this.segments = segments
     }
 }
@@ -1354,7 +1342,7 @@ processNamed("compares values", {
 ```
 
 Trailing brace call syntax on non-constructor calls is only for lambda arguments.
-Constructor braces fill the constructor shape by field name, so enum named
+Constructor braces fill constructor inputs by field name, so enum named
 payloads use braces and enum positional payloads use parentheses:
 
 ```txt

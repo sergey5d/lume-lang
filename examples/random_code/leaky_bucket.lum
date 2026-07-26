@@ -16,10 +16,7 @@ class LeakyBucket {
 }
 
 impl LeakyBucket {
-    new {
-        capacity Int
-        leakPerTick Int
-    } {
+    new(capacity Int, leakPerTick Int) {
         this.capacity = capacity
         this.leakPerTick = leakPerTick
     }

@@ -13,9 +13,7 @@ class DisjointSet {
 
 impl DisjointSet {
 
-    new {
-        size Int
-    } {
+    new(size Int) {
         this.arr = Array.generate(size, i -> i)
     }
 

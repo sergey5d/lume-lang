@@ -559,9 +559,7 @@ class Counter {
 }
 
 impl Counter {
-    new {
-        count Int
-    } {
+    new(count Int) {
         this.count = count
     }
 
@@ -658,9 +656,7 @@ class User {
 impl User {
     def label() Str = this.name
 
-    new {
-        name Str
-    } {
+    new(name Str) {
         this.name = name
     }
 }
@@ -683,9 +679,7 @@ fn rejects_class_field_after_inline_constructor() {
     let result = parse(
         r#"
 class User {
-    new {
-        name Str
-    } {
+    new(name Str) {
         this.name = name
     }
 
@@ -720,9 +714,7 @@ fn rejects_inline_constructor_after_class_method() {
 class User {
     def label() Str = "user"
 
-    new {
-        name Str
-    } {
+    new(name Str) {
         this.name = name
     }
 }
@@ -757,9 +749,7 @@ class User {
 }
 
 impl User {
-    new {
-        name Str
-    } = new { name }
+    new(name Str) = new { name }
 }
 "#,
     );
@@ -783,9 +773,7 @@ class Path {
 }
 
 impl Path {
-    new {
-        vararg segments [Str]
-    } {
+    new(vararg segments [Str]) {
         this.segments = segments
     }
 }
@@ -811,9 +799,7 @@ class Path {
 }
 
 impl Path {
-    new {
-        segments [Str] vararg
-    } {
+    new(segments [Str] vararg) {
         this.segments = segments
     }
 }
@@ -834,7 +820,7 @@ impl Path {
             diag.code == "invalid_variadic_param"
                 && diag
                     .message
-                    .contains("vararg must appear before the constructor field name")
+                    .contains("vararg must appear before the constructor parameter name")
         }),
         "{:#?}",
         result.diagnostics
@@ -875,9 +861,7 @@ class Path {
 }
 
 impl Path {
-    new {
-        segments Str...
-    } {
+    new(segments Str...) {
         this.segments = segments
     }
 }
