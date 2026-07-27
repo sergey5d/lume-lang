@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*constructor delegation cycle in class 'User'.*
+
+class User {
+    name Str
+    age Int
+}
+
+impl User {
+    new(name Str) = this(0)
+
+    new(age Int) = this("unknown")
+}
+
+def main() Unit = ()

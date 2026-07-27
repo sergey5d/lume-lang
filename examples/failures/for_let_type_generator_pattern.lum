@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*for pattern must be irrefutable for value of type 'Any'.*
+
+class Worker {}
+
+def main() Unit {
+    values [Any] = [Worker()]
+
+    for let worker Worker <- values {
+        println(worker)
+    }
+}

@@ -469,8 +469,8 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_plain_for_generator_binding(&mut self) -> Option<Binding> {
-        const MESSAGE: &str = "for generator must bind a plain identifier before '<-'; use 'for let (...) <-' or 'for let { ... } <-' for irrefutable destructuring";
-        if !self.at(TokenKind::Identifier) || self.is_placeholder_identifier() {
+        const MESSAGE: &str = "for generator must bind a plain identifier or '_' before '<-'; use 'for let (...) <-' or 'for let { ... } <-' for irrefutable destructuring";
+        if !self.at(TokenKind::Identifier) {
             self.error_at_current("invalid_for_generator", MESSAGE);
             return None;
         }
@@ -485,7 +485,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn consume_for_generator_arrow(&mut self) -> Option<Span> {
-        const MESSAGE: &str = "for generator must bind a plain identifier before '<-'; use 'for let (...) <-' or 'for let { ... } <-' for irrefutable destructuring";
+        const MESSAGE: &str = "for generator must bind a plain identifier or '_' before '<-'; use 'for let (...) <-' or 'for let { ... } <-' for irrefutable destructuring";
         if self.match_token(TokenKind::LeftArrow) {
             Some(self.previous_span())
         } else {
@@ -525,9 +525,7 @@ impl<'a> Parser<'a> {
             && (parser.at(TokenKind::Eq) || parser.at(TokenKind::LeftArrow))
     }
 
-    pub(super) fn parse_for_destructure_generator_head(
-        &mut self,
-    ) -> Option<(Vec<Binding>, DestructureKind, Span)> {
+    pub(super) fn parse_for_let_generator_head(&mut self) -> Option<ForBinding> {
         if self.at(TokenKind::LBrace) && self.is_brace_destructuring_binding_start() {
             let start = self.consume(TokenKind::LBrace, "expected '{' after 'let'")?;
             let bindings = self.parse_brace_destructure_binding_list(false)?;
@@ -535,7 +533,24 @@ impl<'a> Parser<'a> {
                 TokenKind::RBrace,
                 "expected '}' after destructuring bindings",
             )?;
-            return Some((bindings, DestructureKind::Record, start));
+            self.consume_for_generator_arrow()?;
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "expected_expression",
+                    "expected expression on same line after \"<-\"",
+                );
+                return None;
+            }
+            let iterable = self.parse_expr_without_trailing_block_call()?;
+            let end = iterable.span();
+            return Some(ForBinding {
+                bindings,
+                destructure: Some(DestructureKind::Record),
+                pattern: None,
+                iterable: Some(iterable),
+                values: Vec::new(),
+                span: start.cover(end),
+            });
         }
 
         if self.match_token(TokenKind::LParen) {
@@ -545,14 +560,45 @@ impl<'a> Parser<'a> {
                 TokenKind::RParen,
                 "expected ')' after destructuring bindings",
             )?;
-            return Some((bindings, DestructureKind::Tuple, start));
+            self.consume_for_generator_arrow()?;
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "expected_expression",
+                    "expected expression on same line after \"<-\"",
+                );
+                return None;
+            }
+            let iterable = self.parse_expr_without_trailing_block_call()?;
+            let end = iterable.span();
+            return Some(ForBinding {
+                bindings,
+                destructure: Some(DestructureKind::Tuple),
+                pattern: None,
+                iterable: Some(iterable),
+                values: Vec::new(),
+                span: start.cover(end),
+            });
         }
 
-        self.error_at_current(
-            "invalid_for_generator",
-            "for let generator heads only support irrefutable tuple or shape destructuring before '<-'",
-        );
-        None
+        let pattern = self.parse_pattern()?;
+        self.consume_for_generator_arrow()?;
+        if self.at(TokenKind::Newline) {
+            self.error_at_current(
+                "expected_expression",
+                "expected expression on same line after \"<-\"",
+            );
+            return None;
+        }
+        let iterable = self.parse_expr_without_trailing_block_call()?;
+        let end = iterable.span();
+        Some(ForBinding {
+            span: pattern.span().cover(end),
+            bindings: Vec::new(),
+            destructure: None,
+            pattern: Some(pattern),
+            iterable: Some(iterable),
+            values: Vec::new(),
+        })
     }
 
     pub(super) fn try_parse_assignment_stmt(&mut self) -> Option<AssignmentStmt> {
@@ -717,23 +763,29 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_for_stmt(&mut self) -> Option<ForStmt> {
         let start = self.consume_keyword(Keyword::For, "expected 'for'")?;
-        let (bindings, destructure, target_span) = if self.match_keyword(Keyword::Let) {
-            let (bindings, kind, span) = self.parse_for_destructure_generator_head()?;
-            (bindings, Some(kind), span)
+        let binding = if self.match_keyword(Keyword::Let) {
+            self.parse_for_let_generator_head()?
         } else {
             let binding = self.parse_plain_for_generator_binding()?;
             let target_span = binding.span;
-            (vec![binding], None, target_span)
+            self.consume_for_generator_arrow()?;
+            if self.at(TokenKind::Newline) {
+                self.error_at_current(
+                    "expected_expression",
+                    "expected expression on same line after \"<-\"",
+                );
+                return None;
+            }
+            let iterable = self.parse_expr_without_trailing_block_call()?;
+            ForBinding {
+                span: target_span.cover(iterable.span()),
+                bindings: vec![binding],
+                destructure: None,
+                pattern: None,
+                iterable: Some(iterable),
+                values: Vec::new(),
+            }
         };
-        self.consume_for_generator_arrow()?;
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                "expected expression on same line after \"<-\"",
-            );
-            return None;
-        }
-        let iterable = self.parse_expr_without_trailing_block_call()?;
         if !self.at(TokenKind::LBrace) {
             self.error_at_current(
                 "unexpected_token",
@@ -743,14 +795,7 @@ impl<'a> Parser<'a> {
         }
         let body = self.parse_block()?;
         Some(ForStmt {
-            bindings: vec![ForBinding {
-                span: target_span.cover(iterable.span()),
-                bindings,
-                destructure,
-                pattern: None,
-                iterable: Some(iterable),
-                values: Vec::new(),
-            }],
+            bindings: vec![binding],
             body: body.clone(),
             span: start.cover(body.span),
         })

@@ -5042,7 +5042,7 @@ impl<'a> FunctionLowerer<'a> {
         if let Some(path) = expr_path(callee) {
             if path.len() == 1 {
                 let name = &path[0];
-                if name == "new" && self.function().name == "new" {
+                if name == "this" && self.function().name == "new" {
                     if let ir::FunctionKind::Method { owner } = self.function().kind {
                         if let Some(owner_name) =
                             self.program.types.get(owner.0).map(|ty| ty.name.clone())
@@ -5166,7 +5166,7 @@ impl<'a> FunctionLowerer<'a> {
             return false;
         };
         path.len() == 1
-            && path[0] == "new"
+            && path[0] == "this"
             && self.function().name == "new"
             && matches!(self.function().kind, ir::FunctionKind::Method { .. })
     }

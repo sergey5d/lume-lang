@@ -402,10 +402,10 @@ impl<'a> Parser<'a> {
             } else {
                 let binding = self.parse_binding(false)?;
                 if self.match_token(TokenKind::LeftArrow) {
-                    if binding.name == "_" || binding.ty.is_some() {
+                    if binding.ty.is_some() {
                         self.error_at_current(
                             "invalid_for_generator",
-                            "for generator must bind a plain identifier before '<-'; use 'let (...) <-' or 'let { ... } <-' for irrefutable destructuring",
+                            "for generator must bind a plain identifier or '_' before '<-'; use 'let (...) <-' or 'let { ... } <-' for irrefutable destructuring",
                         );
                         return None;
                     }
@@ -483,11 +483,16 @@ impl<'a> Parser<'a> {
             return None;
         }
         if self.match_token(TokenKind::LeftArrow) {
-            self.error_at_current(
-                "invalid_for_clause",
-                "for yield 'let ... <-' clauses only support irrefutable tuple or shape destructuring; use 'name <- iterable' for plain generators and match for refutable patterns",
-            );
-            return None;
+            let iterable = self.parse_expr_without_trailing_block_call()?;
+            let end = iterable.span();
+            return Some(ForBinding {
+                span: pattern.span().cover(end),
+                bindings: Vec::new(),
+                destructure: None,
+                pattern: Some(pattern),
+                iterable: Some(iterable),
+                values: Vec::new(),
+            });
         }
         self.consume_for_let_equals()?;
         let value = self.parse_for_let_value()?;
@@ -1659,7 +1664,7 @@ impl<'a> Parser<'a> {
 
     fn is_constructor_like_expr(expr: &Expr) -> bool {
         match expr {
-            Expr::Identifier { name, .. } if name == "new" => true,
+            Expr::Identifier { name, .. } if name == "new" || name == "this" => true,
             Expr::Identifier { name, .. } => name
                 .chars()
                 .next()

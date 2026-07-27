@@ -1,0 +1,16 @@
+# FAIL_REGEX:
+# .*constructor delegation must be the entire expression body.*
+
+class User {
+    name Str
+}
+
+impl User {
+    new(name Str) {
+        this {
+            name: name
+        }
+    }
+}
+
+def main() Unit = ()

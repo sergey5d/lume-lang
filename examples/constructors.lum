@@ -18,8 +18,8 @@
 # - later field mutation uses `:=`
 # - nested writes through an initialized field still use `:=`
 # - constructor parameters and construction fields may be comma separated
-# - `new(...)` delegates to another constructor positionally
-# - `new { field: value }` delegates to another constructor by construction fields
+# - `this(...)` delegates to another constructor positionally
+# - `this { field: value }` delegates to another constructor by construction fields
 # - positional construction fills constructor parameters from the beginning in order
 # - named construction can omit any constructor parameter that has a default
 # - a trailing `vararg items [T]` constructor parameter receives positional varargs as `[T]`
@@ -86,12 +86,12 @@ impl Account {
         this.age = age
     }
 
-    new(label Str) = new {
+    new(label Str) = this {
         name: label
         age: 0
     }
 
-    new(years Int) = new("unknown", years)
+    new(years Int) = this("unknown", years)
 
     def label() Str = this.name + " " + this.age
 }

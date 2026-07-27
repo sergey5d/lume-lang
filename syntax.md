@@ -1112,8 +1112,11 @@ Custom constructors are class-only and use a dedicated `new(...)` declaration in
 - constructor parameters may end with one variadic list parameter such as `vararg items [Str]`
 - `hidden new(...) { body }` declares a private constructor
 - each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
-- `new(...)` inside another constructor delegates positionally to another constructor of the same class
-- `new { field: value }` inside another constructor delegates with construction fields to another constructor of the same class
+- `this(...)` inside a constructor delegates positionally to another constructor of the same class
+- `this { field: value }` inside a constructor delegates with construction fields to another constructor of the same class
+- delegating constructors use expression bodies, for example `new(label Str) = this { name: label }`
+- direct and indirect constructor-delegation cycles are rejected
+- `new(...)` only declares constructors; it is not a constructor-delegation call
 - class call sites use braces for construction fields, for example `Person { name: "Ada", age: 10 }`
 - class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
 - `this` is the instance receiver
@@ -1136,9 +1139,9 @@ impl Person {
         this.name = name
     }
 
-    new(age Int) = new(age, "unknown")
+    new(age Int) = this(age, "unknown")
 
-    new(name Str) = new {
+    new(name Str) = this {
         age: 0
         name: name
     }
@@ -2013,16 +2016,21 @@ for i <- Range(0, 10) {
 
 `Range(start, end)` is start-inclusive and end-exclusive. With two arguments it automatically chooses a step of `1` or `-1` based on the bounds, and `Range(start, end, step)` allows an explicit step.
 
-Generator heads normally bind one plain identifier:
+Generator heads normally bind one plain identifier, or `_` when the item is
+intentionally ignored:
 
 ```txt
 for row <- rows {
     println(row)
 }
+
+for _ <- events {
+    incrementCount()
+}
 ```
 
-Use `for let` for explicitly marked irrefutable tuple or shape
-destructuring:
+Use `for let` for explicitly marked irrefutable patterns. Tuple and shape
+destructuring are the common forms:
 
 ```txt
 for let (x, y, char) <- rows {
@@ -2061,6 +2069,7 @@ for (x, y) <- pairs { ... }
 for { name, age } <- users { ... }
 for Some(item) <- values { ... }
 for let Some(item) <- values { ... }
+for let worker Worker <- values { ... }
 for item Int <- items { ... }
 ```
 

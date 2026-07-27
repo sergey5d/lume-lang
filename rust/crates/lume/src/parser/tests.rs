@@ -325,7 +325,7 @@ def run(users List[User]) Unit {
 }
 
 #[test]
-fn rejects_for_let_refutable_generator_pattern() {
+fn parses_for_let_refutable_generator_pattern() {
     let result = parse(
         r#"
 def run(values List[Option[Int]]) Unit {
@@ -335,14 +335,52 @@ def run(values List[Option[Int]]) Unit {
 }
 "#,
     );
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "invalid_for_generator"),
-        "{:#?}",
-        result.diagnostics
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => match &block.statements[0] {
+                Stmt::For(for_stmt) => {
+                    assert!(matches!(
+                        for_stmt.bindings[0].pattern,
+                        Some(Pattern::Constructor { .. })
+                    ));
+                    assert!(for_stmt.bindings[0].iterable.is_some());
+                }
+                other => panic!("expected for stmt, got {other:#?}"),
+            },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
+fn parses_for_ignored_generator() {
+    let result = parse(
+        r#"
+def run(events [Str]) Unit {
+    for _ <- events {
+        println("event")
+    }
+}
+"#,
     );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => match &block.statements[0] {
+                Stmt::For(for_stmt) => {
+                    assert_eq!(for_stmt.bindings[0].bindings[0].name, "_");
+                    assert!(for_stmt.bindings[0].iterable.is_some());
+                }
+                other => panic!("expected for stmt, got {other:#?}"),
+            },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
 }
 
 #[test]
@@ -422,7 +460,7 @@ def run(rows List[(Int, Int)]) Unit {
     assert!(
         result.diagnostics.iter().any(|diag| diag
             .message
-            .contains("for generator must bind a plain identifier")),
+            .contains("for generator must bind a plain identifier or '_'")),
         "{:#?}",
         result.diagnostics
     );
@@ -506,7 +544,7 @@ def run(pairs List[(Int, Int)], users List[User]) [Int] {
 }
 
 #[test]
-fn rejects_for_yield_let_refutable_generator_pattern() {
+fn parses_for_yield_let_refutable_generator_pattern() {
     let result = parse(
         r#"
 def run(values List[Option[Int]]) [Int] {
@@ -517,14 +555,27 @@ def run(values List[Option[Int]]) [Int] {
 }
 "#,
     );
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "invalid_for_clause"),
-        "{:#?}",
-        result.diagnostics
-    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => match &block.statements[0] {
+                Stmt::Binding(binding) => match &binding.values[0] {
+                    Expr::ForYield { bindings, .. } => {
+                        assert!(matches!(
+                            bindings[0].pattern,
+                            Some(Pattern::Constructor { .. })
+                        ));
+                        assert!(bindings[0].iterable.is_some());
+                    }
+                    other => panic!("expected for-yield expression, got {other:#?}"),
+                },
+                other => panic!("expected binding stmt, got {other:#?}"),
+            },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
 }
 
 #[test]
@@ -749,7 +800,7 @@ class User {
 }
 
 impl User {
-    new(name Str) = new { name: name }
+    new(name Str) = this { name: name }
 }
 "#,
     );

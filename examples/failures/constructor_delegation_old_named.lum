@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*constructor delegation uses `this \{ \.\.\. \}`; `new` only declares constructors.*
+
+class User {
+    name Str
+}
+
+impl User {
+    new(name Str) = new {
+        name: name
+    }
+}
+
+def main() Unit = ()

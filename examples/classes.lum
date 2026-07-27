@@ -48,7 +48,7 @@ impl A {
         this.name = name
     }
 
-    new(maturity Int) = new(maturity - 15, "5")
+    new(maturity Int) = this(maturity - 15, "5")
 
     def trueAge() Int = this.age
 

@@ -76,7 +76,7 @@ impl User {
         this.home = home
     }
 
-    new(label Str) = new(label, Point { x: 0, y: 0 })
+    new(label Str) = this(label, Point { x: 0, y: 0 })
 
     def moved(dx Int, dy Int) User = User {
         name: this.name

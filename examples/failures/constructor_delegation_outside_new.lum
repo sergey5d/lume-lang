@@ -1,0 +1,18 @@
+# FAIL_REGEX:
+# .*constructor delegation with `this\(\.\.\.\)` or `this \{ \.\.\. \}` is only valid inside a class constructor.*
+
+class User {
+    name Str
+}
+
+impl User {
+    new(name Str) {
+        this.name = name
+    }
+
+    def copy() User = this {
+        name: this.name
+    }
+}
+
+def main() Unit = ()

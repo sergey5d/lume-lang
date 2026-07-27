@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*for generator must bind a plain identifier before '<-'.*
+# .*for generator must bind a plain identifier or '_' before '<-'.*
 
 def main() Unit {
     pairs List[(Int, Int)] = [(1, 2)]

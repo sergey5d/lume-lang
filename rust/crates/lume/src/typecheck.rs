@@ -266,22 +266,6 @@ impl Ty {
 struct ValueInfo {
     ty: Ty,
     mutable: bool,
-    known: Option<KnownValue>,
-}
-
-#[derive(Debug, Clone)]
-enum KnownValue {
-    Unit,
-    Bool(bool),
-    Int(i64),
-    Float(String),
-    String(String),
-    List(Vec<KnownValue>),
-    Tuple(Vec<KnownValue>),
-    Constructor {
-        path: Vec<String>,
-        args: Vec<KnownValue>,
-    },
 }
 
 #[derive(Debug, Clone)]
@@ -307,6 +291,12 @@ struct FunctionSig {
 struct CallableSelection {
     sig: FunctionSig,
     explicit_type_args: Vec<Ty>,
+}
+
+#[derive(Debug, Clone)]
+struct ConstructorCycleNode {
+    method: MethodDecl,
+    sig: FunctionSig,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -856,6 +846,7 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
+        self.check_constructor_delegation_cycles();
     }
 
     fn check_global_bindings(&mut self) {
@@ -912,12 +903,6 @@ impl<'a> Checker<'a> {
                     ValueInfo {
                         ty,
                         mutable: binding.mutable,
-                        known: (!binding.mutable
-                            && binding_stmt.bindings.len() == 1
-                            && binding_stmt.values.len() == 1
-                            && binding_stmt.destructure.is_none())
-                        .then(|| self.known_value_from_expr(&binding_stmt.values[0]))
-                        .flatten(),
                     },
                 );
             }
@@ -1299,6 +1284,224 @@ impl<'a> Checker<'a> {
         self.pop_type_params();
     }
 
+    fn check_constructor_delegation_cycles(&mut self) {
+        let class_names = self
+            .module
+            .types
+            .values()
+            .filter(|sig| sig.kind == TypeKind::Class)
+            .map(|sig| sig.name.clone())
+            .collect::<Vec<_>>();
+
+        for class_name in class_names {
+            let Some(type_sig) = self.lookup_type_local(&class_name) else {
+                continue;
+            };
+            let nodes = self.constructor_cycle_nodes_for_type(&class_name);
+            if nodes.is_empty() {
+                continue;
+            }
+            self.check_constructor_delegation_cycles_for_type(&type_sig, &nodes);
+        }
+    }
+
+    fn constructor_cycle_nodes_for_type(&self, class_name: &str) -> Vec<ConstructorCycleNode> {
+        let mut nodes = Vec::new();
+        for item in &self.module.program.items {
+            match item {
+                Item::Type(decl) if decl.kind == TypeKind::Class && decl.name == class_name => {
+                    let owner_type_params = decl
+                        .type_params
+                        .iter()
+                        .map(|param| param.name.clone())
+                        .collect::<Vec<_>>();
+                    nodes.extend(
+                        decl.members
+                            .iter()
+                            .filter_map(|member| match member {
+                                TypeMember::Method(method) if method.name == "new" => Some(method),
+                                _ => None,
+                            })
+                            .map(|method| ConstructorCycleNode {
+                                method: method.clone(),
+                                sig: function_sig_from_method(method, &owner_type_params),
+                            }),
+                    );
+                }
+                Item::Impl(block) if block.target_kind == ImplTargetKind::Instance => {
+                    let Some(target_name) = type_ref_named_name(&block.target) else {
+                        continue;
+                    };
+                    if target_name != class_name {
+                        continue;
+                    }
+                    let owner_type_params = impl_target_type_params(&block.target);
+                    nodes.extend(
+                        block
+                            .methods
+                            .iter()
+                            .filter(|method| method.name == "new")
+                            .map(|method| ConstructorCycleNode {
+                                method: method.clone(),
+                                sig: function_sig_from_method(method, &owner_type_params),
+                            }),
+                    );
+                }
+                _ => {}
+            }
+        }
+        nodes
+    }
+
+    fn check_constructor_delegation_cycles_for_type(
+        &mut self,
+        owner: &TypeSig,
+        nodes: &[ConstructorCycleNode],
+    ) {
+        let edges = nodes
+            .iter()
+            .enumerate()
+            .map(|(index, _)| self.constructor_delegation_target_index(owner, nodes, index))
+            .collect::<Vec<_>>();
+        let mut reported = HashSet::new();
+
+        for start in 0..nodes.len() {
+            let mut path = Vec::new();
+            let mut seen = HashMap::new();
+            let mut current = start;
+
+            loop {
+                if let Some(cycle_start) = seen.get(&current).copied() {
+                    let cycle = path[cycle_start..].to_vec();
+                    if cycle.iter().any(|index| !reported.contains(index)) {
+                        for index in &cycle {
+                            reported.insert(*index);
+                        }
+                        let mut labels = cycle
+                            .iter()
+                            .map(|index| constructor_cycle_node_label(&nodes[*index]))
+                            .collect::<Vec<_>>();
+                        if let Some(first) = labels.first().cloned() {
+                            labels.push(first);
+                        }
+                        self.add_error(
+                            "constructor_delegation_cycle",
+                            format!(
+                                "constructor delegation cycle in class '{}': {}",
+                                owner.name,
+                                labels.join(" -> ")
+                            ),
+                            nodes[current].method.span,
+                        );
+                    }
+                    break;
+                }
+
+                if reported.contains(&current) {
+                    break;
+                }
+
+                seen.insert(current, path.len());
+                path.push(current);
+
+                let Some(next) = edges[current] else {
+                    break;
+                };
+                current = next;
+            }
+        }
+    }
+
+    fn constructor_delegation_target_index(
+        &mut self,
+        owner: &TypeSig,
+        nodes: &[ConstructorCycleNode],
+        node_index: usize,
+    ) -> Option<usize> {
+        let method = &nodes[node_index].method;
+        let body = method.body.as_ref()?;
+        let (raw_args, uses_brace_syntax, _) = constructor_delegation_call(body)?;
+        let normalized_args;
+        let args = if uses_brace_syntax {
+            normalized_args =
+                brace_record_constructor_args(raw_args).unwrap_or_else(|| raw_args.to_vec());
+            normalized_args.as_slice()
+        } else {
+            raw_args
+        };
+
+        let previous_owner = self.current_owner.clone();
+        let previous_method = self.current_method.clone();
+        self.current_owner = Some(owner.clone());
+        self.current_method = Some("new".to_string());
+        self.push_scope();
+        self.define_local("this", self.owner_self_ty(owner), false);
+        for param in &nodes[node_index].sig.params {
+            self.define_local(&param.name, param.ty.clone(), false);
+        }
+        let target = self.choose_constructor_node(nodes, args);
+        self.pop_scope();
+        self.current_owner = previous_owner;
+        self.current_method = previous_method;
+
+        target
+    }
+
+    fn choose_constructor_node(
+        &self,
+        nodes: &[ConstructorCycleNode],
+        args: &[crate::ast::CallArg],
+    ) -> Option<usize> {
+        let arg_types = args
+            .iter()
+            .map(|arg| self.probe_expr_type(&arg.value))
+            .collect::<Vec<_>>();
+        nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, node)| {
+                let arrangement = arrange_param_args(&node.sig.params, args);
+                if arrangement.overflow > 0 || arrangement.missing_required > 0 {
+                    return None;
+                }
+                let mut score = 0usize;
+                for (param_index, param) in node.sig.params.iter().enumerate() {
+                    for arg in arrangement
+                        .slots
+                        .get(param_index)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[])
+                    {
+                        let arg_index = args
+                            .iter()
+                            .position(|candidate| std::ptr::eq(candidate, *arg))
+                            .unwrap_or(0);
+                        let actual = &arg_types[arg_index];
+                        let expected =
+                            call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
+                        if !matches!(actual, Ty::Unknown) {
+                            if self.arg_matches_expected(arg, actual, &expected) {
+                                score += 2;
+                            } else if type_contains_type_param(&expected) {
+                                score += 1;
+                            } else {
+                                return None;
+                            }
+                        }
+                        if arg.name.as_deref() == Some(param.name.as_str()) {
+                            score += 1;
+                        }
+                    }
+                }
+                if !node.sig.params.iter().any(|param| param.variadic) {
+                    score += 1;
+                }
+                Some((score, index))
+            })
+            .max_by_key(|(score, _)| *score)
+            .map(|(_, index)| index)
+    }
+
     fn check_extension(&mut self, block: &ExtensionBlock) {
         let Some(target_name) = type_ref_named_name(&block.target) else {
             return;
@@ -1406,6 +1609,17 @@ impl<'a> Checker<'a> {
         if method.name != "new" || owner.kind != TypeKind::Class {
             return;
         }
+        if let Some(body) = &method.body {
+            if constructor_body_contains_this_delegation_call(body)
+                && !constructor_body_delegates(body)
+            {
+                self.add_error(
+                    "invalid_constructor_delegation",
+                    "constructor delegation must be the entire expression body; write `new(...) = this(...)`, `new(...) = this { ... }`, or initialize fields directly",
+                    method.span,
+                );
+            }
+        }
         let required_fields = owner
             .fields
             .iter()
@@ -1419,6 +1633,9 @@ impl<'a> Checker<'a> {
             return;
         };
         if constructor_body_delegates(body) {
+            return;
+        }
+        if constructor_body_contains_delegation_attempt(body) {
             return;
         }
         let assigned = constructor_assigned_fields(body, owner, method);
@@ -2370,12 +2587,6 @@ impl<'a> Checker<'a> {
                     })
                     .collect::<Vec<_>>();
                 let slot_types = self.binding_slot_types(binding_stmt, &value_types);
-                let known_value = (!binding_stmt.bindings[0].mutable
-                    && binding_stmt.bindings.len() == 1
-                    && binding_stmt.values.len() == 1
-                    && binding_stmt.destructure.is_none())
-                .then(|| self.known_value_from_expr(&binding_stmt.values[0]))
-                .flatten();
                 for (index, binding) in binding_stmt.bindings.iter().enumerate() {
                     let explicit = binding.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
                     let inferred = slot_types.get(index).cloned().unwrap_or(Ty::Unknown);
@@ -2394,12 +2605,7 @@ impl<'a> Checker<'a> {
                             ),
                         );
                     }
-                    self.define_local_known(
-                        &binding.name,
-                        ty,
-                        binding.mutable,
-                        (index == 0).then(|| known_value.clone()).flatten(),
-                    );
+                    self.define_local(&binding.name, ty, binding.mutable);
                 }
                 Ty::unit()
             }
@@ -2701,12 +2907,9 @@ impl<'a> Checker<'a> {
         &mut self,
         pattern: &Pattern,
         scrutinee: &Ty,
-        source: &Expr,
         span: crate::source::Span,
     ) {
-        if !self.pattern_is_irrefutable(pattern, scrutinee)
-            && !self.known_expr_matches_pattern(pattern, source)
-        {
+        if !self.for_pattern_is_irrefutable(pattern, scrutinee) {
             self.add_error(
                 "refutable_for_pattern",
                 format!(
@@ -2715,6 +2918,38 @@ impl<'a> Checker<'a> {
                 ),
                 span,
             );
+        }
+    }
+
+    fn for_pattern_is_irrefutable(&self, pattern: &Pattern, scrutinee: &Ty) -> bool {
+        match pattern {
+            Pattern::Wildcard { .. } | Pattern::Binding { .. } => true,
+            Pattern::Extract { .. } | Pattern::Literal { .. } | Pattern::Type { .. } => false,
+            Pattern::Tuple { elements, .. } => match scrutinee {
+                Ty::Tuple(items) if items.len() == elements.len() => elements
+                    .iter()
+                    .zip(items.iter())
+                    .all(|(pattern, item)| self.for_pattern_is_irrefutable(pattern, item)),
+                _ => false,
+            },
+            Pattern::Constructor { path, args, .. } => {
+                if self.lookup_case_by_pattern(path, scrutinee).is_some() {
+                    return false;
+                }
+                let Some((destructured_ty, field_tys)) =
+                    self.lookup_destructured_type_pattern(path)
+                else {
+                    return false;
+                };
+                self.is_assignable(scrutinee, &destructured_ty)
+                    && args.len() == field_tys.len()
+                    && args
+                        .iter()
+                        .zip(field_tys.iter())
+                        .all(|(pattern, field_ty)| {
+                            self.for_pattern_is_irrefutable(pattern, field_ty)
+                        })
+            }
         }
     }
 
@@ -2813,125 +3048,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn known_expr_matches_pattern(&self, pattern: &Pattern, source: &Expr) -> bool {
-        match self.known_value_from_expr(source) {
-            Some(KnownValue::List(items)) => items
-                .iter()
-                .all(|item| self.known_value_matches_pattern(item, pattern)),
-            Some(value) => self.known_value_matches_pattern(&value, pattern),
-            None => false,
-        }
-    }
-
-    fn known_value_from_expr(&self, expr: &Expr) -> Option<KnownValue> {
-        match expr {
-            Expr::Identifier { name, .. } => self.lookup_value(name)?.known.clone(),
-            Expr::Group { inner, .. } => self.known_value_from_expr(inner),
-            Expr::Unit { .. } => Some(KnownValue::Unit),
-            Expr::Bool { value, .. } => Some(KnownValue::Bool(*value)),
-            Expr::Integer { raw, .. } => raw.parse().ok().map(KnownValue::Int),
-            Expr::Float { raw, .. } => Some(KnownValue::Float(raw.clone())),
-            Expr::String { raw, .. } => Some(KnownValue::String(raw.clone())),
-            Expr::ListLiteral { items, .. } => items
-                .iter()
-                .map(|item| self.known_value_from_expr(item))
-                .collect::<Option<Vec<_>>>()
-                .map(KnownValue::List),
-            Expr::TupleLiteral { items, .. } => items
-                .iter()
-                .map(|item| self.known_value_from_expr(item))
-                .collect::<Option<Vec<_>>>()
-                .map(KnownValue::Tuple),
-            Expr::Call { callee, args, .. } => {
-                let path = expr_path_for_known_value(callee)?;
-                if path == ["List".to_string()] {
-                    if args.iter().any(|arg| arg.name.is_some()) {
-                        return None;
-                    }
-                    return args
-                        .iter()
-                        .map(|arg| self.known_value_from_expr(&arg.value))
-                        .collect::<Option<Vec<_>>>()
-                        .map(KnownValue::List);
-                }
-                if args.iter().any(|arg| arg.name.is_some()) {
-                    return None;
-                }
-                if self.lookup_case_by_path(&path).is_none()
-                    && self.lookup_destructured_type_pattern(&path).is_none()
-                {
-                    return None;
-                }
-                let values = args
-                    .iter()
-                    .map(|arg| self.known_value_from_expr(&arg.value))
-                    .collect::<Option<Vec<_>>>()?;
-                Some(KnownValue::Constructor { path, args: values })
-            }
-            other => {
-                let path = expr_path_for_known_value(other)?;
-                let case = self.lookup_case_by_path(&path)?;
-                case.params.is_empty().then_some(KnownValue::Constructor {
-                    path,
-                    args: Vec::new(),
-                })
-            }
-        }
-    }
-
-    fn known_value_matches_pattern(&self, value: &KnownValue, pattern: &Pattern) -> bool {
-        match pattern {
-            Pattern::Wildcard { .. } | Pattern::Binding { .. } => true,
-            Pattern::Extract { inner, .. } => match value {
-                KnownValue::Constructor { path, args }
-                    if path
-                        .last()
-                        .is_some_and(|name| matches!(name.as_str(), "Some" | "Ok" | "Right"))
-                        && args.len() == 1 =>
-                {
-                    self.known_value_matches_pattern(&args[0], inner)
-                }
-                _ => false,
-            },
-            Pattern::Type { .. } => false,
-            Pattern::Literal {
-                value: pattern_value,
-                ..
-            } => {
-                matches!(
-                    (value, pattern_value),
-                    (KnownValue::Unit, Expr::Unit { .. })
-                        | (KnownValue::Bool(true), Expr::Bool { value: true, .. })
-                        | (KnownValue::Bool(false), Expr::Bool { value: false, .. })
-                ) || match (value, pattern_value) {
-                    (KnownValue::Int(left), Expr::Integer { raw, .. }) => {
-                        raw.parse::<i64>().ok().is_some_and(|right| *left == right)
-                    }
-                    (KnownValue::Float(left), Expr::Float { raw, .. }) => left == raw,
-                    (KnownValue::String(left), Expr::String { raw, .. }) => left == raw,
-                    _ => false,
-                }
-            }
-            Pattern::Tuple { elements, .. } => match value {
-                KnownValue::Tuple(items) if items.len() == elements.len() => items
-                    .iter()
-                    .zip(elements.iter())
-                    .all(|(item, pattern)| self.known_value_matches_pattern(item, pattern)),
-                _ => false,
-            },
-            Pattern::Constructor { path, args, .. } => match value {
-                KnownValue::Constructor {
-                    path: value_path,
-                    args: value_args,
-                } if value_path == path && value_args.len() == args.len() => value_args
-                    .iter()
-                    .zip(args.iter())
-                    .all(|(item, pattern)| self.known_value_matches_pattern(item, pattern)),
-                _ => false,
-            },
-        }
-    }
-
     fn check_match_case_against(&mut self, case: &MatchCase, value_ty: &Ty, expected: &Ty) -> Ty {
         self.push_scope();
         self.bind_pattern(&case.pattern, value_ty);
@@ -2966,12 +3082,7 @@ impl<'a> Checker<'a> {
                     None,
                 )
             };
-            let source = binding
-                .iterable
-                .as_ref()
-                .or_else(|| binding.values.first())
-                .expect("pattern-based for binding should have a source");
-            self.require_irrefutable_for_pattern(pattern, &value_ty, source, pattern.span());
+            self.require_irrefutable_for_pattern(pattern, &value_ty, pattern.span());
             self.bind_pattern(pattern, &value_ty);
             return family;
         }
@@ -4243,6 +4354,7 @@ impl<'a> Checker<'a> {
         if uses_brace_syntax
             && self.brace_call_type_sig(callee).is_none()
             && !self.brace_call_targets_current_constructor(callee)
+            && !self.brace_call_uses_constructor_delegation_syntax(callee)
             && !self.brace_call_targets_enum_case(callee)
             && !trailing_brace_call_has_lambda_arg(args)
         {
@@ -5034,27 +5146,51 @@ impl<'a> Checker<'a> {
             constructor_uses_parenthesized_record_arg(self, args, uses_brace_syntax);
         match callee {
             Expr::Identifier { name, .. } => {
+                if name == "this" {
+                    if self.current_method.as_deref() == Some("new") && self.current_owner.is_some()
+                    {
+                        return self.current_owner.clone().map(|owner| {
+                            self.check_named_type_constructor(
+                                &owner,
+                                args,
+                                span,
+                                uses_brace_syntax,
+                                structural_record_arg,
+                                parenthesized_record_arg,
+                            )
+                        });
+                    }
+                    self.add_error(
+                        "invalid_constructor_delegation",
+                        "constructor delegation with `this(...)` or `this { ... }` is only valid inside a class constructor",
+                        span,
+                    );
+                    return Some(Ty::Unknown);
+                }
+                if name == "new"
+                    && self.current_method.as_deref() == Some("new")
+                    && self.current_owner.is_some()
+                {
+                    let replacement = if uses_brace_syntax {
+                        "`this { ... }`"
+                    } else {
+                        "`this(...)`"
+                    };
+                    self.add_error(
+                        "invalid_constructor_delegation",
+                        format!(
+                            "constructor delegation uses {replacement}; `new` only declares constructors"
+                        ),
+                        span,
+                    );
+                    return Some(Ty::Unknown);
+                }
                 if !structural_record_arg {
                     if let Some(ty) =
                         self.check_builtin_constructor(name, args, span, uses_brace_syntax)
                     {
                         return Some(ty);
                     }
-                }
-                if name == "new"
-                    && self.current_method.as_deref() == Some("new")
-                    && self.current_owner.is_some()
-                {
-                    return self.current_owner.clone().map(|owner| {
-                        self.check_named_type_constructor(
-                            &owner,
-                            args,
-                            span,
-                            uses_brace_syntax,
-                            structural_record_arg,
-                            parenthesized_record_arg,
-                        )
-                    });
                 }
                 if let Some(case) = self.world.lookup_enum_case(self.module, name) {
                     return Some(self.check_enum_case_constructor_signature(
@@ -5807,6 +5943,7 @@ impl<'a> Checker<'a> {
         if uses_brace_syntax
             && (self.brace_call_targets_explicit_constructor(callee)
                 || self.brace_call_targets_current_constructor(callee)
+                || self.brace_call_uses_constructor_delegation_syntax(callee)
                 || self.brace_call_targets_enum_case(callee))
         {
             if let Some(args) = brace_record_constructor_args(args) {
@@ -5822,9 +5959,16 @@ impl<'a> Checker<'a> {
     }
 
     fn brace_call_targets_current_constructor(&self, callee: &Expr) -> bool {
-        matches!(callee, Expr::Identifier { name, .. } if name == "new")
+        matches!(callee, Expr::Identifier { name, .. } if name == "this")
             && self.current_method.as_deref() == Some("new")
             && self.current_owner.is_some()
+    }
+
+    fn brace_call_uses_constructor_delegation_syntax(&self, callee: &Expr) -> bool {
+        matches!(callee, Expr::Identifier { name, .. } if name == "this")
+            || (matches!(callee, Expr::Identifier { name, .. } if name == "new")
+                && self.current_method.as_deref() == Some("new")
+                && self.current_owner.is_some())
     }
 
     fn brace_call_targets_enum_case(&self, callee: &Expr) -> bool {
@@ -7569,10 +7713,6 @@ impl<'a> Checker<'a> {
     }
 
     fn define_local(&mut self, name: &str, ty: Ty, mutable: bool) {
-        self.define_local_known(name, ty, mutable, None);
-    }
-
-    fn define_local_known(&mut self, name: &str, ty: Ty, mutable: bool, known: Option<KnownValue>) {
         if name == "_" {
             return;
         }
@@ -7581,7 +7721,7 @@ impl<'a> Checker<'a> {
             self.push_scope();
         }
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), ValueInfo { ty, mutable, known });
+            scope.insert(name.to_string(), ValueInfo { ty, mutable });
         }
     }
 
@@ -7892,6 +8032,39 @@ fn enum_case_pattern_required_count(params: &[FieldSig]) -> usize {
 fn constructor_body_delegates(body: &CallableBody) -> bool {
     match body {
         CallableBody::Expr(expr) => is_constructor_delegation_expr(expr),
+        CallableBody::Block(_) => false,
+    }
+}
+
+fn constructor_delegation_call(
+    body: &CallableBody,
+) -> Option<(&[crate::ast::CallArg], bool, crate::source::Span)> {
+    let CallableBody::Expr(expr) = body else {
+        return None;
+    };
+    constructor_delegation_call_expr(expr)
+}
+
+fn constructor_delegation_call_expr(
+    expr: &Expr,
+) -> Option<(&[crate::ast::CallArg], bool, crate::source::Span)> {
+    match expr {
+        Expr::Call {
+            callee,
+            args,
+            uses_brace_syntax,
+            span,
+        } if matches!(callee.as_ref(), Expr::Identifier { name, .. } if name == "this") => {
+            Some((args.as_slice(), *uses_brace_syntax, *span))
+        }
+        Expr::Group { inner, .. } => constructor_delegation_call_expr(inner),
+        _ => None,
+    }
+}
+
+fn constructor_body_contains_this_delegation_call(body: &CallableBody) -> bool {
+    match body {
+        CallableBody::Expr(expr) => is_constructor_delegation_expr(expr),
         CallableBody::Block(block) => block.statements.iter().any(constructor_stmt_delegates),
     }
 }
@@ -7903,6 +8076,27 @@ fn constructor_stmt_delegates(stmt: &Stmt) -> bool {
             .value
             .as_ref()
             .is_some_and(is_constructor_delegation_expr),
+        _ => false,
+    }
+}
+
+fn constructor_body_contains_delegation_attempt(body: &CallableBody) -> bool {
+    match body {
+        CallableBody::Expr(expr) => is_constructor_delegation_attempt_expr(expr),
+        CallableBody::Block(block) => block
+            .statements
+            .iter()
+            .any(constructor_stmt_contains_delegation_attempt),
+    }
+}
+
+fn constructor_stmt_contains_delegation_attempt(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Expr(stmt) => is_constructor_delegation_attempt_expr(&stmt.expr),
+        Stmt::Return(stmt) => stmt
+            .value
+            .as_ref()
+            .is_some_and(is_constructor_delegation_attempt_expr),
         _ => false,
     }
 }
@@ -8119,11 +8313,32 @@ fn lazy_arg_forbidden_control_flow_span_in_if_stmt(stmt: &IfStmt) -> Option<crat
 fn is_constructor_delegation_expr(expr: &Expr) -> bool {
     match expr {
         Expr::Call { callee, .. } => {
-            matches!(callee.as_ref(), Expr::Identifier { name, .. } if name == "new")
+            matches!(callee.as_ref(), Expr::Identifier { name, .. } if name == "this")
         }
         Expr::Group { inner, .. } => is_constructor_delegation_expr(inner),
         _ => false,
     }
+}
+
+fn is_constructor_delegation_attempt_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call { callee, .. } => {
+            matches!(callee.as_ref(), Expr::Identifier { name, .. } if name == "this" || name == "new")
+        }
+        Expr::Group { inner, .. } => is_constructor_delegation_attempt_expr(inner),
+        _ => false,
+    }
+}
+
+fn constructor_cycle_node_label(node: &ConstructorCycleNode) -> String {
+    let params = node
+        .sig
+        .params
+        .iter()
+        .map(|param| format!("{} {}", param.name, param.ty.describe()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("new({params})")
 }
 
 fn constructor_assigned_fields(
