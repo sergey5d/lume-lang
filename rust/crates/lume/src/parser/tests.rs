@@ -749,7 +749,7 @@ class User {
 }
 
 impl User {
-    new(name Str) = new { name }
+    new(name Str) = new { name: name }
 }
 "#,
     );
@@ -2512,6 +2512,27 @@ def make() Unit = values.map {
     assert!(
         result.diagnostics.iter().any(|diag| {
             diag.code == "invalid_trailing_lambda" && diag.message.contains("same line as '{'")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_headless_trailing_lambda_block() {
+    let result = parse(
+        r#"
+def make() Unit = runner.zero {
+    26
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_trailing_lambda"
+                && diag
+                    .message
+                    .contains("requires an explicit parameter arrow")
         }),
         "{:#?}",
         result.diagnostics

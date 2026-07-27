@@ -1287,7 +1287,13 @@ impl<'a> Parser<'a> {
                     self.parse_brace_record_literal_expr()?
                 } else {
                     let block = self.parse_block()?;
-                    self.validate_trailing_lambda_block(&block, open_span);
+                    if !self.validate_trailing_lambda_block(&block, open_span) && !prefers_block {
+                        self.diagnostics.push(Diagnostic::error(
+                            "invalid_trailing_lambda",
+                            "trailing lambda syntax requires an explicit parameter arrow; write '{ () -> ... }' for zero-argument callbacks",
+                            open_span,
+                        ));
+                    }
                     Expr::Block {
                         span: block.span,
                         body: block,
@@ -1407,7 +1413,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn validate_trailing_lambda_block(&mut self, block: &Block, open_span: Span) {
+    fn validate_trailing_lambda_block(&mut self, block: &Block, open_span: Span) -> bool {
         let [
             Stmt::Expr(ExprStmt {
                 expr: Expr::Lambda { span, .. },
@@ -1415,7 +1421,7 @@ impl<'a> Parser<'a> {
             }),
         ] = block.statements.as_slice()
         else {
-            return;
+            return false;
         };
 
         if span.start_pos.line != open_span.start_pos.line {
@@ -1425,6 +1431,7 @@ impl<'a> Parser<'a> {
                 *span,
             ));
         }
+        true
     }
 
     pub(super) fn parse_call_args(&mut self) -> Option<Vec<CallArg>> {
@@ -1652,6 +1659,7 @@ impl<'a> Parser<'a> {
 
     fn is_constructor_like_expr(expr: &Expr) -> bool {
         match expr {
+            Expr::Identifier { name, .. } if name == "new" => true,
             Expr::Identifier { name, .. } => name
                 .chars()
                 .next()

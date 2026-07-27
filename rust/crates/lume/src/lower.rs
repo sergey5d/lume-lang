@@ -4668,37 +4668,7 @@ impl<'a> FunctionLowerer<'a> {
             }
             return self.lower_lazy_argument(&arg.value, expected.ty.clone(), arg.span);
         }
-        if let Some(closure) =
-            self.lower_implicit_zero_arg_lambda_block_arg(&arg.value, &expected.ty, arg.span)
-        {
-            return closure;
-        }
         self.lower_expr_with_expected(&arg.value, Some(&expected.ty))
-    }
-
-    fn lower_implicit_zero_arg_lambda_block_arg(
-        &mut self,
-        expr: &Expr,
-        expected: &ir::Type,
-        span: Span,
-    ) -> Option<ir::Operand> {
-        let Expr::Block { .. } = expr else {
-            return None;
-        };
-        let ir::Type::Function { params, ret } = expected else {
-            return None;
-        };
-        if !params.is_empty() {
-            return None;
-        }
-        let rvalue = self.lower_lambda_rvalue(
-            &[],
-            expr,
-            span,
-            Some(params.as_slice()),
-            Some(ret.as_ref().clone()),
-        );
-        Some(self.emit_temp_from_rvalue(rvalue, expected.clone(), Some(span)))
     }
 
     fn lazy_forward_operand(&mut self, expr: &Expr) -> Option<ir::Operand> {

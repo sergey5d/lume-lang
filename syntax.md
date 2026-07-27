@@ -1299,12 +1299,14 @@ Block lambda:
 }
 ```
 
-Trailing block-lambda call syntax is also allowed when passing a lambda as an argument. For lambdas with parameters, the lambda head must start on the same line as the opening `{`:
+Trailing lambda call syntax is also allowed when passing a lambda as an argument. The trailing brace body must contain an explicit lambda head with `->`, and that lambda head must start on the same line as the opening `{`:
 
 ```txt
 items.map { x -> x + 1 }
 
 items.repeat { () -> 5 }
+
+runner.zero { () -> 26 }
 
 items.zipMap { (left, right) -> left + right }
 
@@ -1321,13 +1323,16 @@ items.zipMap { (left,
     right) -> left + right }
 ```
 
-If the expected argument type is a zero-argument function, the lambda head may
-be omitted and the trailing block is treated as `() -> { ... }`:
+Headless trailing blocks are rejected. Write the zero-argument lambda head explicitly:
 
 ```txt
-process {
-    println("hehe")
+# invalid
+runner.zero {
+    26
 }
+
+# valid
+runner.zero { () -> 26 }
 ```
 
 If a callback is passed alongside ordinary arguments, include it in the same
@@ -1336,9 +1341,7 @@ completed `(...)` call; that would imply currying or calling the result of the
 first call.
 
 ```txt
-processNamed("compares values", {
-    println("inside callback")
-})
+processNamed("compares values", { () -> println("inside callback") })
 ```
 
 Trailing brace call syntax on non-constructor calls is only for lambda arguments.

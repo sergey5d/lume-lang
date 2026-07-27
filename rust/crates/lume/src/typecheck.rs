@@ -4085,34 +4085,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_call_arg_expr_against(&mut self, expr: &Expr, expected: &Ty) -> Ty {
-        if let Some(ty) = self.check_implicit_zero_arg_lambda_block_arg(expr, expected) {
-            return ty;
-        }
         self.check_expr_against(expr, expected)
-    }
-
-    fn check_implicit_zero_arg_lambda_block_arg(
-        &mut self,
-        expr: &Expr,
-        expected: &Ty,
-    ) -> Option<Ty> {
-        let Expr::Block { body, .. } = expr else {
-            return None;
-        };
-        let Ty::Function(params, expected_ret) = expected else {
-            return None;
-        };
-        if !params.is_empty() {
-            return None;
-        }
-
-        let ret = self.check_block_against(body, expected_ret);
-        let ret = if **expected_ret == Ty::unit() {
-            Ty::unit()
-        } else {
-            ret
-        };
-        Some(Ty::Function(Vec::new(), Box::new(ret)))
     }
 
     fn check_lambda_expr(
@@ -4272,7 +4245,6 @@ impl<'a> Checker<'a> {
             && !self.brace_call_targets_current_constructor(callee)
             && !self.brace_call_targets_enum_case(callee)
             && !trailing_brace_call_has_lambda_arg(args)
-            && !self.trailing_brace_call_accepts_implicit_zero_arg_lambda(callee, args)
         {
             self.add_error(
                 "invalid_trailing_brace_call",
@@ -4399,26 +4371,6 @@ impl<'a> Checker<'a> {
         } else {
             Ty::Unknown
         }
-    }
-
-    fn trailing_brace_call_accepts_implicit_zero_arg_lambda(
-        &self,
-        callee: &Expr,
-        args: &[crate::ast::CallArg],
-    ) -> bool {
-        let Some(arg) = args.last() else {
-            return false;
-        };
-        if arg.name.is_some() || !matches!(arg.value, Expr::Block { .. }) {
-            return false;
-        }
-        let Some((params, _)) = self.callable_signature_for_args_probe(callee, args, true) else {
-            return false;
-        };
-        let Some(param) = params.get(args.len().saturating_sub(1)) else {
-            return false;
-        };
-        matches!(&param.ty, Ty::Function(fn_params, _) if fn_params.is_empty())
     }
 
     fn interface_sig_from_type_ref(&mut self, interface: &TypeRef) -> Option<TypeSig> {
@@ -9709,49 +9661,21 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_trailing_block_call_for_zero_arg_lambda_argument() {
+    fn allows_trailing_block_call_for_explicit_zero_arg_lambda_argument() {
         let program = parse_inline(
             r#"
 def process(f () -> Unit) Unit = f()
 def compute(f () -> Int) Int = f()
 
 def main() Unit {
-    process {
-        println("hehe")
-    }
+    process { () -> println("hehe") }
 
-    value Int = compute {
-        42
-    }
+    value Int = compute { () -> 42 }
 }
 "#,
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    }
-
-    #[test]
-    fn rejects_headless_trailing_block_for_lambda_with_parameters() {
-        let program = parse_inline(
-            r#"
-def process(f (Int) -> Unit) Unit = f(1)
-
-def main() Unit {
-    process {
-        println("hehe")
-    }
-}
-"#,
-        );
-        let result = check_program(&program);
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diag| diag.code == "invalid_trailing_brace_call"),
-            "{:#?}",
-            result.diagnostics
-        );
     }
 
     #[test]

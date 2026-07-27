@@ -72,16 +72,7 @@ Open construction helper naming direction:
 
 ## Medium Priority
 
-### 5. Word Equality Operators
-
-Open equality spelling question:
-- consider adding word operators `eq` and `neq` as readable aliases for `==` and `!=`
-- `left eq right` would mean exactly `left == right`
-- `left neq right` would mean exactly `left != right`
-- if added, they should share equality precedence and lowering rather than becoming separately overloadable operators
-- decide whether this improves readability enough to justify another spelling for equality
-
-### 6. Module / Visibility Polish
+### 5. Module / Visibility Polish
 
 Open module/use questions:
 - whether singleton methods should ever be usable directly beyond explicit `use module/Single/*` and builtin `OS` prelude behavior
@@ -90,7 +81,7 @@ Open module/use questions:
 - decide whether extension-method imports should keep using ordinary wildcard module use, or get a dedicated import surface such as `use ext app/module/*` or `use ext app/module/TypeName`
 - decide whether extension methods should also be allowed on `single` types, or whether `impl single Name { ... }` is enough and keeps singleton behavior explicit
 
-### 7. Interface Method Conflict Resolution
+### 6. Interface Method Conflict Resolution
 
 Open checker/runtime design:
 - decide how method resolution should work when a type implements multiple interfaces that inherit or declare conflicting method signatures
@@ -108,7 +99,7 @@ Related syntax question:
 - if added, decide whether they should mark interface satisfaction, override of a concrete method, or both
 - define diagnostics for accidental signature mismatches even if no marker is added
 
-### 8. Function Type Variance
+### 7. Function Type Variance
 
 Open checker work:
 - make sure function/lambda type assignability follows the usual variance rule
@@ -132,7 +123,7 @@ same way, but functional-interface APIs express the same idea through wildcard
 positions such as `? super T` for consumed argument types and `? extends R` for
 produced return types.
 
-### 9. Annotation Targets
+### 8. Annotation Targets
 
 Open question:
 - do we want annotations on global functions/method-like top-level `def` declarations as a first-class supported target
@@ -144,7 +135,7 @@ Leaning:
 - global functions are probably useful annotation targets for routing, tests, effects, permissions, and generated bindings
 - immutable top-level constants may be useful too, but annotation metadata should describe stable declarations, not changing state
 
-### 10. Primitive Type Definitions
+### 9. Primitive Type Definitions
 
 Primitive types such as `Int`, `Float`, `Str`, `Rune`, `Bool`, and `Unit` should eventually have their public companion/static-style signatures defined in Lume source instead of being scattered through checker, interpreter, and backend special cases.
 
@@ -161,7 +152,7 @@ Goal:
 
 ## Longer-Term Ideas
 
-### 11. Result / Either Style Error Values
+### 10. Result / Either Style Error Values
 
 Still open:
 - whether `try`-style propagation should stay hardcoded to these builtins or later grow a broader protocol
@@ -178,7 +169,7 @@ Clarification on "failure conversion":
   - enclosing function returns `Result[Int, AppError]`
   - failure conversion would mean allowing `IoError` to be turned into something like `AppError.Io(...)` during propagation
 
-### 12. Smarter Type Narrowing
+### 11. Smarter Type Narrowing
 
 Later improvements could include:
 - better narrowing after `is`
@@ -215,7 +206,7 @@ Main design question:
 - whether this should stay very local and conservative
 - or whether the checker should learn more control-flow-sensitive narrowing over time
 
-### 13. Reified Generic Follow-Ups
+### 12. Reified Generic Follow-Ups
 
 Open reified-generic follow-ups:
 - whether expected return types should help infer a reified parameter when no ordinary argument carries it
@@ -280,13 +271,13 @@ Constraints to preserve:
 - automatic reification of every generic parameter
 - reified type parameters on classes, shapes, enums, annotations, or singles
 
-### 14. Deferred Cleanup Follow-Ups
+### 13. Deferred Cleanup Follow-Ups
 
 Open questions:
 - whether runtime errors should also run pending defers
 - whether future async/concurrency features need a stronger cleanup model
 
-### 15. Flow Control Composition
+### 14. Flow Control Composition
 
 Possible future surface:
 
@@ -316,7 +307,7 @@ Open questions:
 - how values produced inside one flow become visible to later composed flows
 - whether `&` should sequence unconditionally, short-circuit, or model dependency composition
 
-### 16. Explicit Tuple Projection
+### 15. Explicit Tuple Projection
 
 Possible later syntax:
 
@@ -407,4 +398,3 @@ Leaning:
 1. enum + pattern ergonomics
 2. derived `Eq` / `Hashed`
 3. stdlib collection/query growth
-4. word equality operators

@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*trailing lambda syntax requires an explicit parameter arrow.*
+
+class Runner {}
+
+impl Runner {
+    def zero(f () -> Int) Int = f()
+}
+
+def main() Unit {
+    runner = Runner {}
+    println(runner.zero {
+        26
+    })
+}

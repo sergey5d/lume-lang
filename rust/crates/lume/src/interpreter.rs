@@ -6105,19 +6105,15 @@ mod tests {
     }
 
     #[test]
-    fn runs_trailing_block_as_zero_arg_lambda_argument() {
+    fn runs_trailing_block_as_explicit_zero_arg_lambda_argument() {
         let program = lower_inline(
             r#"
             def process(f () -> Unit) Unit = f()
             def compute(f () -> Int) Int = f()
 
             def main() Unit {
-                process {
-                    println("hehe")
-                }
-                println(compute {
-                    42
-                })
+                process { () -> println("hehe") }
+                println(compute { () -> 42 })
             }
             "#,
         );

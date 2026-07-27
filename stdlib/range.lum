@@ -11,8 +11,8 @@ class IntRange with Iterable[Int] {
 impl IntRange {
     def iterator() Iterator[Int] = RangeIterator { start: this.start, end: this.end, step: this.step }
 
-    def zip[X](other List[X]) List[(Int, X)] {
-        out List[(Int, X)] = []
+    def zip[X](other [X]) [(Int, X)] {
+        out [(Int, X)] = []
         right Iterator[X] = other.iterator()
         for left <- this {
             if !right.hasNext() {
@@ -23,8 +23,8 @@ impl IntRange {
         return out
     }
 
-    def zipWithIndex() List[(Int, Int)] {
-        out List[(Int, Int)] = []
+    def zipWithIndex() [(Int, Int)] {
+        out [(Int, Int)] = []
         var index = 0
         for item <- this {
             out.append((item, index))

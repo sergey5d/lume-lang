@@ -5,7 +5,7 @@ def it(title Str, block () -> Unit) Unit =
     block()
 
 def main() Unit {
-    it("bad") {
+    it("bad") { () ->
         println("this should be passed as an explicit argument")
     }
 }
