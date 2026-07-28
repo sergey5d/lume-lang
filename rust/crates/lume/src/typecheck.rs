@@ -4418,6 +4418,14 @@ impl<'a> Checker<'a> {
         {
             return self.check_callable_selection_call(&selection, callee, &normalized_args, span);
         }
+        if let Expr::Index { span, .. } = callee {
+            self.add_error(
+                "indexed_function_call_requires_grouping",
+                "callee[...](...) is explicit generic application syntax; to call an indexed function value, write '(callee[key])()'",
+                *span,
+            );
+            return Ty::Unknown;
+        }
         let callee_ty = self.check_expr(callee);
         match callee_ty {
             Ty::Function(params, ret) => {

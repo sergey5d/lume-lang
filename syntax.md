@@ -1001,6 +1001,18 @@ Rules:
 - If no argument determines `A`, pass it explicitly: `metadata[User]()`.
 - Type declarations cannot use `reified`: `class Box[reified A]` is invalid.
 
+Explicit generic application has priority over indexing when it is immediately
+called. Any expression of the form `callee[...](...)` is parsed as a generic
+call. To call a function value returned from indexing, group the indexed
+expression:
+
+```txt
+metadata[User]()       # explicit generic call
+entries["a"]           # indexing
+(handlers[key])()      # call an indexed function value
+handlers[key]()        # invalid: parsed as generic call syntax
+```
+
 Function and method parameters may end with one variadic list parameter. `vararg`
 is written before the parameter name:
 
