@@ -2985,15 +2985,10 @@ impl<'a> Checker<'a> {
                 self.source_expr_proves_pattern_match(pattern, inner)
             }
             (Pattern::Wildcard { .. } | Pattern::Binding { .. }, _) => true,
-            (Pattern::Extract { inner, .. }, source) => {
-                let Some((path, args)) = self.constructor_expr_parts(source) else {
-                    return false;
-                };
-                path.last()
-                    .is_some_and(|name| matches!(name.as_str(), "Some" | "Ok" | "Right"))
-                    && args.len() == 1
-                    && self.source_expr_proves_pattern_match(inner, args[0])
-            }
+            // `<-` extraction always needs an explicit fallback. Otherwise a
+            // harmless refactor from `Some(5)` to `value Option[Int] = Some(5)`
+            // changes whether control flow is required.
+            (Pattern::Extract { .. }, _) => false,
             (Pattern::Tuple { elements, .. }, Expr::TupleLiteral { items, .. })
                 if elements.len() == items.len() =>
             {
@@ -11999,43 +11994,15 @@ def main() Int {
     }
 
     #[test]
-    fn allows_plain_let_extract_when_source_is_known_success_case() {
-        let program = parse_inline(
-            r#"
-def main(seed Int) Int {
-    let item <- Some(seed)
-    let resultItem <- Ok(item)
-    let eitherItem <- Right(resultItem)
-    let {
-        grouped <- Some(eitherItem)
-    }
-    return grouped
-}
-"#,
-        );
-        let result = check_program(&program);
-        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    }
-
-    #[test]
     fn rejects_refutable_plain_let_patterns_without_else() {
         let program = parse_inline(
             r#"
-def main(
-    optionValue Option[Int],
-    resultValue Result[Int, Str],
-    eitherValue Either[Str, Int]
-) Int {
+def main(optionValue Option[Int]) Int {
     knownOption = Some(4)
-    widenedOption Option[Int] = Some(5)
     let Some(optionItem) = optionValue
-    let optionExtract <- optionValue
     let {
         Some(knownItem) = knownOption
-        resultExtract <- resultValue
-        eitherExtract <- eitherValue
     }
-    let widenedItem <- widenedOption
     return 0
 }
 "#,
@@ -12049,7 +12016,7 @@ def main(
                     && diag.message.contains("add an 'else' fallback")
             })
             .count();
-        assert_eq!(matches, 6, "{:#?}", result.diagnostics);
+        assert_eq!(matches, 2, "{:#?}", result.diagnostics);
     }
 
     #[test]

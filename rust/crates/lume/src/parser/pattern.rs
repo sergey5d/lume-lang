@@ -9,6 +9,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub(super) fn pattern_contains_extract(pattern: &Pattern) -> bool {
+        match pattern {
+            Pattern::Extract { .. } => true,
+            Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+                elements.iter().any(Self::pattern_contains_extract)
+            }
+            Pattern::Constructor { args, .. } => args.iter().any(Self::pattern_contains_extract),
+            Pattern::Wildcard { .. }
+            | Pattern::Binding { .. }
+            | Pattern::Type { .. }
+            | Pattern::Literal { .. } => false,
+        }
+    }
+
     pub(super) fn parse_refutable_pattern_head(
         &mut self,
         owner: &'static str,

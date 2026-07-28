@@ -12,7 +12,7 @@
 # panicEither 55
 # panicGroup 18
 # ifLet 89
-# plainKnownExtract 124
+# visibleExtractWithFallback 124
 
 def letElseOption(value Option[Int]) Int {
     let item <- value else return 0
@@ -69,8 +69,8 @@ def ifLetValue(value Option[Int]) Int {
     return -1
 }
 
-def plainKnownExtract(value Int) Int {
-    let item <- Some(value)
+def visibleExtractWithFallback(value Int) Int {
+    let item <- Some(value) else panic("expected visible value")
     item + 1
 }
 
@@ -88,5 +88,5 @@ def main() Unit {
     println("panicEither " + panicEither(Right(55)))
     println("panicGroup " + panicGroup(Some(5), Ok(6), Right(7)))
     println("ifLet " + ifLetValue(Some(89)))
-    println("plainKnownExtract " + plainKnownExtract(123))
+    println("visibleExtractWithFallback " + visibleExtractWithFallback(123))
 }

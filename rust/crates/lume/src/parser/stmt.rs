@@ -200,6 +200,17 @@ impl<'a> Parser<'a> {
                     span: start.cover(end),
                 }));
             }
+            if let Some(clause) = clauses
+                .iter()
+                .find(|clause| Self::pattern_contains_extract(&clause.pattern))
+            {
+                self.diagnostics.push(Diagnostic::error(
+                    "missing_let_extract_fallback",
+                    "let '<-' extraction requires an 'else' fallback; write 'let name <- value else ...'",
+                    clause.pattern.span(),
+                ));
+                return None;
+            }
             return Some(Stmt::PatternBinding(PatternBindingStmt {
                 clauses,
                 pattern: Pattern::Wildcard { span: clauses_end },
@@ -298,6 +309,14 @@ impl<'a> Parser<'a> {
                 else_block,
                 span: start.cover(end),
             }));
+        }
+        if Self::pattern_contains_extract(&pattern) {
+            self.diagnostics.push(Diagnostic::error(
+                "missing_let_extract_fallback",
+                "let '<-' extraction requires an 'else' fallback; write 'let name <- value else ...'",
+                pattern.span(),
+            ));
+            return None;
         }
         let end = value.span();
         Some(Stmt::PatternBinding(PatternBindingStmt {

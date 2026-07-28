@@ -1959,15 +1959,15 @@ let {
 - if the match succeeds, bindings remain visible after the statement
 - if the match fails, the `else` block is evaluated and must exit the current control-flow path, typically with `return`, `break`, `continue`, or a call whose return type is `Never`
 
-Success-case extraction shorthand such as `let item <- maybeValue` is accepted
-without `else` only when the source expression itself proves the successful
+Success-case extraction shorthand in `let` always requires an explicit
+fallback, even when the source expression visibly constructs a successful
 case:
 
 ```txt
-let item <- Some(5)        # ok: source is visibly Some
+let item <- Some(5) else panic("expected value")  # ok
 
 maybe Option[Int] = Some(5)
-let item <- maybe          # error: maybe has type Option[Int], so extraction can fail
+let item <- maybe          # error: '<-' extraction requires else
 ```
 
 For assertive extraction, write an explicit `panic(...)` fallback:
