@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*shape\(\.\.\.\) constructs anonymous shapes only; use 'Point\(\.\.\.\)' for named shape construction.*
+
+shape Point {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    point Point = shape(1, 2)
+}

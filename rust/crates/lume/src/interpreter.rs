@@ -575,7 +575,9 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
         | ast::Expr::String { .. }
         | ast::Expr::Bool { .. }
         | ast::Expr::Unit { .. } => {}
-        ast::Expr::ListLiteral { items, .. } | ast::Expr::TupleLiteral { items, .. } => {
+        ast::Expr::ListLiteral { items, .. }
+        | ast::Expr::TupleLiteral { items, .. }
+        | ast::Expr::ShapeLiteral { items, .. } => {
             for item in items {
                 rewrite_expr_for_runtime(item, module, graph);
             }

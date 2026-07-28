@@ -1,0 +1,21 @@
+# FAIL_REGEX:
+# .*shape\(\.\.\.\) in an overloaded call needs a unique expected anonymous shape type.*
+
+class Label {
+    value Str
+}
+
+impl Label {
+    new(user { name Str, age Int }) {
+        this.value = user.name
+    }
+
+    new(label { title Str, count Int }) {
+        this.value = label.title
+    }
+}
+
+def main() Unit {
+    label = Label(shape("Ada", 10))
+    println(label.value)
+}

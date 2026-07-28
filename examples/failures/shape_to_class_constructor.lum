@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*shape\(\.\.\.\) constructs anonymous shapes only; use 'User' constructors.*
+
+class User {
+    name Str
+    age Int
+}
+
+def main() Unit {
+    user User = shape("Ada", 42)
+}

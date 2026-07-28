@@ -580,6 +580,10 @@ pub enum Expr {
         items: Vec<Expr>,
         span: Span,
     },
+    ShapeLiteral {
+        items: Vec<Expr>,
+        span: Span,
+    },
     Call {
         callee: Box<Expr>,
         args: Vec<CallArg>,
@@ -684,6 +688,7 @@ impl Expr {
             | Expr::Unit { span }
             | Expr::ListLiteral { span, .. }
             | Expr::TupleLiteral { span, .. }
+            | Expr::ShapeLiteral { span, .. }
             | Expr::Call { span, .. }
             | Expr::Member { span, .. }
             | Expr::Index { span, .. }

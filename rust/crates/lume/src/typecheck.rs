@@ -1867,7 +1867,9 @@ impl<'a> Checker<'a> {
             | Expr::String { .. }
             | Expr::Bool { .. }
             | Expr::Unit { .. } => {}
-            Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
+            Expr::ListLiteral { items, .. }
+            | Expr::TupleLiteral { items, .. }
+            | Expr::ShapeLiteral { items, .. } => {
                 for item in items {
                     self.check_field_initializer_expr(item, owner, initialized_fields);
                 }
@@ -3630,42 +3632,117 @@ impl<'a> Checker<'a> {
         self.check_expr_against(expr, &Ty::Unknown)
     }
 
-    fn expected_shape_label(&self, expected: &Ty) -> Option<String> {
-        match expected {
-            Ty::Record(_) => Some("anonymous shape".to_string()),
-            Ty::Named(name, _) => {
-                let sig = self.lookup_any_type(name)?;
-                match sig.kind {
-                    TypeKind::Record => Some(format!("shape '{}'", sig.name)),
-                    TypeKind::Class => Some(format!("class '{}'", sig.name)),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
     fn reject_tuple_literal_against_shape_like(
         &mut self,
         items: &[Expr],
         expected: &Ty,
         span: crate::source::Span,
     ) -> Option<Ty> {
-        let Some(label) = self.expected_shape_label(expected) else {
-            return None;
+        let message = match expected {
+            Ty::Record(_) => {
+                "tuple values cannot construct anonymous shape; use shape(...) with an expected anonymous shape type or named fields like '{ field: value }'".to_string()
+            }
+            Ty::Named(name, _) => {
+                let sig = self.lookup_any_type(name)?;
+                match sig.kind {
+                    TypeKind::Record => format!(
+                        "tuple values cannot construct shape '{}'; use '{}(...)' or '{} {{ ... }}'",
+                        sig.name, sig.name, sig.name
+                    ),
+                    TypeKind::Class => format!(
+                        "tuple values cannot construct class '{}'; use '{}' constructors",
+                        sig.name, sig.name
+                    ),
+                    _ => return None,
+                }
+            }
+            _ => return None,
         };
         for item in items {
             self.check_expr(item);
         }
-        self.add_error(
-            "invalid_tuple_shape_conversion",
-            format!(
-                "tuple values cannot construct {}; use explicit construction fields like '{{ field: value }}'",
-                label
-            ),
-            span,
-        );
+        self.add_error("invalid_tuple_shape_conversion", message, span);
         Some(materialize_type(expected))
+    }
+
+    fn check_shape_literal_expr(
+        &mut self,
+        items: &[Expr],
+        expected: &Ty,
+        span: crate::source::Span,
+    ) -> Ty {
+        match expected {
+            Ty::Record(fields) => {
+                if items.len() != fields.len() {
+                    self.add_error(
+                        "invalid_shape_argument_count",
+                        format!(
+                            "shape(...) for anonymous shape expects {} values, got {}; values map to fields in written order",
+                            fields.len(),
+                            items.len()
+                        ),
+                        span,
+                    );
+                }
+
+                for (index, item) in items.iter().enumerate() {
+                    if let Some((name, expected_ty)) = fields.get(index) {
+                        let actual = self.check_expr_against(item, expected_ty);
+                        self.require_assignable(
+                            &actual,
+                            expected_ty,
+                            item.span(),
+                            "invalid_argument_type",
+                            format!(
+                                "shape field '{}' expects '{}' but got '{}'",
+                                name,
+                                expected_ty.describe(),
+                                actual.describe()
+                            ),
+                        );
+                    } else {
+                        self.check_expr(item);
+                    }
+                }
+
+                Ty::Record(
+                    fields
+                        .iter()
+                        .map(|(name, ty)| (name.clone(), materialize_type(ty)))
+                        .collect(),
+                )
+            }
+            Ty::Named(name, _) => {
+                let kind = self.lookup_any_type(name).map(|sig| sig.kind);
+                for item in items {
+                    self.check_expr(item);
+                }
+                let message = match kind {
+                    Some(TypeKind::Record) => format!(
+                        "shape(...) constructs anonymous shapes only; use '{}(...)' for named shape construction",
+                        name
+                    ),
+                    Some(TypeKind::Class) => format!(
+                        "shape(...) constructs anonymous shapes only; use '{}' constructors for class construction",
+                        name
+                    ),
+                    _ => "shape(...) requires an expected anonymous shape type".to_string(),
+                };
+                self.add_error("missing_shape_context", message, span);
+                Ty::Unknown
+            }
+            _ => {
+                for item in items {
+                    self.check_expr(item);
+                }
+                self.add_error(
+                    "missing_shape_context",
+                    "shape(...) requires an expected anonymous shape type; add an anonymous shape annotation like `value { name Str, age Int } = shape(...)`",
+                    span,
+                );
+                Ty::Unknown
+            }
+        }
     }
 
     fn check_expr_against(&mut self, expr: &Expr, expected: &Ty) -> Ty {
@@ -3712,6 +3789,9 @@ impl<'a> Checker<'a> {
                 } else {
                     Ty::Tuple(items.iter().map(|item| self.check_expr(item)).collect())
                 }
+            }
+            Expr::ShapeLiteral { items, span } => {
+                self.check_shape_literal_expr(items, expected, *span)
             }
             Expr::Call {
                 callee,
@@ -4334,7 +4414,7 @@ impl<'a> Checker<'a> {
             return ty;
         }
         if let Some(selection) =
-            self.callable_signature_for_args(callee, &normalized_args, uses_brace_syntax)
+            self.callable_signature_for_args(callee, &normalized_args, uses_brace_syntax, span)
         {
             return self.check_callable_selection_call(&selection, callee, &normalized_args, span);
         }
@@ -5455,6 +5535,7 @@ impl<'a> Checker<'a> {
                 .filter(|ctor| ctor.visibility != Visibility::Hidden || can_access_hidden)
                 .cloned()
                 .collect::<Vec<_>>();
+            self.diagnose_ambiguous_shape_context_call(&visible, args, span);
             if let Some(ctor) = self.choose_overload(&visible, args) {
                 let params = constructor_field_sigs_from_params(&ctor.params);
                 return self.check_constructor_signature(&params, &ret, args, span);
@@ -5509,20 +5590,7 @@ impl<'a> Checker<'a> {
                 );
                 return ret;
             }
-            for arg in args {
-                self.check_expr(&arg.value);
-            }
-            self.add_error(
-                "no_matching_overload",
-                format!(
-                    "{} '{}' has no implicit positional constructor; use '{} {{ ... }}' for field construction or define 'new(...)'",
-                    type_kind_label(sig.kind),
-                    sig.name,
-                    sig.name
-                ),
-                span,
-            );
-            return ret;
+            return self.check_positional_record_constructor_conversion(sig, &ret, args, span);
         }
 
         self.add_error(
@@ -5802,11 +5870,13 @@ impl<'a> Checker<'a> {
         callee: &Expr,
         args: &[crate::ast::CallArg],
         _uses_brace_syntax: bool,
+        span: crate::source::Span,
     ) -> Option<CallableSelection> {
         let (callee, explicit_type_args) = self.split_generic_call_callee(callee);
         match callee {
             Expr::Identifier { name, .. } => {
                 if let Some(functions) = self.lookup_functions(name) {
+                    self.diagnose_ambiguous_shape_context_call(&functions, args, span);
                     let sig = self
                         .choose_overload(&functions, args)
                         .or_else(|| functions.first())?
@@ -5817,6 +5887,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Some(methods) = self.lookup_implicit_method_functions(name) {
+                    self.diagnose_ambiguous_shape_context_call(&methods, args, span);
                     let sig = self
                         .choose_overload(&methods, args)
                         .or_else(|| methods.first())?
@@ -5837,6 +5908,7 @@ impl<'a> Checker<'a> {
                     })
                 {
                     if let Some(functions) = module.functions.get(&member) {
+                        self.diagnose_ambiguous_shape_context_call(functions, args, span);
                         let sig = self
                             .choose_overload(functions, args)
                             .or_else(|| functions.first())?
@@ -5848,6 +5920,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if let Some(sigs) = self.static_method_sigs(receiver, name) {
+                    self.diagnose_ambiguous_shape_context_call(&sigs, args, span);
                     let sig = self
                         .choose_overload(&sigs, args)
                         .or_else(|| sigs.first())?
@@ -5859,6 +5932,7 @@ impl<'a> Checker<'a> {
                 }
                 let receiver_ty = self.check_expr(receiver);
                 let methods = self.member_method_sigs(&receiver_ty, name)?;
+                self.diagnose_ambiguous_shape_context_call(&methods, args, span);
                 let method = self
                     .choose_overload(&methods, args)
                     .or_else(|| methods.first())?
@@ -5869,6 +5943,103 @@ impl<'a> Checker<'a> {
                 })
             }
             _ => None,
+        }
+    }
+
+    fn diagnose_ambiguous_shape_context_call(
+        &mut self,
+        overloads: &[FunctionSig],
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) {
+        if args
+            .iter()
+            .all(|arg| first_shape_literal_span(&arg.value).is_none())
+        {
+            return;
+        }
+        let candidate_count = self.shape_context_candidate_count(overloads, args);
+        if candidate_count <= 1 {
+            return;
+        }
+        let diagnostic_span = args
+            .iter()
+            .find_map(|arg| first_shape_literal_span(&arg.value))
+            .unwrap_or(span);
+        self.add_error(
+            "ambiguous_shape_context",
+            "shape(...) in an overloaded call needs a unique expected anonymous shape type; add an intermediate anonymous shape annotation",
+            diagnostic_span,
+        );
+    }
+
+    fn shape_context_candidate_count(
+        &self,
+        overloads: &[FunctionSig],
+        args: &[crate::ast::CallArg],
+    ) -> usize {
+        let arg_types = args
+            .iter()
+            .map(|arg| self.probe_expr_type(&arg.value))
+            .collect::<Vec<_>>();
+        overloads
+            .iter()
+            .filter(|sig| {
+                let arrangement = arrange_param_args(&sig.params, args);
+                if arrangement.overflow > 0 || arrangement.missing_required > 0 {
+                    return false;
+                }
+                for (index, param) in sig.params.iter().enumerate() {
+                    for arg in arrangement
+                        .slots
+                        .get(index)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[])
+                    {
+                        let raw_expected =
+                            call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
+                        let arg_index = args
+                            .iter()
+                            .position(|candidate| std::ptr::eq(candidate, *arg))
+                            .unwrap_or(0);
+                        if first_shape_literal_span(&arg.value).is_some() {
+                            if !self.shape_expr_can_use_expected(&arg.value, &raw_expected) {
+                                return false;
+                            }
+                            continue;
+                        }
+                        let actual = &arg_types[arg_index];
+                        if matches!(actual, Ty::Unknown) {
+                            continue;
+                        }
+                        if !self.arg_matches_expected(arg, actual, &raw_expected)
+                            && !type_contains_type_param(&raw_expected)
+                        {
+                            return false;
+                        }
+                    }
+                }
+                true
+            })
+            .count()
+    }
+
+    fn shape_expr_can_use_expected(&self, expr: &Expr, expected: &Ty) -> bool {
+        match expr {
+            Expr::ShapeLiteral { items, .. } => {
+                let Ty::Record(fields) = expected else {
+                    return false;
+                };
+                items.len() == fields.len()
+                    && items.iter().zip(fields.iter()).all(|(item, (_, ty))| {
+                        let actual = self.probe_expr_type(item);
+                        matches!(actual, Ty::Unknown)
+                            || self.is_assignable(&actual, ty)
+                            || type_contains_type_param(ty)
+                    })
+            }
+            Expr::Group { inner, .. } => self.shape_expr_can_use_expected(inner, expected),
+            _ => true,
         }
     }
 
@@ -7380,6 +7551,57 @@ impl<'a> Checker<'a> {
         materialize_type(ret)
     }
 
+    fn check_positional_record_constructor_conversion(
+        &mut self,
+        sig: &TypeSig,
+        ret: &Ty,
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) -> Ty {
+        if let Some(field) = sig
+            .fields
+            .iter()
+            .find(|field| field.hidden && !field.has_initializer)
+        {
+            self.add_error(
+                "no_matching_overload",
+                format!(
+                    "{} '{}' has no implicit positional constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
+                    type_kind_label(sig.kind),
+                    sig.name,
+                    field.name
+                ),
+                span,
+            );
+            return materialize_type(ret);
+        }
+
+        if sig.fields.iter().enumerate().any(|(index, field)| {
+            field.hidden
+                && field.has_initializer
+                && sig.fields[index + 1..].iter().any(|later| !later.hidden)
+        }) {
+            self.add_error(
+                "no_matching_overload",
+                format!(
+                    "{} '{}' cannot use positional construction because hidden defaulted fields must come after all visible fields",
+                    type_kind_label(sig.kind),
+                    sig.name
+                ),
+                span,
+            );
+            return materialize_type(ret);
+        }
+
+        let params = sig
+            .fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .cloned()
+            .collect::<Vec<_>>();
+        self.check_constructor_signature(&params, ret, args, span)
+    }
+
     fn lookup_functions(&self, name: &str) -> Option<Vec<FunctionSig>> {
         self.module
             .functions
@@ -7814,14 +8036,6 @@ impl<'a> Checker<'a> {
             return false;
         };
 
-        if let Ty::Tuple(items) = actual {
-            return items.len() == expected_fields.len()
-                && items
-                    .iter()
-                    .zip(expected_fields.iter())
-                    .all(|(actual, expected)| self.is_assignable(actual, &expected.ty));
-        }
-
         let Some(actual_fields) = self.structural_fields_for_type(actual) else {
             return false;
         };
@@ -7935,6 +8149,14 @@ fn enum_case_pattern_required_count(params: &[FieldSig]) -> usize {
     params.iter().filter(|param| !param.has_initializer).count()
 }
 
+fn first_shape_literal_span(expr: &Expr) -> Option<crate::source::Span> {
+    match expr {
+        Expr::ShapeLiteral { span, .. } => Some(*span),
+        Expr::Group { inner, .. } => first_shape_literal_span(inner),
+        _ => None,
+    }
+}
+
 fn constructor_body_delegates(body: &CallableBody) -> bool {
     match body {
         CallableBody::Expr(expr) => is_constructor_delegation_expr(expr),
@@ -8010,7 +8232,9 @@ fn constructor_stmt_contains_delegation_attempt(stmt: &Stmt) -> bool {
 fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Span> {
     match expr {
         Expr::Try { span, .. } => Some(*span),
-        Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
+        Expr::ListLiteral { items, .. }
+        | Expr::TupleLiteral { items, .. }
+        | Expr::ShapeLiteral { items, .. } => {
             items.iter().find_map(lazy_arg_forbidden_control_flow_span)
         }
         Expr::Call { callee, args, .. } => {
@@ -10909,11 +11133,11 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_tuple_to_anonymous_shape_assignment() {
+    fn allows_shape_positional_anonymous_shape_assignment() {
         let program = parse_inline(
             r#"
 def main() Int {
-    point { x Int, y Int } = (4, 5)
+    point { x Int, y Int } = shape(4, 5)
     point.x + point.y
 }
 "#,
@@ -10923,7 +11147,7 @@ def main() Int {
     }
 
     #[test]
-    fn allows_tuple_to_named_shape_assignment() {
+    fn allows_named_shape_positional_construction() {
         let program = parse_inline(
             r#"
 shape Point {
@@ -10932,13 +11156,81 @@ shape Point {
 }
 
 def main() Int {
-    point Point = (4, 5)
+    point Point = Point(4, 5)
     point.x + point.y
 }
 "#,
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_tuple_to_anonymous_shape_assignment() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    point { x Int, y Int } = (4, 5)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_tuple_shape_conversion"
+                    && diag
+                        .message
+                        .contains("tuple values cannot construct anonymous shape")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_shape_positional_named_shape_assignment() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    point Point = shape(4, 5)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "missing_shape_context" && diag.message.contains("use 'Point(...)'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_shape_positional_without_expected_anonymous_shape() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    point = shape(4, 5)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "missing_shape_context"
+                    && diag
+                        .message
+                        .contains("requires an expected anonymous shape type")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -11092,11 +11384,11 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_tuple_to_shape_with_wrong_field_type() {
+    fn rejects_shape_positional_with_wrong_field_type() {
         let program = parse_inline(
             r#"
 def main() Unit {
-    point { x Int, y Str } = (4, 5)
+    point { x Int, y Str } = shape(4, 5)
 }
 "#,
         );
@@ -11106,7 +11398,7 @@ def main() Unit {
                 diag.code == "invalid_argument_type"
                     && diag
                         .message
-                        .contains("tuple field 'y' for anonymous shape expects 'Str' but got 'Int'")
+                        .contains("shape field 'y' expects 'Str' but got 'Int'")
             }),
             "{:#?}",
             result.diagnostics

@@ -165,6 +165,10 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             items: items.iter().map(desugar_expr).collect(),
             span: *span,
         },
+        ast::Expr::ShapeLiteral { items, span } => core::Expr::ShapeLiteral {
+            items: items.iter().map(desugar_expr).collect(),
+            span: *span,
+        },
         ast::Expr::Call {
             callee,
             args,

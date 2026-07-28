@@ -51,10 +51,10 @@ def find(
             mergedAncestor := Some(current)
         }
 
-        return (mergedP, mergedQ, mergedAncestor)
+        return shape(mergedP, mergedQ, mergedAncestor)
     }
 
-    (currentFoundP, currentFoundQ, None)
+    shape(currentFoundP, currentFoundQ, None)
 }
 
 def lowestCommonAncestor(root TreeNode, valP Int, valQ Int) Option[TreeNode] =

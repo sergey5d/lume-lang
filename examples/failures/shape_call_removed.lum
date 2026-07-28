@@ -1,6 +1,0 @@
-# FAIL_REGEX:
-# shape\(\.\.\.\) expression syntax was removed; assign a tuple to an explicitly typed shape
-
-def main() Unit {
-    point { x Int, y Int } = shape(4, 5)
-}

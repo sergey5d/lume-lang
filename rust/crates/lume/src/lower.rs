@@ -3372,7 +3372,10 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Block { body, .. } => self
                 .lower_block_value_with_expected(body, Some(expected))
                 .unwrap_or(ir::Operand::Const(ir::Constant::Unit)),
-            Expr::Call { .. } | Expr::RecordLiteral { .. } | Expr::Lambda { .. } => {
+            Expr::Call { .. }
+            | Expr::RecordLiteral { .. }
+            | Expr::ShapeLiteral { .. }
+            | Expr::Lambda { .. } => {
                 self.lower_expr_from_rvalue_with_expected(expr, Some(expected))
             }
             Expr::Identifier { .. } | Expr::Member { .. }
@@ -3474,6 +3477,7 @@ impl<'a> FunctionLowerer<'a> {
             } => self.lower_lifted_chain_expr(base, segments, *span),
             Expr::ListLiteral { .. }
             | Expr::TupleLiteral { .. }
+            | Expr::ShapeLiteral { .. }
             | Expr::RecordLiteral { .. }
             | Expr::AnonymousInterface { .. }
             | Expr::Unary { .. }
@@ -3702,6 +3706,7 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|item| self.infer_expr_type_with_overrides(item, overrides))
                     .collect(),
             ),
+            Expr::ShapeLiteral { .. } => ir::Type::Unknown,
             Expr::RecordLiteral { fields, values, .. } => {
                 if fields.is_empty() && !values.is_empty() {
                     return ir::Type::Tuple(
@@ -4490,6 +4495,7 @@ impl<'a> FunctionLowerer<'a> {
             Expr::TupleLiteral { items, .. } => Some(ir::RValue::Tuple(
                 items.iter().map(|item| self.lower_expr(item)).collect(),
             )),
+            Expr::ShapeLiteral { items, .. } => self.lower_shape_literal(items, expected),
             Expr::RecordLiteral { fields, values, .. } => {
                 if let Some(expected) = expected {
                     if let Some(value) =
@@ -4991,6 +4997,29 @@ impl<'a> FunctionLowerer<'a> {
             ty: expected.clone(),
             fields: lowered_fields,
         })
+    }
+
+    fn lower_shape_literal(
+        &mut self,
+        items: &[Expr],
+        expected: Option<&ir::Type>,
+    ) -> Option<ir::RValue> {
+        let Some(ir::Type::Record(fields)) = expected else {
+            return Some(ir::RValue::Tuple(
+                items.iter().map(|item| self.lower_expr(item)).collect(),
+            ));
+        };
+
+        Some(ir::RValue::Record(
+            fields
+                .iter()
+                .zip(items.iter())
+                .map(|(field, item)| ir::NamedOperand {
+                    name: field.name.clone(),
+                    value: self.lower_expr_with_expected(item, Some(&field.ty)),
+                })
+                .collect(),
+        ))
     }
 
     fn named_construct_fields(

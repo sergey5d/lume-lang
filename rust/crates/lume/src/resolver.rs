@@ -1315,6 +1315,7 @@ impl<'a> Resolver<'a> {
             Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => items
                 .iter()
                 .all(|item| self.is_annotation_static_value(item)),
+            Expr::ShapeLiteral { .. } => false,
             Expr::RecordLiteral { fields, values, .. } => {
                 fields
                     .iter()
@@ -2060,7 +2061,9 @@ impl<'a> Resolver<'a> {
             | Expr::String { .. }
             | Expr::Bool { .. }
             | Expr::Unit { .. } => {}
-            Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
+            Expr::ListLiteral { items, .. }
+            | Expr::TupleLiteral { items, .. }
+            | Expr::ShapeLiteral { items, .. } => {
                 for item in items {
                     self.resolve_expr(item);
                 }

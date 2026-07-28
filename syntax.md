@@ -712,20 +712,34 @@ def describe(user { name Str, age Int }) Str =
     user.name + " is " + user.age
 ```
 
-Tuple-to-shape construction is contextual. The target shape must be known from
-an annotation, parameter type, or return type:
+Anonymous shape positional construction uses `shape(...)`. It is contextual:
+the expected type must be an anonymous shape type, and values map to fields in
+the written field order:
 
 ```txt
-user { name Str, age Int } = ("Ada", 10)
+user { name Str, age Int } = shape("Ada", 10)
 
 def makeUser() { name Str, age Int } {
-    return ("Ada", 10)
+    return shape("Ada", 10)
 }
 
-describe(("Cara", 14))
+describe(shape("Cara", 14))
 ```
 
-Tuples do not construct classes. Classes must name their constructor target:
+Without an expected anonymous-shape type, field names are unknown, so
+`shape(...)` is rejected:
+
+```txt
+user = shape("Ada", 10)      # invalid
+```
+
+An overloaded call cannot provide the required expected type unless the overload
+set selects one anonymous-shape parameter unambiguously. If multiple overloads
+could accept the same `shape(...)` values with different field names, bind an
+intermediate anonymous shape first.
+
+Tuples do not construct shapes or classes. Classes must name their constructor
+target:
 
 ```txt
 user User = User { name: "Ada", age: 10 }
@@ -746,7 +760,6 @@ Named shapes are data-only structural field views:
 - shapes may declare interface bounds with `shape Name with Interface`
 - brace field construction uses `ShapeName { field: value }`
 - positional construction uses `ShapeName(...)`
-- contextual tuple construction is allowed when the expected type is a known shape
 
 ```txt
 shape Point {
@@ -773,7 +786,7 @@ impl NamedPoint {
 
 origin = Point(0, 0)
 named = Point { x: 3, y: 4 }
-tupled Point = (5, 6)
+positional Point = Point(5, 6)
 ```
 
 Construction rules:
@@ -783,13 +796,13 @@ General construction rules:
 - a constructor declaration lists the inputs accepted by construction
 - constructor parentheses accept positional arguments only; use braces for construction fields
 - function and method calls may still use named arguments in parentheses
-- `Type { value }` is not valid; use `Type(value)`
-- anonymous shapes use `{ field: value }` for field construction and tuple values for contextual positional construction
+- `Type { value }` is not valid; use `Type(value)` only when the type supports positional construction
+- anonymous shapes use `{ field: value }` for field construction and `shape(...)` for contextual positional construction
 - builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` use parentheses
-- `Type { ... }` and `Type(...)` both resolve through the available explicit `new(...)` declaration or implicit field-construction inputs
+- `Type { ... }` resolves through the available explicit `new(...)` declaration or implicit field-construction inputs
+- `Type(...)` resolves through explicit class `new(...)`, implicit visible-field construction, named shape positional construction, or builtin constructor forms
 - class construction is nominal and constructor-gated; shape construction is structural
-- tuple values cannot construct classes; write `User(...)` or `User { ... }`
-- tuple values can construct anonymous or named shapes only when the target shape type is known
+- tuple values cannot construct classes or shapes; write `shape(...)`, `Point(...)`, `User(...)`, or construction fields
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
 
 Explicit constructor rules:
@@ -859,6 +872,7 @@ Type { field: value }            # brace field construction or enum field payloa
 call { x -> ... }                # trailing lambda
 Interface with Other { method(...) ... } # anonymous interface implementation
 new(field Type)                  # constructor declaration
+shape(value, other)              # contextual anonymous-shape positional construction
 ```
 
 Single-expression braces such as `{ value }` are block expressions, not anonymous shapes. To construct an anonymous shape, use construction fields with `:`.
@@ -868,15 +882,16 @@ Shape conversion rules:
 - extra fields are allowed when passing a value to a narrower shape
 - missing fields are rejected
 - defaults are not part of the shape syntax
-- tuple-to-shape is allowed only when the target shape is known
-- tuple-to-shape follows shape field order exactly
+- `shape(...)` may construct anonymous shapes only when the expected type is an anonymous shape
+- `shape(...)` values map to anonymous-shape fields in written field order
+- `shape(...)` argument count must exactly match the anonymous-shape field count
 - shape-to-shape assignment is structural by field names and field types
 - class-to-shape is allowed through visible fields
 - shape-to-interface follows the shape's explicit `with Interface` bounds
 - class-to-interface-through-shape is not automatic; assign the class value to an explicit shape view first
 - hidden class fields are not visible to shape conversion
 - shape-to-class is not implicit; use a class constructor
-- tuple-to-class is not allowed; use a class constructor
+- tuple-to-shape and tuple-to-class are not allowed; use `shape(...)`, named shape construction, or class constructors
 - ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
 - construction fields inside braces use `field: value`
 - construction fields may carry an explicit initializer type as `field Type: value`
@@ -895,12 +910,15 @@ class Pixel {
     y Int
 }
 
-point Point = (1, 2)                # tuple -> named shape
-anon { x Int, y Int } = (1, 2)      # tuple -> anonymous shape
-fromClass Point = Pixel(1, 2)       # class -> shape
+point Point = Point(1, 2)           # named shape positional construction
+anon { x Int, y Int } = shape(1, 2) # anonymous shape positional construction
+fromClass Point = Pixel { x: 1, y: 2 } # class -> shape
 named Point = { x: 1, y: 2 }        # anonymous shape -> named shape
 
 user User = ("Ada", 10)             # invalid: tuple -> class
+point Point = (1, 2)                # invalid: tuple -> named shape
+named Point = shape(1, 2)           # invalid: use Point(1, 2)
+anon = shape(1, 2)                  # invalid: expected shape fields are unknown
 user User = { name: "Ada", age: 10 } # invalid: shape -> class
 ```
 

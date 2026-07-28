@@ -1,6 +1,6 @@
 # FAIL_REGEX:
-# tuple field 'y' for anonymous shape expects 'Str' but got 'Int'
+# shape field 'y' expects 'Str' but got 'Int'
 
 def main() Unit {
-    point { x Int, y Str } = (4, 5)
+    point { x Int, y Str } = shape(4, 5)
 }

@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# tuple values cannot construct class 'User'; use 'User\(\.\.\.\)' or 'User \{ \.\.\. \}'
+# tuple values cannot construct class 'User'; use 'User' constructors
 
 class User {
     name Str

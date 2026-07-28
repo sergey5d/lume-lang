@@ -802,7 +802,7 @@ impl<'a> Parser<'a> {
             if !entries.is_empty() {
                 self.diagnostics.push(Diagnostic::error(
                     "positional_brace_construction",
-                    "braces are for construction fields; use 'Type(...)' for positional constructors or assign a tuple to an explicitly typed shape",
+                    "braces are for construction fields; use 'Type(...)' for positional constructors",
                     start.cover(end),
                 ));
                 return None;
@@ -1561,13 +1561,30 @@ impl<'a> Parser<'a> {
                 None
             }
             TokenKind::Keyword(Keyword::Shape) => {
-                let _ = self.consume_keyword(Keyword::Shape, "expected 'shape'")?;
+                let start = self.consume_keyword(Keyword::Shape, "expected 'shape'")?;
+                if self.match_token(TokenKind::LParen) {
+                    let args = self.parse_call_args()?;
+                    let end = self.consume(TokenKind::RParen, "expected ')' after shape values")?;
+                    let mut items = Vec::new();
+                    for arg in args {
+                        if arg.name.is_some() || arg.ty.is_some() {
+                            self.diagnostics.push(Diagnostic::error(
+                                "invalid_shape_positional_argument",
+                                "shape(...) accepts positional values only; use '{ field: value }' for named anonymous shape construction",
+                                arg.span,
+                            ));
+                        }
+                        items.push(arg.value);
+                    }
+                    return Some(Expr::ShapeLiteral {
+                        items,
+                        span: start.cover(end),
+                    });
+                }
                 let message = if self.at(TokenKind::LBrace) {
                     "anonymous shape literals use '{ ... }'; 'shape { ... }' is not supported"
-                } else if self.at(TokenKind::LParen) {
-                    "shape(...) expression syntax was removed; assign a tuple to an explicitly typed shape"
                 } else {
-                    "anonymous shape literals use '{ ... }'"
+                    "shape positional construction uses 'shape(...)'"
                 };
                 self.error_at_current("unexpected_token", message);
                 None
