@@ -2556,17 +2556,24 @@ impl<'a> Resolver<'a> {
         let Some(label) = self.field_hint_label(name) else {
             return false;
         };
-        self.add_error(
-            "shadowing_binding",
+        let message = if self.current_constructor {
+            format!(
+                "binding '{}' shadows {} {}; constructor field initialization must write 'this.{} = ...'",
+                name,
+                article_for(label),
+                label,
+                name
+            )
+        } else {
             format!(
                 "binding '{}' shadows {} {}; use a different name, or write 'this.{}' to access the field",
                 name,
                 article_for(label),
                 label,
                 name
-            ),
-            span,
-        );
+            )
+        };
+        self.add_error("shadowing_binding", message, span);
         true
     }
 

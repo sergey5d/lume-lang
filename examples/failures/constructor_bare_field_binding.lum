@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*binding 'count' shadows a class field; constructor field initialization must write 'this.count = \.\.\.'.*
+
+class Counter {
+    count Int
+}
+
+impl Counter {
+    new() {
+        count = 0
+    }
+}
+
+def main() Unit {}

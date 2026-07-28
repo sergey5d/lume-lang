@@ -569,6 +569,10 @@ count /= 2
 count %= 2
 ```
 
+Compound assignments are mutation operators despite containing `=`. They
+require an existing mutable binding or mutable field, and they never introduce a
+new binding.
+
 Constructor field initialization:
 
 ```txt
