@@ -1622,7 +1622,7 @@ def run() Unit {
 }
 
 #[test]
-fn rejects_equals_before_block_callable_body() {
+fn parses_equals_before_block_callable_body() {
     let result = parse(
         r#"
 def run() Unit = {
@@ -1630,14 +1630,15 @@ def run() Unit = {
 }
 "#,
     );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_callable_body"
-                && diag.message.contains("block callable bodies omit '='")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => assert_eq!(block.statements.len(), 1),
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
 }
 
 #[test]

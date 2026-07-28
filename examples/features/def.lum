@@ -1,9 +1,15 @@
 # EXPECT:
 # def function
+# def block
 
 def keywordFunction() Str =
     "function"
 
+blockWithEquals() Str = {
+    "block"
+}
+
 def main() Unit {
     println("def", keywordFunction())
+    println("def", blockWithEquals())
 }

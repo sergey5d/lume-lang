@@ -1,6 +1,0 @@
-# FAIL_REGEX:
-# .*block callable bodies omit '='.*
-
-def main() Unit = {
-    println("old block form")
-}

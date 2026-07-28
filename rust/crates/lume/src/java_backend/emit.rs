@@ -2089,6 +2089,19 @@ impl<'a> FunctionEmitter<'a> {
                     }
                     _ => None,
                 };
+                if matches!(
+                    value,
+                    ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit))
+                ) && target_ty.as_ref().is_some_and(|ty| !is_java_void_type(ty))
+                {
+                    let target_ty = target_ty.as_ref()?;
+                    out.push_str("                    ");
+                    out.push_str(&self.emit_place(target)?);
+                    out.push_str(" = (");
+                    out.push_str(&self.names.value_type(target_ty));
+                    out.push_str(") ((Object) lume.core.LumeUnit.INSTANCE);\n");
+                    return Some(());
+                }
                 if target_ty.as_ref().is_some_and(is_java_void_type)
                     && value_ty.as_ref().is_some_and(is_java_void_type)
                     && rvalue_can_be_java_statement(value)
@@ -2268,14 +2281,21 @@ impl<'a> FunctionEmitter<'a> {
             }
             ir::RValue::Field { base, name } => {
                 let base_expr = self.emit_operand(base)?;
-                if self
-                    .operand_type(base)
-                    .is_some_and(|ty| matches!(ty, ir::Type::Tuple(_)))
-                {
-                    let accessor = tuple_accessor_name(name)?;
-                    Some(format!("{base_expr}.{accessor}()"))
-                } else {
-                    Some(format!("{base_expr}.{}", java_member_name(name)))
+                match self.operand_type(base) {
+                    Some(ir::Type::Tuple(_)) => {
+                        let accessor = tuple_accessor_name(name)?;
+                        Some(format!("{base_expr}.{accessor}()"))
+                    }
+                    Some(ir::Type::Named {
+                        name: ref type_name,
+                        ..
+                    }) if self
+                        .type_def(type_name)
+                        .is_some_and(|ty| ty.kind == TypeKind::Record) =>
+                    {
+                        Some(format!("{base_expr}.{}()", java_member_name(name)))
+                    }
+                    _ => Some(format!("{base_expr}.{}", java_member_name(name))),
                 }
             }
             ir::RValue::TypeOf { ty } => Some(type_value_expr(ty, self.names)),

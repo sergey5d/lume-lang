@@ -958,10 +958,14 @@ Block-bodied function:
 add(left Int, right Int) Int {
     return left + right
 }
+
+addWithEquals(left Int, right Int) Int = {
+    return left + right
+}
 ```
 
-Callable block bodies omit `=`. A block expression is valid in ordinary
-expression positions, but not directly after a callable-body `=`.
+Callable block bodies may include `=` or omit it. Expression-bodied callables
+still use `=`.
 
 Generic function:
 
@@ -1452,7 +1456,7 @@ Rules:
 
 - braced blocks may appear as standalone statements or as expressions
 - block expressions evaluate to the value of their last statement
-- block expressions are not valid directly after callable-body `=`; write `name(...) { ... }` for a callable block body
+- callable block bodies may be written as `name(...) { ... }` or `name(...) = { ... }`
 - if you want a block value, the last statement must be value-producing
 - value-producing tail forms include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
@@ -2601,10 +2605,10 @@ Newline continuation:
   - separators / chaining markers: `,`, `.`, `.->`
 - Delimited forms allow layout after opening delimiters and after commas, but they do not make leading binary/update operators valid by themselves.
 - Binding/callable `=` may start its expression on the same line or the next indented line.
-- Callable bodies have two forms:
+- Callable bodies have three accepted forms:
   - `name(...) { ... }` for block bodies
+  - `name(...) = { ... }` for block bodies
   - `name(...) = expr` for expression bodies
-  - `name(...) = { ... }` is invalid even though blocks are expressions elsewhere; callable block bodies omit `=`
   - `def name(...) ...` remains accepted as the explicit keyword form
 - Inline-body introducers such as `else` and `yield` may take a same-line body without braces; if that body moves to the next line, a `{ ... }` block is required.
 - So this is valid:

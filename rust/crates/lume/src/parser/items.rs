@@ -771,7 +771,7 @@ impl<'a> Parser<'a> {
         let params = if self.at(TokenKind::LBrace) {
             self.diagnostics.push(Diagnostic::error(
                 "old_constructor_syntax",
-                "constructors use `new(params) { body }` or `new(params) = expression`; replace `new { ... }` with `new(...)`",
+                "constructors use `new(params) = expression` or `new(params) = { body }`; replace `new { ... }` with `new(...)`",
                 self.current_span(),
             ));
             self.parse_constructor_param_block()?
@@ -980,13 +980,7 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::Eq, "expected '=' or '{' before callable body")?;
         self.skip_newlines();
         if self.at(TokenKind::LBrace) && !self.looks_like_brace_record_literal(false) {
-            let block = self.parse_block()?;
-            self.diagnostics.push(Diagnostic::error(
-                "invalid_callable_body",
-                "block callable bodies omit '='; use 'def name(...) { ... }'",
-                block.span,
-            ));
-            return Some(CallableBody::Block(block));
+            return self.parse_block().map(CallableBody::Block);
         }
         let expr = self.parse_expr()?;
         Some(CallableBody::Expr(expr))
