@@ -2934,6 +2934,9 @@ impl<'a> Checker<'a> {
                     .all(|(pattern, item)| self.for_pattern_is_irrefutable(pattern, item)),
                 _ => false,
             },
+            Pattern::List { elements, rest, .. } => {
+                elements.is_empty() && rest.is_some() && self.list_element_type(scrutinee).is_some()
+            }
             Pattern::Constructor { path, args, .. } => {
                 if self.lookup_case_by_pattern(path, scrutinee).is_some() {
                     return false;
@@ -2998,6 +3001,15 @@ impl<'a> Checker<'a> {
                     .iter()
                     .zip(items.iter())
                     .all(|(pattern, item)| self.source_expr_proves_pattern_match(pattern, item))
+            }
+            (Pattern::List { elements, rest, .. }, Expr::ListLiteral { items, .. })
+                if rest.is_some() || elements.len() == items.len() =>
+            {
+                items.len() >= elements.len()
+                    && elements
+                        .iter()
+                        .zip(items.iter())
+                        .all(|(pattern, item)| self.source_expr_proves_pattern_match(pattern, item))
             }
             (Pattern::Constructor { path, args, .. }, source) => {
                 let Some((source_path, source_args)) = self.constructor_expr_parts(source) else {
@@ -6385,6 +6397,35 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            Pattern::List { elements, rest, .. } => {
+                let element_ty = match self.list_element_type(scrutinee) {
+                    Some(element_ty) => element_ty,
+                    None if matches!(scrutinee, Ty::Unknown) => Ty::Unknown,
+                    None => {
+                        self.add_error(
+                            "invalid_destructure",
+                            format!(
+                                "list pattern requires a List value, got '{}'",
+                                scrutinee.describe()
+                            ),
+                            pattern.span(),
+                        );
+                        Ty::Unknown
+                    }
+                };
+                for element in elements {
+                    self.bind_pattern(element, &element_ty);
+                }
+                if let Some(rest) = rest {
+                    if rest.name != "_" {
+                        self.define_local(
+                            &rest.name,
+                            Ty::Named("List".to_string(), vec![element_ty]),
+                            false,
+                        );
+                    }
+                }
+            }
             Pattern::Constructor { path, args, .. } => {
                 let case_name = path.last().cloned().unwrap_or_default();
                 if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
@@ -6456,6 +6497,9 @@ impl<'a> Checker<'a> {
                     .all(|(pattern, item)| self.pattern_is_irrefutable(pattern, item)),
                 _ => false,
             },
+            Pattern::List { elements, rest, .. } => {
+                elements.is_empty() && rest.is_some() && self.list_element_type(scrutinee).is_some()
+            }
             Pattern::Constructor { path, args, .. } => {
                 if self.lookup_case_by_pattern(path, scrutinee).is_some() {
                     return false;
@@ -6623,6 +6667,13 @@ impl<'a> Checker<'a> {
             Ty::Named(name, args) if name == "Result" && args.len() >= 1 => args[0].clone(),
             Ty::Named(name, args) if name == "Either" && args.len() == 2 => args[1].clone(),
             _ => Ty::Unknown,
+        }
+    }
+
+    fn list_element_type(&self, ty: &Ty) -> Option<Ty> {
+        match ty {
+            Ty::Named(name, args) if name == "List" && args.len() == 1 => args.first().cloned(),
+            _ => None,
         }
     }
 

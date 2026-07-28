@@ -553,6 +553,11 @@ fn rewrite_pattern_for_runtime(pattern: &mut ast::Pattern, module: &LoadedModule
                 rewrite_pattern_for_runtime(element, module);
             }
         }
+        ast::Pattern::List { elements, .. } => {
+            for element in elements {
+                rewrite_pattern_for_runtime(element, module);
+            }
+        }
         ast::Pattern::Constructor { path, args, .. } => {
             rewrite_pattern_path_for_runtime(path, module);
             for arg in args {
@@ -3763,6 +3768,53 @@ impl<'a> Interpreter<'a> {
                     return Err(self.runtime_error(span, "ListAppend expects 2 arguments"));
                 }
                 self.list_append(args[0].clone(), args[1].clone(), span)
+            }
+            ir::Intrinsic::ListLen => {
+                if args.len() != 1 {
+                    return Err(self.runtime_error(span, "ListLen expects 1 argument"));
+                }
+                match &args[0] {
+                    Value::List(items) => Ok(Value::Int(items.borrow().len() as i64)),
+                    _ => Err(self.runtime_error(span, "ListLen expects a List receiver")),
+                }
+            }
+            ir::Intrinsic::ListGet => {
+                if args.len() != 2 {
+                    return Err(self.runtime_error(span, "ListGet expects 2 arguments"));
+                }
+                let index = args[1].as_int(self, span, "list pattern index")?;
+                match &args[0] {
+                    Value::List(items) => {
+                        let items = items.borrow();
+                        let Some(value) = items.get(index as usize) else {
+                            return Err(self.runtime_error(
+                                span,
+                                format!("list pattern index {} out of bounds", index),
+                            ));
+                        };
+                        Ok(self.clone_value(value))
+                    }
+                    _ => Err(self.runtime_error(span, "ListGet expects a List receiver")),
+                }
+            }
+            ir::Intrinsic::ListSlice => {
+                if args.len() != 2 {
+                    return Err(self.runtime_error(span, "ListSlice expects 2 arguments"));
+                }
+                let start = args[1].as_int(self, span, "list pattern slice start")?;
+                match &args[0] {
+                    Value::List(items) => {
+                        let items = items.borrow();
+                        let start = start.max(0) as usize;
+                        let slice = items
+                            .iter()
+                            .skip(start)
+                            .map(|value| self.clone_value(value))
+                            .collect();
+                        Ok(Value::list(slice))
+                    }
+                    _ => Err(self.runtime_error(span, "ListSlice expects a List receiver")),
+                }
             }
             ir::Intrinsic::ExtractSuccessIsSet => {
                 if args.len() != 1 {

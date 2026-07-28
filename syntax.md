@@ -1915,6 +1915,34 @@ let _ Worker = value else {
 }
 ```
 
+List-pattern binding is supported for `List[T]` / `[T]` values:
+
+```txt
+let [left, right] = values else {
+    return Err("expected exactly two values")
+}
+
+let [name Str, age Int] = valuesOfAny else {
+    return Err("wrong value shape")
+}
+
+let [head, ...tail] = values else {
+    return Err("empty list")
+}
+
+let [...all] = values
+```
+
+List pattern rules:
+
+- `[a, b]` matches exactly two elements.
+- `[]` matches an empty list.
+- `[a, ...rest]` matches one or more elements and binds `rest` as `[T]`.
+- `[...rest]` matches any list and binds a shallow list tail copy as `[T]`.
+- Only one `...rest` is allowed, and it must be last.
+- `..._` ignores the remaining elements.
+- List patterns are for `List[T]` / `[T]`; arrays are not part of this pattern surface.
+
 Grouped refutable bindings share one fallback:
 
 ```txt
@@ -2326,6 +2354,16 @@ result = match value {
     case SomeX(x) if x > 10 => x
     case SomeX(_) => 10
     case OptionX.NoneX => 0
+}
+```
+
+List patterns can be used in `match` cases:
+
+```txt
+result = match values {
+    case [] => "empty"
+    case [only] => "single"
+    case [first, second, ...rest] => "many"
 }
 ```
 

@@ -174,6 +174,36 @@ public final class LumeRuntime {
         throw new LumePanic("index out of bounds: " + offset);
     }
 
+    public static long listLen(Object value) {
+        if (value instanceof LumeList<?> list) {
+            return list.size();
+        }
+        throw new LumePanic("expected List");
+    }
+
+    public static Object listGet(Object value, Object index) {
+        if (value instanceof LumeList<?> list) {
+            var item = list.get(((Number) index).longValue());
+            if (item instanceof Option.Some<?> some) {
+                return some.value();
+            }
+            throw new LumePanic("list pattern index out of bounds");
+        }
+        throw new LumePanic("expected List");
+    }
+
+    public static LumeList<?> listSlice(Object value, Object start) {
+        if (value instanceof LumeList<?> list) {
+            var javaValues = list.asJava();
+            var offset = Math.max(0, ((Number) start).intValue());
+            if (offset >= javaValues.size()) {
+                return LumeList.empty();
+            }
+            return LumeList.from(javaValues.subList(offset, javaValues.size()));
+        }
+        throw new LumePanic("expected List");
+    }
+
     public static LumeIterator<?> iterInit(Object source) {
         return LumeIterator.from(source);
     }

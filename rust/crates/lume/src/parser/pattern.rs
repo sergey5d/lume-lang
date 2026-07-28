@@ -270,6 +270,7 @@ impl<'a> Parser<'a> {
                     span: start.cover(end),
                 })
             }
+            TokenKind::LBracket => self.parse_list_pattern(depth),
             TokenKind::Identifier => {
                 let (name, start) = self.expect_identifier("expected match pattern")?;
                 if depth == 0
@@ -327,6 +328,63 @@ impl<'a> Parser<'a> {
                 None
             }
         }
+    }
+
+    fn parse_list_pattern(&mut self, depth: usize) -> Option<Pattern> {
+        let start = self.consume(TokenKind::LBracket, "expected '['")?;
+        self.skip_newlines();
+        let mut elements = Vec::new();
+        let mut rest = None;
+        if !self.at(TokenKind::RBracket) {
+            loop {
+                self.skip_newlines();
+                if self.match_token(TokenKind::Ellipsis) {
+                    let rest_start = self.previous_span();
+                    let (name, name_span) =
+                        self.expect_binding_name("expected rest binding name after '...'")?;
+                    rest = Some(ListPatternRest {
+                        name,
+                        span: rest_start.cover(name_span),
+                    });
+                    self.skip_newlines();
+                    break;
+                }
+
+                elements.push(self.parse_list_pattern_element(depth + 1)?);
+                self.skip_newlines();
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
+        let end = self.consume(TokenKind::RBracket, "expected ']' after list pattern")?;
+        Some(Pattern::List {
+            elements,
+            rest,
+            span: start.cover(end),
+        })
+    }
+
+    fn parse_list_pattern_element(&mut self, depth: usize) -> Option<Pattern> {
+        let checkpoint = self.checkpoint();
+        if self.at(TokenKind::Identifier) || self.is_placeholder_identifier() {
+            let (name, start) = self.expect_binding_name("expected list pattern")?;
+            if self.binding_type_starts_on_same_line(start)
+                && matches!(
+                    self.current_kind(),
+                    TokenKind::Identifier | TokenKind::LBrace
+                )
+            {
+                let target = self.parse_type_ref()?;
+                return Some(Pattern::Type {
+                    name: (name != "_").then_some(name),
+                    span: start.cover(target.span()),
+                    target,
+                });
+            }
+        }
+        self.restore(checkpoint);
+        self.parse_pattern_at_depth(depth)
     }
 }
 

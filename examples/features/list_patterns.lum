@@ -1,0 +1,50 @@
+# EXPECT:
+# pair 7
+# pair fallback
+# typed Ada 42
+# typed fallback
+# head 1 tail 3
+# all 3
+# empty
+# single 9
+# many 3 rest 2
+
+def pairSum(values [Int]) Str {
+    let [left, right] = values else return "pair fallback"
+    "pair " + (left + right)
+}
+
+def typedSummary(values [Any]) Str {
+    let [name Str, age Int] = values else return "typed fallback"
+    "typed " + name + " " + age
+}
+
+def headTail(values [Int]) Str {
+    let [head, ...tail] = values else return "empty head"
+    "head " + head + " tail " + tail.size()
+}
+
+def copyAll(values [Int]) Str {
+    let [...all] = values
+    "all " + all.size()
+}
+
+def describe(values [Int]) Str {
+    match values {
+        case [] => "empty"
+        case [only] => "single " + only
+        case [first, second, ...rest] => "many " + (first + second) + " rest " + rest.size()
+    }
+}
+
+def main() Unit {
+    println(pairSum([3, 4]))
+    println(pairSum([3, 4, 5]))
+    println(typedSummary(["Ada", 42]))
+    println(typedSummary(["Ada", "wrong"]))
+    println(headTail([1, 2, 3, 4]))
+    println(copyAll([1, 2, 3]))
+    println(describe([]))
+    println(describe([9]))
+    println(describe([1, 2, 3, 4]))
+}

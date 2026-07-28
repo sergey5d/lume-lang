@@ -2297,6 +2297,24 @@ impl<'a> Resolver<'a> {
                     self.resolve_pattern(element);
                 }
             }
+            Pattern::List { elements, rest, .. } => {
+                for element in elements {
+                    self.resolve_pattern(element);
+                }
+                if let Some(rest) = rest {
+                    if rest.name != "_" {
+                        self.define_local_value(
+                            &rest.name,
+                            rest.span,
+                            false,
+                            SymbolKind::Binding,
+                            "duplicate_binding",
+                            format!("duplicate binding '{}'", rest.name),
+                            false,
+                        );
+                    }
+                }
+            }
             Pattern::Constructor { path, args, span } => {
                 self.resolve_pattern_path(path, *span);
                 for arg in args {

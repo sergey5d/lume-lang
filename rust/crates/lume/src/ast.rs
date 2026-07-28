@@ -522,11 +522,23 @@ pub enum Pattern {
         elements: Vec<Pattern>,
         span: Span,
     },
+    List {
+        elements: Vec<Pattern>,
+        rest: Option<ListPatternRest>,
+        span: Span,
+    },
     Constructor {
         path: Vec<String>,
         args: Vec<Pattern>,
         span: Span,
     },
+}
+
+/// The `...rest` tail in a list pattern.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListPatternRest {
+    pub name: String,
+    pub span: Span,
 }
 
 impl Pattern {
@@ -538,6 +550,7 @@ impl Pattern {
             | Pattern::Type { span, .. }
             | Pattern::Literal { span, .. }
             | Pattern::Tuple { span, .. }
+            | Pattern::List { span, .. }
             | Pattern::Constructor { span, .. } => *span,
         }
     }

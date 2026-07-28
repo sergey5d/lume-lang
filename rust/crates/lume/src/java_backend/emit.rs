@@ -1491,6 +1491,7 @@ impl<'a> SourceBodyEmitter<'a> {
             ast::Pattern::Binding { name, .. } if self.enum_case(name).is_some() => {
                 self.enum_case_match(name, &[], value, index, parent_bindings)
             }
+            ast::Pattern::List { .. } => None,
             _ => None,
         }
     }
@@ -1537,6 +1538,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         ),
                     );
                 }
+                ast::Pattern::List { .. } => return None,
                 _ => return None,
             }
         }
@@ -2785,6 +2787,30 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 Some(format!("{}.add({})", args[0], args[1]))
             }
+            ir::Intrinsic::ListLen => {
+                if args.len() != 1 {
+                    return None;
+                }
+                Some(format!("lume.core.LumeRuntime.listLen({})", args[0]))
+            }
+            ir::Intrinsic::ListGet => {
+                if args.len() != 2 {
+                    return None;
+                }
+                Some(format!(
+                    "lume.core.LumeRuntime.listGet({}, {})",
+                    args[0], args[1]
+                ))
+            }
+            ir::Intrinsic::ListSlice => {
+                if args.len() != 2 {
+                    return None;
+                }
+                Some(format!(
+                    "lume.core.LumeRuntime.listSlice({}, {})",
+                    args[0], args[1]
+                ))
+            }
             ir::Intrinsic::IterInit => {
                 if args.len() != 1 {
                     return None;
@@ -3840,6 +3866,18 @@ impl<'a> FunctionEmitter<'a> {
                     | ir::Intrinsic::Assert,
                 ) => Some(ir::Type::Unit),
                 ir::Callee::Intrinsic(ir::Intrinsic::Identity) => {
+                    args.first().and_then(|arg| self.operand_type(arg))
+                }
+                ir::Callee::Intrinsic(ir::Intrinsic::ListLen) => Some(ir::Type::Int),
+                ir::Callee::Intrinsic(ir::Intrinsic::ListGet) => {
+                    args.first().and_then(|arg| match self.operand_type(arg)? {
+                        ir::Type::Named { name, args } if name == "List" && args.len() == 1 => {
+                            args.into_iter().next()
+                        }
+                        _ => Some(ir::Type::Unknown),
+                    })
+                }
+                ir::Callee::Intrinsic(ir::Intrinsic::ListSlice) => {
                     args.first().and_then(|arg| self.operand_type(arg))
                 }
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue)

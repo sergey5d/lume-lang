@@ -1,0 +1,9 @@
+# FAIL_REGEX:
+# .*binding 'tail' shadows a local binding; use a different name.*
+
+def main() Unit {
+    values [Int] = [1, 2, 3]
+    let [head, tail, ...tail] = values else return ()
+
+    println(head + tail)
+}

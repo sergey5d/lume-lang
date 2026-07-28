@@ -1889,6 +1889,48 @@ def run(value Option[Int]) Int {
 }
 
 #[test]
+fn parses_list_pattern_binding_with_typed_elements_and_rest() {
+    let result = parse(
+        r#"
+def run(values [Any]) Unit {
+    let [name Str, age Int, ...rest] = values else return ()
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Block(block) => match &block.statements[0] {
+            Stmt::LetElse(stmt) => match &stmt.pattern {
+                Pattern::List {
+                    elements,
+                    rest: Some(rest),
+                    ..
+                } => {
+                    assert_eq!(elements.len(), 2);
+                    assert!(matches!(
+                        &elements[0],
+                        Pattern::Type { name: Some(name), .. } if name == "name"
+                    ));
+                    assert!(matches!(
+                        &elements[1],
+                        Pattern::Type { name: Some(name), .. } if name == "age"
+                    ));
+                    assert_eq!(rest.name, "rest");
+                }
+                other => panic!("expected list pattern, got {other:#?}"),
+            },
+            other => panic!("expected let else statement, got {other:#?}"),
+        },
+        other => panic!("expected block body, got {other:#?}"),
+    }
+}
+
+#[test]
 fn rejects_plain_let_identifier_binding() {
     let result = parse(
         r#"

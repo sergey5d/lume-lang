@@ -1,0 +1,9 @@
+# FAIL_REGEX:
+# .*list pattern requires a List value, got '\(Int, Int\)'.*
+
+def main() Unit {
+    pair = (1, 2)
+    let [left, right] = pair else return ()
+
+    println(left + right)
+}

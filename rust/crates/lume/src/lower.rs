@@ -3028,6 +3028,79 @@ impl<'a> FunctionLowerer<'a> {
                     bindings,
                 }
             }
+            Pattern::List {
+                elements,
+                rest,
+                span,
+            } => {
+                let element_ty = self.list_element_type(&scrutinee);
+                let list_ty = ir::Type::Named {
+                    name: "List".to_string(),
+                    args: vec![element_ty.clone()],
+                };
+                let len = self.emit_temp_from_rvalue(
+                    ir::RValue::Call {
+                        callee: ir::Callee::Intrinsic(ir::Intrinsic::ListLen),
+                        args: vec![scrutinee.clone()],
+                        structural: false,
+                    },
+                    ir::Type::Int,
+                    Some(*span),
+                );
+                let expected_len = ir::Operand::Const(ir::Constant::Int(elements.len() as i64));
+                let length_condition = self.emit_temp_from_rvalue(
+                    ir::RValue::Binary {
+                        op: if rest.is_some() {
+                            ir::BinaryOp::GreaterEq
+                        } else {
+                            ir::BinaryOp::Eq
+                        },
+                        left: len,
+                        right: expected_len,
+                    },
+                    ir::Type::Bool,
+                    Some(*span),
+                );
+                let mut conditions = vec![length_condition];
+                let mut bindings = Vec::new();
+                for (index, element) in elements.iter().enumerate() {
+                    let item = self.emit_temp_from_rvalue(
+                        ir::RValue::Call {
+                            callee: ir::Callee::Intrinsic(ir::Intrinsic::ListGet),
+                            args: vec![
+                                scrutinee.clone(),
+                                ir::Operand::Const(ir::Constant::Int(index as i64)),
+                            ],
+                            structural: false,
+                        },
+                        element_ty.clone(),
+                        Some(element.span()),
+                    );
+                    let plan = self.lower_pattern_plan(item, element);
+                    conditions.push(plan.condition);
+                    bindings.extend(plan.bindings);
+                }
+                if let Some(rest) = rest {
+                    if rest.name != "_" {
+                        bindings.push(PendingBinding {
+                            name: rest.name.clone(),
+                            ty: list_ty,
+                            source: PendingBindingSource::RValue(ir::RValue::Call {
+                                callee: ir::Callee::Intrinsic(ir::Intrinsic::ListSlice),
+                                args: vec![
+                                    scrutinee,
+                                    ir::Operand::Const(ir::Constant::Int(elements.len() as i64)),
+                                ],
+                                structural: false,
+                            }),
+                        });
+                    }
+                }
+                PatternPlan {
+                    condition: self.combine_conditions(conditions, *span),
+                    bindings,
+                }
+            }
             Pattern::Constructor { path, args, span } => {
                 let Some(kind) = self.lookup_constructor_pattern_kind(path, args.len()) else {
                     self.add_error(
@@ -3106,6 +3179,15 @@ impl<'a> FunctionLowerer<'a> {
         };
         self.enum_case_field_type(&scrutinee_ty, path, field_name, index)
             .unwrap_or(ir::Type::Unknown)
+    }
+
+    fn list_element_type(&self, scrutinee: &ir::Operand) -> ir::Type {
+        match self.operand_type(scrutinee) {
+            Some(ir::Type::Named { name, args }) if name == "List" && args.len() == 1 => {
+                args.into_iter().next().unwrap_or(ir::Type::Unknown)
+            }
+            _ => ir::Type::Unknown,
+        }
     }
 
     fn enum_case_field_type(

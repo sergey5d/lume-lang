@@ -1,0 +1,9 @@
+# FAIL_REGEX:
+# .*plain 'let' pattern may fail for value of type 'List\[Int\]'; add an 'else' fallback.*
+
+def main() Unit {
+    values [Int] = [1, 2]
+    let [left, right] = values
+
+    println(left + right)
+}
