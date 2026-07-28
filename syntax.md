@@ -1331,8 +1331,34 @@ Block lambda:
 
 ```txt
 (x Int) -> {
-    value := x + 1
-    value
+    next = x + 1
+    next
+}
+```
+
+After `->`, a standalone lambda accepts exactly one body unit: an expression, a
+statement, or a `{ ... }` block. If the body is an expression, normal multiline
+expression continuation rules apply:
+
+```txt
+mapper = item ->
+    item +
+        1
+```
+
+Multiple statements require an explicit block. This keeps lambda scope
+brace-delimited:
+
+```txt
+# invalid
+mapper = item ->
+    next = item + 1
+    next * 2
+
+# valid
+mapper = item -> {
+    next = item + 1
+    next * 2
 }
 ```
 
@@ -1389,10 +1415,6 @@ payloads use braces and enum positional payloads use parentheses:
 maybeOrder = Some(Order { id: 7 })
 namedMaybeOrder = Some { value: Order { id: 7 } }
 ```
-
-If the body after `->` starts on the next line, it may be either:
-- a single expression spread over later lines
-- or a multi-statement lambda body without an extra `{ ... }` wrapper
 
 Use an explicit lambda when mapping with a `match`:
 
@@ -2233,11 +2255,11 @@ for {
 is approximately:
 
 ```txt
-xs.flatMap(x ->
-    ys.map(y ->
+xs.flatMap(x -> {
+    ys.map(y -> {
         x + y
-    )
-)
+    })
+})
 ```
 
 `continue` is valid in `while`, `for`, and `for ... yield`.

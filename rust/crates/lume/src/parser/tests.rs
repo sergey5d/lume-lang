@@ -2365,6 +2365,41 @@ fn parses_lambda_expression() {
 }
 
 #[test]
+fn parses_standalone_lambda_body_as_multiline_expression() {
+    let result = parse(
+        r#"
+def main() Unit {
+    mapper = (x Int) ->
+        x +
+            5
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn rejects_standalone_lambda_body_with_multiple_statements_without_block() {
+    let result = parse(
+        r#"
+def main() Unit {
+    mapper = x ->
+        next = x + 1
+        next * 2
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "lambda_body_requires_braces"
+                && diag.message.contains("one statement or expression")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_supported_lambda_parameter_forms() {
     let result = parse(
         r#"

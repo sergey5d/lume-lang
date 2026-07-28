@@ -41,142 +41,10 @@ impl<'a> Parser<'a> {
 
     pub(super) fn try_parse_lambda_expr(&mut self) -> Option<Expr> {
         let checkpoint = self.checkpoint();
-        if self.match_keyword(Keyword::Let) {
-            let start = self.previous_span();
-            let Some(param) = self.parse_lambda_destructure_param(start, 0) else {
-                self.restore(checkpoint);
-                return None;
-            };
-            if !self.match_token(TokenKind::Arrow) {
-                self.restore(checkpoint);
-                return None;
-            }
-            self.diagnostics.push(Diagnostic::error(
-                "invalid_lambda_params",
-                "lambda parameters cannot use 'let' destructuring; name the parameter and destructure inside the lambda body",
-                param.span,
-            ));
-            let body = match self.parse_lambda_body() {
-                Some(body) => body,
-                None => {
-                    self.restore(checkpoint);
-                    return None;
-                }
-            };
-            let end = body.span();
-            return Some(Expr::Lambda {
-                params: vec![param],
-                body,
-                span: start.cover(end),
-            });
-        }
-        if self.at(TokenKind::Identifier) {
-            if let Some((name, start)) = self.expect_identifier("expected lambda parameter") {
-                if self.match_token(TokenKind::Arrow) {
-                    let param = LambdaParam {
-                        name,
-                        ty: None,
-                        destructure: None,
-                        span: start,
-                    };
-                    let body = match self.parse_lambda_body() {
-                        Some(body) => body,
-                        None => {
-                            self.restore(checkpoint);
-                            return None;
-                        }
-                    };
-                    let end = body.span();
-                    return Some(Expr::Lambda {
-                        params: vec![param],
-                        body,
-                        span: start.cover(end),
-                    });
-                }
-
-                let ty_checkpoint = self.checkpoint();
-                if self.can_start_type_ref() {
-                    if let Some(ty) = self.parse_primary_type_ref() {
-                        if self.match_token(TokenKind::Arrow) {
-                            let ty_span = ty.span();
-                            self.diagnostics.push(Diagnostic::error(
-                                "invalid_lambda_params",
-                                "typed single-parameter lambdas must use parentheses; write '(x T) -> ...'",
-                                start.cover(ty_span),
-                            ));
-                            let param = LambdaParam {
-                                name,
-                                ty: Some(ty),
-                                destructure: None,
-                                span: start.cover(ty_span),
-                            };
-                            let body = match self.parse_lambda_body() {
-                                Some(body) => body,
-                                None => {
-                                    self.restore(checkpoint);
-                                    return None;
-                                }
-                            };
-                            let end = body.span();
-                            return Some(Expr::Lambda {
-                                params: vec![param],
-                                body,
-                                span: start.cover(end),
-                            });
-                        }
-                    }
-                    self.restore(ty_checkpoint);
-                }
-            }
-            self.restore(checkpoint);
-            return None;
-        }
-        if !self.match_token(TokenKind::LParen) {
-            return None;
-        }
-        let start = self.previous_span();
-        let mut params = Vec::new();
-        self.skip_newlines();
-        if !self.at(TokenKind::RParen) {
-            let Some(param) = self.parse_lambda_param(params.len()) else {
-                self.restore(checkpoint);
-                return None;
-            };
-            params.push(param);
-            while self.match_token(TokenKind::Comma) {
-                self.skip_newlines();
-                let Some(param) = self.parse_lambda_param(params.len()) else {
-                    self.restore(checkpoint);
-                    return None;
-                };
-                params.push(param);
-            }
-        }
-        self.skip_newlines();
-        let Some(close) = self.consume(TokenKind::RParen, "expected ')' after lambda parameters")
-        else {
+        let Some((params, start)) = self.parse_lambda_head() else {
             self.restore(checkpoint);
             return None;
         };
-        if !self.match_token(TokenKind::Arrow) {
-            self.restore(checkpoint);
-            return None;
-        }
-        let simple_params = params
-            .iter()
-            .filter(|param| param.destructure.is_none())
-            .collect::<Vec<_>>();
-        let typed_count = simple_params
-            .iter()
-            .filter(|param| param.ty.is_some())
-            .count();
-        if typed_count > 0 && typed_count < simple_params.len() {
-            self.diagnostics.push(Diagnostic::error(
-                "invalid_lambda_params",
-                "lambda parameters must be either all typed or all untyped",
-                start.cover(close),
-            ));
-        }
         let Some(body) = self.parse_lambda_body() else {
             self.restore(checkpoint);
             return None;
@@ -252,14 +120,6 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block().map(LambdaBody::Block);
         }
-        if self.at(TokenKind::Newline) {
-            return self.parse_implicit_lambda_body();
-        }
-        self.parse_expr()
-            .map(|expr| LambdaBody::Expr(Box::new(expr)))
-    }
-
-    fn parse_implicit_lambda_body(&mut self) -> Option<LambdaBody> {
         self.skip_newlines();
         let Some(first) = self.parse_stmt() else {
             self.synchronize_stmt();
@@ -269,41 +129,46 @@ impl<'a> Parser<'a> {
             );
             return None;
         };
-        let body_indent = first.span().start_pos.column;
-        let mut statements = vec![first];
-        loop {
+        self.diagnose_extra_lambda_body_unit(first.span());
+        Some(Self::lambda_body_from_stmt(first))
+    }
+
+    fn lambda_body_from_stmt(stmt: Stmt) -> LambdaBody {
+        if let Stmt::Expr(ExprStmt { expr, .. }) = stmt {
+            return LambdaBody::Expr(Box::new(expr));
+        }
+        let span = stmt.span();
+        LambdaBody::Block(Block {
+            statements: vec![stmt],
+            span,
+        })
+    }
+
+    fn diagnose_extra_lambda_body_unit(&mut self, body_span: Span) {
+        let checkpoint = self.checkpoint();
+        if self.at(TokenKind::Newline) {
             self.skip_newlines();
-            if self.at(TokenKind::RParen)
-                || self.at(TokenKind::RBrace)
-                || self.at(TokenKind::Comma)
-                || self.at(TokenKind::Eof)
-                || self.current_span().start_pos.column < body_indent
-            {
-                break;
-            }
-            if let Some(stmt) = self.parse_stmt() {
-                statements.push(stmt);
-            } else {
-                self.synchronize_stmt();
-                break;
-            }
         }
-
-        let first = statements
-            .first()
-            .cloned()
-            .expect("lambda body first statement");
-        let span = first
-            .span()
-            .cover(statements.last().map(Stmt::span).unwrap_or(first.span()));
-
-        if statements.len() == 1 {
-            if let Stmt::Expr(ExprStmt { expr, .. }) = statements.remove(0) {
-                return Some(LambdaBody::Expr(Box::new(expr)));
-            }
+        let current_span = self.current_span();
+        let diagnostic_span = if !self.at(TokenKind::RParen)
+            && !self.at(TokenKind::RBrace)
+            && !self.at(TokenKind::Comma)
+            && !self.at(TokenKind::Eof)
+            && current_span.start_pos.line > body_span.end_pos.line
+            && current_span.start_pos.column >= body_span.start_pos.column
+        {
+            Some(body_span.cover(current_span))
+        } else {
+            None
+        };
+        self.restore(checkpoint);
+        if let Some(span) = diagnostic_span {
+            self.diagnostics.push(Diagnostic::error(
+                "lambda_body_requires_braces",
+                "lambda body accepts one statement or expression; use '{ ... }' for multiple statements",
+                span,
+            ));
         }
-
-        Some(LambdaBody::Block(Block { statements, span }))
     }
 
     pub(super) fn parse_if_expr(&mut self, start: Span) -> Option<Expr> {
@@ -1297,24 +1162,15 @@ impl<'a> Parser<'a> {
             if self.allow_trailing_block_call && self.at(TokenKind::LBrace) {
                 let start = expr.span();
                 let open_span = self.current_span();
-                let checkpoint = self.checkpoint();
-                let mut lambda_probe = self.checkpoint();
-                lambda_probe.index += 1;
-                let lambda_head_can_start = self
-                    .tokens
-                    .get(lambda_probe.index)
-                    .is_some_and(|token| token.span.start_pos.line == open_span.start_pos.line);
-                self.restore(lambda_probe);
-                let prefers_block = lambda_head_can_start && self.try_parse_lambda_expr().is_some();
-                self.restore(checkpoint);
-                let arg = if !prefers_block
-                    && (self.looks_like_brace_record_literal(true)
-                        || Self::is_constructor_like_expr(&expr))
+                let arg = if self.looks_like_brace_record_literal(true)
+                    || Self::is_constructor_like_expr(&expr)
                 {
                     self.parse_brace_record_literal_expr()?
+                } else if let Some(arg) = self.parse_trailing_lambda_block_arg(open_span) {
+                    arg
                 } else {
                     let block = self.parse_block()?;
-                    if !self.validate_trailing_lambda_block(&block, open_span) && !prefers_block {
+                    if !self.validate_trailing_lambda_block(&block, open_span) {
                         self.diagnostics.push(Diagnostic::error(
                             "invalid_trailing_lambda",
                             "trailing lambda syntax requires an explicit parameter arrow; write '{ () -> ... }' for zero-argument callbacks",
@@ -1349,6 +1205,166 @@ impl<'a> Parser<'a> {
             break;
         }
         Some(expr)
+    }
+
+    fn parse_trailing_lambda_block_arg(&mut self, open_span: Span) -> Option<Expr> {
+        let checkpoint = self.checkpoint();
+        let start = self.consume(TokenKind::LBrace, "expected '{'")?;
+        if self.current_span().start_pos.line != open_span.start_pos.line {
+            self.restore(checkpoint);
+            return None;
+        }
+        let Some((params, lambda_start)) = self.parse_lambda_head() else {
+            self.restore(checkpoint);
+            return None;
+        };
+
+        self.skip_newlines();
+        let mut statements = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            if let Some(stmt) = self.parse_stmt() {
+                statements.push(stmt);
+            } else {
+                self.synchronize_stmt();
+            }
+            self.skip_newlines();
+        }
+        let end = self.consume(TokenKind::RBrace, "expected '}' after block")?;
+        let body_span = statements
+            .first()
+            .map(Stmt::span)
+            .unwrap_or(end)
+            .cover(statements.last().map(Stmt::span).unwrap_or(end));
+        let lambda_span = lambda_start.cover(body_span);
+        let lambda = Expr::Lambda {
+            params,
+            body: LambdaBody::Block(Block {
+                statements,
+                span: body_span,
+            }),
+            span: lambda_span,
+        };
+        let block_span = start.cover(end);
+        Some(Expr::Block {
+            body: Block {
+                statements: vec![Stmt::Expr(ExprStmt {
+                    expr: lambda,
+                    span: lambda_span,
+                })],
+                span: block_span,
+            },
+            span: block_span,
+        })
+    }
+
+    fn parse_lambda_head(&mut self) -> Option<(Vec<LambdaParam>, Span)> {
+        let checkpoint = self.checkpoint();
+        if self.match_keyword(Keyword::Let) {
+            let start = self.previous_span();
+            let Some(param) = self.parse_lambda_destructure_param(start, 0) else {
+                self.restore(checkpoint);
+                return None;
+            };
+            if !self.match_token(TokenKind::Arrow) {
+                self.restore(checkpoint);
+                return None;
+            }
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_lambda_params",
+                "lambda parameters cannot use 'let' destructuring; name the parameter and destructure inside the lambda body",
+                param.span,
+            ));
+            return Some((vec![param], start));
+        }
+
+        if self.at(TokenKind::Identifier) {
+            let (name, start) = self.expect_identifier("expected lambda parameter")?;
+            if self.match_token(TokenKind::Arrow) {
+                return Some((
+                    vec![LambdaParam {
+                        name,
+                        ty: None,
+                        destructure: None,
+                        span: start,
+                    }],
+                    start,
+                ));
+            }
+
+            let ty_checkpoint = self.checkpoint();
+            if self.can_start_type_ref() {
+                if let Some(ty) = self.parse_primary_type_ref() {
+                    if self.match_token(TokenKind::Arrow) {
+                        let ty_span = ty.span();
+                        self.diagnostics.push(Diagnostic::error(
+                            "invalid_lambda_params",
+                            "typed single-parameter lambdas must use parentheses; write '(x T) -> ...'",
+                            start.cover(ty_span),
+                        ));
+                        return Some((
+                            vec![LambdaParam {
+                                name,
+                                ty: Some(ty),
+                                destructure: None,
+                                span: start.cover(ty_span),
+                            }],
+                            start,
+                        ));
+                    }
+                }
+                self.restore(ty_checkpoint);
+            }
+            self.restore(checkpoint);
+            return None;
+        }
+
+        if !self.match_token(TokenKind::LParen) {
+            return None;
+        }
+        let start = self.previous_span();
+        let mut params = Vec::new();
+        self.skip_newlines();
+        if !self.at(TokenKind::RParen) {
+            let Some(param) = self.parse_lambda_param(params.len()) else {
+                self.restore(checkpoint);
+                return None;
+            };
+            params.push(param);
+            while self.match_token(TokenKind::Comma) {
+                self.skip_newlines();
+                let Some(param) = self.parse_lambda_param(params.len()) else {
+                    self.restore(checkpoint);
+                    return None;
+                };
+                params.push(param);
+            }
+        }
+        self.skip_newlines();
+        let Some(close) = self.consume(TokenKind::RParen, "expected ')' after lambda parameters")
+        else {
+            self.restore(checkpoint);
+            return None;
+        };
+        if !self.match_token(TokenKind::Arrow) {
+            self.restore(checkpoint);
+            return None;
+        }
+        let simple_params = params
+            .iter()
+            .filter(|param| param.destructure.is_none())
+            .collect::<Vec<_>>();
+        let typed_count = simple_params
+            .iter()
+            .filter(|param| param.ty.is_some())
+            .count();
+        if typed_count > 0 && typed_count < simple_params.len() {
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_lambda_params",
+                "lambda parameters must be either all typed or all untyped",
+                start.cover(close),
+            ));
+        }
+        Some((params, start))
     }
 
     fn parse_lifted_hop_postfixes(&mut self, mut body: Expr) -> Option<Expr> {
