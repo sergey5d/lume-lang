@@ -624,6 +624,20 @@ impl<'a> Parser<'a> {
                     span: start.cover(value.span()),
                     value,
                 }
+            } else if self.match_token(TokenKind::LBracket) {
+                let start = self.previous_span();
+                let key = self.parse_expr()?;
+                self.consume(
+                    TokenKind::RBracket,
+                    "expected ']' after computed keyed entry",
+                )?;
+                self.consume(TokenKind::Colon, "expected ':' after computed keyed entry")?;
+                let value = self.parse_expr()?;
+                RecordEntry::Keyed {
+                    span: start.cover(value.span()),
+                    key,
+                    value,
+                }
             } else if self.at(TokenKind::Identifier) {
                 let checkpoint = self.checkpoint();
                 let (name, name_span) = self.expect_identifier("expected shape field name")?;
@@ -664,6 +678,14 @@ impl<'a> Parser<'a> {
             } else {
                 let key_or_value = self.parse_or_expr()?;
                 if self.match_token(TokenKind::Colon) {
+                    if matches!(key_or_value, Expr::Group { .. } | Expr::TupleLiteral { .. }) {
+                        self.diagnostics.push(Diagnostic::error(
+                            "computed_key_requires_brackets",
+                            "computed keyed entries use '[expr]: value', not '(expr): value'",
+                            key_or_value.span(),
+                        ));
+                        return None;
+                    }
                     let value = self.parse_expr()?;
                     RecordEntry::Keyed {
                         span: key_or_value.span().cover(value.span()),

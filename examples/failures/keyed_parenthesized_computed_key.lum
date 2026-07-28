@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*not '\(expr\): value'.*
+
+def main() Unit {
+    key = "one"
+
+    values = Map {
+        (key): 1
+    }
+}

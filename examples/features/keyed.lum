@@ -1,6 +1,10 @@
 # EXPECT:
 # built-in two 2
+# built-in dynamic 3
+# built-in made 4
+# tuple key 99
 # custom Ada 10
+# custom dynamic 14
 # 0
 
 class NameScores {
@@ -15,22 +19,43 @@ impl single NameScores {
     }
 }
 
+def makeKey() Str = "made"
+
 def main() Int {
+    dynamicKey = "dynamic"
+
     builtIn Map[Str, Int] = Map {
         "one": 1
         "two": 2
+        [dynamicKey]: 3
+        [makeKey()]: 4
     }
 
     let Some(two) = builtIn["two"] else return 1
     println("built-in two", two)
+    let Some(dynamic) = builtIn[dynamicKey] else return 1
+    println("built-in dynamic", dynamic)
+    let Some(made) = builtIn["made"] else return 1
+    println("built-in made", made)
+
+    tupleKey = ("Ada", 1)
+    tupleMap Map[(Str, Int), Int] = Map {
+        [tupleKey]: 99
+    }
+
+    let Some(tupleValue) = tupleMap[("Ada", 1)] else return 1
+    println("tuple key", tupleValue)
 
     custom NameScores = NameScores {
         "Ada": 10
         "Bob": 12
+        [dynamicKey]: 14
     }
 
     let Some(ada) = custom.entries["Ada"] else return 1
     println("custom Ada", ada)
+    let Some(customDynamic) = custom.entries[dynamicKey] else return 1
+    println("custom dynamic", customDynamic)
 
     0
 }

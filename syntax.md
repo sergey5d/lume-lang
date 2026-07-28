@@ -1635,18 +1635,28 @@ map = CustomHashMap {
 Brace entries are interpreted by syntax first:
 
 - Identifier entries such as `name: value` are construction fields.
-- Expression-key entries such as `"name": value`, `42: value`, or `(key): value` are keyed entries.
+- Literal-key entries such as `"name": value` or `42: value` are keyed entries.
+- Computed-key entries use brackets, such as `[key]: value`, `[makeKey()]: value`, or `[(x, y)]: value`.
+- A single brace entry list cannot mix construction fields and keyed entries.
 
 For keyed construction, the compiler collects entries into `[(K, V)]` and calls
 `Type.keyed(entries)`.
 
 Bare identifier keys are parsed as construction field labels. If the key is an
-identifier value, parenthesize it:
+identifier value, use brackets:
 
 ```txt
 map = CustomHashMap {
-    (dynamicKey): value
+    [dynamicKey]: value
 }
+```
+
+If a type exposes both ordinary empty construction and keyed construction,
+`Type {}` is ambiguous. Use the ordinary constructor or call keyed explicitly:
+
+```txt
+empty = CustomHashMap()
+entries = CustomHashMap.keyed([])
 ```
 
 Tuple literal:

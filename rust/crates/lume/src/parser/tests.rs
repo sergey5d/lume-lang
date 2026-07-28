@@ -1165,7 +1165,7 @@ fn parses_shape_literal_forms() {
         other => panic!("expected call, got {other:#?}"),
     }
 
-    match parse_expr_only(r#"Map { "a": 1, "bbb": 2 }"#) {
+    match parse_expr_only(r#"Map { "a": 1, [dynamicKey]: 2, [makeKey()]: 3, [(x, y)]: 4 }"#) {
         Expr::Call {
             callee,
             args,
@@ -1185,14 +1185,30 @@ fn parses_shape_literal_forms() {
             }
             match &args[0].value {
                 Expr::ListLiteral { items, .. } => {
-                    assert_eq!(items.len(), 2);
+                    assert_eq!(items.len(), 4);
                     assert!(matches!(items[0], Expr::TupleLiteral { .. }));
+                    assert!(matches!(items[1], Expr::TupleLiteral { .. }));
+                    assert!(matches!(items[2], Expr::TupleLiteral { .. }));
+                    assert!(matches!(items[3], Expr::TupleLiteral { .. }));
                 }
                 other => panic!("expected list of tuple entries, got {other:#?}"),
             }
         }
         other => panic!("expected keyed call, got {other:#?}"),
     }
+
+    let file = SourceFile::new("test.lum", "Map { (dynamicKey): 1 }");
+    let lexed = lex(&file);
+    let mut parser = Parser::new(&lexed.tokens);
+    let _ = parser.parse_expr();
+    assert!(
+        parser
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "computed_key_requires_brackets"),
+        "expected computed-key bracket diagnostic, got {:#?}",
+        parser.diagnostics
+    );
 
     match parse_expr_only("Settings {}") {
         Expr::Call {

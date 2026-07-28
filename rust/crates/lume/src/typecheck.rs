@@ -3630,111 +3630,41 @@ impl<'a> Checker<'a> {
         self.check_expr_against(expr, &Ty::Unknown)
     }
 
-    fn expected_shape_fields(&self, expected: &Ty) -> Option<(String, Vec<FieldSig>)> {
+    fn expected_shape_label(&self, expected: &Ty) -> Option<String> {
         match expected {
-            Ty::Record(fields) => Some((
-                "anonymous shape".to_string(),
-                fields
-                    .iter()
-                    .map(|(name, ty)| FieldSig {
-                        name: name.clone(),
-                        ty: ty.clone(),
-                        mutable: false,
-                        hidden: false,
-                        has_initializer: false,
-                        variadic: false,
-                    })
-                    .collect(),
-            )),
-            Ty::Named(name, args) => {
+            Ty::Record(_) => Some("anonymous shape".to_string()),
+            Ty::Named(name, _) => {
                 let sig = self.lookup_any_type(name)?;
-                if sig.kind != TypeKind::Record {
-                    return None;
+                match sig.kind {
+                    TypeKind::Record => Some(format!("shape '{}'", sig.name)),
+                    TypeKind::Class => Some(format!("class '{}'", sig.name)),
+                    _ => None,
                 }
-                let subst = sig
-                    .type_params
-                    .iter()
-                    .cloned()
-                    .zip(args.iter().cloned())
-                    .collect::<HashMap<_, _>>();
-                Some((
-                    format!("shape '{}'", sig.name),
-                    sig.fields
-                        .iter()
-                        .filter(|field| !field.hidden)
-                        .map(|field| FieldSig {
-                            name: field.name.clone(),
-                            ty: substitute_type(&field.ty, &subst),
-                            mutable: field.mutable,
-                            hidden: field.hidden,
-                            has_initializer: field.has_initializer,
-                            variadic: false,
-                        })
-                        .collect(),
-                ))
             }
             _ => None,
         }
     }
 
-    fn check_tuple_literal_against_shape(
+    fn reject_tuple_literal_against_shape_like(
         &mut self,
         items: &[Expr],
         expected: &Ty,
         span: crate::source::Span,
     ) -> Option<Ty> {
-        let Some((label, fields)) = self.expected_shape_fields(expected) else {
-            if let Ty::Named(name, _) = expected {
-                if let Some(sig) = self.lookup_any_type(name) {
-                    if sig.kind == TypeKind::Class {
-                        for item in items {
-                            self.check_expr(item);
-                        }
-                        self.add_error(
-                            "invalid_tuple_shape_conversion",
-                            format!(
-                                "tuple values cannot construct class '{}'; use '{}(...)' or '{} {{ ... }}'",
-                                sig.name, sig.name, sig.name
-                            ),
-                            span,
-                        );
-                        return Some(materialize_type(expected));
-                    }
-                }
-            }
+        let Some(label) = self.expected_shape_label(expected) else {
             return None;
         };
-
-        if items.len() != fields.len() {
-            self.add_error(
-                "invalid_argument_count",
-                format!(
-                    "tuple construction for {} expects {} values, got {}",
-                    label,
-                    fields.len(),
-                    items.len()
-                ),
-                span,
-            );
+        for item in items {
+            self.check_expr(item);
         }
-
-        for (item, field) in items.iter().zip(fields.iter()) {
-            let actual = self.check_expr_against(item, &field.ty);
-            self.require_assignable(
-                &actual,
-                &field.ty,
-                item.span(),
-                "invalid_argument_type",
-                format!(
-                    "tuple field '{}' for {} expects '{}' but got '{}'",
-                    field.name,
-                    label,
-                    field.ty.describe(),
-                    actual.describe()
-                ),
-            );
-        }
-
+        self.add_error(
+            "invalid_tuple_shape_conversion",
+            format!(
+                "tuple values cannot construct {}; use explicit construction fields like '{{ field: value }}'",
+                label
+            ),
+            span,
+        );
         Some(materialize_type(expected))
     }
 
@@ -3775,7 +3705,9 @@ impl<'a> Checker<'a> {
                 Ty::list(item_ty)
             }
             Expr::TupleLiteral { items, span } => {
-                if let Some(ty) = self.check_tuple_literal_against_shape(items, expected, *span) {
+                if let Some(ty) =
+                    self.reject_tuple_literal_against_shape_like(items, expected, *span)
+                {
                     ty
                 } else {
                     Ty::Tuple(items.iter().map(|item| self.check_expr(item)).collect())
@@ -5485,6 +5417,23 @@ impl<'a> Checker<'a> {
             sig.methods.get("new")
         };
 
+        if self.empty_brace_keyed_construction_is_ambiguous(
+            sig,
+            constructor_overloads,
+            args,
+            uses_brace_syntax,
+        ) {
+            self.add_error(
+                "ambiguous_empty_keyed_construction",
+                format!(
+                    "empty brace construction for '{}' is ambiguous between field construction and keyed construction; use '{}()' or '{}.keyed([])'",
+                    sig.name, sig.name, sig.name
+                ),
+                span,
+            );
+            return ret;
+        }
+
         let explicit_constructor_args;
         let args = if structural_record_arg && constructor_overloads.is_some() {
             explicit_constructor_args = brace_record_constructor_args(args).unwrap_or_default();
@@ -5560,7 +5509,20 @@ impl<'a> Checker<'a> {
                 );
                 return ret;
             }
-            return self.check_positional_record_constructor_conversion(sig, &ret, args, span);
+            for arg in args {
+                self.check_expr(&arg.value);
+            }
+            self.add_error(
+                "no_matching_overload",
+                format!(
+                    "{} '{}' has no implicit positional constructor; use '{} {{ ... }}' for field construction or define 'new(...)'",
+                    type_kind_label(sig.kind),
+                    sig.name,
+                    sig.name
+                ),
+                span,
+            );
+            return ret;
         }
 
         self.add_error(
@@ -5579,6 +5541,59 @@ impl<'a> Checker<'a> {
             span,
         );
         ret
+    }
+
+    fn empty_brace_keyed_construction_is_ambiguous(
+        &self,
+        sig: &TypeSig,
+        constructor_overloads: Option<&Vec<FunctionSig>>,
+        args: &[crate::ast::CallArg],
+        uses_brace_syntax: bool,
+    ) -> bool {
+        uses_brace_syntax
+            && empty_brace_record_constructor_arg(args)
+            && self.has_keyed_constructor_for_type(&sig.name)
+            && self.ordinary_empty_construction_available(sig, constructor_overloads)
+    }
+
+    fn has_keyed_constructor_for_type(&self, name: &str) -> bool {
+        if name == "Map" {
+            return true;
+        }
+        self.lookup_any_single(name)
+            .and_then(|single| self.method_sigs_for_type(&single, "keyed"))
+            .is_some()
+    }
+
+    fn ordinary_empty_construction_available(
+        &self,
+        sig: &TypeSig,
+        constructor_overloads: Option<&Vec<FunctionSig>>,
+    ) -> bool {
+        if let Some(overloads) = constructor_overloads {
+            let can_access_hidden = self.can_access_hidden_constructor(sig);
+            let visible = overloads
+                .iter()
+                .filter(|ctor| ctor.visibility != Visibility::Hidden || can_access_hidden)
+                .cloned()
+                .collect::<Vec<_>>();
+            return self.choose_overload(&visible, &[]).is_some();
+        }
+
+        if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
+            return false;
+        }
+        if sig
+            .fields
+            .iter()
+            .any(|field| field.hidden && !field.has_initializer)
+        {
+            return false;
+        }
+        sig.fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .all(|field| field.has_initializer)
     }
 
     fn check_constructor_signature(
@@ -7365,115 +7380,6 @@ impl<'a> Checker<'a> {
         materialize_type(ret)
     }
 
-    fn check_positional_record_constructor_conversion(
-        &mut self,
-        sig: &TypeSig,
-        ret: &Ty,
-        args: &[crate::ast::CallArg],
-        span: crate::source::Span,
-    ) -> Ty {
-        if let Some(field) = sig
-            .fields
-            .iter()
-            .find(|field| field.hidden && !field.has_initializer)
-        {
-            self.add_error(
-                "no_matching_overload",
-                format!(
-                    "{} '{}' has no implicit positional constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
-                    type_kind_label(sig.kind),
-                    sig.name,
-                    field.name
-                ),
-                span,
-            );
-            return materialize_type(ret);
-        }
-
-        let uses_named_args = args.iter().any(|arg| arg.name.is_some());
-        if !uses_named_args
-            && sig.fields.iter().enumerate().any(|(index, field)| {
-                field.hidden
-                    && field.has_initializer
-                    && sig.fields[index + 1..].iter().any(|later| !later.hidden)
-            })
-        {
-            self.add_error(
-                "no_matching_overload",
-                format!(
-                    "{} '{}' cannot use positional construction because hidden defaulted fields must come after all visible fields",
-                    type_kind_label(sig.kind),
-                    sig.name
-                ),
-                span,
-            );
-            return materialize_type(ret);
-        }
-
-        let visible_fields = sig
-            .fields
-            .iter()
-            .filter(|field| !field.hidden)
-            .cloned()
-            .collect::<Vec<_>>();
-
-        if uses_named_args {
-            return self.check_constructor_signature(&visible_fields, ret, args, span);
-        }
-
-        if let Some(message) =
-            positional_constructor_prefix_message(&sig.name, &visible_fields, args.len())
-        {
-            self.add_error("invalid_argument_count", message, span);
-            return materialize_type(ret);
-        }
-
-        if args.len() > visible_fields.len()
-            || visible_fields[args.len()..]
-                .iter()
-                .any(|field| !field.has_initializer)
-        {
-            let required_visible = visible_fields
-                .iter()
-                .filter(|field| !field.has_initializer)
-                .count();
-            self.add_error(
-                "invalid_argument_count",
-                format!(
-                    "{} '{}' positional construction expects {}..{} arguments, got {}",
-                    type_kind_label(sig.kind),
-                    sig.name,
-                    required_visible,
-                    visible_fields.len(),
-                    args.len()
-                ),
-                span,
-            );
-            return materialize_type(ret);
-        }
-
-        for (arg, field) in args.iter().zip(visible_fields.iter()) {
-            let actual = self.check_expr_against(&arg.value, &field.ty);
-            if !self.is_assignable(&actual, &field.ty) {
-                self.add_error(
-                    "invalid_argument_type",
-                    format!(
-                        "positional field '{}' in {} '{}' expects '{}' but got '{}'",
-                        field.name,
-                        type_kind_label(sig.kind),
-                        sig.name,
-                        field.ty.describe(),
-                        actual.describe()
-                    ),
-                    arg.span,
-                );
-                return materialize_type(ret);
-            }
-        }
-
-        materialize_type(ret)
-    }
-
     fn lookup_functions(&self, name: &str) -> Option<Vec<FunctionSig>> {
         self.module
             .functions
@@ -8884,6 +8790,17 @@ fn brace_record_constructor_args(args: &[crate::ast::CallArg]) -> Option<Vec<cra
     }
 
     None
+}
+
+fn empty_brace_record_constructor_arg(args: &[crate::ast::CallArg]) -> bool {
+    matches!(
+        args,
+        [crate::ast::CallArg {
+            name: None,
+            value: Expr::RecordLiteral { fields, values, .. },
+            ..
+        }] if fields.is_empty() && values.is_empty()
+    )
 }
 
 fn trailing_brace_call_has_lambda_arg(args: &[crate::ast::CallArg]) -> bool {
