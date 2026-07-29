@@ -1,8 +1,11 @@
 # EXPECT:
 # function tags alpha 3 alpha joined alpha beta gamma
+# function spread delta 4 alpha joined alpha beta gamma omega
 # function empty empty 0 none
 # method task:build|2|fast,local
+# method spread task:deploy|2|fast,remote
 # ctor positional bin 3 usr/local/bin
+# ctor spread spread 2 usr/bin
 # ctor named config 2 etc/hosts
 # ctor default tmp 1 default
 
@@ -55,15 +58,20 @@ impl Path {
 
 def main() Unit {
     println("function tags", describeTags("alpha", "alpha", "beta", "gamma"), "joined", joinWords(" ", "alpha", "beta", "gamma"))
+    extra = ["beta", "gamma"]
+    println("function spread", describeTags("delta", "alpha", ...extra, "omega"), "joined", joinWords(" ", "alpha", ...extra, "omega"))
     println("function empty", describeTags("empty"))
 
     reporter = Reporter("task")
     println("method", reporter.line("build", "fast", "local"))
+    println("method spread", reporter.line("deploy", ...["fast", "remote"]))
 
     positional = Path("bin", "usr", "local", "bin")
+    spread = Path("spread", ...["usr", "bin"])
     named = Path { label: "config", segments: ["etc", "hosts"] }
     defaulted = Path("tmp")
     println("ctor positional", positional.render())
+    println("ctor spread", spread.render())
     println("ctor named", named.render())
     println("ctor default", defaulted.render())
 }

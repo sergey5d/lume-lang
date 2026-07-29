@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*list spread requires an iterable value, got 'Int'.*
+
+def main() Unit {
+    values = [1, ...2]
+    println(values.size())
+}

@@ -157,6 +157,10 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             span: *span,
         },
         ast::Expr::Unit { span } => core::Expr::Unit { span: *span },
+        ast::Expr::Spread { value, span } => core::Expr::Spread {
+            value: Box::new(desugar_expr(value)),
+            span: *span,
+        },
         ast::Expr::ListLiteral { items, span } => core::Expr::ListLiteral {
             items: items.iter().map(desugar_expr).collect(),
             span: *span,

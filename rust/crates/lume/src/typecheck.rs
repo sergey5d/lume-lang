@@ -1454,7 +1454,7 @@ impl<'a> Checker<'a> {
     ) -> Option<usize> {
         let arg_types = args
             .iter()
-            .map(|arg| self.probe_expr_type(&arg.value))
+            .map(|arg| self.probe_expr_type(call_arg_value_expr(arg)))
             .collect::<Vec<_>>();
         nodes
             .iter()
@@ -1477,8 +1477,7 @@ impl<'a> Checker<'a> {
                             .position(|candidate| std::ptr::eq(candidate, *arg))
                             .unwrap_or(0);
                         let actual = &arg_types[arg_index];
-                        let expected =
-                            call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
+                        let expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
                         if !matches!(actual, Ty::Unknown) {
                             if self.arg_matches_expected(arg, actual, &expected) {
                                 score += 2;
@@ -1867,6 +1866,9 @@ impl<'a> Checker<'a> {
             | Expr::String { .. }
             | Expr::Bool { .. }
             | Expr::Unit { .. } => {}
+            Expr::Spread { value, .. } => {
+                self.check_field_initializer_expr(value, owner, initialized_fields);
+            }
             Expr::ListLiteral { items, .. }
             | Expr::TupleLiteral { items, .. }
             | Expr::ShapeLiteral { items, .. } => {
@@ -2998,7 +3000,8 @@ impl<'a> Checker<'a> {
                     .all(|(pattern, item)| self.source_expr_proves_pattern_match(pattern, item))
             }
             (Pattern::List { elements, rest, .. }, Expr::ListLiteral { items, .. })
-                if rest.is_some() || elements.len() == items.len() =>
+                if !items.iter().any(|item| matches!(item, Expr::Spread { .. }))
+                    && (rest.is_some() || elements.len() == items.len()) =>
             {
                 items.len() >= elements.len()
                     && elements
@@ -3783,10 +3786,37 @@ impl<'a> Checker<'a> {
             Expr::ListLiteral { items, .. } => {
                 let mut item_ty = Ty::Unknown;
                 for item in items {
-                    let current = self.check_expr(item);
+                    let current = if let Expr::Spread { value, span } = item {
+                        let spread_ty = self.check_expr(value);
+                        if let Some(item_ty) = self.known_iterable_item_type(&spread_ty) {
+                            item_ty
+                        } else {
+                            if !matches!(spread_ty, Ty::Unknown) {
+                                self.add_error(
+                                    "invalid_list_spread",
+                                    format!(
+                                        "list spread requires an iterable value, got '{}'",
+                                        spread_ty.describe()
+                                    ),
+                                    *span,
+                                );
+                            }
+                            Ty::Unknown
+                        }
+                    } else {
+                        self.check_expr(item)
+                    };
                     item_ty = join_types(&item_ty, &current);
                 }
                 Ty::list(item_ty)
+            }
+            Expr::Spread { span, .. } => {
+                self.add_error(
+                    "invalid_spread",
+                    "spread syntax is only valid inside list literals and positional vararg call arguments",
+                    *span,
+                );
+                Ty::Unknown
             }
             Expr::TupleLiteral { items, span } => {
                 if let Some(ty) =
@@ -5111,10 +5141,18 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
-                let raw_expected =
-                    call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
+                if matches!(arg.value, Expr::Spread { .. })
+                    && (!param.variadic || arg.name.is_some())
+                {
+                    self.add_error(
+                        "invalid_spread_argument",
+                        "spread arguments are only valid as positional arguments for a vararg parameter",
+                        arg.span,
+                    );
+                }
+                let raw_expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
                 let expected = substitute_type(&raw_expected, &subst);
-                let actual = self.check_call_arg_expr_against(&arg.value, &expected);
+                let actual = self.check_call_arg_expr_against(call_arg_value_expr(arg), &expected);
                 infer_type_subst(&expected, &actual, &mut subst);
                 checked_args.push((arg.span, actual, raw_expected.clone()));
             }
@@ -5749,10 +5787,18 @@ impl<'a> Checker<'a> {
                     .map(Vec::as_slice)
                     .unwrap_or(&[])
                 {
-                    let raw_expected =
-                        call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
+                    if matches!(arg.value, Expr::Spread { .. })
+                        && (!param.variadic || arg.name.is_some())
+                    {
+                        self.add_error(
+                            "invalid_spread_argument",
+                            "spread arguments are only valid as positional arguments for a vararg parameter",
+                            arg.span,
+                        );
+                    }
+                    let raw_expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
                     let expected = substitute_type(&raw_expected, &subst);
-                    let actual = self.check_expr_against(&arg.value, &expected);
+                    let actual = self.check_expr_against(call_arg_value_expr(arg), &expected);
                     infer_type_subst(&expected, &actual, &mut subst);
                     checked_args.push((arg.span, actual, raw_expected, String::new()));
                 }
@@ -5811,10 +5857,18 @@ impl<'a> Checker<'a> {
                 .map(Vec::as_slice)
                 .unwrap_or(&[])
             {
-                let raw_expected =
-                    call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
+                if matches!(arg.value, Expr::Spread { .. })
+                    && (!param.variadic || arg.name.is_some())
+                {
+                    self.add_error(
+                        "invalid_spread_argument",
+                        "spread arguments are only valid as positional arguments for a vararg parameter",
+                        arg.span,
+                    );
+                }
+                let raw_expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
                 let expected = substitute_type(&raw_expected, &subst);
-                let actual = self.check_expr_against(&arg.value, &expected);
+                let actual = self.check_expr_against(call_arg_value_expr(arg), &expected);
                 infer_type_subst(&expected, &actual, &mut subst);
                 checked_args.push((arg.span, actual, expected, param.name.clone()));
             }
@@ -6010,7 +6064,7 @@ impl<'a> Checker<'a> {
     ) -> usize {
         let arg_types = args
             .iter()
-            .map(|arg| self.probe_expr_type(&arg.value))
+            .map(|arg| self.probe_expr_type(call_arg_value_expr(arg)))
             .collect::<Vec<_>>();
         overloads
             .iter()
@@ -6027,7 +6081,7 @@ impl<'a> Checker<'a> {
                         .unwrap_or(&[])
                     {
                         let raw_expected =
-                            call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
+                            call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
                         let arg_index = args
                             .iter()
                             .position(|candidate| std::ptr::eq(candidate, *arg))
@@ -7369,7 +7423,7 @@ impl<'a> Checker<'a> {
     ) -> Option<&'b FunctionSig> {
         let arg_types = args
             .iter()
-            .map(|arg| self.probe_expr_type(&arg.value))
+            .map(|arg| self.probe_expr_type(call_arg_value_expr(arg)))
             .collect::<Vec<_>>();
         overloads
             .iter()
@@ -7391,8 +7445,7 @@ impl<'a> Checker<'a> {
                             .position(|candidate| std::ptr::eq(candidate, *arg))
                             .unwrap_or(0);
                         let actual = &arg_types[arg_index];
-                        let expected =
-                            call_arg_expected_ty(param.variadic, &param.ty, arg.name.is_some());
+                        let expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
                         if !matches!(actual, Ty::Unknown) {
                             if self.arg_matches_expected(arg, actual, &expected) {
                                 score += 2;
@@ -8445,7 +8498,8 @@ fn loop_control_targeting_current_loop_in_expr(expr: &Expr) -> Option<LoopContro
             }),
         Expr::Try { value, .. }
         | Expr::Unary { expr: value, .. }
-        | Expr::Group { inner: value, .. } => loop_control_targeting_current_loop_in_expr(value),
+        | Expr::Group { inner: value, .. }
+        | Expr::Spread { value, .. } => loop_control_targeting_current_loop_in_expr(value),
         Expr::Binary { left, right, .. } => loop_control_targeting_current_loop_in_expr(left)
             .or_else(|| loop_control_targeting_current_loop_in_expr(right)),
         Expr::Is { left, .. } => loop_control_targeting_current_loop_in_expr(left),
@@ -8552,6 +8606,7 @@ fn loop_control_targeting_current_loop_in_if_stmt(stmt: &IfStmt) -> Option<LoopC
 fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Span> {
     match expr {
         Expr::Try { span, .. } => Some(*span),
+        Expr::Spread { value, .. } => lazy_arg_forbidden_control_flow_span(value),
         Expr::ListLiteral { items, .. }
         | Expr::TupleLiteral { items, .. }
         | Expr::ShapeLiteral { items, .. } => {
@@ -9152,6 +9207,21 @@ fn call_arg_expected_ty(variadic: bool, param_ty: &Ty, is_named_arg: bool) -> Ty
         variadic_arg_ty(param_ty).unwrap_or(Ty::Unknown)
     } else {
         param_ty.clone()
+    }
+}
+
+fn call_arg_expected_ty_for_arg(variadic: bool, param_ty: &Ty, arg: &crate::ast::CallArg) -> Ty {
+    if variadic && arg.name.is_none() && matches!(arg.value, Expr::Spread { .. }) {
+        param_ty.clone()
+    } else {
+        call_arg_expected_ty(variadic, param_ty, arg.name.is_some())
+    }
+}
+
+fn call_arg_value_expr(arg: &crate::ast::CallArg) -> &Expr {
+    match &arg.value {
+        Expr::Spread { value, .. } => value,
+        _ => &arg.value,
     }
 }
 

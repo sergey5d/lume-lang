@@ -1028,6 +1028,17 @@ printf(format Str, vararg value [Str]) Unit
 The parameter is available as `[T]` inside the body, and call sites pass the
 extra values positionally.
 
+Call sites may spread an existing list into a variadic tail with `...`:
+
+```txt
+extra = ["beta", "gamma"]
+
+describe("task", "alpha", ...extra, "omega")
+```
+
+Spread arguments are valid only as positional arguments for a `vararg`
+parameter. Fixed-arity parameters reject `...value`.
+
 Function and method parameters may be marked `lazy`:
 
 ```txt
@@ -1630,7 +1641,13 @@ List literal:
 ```txt
 [1, 2, 3]
 ["a", "b"]
+[0, ...items, 5, ...more]
+copy = [...items]
 ```
+
+`...items` inside a list literal copies each element from an iterable into the
+new list. The copy is shallow: element values are reused, but the outer list is
+new.
 
 Array construction:
 

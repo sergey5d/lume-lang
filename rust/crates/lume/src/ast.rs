@@ -585,6 +585,10 @@ pub enum Expr {
     Unit {
         span: Span,
     },
+    Spread {
+        value: Box<Expr>,
+        span: Span,
+    },
     ListLiteral {
         items: Vec<Expr>,
         span: Span,
@@ -699,6 +703,7 @@ impl Expr {
             | Expr::String { span, .. }
             | Expr::Bool { span, .. }
             | Expr::Unit { span }
+            | Expr::Spread { span, .. }
             | Expr::ListLiteral { span, .. }
             | Expr::TupleLiteral { span, .. }
             | Expr::ShapeLiteral { span, .. }

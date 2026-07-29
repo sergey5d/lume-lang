@@ -1126,6 +1126,12 @@ fn push_variadic_bridge_method(
         .collect::<Vec<_>>();
 
     if !has_fixed_overload {
+        let omitted_variadic_arg = function
+            .param_defaults
+            .get(variadic_index)
+            .and_then(|default| default.as_ref())
+            .map(java_constant)
+            .unwrap_or_else(|| "lume.core.LumeList.of()".to_string());
         push_variadic_bridge_overload(
             out,
             function,
@@ -1134,7 +1140,7 @@ fn push_variadic_bridge_method(
             method_name,
             &fixed_decl,
             &fixed_args,
-            "lume.core.LumeList.of()".to_string(),
+            omitted_variadic_arg,
         );
     }
 
@@ -1205,6 +1211,7 @@ struct JavaParamSpec {
     ty: ir::Type,
     variadic: bool,
     lazy: bool,
+    default: Option<ir::Constant>,
     coercion: Option<JavaPrimitiveCoercion>,
 }
 
@@ -1219,6 +1226,7 @@ fn function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
                 ty: local.ty.clone(),
                 variadic: function.param_variadic.get(index).copied().unwrap_or(false),
                 lazy: function.param_lazy.get(index).copied().unwrap_or(false),
+                default: function.param_defaults.get(index).cloned().flatten(),
                 coercion: None,
             })
         })
@@ -1232,6 +1240,7 @@ fn param_specs_from_types(params: Vec<ir::Type>) -> Vec<JavaParamSpec> {
             ty,
             variadic: false,
             lazy: false,
+            default: None,
             coercion: None,
         })
         .collect()
@@ -1242,6 +1251,7 @@ fn java_param_spec(ty: ir::Type, lazy: bool) -> JavaParamSpec {
         ty,
         variadic: false,
         lazy,
+        default: None,
         coercion: None,
     }
 }
@@ -1575,12 +1585,32 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             ast::Expr::Unit { .. } => Some("lume.core.LumeUnit.INSTANCE".to_string()),
             ast::Expr::ListLiteral { items, .. } => {
-                let items = items
+                if items
                     .iter()
-                    .map(|item| self.emit_expr(item, bindings))
-                    .collect::<Option<Vec<_>>>()?;
-                Some(format!("lume.core.LumeList.of({})", items.join(", ")))
+                    .any(|item| matches!(item, ast::Expr::Spread { .. }))
+                {
+                    let mut out = "lume.core.LumeList.empty()".to_string();
+                    for item in items {
+                        match item {
+                            ast::Expr::Spread { value, .. } => {
+                                out =
+                                    format!("{}.addAll({})", out, self.emit_expr(value, bindings)?);
+                            }
+                            _ => {
+                                out = format!("{}.add({})", out, self.emit_expr(item, bindings)?);
+                            }
+                        }
+                    }
+                    Some(out)
+                } else {
+                    let items = items
+                        .iter()
+                        .map(|item| self.emit_expr(item, bindings))
+                        .collect::<Option<Vec<_>>>()?;
+                    Some(format!("lume.core.LumeList.of({})", items.join(", ")))
+                }
             }
+            ast::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
             ast::Expr::Group { inner, .. } => self.emit_expr(inner, bindings),
             ast::Expr::Call { callee, args, .. } => self.emit_call(callee, args, bindings),
             _ => None,
@@ -1604,7 +1634,7 @@ impl<'a> SourceBodyEmitter<'a> {
             ast::Expr::Identifier { name, .. } if self.enum_case(name).is_some() => {
                 let args = args
                     .iter()
-                    .map(|arg| self.emit_expr(&arg.value, bindings))
+                    .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
                 Some(format!(
                     "new {}<>({})",
@@ -1615,14 +1645,14 @@ impl<'a> SourceBodyEmitter<'a> {
             ast::Expr::Identifier { name, .. } if core_enum_case_owner(name).is_some() => {
                 let args = args
                     .iter()
-                    .map(|arg| self.emit_expr(&arg.value, bindings))
+                    .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
                 self.emit_core_enum_case(name, &args)
             }
             ast::Expr::Identifier { name, .. } if self.function_param(name).is_some() => {
                 let args = args
                     .iter()
-                    .map(|arg| self.emit_expr(&arg.value, bindings))
+                    .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
                 let target = if self.is_lazy_param(name) {
                     format!("{}.get()", self.param_reference(name)?)
@@ -1646,7 +1676,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 let receiver = self.emit_expr(receiver, bindings)?;
                 let args = args
                     .iter()
-                    .map(|arg| self.emit_expr(&arg.value, bindings))
+                    .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
                 Some(format!(
                     "{}.{}({})",
@@ -1656,6 +1686,17 @@ impl<'a> SourceBodyEmitter<'a> {
                 ))
             }
             _ => None,
+        }
+    }
+
+    fn emit_call_arg(
+        &self,
+        arg: &ast::CallArg,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        match &arg.value {
+            ast::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
+            _ => self.emit_expr(&arg.value, bindings),
         }
     }
 
@@ -2807,6 +2848,12 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 Some(format!("{}.add({})", args[0], args[1]))
             }
+            ir::Intrinsic::ListExtend => {
+                if args.len() != 2 {
+                    return None;
+                }
+                Some(format!("{}.addAll({})", args[0], args[1]))
+            }
             ir::Intrinsic::ListLen => {
                 if args.len() != 1 {
                     return None;
@@ -2938,6 +2985,7 @@ impl<'a> FunctionEmitter<'a> {
                         ty: field_ty,
                         variadic: false,
                         lazy: false,
+                        default: None,
                         coercion: None,
                     },
                 )?);
@@ -3296,6 +3344,16 @@ impl<'a> FunctionEmitter<'a> {
         }
 
         let variadic_target = params.get(variadic_index)?;
+        if operands.len() == variadic_index {
+            args.push(
+                variadic_target
+                    .default
+                    .as_ref()
+                    .map(java_constant)
+                    .unwrap_or_else(|| "lume.core.LumeList.of()".to_string()),
+            );
+            return Some(args);
+        }
         if operands.len() == params.len() {
             let operand = operands.get(variadic_index)?;
             if self.operand_type_is_variadic_list(operand, &variadic_target.ty) {
@@ -3485,6 +3543,7 @@ impl<'a> FunctionEmitter<'a> {
                 ty: field.ty.clone(),
                 variadic: false,
                 lazy: false,
+                default: None,
                 coercion: None,
             })
             .collect::<Vec<_>>();
@@ -3510,6 +3569,7 @@ impl<'a> FunctionEmitter<'a> {
                             ty,
                             variadic: false,
                             lazy: false,
+                            default: None,
                             coercion: None,
                         }]
                     });
@@ -3535,6 +3595,7 @@ impl<'a> FunctionEmitter<'a> {
                     ty: self.substitute_receiver_type_args(&name, &args, &param.ty),
                     variadic: param.variadic,
                     lazy: param.lazy,
+                    default: param.default.clone(),
                     coercion: param.coercion,
                 })
                 .collect(),
@@ -3886,6 +3947,10 @@ impl<'a> FunctionEmitter<'a> {
                     | ir::Intrinsic::Assert,
                 ) => Some(ir::Type::Unit),
                 ir::Callee::Intrinsic(ir::Intrinsic::Identity) => {
+                    args.first().and_then(|arg| self.operand_type(arg))
+                }
+                ir::Callee::Intrinsic(ir::Intrinsic::ListAppend)
+                | ir::Callee::Intrinsic(ir::Intrinsic::ListExtend) => {
                     args.first().and_then(|arg| self.operand_type(arg))
                 }
                 ir::Callee::Intrinsic(ir::Intrinsic::ListLen) => Some(ir::Type::Int),
@@ -4273,6 +4338,7 @@ impl JavaNames {
                             .unwrap_or(ir::Type::Unknown),
                         variadic: param.variadic,
                         lazy: false,
+                        default: None,
                         coercion: param.coercion,
                     })
                     .collect::<Vec<_>>();

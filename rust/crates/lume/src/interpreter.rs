@@ -580,6 +580,7 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
         | ast::Expr::String { .. }
         | ast::Expr::Bool { .. }
         | ast::Expr::Unit { .. } => {}
+        ast::Expr::Spread { value, .. } => rewrite_expr_for_runtime(value, module, graph),
         ast::Expr::ListLiteral { items, .. }
         | ast::Expr::TupleLiteral { items, .. }
         | ast::Expr::ShapeLiteral { items, .. } => {
@@ -3769,6 +3770,12 @@ impl<'a> Interpreter<'a> {
                 }
                 self.list_append(args[0].clone(), args[1].clone(), span)
             }
+            ir::Intrinsic::ListExtend => {
+                if args.len() != 2 {
+                    return Err(self.runtime_error(span, "ListExtend expects 2 arguments"));
+                }
+                self.list_extend(args[0].clone(), args[1].clone(), span)
+            }
             ir::Intrinsic::ListLen => {
                 if args.len() != 1 {
                     return Err(self.runtime_error(span, "ListLen expects 1 argument"));
@@ -4024,6 +4031,22 @@ impl<'a> Interpreter<'a> {
                 Ok(list)
             }
             _ => Err(self.runtime_error(span, "ListAppend expects a List receiver")),
+        }
+    }
+
+    fn list_extend(
+        &mut self,
+        list: Value,
+        values: Value,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let values = iterable_values(values, span, self)?;
+        match &list {
+            Value::List(items) => {
+                items.borrow_mut().extend(values);
+                Ok(list)
+            }
+            _ => Err(self.runtime_error(span, "ListExtend expects a List receiver")),
         }
     }
 

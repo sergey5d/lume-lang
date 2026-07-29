@@ -19,6 +19,7 @@
 # tail 2 4
 # remove 2 3
 # size 3
+# spread 0 4 7 7
 
 single Descending with Ordering[Int] {
 }
@@ -72,4 +73,7 @@ def main() Unit {
     println("tail " + tailItems.get(0).getOr(0) + " " + tailItems.get(2).getOr(0))
     println("remove " + removed + " " + items.size())
     println("size " + items.size())
+
+    spreaded = [0, ...items, 5, ...[6, 7]]
+    println("spread " + spreaded.get(0).getOr(0) + " " + spreaded.get(3).getOr(0) + " " + spreaded.get(6).getOr(0) + " " + spreaded.size())
 }

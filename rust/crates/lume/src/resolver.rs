@@ -1312,6 +1312,7 @@ impl<'a> Resolver<'a> {
             | Expr::Bool { .. }
             | Expr::Unit { .. } => true,
             Expr::Group { inner, .. } => self.is_annotation_static_value(inner),
+            Expr::Spread { .. } => false,
             Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => items
                 .iter()
                 .all(|item| self.is_annotation_static_value(item)),
@@ -2061,6 +2062,7 @@ impl<'a> Resolver<'a> {
             | Expr::String { .. }
             | Expr::Bool { .. }
             | Expr::Unit { .. } => {}
+            Expr::Spread { value, .. } => self.resolve_expr(value),
             Expr::ListLiteral { items, .. }
             | Expr::TupleLiteral { items, .. }
             | Expr::ShapeLiteral { items, .. } => {

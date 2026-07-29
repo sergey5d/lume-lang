@@ -1485,7 +1485,19 @@ impl<'a> Parser<'a> {
         }
         loop {
             let start = self.current_span();
-            if self.at(TokenKind::Identifier) && self.at_next(TokenKind::Eq) {
+            if self.match_token(TokenKind::Ellipsis) {
+                let value = self.parse_expr()?;
+                let span = start.cover(value.span());
+                args.push(CallArg {
+                    name: None,
+                    ty: None,
+                    span,
+                    value: Expr::Spread {
+                        value: Box::new(value),
+                        span,
+                    },
+                });
+            } else if self.at(TokenKind::Identifier) && self.at_next(TokenKind::Eq) {
                 let (name, name_span) = self.expect_identifier("expected named argument")?;
                 self.consume(TokenKind::Eq, "expected '=' after argument name")?;
                 let value = self.parse_expr()?;
@@ -1740,14 +1752,14 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let mut items = Vec::new();
         if !self.at(TokenKind::RBracket) {
-            items.push(self.parse_expr()?);
+            items.push(self.parse_list_literal_item()?);
             self.skip_newlines();
             while self.match_token(TokenKind::Comma) {
                 self.skip_newlines();
                 if self.at(TokenKind::RBracket) {
                     break;
                 }
-                items.push(self.parse_expr()?);
+                items.push(self.parse_list_literal_item()?);
                 self.skip_newlines();
             }
         }
@@ -1756,6 +1768,19 @@ impl<'a> Parser<'a> {
             items,
             span: start.cover(end),
         })
+    }
+
+    fn parse_list_literal_item(&mut self) -> Option<Expr> {
+        if self.match_token(TokenKind::Ellipsis) {
+            let start = self.previous_span();
+            let value = self.parse_expr()?;
+            let span = start.cover(value.span());
+            return Some(Expr::Spread {
+                value: Box::new(value),
+                span,
+            });
+        }
+        self.parse_expr()
     }
 
     pub(super) fn parse_group_or_tuple_expr(&mut self) -> Option<Expr> {

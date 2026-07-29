@@ -545,6 +545,7 @@ pub enum Intrinsic {
     IterHasNext,
     IterNext,
     ListAppend,
+    ListExtend,
     ListLen,
     ListGet,
     ListSlice,

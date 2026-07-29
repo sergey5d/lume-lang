@@ -697,6 +697,7 @@ struct CaptureSource {
 struct ExpectedArgSpec {
     ty: ir::Type,
     lazy: bool,
+    variadic: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -3552,6 +3553,9 @@ impl<'a> FunctionLowerer<'a> {
                 yield_body,
                 span,
             } => self.lower_for_yield_expr(bindings, yield_body, *span),
+            Expr::ListLiteral { items, span } if list_literal_has_spread(items) => {
+                self.lower_spread_list_literal(items, *span)
+            }
             Expr::LiftedChain {
                 base,
                 segments,
@@ -3571,6 +3575,7 @@ impl<'a> FunctionLowerer<'a> {
             | Expr::Is { .. }
             | Expr::TypeOf { .. }
             | Expr::Lambda { .. } => self.lower_expr_from_rvalue(expr),
+            Expr::Spread { value, .. } => self.lower_expr(value),
             Expr::Placeholder { span } => {
                 self.add_error(
                     "lower_invariant",
@@ -3584,6 +3589,43 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_expr_from_rvalue(&mut self, expr: &Expr) -> ir::Operand {
         self.lower_expr_from_rvalue_with_expected(expr, None)
+    }
+
+    fn lower_spread_list_literal(&mut self, items: &[Expr], span: Span) -> ir::Operand {
+        let list = self.add_temp(ir::Type::list(ir::Type::Unknown));
+        self.push_statement(ir::Statement {
+            span: Some(span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(list),
+                value: ir::RValue::List(Vec::new()),
+            },
+        });
+
+        for item in items {
+            let (intrinsic, value, item_span) = match item {
+                Expr::Spread { value, span } => {
+                    (ir::Intrinsic::ListExtend, self.lower_expr(value), *span)
+                }
+                _ => (
+                    ir::Intrinsic::ListAppend,
+                    self.lower_expr(item),
+                    item.span(),
+                ),
+            };
+            self.push_statement(ir::Statement {
+                span: Some(item_span),
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Local(list),
+                    value: ir::RValue::Call {
+                        callee: ir::Callee::Intrinsic(intrinsic),
+                        args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(list))), value],
+                        structural: false,
+                    },
+                },
+            });
+        }
+
+        ir::Operand::Copy(Box::new(ir::Place::Local(list)))
     }
 
     fn lower_expr_from_rvalue_with_expected(
@@ -3777,11 +3819,19 @@ impl<'a> FunctionLowerer<'a> {
             Expr::ListLiteral { items, .. } => {
                 let item_ty = items
                     .iter()
-                    .map(|item| self.infer_expr_type_with_overrides(item, overrides))
+                    .map(|item| {
+                        if let Expr::Spread { value, .. } = item {
+                            let spread_ty = self.infer_expr_type_with_overrides(value, overrides);
+                            known_iterable_ir_item_type(&spread_ty).unwrap_or(ir::Type::Unknown)
+                        } else {
+                            self.infer_expr_type_with_overrides(item, overrides)
+                        }
+                    })
                     .reduce(join_ir_types)
                     .unwrap_or(ir::Type::Unknown);
                 ir::Type::list(item_ty)
             }
+            Expr::Spread { value, .. } => self.infer_expr_type_with_overrides(value, overrides),
             Expr::TupleLiteral { items, .. } => ir::Type::Tuple(
                 items
                     .iter()
@@ -4571,9 +4621,9 @@ impl<'a> FunctionLowerer<'a> {
             }
         }
         match expr {
-            Expr::ListLiteral { items, .. } => Some(ir::RValue::List(
-                items.iter().map(|item| self.lower_expr(item)).collect(),
-            )),
+            Expr::ListLiteral { items, .. } if !list_literal_has_spread(items) => Some(
+                ir::RValue::List(items.iter().map(|item| self.lower_expr(item)).collect()),
+            ),
             Expr::TupleLiteral { items, .. } => Some(ir::RValue::Tuple(
                 items.iter().map(|item| self.lower_expr(item)).collect(),
             )),
@@ -4663,17 +4713,8 @@ impl<'a> FunctionLowerer<'a> {
                     .collect::<Vec<_>>();
                 let expected_args =
                     self.call_expected_arg_specs(call_callee, &ordered_args, expected);
-                let mut lowered_args = ordered_args
-                    .iter()
-                    .enumerate()
-                    .map(|(index, arg)| {
-                        let spec = expected_args
-                            .as_ref()
-                            .and_then(|args| args.get(index))
-                            .and_then(Option::as_ref);
-                        self.lower_call_arg(arg, spec)
-                    })
-                    .collect::<Vec<_>>();
+                let mut lowered_args =
+                    self.lower_call_args_with_spread(&ordered_args, expected_args.as_deref());
                 lowered_args.extend(self.reified_call_evidence_args(
                     call_callee,
                     &ordered_args,
@@ -4747,16 +4788,110 @@ impl<'a> FunctionLowerer<'a> {
         arg: &core::CallArg,
         expected: Option<&ExpectedArgSpec>,
     ) -> ir::Operand {
+        let value = match &arg.value {
+            Expr::Spread { value, .. } => value.as_ref(),
+            _ => &arg.value,
+        };
         let Some(expected) = expected else {
-            return self.lower_expr(&arg.value);
+            return self.lower_expr(value);
         };
         if expected.lazy {
-            if let Some(thunk) = self.lazy_forward_operand(&arg.value) {
+            if let Some(thunk) = self.lazy_forward_operand(value) {
                 return thunk;
             }
-            return self.lower_lazy_argument(&arg.value, expected.ty.clone(), arg.span);
+            return self.lower_lazy_argument(value, expected.ty.clone(), arg.span);
         }
-        self.lower_expr_with_expected(&arg.value, Some(&expected.ty))
+        self.lower_expr_with_expected(value, Some(&expected.ty))
+    }
+
+    fn lower_call_args_with_spread(
+        &mut self,
+        args: &[core::CallArg],
+        expected: Option<&[Option<ExpectedArgSpec>]>,
+    ) -> Vec<ir::Operand> {
+        let Some(expected) = expected else {
+            return args
+                .iter()
+                .map(|arg| self.lower_call_arg(arg, None))
+                .collect();
+        };
+        let Some(variadic_index) = expected
+            .iter()
+            .position(|spec| spec.as_ref().is_some_and(|spec| spec.variadic))
+        else {
+            return args
+                .iter()
+                .enumerate()
+                .map(|(index, arg)| {
+                    self.lower_call_arg(arg, expected.get(index).and_then(Option::as_ref))
+                })
+                .collect();
+        };
+        if !args
+            .iter()
+            .skip(variadic_index)
+            .any(|arg| matches!(arg.value, Expr::Spread { .. }))
+        {
+            return args
+                .iter()
+                .enumerate()
+                .map(|(index, arg)| {
+                    self.lower_call_arg(arg, expected.get(index).and_then(Option::as_ref))
+                })
+                .collect();
+        }
+
+        let mut out = Vec::new();
+        for (index, arg) in args.iter().take(variadic_index).enumerate() {
+            out.push(self.lower_call_arg(arg, expected.get(index).and_then(Option::as_ref)));
+        }
+
+        let variadic_spec = expected
+            .get(variadic_index)
+            .and_then(Option::as_ref)
+            .cloned()
+            .unwrap_or(ExpectedArgSpec {
+                ty: ir::Type::list(ir::Type::Unknown),
+                lazy: false,
+                variadic: true,
+            });
+        let element_ty = match &variadic_spec.ty {
+            ir::Type::Named { name, args } if name == "List" && args.len() == 1 => args[0].clone(),
+            _ => ir::Type::Unknown,
+        };
+        let list = self.add_temp(variadic_spec.ty.clone());
+        self.push_statement(ir::Statement {
+            span: args.get(variadic_index).map(|arg| arg.span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(list),
+                value: ir::RValue::List(Vec::new()),
+            },
+        });
+        for arg in args.iter().skip(variadic_index) {
+            let (intrinsic, value, span) = match &arg.value {
+                Expr::Spread { value, span } => {
+                    (ir::Intrinsic::ListExtend, self.lower_expr(value), *span)
+                }
+                _ => (
+                    ir::Intrinsic::ListAppend,
+                    self.lower_expr_with_expected(&arg.value, Some(&element_ty)),
+                    arg.span,
+                ),
+            };
+            self.push_statement(ir::Statement {
+                span: Some(span),
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Local(list),
+                    value: ir::RValue::Call {
+                        callee: ir::Callee::Intrinsic(intrinsic),
+                        args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(list))), value],
+                        structural: false,
+                    },
+                },
+            });
+        }
+        out.push(ir::Operand::Copy(Box::new(ir::Place::Local(list))));
+        out
     }
 
     fn lazy_forward_operand(&mut self, expr: &Expr) -> Option<ir::Operand> {
@@ -4820,7 +4955,13 @@ impl<'a> FunctionLowerer<'a> {
             return Some(
                 fields
                     .into_iter()
-                    .map(|ty| Some(ExpectedArgSpec { ty, lazy: false }))
+                    .map(|ty| {
+                        Some(ExpectedArgSpec {
+                            ty,
+                            lazy: false,
+                            variadic: false,
+                        })
+                    })
                     .collect(),
             );
         }
@@ -4840,10 +4981,12 @@ impl<'a> FunctionLowerer<'a> {
                         Some(ExpectedArgSpec {
                             ty: ir::Type::Bool,
                             lazy: false,
+                            variadic: false,
                         }),
                         Some(ExpectedArgSpec {
                             ty: error_ty,
                             lazy: true,
+                            variadic: false,
                         }),
                     ]);
                 }
@@ -4863,6 +5006,7 @@ impl<'a> FunctionLowerer<'a> {
                     return Some(vec![Some(ExpectedArgSpec {
                         ty: transactional_work_type(value_ty),
                         lazy: false,
+                        variadic: false,
                     })]);
                 }
                 let receiver_ty = self.infer_expr_type(receiver);
@@ -4920,6 +5064,7 @@ impl<'a> FunctionLowerer<'a> {
                     Some(ExpectedArgSpec {
                         ty: substitute_ir_type(&ty, subst),
                         lazy,
+                        variadic: function.param_variadic.get(index).copied().unwrap_or(false),
                     })
                 })
                 .collect(),
@@ -6307,6 +6452,28 @@ fn index_result_ir_type(ty: &ir::Type) -> ir::Type {
     }
 }
 
+fn known_iterable_ir_item_type(ty: &ir::Type) -> Option<ir::Type> {
+    match ty {
+        ir::Type::Named { name, args }
+            if (name == "Array"
+                || name == "Iterable"
+                || name == "Iterator"
+                || name == "List"
+                || name == "Set")
+                && args.len() == 1 =>
+        {
+            Some(args[0].clone())
+        }
+        ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
+            Some(ir::Type::Tuple(vec![args[0].clone(), args[1].clone()]))
+        }
+        ir::Type::Named { name, args } if name == "IntRange" && args.is_empty() => {
+            Some(ir::Type::Int)
+        }
+        _ => None,
+    }
+}
+
 fn builtin_member_expected_arg_specs(
     receiver: &ir::Type,
     name: &str,
@@ -6320,7 +6487,13 @@ fn builtin_member_expected_arg_specs(
         return None;
     };
     let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
-    let spec = |ty: ir::Type, lazy: bool| Some(ExpectedArgSpec { ty, lazy });
+    let spec = |ty: ir::Type, lazy: bool| {
+        Some(ExpectedArgSpec {
+            ty,
+            lazy,
+            variadic: false,
+        })
+    };
     match (type_name.as_str(), name) {
         ("Database", "transactionally") => {
             let value_ty = transactionally_result_value_type(expected).unwrap_or(ir::Type::Unknown);
@@ -7407,6 +7580,10 @@ fn callable_reference_call_expr(reference: &Expr, param_names: &[String], span: 
         style: core::CallStyle::Paren,
         span,
     }
+}
+
+fn list_literal_has_spread(items: &[Expr]) -> bool {
+    items.iter().any(|item| matches!(item, Expr::Spread { .. }))
 }
 
 fn is_named_runtime_value_path(program: &ir::Program, path: &[String]) -> bool {
