@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*operator '\|' is reserved and not currently supported.*
+# .*expected expression.*
 
 def main() Unit {
     value = left | right

@@ -2306,6 +2306,44 @@ def run(flag Bool) Unit = match flag {
 }
 
 #[test]
+fn parses_match_case_or_patterns_as_case_alternatives() {
+    let result = parse(
+        r#"
+enum Size {
+    case Small
+    case Medium
+    case Large
+}
+
+def run(size Size) Str = match size {
+    case Size.Small | Size.Medium => "common"
+    case Size.Large => "large"
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[1] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    match &function.body {
+        CallableBody::Expr(Expr::Match { cases, .. }) => {
+            assert_eq!(cases.len(), 3);
+            assert!(matches!(
+                &cases[0].pattern,
+                Pattern::Constructor { path, .. } if path == &vec!["Size".to_string(), "Small".to_string()]
+            ));
+            assert!(matches!(
+                &cases[1].pattern,
+                Pattern::Constructor { path, .. } if path == &vec!["Size".to_string(), "Medium".to_string()]
+            ));
+        }
+        other => panic!("expected match expression body, got {other:#?}"),
+    }
+}
+
+#[test]
 fn rejects_match_without_value() {
     let result = parse(
         r#"

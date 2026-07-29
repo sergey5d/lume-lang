@@ -2361,6 +2361,16 @@ result = match value {
 }
 ```
 
+Case alternatives use `|` between patterns. The alternatives share one guard and
+one body:
+
+```txt
+result = match value {
+    case Size.Small | Size.Medium => "common"
+    case Size.Large => "large"
+}
+```
+
 List patterns can be used in `match` cases:
 
 ```txt
@@ -2421,6 +2431,7 @@ Supported pattern families:
 - wildcard: `_`
 - binding pattern: `x`
 - literal/value patterns: `1`, `"hello"`, `true`
+- case alternatives: `case A | B => ...`
 - tuple patterns: `(x, y)`
 - enum constructor patterns: `SomeX(x)`
 - class extractor patterns: `PairBox(left, right)`

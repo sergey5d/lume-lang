@@ -87,6 +87,7 @@ pub enum TokenKind {
     PercentEq,
     AndAnd,
     OrOr,
+    Pipe,
     Eof,
 }
 
@@ -388,7 +389,7 @@ impl<'a> Lexer<'a> {
             '&' if self.take('&') => Some(TokenKind::AndAnd),
             '&' => return self.unsupported_operator(start, "&"),
             '|' if self.take('|') => Some(TokenKind::OrOr),
-            '|' => return self.unsupported_operator(start, "|"),
+            '|' => Some(TokenKind::Pipe),
             _ => None,
         };
 
@@ -547,16 +548,14 @@ mod tests {
 
     #[test]
     fn rejects_reserved_symbolic_collection_operators() {
-        let result = lex(&source(
-            "a :+ b\nc :- d\ne :: f\ng ++ h\ni -- j\na & b\nc | d\n",
-        ));
+        let result = lex(&source("a :+ b\nc :- d\ne :: f\ng ++ h\ni -- j\na & b\n"));
         let messages = result
             .diagnostics
             .iter()
             .map(|diag| (diag.code, diag.message.as_str()))
             .collect::<Vec<_>>();
-        assert_eq!(messages.len(), 7);
-        for operator in [":+", ":-", "::", "++", "--", "&", "|"] {
+        assert_eq!(messages.len(), 6);
+        for operator in [":+", ":-", "::", "++", "--", "&"] {
             assert!(
                 messages.iter().any(|(code, message)| {
                     *code == "unsupported_operator" && message.contains(operator)
@@ -569,7 +568,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err -> mapped(err) }\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\ncount %= 2\nlifted = value.->name()\ndef spread(vararg value [Str]) Unit = ()\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err -> mapped(err) }\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\ncount %= 2\nlifted = value.->name()\ndef spread(vararg value [Str]) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -582,6 +581,7 @@ mod tests {
         assert!(kinds.contains(&TokenKind::ColonLess));
         assert!(kinds.contains(&TokenKind::PercentEq));
         assert!(kinds.contains(&TokenKind::DotArrow));
+        assert!(kinds.contains(&TokenKind::Pipe));
         assert!(kinds.contains(&TokenKind::Float));
         assert!(
             result

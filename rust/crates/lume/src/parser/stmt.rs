@@ -868,7 +868,10 @@ impl<'a> Parser<'a> {
                 return None;
             }
             self.consume_keyword(Keyword::Case, "expected 'case' before match pattern")?;
-            let pattern = self.parse_pattern()?;
+            let mut patterns = vec![self.parse_pattern()?];
+            while self.match_token(TokenKind::Pipe) {
+                patterns.push(self.parse_pattern()?);
+            }
             let guard = if self.match_keyword(Keyword::If) {
                 Some(self.parse_expr()?)
             } else {
@@ -880,12 +883,14 @@ impl<'a> Parser<'a> {
                 MatchCaseBody::Block(block) => block.span,
                 MatchCaseBody::Expr(expr) => expr.span(),
             };
-            cases.push(MatchCase {
-                pattern: pattern.clone(),
-                guard,
-                body,
-                span: pattern.span().cover(end),
-            });
+            for pattern in patterns {
+                cases.push(MatchCase {
+                    span: pattern.span().cover(end),
+                    pattern,
+                    guard: guard.clone(),
+                    body: body.clone(),
+                });
+            }
             self.skip_newlines();
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after match cases")?;
