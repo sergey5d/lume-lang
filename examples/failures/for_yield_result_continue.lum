@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*`continue` inside `for \.\.\. yield` is only supported for iterable comprehensions; Result comprehensions have no skip state.*
+
+def main() Result[Int, Str] =
+    for item <- Ok(1) yield {
+        if item > 0 {
+            continue
+        }
+
+        item + 1
+    }

@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*`continue` inside `for \.\.\. yield` is only supported for iterable comprehensions; Option comprehensions have no skip state.*
+
+def main() Option[Int] =
+    for item <- Some(1) yield {
+        if item > 0 {
+            continue
+        }
+
+        item + 1
+    }

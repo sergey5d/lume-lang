@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*`break` inside `for \.\.\. yield` is only supported for iterable comprehensions; Option comprehensions have no early-exit state.*
+
+def main() Option[Int] =
+    for item <- Some(1) yield {
+        if item > 0 {
+            break
+        }
+
+        item + 1
+    }

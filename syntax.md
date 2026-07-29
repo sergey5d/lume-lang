@@ -2294,9 +2294,15 @@ xs.flatMap(x -> {
 })
 ```
 
-`continue` is valid in `while`, `for`, and `for ... yield`.
-Inside `for ... yield`, it skips the current iteration without producing a
-value.
+`break` and `continue` are valid in `while`, `for`, and iterable
+`for ... yield`.
+Inside iterable `for ... yield`, `continue` skips the current iteration without
+producing a value, and `break` exits the current generator loop.
+
+`break` and `continue` are invalid inside `Option`, `Result`, and `Either`
+comprehensions. Those families lower through `map` / `flatMap`, not real
+iteration, and they do not have skip or early-exit states. Choose absence or
+failure explicitly with `match`, `map`, `flatMap`, `None`, `Err`, or `Left`.
 
 Condition-controlled loops use `while`:
 

@@ -4074,6 +4074,21 @@ impl<'a> Checker<'a> {
                         family = self.choose_for_yield_family(family, next, binding.span);
                     }
                 }
+                if let Some(family) = &family
+                    && !matches!(family, ForYieldFamily::Iterable | ForYieldFamily::Unknown)
+                    && let Some(control) = loop_control_targeting_current_loop_in_block(yield_body)
+                {
+                    self.add_error(
+                        control.kind.diagnostic_code(),
+                        format!(
+                            "`{}` inside `for ... yield` is only supported for iterable comprehensions; {} comprehensions have no {} state",
+                            control.kind.keyword(),
+                            describe_for_yield_family(family),
+                            control.kind.state_name()
+                        ),
+                        control.span,
+                    );
+                }
                 let yield_ty = self.check_block(yield_body);
                 self.loop_depth -= 1;
                 self.pop_scope();
@@ -8283,6 +8298,257 @@ fn constructor_stmt_contains_delegation_attempt(stmt: &Stmt) -> bool {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoopControlKind {
+    Break,
+    Continue,
+}
+
+impl LoopControlKind {
+    fn diagnostic_code(self) -> &'static str {
+        match self {
+            LoopControlKind::Break => "invalid_for_yield_break",
+            LoopControlKind::Continue => "invalid_for_yield_continue",
+        }
+    }
+
+    fn keyword(self) -> &'static str {
+        match self {
+            LoopControlKind::Break => "break",
+            LoopControlKind::Continue => "continue",
+        }
+    }
+
+    fn state_name(self) -> &'static str {
+        match self {
+            LoopControlKind::Break => "early-exit",
+            LoopControlKind::Continue => "skip",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LoopControlSpan {
+    kind: LoopControlKind,
+    span: crate::source::Span,
+}
+
+fn loop_control_targeting_current_loop_in_block(block: &Block) -> Option<LoopControlSpan> {
+    block
+        .statements
+        .iter()
+        .find_map(loop_control_targeting_current_loop_in_stmt)
+}
+
+fn loop_control_targeting_current_loop_in_stmt(stmt: &Stmt) -> Option<LoopControlSpan> {
+    match stmt {
+        Stmt::Break(stmt) => Some(LoopControlSpan {
+            kind: LoopControlKind::Break,
+            span: stmt.span,
+        }),
+        Stmt::Continue(stmt) => Some(LoopControlSpan {
+            kind: LoopControlKind::Continue,
+            span: stmt.span,
+        }),
+        Stmt::Binding(stmt) => stmt
+            .values
+            .iter()
+            .find_map(loop_control_targeting_current_loop_in_expr),
+        Stmt::PatternBinding(stmt) => stmt
+            .clauses
+            .iter()
+            .find_map(|clause| loop_control_targeting_current_loop_in_expr(&clause.value))
+            .or_else(|| loop_control_targeting_current_loop_in_expr(&stmt.value)),
+        Stmt::Assignment(stmt) => stmt
+            .targets
+            .iter()
+            .chain(stmt.values.iter())
+            .find_map(loop_control_targeting_current_loop_in_expr),
+        Stmt::Defer(stmt) => match &stmt.action {
+            crate::ast::DeferAction::Call(expr) => {
+                loop_control_targeting_current_loop_in_expr(expr)
+            }
+            // Defer blocks have separate control-flow rules; loop control there
+            // never targets this comprehension item.
+            crate::ast::DeferAction::Block(_) => None,
+        },
+        Stmt::If(stmt) => loop_control_targeting_current_loop_in_if_stmt(stmt),
+        Stmt::Match(stmt) => {
+            loop_control_targeting_current_loop_in_expr(&stmt.value).or_else(|| {
+                stmt.cases.iter().find_map(|case| {
+                    case.guard
+                        .as_ref()
+                        .and_then(loop_control_targeting_current_loop_in_expr)
+                        .or_else(|| match &case.body {
+                            MatchCaseBody::Block(block) => {
+                                loop_control_targeting_current_loop_in_block(block)
+                            }
+                            MatchCaseBody::Expr(expr) => {
+                                loop_control_targeting_current_loop_in_expr(expr)
+                            }
+                        })
+                })
+            })
+        }
+        Stmt::While(stmt) => loop_control_targeting_current_loop_in_expr(&stmt.condition),
+        Stmt::For(stmt) => stmt.bindings.iter().find_map(|binding| {
+            binding
+                .iterable
+                .as_ref()
+                .and_then(loop_control_targeting_current_loop_in_expr)
+                .or_else(|| {
+                    binding
+                        .values
+                        .iter()
+                        .find_map(loop_control_targeting_current_loop_in_expr)
+                })
+        }),
+        Stmt::LetElse(stmt) => stmt
+            .clauses
+            .iter()
+            .find_map(|clause| loop_control_targeting_current_loop_in_expr(&clause.value))
+            .or_else(|| loop_control_targeting_current_loop_in_expr(&stmt.value))
+            .or_else(|| loop_control_targeting_current_loop_in_block(&stmt.else_block)),
+        Stmt::Expr(stmt) => loop_control_targeting_current_loop_in_expr(&stmt.expr),
+        Stmt::Return(_) | Stmt::LocalFunction(_) => None,
+    }
+}
+
+fn loop_control_targeting_current_loop_in_expr(expr: &Expr) -> Option<LoopControlSpan> {
+    match expr {
+        Expr::ListLiteral { items, .. }
+        | Expr::TupleLiteral { items, .. }
+        | Expr::ShapeLiteral { items, .. } => items
+            .iter()
+            .find_map(loop_control_targeting_current_loop_in_expr),
+        Expr::Call { callee, args, .. } => loop_control_targeting_current_loop_in_expr(callee)
+            .or_else(|| {
+                args.iter()
+                    .find_map(|arg| loop_control_targeting_current_loop_in_expr(&arg.value))
+            }),
+        Expr::Member { receiver, .. } => loop_control_targeting_current_loop_in_expr(receiver),
+        Expr::Index {
+            receiver, index, ..
+        } => loop_control_targeting_current_loop_in_expr(receiver)
+            .or_else(|| loop_control_targeting_current_loop_in_expr(index)),
+        Expr::RecordUpdate {
+            receiver, patch, ..
+        } => loop_control_targeting_current_loop_in_expr(receiver)
+            .or_else(|| loop_control_targeting_current_loop_in_expr(patch)),
+        Expr::RecordLiteral { fields, values, .. } => fields
+            .iter()
+            .find_map(|field| loop_control_targeting_current_loop_in_expr(&field.value))
+            .or_else(|| {
+                values
+                    .iter()
+                    .find_map(loop_control_targeting_current_loop_in_expr)
+            }),
+        Expr::Try { value, .. }
+        | Expr::Unary { expr: value, .. }
+        | Expr::Group { inner: value, .. } => loop_control_targeting_current_loop_in_expr(value),
+        Expr::Binary { left, right, .. } => loop_control_targeting_current_loop_in_expr(left)
+            .or_else(|| loop_control_targeting_current_loop_in_expr(right)),
+        Expr::Is { left, .. } => loop_control_targeting_current_loop_in_expr(left),
+        Expr::If {
+            condition,
+            then_block,
+            else_branch,
+            ..
+        } => loop_control_targeting_current_loop_in_expr(condition)
+            .or_else(|| loop_control_targeting_current_loop_in_block(then_block))
+            .or_else(|| match else_branch.as_ref() {
+                ElseExprBranch::If(expr) => loop_control_targeting_current_loop_in_expr(expr),
+                ElseExprBranch::Block(block) => loop_control_targeting_current_loop_in_block(block),
+            }),
+        Expr::Block { body, .. } => loop_control_targeting_current_loop_in_block(body),
+        Expr::Match { value, cases, .. } => loop_control_targeting_current_loop_in_expr(value)
+            .or_else(|| {
+                cases.iter().find_map(|case| {
+                    case.guard
+                        .as_ref()
+                        .and_then(loop_control_targeting_current_loop_in_expr)
+                        .or_else(|| match &case.body {
+                            MatchCaseBody::Block(block) => {
+                                loop_control_targeting_current_loop_in_block(block)
+                            }
+                            MatchCaseBody::Expr(expr) => {
+                                loop_control_targeting_current_loop_in_expr(expr)
+                            }
+                        })
+                })
+            }),
+        Expr::ForYield { bindings, .. } => bindings.iter().find_map(|binding| {
+            binding
+                .iterable
+                .as_ref()
+                .and_then(loop_control_targeting_current_loop_in_expr)
+                .or_else(|| {
+                    binding
+                        .values
+                        .iter()
+                        .find_map(loop_control_targeting_current_loop_in_expr)
+                })
+        }),
+        Expr::LiftedChain { base, segments, .. } => {
+            loop_control_targeting_current_loop_in_expr(base).or_else(|| {
+                segments
+                    .iter()
+                    .find_map(|segment| loop_control_targeting_current_loop_in_expr(&segment.body))
+            })
+        }
+        // Nested callables and anonymous interface methods are separate
+        // control-flow boundaries.
+        Expr::Lambda { .. } | Expr::AnonymousInterface { .. } => None,
+        Expr::Identifier { .. }
+        | Expr::Placeholder { .. }
+        | Expr::Integer { .. }
+        | Expr::Float { .. }
+        | Expr::String { .. }
+        | Expr::Bool { .. }
+        | Expr::Unit { .. }
+        | Expr::TypeOf { .. } => None,
+    }
+}
+
+fn loop_control_targeting_current_loop_in_if_stmt(stmt: &IfStmt) -> Option<LoopControlSpan> {
+    stmt.condition
+        .as_ref()
+        .and_then(loop_control_targeting_current_loop_in_expr)
+        .or_else(|| {
+            stmt.condition_clauses
+                .iter()
+                .find_map(|clause| match clause {
+                    IfConditionClause::Let(clause) => {
+                        loop_control_targeting_current_loop_in_expr(&clause.value)
+                    }
+                    IfConditionClause::Expr(expr) => {
+                        loop_control_targeting_current_loop_in_expr(expr)
+                    }
+                })
+        })
+        .or_else(|| {
+            stmt.pattern_value
+                .as_ref()
+                .and_then(loop_control_targeting_current_loop_in_expr)
+        })
+        .or_else(|| {
+            stmt.pattern_clauses
+                .iter()
+                .find_map(|clause| loop_control_targeting_current_loop_in_expr(&clause.value))
+        })
+        .or_else(|| {
+            stmt.binding_value
+                .as_ref()
+                .and_then(loop_control_targeting_current_loop_in_expr)
+        })
+        .or_else(|| loop_control_targeting_current_loop_in_block(&stmt.then_block))
+        .or_else(|| match &stmt.else_branch {
+            Some(ElseBranch::If(stmt)) => loop_control_targeting_current_loop_in_if_stmt(stmt),
+            Some(ElseBranch::Block(block)) => loop_control_targeting_current_loop_in_block(block),
+            None => None,
+        })
+}
+
 fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Span> {
     match expr {
         Expr::Try { span, .. } => Some(*span),
@@ -12065,6 +12331,118 @@ def main(value) Int {
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn rejects_continue_in_lifted_for_yield() {
+        let cases = [
+            (
+                "Option",
+                r#"
+def main() Option[Int] =
+    for item <- Some(1) yield {
+        if item > 0 {
+            continue
+        }
+        item + 1
+    }
+"#,
+            ),
+            (
+                "Result",
+                r#"
+def main() Result[Int, Str] =
+    for item <- Ok(1) yield {
+        if item > 0 {
+            continue
+        }
+        item + 1
+    }
+"#,
+            ),
+            (
+                "Either",
+                r#"
+def main() Either[Str, Int] =
+    for item <- Right(1) yield {
+        if item > 0 {
+            continue
+        }
+        item + 1
+    }
+"#,
+            ),
+        ];
+
+        for (family, source) in cases {
+            let program = parse_inline(source);
+            let result = check_program(&program);
+            assert!(
+                result.diagnostics.iter().any(|diag| {
+                    diag.code == "invalid_for_yield_continue"
+                        && diag.message.contains(family)
+                        && diag.message.contains("no skip state")
+                }),
+                "{family}: {:#?}",
+                result.diagnostics
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_break_in_lifted_for_yield() {
+        let cases = [
+            (
+                "Option",
+                r#"
+def main() Option[Int] =
+    for item <- Some(1) yield {
+        if item > 0 {
+            break
+        }
+        item + 1
+    }
+"#,
+            ),
+            (
+                "Result",
+                r#"
+def main() Result[Int, Str] =
+    for item <- Ok(1) yield {
+        if item > 0 {
+            break
+        }
+        item + 1
+    }
+"#,
+            ),
+            (
+                "Either",
+                r#"
+def main() Either[Str, Int] =
+    for item <- Right(1) yield {
+        if item > 0 {
+            break
+        }
+        item + 1
+    }
+"#,
+            ),
+        ];
+
+        for (family, source) in cases {
+            let program = parse_inline(source);
+            let result = check_program(&program);
+            assert!(
+                result.diagnostics.iter().any(|diag| {
+                    diag.code == "invalid_for_yield_break"
+                        && diag.message.contains(family)
+                        && diag.message.contains("no early-exit state")
+                }),
+                "{family}: {:#?}",
+                result.diagnostics
+            );
+        }
     }
 
     #[test]

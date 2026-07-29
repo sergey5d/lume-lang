@@ -277,37 +277,7 @@ Open questions:
 - whether runtime errors should also run pending defers
 - whether future async/concurrency features need a stronger cleanup model
 
-### 14. Flow Control Composition
-
-Possible future surface:
-
-```txt
-first = flow if passedInTry == tryTime {
-    passedOther = await(control.side.reverse(), 1)
-}
-
-second = flow(passedOther) if passedOther == 1 {
-    control.inc(passedOther)
-} else {
-    set_light()
-    control.reverseAndZero()
-}
-
-program = first & second
-```
-
-Idea:
-- `flow if condition { ... }` captures a conditional control-flow fragment as a value
-- `flow(value) if condition { ... } else { ... }` can depend on a value produced by another flow
-- `&` composes flow fragments so a program can be assembled from smaller branching/control pieces
-
-Open questions:
-- whether `flow` is executable syntax, an IR-building DSL, or only a proposal-level abstraction
-- what type `flow` expressions produce
-- how values produced inside one flow become visible to later composed flows
-- whether `&` should sequence unconditionally, short-circuit, or model dependency composition
-
-### 15. Explicit Tuple Projection
+### 14. Explicit Tuple Projection
 
 Possible later syntax:
 
