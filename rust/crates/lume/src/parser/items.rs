@@ -984,6 +984,13 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::LBrace) && !self.looks_like_brace_record_literal(false) {
             return self.parse_block().map(CallableBody::Block);
         }
+        if let Some(assignment) = self.try_parse_assignment_stmt() {
+            let span = assignment.span;
+            return Some(CallableBody::Block(Block {
+                statements: vec![Stmt::Assignment(assignment)],
+                span,
+            }));
+        }
         let expr = self.parse_expr()?;
         Some(CallableBody::Expr(expr))
     }

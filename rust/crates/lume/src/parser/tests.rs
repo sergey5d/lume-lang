@@ -1660,6 +1660,34 @@ def run() Unit = {
 }
 
 #[test]
+fn parses_equals_before_assignment_statement_callable_body() {
+    let result = parse(
+        r#"
+class Counter {
+    hidden var value Int = 0
+}
+
+impl Counter {
+    reset() Unit =
+        this.value := 0
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[1] {
+        Item::Impl(block) => match block.methods[0].body.as_ref() {
+            Some(CallableBody::Block(block)) => match &block.statements[0] {
+                Stmt::Assignment(_) => {}
+                other => panic!("expected assignment statement, got {other:#?}"),
+            },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected impl block, got {other:#?}"),
+    }
+}
+
+#[test]
 fn allows_equals_before_shape_expression_callable_body() {
     let result = parse(
         r#"

@@ -9,16 +9,15 @@ class Counter {
 }
 
 impl Counter {
-    def next() Int {
+    next() Int {
         this.value := this.value + 1
         this.value
     }
 
-    def reset() Unit {
+    reset() Unit = 
         this.value := 0
-    }
 
-    def current() Int =
+    current() Int = 
         this.value
 }
 
