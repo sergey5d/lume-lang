@@ -22,16 +22,16 @@ impl Counter {
         this.value
 }
 
-def twice(lazy value Int) Int =
+def twice(value => Int) Int =
     value + value
 
-def inner(lazy value Int) Int =
+def inner(value => Int) Int =
     value
 
-def outer(lazy value Int) Int =
+def outer(value => Int) Int =
     inner(value) + inner(value)
 
-def cachedOnce(lazy value Int) Int {
+def cachedOnce(value => Int) Int {
     cached Int = value
     cached + cached
 }

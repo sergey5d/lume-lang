@@ -879,15 +879,15 @@ impl Path {
 }
 
 #[test]
-fn parses_lazy_function_and_method_parameters() {
+fn parses_by_name_function_and_method_parameters() {
     let result = parse(
         r#"
-def debug(lazy message Str) Unit = ()
+def debug(message => Str) Unit = ()
 
 class Logger {}
 
 impl Logger {
-    def write(lazy message Str) Unit = ()
+    def write(message => Str) Unit = ()
 }
 "#,
     );

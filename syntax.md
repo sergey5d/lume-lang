@@ -1039,53 +1039,53 @@ describe("task", "alpha", ...extra, "omega")
 Spread arguments are valid only as positional arguments for a `vararg`
 parameter. Fixed-arity parameters reject `...value`.
 
-Function and method parameters may be marked `lazy`:
+Function and method parameters may be by-name:
 
 ```txt
-def twice(lazy value Int) Int =
+def twice(value => Int) Int =
     value + value
 
-def debug(lazy message Str) Unit
+def debug(message => Str) Unit
 ```
 
 Rules:
 
-- `lazy` is allowed on function and method parameters only.
-- A lazy argument expression is captured as a zero-argument closure.
+- `name => Type` is allowed on function and method parameters only.
+- A by-name argument expression is captured as a zero-argument closure.
 - Reading the parameter evaluates that closure.
-- Lazy parameters are not memoized; each read evaluates the captured expression again.
-- Lazy parameters cannot be `vararg`.
-- Lazy argument expressions cannot contain non-local `return`, `break`, `continue`, or `try`.
+- By-name parameters are not memoized; each read evaluates the captured expression again.
+- By-name parameters cannot be `vararg`.
+- By-name argument expressions cannot contain non-local `return`, `break`, `continue`, or `try`.
 - Use an explicit `() => T` parameter when the caller should pass, store, or return the thunk itself.
 
 Style:
 
-- Use `lazy` only for conditional-value APIs such as `assert`, `debug`, `getOr`, and `orElse`.
+- Use by-name parameters only for conditional-value APIs such as `assert`, `debug`, `getOr`, and `orElse`.
 - Use `() => T` for callbacks, schedulers, retry operations, event handlers, and stored work.
 
 Forwarding rules:
 
 ```txt
-def inner(lazy value Int) Int = value
+def inner(value => Int) Int = value
 
-def outer(lazy value Int) Int =
+def outer(value => Int) Int =
     inner(value)
 ```
 
-- Passing a lazy parameter to a normal parameter evaluates it first.
-- Passing a lazy parameter to another lazy parameter forwards the delayed expression.
-- Reading a lazy parameter in any other expression evaluates it immediately.
+- Passing a by-name parameter to a normal parameter evaluates it first.
+- Passing a by-name parameter to another by-name parameter forwards the delayed expression.
+- Reading a by-name parameter in any other expression evaluates it immediately.
 
 If a callee needs one evaluation, bind the value explicitly:
 
 ```txt
-def cached(lazy value Int) Int {
+def cached(value => Int) Int {
     item = value
     item + item
 }
 ```
 
-Core fallback APIs use `lazy` parameters so fallback work only runs on the
+Core fallback APIs use by-name parameters so fallback work only runs on the
 fallback branch. Mapper callbacks such as `map`, `flatMap`, `mapLeft`, and
 `mapError` are ordinary function values; only the callback body is conditional
 on the container branch:
@@ -2620,7 +2620,7 @@ Other operators / constructs:
 - `is` for runtime type checks
 - `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
 - `??` for extract-or-fallback through `Option`, `Result`, and `Either`
-- `=>` for parenthesized function types and lambdas
+- `=>` for parenthesized function types, lambdas, and by-name parameters
 - `=>` for match cases
 - `.->` for per-hop lifted access through `Option`, `Result`, and `Either`
 - `with` for interface implementation and generic bounds

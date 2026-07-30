@@ -838,10 +838,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_constructor_param(&mut self, terminator: TokenKind) -> Option<Param> {
-        let (lazy, variadic, modifier_start) = self.parse_param_modifiers();
+        let (variadic, modifier_start) = self.parse_param_modifiers();
         let (name, start) = self.expect_identifier("expected constructor parameter name")?;
-        let ty = if self.can_start_type_ref() {
-            Some(self.parse_type_ref()?)
+        let (lazy, ty) = if self.match_token(TokenKind::FatArrow) {
+            (true, Some(self.parse_type_ref()?))
+        } else if self.can_start_type_ref() {
+            (false, Some(self.parse_type_ref()?))
         } else {
             self.error_at_current("expected_type", "expected constructor parameter type");
             return None;

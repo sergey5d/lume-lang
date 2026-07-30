@@ -3,7 +3,7 @@
 # lazy evaluated
 # lazy fallback
 
-def choose(usePrimary Bool, lazy fallback Str) Str =
+def choose(usePrimary Bool, fallback => Str) Str =
     if usePrimary {
         "yes"
     } else {

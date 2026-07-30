@@ -41,12 +41,14 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         if !self.at(TokenKind::RParen) {
             loop {
-                let (lazy, variadic, modifier_start) = self.parse_param_modifiers();
+                let (variadic, modifier_start) = self.parse_param_modifiers();
                 let (name, start) = self.expect_identifier("expected parameter name")?;
-                let ty = if self.can_start_type_ref() {
-                    Some(self.parse_type_ref()?)
+                let (lazy, ty) = if self.match_token(TokenKind::FatArrow) {
+                    (true, Some(self.parse_type_ref()?))
+                } else if self.can_start_type_ref() {
+                    (false, Some(self.parse_type_ref()?))
                 } else {
-                    None
+                    (false, None)
                 };
                 if self.match_keyword(Keyword::Vararg) {
                     self.diagnostics.push(Diagnostic::error(
@@ -75,22 +77,18 @@ impl<'a> Parser<'a> {
         Some(params)
     }
 
-    pub(super) fn parse_param_modifiers(&mut self) -> (bool, bool, Option<Span>) {
-        let mut lazy = false;
+    pub(super) fn parse_param_modifiers(&mut self) -> (bool, Option<Span>) {
         let mut variadic = false;
         let mut start = None;
         loop {
-            if self.match_keyword(Keyword::Lazy) {
-                start.get_or_insert(self.previous_span());
-                lazy = true;
-            } else if self.match_keyword(Keyword::Vararg) {
+            if self.match_keyword(Keyword::Vararg) {
                 start.get_or_insert(self.previous_span());
                 variadic = true;
             } else {
                 break;
             }
         }
-        (lazy, variadic, start)
+        (variadic, start)
     }
 
     pub(super) fn parse_optional_return_type(&mut self) -> Option<TypeRef> {

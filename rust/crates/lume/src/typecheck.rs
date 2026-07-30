@@ -1769,15 +1769,15 @@ impl<'a> Checker<'a> {
             }
             if param.lazy && is_constructor {
                 self.add_error(
-                    "invalid_lazy_param",
-                    "constructor parameters cannot be lazy; use lazy only on function and method parameters",
+                    "invalid_by_name_param",
+                    "constructor parameters cannot be by-name; use 'name => Type' only on function and method parameters",
                     param.span,
                 );
             }
             if param.lazy && param.variadic {
                 self.add_error(
-                    "invalid_lazy_param",
-                    "lazy parameters cannot be vararg",
+                    "invalid_by_name_param",
+                    "by-name parameters cannot be vararg",
                     param.span,
                 );
             }
@@ -5149,8 +5149,8 @@ impl<'a> Checker<'a> {
                 if param.lazy {
                     if let Some(reason_span) = lazy_arg_forbidden_control_flow_span(&arg.value) {
                         self.add_error(
-                            "invalid_lazy_argument",
-                            "lazy argument expressions cannot contain return, break, continue, or try; make the control flow explicit before the call",
+                            "invalid_by_name_argument",
+                            "by-name argument expressions cannot contain return, break, continue, or try; make the control flow explicit before the call",
                             reason_span,
                         );
                     }
@@ -12101,12 +12101,12 @@ def main() Unit {
     }
 
     #[test]
-    fn accepts_lazy_function_parameters_and_forwarding() {
+    fn accepts_by_name_function_parameters_and_forwarding() {
         let program = parse_inline(
             r#"
-def inner(lazy value Int) Int = value
+def inner(value => Int) Int = value
 
-def outer(lazy value Int) Int =
+def outer(value => Int) Int =
     inner(value)
 
 def main() Unit {
@@ -12119,7 +12119,7 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_lazy_constructor_and_vararg_parameters() {
+    fn rejects_by_name_constructor_and_vararg_parameters() {
         let program = parse_inline(
             r#"
 class Box {
@@ -12127,12 +12127,12 @@ class Box {
 }
 
 impl Box {
-    new(lazy value Int) {
+    new(value => Int) {
         this.value = value
     }
 }
 
-def bad(lazy vararg values [Int]) Unit = ()
+def bad(vararg values => [Int]) Unit = ()
 "#,
         );
         let result = check_program(&program);
@@ -12140,10 +12140,10 @@ def bad(lazy vararg values [Int]) Unit = ()
             result
                 .diagnostics
                 .iter()
-                .any(|diag| diag.code == "invalid_lazy_param"
+                .any(|diag| diag.code == "invalid_by_name_param"
                     && diag
                         .message
-                        .contains("constructor parameters cannot be lazy")),
+                        .contains("constructor parameters cannot be by-name")),
             "{:#?}",
             result.diagnostics
         );
@@ -12151,18 +12151,18 @@ def bad(lazy vararg values [Int]) Unit = ()
             result
                 .diagnostics
                 .iter()
-                .any(|diag| diag.code == "invalid_lazy_param"
-                    && diag.message.contains("lazy parameters cannot be vararg")),
+                .any(|diag| diag.code == "invalid_by_name_param"
+                    && diag.message.contains("by-name parameters cannot be vararg")),
             "{:#?}",
             result.diagnostics
         );
     }
 
     #[test]
-    fn rejects_try_inside_lazy_argument_expression() {
+    fn rejects_try_inside_by_name_argument_expression() {
         let program = parse_inline(
             r#"
-def delayed(lazy value Int) Int = value
+def delayed(value => Int) Int = value
 
 def load() Option[Int] = Some(1)
 
@@ -12174,10 +12174,10 @@ def main() Unit {
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diag| {
-                diag.code == "invalid_lazy_argument"
+                diag.code == "invalid_by_name_argument"
                     && diag
                         .message
-                        .contains("lazy argument expressions cannot contain return")
+                        .contains("by-name argument expressions cannot contain return")
             }),
             "{:#?}",
             result.diagnostics

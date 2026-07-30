@@ -30,12 +30,12 @@ enum Either[L, R] {
        case Right(_) => panic("Either has no left value")
     }
 
-    def getOr(lazy defaultValue R) R = match this {
+    def getOr(defaultValue => R) R = match this {
        case Left(_) => defaultValue
        case Right(value) => value
     }
 
-    def orElse(lazy fallback Either[L, R]) Either[L, R] = match this {
+    def orElse(fallback => Either[L, R]) Either[L, R] = match this {
        case Left(_) => fallback
        case Right(value) => Right(value)
     }
