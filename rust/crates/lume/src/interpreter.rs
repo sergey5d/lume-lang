@@ -653,6 +653,18 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
         ast::Expr::Try { value, .. } => {
             rewrite_expr_for_runtime(value, module, graph);
         }
+        ast::Expr::ExtractOr {
+            value, fallback, ..
+        } => {
+            rewrite_expr_for_runtime(value, module, graph);
+            rewrite_expr_for_runtime(fallback, module, graph);
+        }
+        ast::Expr::Return { value, .. } => {
+            if let Some(value) = value {
+                rewrite_expr_for_runtime(value, module, graph);
+            }
+        }
+        ast::Expr::Break { .. } | ast::Expr::Continue { .. } => {}
         ast::Expr::Binary { left, right, .. } => {
             rewrite_expr_for_runtime(left, module, graph);
             rewrite_expr_for_runtime(right, module, graph);

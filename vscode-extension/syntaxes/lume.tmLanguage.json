@@ -280,6 +280,10 @@
           "match": "\\.->"
         },
         {
+          "name": "keyword.operator.extract-or.lume",
+          "match": "\\?\\?"
+        },
+        {
           "name": "keyword.operator.spread.lume",
           "match": "\\.\\.\\."
         },

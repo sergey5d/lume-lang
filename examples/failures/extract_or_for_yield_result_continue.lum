@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*`continue` inside `for \.\.\. yield` is only supported for iterable comprehensions; Result comprehensions have no skip state.*
+
+def main() Result[Int, Str] {
+    source Result[Option[Int], Str] = Ok(None)
+    for maybe <- source yield {
+        value = maybe ?? continue
+        value
+    }
+}

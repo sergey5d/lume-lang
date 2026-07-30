@@ -1539,6 +1539,24 @@ fn parses_try_with_mapped_source() {
 }
 
 #[test]
+fn parses_extract_or_with_return_fallback() {
+    match parse_expr_only("source ?? return fallback") {
+        Expr::ExtractOr {
+            value, fallback, ..
+        } => {
+            assert!(matches!(*value, Expr::Identifier { .. }));
+            match *fallback {
+                Expr::Return {
+                    value: Some(value), ..
+                } => assert!(matches!(*value, Expr::Identifier { .. })),
+                other => panic!("expected return fallback, got {other:#?}"),
+            }
+        }
+        other => panic!("expected extract-or expression, got {other:#?}"),
+    }
+}
+
+#[test]
 fn rejects_removed_try_catch_syntax() {
     let result = parse(
         r#"

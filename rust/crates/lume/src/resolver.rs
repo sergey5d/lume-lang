@@ -2147,6 +2147,27 @@ impl<'a> Resolver<'a> {
             Expr::Try { value, .. } => {
                 self.resolve_expr(value);
             }
+            Expr::ExtractOr {
+                value, fallback, ..
+            } => {
+                self.resolve_expr(value);
+                self.resolve_expr(fallback);
+            }
+            Expr::Return { value, .. } => {
+                if let Some(value) = value {
+                    self.resolve_expr(value);
+                }
+            }
+            Expr::Break { span } => {
+                if self.loop_depth == 0 {
+                    self.add_error("invalid_break", "break used outside of a loop", *span);
+                }
+            }
+            Expr::Continue { span } => {
+                if self.loop_depth == 0 {
+                    self.add_error("invalid_continue", "continue used outside of a loop", *span);
+                }
+            }
             Expr::Unary { expr, .. } => self.resolve_expr(expr),
             Expr::Binary { left, right, .. } => {
                 self.resolve_expr(left);
@@ -2195,10 +2216,13 @@ impl<'a> Resolver<'a> {
                 for param in params {
                     self.resolve_lambda_param(param);
                 }
+                let previous_loop_depth = self.loop_depth;
+                self.loop_depth = 0;
                 match body {
                     LambdaBody::Expr(expr) => self.resolve_expr(expr),
                     LambdaBody::Block(block) => self.resolve_block(block),
                 }
+                self.loop_depth = previous_loop_depth;
                 self.pop_scope();
             }
             Expr::LiftedChain { base, segments, .. } => {
@@ -2214,7 +2238,10 @@ impl<'a> Resolver<'a> {
                         format!("duplicate parameter '{}'", segment.param),
                         false,
                     );
+                    let previous_loop_depth = self.loop_depth;
+                    self.loop_depth = 0;
                     self.resolve_expr(&segment.body);
+                    self.loop_depth = previous_loop_depth;
                     self.pop_scope();
                 }
             }

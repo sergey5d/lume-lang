@@ -806,6 +806,7 @@ struct Checker<'a> {
     current_owner: Option<TypeSig>,
     current_method: Option<String>,
     current_extension_target: Option<String>,
+    callable_depth: usize,
     loop_depth: usize,
     defer_depth: usize,
     lifted_segment_depth: usize,
@@ -826,6 +827,7 @@ impl<'a> Checker<'a> {
             current_owner: None,
             current_method: None,
             current_extension_target: None,
+            callable_depth: 0,
             loop_depth: 0,
             defer_depth: 0,
             lifted_segment_depth: 0,
@@ -913,6 +915,7 @@ impl<'a> Checker<'a> {
     fn check_function(&mut self, function: &FunctionDecl) {
         let previous_return = self.current_return.clone();
         let previous_defer_depth = self.defer_depth;
+        let previous_callable_depth = self.callable_depth;
         self.push_ast_type_params(&function.type_params);
         let expected_return = function
             .return_type
@@ -921,6 +924,7 @@ impl<'a> Checker<'a> {
             .unwrap_or(Ty::Unknown);
         self.current_return = expected_return.clone();
         self.defer_depth = 0;
+        self.callable_depth += 1;
         self.push_scope();
         self.check_param_list_rules(&function.params, false);
         for param in &function.params {
@@ -952,6 +956,7 @@ impl<'a> Checker<'a> {
         self.pop_type_params();
         self.current_return = previous_return;
         self.defer_depth = previous_defer_depth;
+        self.callable_depth = previous_callable_depth;
     }
 
     fn check_type_decl(&mut self, decl: &TypeDecl) {
@@ -1550,6 +1555,7 @@ impl<'a> Checker<'a> {
         let previous_owner = self.current_owner.clone();
         let previous_method = self.current_method.clone();
         let previous_defer_depth = self.defer_depth;
+        let previous_callable_depth = self.callable_depth;
         self.push_ast_type_params(&method.type_params);
         let expected_return = method
             .return_type
@@ -1558,6 +1564,7 @@ impl<'a> Checker<'a> {
             .unwrap_or(Ty::Unknown);
         self.current_return = expected_return.clone();
         self.defer_depth = 0;
+        self.callable_depth += 1;
         self.current_owner = Some(owner.clone());
         self.current_method = Some(method.name.clone());
         self.push_scope();
@@ -1598,6 +1605,7 @@ impl<'a> Checker<'a> {
         self.current_owner = previous_owner;
         self.current_method = previous_method;
         self.defer_depth = previous_defer_depth;
+        self.callable_depth = previous_callable_depth;
     }
 
     fn check_constructor_initializes_required_fields(
@@ -1957,6 +1965,18 @@ impl<'a> Checker<'a> {
             | Expr::Group { inner: value, .. } => {
                 self.check_field_initializer_expr(value, owner, initialized_fields);
             }
+            Expr::ExtractOr {
+                value, fallback, ..
+            } => {
+                self.check_field_initializer_expr(value, owner, initialized_fields);
+                self.check_field_initializer_expr(fallback, owner, initialized_fields);
+            }
+            Expr::Return { value, .. } => {
+                if let Some(value) = value {
+                    self.check_field_initializer_expr(value, owner, initialized_fields);
+                }
+            }
+            Expr::Break { .. } | Expr::Continue { .. } => {}
             Expr::Binary { left, right, .. } => {
                 self.check_field_initializer_expr(left, owner, initialized_fields);
                 self.check_field_initializer_expr(right, owner, initialized_fields);
@@ -2661,66 +2681,10 @@ impl<'a> Checker<'a> {
                 Ty::unit()
             }
             Stmt::Return(return_stmt) => {
-                if self.defer_depth > 0 {
-                    self.add_error(
-                        "invalid_defer_control_flow",
-                        "defer block cannot contain 'return'",
-                        return_stmt.span,
-                    );
-                }
-                let expected = self.current_return.clone();
-                let actual = return_stmt
-                    .value
-                    .as_ref()
-                    .map(|expr| self.check_expr_against(expr, &expected))
-                    .unwrap_or_else(Ty::unit);
-                self.require_assignable(
-                    &actual,
-                    &expected,
-                    return_stmt.span,
-                    "invalid_return_type",
-                    format!(
-                        "return has type {} but enclosing callable expects {}",
-                        self.diagnostic_type_phrase(&actual),
-                        self.diagnostic_type_phrase(&expected)
-                    ),
-                );
-                actual
+                self.check_return_control_expr(return_stmt.value.as_ref(), return_stmt.span)
             }
-            Stmt::Break(break_stmt) => {
-                if self.defer_depth > 0 {
-                    self.add_error(
-                        "invalid_defer_control_flow",
-                        "defer block cannot contain 'break'",
-                        break_stmt.span,
-                    );
-                }
-                if self.loop_depth == 0 {
-                    self.add_error(
-                        "invalid_break",
-                        "break used outside of a loop",
-                        break_stmt.span,
-                    );
-                }
-                Ty::unit()
-            }
-            Stmt::Continue(continue_stmt) => {
-                if self.defer_depth > 0 {
-                    self.add_error(
-                        "invalid_defer_control_flow",
-                        "defer block cannot contain 'continue'",
-                        continue_stmt.span,
-                    );
-                }
-                if self.loop_depth == 0 {
-                    self.add_error(
-                        "invalid_continue",
-                        "continue used outside of a loop",
-                        continue_stmt.span,
-                    );
-                }
-                Ty::unit()
-            }
+            Stmt::Break(break_stmt) => self.check_break_control_expr(break_stmt.span),
+            Stmt::Continue(continue_stmt) => self.check_continue_control_expr(continue_stmt.span),
             Stmt::Expr(expr_stmt) => {
                 let ty = self.check_expr(&expr_stmt.expr);
                 self.check_discarded_expr_in_statement(&expr_stmt.expr);
@@ -2743,7 +2707,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_defer_stmt(&mut self, stmt: &crate::ast::DeferStmt) {
-        if self.current_return == Ty::Unknown {
+        if self.callable_depth == 0 {
             self.add_error(
                 "invalid_defer",
                 "defer used outside callable body",
@@ -2830,6 +2794,7 @@ impl<'a> Checker<'a> {
     fn expr_guarantees_control_exit(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Group { inner, .. } => self.expr_guarantees_control_exit(inner),
+            Expr::Return { .. } | Expr::Break { .. } | Expr::Continue { .. } => true,
             Expr::Call {
                 callee,
                 args,
@@ -4007,6 +3972,14 @@ impl<'a> Checker<'a> {
                 span,
             } => self.check_anonymous_interface_expr(interfaces, methods, *span, expected),
             Expr::Try { value, span } => self.check_try_expr(value, *span),
+            Expr::ExtractOr {
+                value,
+                fallback,
+                span,
+            } => self.check_extract_or_expr(value, fallback, *span),
+            Expr::Return { value, span } => self.check_return_control_expr(value.as_deref(), *span),
+            Expr::Break { span } => self.check_break_control_expr(*span),
+            Expr::Continue { span } => self.check_continue_control_expr(*span),
             Expr::Unary { op, expr, span } => {
                 let inner = self.check_expr(expr);
                 match op {
@@ -4150,16 +4123,34 @@ impl<'a> Checker<'a> {
                 }
                 self.push_scope();
                 self.define_local(&segment.param, Ty::Unknown, false);
+                let previous_return = self.current_return.clone();
+                let previous_callable_depth = self.callable_depth;
+                let previous_loop_depth = self.loop_depth;
+                self.current_return = Ty::Unknown;
+                self.callable_depth = 0;
+                self.loop_depth = 0;
                 self.check_expr(&segment.body);
+                self.current_return = previous_return;
+                self.callable_depth = previous_callable_depth;
+                self.loop_depth = previous_loop_depth;
                 self.pop_scope();
                 return Ty::Unknown;
             };
 
             self.push_scope();
             self.define_local(&segment.param, inner.clone(), false);
+            let previous_return = self.current_return.clone();
+            let previous_callable_depth = self.callable_depth;
+            let previous_loop_depth = self.loop_depth;
+            self.current_return = Ty::Unknown;
+            self.callable_depth = 0;
+            self.loop_depth = 0;
             self.lifted_segment_depth += 1;
             let segment_ty = self.check_expr(&segment.body);
             self.lifted_segment_depth -= 1;
+            self.current_return = previous_return;
+            self.callable_depth = previous_callable_depth;
+            self.loop_depth = previous_loop_depth;
             self.pop_scope();
 
             current = self.lifted_segment_result_type(&current, &family, &segment_ty, segment.span);
@@ -4279,6 +4270,12 @@ impl<'a> Checker<'a> {
         };
 
         self.push_scope();
+        let previous_return = self.current_return.clone();
+        let previous_callable_depth = self.callable_depth;
+        let previous_loop_depth = self.loop_depth;
+        self.current_return = expected_ret.clone().unwrap_or(Ty::Unknown);
+        self.callable_depth += 1;
+        self.loop_depth = 0;
         let mut param_types = Vec::new();
         for (index, param) in params.iter().enumerate() {
             let hint = hinted_params.get(index).cloned().unwrap_or(Ty::Unknown);
@@ -4298,6 +4295,9 @@ impl<'a> Checker<'a> {
                 self.check_discarded_expr_after_unit_expected(expr);
             }
         }
+        self.current_return = previous_return;
+        self.callable_depth = previous_callable_depth;
+        self.loop_depth = previous_loop_depth;
         self.pop_scope();
         let ret = if expected_ret
             .as_ref()
@@ -4926,7 +4926,14 @@ impl<'a> Checker<'a> {
 
     fn check_discarded_expr_in_statement(&mut self, expr: &Expr) {
         match expr {
-            Expr::Call { .. } | Expr::Try { .. } | Expr::Unit { .. } | Expr::ForYield { .. } => {}
+            Expr::Call { .. }
+            | Expr::Try { .. }
+            | Expr::ExtractOr { .. }
+            | Expr::Return { .. }
+            | Expr::Break { .. }
+            | Expr::Continue { .. }
+            | Expr::Unit { .. }
+            | Expr::ForYield { .. } => {}
             Expr::Group { inner, .. } => self.check_discarded_expr_in_statement(inner),
             Expr::Block { body, .. } => self.check_discarded_block_tail_in_statement(body),
             Expr::If {
@@ -4957,7 +4964,14 @@ impl<'a> Checker<'a> {
 
     fn check_discarded_expr_after_unit_expected(&mut self, expr: &Expr) {
         match expr {
-            Expr::Call { .. } | Expr::Try { .. } | Expr::Unit { .. } | Expr::ForYield { .. } => {}
+            Expr::Call { .. }
+            | Expr::Try { .. }
+            | Expr::ExtractOr { .. }
+            | Expr::Return { .. }
+            | Expr::Break { .. }
+            | Expr::Continue { .. }
+            | Expr::Unit { .. }
+            | Expr::ForYield { .. } => {}
             Expr::Group { inner, .. } => self.check_discarded_expr_after_unit_expected(inner),
             Expr::Block { .. } => {}
             Expr::If {
@@ -6775,6 +6789,105 @@ impl<'a> Checker<'a> {
         inner
     }
 
+    fn check_extract_or_expr(
+        &mut self,
+        value: &Expr,
+        fallback: &Expr,
+        span: crate::source::Span,
+    ) -> Ty {
+        let value_ty = self.check_expr(value);
+        let inner = self.unwrap_inner_type(&value_ty);
+        if inner == Ty::Unknown && !matches!(value_ty, Ty::Unknown) {
+            self.add_error(
+                "invalid_extract_or",
+                format!(
+                    "'??' requires Option[T], Result[T, E], or Either[L, R], got '{}'",
+                    value_ty.describe()
+                ),
+                span,
+            );
+            self.check_expr(fallback);
+            return Ty::Unknown;
+        }
+
+        let fallback_ty = self.check_expr_against(fallback, &inner);
+        self.require_assignable(
+            &fallback_ty,
+            &inner,
+            fallback.span(),
+            "invalid_extract_or_fallback",
+            format!(
+                "'??' fallback has type {} but extracted success value has type {}",
+                self.diagnostic_type_phrase(&fallback_ty),
+                self.diagnostic_type_phrase(&inner)
+            ),
+        );
+        inner
+    }
+
+    fn check_return_control_expr(&mut self, value: Option<&Expr>, span: crate::source::Span) -> Ty {
+        if self.defer_depth > 0 {
+            self.add_error(
+                "invalid_defer_control_flow",
+                "defer block cannot contain 'return'",
+                span,
+            );
+        }
+        if self.callable_depth == 0 {
+            self.add_error(
+                "invalid_return",
+                "return used outside of a callable body",
+                span,
+            );
+            value.map(|expr| self.check_expr(expr));
+            return Ty::never();
+        }
+        let expected = self.current_return.clone();
+        let actual = value
+            .map(|expr| self.check_expr_against(expr, &expected))
+            .unwrap_or_else(Ty::unit);
+        self.require_assignable(
+            &actual,
+            &expected,
+            span,
+            "invalid_return_type",
+            format!(
+                "return has type {} but enclosing callable expects {}",
+                self.diagnostic_type_phrase(&actual),
+                self.diagnostic_type_phrase(&expected)
+            ),
+        );
+        Ty::never()
+    }
+
+    fn check_break_control_expr(&mut self, span: crate::source::Span) -> Ty {
+        if self.defer_depth > 0 {
+            self.add_error(
+                "invalid_defer_control_flow",
+                "defer block cannot contain 'break'",
+                span,
+            );
+        }
+        if self.loop_depth == 0 {
+            self.add_error("invalid_break", "break used outside of a loop", span);
+        }
+        Ty::never()
+    }
+
+    fn check_continue_control_expr(&mut self, span: crate::source::Span) -> Ty {
+        if self.defer_depth > 0 {
+            self.add_error(
+                "invalid_defer_control_flow",
+                "defer block cannot contain 'continue'",
+                span,
+            );
+        }
+        if self.loop_depth == 0 {
+            self.add_error("invalid_continue", "continue used outside of a loop", span);
+        }
+        Ty::never()
+    }
+
     fn extract_pattern_inner_type(&mut self, scrutinee: &Ty, span: crate::source::Span) -> Ty {
         let inner = self.unwrap_inner_type(scrutinee);
         if inner == Ty::Unknown {
@@ -8500,6 +8613,19 @@ fn loop_control_targeting_current_loop_in_expr(expr: &Expr) -> Option<LoopContro
         | Expr::Unary { expr: value, .. }
         | Expr::Group { inner: value, .. }
         | Expr::Spread { value, .. } => loop_control_targeting_current_loop_in_expr(value),
+        Expr::ExtractOr {
+            value, fallback, ..
+        } => loop_control_targeting_current_loop_in_expr(value)
+            .or_else(|| loop_control_targeting_current_loop_in_expr(fallback)),
+        Expr::Break { span } => Some(LoopControlSpan {
+            kind: LoopControlKind::Break,
+            span: *span,
+        }),
+        Expr::Continue { span } => Some(LoopControlSpan {
+            kind: LoopControlKind::Continue,
+            span: *span,
+        }),
+        Expr::Return { .. } => None,
         Expr::Binary { left, right, .. } => loop_control_targeting_current_loop_in_expr(left)
             .or_else(|| loop_control_targeting_current_loop_in_expr(right)),
         Expr::Is { left, .. } => loop_control_targeting_current_loop_in_expr(left),
@@ -8606,6 +8732,7 @@ fn loop_control_targeting_current_loop_in_if_stmt(stmt: &IfStmt) -> Option<LoopC
 fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Span> {
     match expr {
         Expr::Try { span, .. } => Some(*span),
+        Expr::Return { span, .. } | Expr::Break { span } | Expr::Continue { span } => Some(*span),
         Expr::Spread { value, .. } => lazy_arg_forbidden_control_flow_span(value),
         Expr::ListLiteral { items, .. }
         | Expr::TupleLiteral { items, .. }
@@ -8632,6 +8759,10 @@ fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Sp
             .find_map(|field| lazy_arg_forbidden_control_flow_span(&field.value))
             .or_else(|| values.iter().find_map(lazy_arg_forbidden_control_flow_span)),
         Expr::Unary { expr, .. } => lazy_arg_forbidden_control_flow_span(expr),
+        Expr::ExtractOr {
+            value, fallback, ..
+        } => lazy_arg_forbidden_control_flow_span(value)
+            .or_else(|| lazy_arg_forbidden_control_flow_span(fallback)),
         Expr::Binary { left, right, .. } => lazy_arg_forbidden_control_flow_span(left)
             .or_else(|| lazy_arg_forbidden_control_flow_span(right)),
         Expr::Is { left, .. } => lazy_arg_forbidden_control_flow_span(left),

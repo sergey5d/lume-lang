@@ -337,6 +337,21 @@ pub enum Expr {
         value: Box<Expr>,
         span: Span,
     },
+    ExtractOr {
+        value: Box<Expr>,
+        fallback: Box<Expr>,
+        span: Span,
+    },
+    Return {
+        value: Option<Box<Expr>>,
+        span: Span,
+    },
+    Break {
+        span: Span,
+    },
+    Continue {
+        span: Span,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,
@@ -411,6 +426,10 @@ impl Expr {
             | Expr::RecordLiteral { span, .. }
             | Expr::AnonymousInterface { span, .. }
             | Expr::Try { span, .. }
+            | Expr::ExtractOr { span, .. }
+            | Expr::Return { span, .. }
+            | Expr::Break { span }
+            | Expr::Continue { span }
             | Expr::Unary { span, .. }
             | Expr::Binary { span, .. }
             | Expr::Is { span, .. }

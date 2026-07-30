@@ -3455,6 +3455,11 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Block { body, .. } => self
                 .lower_block_value_with_expected(body, Some(expected))
                 .unwrap_or(ir::Operand::Const(ir::Constant::Unit)),
+            Expr::ExtractOr {
+                value,
+                fallback,
+                span,
+            } => self.lower_extract_or_expr(value, fallback, *span, Some(expected)),
             Expr::Call { .. }
             | Expr::RecordLiteral { .. }
             | Expr::ShapeLiteral { .. }
@@ -3541,6 +3546,14 @@ impl<'a> FunctionLowerer<'a> {
                 span,
             } => self.lower_if_expr(condition, then_block, else_branch, *span),
             Expr::Try { value, span } => self.lower_try_expr(value, *span),
+            Expr::ExtractOr {
+                value,
+                fallback,
+                span,
+            } => self.lower_extract_or_expr(value, fallback, *span, None),
+            Expr::Return { value, span } => self.lower_return_control_expr(value.as_deref(), *span),
+            Expr::Break { span } => self.lower_break_control_expr(*span),
+            Expr::Continue { span } => self.lower_continue_control_expr(*span),
             Expr::Block { body, .. } => self.lower_block_expr(body),
             Expr::Match {
                 partial,
@@ -3726,6 +3739,124 @@ impl<'a> FunctionLowerer<'a> {
         ir::Operand::Copy(Box::new(ir::Place::Local(result)))
     }
 
+    fn lower_extract_or_expr(
+        &mut self,
+        value: &Expr,
+        fallback: &Expr,
+        span: Span,
+        expected: Option<&ir::Type>,
+    ) -> ir::Operand {
+        let source_ty = self.infer_expr_type(value);
+        let success_ty = unwrap_lifted_ir_type(&source_ty)
+            .map(|(_, inner)| inner)
+            .unwrap_or(ir::Type::Unknown);
+        let result_ty = expected.cloned().unwrap_or_else(|| success_ty.clone());
+        let source = self.lower_expr_with_expected(value, Some(&source_ty));
+        let source_local = self.add_temp(source_ty);
+        self.push_statement(ir::Statement {
+            span: Some(value.span()),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(source_local),
+                value: ir::RValue::Use(source),
+            },
+        });
+
+        let success_block = self.add_block();
+        let failure_block = self.add_block();
+        let join_block = self.add_block();
+        let result = self.add_temp(result_ty.clone());
+
+        let present = self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+                structural: false,
+            },
+            ir::Type::Bool,
+            Some(span),
+        );
+        self.terminate(ir::Terminator {
+            span: Some(span),
+            kind: ir::TerminatorKind::Branch {
+                condition: present,
+                then_block: success_block,
+                else_block: failure_block,
+            },
+        });
+
+        self.current_block = Some(success_block);
+        let extracted = self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
+                structural: false,
+            },
+            success_ty,
+            Some(span),
+        );
+        self.push_statement(ir::Statement {
+            span: Some(span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(result),
+                value: ir::RValue::Use(extracted),
+            },
+        });
+        if self.current_block.is_some() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        self.current_block = Some(failure_block);
+        let fallback_value = self.lower_expr_with_expected(fallback, Some(&result_ty));
+        if self.current_block.is_some() {
+            self.push_statement(ir::Statement {
+                span: Some(fallback.span()),
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Local(result),
+                    value: ir::RValue::Use(fallback_value),
+                },
+            });
+            self.terminate(ir::Terminator::goto(join_block));
+        }
+
+        let join_used = self.block_has_predecessor(join_block);
+        self.current_block = if join_used { Some(join_block) } else { None };
+        ir::Operand::Copy(Box::new(ir::Place::Local(result)))
+    }
+
+    fn lower_return_control_expr(&mut self, value: Option<&Expr>, span: Span) -> ir::Operand {
+        let return_ty = self.function().return_ty.clone();
+        let value = value.map(|expr| self.lower_expr_with_expected(expr, Some(&return_ty)));
+        self.terminate(ir::Terminator {
+            span: Some(span),
+            kind: ir::TerminatorKind::Return(value),
+        });
+        ir::Operand::Const(ir::Constant::Unit)
+    }
+
+    fn lower_break_control_expr(&mut self, span: Span) -> ir::Operand {
+        if let Some(exit) = self.loop_exits.last().copied() {
+            self.terminate(ir::Terminator {
+                span: Some(span),
+                kind: ir::TerminatorKind::Goto(exit),
+            });
+        } else {
+            self.invariant("break should be rejected before lowering", span);
+        }
+        ir::Operand::Const(ir::Constant::Unit)
+    }
+
+    fn lower_continue_control_expr(&mut self, span: Span) -> ir::Operand {
+        if let Some(target) = self.loop_continues.last().copied() {
+            self.terminate(ir::Terminator {
+                span: Some(span),
+                kind: ir::TerminatorKind::Goto(target),
+            });
+        } else {
+            self.invariant("continue should be rejected before lowering", span);
+        }
+        ir::Operand::Const(ir::Constant::Unit)
+    }
+
     fn lower_lifted_chain_expr(
         &mut self,
         base: &Expr,
@@ -3890,6 +4021,12 @@ impl<'a> FunctionLowerer<'a> {
             Expr::RecordUpdate { receiver, .. } => {
                 self.infer_expr_type_with_overrides(receiver, overrides)
             }
+            Expr::ExtractOr { value, .. } => {
+                let source_ty = self.infer_expr_type_with_overrides(value, overrides);
+                unwrap_lifted_ir_type(&source_ty)
+                    .map(|(_, inner)| inner)
+                    .unwrap_or(ir::Type::Unknown)
+            }
             Expr::LiftedChain { base, segments, .. } => {
                 let mut current = self.infer_expr_type_with_overrides(base, overrides);
                 for segment in segments {
@@ -3905,6 +4042,7 @@ impl<'a> FunctionLowerer<'a> {
                 current
             }
             Expr::TypeOf { ty, .. } => ir_exact_runtime_type(lower_type_ref(ty)),
+            Expr::Return { .. } | Expr::Break { .. } | Expr::Continue { .. } => ir::Type::Never,
             Expr::AnonymousInterface { interfaces, .. } => {
                 if interfaces.len() == 1 {
                     lower_type_ref(&interfaces[0])

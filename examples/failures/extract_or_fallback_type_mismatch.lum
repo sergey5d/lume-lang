@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*'\?\?' fallback has type 'Str' but extracted success value has type 'Int'.*
+
+def main() Int {
+    maybe Option[Int] = None
+    maybe ?? "missing"
+}

@@ -1,0 +1,76 @@
+# EXPECT:
+# option some 5
+# option fallback
+# option none 10
+# result ok 7
+# result fallback
+# result err 20
+# either right 9
+# either fallback
+# either left 30
+# block fallback
+# block 42
+# early found 4
+# early missing
+# continue sum 6
+# break sum 6
+
+def fallback(label Str, value Int) Int {
+    println(label)
+    value
+}
+
+def early(value Option[Int]) Str {
+    item = value ?? return "early missing"
+    "early found " + item.toStr()
+}
+
+def continueSum(values [Option[Int]]) Int {
+    var total Int = 0
+    for maybe <- values {
+        item = maybe ?? continue
+        total += item
+    }
+    total
+}
+
+def breakSum(values [Int]) Int {
+    var total Int = 0
+    var index Int = 0
+    while true {
+        item = values.get(index) ?? break
+        total += item
+        index += 1
+    }
+    total
+}
+
+def blockFallback(value Option[Int]) Int =
+    value ?? {
+        println("block fallback")
+        42
+    }
+
+def main() Unit {
+    some Option[Int] = Some(5)
+    none Option[Int] = None
+    ok Result[Int, Str] = Ok(7)
+    err Result[Int, Str] = Err("bad")
+    right Either[Str, Int] = Right(9)
+    left Either[Str, Int] = Left("bad")
+
+    println("option some " + (some ?? fallback("option eager", 99)).toStr())
+    println("option none " + (none ?? fallback("option fallback", 10)).toStr())
+
+    println("result ok " + (ok ?? fallback("result eager", 99)).toStr())
+    println("result err " + (err ?? fallback("result fallback", 20)).toStr())
+
+    println("either right " + (right ?? fallback("either eager", 99)).toStr())
+    println("either left " + (left ?? fallback("either fallback", 30)).toStr())
+
+    println("block " + blockFallback(none).toStr())
+    println(early(Some(4)))
+    println(early(none))
+    println("continue sum " + continueSum([Some(1), None, Some(5)]).toStr())
+    println("break sum " + breakSum([1, 2, 3]).toStr())
+}

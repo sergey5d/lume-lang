@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*'\?\?' requires Option\[T\], Result\[T, E\], or Either\[L, R\], got 'Int'.*
+
+def main() Int {
+    value = 1 ?? 2
+    value
+}

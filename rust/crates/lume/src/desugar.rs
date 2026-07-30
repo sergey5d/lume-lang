@@ -251,6 +251,21 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             value: Box::new(desugar_expr(value)),
             span: *span,
         },
+        ast::Expr::ExtractOr {
+            value,
+            fallback,
+            span,
+        } => core::Expr::ExtractOr {
+            value: Box::new(desugar_expr(value)),
+            fallback: Box::new(desugar_expr(fallback)),
+            span: *span,
+        },
+        ast::Expr::Return { value, span } => core::Expr::Return {
+            value: value.as_ref().map(|expr| Box::new(desugar_expr(expr))),
+            span: *span,
+        },
+        ast::Expr::Break { span } => core::Expr::Break { span: *span },
+        ast::Expr::Continue { span } => core::Expr::Continue { span: *span },
         ast::Expr::Unary { op, expr, span } => core::Expr::Unary {
             op: *op,
             expr: Box::new(desugar_expr(expr)),

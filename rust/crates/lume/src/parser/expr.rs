@@ -28,7 +28,7 @@ impl<'a> Parser<'a> {
             let start = self.consume_keyword(Keyword::For, "expected 'for'")?;
             return self.parse_for_yield_expr_after_start(start);
         }
-        self.parse_colon_expr()
+        self.parse_extract_or_expr()
     }
 
     pub(super) fn parse_expr_without_trailing_block_call(&mut self) -> Option<Expr> {
@@ -883,6 +883,22 @@ impl<'a> Parser<'a> {
         Some(expr)
     }
 
+    pub(super) fn parse_extract_or_expr(&mut self) -> Option<Expr> {
+        let value = self.parse_colon_expr()?;
+        if !self.match_token(TokenKind::QuestionQuestion) {
+            return Some(value);
+        }
+
+        self.skip_newlines();
+        let fallback = self.parse_extract_or_expr()?;
+        let span = value.span().cover(fallback.span());
+        Some(Expr::ExtractOr {
+            value: Box::new(value),
+            fallback: Box::new(fallback),
+            span,
+        })
+    }
+
     pub(super) fn parse_or_expr(&mut self) -> Option<Expr> {
         self.parse_left_assoc(
             |parser| parser.parse_and_expr(),
@@ -1007,6 +1023,17 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_unary_expr(&mut self) -> Option<Expr> {
+        if self.match_keyword(Keyword::Return) {
+            return self.parse_return_expr(self.previous_span());
+        }
+        if self.match_keyword(Keyword::Break) {
+            let span = self.previous_span();
+            return Some(Expr::Break { span });
+        }
+        if self.match_keyword(Keyword::Continue) {
+            let span = self.previous_span();
+            return Some(Expr::Continue { span });
+        }
         if self.match_keyword(Keyword::Try) {
             let start = self.previous_span();
             self.skip_newlines();
@@ -1053,6 +1080,33 @@ impl<'a> Parser<'a> {
             });
         }
         self.parse_postfix_expr()
+    }
+
+    fn parse_return_expr(&mut self, start: Span) -> Option<Expr> {
+        if self.return_expr_value_is_omitted() {
+            return Some(Expr::Return {
+                value: None,
+                span: start,
+            });
+        }
+        let value = self.parse_expr()?;
+        let span = start.cover(value.span());
+        Some(Expr::Return {
+            value: Some(Box::new(value)),
+            span,
+        })
+    }
+
+    fn return_expr_value_is_omitted(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            TokenKind::Newline
+                | TokenKind::RBrace
+                | TokenKind::RParen
+                | TokenKind::RBracket
+                | TokenKind::Comma
+                | TokenKind::Eof
+        )
     }
 
     pub(super) fn parse_postfix_expr(&mut self) -> Option<Expr> {

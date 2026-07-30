@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*continue used outside of a loop.*
+
+def run(work () => Unit) Unit {
+    work()
+}
+
+def main() Unit {
+    for maybe <- [Some(1)] {
+        run { () =>
+            value = maybe ?? continue
+            println(value)
+        }
+    }
+}

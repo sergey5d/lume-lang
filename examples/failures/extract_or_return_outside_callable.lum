@@ -1,0 +1,5 @@
+# FAIL_REGEX:
+# .*return used outside of a callable body.*
+
+maybe Option[Int] = None
+value = maybe ?? return

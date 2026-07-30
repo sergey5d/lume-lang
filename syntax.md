@@ -2060,6 +2060,56 @@ row = try Db.query(id)
     .mapError { err => AppError.Db(err) }
 ```
 
+Extract-or-fallback form:
+
+```txt
+value = wrapped ?? fallback
+```
+
+`??` unwraps the success side of `Option[T]`, `Result[T, E]`, or
+`Either[L, T]`. If the wrapped value is empty / error / left, the right-hand
+fallback is evaluated lazily and used instead. The fallback must be assignable
+to the extracted success type, or have type `Never`.
+
+```txt
+name = maybeName ?? "unknown"
+row = queryRow() ?? defaultRow()
+
+value = maybeValue ?? {
+    println("missing value")
+    0
+}
+```
+
+Control-flow expressions have type `Never`, so they work naturally as
+fallbacks:
+
+```txt
+user = findUser(id) ?? return
+user = findUser(id) ?? return Err(UserNotFound(id))
+
+for request <- requests {
+    user = findUser(request.userId) ?? continue
+    process(user, request)
+}
+
+while true {
+    item = queue.next() ?? break
+    process(item)
+}
+```
+
+`return` targets the current callable. `break` and `continue` require an
+enclosing loop and cannot jump across lambda or lifted-access callback
+boundaries. `continue` and `break` inside `for ... yield` are valid only for
+iterable comprehensions; `Option`, `Result`, and `Either` comprehensions have no
+“skip item” or “early-exit item” state.
+
+`try` and `??` intentionally do different jobs:
+
+- `try` propagates the original failure.
+- `??` discards/replaces the failure with an explicit fallback.
+
 Multiple dependent unwraps can be written as sequential `let ... else` / `try`
 statements or as a grouped `let` block with `else`:
 
@@ -2569,6 +2619,7 @@ Other operators / constructs:
 
 - `is` for runtime type checks
 - `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
+- `??` for extract-or-fallback through `Option`, `Result`, and `Either`
 - `=>` for parenthesized function types and lambdas
 - `=>` for match cases
 - `.->` for per-hop lifted access through `Option`, `Result`, and `Either`
@@ -2586,6 +2637,7 @@ for item <- items {
 SomeX(x) => x
 class Box[T] with Named
 pair = ("a", 1)
+name = maybeName ?? "unknown"
 ```
 
 Shape copy, extension, and distinct merge:
@@ -2632,6 +2684,7 @@ Newline continuation:
 - A newline continues the current expression only when the previous line clearly ends in a continuation form, except postfix chains may continue when the next line starts with `.` or `.->`.
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
+  - extraction/fallback operators: `??`
   - shape/update operators: `:<`
   - unary prefixes: unary `-`, `!`, `try`
   - runtime type check keyword: `is`
