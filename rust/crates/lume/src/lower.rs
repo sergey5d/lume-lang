@@ -7495,7 +7495,7 @@ fn describe_ir_type(ty: &ir::Type) -> String {
                 .join(", ")
         ),
         ir::Type::Function { params, ret } => format!(
-            "({}) -> {}",
+            "({}) => {}",
             params
                 .iter()
                 .map(describe_ir_type)
@@ -8097,8 +8097,8 @@ mod tests {
 
             def main() Int {
                 base = 10
-                inc (Int) -> Int = value -> value + 1
-                plus = (value Int) -> value + base
+                inc (Int) => Int = value => value + 1
+                plus = (value Int) => value + base
 
                 def add(value Int) Int = plus(value)
 

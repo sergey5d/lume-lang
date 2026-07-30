@@ -78,7 +78,7 @@ impl OrderManager {
             case "FILL" => {
                 order.fills.add(parsedOrder.quantity)
                 if order.quantity != 0 {
-                    totalFills = order.fills.reduce(0, (f1, f2) -> f1 + f2)
+                    totalFills = order.fills.reduce(0, (f1, f2) => f1 + f2)
                     if (totalFills == order.quantity) {
                         order.status := "FILLED"
                     } else {

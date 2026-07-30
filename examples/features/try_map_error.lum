@@ -21,12 +21,12 @@ def loadUser(found Bool) Result[Str, Str] {
 }
 
 def loadRow(ok Bool) Result[Str, Str] {
-    row = try queryRow(ok).mapError { err -> "db: " + err }
+    row = try queryRow(ok).mapError { err => "db: " + err }
     Ok(row)
 }
 
 def loadEither(ok Bool) Either[Str, Int] {
-    value = try queryEither(ok).mapLeft { left ->
+    value = try queryEither(ok).mapLeft { left =>
         "left: " + left
     }
     Right(value)

@@ -58,7 +58,7 @@ impl AssetPrices {
     }
 
     def makeResult(prices [((Str, Str), Float)]) Str {
-        strings [Str] = prices.map(entry -> match entry {
+        strings [Str] = prices.map(entry => match entry {
             case ((from, to), price) => from + " -> " + to + " at " + price
         })
 
@@ -103,7 +103,7 @@ impl AssetPrices {
 def main() {
 
     def printResults(results Option[[Str]]) = match results {
-        case Some(list) => list.forEach { elem ->
+        case Some(list) => list.forEach { elem =>
             println("result: " + elem)
         }
         case None => ()

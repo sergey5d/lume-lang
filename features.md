@@ -110,7 +110,7 @@ Example:
 
 ```txt
 # If Dog <: Animal, then this is safe:
-expected (Dog) -> Animal = (animal Animal) -> Dog()
+expected (Dog) => Animal = (animal Animal) => Dog()
 ```
 
 Reason:
@@ -305,8 +305,8 @@ Open follow-ups:
 Possible explicit lambda keyword direction:
 
 ```txt
-x -> x + 1
-(x, y) -> x + y
+x => x + 1
+(x, y) => x + y
 ```
 
 Open question:

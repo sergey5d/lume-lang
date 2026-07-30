@@ -39,12 +39,12 @@ enum Option[T] {
         case Option.None => Left(left)
     }
 
-    def map[X](f (T) -> X) Option[X] = match this {
+    def map[X](f (T) => X) Option[X] = match this {
         case Some(value) => Some(f(value))
         case Option.None => None()
     }
 
-    def flatMap[X](f (T) -> Option[X]) Option[X] = match this {
+    def flatMap[X](f (T) => Option[X]) Option[X] = match this {
         case Some(value) => f(value)
         case Option.None => None()
     }

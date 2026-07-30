@@ -7,5 +7,5 @@ class User {
 }
 
 def main() Unit {
-    mapper = let { name, age } -> name
+    mapper = let { name, age } => name
 }

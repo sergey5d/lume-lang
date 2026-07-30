@@ -9,14 +9,14 @@ class Mapper {
 }
 
 impl Mapper {
-    def map[X](value Int, fn (Int) -> X) X {
+    def map[X](value Int, fn (Int) => X) X {
         fn(value)
     }
 }
 
 def main() Int {
     mapper Mapper = Mapper {}
-    println(mapper.map(5, (x Int) -> x + 10))
-    println(id(mapper.map(7, (x Int) -> "value=" + x)))
+    println(mapper.map(5, (x Int) => x + 10))
+    println(id(mapper.map(7, (x Int) => "value=" + x)))
     0
 }

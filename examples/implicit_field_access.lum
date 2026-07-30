@@ -28,7 +28,7 @@ impl Counter {
     def shadow(count Int) Int = this.count + count
 
     def lambdaValue() Int {
-        reader = () -> count + 1
+        reader = () => count + 1
         reader()
     }
 }

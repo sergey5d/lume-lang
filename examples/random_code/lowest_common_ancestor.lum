@@ -36,8 +36,8 @@ def find(
         currentFoundQ := Some(current)
     }
 
-    foundPCount = currentFoundP.map(_ -> 1).getOr(0)
-    foundQCount = currentFoundQ.map(_ -> 1).getOr(0)
+    foundPCount = currentFoundP.map(_ => 1).getOr(0)
+    foundQCount = currentFoundQ.map(_ => 1).getOr(0)
 
     if foundPCount + foundQCount < 2 {
         leftResult = find(current.left, valP, valQ, currentFoundP, currentFoundQ)

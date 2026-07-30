@@ -1033,7 +1033,7 @@ impl RuntimeTypeValue {
                     .join(",")
             ),
             RuntimeTypeValue::Function { params, ret } => format!(
-                "({}) -> {}",
+                "({}) => {}",
                 params
                     .iter()
                     .map(render_ir_type)
@@ -5836,7 +5836,7 @@ fn render_ir_type(ty: &ir::Type) -> String {
                 .join(",")
         ),
         ir::Type::Function { params, ret } => format!(
-            "({}) -> {}",
+            "({}) => {}",
             params
                 .iter()
                 .map(render_ir_type)
@@ -6185,12 +6185,12 @@ mod tests {
     fn runs_trailing_block_as_explicit_zero_arg_lambda_argument() {
         let program = lower_inline(
             r#"
-            def process(f () -> Unit) Unit = f()
-            def compute(f () -> Int) Int = f()
+            def process(f () => Unit) Unit = f()
+            def compute(f () => Int) Int = f()
 
             def main() Unit {
-                process { () -> println("hehe") }
-                println(compute { () -> 42 })
+                process { () => println("hehe") }
+                println(compute { () => 42 })
             }
             "#,
         );
@@ -6342,7 +6342,7 @@ mod tests {
             def main() Int {
                 values = List(1, 2, 3)
                 values.removeFirst()
-                return values.reduce(0, (acc, value) -> acc + value)
+                return values.reduce(0, (acc, value) => acc + value)
             }
             "#,
         );
@@ -6656,10 +6656,10 @@ $name
             r#"
             def main() Unit {
                 empty [Int] = []
-                mappedEmpty = empty.map { value -> value + 5 }
+                mappedEmpty = empty.map { value => value + 5 }
 
                 values [Int] = [1, 2]
-                mapped = values.map { value -> value + 5 }
+                mapped = values.map { value => value + 5 }
 
                 OS.println(mappedEmpty.size())
                 OS.println(mapped.get(0).getOr(0))
@@ -7037,7 +7037,7 @@ $name
                 amount Amount = Amount(42, "hello")
                 pair PairBox = PairBox(5, 9)
                 values [MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3)]
-                partialMapped List[Option[Int]] = values.map(value -> partial match value {
+                partialMapped List[Option[Int]] = values.map(value => partial match value {
                     case SomeX(x) => x + 1
                 })
 
@@ -7336,7 +7336,7 @@ $name
             r#"
             def main() Unit {
                 items = [1, 2, 3]
-                items.forEach { item ->
+                items.forEach { item =>
                     plusOne = item + 1
                     OS.println(plusOne)
                 }
@@ -7504,7 +7504,7 @@ $name
             def main() Unit {
                 defer OS.println("main")
 
-                run = () -> {
+                run = () => {
                     defer OS.println("lambda")
                     OS.println("inside")
                 }

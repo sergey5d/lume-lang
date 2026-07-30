@@ -229,7 +229,7 @@ fn optional_def_does_not_reclassify_tuple_or_function_fields() {
         r#"
 class Holder {
     pair (Int, Int)
-    mapper (Int) -> Int
+    mapper (Int) => Int
 }
 "#,
     );
@@ -1530,7 +1530,7 @@ def run(user User) Unit {
 
 #[test]
 fn parses_try_with_mapped_source() {
-    match parse_expr_only(r#"try source.mapError { err -> mapped(err) }"#) {
+    match parse_expr_only(r#"try source.mapError { err => mapped(err) }"#) {
         Expr::Try { value, .. } => {
             assert!(matches!(*value, Expr::Call { .. }));
         }
@@ -2441,7 +2441,7 @@ def run(flag Bool) Unit {
 
 #[test]
 fn parses_lambda_expression() {
-    let result = parse("def make() Unit = values.map((x, y) -> x + y)\n");
+    let result = parse("def make() Unit = values.map((x, y) => x + y)\n");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
@@ -2450,7 +2450,7 @@ fn parses_standalone_lambda_body_as_multiline_expression() {
     let result = parse(
         r#"
 def main() Unit {
-    mapper = (x Int) ->
+    mapper = (x Int) =>
         x +
             5
 }
@@ -2464,7 +2464,7 @@ fn rejects_standalone_lambda_body_with_multiple_statements_without_block() {
     let result = parse(
         r#"
 def main() Unit {
-    mapper = x ->
+    mapper = x =>
         next = x + 1
         next * 2
 }
@@ -2485,16 +2485,16 @@ fn parses_supported_lambda_parameter_forms() {
     let result = parse(
         r#"
 def main() Unit {
-    empty = () -> 0
-    bare = x -> x
-    bareIgnored = _ -> 1
-    one = (x) -> x
-    pair = (x, y) -> x + y
-    typed = (x Int) -> x + 1
-    typedPair = (x Int, y Int) -> x + y
-    ignored = (_) -> 1
-    ignoredPair = (x, _) -> x
-    typedIgnored = (_ Int, value Int) -> value
+    empty = () => 0
+    bare = x => x
+    bareIgnored = _ => 1
+    one = (x) => x
+    pair = (x, y) => x + y
+    typed = (x Int) => x + 1
+    typedPair = (x Int, y Int) => x + y
+    ignored = (_) => 1
+    ignoredPair = (x, _) => x
+    typedIgnored = (_ Int, value Int) => value
 }
 "#,
     );
@@ -2506,7 +2506,7 @@ fn rejects_destructured_lambda_parameter_forms() {
     let tuple = parse(
         r#"
 def main() Unit {
-    mapper = let (x Int, y Int) -> x + y
+    mapper = let (x Int, y Int) => x + y
 }
 "#,
     );
@@ -2524,7 +2524,7 @@ def main() Unit {
     let shape = parse(
         r#"
 def main() Unit {
-    mapper = let { name, age } -> name
+    mapper = let { name, age } => name
 }
 "#,
     );
@@ -2545,7 +2545,7 @@ fn rejects_parenthesized_let_destructuring_lambda_param() {
     let result = parse(
         r#"
 def main() Unit {
-    mapper = (let (x, y)) -> x + y
+    mapper = (let (x, y)) => x + y
 }
 "#,
     );
@@ -2567,7 +2567,7 @@ fn rejects_let_destructuring_inside_multi_parameter_lambdas() {
     let result = parse(
         r#"
 def main() Unit {
-    mapper = (let (x, y), index) -> x + y + index
+    mapper = (let (x, y), index) => x + y + index
 }
 "#,
     );
@@ -2588,7 +2588,7 @@ def main() Unit {
 fn parses_trailing_block_lambda_call_syntax() {
     let result = parse(
         r#"
-def make() Unit = values.map { value -> value + 5 }
+def make() Unit = values.map { value => value + 5 }
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -2627,7 +2627,7 @@ def make() Unit = values.map { value -> value + 5 }
 fn parses_trailing_block_lambda_with_multiline_body() {
     let result = parse(
         r#"
-def make() Unit = values.forEach { value ->
+def make() Unit = values.forEach { value =>
     plusOne = value + 1
     println(plusOne)
 }
@@ -2677,7 +2677,7 @@ def make() Unit = values.forEach { value ->
 fn parses_trailing_block_lambda_with_typed_single_param() {
     let result = parse(
         r#"
-def make() Unit = values.map { (value Int) -> value + 5 }
+def make() Unit = values.map { (value Int) => value + 5 }
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -2688,7 +2688,7 @@ fn rejects_trailing_block_lambda_head_on_next_line() {
     let result = parse(
         r#"
 def make() Unit = values.map {
-    value -> value + 5
+    value => value + 5
 }
 "#,
     );
@@ -2726,14 +2726,14 @@ def make() Unit = runner.zero {
 fn parses_trailing_block_lambda_with_zero_or_multiple_params() {
     let zero = parse(
         r#"
-def make() Unit = values.map { () -> 5 }
+def make() Unit = values.map { () => 5 }
 "#,
     );
     assert!(zero.diagnostics.is_empty(), "{:#?}", zero.diagnostics);
 
     let multi = parse(
         r#"
-def make() Unit = values.map { (left, right) -> left + right }
+def make() Unit = values.map { (left, right) => left + right }
 "#,
     );
     assert!(multi.diagnostics.is_empty(), "{:#?}", multi.diagnostics);
@@ -2849,7 +2849,7 @@ fn parses_trailing_block_lambda_when_parameter_list_starts_on_opening_line() {
     let result = parse(
         r#"
 def make() Unit = values.map { (left,
-    right) -> left + right }
+    right) => left + right }
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -2971,7 +2971,7 @@ def inspect(value Type[_]) Unit {}
 fn parses_parenthesized_function_type_refs() {
     let result = parse(
         r#"
-def apply(f (Int) -> Int, both (Int, Str) -> Bool) Unit {}
+def apply(f (Int) => Int, both (Int, Str) => Bool) Unit {}
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -3025,7 +3025,7 @@ def describe(value (name Str, age Int)) Unit {}
 fn rejects_unparenthesized_function_type_refs() {
     let result = parse(
         r#"
-def apply(f Int -> Int) Unit {}
+def apply(f Int => Int) Unit {}
 "#,
     );
     assert!(
@@ -3045,7 +3045,7 @@ fn rejects_single_param_typed_lambda_without_parens() {
     let result = parse(
         r#"
 def main() Unit {
-    value = item Int -> item + 1
+    value = item Int => item + 1
 }
 "#,
     );
@@ -3066,7 +3066,7 @@ fn rejects_mixed_typed_and_untyped_lambda_params() {
     let result = parse(
         r#"
 def main() Unit {
-    value = (left Int, right) -> left + right
+    value = (left Int, right) => left + right
 }
 "#,
     );
@@ -3087,7 +3087,7 @@ fn rejects_mixed_typed_and_untyped_ignored_lambda_params() {
     let result = parse(
         r#"
 def main() Unit {
-    value = (left Int, _) -> left
+    value = (left Int, _) => left
 }
 "#,
     );

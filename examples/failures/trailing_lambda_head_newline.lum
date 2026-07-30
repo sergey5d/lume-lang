@@ -4,6 +4,6 @@
 def main() Unit {
     items = List(1, 2, 3)
     mapped = items.map {
-        item -> item + 1
+        item => item + 1
     }
 }

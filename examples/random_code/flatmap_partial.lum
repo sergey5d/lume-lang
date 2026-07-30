@@ -14,7 +14,7 @@ enum MaybeInt {
 def expandPage(page List[MaybeInt]) List[Int] {
     extracted List[Int] = []
 
-    page.forEach { maybeValue -> 
+    page.forEach { maybeValue =>
         parsed Option[Int] = partial match maybeValue {
            case SomeX(x) if x > 0 => {
                 x * 10
@@ -35,8 +35,8 @@ def main() Unit {
         [ MaybeInt.NoneX, MaybeInt.SomeX(5) ]
     ]
 
-    extracted List[Int] = pages.flatMap(page -> expandPage(page))
+    extracted List[Int] = pages.flatMap(page => expandPage(page))
 
     println("count " + extracted.size())
-    extracted.forEach(item -> println("item " + item))
+    extracted.forEach(item => println("item " + item))
 }

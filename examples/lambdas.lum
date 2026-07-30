@@ -24,42 +24,42 @@ impl Adder {
 def main() Int {
     adder Adder = Adder(5)
 
-    emptyLambda = () -> 4
+    emptyLambda = () => 4
     println(emptyLambda())
 
-    lambda (Int) -> Int = x ->
+    lambda (Int) => Int = x =>
        adder.add(x)
 
     println(lambda(9))
 
-    lambda2 = (x Int) -> adder.add(x)
+    lambda2 = (x Int) => adder.add(x)
     println(lambda2(19))
 
-    lambda3 (Int) -> Int = x -> {
+    lambda3 (Int) => Int = x => {
         adder.add(x)
     }
     println(lambda3(29))
 
-    lambda4 = (x Int) -> {
+    lambda4 = (x Int) => {
         adder.add(x)
     }
     println(lambda4(40))
 
-    lambda5 (Int, Int) -> Int = (left, right) ->
+    lambda5 (Int, Int) => Int = (left, right) =>
         adder.add(left + right)
     println(lambda5(20, 31))
 
-    lambda6 = (left Int, right Int) -> adder.add(left + right)
+    lambda6 = (left Int, right Int) => adder.add(left + right)
     println(lambda6(30, 31))
 
     seen = Set(1, 2, 3)
-    doubled = seen.map((item Int) -> item * 2)
-    doubledV2 = seen.map((item) -> item * 2)
-    doubledV3 = seen.map(item -> item * 2)
-    doubledV4 = seen.map(item ->
+    doubled = seen.map((item Int) => item * 2)
+    doubledV2 = seen.map((item) => item * 2)
+    doubledV3 = seen.map(item => item * 2)
+    doubledV4 = seen.map(item =>
         item * 2
     )
-    doubledV5 = seen.map { item -> item * 2 }
+    doubledV5 = seen.map { item => item * 2 }
 
     println("map 1 " + doubled.contains(4) + " " + doubled.size())
     println("map 2 " + doubledV2.contains(4) + " " + doubledV2.size())

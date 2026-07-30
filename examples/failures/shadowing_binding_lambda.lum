@@ -3,6 +3,6 @@
 
 def main() Int {
     value = 1
-    mapper = (value Int) -> value + 1
+    mapper = (value Int) => value + 1
     mapper(2)
 }

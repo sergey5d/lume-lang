@@ -26,7 +26,7 @@ def plusOneEither(value Either[Str, Int]) Either[Str, Int] {
 def twoEithers(value Either[Str, Int], value2 Either[Str, Str]) Either[Str, Int] {
     item = try value
     str = try value2
-    size = try value2.map((s Str) -> s.size())
+    size = try value2.map((s Str) => s.size())
     return Right(item + str.size() / 2 + size)
 }
 

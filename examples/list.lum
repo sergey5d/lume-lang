@@ -32,15 +32,15 @@ def main() Unit {
     items = [1, 2, 3]
     items.append(4)
 
-    mapped = items.map(item -> item * 2)
-    expanded = items.flatMap(item -> [item, item + 10])
-    filtered = items.filter(item -> item > 2)
-    total = items.fold(0, (acc, item) -> acc + item)
-    reduced = items.reduce((left, right) -> left + right)
-    hasBig = items.exists(item -> item > 3)
-    allPositive = items.forAll(item -> item > 0)
+    mapped = items.map(item => item * 2)
+    expanded = items.flatMap(item => [item, item + 10])
+    filtered = items.filter(item => item > 2)
+    total = items.fold(0, (acc, item) => acc + item)
+    reduced = items.reduce((left, right) => left + right)
+    hasBig = items.exists(item => item > 3)
+    allPositive = items.forAll(item => item > 0)
 
-    items.forEach(item -> println("each " + item))
+    items.forEach(item => println("each " + item))
     println("index " + items[0] + " " + items[3])
 
     sorted = [3, 1, 4, 2]

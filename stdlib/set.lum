@@ -6,14 +6,14 @@ interface Set[T] with Iterable[T] {
     def add(value T) Set[T]
     def addAll(values Iterable[T]) Set[T]
     def iterator() Iterator[T]
-    def map[X](f (T) -> X) Set[X]
-    def flatMap[X](f (T) -> Set[X]) Set[X]
-    def filter(f (T) -> Bool) Set[T]
-    def fold[X](initial X, f (X, T) -> X) X
-    def reduce(f (T, T) -> T) Option[T]
-    def exists(f (T) -> Bool) Bool
-    def forAll(f (T) -> Bool) Bool
-    def forEach(f (T) -> Unit)
+    def map[X](f (T) => X) Set[X]
+    def flatMap[X](f (T) => Set[X]) Set[X]
+    def filter(f (T) => Bool) Set[T]
+    def fold[X](initial X, f (X, T) => X) X
+    def reduce(f (T, T) => T) Option[T]
+    def exists(f (T) => Bool) Bool
+    def forAll(f (T) => Bool) Bool
+    def forEach(f (T) => Unit)
     def contains(value T) Bool
     def size() Int
 }

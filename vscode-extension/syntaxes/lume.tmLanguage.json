@@ -293,7 +293,7 @@
         },
         {
           "name": "keyword.operator.arrow.lume",
-          "match": "=>|->"
+          "match": "=>"
         },
         {
           "name": "keyword.operator.pair.lume",

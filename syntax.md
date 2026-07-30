@@ -95,12 +95,12 @@ Tuple types:
 
 Function types:
 
-- `(Int) -> Str`
-- `(Int, Bool) -> Unit`
+- `(Int) => Str`
+- `(Int, Bool) => Unit`
 
-Function type parameter lists must be parenthesized. Use `(Int) -> Int`,
-not `Int -> Int`. Lambda expressions still use ordinary arrow syntax, for
-example `value -> value + 1`.
+Function type parameter lists must be parenthesized. Use `(Int) => Int`,
+not `Int => Int`. Lambda expressions use the same arrow token, for
+example `value => value + 1`.
 
 ## Lifted Access Operator
 
@@ -869,7 +869,7 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 { field Type: value }            # typed anonymous shape literal
 { expr }                         # block expression
 Type { field: value }            # brace field construction or enum field payload
-call { x -> ... }                # trailing lambda
+call { x => ... }                # trailing lambda
 Interface with Other { method(...) ... } # anonymous interface implementation
 new(field Type)                  # constructor declaration
 shape(value, other)              # contextual anonymous-shape positional construction
@@ -944,7 +944,7 @@ def greet(name Str) Str = "hello, " + name
 
 The parameter list is attached to the callable name. `name(...)` starts a
 callable declaration; `name (...)` does not, which keeps fields such as
-`pair (Int, Int)` and `mapper (Int) -> Int` unambiguous.
+`pair (Int, Int)` and `mapper (Int) => Int` unambiguous.
 
 Expression-bodied function:
 
@@ -1056,12 +1056,12 @@ Rules:
 - Lazy parameters are not memoized; each read evaluates the captured expression again.
 - Lazy parameters cannot be `vararg`.
 - Lazy argument expressions cannot contain non-local `return`, `break`, `continue`, or `try`.
-- Use an explicit `() -> T` parameter when the caller should pass, store, or return the thunk itself.
+- Use an explicit `() => T` parameter when the caller should pass, store, or return the thunk itself.
 
 Style:
 
 - Use `lazy` only for conditional-value APIs such as `assert`, `debug`, `getOr`, and `orElse`.
-- Use `() -> T` for callbacks, schedulers, retry operations, event handlers, and stored work.
+- Use `() => T` for callbacks, schedulers, retry operations, event handlers, and stored work.
 
 Forwarding rules:
 
@@ -1094,8 +1094,8 @@ on the container branch:
 value = maybe.getOr(expensiveDefault())
 result = maybe.toResult(makeError())
 next = result.orElse(recover())
-mapped = maybe.map(value -> value + 1)
-leftMapped = either.mapLeft(error -> error.toStr())
+mapped = maybe.map(value => value + 1)
+leftMapped = either.mapLeft(error => error.toStr())
 ```
 
 Classes, enums, and singles can declare methods in their declaration bodies.
@@ -1221,50 +1221,50 @@ empty Path = Path()
 Accepted lambda parameter forms are deliberately small:
 
 ```txt
-() -> expr
-x -> expr
-_ -> expr
-(x) -> expr
-(x, y) -> expr
-(x Int) -> expr
-(x Int, y Int) -> expr
-(_) -> expr
-(x, _) -> expr
-(_ Int, value Int) -> expr
+() => expr
+x => expr
+_ => expr
+(x) => expr
+(x, y) => expr
+(x Int) => expr
+(x Int, y Int) => expr
+(_) => expr
+(x, _) => expr
+(_ Int, value Int) => expr
 ```
 
 Typed single-parameter lambdas must use parentheses, so write
-`(x Int) -> x + 1`, not `x Int -> x + 1`. Parenthesized parameter lists
-must also be either fully typed or fully untyped; `(x Int, y) -> ...` is
-invalid. Plain `(x, y) -> ...` always means two parameters.
+`(x Int) => x + 1`, not `x Int => x + 1`. Parenthesized parameter lists
+must also be either fully typed or fully untyped; `(x Int, y) => ...` is
+invalid. Plain `(x, y) => ...` always means two parameters.
 
 Single-parameter lambda:
 
 ```txt
-x -> x + 1
+x => x + 1
 ```
 
 Explicitly typed lambda:
 
 ```txt
-(x Int) -> x + 1
+(x Int) => x + 1
 ```
 
 Multi-parameter lambda:
 
 ```txt
-(left Int, right Int) -> left + right
+(left Int, right Int) => left + right
 ```
 
 Tuple-destructuring inside a one-argument lambda:
 
 ```txt
-pairs.map(pair -> {
+pairs.map(pair => {
     let (key, value) = pair
     key + value
 })
 
-pairs.map(pair -> {
+pairs.map(pair => {
     let (key, _) = pair
     key
 })
@@ -1273,7 +1273,7 @@ pairs.map(pair -> {
 Class or anonymous-shape destructuring inside a lambda:
 
 ```txt
-users.map { user ->
+users.map { user =>
     let { name, age } = user
     "$name is $age"
 }
@@ -1284,17 +1284,17 @@ class, or anonymous-shape value, name the parameter normally and destructure it
 inside the body:
 
 ```txt
-pairs.mapWithIndex((pair, index) -> {
+pairs.mapWithIndex((pair, index) => {
     let (x, y) = pair
     "$index: ${x + y}"
 })
 
-source.combine((name, pair) -> {
+source.combine((name, pair) => {
     let (x, y) = pair
     "$name: ${x + y}"
 })
 
-source.combine((left, right) -> {
+source.combine((left, right) => {
     let (a, b) = left
     let (x, y) = right
     a + b + x + y
@@ -1304,8 +1304,8 @@ source.combine((left, right) -> {
 Rules:
 
 - `_` inside an explicit lambda parameter list means "ignore this parameter slot"
-- `_` is not a readable value, so `(_, value) -> _ + value` is invalid
-- `_ -> expr` is valid as a one-parameter lambda whose parameter is ignored
+- `_` is not a readable value, so `(_, value) => _ + value` is invalid
+- `_ => expr` is valid as a one-parameter lambda whose parameter is ignored
 - placeholder-expression lambdas such as `_ + 1` and `items.map(_ + 1)` are not supported
 - tuple, class, and anonymous-shape values are destructured inside the lambda body with normal `let`
 - `let` destructuring is not allowed in lambda parameter lists
@@ -1318,14 +1318,14 @@ def mapUser(user User) UserDto =
     UserDto { id: user.id, name: user.name }
 
 dtos = users.map(mapUser)
-# same as: users.map(user -> mapUser(user))
+# same as: users.map(user => mapUser(user))
 
 mapper UserMapper = UserMapper()
 dtos = users.map(mapper.mapUser)
-# same as: users.map(user -> mapper.mapUser(user))
+# same as: users.map(user => mapper.mapUser(user))
 
 dtos = users.map(this.mapUser)
-# same as: users.map(user -> this.mapUser(user))
+# same as: users.map(user => this.mapUser(user))
 
 dtos = users.map(User.toDto)
 # single method reference
@@ -1345,18 +1345,18 @@ method reference.
 Block lambda:
 
 ```txt
-(x Int) -> {
+(x Int) => {
     next = x + 1
     next
 }
 ```
 
-After `->`, a standalone lambda accepts exactly one body unit: an expression, a
+After `=>`, a standalone lambda accepts exactly one body unit: an expression, a
 statement, or a `{ ... }` block. If the body is an expression, normal multiline
 expression continuation rules apply:
 
 ```txt
-mapper = item ->
+mapper = item =>
     item +
         1
 ```
@@ -1366,39 +1366,39 @@ brace-delimited:
 
 ```txt
 # invalid
-mapper = item ->
+mapper = item =>
     next = item + 1
     next * 2
 
 # valid
-mapper = item -> {
+mapper = item => {
     next = item + 1
     next * 2
 }
 ```
 
-Trailing lambda call syntax is also allowed when passing a lambda as an argument. The trailing brace body must contain an explicit lambda head with `->`, and that lambda head must start on the same line as the opening `{`:
+Trailing lambda call syntax is also allowed when passing a lambda as an argument. The trailing brace body must contain an explicit lambda head with `=>`, and that lambda head must start on the same line as the opening `{`:
 
 ```txt
-items.map { x -> x + 1 }
+items.map { x => x + 1 }
 
-items.repeat { () -> 5 }
+items.repeat { () => 5 }
 
-runner.zero { () -> 26 }
+runner.zero { () => 26 }
 
-items.zipMap { (left, right) -> left + right }
+items.zipMap { (left, right) => left + right }
 
-items.forEach { x ->
+items.forEach { x =>
     next = x + 1
     println(next)
 }
 
-items.map { (x Int) ->
+items.map { (x Int) =>
     x + 1
 }
 
 items.zipMap { (left,
-    right) -> left + right }
+    right) => left + right }
 ```
 
 Headless trailing blocks are rejected. Write the zero-argument lambda head explicitly:
@@ -1410,7 +1410,7 @@ runner.zero {
 }
 
 # valid
-runner.zero { () -> 26 }
+runner.zero { () => 26 }
 ```
 
 If a callback is passed alongside ordinary arguments, include it in the same
@@ -1419,7 +1419,7 @@ completed `(...)` call; that would imply currying or calling the result of the
 first call.
 
 ```txt
-processNamed("compares values", { () -> println("inside callback") })
+processNamed("compares values", { () => println("inside callback") })
 ```
 
 Trailing brace call syntax on non-constructor calls is only for lambda arguments.
@@ -1434,7 +1434,7 @@ namedMaybeOrder = Some { value: Order { id: 7 } }
 Use an explicit lambda when mapping with a `match`:
 
 ```txt
-options.map(value -> match value {
+options.map(value => match value {
     case SomeX(x) => x + 1
     case NoneX => 0
 })
@@ -1443,7 +1443,7 @@ options.map(value -> match value {
 The same idea applies to `partial match`:
 
 ```txt
-options.map(value -> partial match value {
+options.map(value => partial match value {
     case SomeX(x) => x + 1
 })
 ```
@@ -1659,7 +1659,7 @@ texts Array[Str] = Array.ofStr(3)      # ["", "", ""]
 runes Array[Rune] = Array.ofRune(3)    # default NUL rune values
 
 filled Array[Int] = Array.fill(3, 7)
-generated Array[Int] = Array.generate(3, idx -> idx * 2)
+generated Array[Int] = Array.generate(3, idx => idx * 2)
 ```
 
 Arrays always contain initialized values. Use `Array.generate` when each slot
@@ -2042,8 +2042,8 @@ Failure mapping is ordinary container transformation before `try`:
 
 ```txt
 user = try maybeUser.toResult(AppError.NotFound(id))
-row = try Db.query(id).mapError { err -> AppError.Db(err) }
-value = try sourceEither.mapLeft { left -> AppError.FromLeft(left) }
+row = try Db.query(id).mapError { err => AppError.Db(err) }
+value = try sourceEither.mapLeft { left => AppError.FromLeft(left) }
 ```
 
 `try` propagates the value it receives. If the source has the wrong failure type,
@@ -2057,7 +2057,7 @@ When the chain gets visually noisy, split before the mapping call:
 
 ```txt
 row = try Db.query(id)
-    .mapError { err -> AppError.Db(err) }
+    .mapError { err => AppError.Db(err) }
 ```
 
 Multiple dependent unwraps can be written as sequential `let ... else` / `try`
@@ -2236,7 +2236,7 @@ failures explicitly before the generator when needed:
 
 ```txt
 value = for {
-    row <- dbRow.mapError(err -> AppError.Db(err))
+    row <- dbRow.mapError(err => AppError.Db(err))
     user <- decodeUser(row)
 } yield user
 ```
@@ -2272,7 +2272,7 @@ Refutable `let ... else`, reassignment, mutation, and expression statements are
 not clause forms. Put that logic in the body or use helpers such as `filterMap`:
 
 ```txt
-result = items.filterMap(item -> partial match item {
+result = items.filterMap(item => partial match item {
     case Some(value) => value
 })
 ```
@@ -2287,7 +2287,7 @@ yield    = produces values
 ```
 
 `for item <- items yield item * 2` lowers approximately to
-`items.map(item -> item * 2)`.
+`items.map(item => item * 2)`.
 
 If `items` is `Option`, `Result`, or `Either`, the same spelling lowers to that
 type's `map`.
@@ -2304,8 +2304,8 @@ for {
 is approximately:
 
 ```txt
-xs.flatMap(x -> {
-    ys.map(y -> {
+xs.flatMap(x => {
+    ys.map(y => {
         x + y
     })
 })
@@ -2424,7 +2424,7 @@ partial match value {
 Partial mapped through an explicit lambda:
 
 ```txt
-values.map(value -> partial match value {
+values.map(value => partial match value {
     case SomeX(x) => x + 1
 })
 ```
@@ -2569,7 +2569,7 @@ Other operators / constructs:
 
 - `is` for runtime type checks
 - `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
-- `->` for parenthesized function types and lambdas
+- `=>` for parenthesized function types and lambdas
 - `=>` for match cases
 - `.->` for per-hop lifted access through `Option`, `Result`, and `Either`
 - `with` for interface implementation and generic bounds
@@ -2582,7 +2582,7 @@ Examples:
 counter is Counter
 for item <- items {
 }
-(Int) -> Str
+(Int) => Str
 SomeX(x) => x
 class Box[T] with Named
 pair = ("a", 1)

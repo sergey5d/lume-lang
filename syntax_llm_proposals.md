@@ -39,8 +39,8 @@ Risky candidates:
 The keyword-free lambda surface is currently good:
 
 ```txt
-x -> x + 1
-(x, y) -> x + y
+x => x + 1
+(x, y) => x + y
 users.map(mapUser)
 users.map(User.toDto)
 ```

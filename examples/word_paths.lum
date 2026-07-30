@@ -50,7 +50,7 @@ def renderPath(path [Str]) Str {
 
     first = path.head().getOr("")
     rest = path.tail()
-    rest.fold(first, (acc, word) -> acc + " -> " + word)
+    rest.fold(first, (acc, word) => acc + " -> " + word)
 }
 
 def main() Unit {
@@ -65,6 +65,6 @@ def main() Unit {
     ]
 
     path = firstPath("apple", "rat", words)
-    pathText = path.map(found -> renderPath(found)).getOr("no match")
+    pathText = path.map(found => renderPath(found)).getOr("no match")
     println(pathText)
 }

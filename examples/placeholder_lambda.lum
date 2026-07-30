@@ -10,28 +10,28 @@
 # 4
 # 10
 
-def applyTwice(f (Int) -> Int, value Int) Int = f(f(value))
+def applyTwice(f (Int) => Int, value Int) Int = f(f(value))
 
 def main() Unit {
-    inc (Int) -> Int = value -> value + 1
+    inc (Int) => Int = value => value + 1
     items = List(1, 2, 3)
-    mapped = items.map(item -> item + 1)
+    mapped = items.map(item => item + 1)
     str Str = "haha"
     words = [str]
-    sizes = words.map(word -> word.size())
+    sizes = words.map(word => word.size())
     pairs = List(("a", 1), ("bb", 2))
-    pairMapped = pairs.map(pair -> {
+    pairMapped = pairs.map(pair => {
         let (key, value) = pair
         key.size() + value
     })
-    pairIgnored = pairs.map(pair -> {
+    pairIgnored = pairs.map(pair => {
         let (_, value) = pair
         value * 2
     })
     entries = Map { "a": 1, "bbb": 2 }
-    mapMapped = entries.map((key, value) -> key.size() + value)
+    mapMapped = entries.map((key, value) => key.size() + value)
     tuple4s = List((1, 2, 3, 4), (4, 5, 6, 7))
-    tuple4Mapped = tuple4s.map(tuple -> {
+    tuple4Mapped = tuple4s.map(tuple => {
         let (first, _, third, _) = tuple
         first + third
     })

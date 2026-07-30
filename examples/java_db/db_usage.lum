@@ -43,7 +43,7 @@ def loadNamed(db Database, active Bool) Result[[Str], DbError] {
 
     db.query("select name from users where active = :active")
         .bind(params)
-        .flatMap(row -> row.str("name"))
+        .flatMap(row => row.str("name"))
 }
 
 def activateUser(db Database, id Int) Result[Int, DbError] {
@@ -56,7 +56,7 @@ def activateUserStaged(db Database, id Int) Result[Int, DbError] {
 }
 
 def replaceUser(db Database, id Int, name Str) Result[Unit, DbError] {
-    db.transactionally(tx -> {
+    db.transactionally(tx => {
         deleted Int = try tx.exec("delete from users where id = ?", id)
         inserted Int = try tx.exec("insert into users(id, name, active) values (?, ?, ?)", id, name, true)
 

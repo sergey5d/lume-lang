@@ -2,8 +2,8 @@
 # .*annotation arguments must be literals, stable constants, or constant expressions.*
 
 annotation Flag {
-    value (Int) -> Int
+    value (Int) => Int
 }
 
-@Flag { value: x -> x + 1 }
+@Flag { value: x => x + 1 }
 def main() Unit {}

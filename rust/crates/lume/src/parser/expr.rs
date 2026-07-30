@@ -125,7 +125,7 @@ impl<'a> Parser<'a> {
             self.synchronize_stmt();
             self.error_at_current(
                 "expected_expression",
-                "expected expression or lambda body after '->'",
+                "expected expression or lambda body after '=>'",
             );
             return None;
         };
@@ -1014,7 +1014,7 @@ impl<'a> Parser<'a> {
             if self.at(TokenKind::Identifier) && self.current().lexeme == "catch" {
                 self.error_at_current(
                     "removed_try_catch",
-                    "try catch syntax was removed; transform the source before try, for example 'try source.mapError { err -> mappedFailure }'",
+                    "try catch syntax was removed; transform the source before try, for example 'try source.mapError { err => mappedFailure }'",
                 );
             }
             let span = start.cover(value.span());
@@ -1173,7 +1173,7 @@ impl<'a> Parser<'a> {
                     if !self.validate_trailing_lambda_block(&block, open_span) {
                         self.diagnostics.push(Diagnostic::error(
                             "invalid_trailing_lambda",
-                            "trailing lambda syntax requires an explicit parameter arrow; write '{ () -> ... }' for zero-argument callbacks",
+                        "trailing lambda syntax requires an explicit parameter arrow; write '{ () => ... }' for zero-argument callbacks",
                             open_span,
                         ));
                     }
@@ -1265,7 +1265,7 @@ impl<'a> Parser<'a> {
                 self.restore(checkpoint);
                 return None;
             };
-            if !self.match_token(TokenKind::Arrow) {
+            if !self.match_lambda_arrow() {
                 self.restore(checkpoint);
                 return None;
             }
@@ -1279,7 +1279,7 @@ impl<'a> Parser<'a> {
 
         if self.at(TokenKind::Identifier) {
             let (name, start) = self.expect_identifier("expected lambda parameter")?;
-            if self.match_token(TokenKind::Arrow) {
+            if self.match_lambda_arrow() {
                 return Some((
                     vec![LambdaParam {
                         name,
@@ -1294,11 +1294,11 @@ impl<'a> Parser<'a> {
             let ty_checkpoint = self.checkpoint();
             if self.can_start_type_ref() {
                 if let Some(ty) = self.parse_primary_type_ref() {
-                    if self.match_token(TokenKind::Arrow) {
+                    if self.match_lambda_arrow() {
                         let ty_span = ty.span();
                         self.diagnostics.push(Diagnostic::error(
                             "invalid_lambda_params",
-                            "typed single-parameter lambdas must use parentheses; write '(x T) -> ...'",
+                            "typed single-parameter lambdas must use parentheses; write '(x T) => ...'",
                             start.cover(ty_span),
                         ));
                         return Some((
@@ -1345,7 +1345,7 @@ impl<'a> Parser<'a> {
             self.restore(checkpoint);
             return None;
         };
-        if !self.match_token(TokenKind::Arrow) {
+        if !self.match_lambda_arrow() {
             self.restore(checkpoint);
             return None;
         }
@@ -1365,6 +1365,21 @@ impl<'a> Parser<'a> {
             ));
         }
         Some((params, start))
+    }
+
+    fn match_lambda_arrow(&mut self) -> bool {
+        if self.match_token(TokenKind::FatArrow) {
+            return true;
+        }
+        if self.match_token(TokenKind::Arrow) {
+            self.diagnostics.push(Diagnostic::error(
+                "old_lambda_arrow",
+                "lambda syntax uses '=>'; replace '->' with '=>'",
+                self.previous_span(),
+            ));
+            return true;
+        }
+        false
     }
 
     fn parse_lifted_hop_postfixes(&mut self, mut body: Expr) -> Option<Expr> {

@@ -205,7 +205,7 @@ impl<'a> Parser<'a> {
                         TokenKind::Identifier | TokenKind::LBrace
                     )
                 {
-                    let target = self.parse_type_ref()?;
+                    let target = self.parse_pattern_type_ref()?;
                     return Some(Pattern::Type {
                         name: None,
                         span: start.cover(target.span()),
@@ -294,7 +294,7 @@ impl<'a> Parser<'a> {
                         TokenKind::Identifier | TokenKind::LBrace
                     )
                 {
-                    let target = self.parse_type_ref()?;
+                    let target = self.parse_pattern_type_ref()?;
                     return Some(Pattern::Type {
                         name: Some(name),
                         span: start.cover(target.span()),
@@ -389,7 +389,7 @@ impl<'a> Parser<'a> {
                     TokenKind::Identifier | TokenKind::LBrace
                 )
             {
-                let target = self.parse_type_ref()?;
+                let target = self.parse_pattern_type_ref()?;
                 return Some(Pattern::Type {
                     name: (name != "_").then_some(name),
                     span: start.cover(target.span()),

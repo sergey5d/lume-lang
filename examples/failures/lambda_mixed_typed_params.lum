@@ -2,5 +2,5 @@
 # .*lambda parameters must be either all typed or all untyped.*
 
 def main() Unit {
-    mapper = (left Int, right) -> left + right
+    mapper = (left Int, right) => left + right
 }

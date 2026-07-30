@@ -63,9 +63,9 @@ def main() Int {
     printAt("this", service.fromThis(users), 0)
     printAt("single", users.map(User.toDto), 1)
 
-    topLevelFn (UserEntity) -> UserDto = mapUser
-    instanceFn (UserEntity) -> UserDto = mapper.mapUser
-    handlers [() -> Int] = [() -> 26]
+    topLevelFn (UserEntity) => UserDto = mapUser
+    instanceFn (UserEntity) => UserDto = mapper.mapUser
+    handlers [() => Int] = [() => 26]
 
     println("assigned", topLevelFn(UserEntity { id: 3, name: "Katherine" }).name)
     println("assigned instance", instanceFn(UserEntity { id: 4, name: "Alan" }).name)

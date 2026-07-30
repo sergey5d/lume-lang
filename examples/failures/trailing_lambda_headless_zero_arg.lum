@@ -4,7 +4,7 @@
 class Runner {}
 
 impl Runner {
-    def zero(f () -> Int) Int = f()
+    def zero(f () => Int) Int = f()
 }
 
 def main() Unit {

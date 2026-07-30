@@ -225,7 +225,7 @@ impl Ty {
                     .join(", ")
             ),
             Ty::Function(params, ret) => format!(
-                "({}) -> {}",
+                "({}) => {}",
                 params
                     .iter()
                     .map(Ty::describe)
@@ -1742,7 +1742,7 @@ impl<'a> Checker<'a> {
                         self.add_error(
                             "invalid_parameter_type",
                             format!(
-                                "parameter '{}' cannot have type Unit; omit the parameter or use '() -> T' for a no-argument callback",
+                                "parameter '{}' cannot have type Unit; omit the parameter or use '() => T' for a no-argument callback",
                                 param.name
                             ),
                             ty.span(),
@@ -1751,7 +1751,7 @@ impl<'a> Checker<'a> {
                         self.add_error(
                             "invalid_parameter_type",
                             format!(
-                                "function parameter '{}' cannot use Unit as a callback parameter; write '() -> T' for a no-argument function type",
+                                "function parameter '{}' cannot use Unit as a callback parameter; write '() => T' for a no-argument function type",
                                 param.name
                             ),
                             unit_span,
@@ -4795,7 +4795,7 @@ impl<'a> Checker<'a> {
                                     self.add_error(
                                         "invalid_argument_type",
                                         format!(
-                                            "Array.generate expects (Int) -> T generator, got '{}'",
+                                            "Array.generate expects (Int) => T generator, got '{}'",
                                             Ty::Function(params.clone(), ret.clone()).describe()
                                         ),
                                         arg.span,
@@ -4808,7 +4808,7 @@ impl<'a> Checker<'a> {
                                 self.add_error(
                                     "invalid_argument_type",
                                     format!(
-                                        "Array.generate expects (Int) -> T generator, got '{}'",
+                                        "Array.generate expects (Int) => T generator, got '{}'",
                                         other.describe()
                                     ),
                                     arg.span,
@@ -10397,7 +10397,7 @@ def main() Int {
             r#"
 def main() Unit {
     items = List(1, 2, 3)
-    mapped = items.map { item -> item + 1 }
+    mapped = items.map { item => item + 1 }
     OS.println(mapped.size())
 }
 "#,
@@ -10410,13 +10410,13 @@ def main() Unit {
     fn allows_trailing_block_call_for_explicit_zero_arg_lambda_argument() {
         let program = parse_inline(
             r#"
-def process(f () -> Unit) Unit = f()
-def compute(f () -> Int) Int = f()
+def process(f () => Unit) Unit = f()
+def compute(f () => Int) Int = f()
 
 def main() Unit {
-    process { () -> println("hehe") }
+    process { () => println("hehe") }
 
-    value Int = compute { () -> 42 }
+    value Int = compute { () => 42 }
 }
 "#,
         );
@@ -10569,7 +10569,7 @@ def main() Unit {
         let program = parse_inline(
             r#"
 def main() Unit {
-    values Array[Int] = Array.generate(3, idx -> idx + 1)
+    values Array[Int] = Array.generate(3, idx => idx + 1)
 }
 "#,
         );
@@ -10676,7 +10676,7 @@ def main(flag Bool) Unit {
 def main() Unit {
     values = List(1, 2, 3)
     removed Option[Int] = values.removeFirst()
-    total Int = values.reduce(0, (acc, value) -> acc + value)
+    total Int = values.reduce(0, (acc, value) => acc + value)
 }
 "#,
         );
@@ -11929,17 +11929,17 @@ def main() Unit {
     fn allows_ignored_lambda_parameter_slots() {
         let program = parse_inline(
             r#"
-def consumeOne(f (Int) -> Int) Int = f(10)
+def consumeOne(f (Int) => Int) Int = f(10)
 
-def consumeTwo(f (Int, Int) -> Int) Int = f(20, 3)
+def consumeTwo(f (Int, Int) => Int) Int = f(20, 3)
 
 def main() Unit {
-    one = consumeOne((_) -> 1)
-    bare = consumeOne(_ -> 1)
-    left = consumeTwo((x, _) -> x)
-    right = consumeTwo((_, value) -> value + 1)
-    typed = consumeTwo((_ Int, value Int) -> value + 2)
-    both = consumeTwo((_, _) -> 1)
+    one = consumeOne((_) => 1)
+    bare = consumeOne(_ => 1)
+    left = consumeTwo((x, _) => x)
+    right = consumeTwo((_, value) => value + 1)
+    typed = consumeTwo((_ Int, value Int) => value + 2)
+    both = consumeTwo((_, _) => 1)
 }
 "#,
         );
@@ -11951,10 +11951,10 @@ def main() Unit {
     fn rejects_reading_ignored_lambda_parameter_slot() {
         let program = parse_inline(
             r#"
-def consumeTwo(f (Int, Int) -> Int) Int = f(20, 3)
+def consumeTwo(f (Int, Int) => Int) Int = f(20, 3)
 
 def main() Unit {
-    value = consumeTwo((_, item) -> _ + item)
+    value = consumeTwo((_, item) => _ + item)
 }
 "#,
         );
@@ -12154,7 +12154,7 @@ def main() Unit {
     fn materializes_bare_zero_payload_enum_case_patterns() {
         let program = parse_inline(
             r#"
-def mapOption[X](value Option[Int], f (Int) -> X) Option[X] {
+def mapOption[X](value Option[Int], f (Int) => X) Option[X] {
     match value {
         case Some(item) => Some(f(item))
         case None => None

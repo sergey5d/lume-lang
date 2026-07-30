@@ -122,10 +122,15 @@ impl<'a> Parser<'a> {
         }
 
         let left = self.parse_primary_type_ref()?;
-        if self.at(TokenKind::Arrow) {
+        if self.at(TokenKind::FatArrow) || self.at(TokenKind::Arrow) {
+            let old_arrow = self.at(TokenKind::Arrow);
             self.error_at_current(
                 "invalid_function_type",
-                "function type parameters must be parenthesized; use '(T) -> U'",
+                if old_arrow {
+                    "function type parameters must be parenthesized and use '=>'; write '(T) => U'"
+                } else {
+                    "function type parameters must be parenthesized; use '(T) => U'"
+                },
             );
             self.advance();
             let ret = self.parse_type_ref()?;
@@ -137,6 +142,15 @@ impl<'a> Parser<'a> {
             });
         }
         Some(left)
+    }
+
+    pub(super) fn parse_pattern_type_ref(&mut self) -> Option<TypeRef> {
+        self.skip_newlines();
+        if self.at(TokenKind::LParen) {
+            return self.parse_parenthesized_or_function_type_ref();
+        }
+
+        self.parse_primary_type_ref()
     }
 
     fn parse_parenthesized_or_function_type_ref(&mut self) -> Option<TypeRef> {
@@ -155,7 +169,15 @@ impl<'a> Parser<'a> {
         }
         let end = self.consume(TokenKind::RParen, "expected ')' after tuple type")?;
 
-        if self.match_token(TokenKind::Arrow) {
+        let uses_old_arrow = self.at(TokenKind::Arrow);
+        if self.match_token(TokenKind::FatArrow) || self.match_token(TokenKind::Arrow) {
+            if uses_old_arrow {
+                self.diagnostics.push(crate::diagnostic::Diagnostic::error(
+                    "old_function_type_arrow",
+                    "function types use '=>'; replace '->' with '=>'",
+                    self.previous_span(),
+                ));
+            }
             let ret = self.parse_type_ref()?;
             return Some(TypeRef::Function {
                 params: fields.into_iter().map(|field| field.ty).collect(),

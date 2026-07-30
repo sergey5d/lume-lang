@@ -21,11 +21,11 @@ def main() Unit {
     values Array[Int] = Array(4, 5, 6)
     labels Array[Str] = Array("a", "b")
 
-    mapped = values.map(item -> item * 2)
-    hasBig = values.exists(item -> item > 5)
-    allPositive = values.forAll(item -> item > 0)
+    mapped = values.map(item => item * 2)
+    hasBig = values.exists(item => item > 5)
+    allPositive = values.forAll(item => item > 0)
 
-    values.forEach(item -> println("each " + item))
+    values.forEach(item => println("each " + item))
     println("index " + values[0] + " " + values[2])
 
     let Some(middle) = values.get(1) else return ()
@@ -46,7 +46,7 @@ def main() Unit {
     defaultStrs = Array.ofStr(1)
     defaultRunes = Array.ofRune(1)
     filled = Array.fill(2, 7)
-    generated = Array.generate(3, idx -> idx * 2)
+    generated = Array.generate(3, idx => idx * 2)
 
     println("get " + middle + " " + values.get(9).isEmpty())
     println("first " + first)

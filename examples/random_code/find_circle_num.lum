@@ -14,7 +14,7 @@ class DisjointSet {
 impl DisjointSet {
 
     new(size Int) {
-        this.arr = Array.generate(size, i -> i)
+        this.arr = Array.generate(size, i => i)
     }
 
     def findParent(v Int) Int {
@@ -67,7 +67,7 @@ def findCircleNumUnion(isConnected List[List[Int]]) Int {
 }
 
 def findCircleNumTraversal(isConnected List[List[Int]]) Int {
-    directConns Array[Set[Int]] = Array.generate(isConnected.size(), idx -> Set())
+    directConns Array[Set[Int]] = Array.generate(isConnected.size(), idx => Set())
 
     for i <- Range(0, isConnected.size()) {
         row = isConnected[i]
@@ -92,7 +92,7 @@ def findCircleNumTraversal(isConnected List[List[Int]]) Int {
                 idx = stack.remove(stack.size() - 1).getOr(-1)
                 if !visitedAll.contains(idx) {
                     visitedAll.add(idx)
-                    directConns[idx].forEach(next -> stack.append(next))
+                    directConns[idx].forEach(next => stack.append(next))
                 }
             }
         }

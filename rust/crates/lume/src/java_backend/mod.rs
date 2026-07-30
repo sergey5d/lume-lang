@@ -3654,12 +3654,12 @@ def main() Unit {
             r#"
 module demo/tail_if_let_lambda
 
-def applyMaybe(work (Option[Int]) -> Result[Int, Str]) Result[Int, Str] {
+def applyMaybe(work (Option[Int]) => Result[Int, Str]) Result[Int, Str] {
     work(Some(5))
 }
 
 def main() Unit {
-    result Result[Int, Str] = applyMaybe((existing Option[Int]) -> {
+    result Result[Int, Str] = applyMaybe((existing Option[Int]) => {
         if let None = existing {
             Ok(0)
         } else {
@@ -3833,7 +3833,7 @@ class Runner {
 }
 
 impl Runner {
-    def call(value Int, mapper (Int) -> Result[Int, Str]) Result[Int, Str] {
+    def call(value Int, mapper (Int) => Result[Int, Str]) Result[Int, Str] {
         mapped Result[Int, Str] = mapper(value)
         match mapped {
             case Ok(item) => Ok(item)
@@ -4032,7 +4032,7 @@ def main() Unit {
             r#"
 module demo/genericappend
 
-def mapItems[T](items [T], mapper (T) -> T) [T] {
+def mapItems[T](items [T], mapper (T) => T) [T] {
     out [T] = []
 
     for item <- items {
@@ -4085,12 +4085,12 @@ def main() Unit {
             r#"
 module demo/higharity
 
-def apply7(f (Int, Int, Int, Int, Int, Int, Int) -> Int) Int {
+def apply7(f (Int, Int, Int, Int, Int, Int, Int) => Int) Int {
     f(1, 2, 3, 4, 5, 6, 7)
 }
 
 def main() Unit {
-    total Int = apply7((a, b, c, d, e, g, h) -> a + b + c + d + e + g + h)
+    total Int = apply7((a, b, c, d, e, g, h) => a + b + c + d + e + g + h)
     println(total)
 }
 "#,

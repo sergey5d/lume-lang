@@ -1,6 +1,6 @@
 # FAIL_REGEX:
-# .*function type parameters must be parenthesized; use '\(T\) -> U'.*
+# .*function type parameters must be parenthesized; use '\(T\) => U'.*
 
 def main() Unit {
-    mapper Int -> Int = value -> value + 1
+    mapper Int => Int = value => value + 1
 }

@@ -24,60 +24,60 @@
 def main() Unit {
     seen = Set(1, 2, 3)
 
-    doubled = seen.map(item -> item * 2)
+    doubled = seen.map(item => item * 2)
     println("doubled " + doubled.contains(4) + " " + doubled.size())
 
-    expanded = seen.flatMap(item -> Set(item, item + 10))
+    expanded = seen.flatMap(item => Set(item, item + 10))
     println("expanded " + expanded.contains(12) + " " + expanded.size())
 
-    filtered = seen.filter(item -> item > 1)
+    filtered = seen.filter(item => item > 1)
     println("filtered " + filtered.contains(2) + " " + filtered.size())
 
-    setTotal = seen.fold(0, (acc Int, item Int) -> acc + item)
+    setTotal = seen.fold(0, (acc Int, item Int) => acc + item)
     println("setFold " + setTotal)
 
-    setReduced = seen.reduce((left, right) -> left + right)
+    setReduced = seen.reduce((left, right) => left + right)
     println("setReduce " + setReduced.getOr(0))
 
-    setHasBig = seen.exists(item -> item > 2)
+    setHasBig = seen.exists(item => item > 2)
     println("setExists " + setHasBig)
 
-    setAllPositive = seen.forAll(item -> item > 0)
+    setAllPositive = seen.forAll(item => item > 0)
     println("setForAll " + setAllPositive)
 
-    seen.forEach(item -> println("set " + item))
+    seen.forEach(item => println("set " + item))
 
     values = Map { "a": 1, "b": 2 }
 
-    mapped = values.map((key, value) -> value * 10)
+    mapped = values.map((key, value) => value * 10)
     println("mapped " + mapped.get(0).getOr(0) + " " + mapped.get(1).getOr(0))
 
-    mappedValues = values.mapValues(value -> value * 100)
+    mappedValues = values.mapValues(value => value * 100)
     println("mappedValues " + mappedValues["a"].getOr(0) + " " + mappedValues["b"].getOr(0))
 
-    expandedValues = values.flatMap((key, value) -> List(value, value + 10))
+    expandedValues = values.flatMap((key, value) => List(value, value + 10))
     println("expandedValues " + expandedValues.get(0).getOr(0) + " " + expandedValues.get(3).getOr(0))
 
-    filteredMap = values.filter((key, value) -> value > 1)
+    filteredMap = values.filter((key, value) => value > 1)
     println("filteredMap " + filteredMap.contains("b") + " " + filteredMap.size())
 
-    mapTotal = values.fold(0, (acc, key, value) -> acc + value)
+    mapTotal = values.fold(0, (acc, key, value) => acc + value)
     println("mapFold " + mapTotal)
 
-    reducedPairOpt = values.reduce((leftKey, leftVal, rightKey, rightVal) -> (rightKey, rightVal))
+    reducedPairOpt = values.reduce((leftKey, leftVal, rightKey, rightVal) => (rightKey, rightVal))
 
     let Some(reducedPair) = reducedPairOpt else return ()
 
     let (reducedKey, reducedValue) = reducedPair
     println("mapReduce " + reducedKey + " " + reducedValue)
 
-    mapHasB = values.exists((key, value) -> key == "b")
+    mapHasB = values.exists((key, value) => key == "b")
     println("mapExists " + mapHasB)
 
-    mapAllSmall = values.forAll((key, value) -> value < 3)
+    mapAllSmall = values.forAll((key, value) => value < 3)
     println("mapForAll " + mapAllSmall)
 
-    values.forEach((key, value) -> println("pair " + key + " " + value))
+    values.forEach((key, value) => println("pair " + key + " " + value))
 
     var total = 0
 

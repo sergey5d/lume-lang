@@ -35,21 +35,21 @@ class LambdaRunner {
 }
 
 impl LambdaRunner {
-    def zero(f () -> Int) Int = f()
+    def zero(f () => Int) Int = f()
 
-    def one(f (Int) -> Int, value Int) Int = f(value)
+    def one(f (Int) => Int, value Int) Int = f(value)
 
-    def two(f (Int, Int) -> Int, left Int, right Int) Int = f(left, right)
+    def two(f (Int, Int) => Int, left Int, right Int) Int = f(left, right)
 
-    def tupleOne(f ((Int, Int)) -> Int, pair (Int, Int)) Int = f(pair)
+    def tupleOne(f ((Int, Int)) => Int, pair (Int, Int)) Int = f(pair)
 
-    def userOne(f (User) -> Str, user User) Str = f(user)
+    def userOne(f (User) => Str, user User) Str = f(user)
 
-    def withIndex(f ((Int, Int), Int) -> Str, pair (Int, Int), index Int) Str = f(pair, index)
+    def withIndex(f ((Int, Int), Int) => Str, pair (Int, Int), index Int) Str = f(pair, index)
 
-    def combine(f (Str, (Int, Int)) -> Str, name Str, pair (Int, Int)) Str = f(name, pair)
+    def combine(f (Str, (Int, Int)) => Str, name Str, pair (Int, Int)) Str = f(name, pair)
 
-    def twoTuples(f ((Int, Int), (Int, Int)) -> Int, left (Int, Int), right (Int, Int)) Int = f(left, right)
+    def twoTuples(f ((Int, Int), (Int, Int)) => Int, left (Int, Int), right (Int, Int)) Int = f(left, right)
 }
 
 class User {
@@ -58,13 +58,13 @@ class User {
 }
 
 def main() Unit {
-    zero = () -> 10
-    bare = x -> x + 1
-    paren = (x) -> x + 2
-    pair = (x, y) -> x + y
-    typed = (x Int) -> x + 4
-    typedPair = (x Int, y Int) -> x + y + 5
-    block = (x Int) -> {
+    zero = () => 10
+    bare = x => x + 1
+    paren = (x) => x + 2
+    pair = (x, y) => x + y
+    typed = (x Int) => x + 4
+    typedPair = (x Int, y Int) => x + y + 5
+    block = (x Int) => {
         next = x + 6
         next
     }
@@ -78,63 +78,63 @@ def main() Unit {
     println("block " + block(10))
 
     values = List(1, 2, 3)
-    doubled = values.map { item -> item * 2 }
+    doubled = values.map { item => item * 2 }
     println("trailing " + doubled.get(1).getOr(0))
 
     runner = LambdaRunner {}
-    println("inlineZero " + runner.zero(() -> 20))
-    println("trailingZero " + runner.zero { () -> 26 })
-    println("inlineBare " + runner.one(x -> x + 1, 20))
-    println("inlineParen " + runner.one((x) -> x + 2, 20))
-    println("inlinePair " + runner.two((x, y) -> x + y, 11, 12))
-    println("inlineTyped " + runner.one((x Int) -> x + 4, 20))
-    println("inlineTypedPair " + runner.two((x Int, y Int) -> x + y, 12, 13))
-    println("ignoredOne " + runner.one((_) -> 1, 20))
-    println("ignoredBare " + runner.one(_ -> 1, 20))
-    println("ignoredLeft " + runner.two((x, _) -> x, 20, 30))
-    println("ignoredRight " + runner.two((_, value) -> value + 1, 20, 3))
-    println("ignoredTyped " + runner.two((_ Int, value Int) -> value + 2, 20, 3))
-    println("ignoredBoth " + runner.two((_, _) -> 1, 20, 3))
+    println("inlineZero " + runner.zero(() => 20))
+    println("trailingZero " + runner.zero { () => 26 })
+    println("inlineBare " + runner.one(x => x + 1, 20))
+    println("inlineParen " + runner.one((x) => x + 2, 20))
+    println("inlinePair " + runner.two((x, y) => x + y, 11, 12))
+    println("inlineTyped " + runner.one((x Int) => x + 4, 20))
+    println("inlineTypedPair " + runner.two((x Int, y Int) => x + y, 12, 13))
+    println("ignoredOne " + runner.one((_) => 1, 20))
+    println("ignoredBare " + runner.one(_ => 1, 20))
+    println("ignoredLeft " + runner.two((x, _) => x, 20, 30))
+    println("ignoredRight " + runner.two((_, value) => value + 1, 20, 3))
+    println("ignoredTyped " + runner.two((_ Int, value Int) => value + 2, 20, 3))
+    println("ignoredBoth " + runner.two((_, _) => 1, 20, 3))
 
-    inlineMapBare = values.map(x -> x + 10)
-    inlineMapParen = values.map((x) -> x + 20)
-    inlineMapTyped = values.map((x Int) -> x + 30)
+    inlineMapBare = values.map(x => x + 10)
+    inlineMapParen = values.map((x) => x + 20)
+    inlineMapTyped = values.map((x Int) => x + 30)
     println("inlineMapBare " + inlineMapBare.get(0).getOr(0))
     println("inlineMapParen " + inlineMapParen.get(1).getOr(0))
     println("inlineMapTyped " + inlineMapTyped.get(2).getOr(0))
 
     pairs = List((2, 3), (4, 5))
-    tupleSums = pairs.map { pairValue ->
+    tupleSums = pairs.map { pairValue =>
         let (x Int, y Int) = pairValue
         x + y
     }
     println("tupleMap " + tupleSums.get(0).getOr(0))
 
     users = List(User { name: "Ada", age: 37 })
-    userLabels = users.map { userValue ->
+    userLabels = users.map { userValue =>
         let { name, age } = userValue
         "$name is $age"
     }
     println("userMap " + userLabels.get(0).getOr(""))
 
     bob User = User { name: "Bob", age: 40 }
-    println("tupleMethod " + runner.tupleOne(pairValue -> {
+    println("tupleMethod " + runner.tupleOne(pairValue => {
         let (x, y) = pairValue
         x + y
     }, (3, 4)))
-    println("userMethod " + runner.userOne(userValue -> {
+    println("userMethod " + runner.userOne(userValue => {
         let { name, age } = userValue
         "$name is $age"
     }, bob))
-    println("withIndex " + runner.withIndex((tupleValue, index) -> {
+    println("withIndex " + runner.withIndex((tupleValue, index) => {
         let (x, y) = tupleValue
         "$index: ${x + y}"
     }, (7, 8), 3))
-    println("combine " + runner.combine((name, tupleInput) -> {
+    println("combine " + runner.combine((name, tupleInput) => {
         let (x, y) = tupleInput
         "$name: ${x + y}"
     }, "item", (4, 5)))
-    println("twoDestructured " + runner.twoTuples((left, right) -> {
+    println("twoDestructured " + runner.twoTuples((left, right) => {
         let (a, b) = left
         let (x, y) = right
         a + b + x + y
