@@ -2863,18 +2863,6 @@ impl<'a> Interpreter<'a> {
             return Ok(Value::set(unique_values(values)));
         }
 
-        if path[0] == "Map" && path.len() == 2 && path[1] == "keyed" {
-            if args.len() != 1 {
-                return Err(self.runtime_error(
-                    span,
-                    format!("Map.keyed expects 1 argument, got {}", args.len()),
-                ));
-            }
-            let values = iterable_values(args[0].clone(), span, self)?;
-            let entries = map_entries_from_tuple_values(values, span, self)?;
-            return Ok(Value::Map(Rc::new(RefCell::new(entries))));
-        }
-
         if path[0] == "Int" && path.len() == 2 && path[1] == "parse" {
             if args.len() != 1 {
                 return Err(self.runtime_error(
@@ -6322,7 +6310,7 @@ mod tests {
                 seen.add(3)
                 OS.println(seen.size())
 
-                pairs = Map { "a": 1 }
+                pairs = ["a": 1]
                 pairs.put("b", 2)
                 OS.println(pairs.size())
 

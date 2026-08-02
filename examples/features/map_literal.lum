@@ -1,0 +1,34 @@
+# EXPECT:
+# built-in two 2
+# built-in dynamic 3
+# built-in made 4
+# tuple key 99
+# 0
+
+def makeKey() Str = "made"
+
+def main() Int {
+    dynamicKey = "dynamic"
+
+    builtIn [Str : Int] = [
+        "one": 1,
+        "two": 2,
+        dynamicKey: 3,
+        makeKey(): 4,
+    ]
+
+    let Some(two) = builtIn["two"] else return 1
+    println("built-in two", two)
+    let Some(dynamic) = builtIn[dynamicKey] else return 1
+    println("built-in dynamic", dynamic)
+    let Some(made) = builtIn["made"] else return 1
+    println("built-in made", made)
+
+    tupleKey = ("Ada", 1)
+    tupleMap [(Str, Int) : Int] = [tupleKey: 99]
+
+    let Some(tupleValue) = tupleMap[("Ada", 1)] else return 1
+    println("tuple key", tupleValue)
+
+    0
+}

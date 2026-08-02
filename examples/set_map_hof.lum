@@ -47,7 +47,7 @@ def main() Unit {
 
     seen.forEach(item => println("set " + item))
 
-    values = Map { "a": 1, "b": 2 }
+    values = ["a": 1, "b": 2]
 
     mapped = values.map((key, value) => value * 10)
     println("mapped " + mapped.get(0).getOr(0) + " " + mapped.get(1).getOr(0))

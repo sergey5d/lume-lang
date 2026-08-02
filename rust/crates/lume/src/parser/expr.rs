@@ -469,11 +469,6 @@ impl<'a> Parser<'a> {
                 value: Expr,
                 span: Span,
             },
-            Keyed {
-                key: Expr,
-                value: Expr,
-                span: Span,
-            },
             Positional {
                 span: Span,
             },
@@ -490,19 +485,11 @@ impl<'a> Parser<'a> {
                     value,
                 }
             } else if self.match_token(TokenKind::LBracket) {
-                let start = self.previous_span();
-                let key = self.parse_expr()?;
-                self.consume(
-                    TokenKind::RBracket,
-                    "expected ']' after computed keyed entry",
-                )?;
-                self.consume(TokenKind::Colon, "expected ':' after computed keyed entry")?;
-                let value = self.parse_expr()?;
-                RecordEntry::Keyed {
-                    span: start.cover(value.span()),
-                    key,
-                    value,
-                }
+                self.error_at_current(
+                    "removed_map_brace_syntax",
+                    "computed-key brace syntax has been removed; construct a map with '[key: value]'",
+                );
+                return None;
             } else if self.at(TokenKind::Identifier) {
                 let checkpoint = self.checkpoint();
                 let (name, name_span) = self.expect_identifier("expected shape field name")?;
@@ -543,20 +530,12 @@ impl<'a> Parser<'a> {
             } else {
                 let key_or_value = self.parse_or_expr()?;
                 if self.match_token(TokenKind::Colon) {
-                    if matches!(key_or_value, Expr::Group { .. } | Expr::TupleLiteral { .. }) {
-                        self.diagnostics.push(Diagnostic::error(
-                            "computed_key_requires_brackets",
-                            "computed keyed entries use '[expr]: value', not '(expr): value'",
-                            key_or_value.span(),
-                        ));
-                        return None;
-                    }
-                    let value = self.parse_expr()?;
-                    RecordEntry::Keyed {
-                        span: key_or_value.span().cover(value.span()),
-                        key: key_or_value,
-                        value,
-                    }
+                    self.diagnostics.push(Diagnostic::error(
+                        "removed_map_brace_syntax",
+                        "map brace construction has been removed; construct a map with '[key: value]'",
+                        key_or_value.span(),
+                    ));
+                    return None;
                 } else {
                     RecordEntry::Positional {
                         span: key_or_value.span(),
@@ -587,26 +566,14 @@ impl<'a> Parser<'a> {
             }
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after anonymous shape")?;
-        let has_named = entries.iter().any(|entry| {
+        let mut fields = Vec::new();
+        let values = Vec::new();
+        if entries.iter().any(|entry| {
             matches!(
                 entry,
                 RecordEntry::Field { .. } | RecordEntry::Spread { .. }
             )
-        });
-        let has_keyed = entries
-            .iter()
-            .any(|entry| matches!(entry, RecordEntry::Keyed { .. }));
-        if has_named && has_keyed {
-            self.diagnostics.push(Diagnostic::error(
-                "mixed_brace_entries",
-                "cannot mix construction fields and keyed entries in the same brace payload",
-                start.cover(end),
-            ));
-            return None;
-        }
-        let mut fields = Vec::new();
-        let mut values = Vec::new();
-        if has_named {
+        }) {
             for entry in entries {
                 match entry {
                     RecordEntry::Field {
@@ -630,7 +597,6 @@ impl<'a> Parser<'a> {
                             span,
                         });
                     }
-                    RecordEntry::Keyed { .. } => unreachable!("keyed entries were rejected above"),
                     RecordEntry::Positional { span, .. } => {
                         self.diagnostics.push(Diagnostic::error(
                             "unexpected_token",
@@ -638,28 +604,6 @@ impl<'a> Parser<'a> {
                             span,
                         ));
                         return None;
-                    }
-                }
-            }
-        } else if has_keyed {
-            for entry in entries {
-                match entry {
-                    RecordEntry::Keyed { key, value, span } => {
-                        values.push(Expr::TupleLiteral {
-                            items: vec![key, value],
-                            span,
-                        });
-                    }
-                    RecordEntry::Positional { span, .. } => {
-                        self.diagnostics.push(Diagnostic::error(
-                            "unexpected_token",
-                            "cannot mix keyed entries and positional brace values",
-                            span,
-                        ));
-                        return None;
-                    }
-                    RecordEntry::Field { .. } | RecordEntry::Spread { .. } => {
-                        unreachable!("named entries were rejected above")
                     }
                 }
             }
@@ -677,39 +621,6 @@ impl<'a> Parser<'a> {
             fields,
             values,
             span: start.cover(end),
-        })
-    }
-
-    fn keyed_record_literal_call(&self, callee: Expr, record: Expr, start: Span) -> Option<Expr> {
-        let Expr::RecordLiteral {
-            fields,
-            values,
-            span: record_span,
-        } = record
-        else {
-            return None;
-        };
-        if !fields.is_empty() || values.is_empty() {
-            return None;
-        }
-        let member_span = callee.span().cover(record_span);
-        Some(Expr::Call {
-            callee: Box::new(Expr::Member {
-                receiver: Box::new(callee),
-                name: "keyed".to_string(),
-                span: member_span,
-            }),
-            args: vec![CallArg {
-                name: None,
-                ty: None,
-                value: Expr::ListLiteral {
-                    items: values,
-                    span: record_span,
-                },
-                span: record_span,
-            }],
-            uses_brace_syntax: false,
-            span: start.cover(record_span),
         })
     }
 
@@ -863,7 +774,7 @@ impl<'a> Parser<'a> {
             let op = if self.match_token(TokenKind::Colon) {
                 self.diagnostics.push(Diagnostic::error(
                     "removed_pair_expression",
-                    "':' pair expressions are no longer supported; use '(left, right)' for tuple pairs or keyed construction inside 'Type { key: value }'",
+                    "':' pair expressions are no longer supported; use '(left, right)' for tuple pairs or '[key: value]' for maps",
                     self.previous_span(),
                 ));
                 BinaryOp::Colon
@@ -1237,23 +1148,17 @@ impl<'a> Parser<'a> {
                     }
                 };
                 let arg_span = arg.span();
-                if let Some(keyed_call) =
-                    self.keyed_record_literal_call(expr.clone(), arg.clone(), start)
-                {
-                    expr = keyed_call;
-                } else {
-                    expr = Expr::Call {
-                        callee: Box::new(expr),
-                        args: vec![CallArg {
-                            name: None,
-                            ty: None,
-                            span: arg_span,
-                            value: arg,
-                        }],
-                        uses_brace_syntax: true,
-                        span: start.cover(arg_span),
-                    };
-                }
+                expr = Expr::Call {
+                    callee: Box::new(expr),
+                    args: vec![CallArg {
+                        name: None,
+                        ty: None,
+                        span: arg_span,
+                        value: arg,
+                    }],
+                    uses_brace_syntax: true,
+                    span: start.cover(arg_span),
+                };
                 continue;
             }
             break;
@@ -1819,6 +1724,9 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_list_literal(&mut self) -> Option<Expr> {
         let start = self.consume(TokenKind::LBracket, "expected '['")?;
         self.skip_newlines();
+        if !self.at(TokenKind::RBracket) && self.collection_literal_entry_has_colon() {
+            return self.parse_map_literal_after_open(start);
+        }
         let mut items = Vec::new();
         if !self.at(TokenKind::RBracket) {
             items.push(self.parse_list_literal_item()?);
@@ -1827,6 +1735,13 @@ impl<'a> Parser<'a> {
                 self.skip_newlines();
                 if self.at(TokenKind::RBracket) {
                     break;
+                }
+                if self.collection_literal_entry_has_colon() {
+                    self.error_at_current(
+                        "mixed_collection_literal_entries",
+                        "cannot mix list items and map entries in the same bracket literal",
+                    );
+                    return None;
                 }
                 items.push(self.parse_list_literal_item()?);
                 self.skip_newlines();
@@ -1837,6 +1752,79 @@ impl<'a> Parser<'a> {
             items,
             span: start.cover(end),
         })
+    }
+
+    fn parse_map_literal_after_open(&mut self, start: Span) -> Option<Expr> {
+        let mut entries = Vec::new();
+        loop {
+            if !self.collection_literal_entry_has_colon() {
+                self.error_at_current(
+                    "mixed_collection_literal_entries",
+                    "cannot mix map entries and list items in the same bracket literal",
+                );
+                return None;
+            }
+            let key = self.parse_or_expr()?;
+            self.consume(TokenKind::Colon, "expected ':' after map key")?;
+            self.skip_newlines();
+            let value = self.parse_expr()?;
+            let entry_span = key.span().cover(value.span());
+            entries.push(Expr::TupleLiteral {
+                items: vec![key, value],
+                span: entry_span,
+            });
+            self.skip_newlines();
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+            self.skip_newlines();
+            if self.at(TokenKind::RBracket) {
+                break;
+            }
+        }
+        let end = self.consume(TokenKind::RBracket, "expected ']' after map literal")?;
+        let span = start.cover(end);
+        Some(Expr::Call {
+            callee: Box::new(Expr::Identifier {
+                name: "Map".to_string(),
+                span: start,
+            }),
+            args: entries
+                .into_iter()
+                .map(|value| CallArg {
+                    name: None,
+                    ty: None,
+                    span: value.span(),
+                    value,
+                })
+                .collect(),
+            uses_brace_syntax: false,
+            span,
+        })
+    }
+
+    fn collection_literal_entry_has_colon(&self) -> bool {
+        let mut lookahead = self.index;
+        let mut parens = 0usize;
+        let mut brackets = 0usize;
+        let mut braces = 0usize;
+        while let Some(token) = self.tokens.get(lookahead) {
+            match token.kind {
+                TokenKind::LParen => parens += 1,
+                TokenKind::RParen => parens = parens.saturating_sub(1),
+                TokenKind::LBracket => brackets += 1,
+                TokenKind::RBracket if parens == 0 && brackets == 0 && braces == 0 => return false,
+                TokenKind::RBracket => brackets = brackets.saturating_sub(1),
+                TokenKind::LBrace => braces += 1,
+                TokenKind::RBrace => braces = braces.saturating_sub(1),
+                TokenKind::Colon if parens == 0 && brackets == 0 && braces == 0 => return true,
+                TokenKind::Comma if parens == 0 && brackets == 0 && braces == 0 => return false,
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+            lookahead += 1;
+        }
+        false
     }
 
     fn parse_list_literal_item(&mut self) -> Option<Expr> {

@@ -1165,39 +1165,7 @@ fn parses_shape_literal_forms() {
         other => panic!("expected call, got {other:#?}"),
     }
 
-    match parse_expr_only(r#"Map { "a": 1, [dynamicKey]: 2, [makeKey()]: 3, [(x, y)]: 4 }"#) {
-        Expr::Call {
-            callee,
-            args,
-            uses_brace_syntax,
-            ..
-        } => {
-            assert!(!uses_brace_syntax);
-            assert_eq!(args.len(), 1);
-            match callee.as_ref() {
-                Expr::Member { receiver, name, .. } => {
-                    assert_eq!(name, "keyed");
-                    assert!(
-                        matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "Map")
-                    );
-                }
-                other => panic!("expected keyed member callee, got {other:#?}"),
-            }
-            match &args[0].value {
-                Expr::ListLiteral { items, .. } => {
-                    assert_eq!(items.len(), 4);
-                    assert!(matches!(items[0], Expr::TupleLiteral { .. }));
-                    assert!(matches!(items[1], Expr::TupleLiteral { .. }));
-                    assert!(matches!(items[2], Expr::TupleLiteral { .. }));
-                    assert!(matches!(items[3], Expr::TupleLiteral { .. }));
-                }
-                other => panic!("expected list of tuple entries, got {other:#?}"),
-            }
-        }
-        other => panic!("expected keyed call, got {other:#?}"),
-    }
-
-    let file = SourceFile::new("test.lum", "Map { (dynamicKey): 1 }");
+    let file = SourceFile::new("test.lum", r#"Map { "a": 1 }"#);
     let lexed = lex(&file);
     let mut parser = Parser::new(&lexed.tokens);
     let _ = parser.parse_expr();
@@ -1205,8 +1173,8 @@ fn parses_shape_literal_forms() {
         parser
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "computed_key_requires_brackets"),
-        "expected computed-key bracket diagnostic, got {:#?}",
+            .any(|diagnostic| diagnostic.code == "removed_map_brace_syntax"),
+        "expected removed map-brace diagnostic, got {:#?}",
         parser.diagnostics
     );
 
@@ -1256,6 +1224,47 @@ fn parses_shape_literal_forms() {
         "expected class(...) rejection, got diagnostics: {:#?}",
         result.diagnostics
     );
+}
+
+#[test]
+fn parses_bracket_map_literal_as_map_construction() {
+    match parse_expr_only(r#"["fixed": 1, dynamicKey: 2, makeKey(): 3, (x, y): 4]"#) {
+        Expr::Call {
+            callee,
+            args,
+            uses_brace_syntax,
+            ..
+        } => {
+            assert!(!uses_brace_syntax);
+            assert_eq!(args.len(), 4);
+            assert!(matches!(
+                callee.as_ref(),
+                Expr::Identifier { name, .. } if name == "Map"
+            ));
+            assert!(args.iter().all(
+                |arg| matches!(&arg.value, Expr::TupleLiteral { items, .. } if items.len() == 2)
+            ));
+        }
+        other => panic!("expected Map call, got {other:#?}"),
+    }
+}
+
+#[test]
+fn rejects_mixed_list_and_map_literal_entries() {
+    for source in [r#"[1, "two": 2]"#, r#"["one": 1, 2]"#] {
+        let file = SourceFile::new("test.lum", source);
+        let lexed = lex(&file);
+        let mut parser = Parser::new(&lexed.tokens);
+        let _ = parser.parse_expr();
+        assert!(
+            parser
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "mixed_collection_literal_entries"),
+            "expected mixed collection literal diagnostic for {source}, got {:#?}",
+            parser.diagnostics
+        );
+    }
 }
 
 #[test]
@@ -2987,6 +2996,64 @@ def wrap(input Map[Str, [Int]]) [[[(Str, Int)]]] {
         }
         other => panic!("expected nested list shorthand return type, got {other:#?}"),
     }
+}
+
+#[test]
+fn parses_map_type_ref_shorthand() {
+    let result = parse(
+        r#"
+class Store {
+    counts [Str : Int]
+    nested [Str : [Int : Bool]]
+}
+
+def lookup(values [Str : Int], key Str) Option[Int] = values[key]
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+    let program = result.program.expect("program");
+    let store = match &program.items[0] {
+        Item::Type(ty) => ty,
+        other => panic!("expected type declaration, got {other:#?}"),
+    };
+
+    match &store.members[0] {
+        TypeMember::Field(field) => match field.ty.as_ref().expect("field type") {
+            TypeRef::Named { name, args, .. } => {
+                assert_eq!(name, "Map");
+                assert_eq!(args.len(), 2);
+                assert!(matches!(&args[0], TypeRef::Named { name, .. } if name == "Str"));
+                assert!(matches!(&args[1], TypeRef::Named { name, .. } if name == "Int"));
+            }
+            other => panic!("expected Map[Str, Int], got {other:#?}"),
+        },
+        other => panic!("expected field, got {other:#?}"),
+    }
+
+    match &store.members[1] {
+        TypeMember::Field(field) => match field.ty.as_ref().expect("field type") {
+            TypeRef::Named { name, args, .. } => {
+                assert_eq!(name, "Map");
+                assert!(matches!(&args[0], TypeRef::Named { name, .. } if name == "Str"));
+                assert!(matches!(&args[1], TypeRef::Named { name, args, .. }
+                        if name == "Map"
+                            && matches!(&args[0], TypeRef::Named { name, .. } if name == "Int")
+                            && matches!(&args[1], TypeRef::Named { name, .. } if name == "Bool")));
+            }
+            other => panic!("expected nested map shorthand, got {other:#?}"),
+        },
+        other => panic!("expected field, got {other:#?}"),
+    }
+
+    let function = match &program.items[1] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    assert!(matches!(
+        function.params[0].ty.as_ref(),
+        Some(TypeRef::Named { name, args, .. }) if name == "Map" && args.len() == 2
+    ));
 }
 
 #[test]

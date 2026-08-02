@@ -197,11 +197,20 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         if self.match_token(TokenKind::LBracket) {
             let start = self.previous_span();
-            let inner = self.parse_type_ref()?;
+            let first = self.parse_type_ref()?;
+            if self.match_token(TokenKind::Colon) {
+                let value = self.parse_type_ref()?;
+                let end = self.consume(TokenKind::RBracket, "expected ']' after map type")?;
+                return Some(TypeRef::Named {
+                    name: "Map".to_string(),
+                    args: vec![first, value],
+                    span: start.cover(end),
+                });
+            }
             let end = self.consume(TokenKind::RBracket, "expected ']' after list type")?;
             return Some(TypeRef::Named {
                 name: "List".to_string(),
-                args: vec![inner],
+                args: vec![first],
                 span: start.cover(end),
             });
         }

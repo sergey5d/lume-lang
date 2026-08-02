@@ -39,7 +39,7 @@ def loadOneUser(db Database, id Int) Result[Option[User], DbError] {
 }
 
 def loadNamed(db Database, active Bool) Result[[Str], DbError] {
-    params Map[Str, Any] = Map { "active": active }
+    params [Str : Any] = ["active": active]
 
     db.query("select name from users where active = :active")
         .bind(params)

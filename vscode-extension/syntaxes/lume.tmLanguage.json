@@ -300,7 +300,7 @@
           "match": "=>"
         },
         {
-          "name": "keyword.operator.pair.lume",
+          "name": "punctuation.separator.colon.lume",
           "match": ":"
         },
         {

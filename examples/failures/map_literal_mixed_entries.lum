@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*cannot mix list items and map entries in the same bracket literal.*
+
+def main() Unit {
+    values = [1, "two": 2]
+}

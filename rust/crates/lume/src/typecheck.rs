@@ -3959,7 +3959,7 @@ impl<'a> Checker<'a> {
                     if !values.is_empty() {
                         self.add_error(
 	                            "missing_shape_context",
-	                            "anonymous shape literals require field labels; keyed entries require a construction target like 'Map { key: value }'",
+                            "anonymous shape literals require field labels; map literals use '[key: value]'",
 	                            expr.span(),
 	                        );
                     }
@@ -4820,39 +4820,6 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Ty::Unknown);
                 Some(Ty::Named("Array".to_string(), vec![item_ty]))
             }
-            ("Map", "keyed") => {
-                if args.len() != 1 {
-                    self.add_error(
-                        "invalid_argument_count",
-                        format!("Map.keyed expects 1 argument, got {}", args.len()),
-                        span,
-                    );
-                }
-                let entry_ty = args
-                    .first()
-                    .map(|arg| {
-                        let entries_ty = self.check_expr(&arg.value);
-                        self.iterable_item_type(&entries_ty)
-                    })
-                    .unwrap_or(Ty::Unknown);
-                let (key_ty, value_ty) = match entry_ty {
-                    Ty::Tuple(items) if items.len() == 2 => (items[0].clone(), items[1].clone()),
-                    Ty::Unknown => (Ty::Unknown, Ty::Unknown),
-                    other => {
-                        let arg_span = args.first().map(|arg| arg.span).unwrap_or(span);
-                        self.add_error(
-                            "invalid_argument_type",
-                            format!(
-                                "Map.keyed expects an iterable of tuple pairs, got entries of type '{}'",
-                                other.describe()
-                            ),
-                            arg_span,
-                        );
-                        (Ty::Unknown, Ty::Unknown)
-                    }
-                };
-                Some(Ty::Named("Map".to_string(), vec![key_ty, value_ty]))
-            }
             ("Int", "parse") => {
                 if args.len() != 1 {
                     self.add_error(
@@ -5579,23 +5546,6 @@ impl<'a> Checker<'a> {
             sig.methods.get("new")
         };
 
-        if self.empty_brace_keyed_construction_is_ambiguous(
-            sig,
-            constructor_overloads,
-            args,
-            uses_brace_syntax,
-        ) {
-            self.add_error(
-                "ambiguous_empty_keyed_construction",
-                format!(
-                    "empty brace construction for '{}' is ambiguous between field construction and keyed construction; use '{}()' or '{}.keyed([])'",
-                    sig.name, sig.name, sig.name
-                ),
-                span,
-            );
-            return ret;
-        }
-
         let explicit_constructor_args;
         let args = if structural_record_arg && constructor_overloads.is_some() {
             explicit_constructor_args = brace_record_constructor_args(args).unwrap_or_default();
@@ -5691,59 +5641,6 @@ impl<'a> Checker<'a> {
             span,
         );
         ret
-    }
-
-    fn empty_brace_keyed_construction_is_ambiguous(
-        &self,
-        sig: &TypeSig,
-        constructor_overloads: Option<&Vec<FunctionSig>>,
-        args: &[crate::ast::CallArg],
-        uses_brace_syntax: bool,
-    ) -> bool {
-        uses_brace_syntax
-            && empty_brace_record_constructor_arg(args)
-            && self.has_keyed_constructor_for_type(&sig.name)
-            && self.ordinary_empty_construction_available(sig, constructor_overloads)
-    }
-
-    fn has_keyed_constructor_for_type(&self, name: &str) -> bool {
-        if name == "Map" {
-            return true;
-        }
-        self.lookup_any_single(name)
-            .and_then(|single| self.method_sigs_for_type(&single, "keyed"))
-            .is_some()
-    }
-
-    fn ordinary_empty_construction_available(
-        &self,
-        sig: &TypeSig,
-        constructor_overloads: Option<&Vec<FunctionSig>>,
-    ) -> bool {
-        if let Some(overloads) = constructor_overloads {
-            let can_access_hidden = self.can_access_hidden_constructor(sig);
-            let visible = overloads
-                .iter()
-                .filter(|ctor| ctor.visibility != Visibility::Hidden || can_access_hidden)
-                .cloned()
-                .collect::<Vec<_>>();
-            return self.choose_overload(&visible, &[]).is_some();
-        }
-
-        if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
-            return false;
-        }
-        if sig
-            .fields
-            .iter()
-            .any(|field| field.hidden && !field.has_initializer)
-        {
-            return false;
-        }
-        sig.fields
-            .iter()
-            .filter(|field| !field.hidden)
-            .all(|field| field.has_initializer)
     }
 
     fn check_constructor_signature(
@@ -6422,7 +6319,7 @@ impl<'a> Checker<'a> {
             BinaryOp::Colon => {
                 self.add_error(
                     "removed_pair_expression",
-                    "':' pair expressions are no longer supported; use '(left, right)' for tuple pairs or keyed construction inside 'Type { key: value }'",
+                    "':' pair expressions are no longer supported; use '(left, right)' for tuple pairs or '[key: value]' for maps",
                     span,
                 );
                 Ty::Unknown
@@ -9535,17 +9432,6 @@ fn brace_record_constructor_args(args: &[crate::ast::CallArg]) -> Option<Vec<cra
     }
 
     None
-}
-
-fn empty_brace_record_constructor_arg(args: &[crate::ast::CallArg]) -> bool {
-    matches!(
-        args,
-        [crate::ast::CallArg {
-            name: None,
-            value: Expr::RecordLiteral { fields, values, .. },
-            ..
-        }] if fields.is_empty() && values.is_empty()
-    )
 }
 
 fn trailing_brace_call_has_lambda_arg(args: &[crate::ast::CallArg]) -> bool {

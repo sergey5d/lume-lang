@@ -3,6 +3,7 @@
 # named 5 6 11
 # positional 8 9 17
 # fromClass 10 11 21
+# narrowed 5
 # moved 7 9 16
 
 class Pixel {
@@ -15,6 +16,10 @@ shape Point {
     y Int
 }
 
+shape HorizontalPoint {
+    x Int
+}
+
 impl Point {
     def sum() Int = this.x + this.y
 
@@ -23,6 +28,8 @@ impl Point {
         y: this.y + dy
     }
 }
+
+def horizontal(point HorizontalPoint) Int = point.x
 
 def main() Unit {
     origin = Point(3, 4)
@@ -36,5 +43,6 @@ def main() Unit {
     println("named", named.x, named.y, named.sum())
     println("positional", positional.x, positional.y, positional.sum())
     println("fromClass", fromClass.x, fromClass.y, fromClass.sum())
+    println("narrowed", horizontal(named))
     println("moved", moved.x, moved.y, moved.sum())
 }
