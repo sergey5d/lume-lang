@@ -1724,6 +1724,20 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_list_literal(&mut self) -> Option<Expr> {
         let start = self.consume(TokenKind::LBracket, "expected '['")?;
         self.skip_newlines();
+        if self.match_token(TokenKind::Colon) {
+            self.skip_newlines();
+            if !self.at(TokenKind::RBracket) {
+                self.error_at_current(
+                    "invalid_empty_map_literal",
+                    "empty map literal must be exactly '[:]'",
+                );
+                return None;
+            }
+            let end = self.consume(TokenKind::RBracket, "expected ']' after empty map literal")?;
+            return Some(Expr::EmptyMapLiteral {
+                span: start.cover(end),
+            });
+        }
         if !self.at(TokenKind::RBracket) && self.collection_literal_entry_has_colon() {
             return self.parse_map_literal_after_open(start);
         }
@@ -1767,6 +1781,13 @@ impl<'a> Parser<'a> {
             let key = self.parse_or_expr()?;
             self.consume(TokenKind::Colon, "expected ':' after map key")?;
             self.skip_newlines();
+            if self.at(TokenKind::RBracket) {
+                self.error_at_current(
+                    "missing_map_literal_value",
+                    "map entry requires a value after ':'",
+                );
+                return None;
+            }
             let value = self.parse_expr()?;
             let entry_span = key.span().cover(value.span());
             entries.push(Expr::TupleLiteral {

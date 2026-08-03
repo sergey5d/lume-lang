@@ -165,6 +165,15 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             items: items.iter().map(desugar_expr).collect(),
             span: *span,
         },
+        ast::Expr::EmptyMapLiteral { span } => core::Expr::Call {
+            callee: Box::new(core::Expr::Identifier {
+                name: "Map".to_string(),
+                span: *span,
+            }),
+            args: Vec::new(),
+            style: core::CallStyle::Paren,
+            span: *span,
+        },
         ast::Expr::TupleLiteral { items, span } => core::Expr::TupleLiteral {
             items: items.iter().map(desugar_expr).collect(),
             span: *span,

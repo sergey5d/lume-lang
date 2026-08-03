@@ -11,7 +11,7 @@ def plusOne(entries [Str: Int], key Str) Option[Int] {
 }
 
 def main() Unit {
-    var entries [Str : Int] = ["a": 1, "b": 2]
+    var entries [Str: Int] = ["a": 1, "b": 2]
     present = entries["a"]
     missing = entries["z"]
     plusOneValue = plusOne(entries, "a")

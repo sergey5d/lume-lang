@@ -1250,6 +1250,39 @@ fn parses_bracket_map_literal_as_map_construction() {
 }
 
 #[test]
+fn parses_empty_map_literal() {
+    for source in ["[:]", "[ : ]"] {
+        assert!(
+            matches!(parse_expr_only(source), Expr::EmptyMapLiteral { .. }),
+            "expected empty map literal for {source}"
+        );
+    }
+}
+
+#[test]
+fn rejects_malformed_empty_map_and_missing_map_value() {
+    let cases = [
+        ("[: 5]", "invalid_empty_map_literal"),
+        (r#"["a":]"#, "missing_map_literal_value"),
+    ];
+
+    for (source, expected_code) in cases {
+        let file = SourceFile::new("test.lum", source);
+        let lexed = lex(&file);
+        let mut parser = Parser::new(&lexed.tokens);
+        let _ = parser.parse_expr();
+        assert!(
+            parser
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == expected_code),
+            "expected {expected_code} diagnostic for {source}, got {:#?}",
+            parser.diagnostics
+        );
+    }
+}
+
+#[test]
 fn rejects_mixed_list_and_map_literal_entries() {
     for source in [r#"[1, "two": 2]"#, r#"["one": 1, 2]"#] {
         let file = SourceFile::new("test.lum", source);

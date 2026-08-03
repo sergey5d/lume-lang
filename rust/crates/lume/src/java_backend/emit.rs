@@ -1610,6 +1610,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     Some(format!("lume.core.LumeList.of({})", items.join(", ")))
                 }
             }
+            ast::Expr::EmptyMapLiteral { .. } => Some("lume.core.LumeMap.empty()".to_string()),
             ast::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
             ast::Expr::Group { inner, .. } => self.emit_expr(inner, bindings),
             ast::Expr::Call { callee, args, .. } => self.emit_call(callee, args, bindings),

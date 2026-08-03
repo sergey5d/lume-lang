@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*empty map literal must be exactly.*
+
+def main() Unit {
+    values [Str : Int] = [: 5]
+}

@@ -579,7 +579,8 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
         | ast::Expr::Float { .. }
         | ast::Expr::String { .. }
         | ast::Expr::Bool { .. }
-        | ast::Expr::Unit { .. } => {}
+        | ast::Expr::Unit { .. }
+        | ast::Expr::EmptyMapLiteral { .. } => {}
         ast::Expr::Spread { value, .. } => rewrite_expr_for_runtime(value, module, graph),
         ast::Expr::ListLiteral { items, .. }
         | ast::Expr::TupleLiteral { items, .. }

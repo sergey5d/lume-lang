@@ -1679,6 +1679,7 @@ Map construction:
 
 ```txt
 entries [Str : Int] = ["a": 1, "b": 2]
+empty [Str : Int] = [:]
 value Option[Int] = entries["a"]
 ```
 
@@ -1694,8 +1695,28 @@ scores [Str : Int] = [dynamic: 10, makeKey(): 20]
 positions [(Int, Int) : Str] = [(10, 20): "start"]
 ```
 
-Map entries are comma-separated and cannot be mixed with list items. `[]`
-always means an empty list; use `Map()` for an empty map.
+Map entries are comma-separated and cannot be mixed with list items. Collection
+literals are distinguished by their contents:
+
+```txt
+[]                    # empty list
+[:]                   # empty map
+[value, ...]          # list
+[key: value, ...]     # map
+```
+
+An empty map has no key or value expressions from which to infer its type, so
+it requires an expected map type:
+
+```txt
+counts [Str : Int] = [:]  # valid
+counts = [:]              # invalid: key and value types are unknown
+```
+
+The compiler does not infer `[Any : Any]`. Whitespace inside the empty form is
+insignificant, so `[ : ]` is equivalent to `[:]`. A colon without a key is
+valid only in this exact empty-map form; `[: value]` and `["key":]` are
+invalid.
 
 Map construction belongs only to bracket literals. The former brace forms,
 including `Map { "key": value }` and `Map { [key]: value }`, are not

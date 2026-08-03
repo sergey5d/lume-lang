@@ -3,6 +3,7 @@
 # built-in dynamic 3
 # built-in made 4
 # tuple key 99
+# empty 0
 # 0
 
 def makeKey() Str = "made"
@@ -29,6 +30,9 @@ def main() Int {
 
     let Some(tupleValue) = tupleMap[("Ada", 1)] else return 1
     println("tuple key", tupleValue)
+
+    empty [Str : Int] = [:]
+    println("empty", empty.size())
 
     0
 }

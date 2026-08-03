@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*cannot infer key and value types of empty map; add a type annotation.*
+
+def main() Unit {
+    values = [:]
+}

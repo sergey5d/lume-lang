@@ -2725,7 +2725,8 @@ module demo/mapliteral
 
 def main() Unit {
     entries [Str : Int] = ["one": 1, "two": 2]
-    println(entries.size())
+    empty [Str : Int] = [:]
+    println(entries.size(), empty.size())
 }
 "#,
         )
@@ -2738,6 +2739,7 @@ def main() Unit {
             .expect("read module");
         assert!(module.contains("lume.core.LumeMap.fromEntries("));
         assert!(module.contains("new lume.core.Tuple2<>("));
+        assert!(module.contains("lume.core.LumeMap.empty()"));
 
         let _ = fs::remove_dir_all(temp);
     }

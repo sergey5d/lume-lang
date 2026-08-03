@@ -1873,7 +1873,8 @@ impl<'a> Checker<'a> {
             | Expr::Float { .. }
             | Expr::String { .. }
             | Expr::Bool { .. }
-            | Expr::Unit { .. } => {}
+            | Expr::Unit { .. }
+            | Expr::EmptyMapLiteral { .. } => {}
             Expr::Spread { value, .. } => {
                 self.check_field_initializer_expr(value, owner, initialized_fields);
             }
@@ -3775,6 +3776,30 @@ impl<'a> Checker<'a> {
                 }
                 Ty::list(item_ty)
             }
+            Expr::EmptyMapLiteral { span } => match expected {
+                Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
+                    Ty::Named(name.clone(), args.iter().map(materialize_type).collect())
+                }
+                Ty::Unknown => {
+                    self.add_error(
+                        "cannot_infer_empty_map_type",
+                        "cannot infer key and value types of empty map; add a type annotation",
+                        *span,
+                    );
+                    Ty::Unknown
+                }
+                other => {
+                    self.add_error(
+                        "invalid_empty_map_context",
+                        format!(
+                            "empty map literal '[:]' requires a map type, got '{}'",
+                            other.describe()
+                        ),
+                        *span,
+                    );
+                    Ty::Unknown
+                }
+            },
             Expr::Spread { span, .. } => {
                 self.add_error(
                     "invalid_spread",
@@ -8583,6 +8608,7 @@ fn loop_control_targeting_current_loop_in_expr(expr: &Expr) -> Option<LoopContro
         | Expr::String { .. }
         | Expr::Bool { .. }
         | Expr::Unit { .. }
+        | Expr::EmptyMapLiteral { .. }
         | Expr::TypeOf { .. } => None,
     }
 }
@@ -8727,6 +8753,7 @@ fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Sp
         | Expr::String { .. }
         | Expr::Bool { .. }
         | Expr::Unit { .. }
+        | Expr::EmptyMapLiteral { .. }
         | Expr::TypeOf { .. } => None,
     }
 }
@@ -12902,6 +12929,45 @@ def main() Unit {
                     && diag
                         .message
                         .contains("cannot assign value of type 'Type[User]'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn checks_empty_map_literal_from_expected_type() {
+        let program = parse_inline(
+            r#"
+def count(values [Str : Int]) Int = values.size()
+def empty() [Str : Int] = [:]
+
+def main() Int {
+    direct [Str : Int] = [:]
+    return direct.size() + count([:]) + empty().size()
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_empty_map_literal_without_expected_type() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    values = [:]
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "cannot_infer_empty_map_type"
+                    && diag
+                        .message
+                        .contains("cannot infer key and value types of empty map")
             }),
             "{:#?}",
             result.diagnostics
