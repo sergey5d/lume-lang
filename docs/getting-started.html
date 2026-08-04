@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Getting Started with Lume - Install and run the compiler</title>
+    <meta name="description" content="Install the Lume programming language compiler, run a Lume program, type-check source files, execute examples, and install the VS Code extension.">
+    <meta name="author" content="Sergey Denisov">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://sergey5d.github.io/lume-lang/getting-started.html">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css?v=20260803-2">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Getting Started with the Lume Programming Language">
+    <meta property="og:description" content="Build the compiler, run a program, check source, and install editor support.">
+    <meta property="og:url" content="https://sergey5d.github.io/lume-lang/getting-started.html">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": "Getting Started with the Lume Programming Language",
+        "description": "How to build the Lume compiler, run a program, and use the development tools.",
+        "author": {"@type": "Person", "name": "Sergey Denisov"},
+        "mainEntityOfPage": "https://sergey5d.github.io/lume-lang/getting-started.html"
+      }
+    </script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="shell">
+        <a class="wordmark" href="index.html" aria-label="Lume documentation home">lume</a>
+        <nav class="site-nav" aria-label="Documentation">
+          <a href="index.html">Overview</a>
+          <a href="getting-started.html" aria-current="page">Get started</a>
+          <a href="language-tour.html">Language tour</a>
+          <a href="https://github.com/sergey5d/lume-lang">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shell doc-layout">
+      <nav class="doc-nav" aria-label="On this page">
+        <strong>On this page</strong>
+        <a href="#prerequisites">Prerequisites</a>
+        <a href="#build">Build Lume</a>
+        <a href="#first-program">First program</a>
+        <a href="#commands">CLI commands</a>
+        <a href="#tests">Run examples</a>
+        <a href="#editor">VS Code</a>
+      </nav>
+
+      <article class="doc">
+        <div class="eyebrow">Guide 01</div>
+        <h1>Getting started</h1>
+        <p class="lede">Build the current Lume compiler from source, type-check a file, and run a small program. Lume is experimental, so the repository is currently the distribution.</p>
+
+        <h2 id="prerequisites">Prerequisites</h2>
+        <p>You need Git and a current Rust toolchain with Cargo. Java is only required when you use the Java source backend or build one of the Gradle integration examples.</p>
+
+        <h2 id="build">Build Lume</h2>
+        <p>Clone the public repository and build the <code>lume</code> package from its Rust workspace:</p>
+        <pre><code>git clone https://github.com/sergey5d/lume-lang.git
+cd lume-lang
+cargo build --manifest-path rust/Cargo.toml -p lume</code></pre>
+        <p>During development, the examples use <code>cargo run</code> so the local compiler is rebuilt when necessary.</p>
+
+        <h2 id="first-program">Run your first program</h2>
+        <p>Create <code>hello.lum</code>:</p>
+        <pre><code>main() Unit = {
+    language = "Lume"
+    println("Hello, $language")
+}</code></pre>
+        <p>Type-check it first, then run it:</p>
+        <pre><code>cargo run --manifest-path rust/Cargo.toml -p lume -- check hello.lum
+cargo run --manifest-path rust/Cargo.toml -p lume -- run hello.lum</code></pre>
+
+        <h2 id="commands">Understand the CLI</h2>
+        <table>
+          <thead>
+            <tr><th>Command</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>tokens file.lum</code></td><td>Print lexer tokens and source spans.</td></tr>
+            <tr><td><code>parse file.lum</code></td><td>Parse a file and print its syntax tree.</td></tr>
+            <tr><td><code>check file.lum</code></td><td>Resolve modules and type-check the program.</td></tr>
+            <tr><td><code>run file.lum</code></td><td>Check, lower, and execute a Lume entry point.</td></tr>
+            <tr><td><code>gen file.lum --out dir</code></td><td>Validate Lume and generate Java source.</td></tr>
+          </tbody>
+        </table>
+        <div class="callout"><p>The compiler reports source snippets and spans for parser, resolution, and type errors. Run <code>check</code> before generation when developing a module.</p></div>
+
+        <h2 id="tests">Explore checked examples</h2>
+        <p>The <code>examples/</code> directory is both a tour of the language and a regression suite. Successful examples contain expected output; failure examples lock targeted diagnostics.</p>
+        <pre><code>./run_samples.sh
+cargo test --manifest-path rust/Cargo.toml -p lume</code></pre>
+        <p>Good starting points include <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/classes.lum">classes</a>, <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/shape.lum">shapes</a>, <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/enums.lum">enums</a>, and <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/unwrapping.lum">failure handling</a>.</p>
+
+        <h2 id="editor">Install VS Code support</h2>
+        <p>The repository includes syntax highlighting and language configuration for VS Code. Run the installer from the extension directory:</p>
+        <pre><code>cd vscode-extension
+./install.sh</code></pre>
+        <p>Restart VS Code after installation, then open a <code>.lum</code> file. See the <a href="https://github.com/sergey5d/lume-lang/tree/main/vscode-extension">extension README</a> for manual installation details.</p>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell">
+        <span>Next: understand the core type and control-flow model.</span>
+        <a href="language-tour.html">Language tour</a>
+      </div>
+    </footer>
+  </body>
+</html>

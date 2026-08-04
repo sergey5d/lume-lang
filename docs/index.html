@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lume Programming Language - Readable typed programs for the JVM</title>
+    <meta name="description" content="Lume is an experimental statically typed programming language with classes, structural shapes, pattern matching, Option, Result, Either, and Java interoperability.">
+    <meta name="author" content="Sergey Denisov">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://sergey5d.github.io/lume-lang/">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css?v=20260803-2">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Lume Programming Language">
+    <meta property="og:description" content="An experimental statically typed language designed for direct, readable backend programs and Java interoperability.">
+    <meta property="og:url" content="https://sergey5d.github.io/lume-lang/">
+    <meta property="og:site_name" content="Lume Programming Language">
+    <meta name="twitter:card" content="summary">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareSourceCode",
+        "name": "Lume Programming Language",
+        "alternateName": "Lume",
+        "description": "An experimental statically typed programming language implemented in Rust with a Java source backend.",
+        "codeRepository": "https://github.com/sergey5d/lume-lang",
+        "url": "https://sergey5d.github.io/lume-lang/",
+        "programmingLanguage": ["Rust", "Lume", "Java"],
+        "runtimePlatform": "Java Virtual Machine",
+        "author": {
+          "@type": "Person",
+          "name": "Sergey Denisov",
+          "url": "https://sergeyd.dev/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="shell">
+        <a class="wordmark" href="index.html" aria-label="Lume documentation home">lume</a>
+        <nav class="site-nav" aria-label="Documentation">
+          <a href="index.html" aria-current="page">Overview</a>
+          <a href="getting-started.html">Get started</a>
+          <a href="language-tour.html">Language tour</a>
+          <a href="https://github.com/sergey5d/lume-lang">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="shell hero">
+        <div>
+          <div class="eyebrow">Experimental programming language</div>
+          <h1>Lume programming language</h1>
+          <p class="lede">Readable types. Explicit flow. Java reach. Lume is designed for direct application code with nominal classes, structural shapes, exhaustive pattern matching, and practical Java interoperability.</p>
+          <div class="actions">
+            <a class="button primary" href="getting-started.html">Run your first program</a>
+            <a class="button" href="language-tour.html">Explore the language</a>
+          </div>
+        </div>
+        <div class="hero-code" aria-label="Lume source example">
+          <pre><code>shape UserView {
+    name Str
+    active Bool
+}
+
+loadUser(id Int) Result[UserView, DbError] = {
+    row = try Db.queryRow(
+        "select name, active from users where id = ?",
+        id
+    )
+
+    Ok({
+        name: row.str("name")
+        active: row.bool("active")
+    })
+}</code></pre>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="shell">
+          <div class="eyebrow">Language model</div>
+          <h2>Different tools for different kinds of data</h2>
+          <p class="section-intro">Lume does not force every concept into one object model. The language separates identity, structural data, alternatives, behavior, and singleton values.</p>
+          <div class="grid">
+            <article class="card">
+              <h3>Classes and shapes</h3>
+              <p>Classes are nominal runtime entities. Shapes are structural, read-only field views. Classes can expose public fields as shapes without becoming structurally interchangeable classes.</p>
+            </article>
+            <article class="card">
+              <h3>Explicit failure</h3>
+              <p><code>Option</code>, <code>Result</code>, and <code>Either</code> make absence and failure visible. <code>try</code>, pattern bindings, and lifted access keep propagation concise.</p>
+            </article>
+            <article class="card">
+              <h3>Java ecosystem</h3>
+              <p>The compiler validates Lume source before generating Java. External Java classes can be described as Lume-compatible types while backend-specific details stay outside the language model.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="shell">
+          <div class="eyebrow">Current status</div>
+          <h2>A working language under active design</h2>
+          <div class="status-line">
+            <div class="status">Compiler</div>
+            <p>Implemented in Rust with lexing, parsing, name resolution, type checking, desugaring, lowering, diagnostics, and checked execution.</p>
+          </div>
+          <div class="status-line">
+            <div class="status">Backends</div>
+            <p>The repository contains an interpreter path and Java source generation used by Gradle examples and Lume libraries.</p>
+          </div>
+          <div class="status-line">
+            <div class="status">Libraries</div>
+            <p>A small standard library plus Lume-authored core, JSON, database, and HTTP modules exercise the language against real application code.</p>
+          </div>
+          <div class="status-line">
+            <div class="status">Stability</div>
+            <p>Lume is experimental. Syntax and runtime behavior are still evolving, so it is a language to explore and contribute to rather than a production compatibility promise.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="shell">
+          <div class="eyebrow">Next step</div>
+          <h2>Read it, run it, inspect it</h2>
+          <p class="section-intro">Start with the installation and CLI guide, then use the language tour for the core mental model. The complete evolving reference remains in the repository.</p>
+          <div class="actions">
+            <a class="button primary" href="getting-started.html">Getting started</a>
+            <a class="button" href="https://github.com/sergey5d/lume-lang/blob/main/syntax.md">Full syntax reference</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell">
+        <span>Lume is designed and developed by Sergey Denisov.</span>
+        <a href="https://github.com/sergey5d/lume-lang">Source on GitHub</a>
+      </div>
+    </footer>
+  </body>
+</html>

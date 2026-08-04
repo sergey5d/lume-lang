@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lume Language Tour - Classes, shapes, patterns, and typed failure</title>
+    <meta name="description" content="Tour the Lume programming language: immutable bindings, classes, structural shapes, enums, interfaces, pattern matching, Option, Result, Either, collections, and Java generation.">
+    <meta name="author" content="Sergey Denisov">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://sergey5d.github.io/lume-lang/language-tour.html">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css?v=20260803-2">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Lume Programming Language Tour">
+    <meta property="og:description" content="Classes, structural shapes, exhaustive matching, typed failure, collections, and Java interoperability in Lume.">
+    <meta property="og:url" content="https://sergey5d.github.io/lume-lang/language-tour.html">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": "Lume Programming Language Tour",
+        "description": "A tour of the Lume type system, data model, control flow, and Java backend.",
+        "author": {"@type": "Person", "name": "Sergey Denisov"},
+        "mainEntityOfPage": "https://sergey5d.github.io/lume-lang/language-tour.html"
+      }
+    </script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="shell">
+        <a class="wordmark" href="index.html" aria-label="Lume documentation home">lume</a>
+        <nav class="site-nav" aria-label="Documentation">
+          <a href="index.html">Overview</a>
+          <a href="getting-started.html">Get started</a>
+          <a href="language-tour.html" aria-current="page">Language tour</a>
+          <a href="https://github.com/sergey5d/lume-lang">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shell doc-layout">
+      <nav class="doc-nav" aria-label="On this page">
+        <strong>On this page</strong>
+        <a href="#bindings">Bindings</a>
+        <a href="#data-model">Data model</a>
+        <a href="#construction">Construction</a>
+        <a href="#patterns">Patterns</a>
+        <a href="#failure">Typed failure</a>
+        <a href="#collections">Collections</a>
+        <a href="#java">Java backend</a>
+      </nav>
+
+      <article class="doc">
+        <div class="eyebrow">Guide 02</div>
+        <h1>Language tour</h1>
+        <p class="lede">Lume favors explicit data and control flow without requiring ceremony around ordinary application code. This tour explains the stable mental model; the full syntax reference remains authoritative.</p>
+
+        <h2 id="bindings">Bindings and mutation</h2>
+        <p>A bare assignment introduces an immutable binding. Add a type when it improves the contract or supplies context for inference. Mutable bindings use <code>var</code>, while reassignment uses <code>:=</code>.</p>
+        <pre><code>name = "Ada"
+count Int = 1
+var retries = 3
+retries := retries - 1</code></pre>
+        <p>Local bindings cannot silently shadow parameters, fields, or another live local. Field access can be qualified with <code>this</code> when a parameter has the same name.</p>
+
+        <h2 id="data-model">Classes, shapes, enums, and singles</h2>
+        <p>A <code>class</code> is nominal: construction and class-to-class assignment depend on its declared identity. A <code>shape</code> is structural data with public immutable fields. An <code>enum</code> describes tagged alternatives, and a <code>single</code> declares one singleton type and value.</p>
+        <pre><code>shape Location {
+    city Str
+    country Str
+}
+
+class User {
+    name Str
+    location Location
+}
+
+enum Access {
+    Admin
+    Member { organization Str }
+}
+
+single Defaults {
+    country Str = "US"
+}</code></pre>
+        <p>Interfaces describe behavior. Classes, shapes, enums, annotations, and singles can explicitly implement interfaces; enum cases cannot.</p>
+
+        <h2 id="construction">Construction</h2>
+        <p>Class constructors are declared with <code>new(...)</code>. Braces supply construction fields by name, while parentheses supply explicitly positional constructor inputs in declaration order.</p>
+        <pre><code>impl User {
+    new(name Str, location Location) = {
+        this.name = name
+        this.location = location
+    }
+}
+
+ada = User {
+    name: "Ada"
+    location: Location("London", "UK")
+}</code></pre>
+        <p>Anonymous shapes use the same named field form without a type name:</p>
+        <pre><code>summary = {
+    name: ada.name
+    active: true
+}</code></pre>
+
+        <h2 id="patterns">Pattern matching and destructuring</h2>
+        <p><code>let</code> supports irrefutable destructuring directly. Refutable bindings require an <code>else</code> path. <code>if let</code> branches on a pattern, and <code>match</code> handles alternatives exhaustively.</p>
+        <pre><code>let { name, location } = ada
+
+let Some(first) = users.get(0) else return
+
+label = match access {
+    case Admin => "administrator"
+    case Member { organization } => organization
+}</code></pre>
+        <p>Tuple, list, shape, class, and enum patterns are name-aware where the source data is named. List patterns may capture a remainder with spread syntax.</p>
+
+        <h2 id="failure">Option, Result, Either, and try</h2>
+        <p>Lume represents optional values and recoverable failure explicitly. <code>try</code> unwraps the success side and propagates the container's failure. Use <code>mapError</code> or <code>mapLeft</code> before <code>try</code> when the enclosing function uses a different error type.</p>
+        <pre><code>load(id Int) Result[User, AppError] = {
+    row = try Db.queryRow("select ...", id)
+        .mapError(error => AppError.Db(error))
+
+    Ok(decodeUser(row))
+}</code></pre>
+        <p>The lifted access operator <code>.-></code> accesses one member inside <code>Option</code>, <code>Result</code>, or <code>Either</code>. Each hop maps a plain result or flat-maps the same container family.</p>
+
+        <h2 id="collections">Lists and maps</h2>
+        <p>Collection types and literals use parallel bracket syntax. Empty collections stay self-describing.</p>
+        <pre><code>names [Str] = ["Ada", "Grace"]
+scores [Str : Int] = ["Ada": 10, "Grace": 12]
+
+emptyNames [Str] = []
+emptyScores [Str : Int] = [:]</code></pre>
+        <p>Higher-order methods accept explicit lambdas or compatible function and bound-method references. A lambda uses <code>=&gt;</code> and may use a block body.</p>
+        <pre><code>lengths = names.map(name => name.size())
+labels = names.map(name => {
+    upper = name.upper()
+    "$upper!"
+})</code></pre>
+
+        <h2 id="java">Java source generation and interoperability</h2>
+        <p>The frontend completes parsing, resolution, and type checking before Java source is generated. Java-specific class loading and descriptors live at the backend boundary, allowing the core compiler model to remain Lume-oriented.</p>
+        <pre><code>cargo run --manifest-path rust/Cargo.toml -p lume -- \
+    gen app/main.lum --out build/generated/lume</code></pre>
+        <p>Lume libraries can wrap Java dependencies behind Lume interfaces. The repository includes database, JSON, HTTP, Gradle, and Java compatibility examples.</p>
+
+        <div class="callout"><p>This page is an introduction, not a complete grammar. Continue with the <a href="https://github.com/sergey5d/lume-lang/blob/main/syntax.md">current syntax reference</a> for visibility, constructors, annotations, generics, comprehensions, operators, and exact diagnostics.</p></div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell">
+        <span>Ready to run an example?</span>
+        <a href="getting-started.html">Getting started</a>
+      </div>
+    </footer>
+  </body>
+</html>
