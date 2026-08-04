@@ -4,6 +4,7 @@
 # plusOne 2
 # plusOneMissing true
 # inferred 3
+# pure -1
 
 def plusOne(entries [Str: Int], key Str) Option[Int] {
     value = try entries[key]
@@ -11,17 +12,19 @@ def plusOne(entries [Str: Int], key Str) Option[Int] {
 }
 
 def main() Unit {
-    var entries [Str: Int] = ["a": 1, "b": 2]
+    entries [Str: Int] = ["a": 1, "b": 2]
     present = entries["a"]
     missing = entries["z"]
     plusOneValue = plusOne(entries, "a")
     plusOneMissing = plusOne(entries, "z")
     inferred = ["c": 3]
     inferredValue = inferred["c"]
+    pureValue = inferred["d"] ?? -1
 
     println("present ${present.getOr(0)}")
     println("missing ${missing.isEmpty()}")
     println("plusOne ${plusOneValue.getOr(0)}")
     println("plusOneMissing ${plusOneMissing.isEmpty()}")
     println("inferred ${inferredValue.getOr(0)}")
+    println("pure $pureValue")
 }
