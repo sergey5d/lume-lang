@@ -1,0 +1,45 @@
+# EXPECT:
+# yield default 14
+# yield return missing
+# yield continue 8
+# yield break 2
+
+def sum(values [Int]) Int {
+    var total Int = 0
+    for value <- values {
+        total += value
+    }
+    total
+}
+
+def defaultValues(values [Option[Int]]) [Int] =
+    for maybe <- values yield maybe ?? 10
+
+def returnOnMissing(values [Option[Int]]) Str {
+    doubled = for maybe <- values yield {
+        value = maybe ?? return "missing"
+        value * 2
+    }
+    "complete " + doubled.size()
+}
+
+def continueOnMissing(values [Option[Int]]) [Int] =
+    for maybe <- values yield {
+        value = maybe ?? continue
+        value * 2
+    }
+
+def breakOnMissing(values [Option[Int]]) [Int] =
+    for maybe <- values yield {
+        value = maybe ?? break
+        value * 2
+    }
+
+def main() Unit {
+    values [Option[Int]] = [Some(1), None, Some(3)]
+
+    println("yield default " + sum(defaultValues(values)))
+    println("yield return " + returnOnMissing(values))
+    println("yield continue " + sum(continueOnMissing(values)))
+    println("yield break " + sum(breakOnMissing(values)))
+}

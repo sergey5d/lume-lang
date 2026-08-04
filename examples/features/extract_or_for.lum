@@ -1,0 +1,48 @@
+# EXPECT:
+# for default 14
+# for return missing
+# for continue 4
+# for break 1
+
+def defaultValues(values [Option[Int]]) Int {
+    var total Int = 0
+    for maybe <- values {
+        value = maybe ?? 10
+        total += value
+    }
+    total
+}
+
+def returnOnMissing(values [Option[Int]]) Str {
+    for maybe <- values {
+        value = maybe ?? return "missing"
+    }
+    "complete"
+}
+
+def continueOnMissing(values [Option[Int]]) Int {
+    var total Int = 0
+    for maybe <- values {
+        value = maybe ?? continue
+        total += value
+    }
+    total
+}
+
+def breakOnMissing(values [Option[Int]]) Int {
+    var total Int = 0
+    for maybe <- values {
+        value = maybe ?? break
+        total += value
+    }
+    total
+}
+
+def main() Unit {
+    values [Option[Int]] = [Some(1), None, Some(3)]
+
+    println("for default " + defaultValues(values))
+    println("for return " + returnOnMissing(values))
+    println("for continue " + continueOnMissing(values))
+    println("for break " + breakOnMissing(values))
+}

@@ -1,0 +1,26 @@
+# EXPECT:
+# method default value 5
+# method default fallback 10
+# method return value 5
+# method return missing
+
+class Extractor {}
+
+impl Extractor {
+    def withDefault(value Option[Int], defaultValue Int) Int =
+        value ?? defaultValue
+
+    def withReturn(value Option[Int]) Str {
+        item = value ?? return "missing"
+        "value " + item
+    }
+}
+
+def main() Unit {
+    extractor = Extractor {}
+
+    println("method default value " + extractor.withDefault(Some(5), 10))
+    println("method default fallback " + extractor.withDefault(None, 10))
+    println("method return " + extractor.withReturn(Some(5)))
+    println("method return " + extractor.withReturn(None))
+}
