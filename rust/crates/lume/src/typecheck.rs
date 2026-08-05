@@ -5158,7 +5158,13 @@ impl<'a> Checker<'a> {
                 }
                 let raw_expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
                 let expected = substitute_type(&raw_expected, &subst);
-                let actual = self.check_call_arg_expr_against(call_arg_value_expr(arg), &expected);
+                // Unresolved call type parameters are inference holes, not concrete
+                // contextual types. In particular, a lambda returning `Ok(())`
+                // must be able to infer `T = Unit` for a `(…) => Result[T, E]`
+                // parameter.
+                let check_expected = materialize_type(&expected);
+                let actual =
+                    self.check_call_arg_expr_against(call_arg_value_expr(arg), &check_expected);
                 infer_type_subst(&expected, &actual, &mut subst);
                 checked_args.push((arg.span, actual, raw_expected.clone()));
             }
@@ -5881,7 +5887,10 @@ impl<'a> Checker<'a> {
                 variadic: param.variadic,
             })
             .collect();
-        let ret = self.materialize_enum_case_result_against(&case.result, expected);
+        // Preserve enum type parameters that the expected type leaves unknown so
+        // constructor arguments can still infer them. For example, contextual
+        // `Result[<unknown>, E]` plus `Ok(())` must produce `Result[Unit, E]`.
+        let ret = substitute_type(&case.result, &subst);
         (params, ret)
     }
 
@@ -9579,6 +9588,9 @@ fn infer_type_subst(expected: &Ty, actual: &Ty, subst: &mut HashMap<String, Ty>)
         Ty::Capture(_) => {}
         Ty::TypeParam(name) => {
             let actual = materialize_type(actual);
+            if matches!(actual, Ty::Unknown) {
+                return;
+            }
             subst
                 .entry(name.clone())
                 .and_modify(|existing| *existing = join_types(existing, &actual))
@@ -10461,6 +10473,22 @@ def main() Unit {
     process { () => println("hehe") }
 
     value Int = compute { () => 42 }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn infers_generic_result_type_from_trailing_lambda_body() {
+        let program = parse_inline(
+            r#"
+def transactionally[T](work () => Result[T, Str]) Result[T, Str] = work()
+
+def run() Result[Unit, Str] {
+    try transactionally { () => Ok(()) }
+    Ok(())
 }
 "#,
         );

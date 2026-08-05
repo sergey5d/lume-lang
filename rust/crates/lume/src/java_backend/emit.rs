@@ -2616,6 +2616,10 @@ impl<'a> FunctionEmitter<'a> {
             [owner] if owner == "Set" && operands.is_empty() => {
                 Some("lume.core.LumeSet.empty()".to_string())
             }
+            [owner] if owner == "Range" && operands.len() == 2 => {
+                let args = self.emit_operands(operands)?;
+                Some(format!("new lume.core.Range({})", args.join(", ")))
+            }
             [owner, method] if owner == "Int" && method == "parse" => {
                 let args = self.emit_operands(operands)?;
                 Some(format!(
@@ -3429,11 +3433,16 @@ impl<'a> FunctionEmitter<'a> {
                 .globals
                 .get(id.0)
                 .map(|global| java_member_name(&global.name)),
-            ir::Place::Field { base, name } => Some(format!(
-                "{}.{}",
-                self.emit_operand(base)?,
-                java_member_name(name)
-            )),
+            ir::Place::Field { base, name } => {
+                let base_expr = self.emit_operand(base)?;
+                match self.operand_type(base) {
+                    Some(ir::Type::Tuple(_)) => {
+                        let accessor = tuple_accessor_name(name)?;
+                        Some(format!("{base_expr}.{accessor}()"))
+                    }
+                    _ => Some(format!("{base_expr}.{}", java_member_name(name))),
+                }
+            }
             ir::Place::Index { .. } => self.unsupported("indexed assignment target"),
         }
     }
@@ -3618,6 +3627,9 @@ impl<'a> FunctionEmitter<'a> {
         arg_len: usize,
     ) -> Option<ir::Type> {
         let receiver_ty = self.operand_type(receiver)?;
+        if let Some(ret) = builtin_method_return_type(&receiver_ty, method, arg_len) {
+            return Some(ret);
+        }
         let ir::Type::Named { name, args } = receiver_ty else {
             return None;
         };
@@ -3662,6 +3674,10 @@ impl<'a> FunctionEmitter<'a> {
             [owner] if owner == "Set" => Some(ir::Type::Named {
                 name: "Set".to_string(),
                 args: vec![ir::Type::Unknown],
+            }),
+            [owner] if owner == "Range" && arg_len == 2 => Some(ir::Type::Named {
+                name: "Range".to_string(),
+                args: Vec::new(),
             }),
             [owner, method] if owner == "Int" && method == "parse" && arg_len == 1 => {
                 Some(ir::Type::Named {
@@ -3922,6 +3938,10 @@ impl<'a> FunctionEmitter<'a> {
     fn rvalue_type(&self, value: &ir::RValue) -> Option<ir::Type> {
         match value {
             ir::RValue::Use(operand) => self.operand_type(operand),
+            ir::RValue::Unary { op, operand } => match op {
+                ir::UnaryOp::Neg => self.operand_type(operand),
+                ir::UnaryOp::Not => Some(ir::Type::Bool),
+            },
             ir::RValue::Call { callee, args, .. } => match callee {
                 ir::Callee::Direct(id) => self
                     .bundle
@@ -3957,6 +3977,18 @@ impl<'a> FunctionEmitter<'a> {
                 ir::Callee::Intrinsic(ir::Intrinsic::ListSlice) => {
                     args.first().and_then(|arg| self.operand_type(arg))
                 }
+                ir::Callee::Intrinsic(ir::Intrinsic::IterInit) => args
+                    .first()
+                    .and_then(|arg| self.operand_type(arg))
+                    .and_then(|ty| iterable_item_type(&ty))
+                    .map(|item| ir::Type::Named {
+                        name: "Iterator".to_string(),
+                        args: vec![item],
+                    }),
+                ir::Callee::Intrinsic(ir::Intrinsic::IterNext) => args
+                    .first()
+                    .and_then(|arg| self.operand_type(arg))
+                    .and_then(|ty| iterable_item_type(&ty)),
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue)
                 | ir::Callee::Intrinsic(ir::Intrinsic::VariantField(_)) => Some(ir::Type::Unknown),
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet)
@@ -4647,6 +4679,39 @@ fn builtin_method_param_types(
                 _ => None,
             }
         }
+        _ => None,
+    }
+}
+
+fn builtin_method_return_type(
+    receiver: &ir::Type,
+    method: &str,
+    arg_len: usize,
+) -> Option<ir::Type> {
+    match receiver {
+        ir::Type::Named { name, args }
+            if name == "List" && args.len() == 1 && method == "zipWithIndex" && arg_len == 0 =>
+        {
+            Some(ir::Type::list(ir::Type::Tuple(vec![
+                args[0].clone(),
+                ir::Type::Int,
+            ])))
+        }
+        _ => None,
+    }
+}
+
+fn iterable_item_type(ty: &ir::Type) -> Option<ir::Type> {
+    match ty {
+        ir::Type::Named { name, args }
+            if matches!(
+                name.as_str(),
+                "Array" | "Iterator" | "List" | "Option" | "Set"
+            ) && args.len() == 1 =>
+        {
+            args.first().cloned()
+        }
+        ir::Type::Named { name, args } if name == "Range" && args.is_empty() => Some(ir::Type::Int),
         _ => None,
     }
 }

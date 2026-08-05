@@ -51,6 +51,14 @@ public final class LumeList<T> {
         return this;
     }
 
+    public LumeList<Tuple2<T, Long>> zipWithIndex() {
+        var indexed = new ArrayList<Tuple2<T, Long>>(values.size());
+        for (var index = 0; index < values.size(); index++) {
+            indexed.add(new Tuple2<>(values.get(index), (long) index));
+        }
+        return new LumeList<>(indexed);
+    }
+
     public LumeIterator<T> iterator() {
         return LumeIterator.from(this);
     }

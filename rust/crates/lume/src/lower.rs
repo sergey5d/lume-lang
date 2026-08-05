@@ -4092,6 +4092,94 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
+    fn infer_expr_type_against_with_overrides(
+        &self,
+        expr: &Expr,
+        expected: &ir::Type,
+        overrides: &[(String, ir::Type)],
+    ) -> ir::Type {
+        let actual = match expr {
+            Expr::Lambda { params, body, .. } => {
+                let expected_params = match expected {
+                    ir::Type::Function { params, .. } => params.as_slice(),
+                    _ => &[],
+                };
+                let expected_ret = match expected {
+                    ir::Type::Function { ret, .. } => ret.as_ref().clone(),
+                    _ => ir::Type::Unknown,
+                };
+                let param_types = params
+                    .iter()
+                    .enumerate()
+                    .map(|(index, param)| {
+                        lower_lambda_param_type(param, expected_params.get(index))
+                    })
+                    .collect::<Vec<_>>();
+                let mut body_overrides = overrides.to_vec();
+                for (index, param) in params.iter().enumerate() {
+                    if param.name != "_" && param.destructure.is_none() {
+                        body_overrides.push((
+                            param.name.clone(),
+                            param_types.get(index).cloned().unwrap_or(ir::Type::Unknown),
+                        ));
+                    }
+                }
+                let ret = self.infer_lambda_body_type_against(body, &expected_ret, &body_overrides);
+                ir::Type::Function {
+                    params: param_types,
+                    ret: Box::new(ret),
+                }
+            }
+            _ => self.infer_expr_type_with_overrides(expr, overrides),
+        };
+        contextualize_inferred_ir_type(actual, expected)
+    }
+
+    fn infer_lambda_body_type_against(
+        &self,
+        body: &Expr,
+        expected: &ir::Type,
+        overrides: &[(String, ir::Type)],
+    ) -> ir::Type {
+        let actual = match body {
+            Expr::Block { body, .. } => {
+                body.statements
+                    .last()
+                    .and_then(|statement| match statement {
+                        Stmt::Expr(expr) => Some(self.infer_expr_type_against_with_overrides(
+                            &expr.expr, expected, overrides,
+                        )),
+                        _ => None,
+                    })
+                    .unwrap_or(ir::Type::Unknown)
+            }
+            _ => self.infer_expr_type_against_with_overrides(body, expected, overrides),
+        };
+        contextualize_inferred_ir_type(actual, expected)
+    }
+
+    fn infer_function_call_subst(
+        &self,
+        function_id: ir::FunctionId,
+        args: &[core::CallArg],
+        subst: &mut HashMap<String, ir::Type>,
+    ) {
+        let Some(function) = self.program.function(function_id) else {
+            return;
+        };
+        for (arg, param_index) in args.iter().zip(source_param_indices(function)) {
+            let Some(param) = function.params.get(param_index) else {
+                continue;
+            };
+            let Some(local) = function.locals.get(param.0) else {
+                continue;
+            };
+            let expected = substitute_ir_type(&local.ty, subst);
+            let actual = self.infer_expr_type_against_with_overrides(&arg.value, &expected, &[]);
+            infer_ir_type_subst(&expected, &actual, subst);
+        }
+    }
+
     fn infer_named_runtime_call_type(&self, callee: &Expr) -> Option<ir::Type> {
         let path = expr_path(callee)?;
         match path.as_slice() {
@@ -4530,7 +4618,9 @@ impl<'a> FunctionLowerer<'a> {
                 .map(|(best_score, _)| score > *best_score)
                 .unwrap_or(true)
             {
-                best = Some((score, substitute_ir_type(&function.return_ty, subst)));
+                let mut call_subst = subst.clone();
+                self.infer_function_call_subst(*method_id, args, &mut call_subst);
+                best = Some((score, substitute_ir_type(&function.return_ty, &call_subst)));
             }
         }
         if let Some((_, return_ty)) = best {
@@ -5223,9 +5313,10 @@ impl<'a> FunctionLowerer<'a> {
             return None;
         };
         let ty = self.program.types.iter().find(|ty| ty.name == *type_name)?;
-        let subst = ir_type_subst(ty, type_args);
-        self.find_method_expected_arg_target(ty, method, args)
-            .map(|id| (id, subst))
+        let mut subst = ir_type_subst(ty, type_args);
+        let id = self.find_method_expected_arg_target(ty, method, args)?;
+        self.infer_function_call_subst(id, args, &mut subst);
+        Some((id, subst))
     }
 
     fn named_method_expected_arg_target(
@@ -5240,8 +5331,10 @@ impl<'a> FunctionLowerer<'a> {
             .types
             .iter()
             .find(|ty| ty.name == owner && ty.kind == kind)?;
-        self.find_method_expected_arg_target(ty, method, args)
-            .map(|id| (id, HashMap::new()))
+        let id = self.find_method_expected_arg_target(ty, method, args)?;
+        let mut subst = HashMap::new();
+        self.infer_function_call_subst(id, args, &mut subst);
+        Some((id, subst))
     }
 
     fn find_method_expected_arg_target(
@@ -7449,6 +7542,9 @@ fn infer_ir_type_subst(
 ) {
     match expected {
         ir::Type::TypeParam(name) => {
+            if matches!(actual, ir::Type::Unknown | ir::Type::TypeParam(_)) {
+                return;
+            }
             subst
                 .entry(name.clone())
                 .and_modify(|existing| *existing = join_ir_types(existing.clone(), actual.clone()))
@@ -7515,6 +7611,75 @@ fn infer_ir_type_subst(
         | ir::Type::Int
         | ir::Type::Float
         | ir::Type::Str => {}
+    }
+}
+
+fn contextualize_inferred_ir_type(actual: ir::Type, expected: &ir::Type) -> ir::Type {
+    match (actual, expected) {
+        (ir::Type::Unknown, ir::Type::TypeParam(_)) => ir::Type::Unknown,
+        (ir::Type::Unknown, expected) => erase_ir_type_params(expected),
+        (
+            ir::Type::Named {
+                name: actual_name,
+                args: actual_args,
+            },
+            ir::Type::Named {
+                name: expected_name,
+                args: expected_args,
+            },
+        ) if actual_name == *expected_name && actual_args.len() == expected_args.len() => {
+            ir::Type::Named {
+                name: actual_name,
+                args: actual_args
+                    .into_iter()
+                    .zip(expected_args.iter())
+                    .map(|(actual, expected)| contextualize_inferred_ir_type(actual, expected))
+                    .collect(),
+            }
+        }
+        (
+            ir::Type::Function {
+                params: actual_params,
+                ret: actual_ret,
+            },
+            ir::Type::Function {
+                params: expected_params,
+                ret: expected_ret,
+            },
+        ) if actual_params.len() == expected_params.len() => ir::Type::Function {
+            params: actual_params
+                .into_iter()
+                .zip(expected_params.iter())
+                .map(|(actual, expected)| contextualize_inferred_ir_type(actual, expected))
+                .collect(),
+            ret: Box::new(contextualize_inferred_ir_type(*actual_ret, expected_ret)),
+        },
+        (actual, _) => actual,
+    }
+}
+
+fn erase_ir_type_params(ty: &ir::Type) -> ir::Type {
+    match ty {
+        ir::Type::TypeParam(_) => ir::Type::Unknown,
+        ir::Type::Named { name, args } => ir::Type::Named {
+            name: name.clone(),
+            args: args.iter().map(erase_ir_type_params).collect(),
+        },
+        ir::Type::Tuple(items) => ir::Type::Tuple(items.iter().map(erase_ir_type_params).collect()),
+        ir::Type::Record(fields) => ir::Type::Record(
+            fields
+                .iter()
+                .map(|field| ir::NamedType {
+                    name: field.name.clone(),
+                    ty: erase_ir_type_params(&field.ty),
+                })
+                .collect(),
+        ),
+        ir::Type::Function { params, ret } => ir::Type::Function {
+            params: params.iter().map(erase_ir_type_params).collect(),
+            ret: Box::new(erase_ir_type_params(ret)),
+        },
+        _ => ty.clone(),
     }
 }
 
@@ -8162,6 +8327,38 @@ mod tests {
             ir::Type::Named {
                 name: "Result".to_string(),
                 args: vec![ir::Type::named("Int"), ir::Type::named("Str")],
+            }
+        );
+    }
+
+    #[test]
+    fn infers_generic_method_type_from_trailing_lambda_return() {
+        let program = parse_inline(
+            r#"
+            interface Runner {
+                def perform[T](work (Int) => Result[T, Str]) Result[T, Str]
+            }
+
+            def run(runner Runner) Result[Unit, Str] {
+                try runner.perform { (value Int) => Ok(()) }
+                Ok(())
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let lambda = ir
+            .functions
+            .iter()
+            .find(|function| matches!(function.kind, ir::FunctionKind::Lambda))
+            .expect("trailing lambda");
+        assert_eq!(
+            lambda.return_ty,
+            ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::Unit, ir::Type::named("Str")],
             }
         );
     }

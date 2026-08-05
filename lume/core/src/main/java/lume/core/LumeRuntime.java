@@ -204,7 +204,7 @@ public final class LumeRuntime {
         throw new LumePanic("expected List");
     }
 
-    public static LumeIterator<?> iterInit(Object source) {
+    public static <T> LumeIterator<T> iterInit(Object source) {
         return LumeIterator.from(source);
     }
 
@@ -212,8 +212,9 @@ public final class LumeRuntime {
         return ((LumeIterator<?>) iterator).hasNext();
     }
 
-    public static Object iterNext(Object iterator) {
-        return ((LumeIterator<?>) iterator).next();
+    @SuppressWarnings("unchecked")
+    public static <T> T iterNext(Object iterator) {
+        return ((LumeIterator<T>) iterator).next();
     }
 
     private static String join(Object... values) {
