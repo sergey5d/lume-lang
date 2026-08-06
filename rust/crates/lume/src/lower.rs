@@ -391,12 +391,12 @@ impl<'a> Lowerer<'a> {
         target_kind: ImplTargetKind,
     ) -> Option<ir::TypeId> {
         match target_kind {
-            ImplTargetKind::Single => self
+            ImplTargetKind::Object => self
                 .type_ids
-                .get(&(target_name.to_string(), ast::TypeKind::Single))
+                .get(&(target_name.to_string(), ast::TypeKind::Object))
                 .copied(),
             ImplTargetKind::Instance => self.type_ids.iter().find_map(|((name, kind), id)| {
-                (name == target_name && *kind != ast::TypeKind::Single).then_some(*id)
+                (name == target_name && *kind != ast::TypeKind::Object).then_some(*id)
             }),
         }
     }
@@ -1460,6 +1460,188 @@ impl<'a> FunctionLowerer<'a> {
         ir::RValue::AnonymousInterface {
             interfaces: interfaces.iter().map(lower_type_ref).collect(),
             methods,
+        }
+    }
+
+    fn lower_anonymous_object_rvalue(
+        &mut self,
+        fields: &[core::FieldDecl],
+        methods: &[MethodDecl],
+        span: Span,
+    ) -> ir::RValue {
+        let type_name = crate::source::anonymous_object_type_name(span);
+        let mut ty = ir::TypeDef::new(ast::TypeKind::Object, type_name.clone());
+        ty.visibility = ast::Visibility::Hidden;
+        ty.span = Some(span);
+        ty.fields = fields
+            .iter()
+            .map(|field| ir::Field {
+                annotations: lower_annotations(&field.annotations),
+                visibility: field.visibility,
+                mutable: false,
+                name: field.name.clone(),
+                ty: field
+                    .ty
+                    .as_ref()
+                    .map(lower_type_ref)
+                    .or_else(|| {
+                        field
+                            .initializer
+                            .as_ref()
+                            .map(|value| self.infer_expr_type(value))
+                    })
+                    .unwrap_or(ir::Type::Unknown),
+                has_initializer: true,
+                initializer: None,
+                span: Some(field.span),
+            })
+            .collect();
+        let owner = self.program.add_type(ty);
+
+        let mut method_ids = Vec::new();
+        for field in fields {
+            let return_ty = self.program.types[owner.0]
+                .fields
+                .iter()
+                .find(|candidate| candidate.name == field.name)
+                .map(|candidate| candidate.ty.clone())
+                .unwrap_or(ir::Type::Unknown);
+            let mut getter = ir::Function::new(
+                field.name.clone(),
+                ir::FunctionKind::Method { owner },
+                return_ty,
+            );
+            getter.visibility = field.visibility;
+            getter.span = Some(field.span);
+            getter.add_local(
+                "this",
+                ir::Type::named(type_name.clone()),
+                false,
+                ir::LocalKind::Capture,
+            );
+            method_ids.push(self.program.add_function(getter));
+        }
+
+        let mut declared_methods = Vec::new();
+        for method in methods {
+            let mut function = ir::Function::new(
+                method.name.clone(),
+                ir::FunctionKind::Method { owner },
+                method
+                    .return_type
+                    .as_ref()
+                    .map(lower_type_ref)
+                    .unwrap_or(ir::Type::Unknown),
+            );
+            function.annotations = lower_annotations(&method.annotations);
+            function.visibility = method.visibility;
+            function.type_params = method
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect();
+            function.reified_type_params = method
+                .type_params
+                .iter()
+                .filter(|param| param.reified)
+                .map(|param| param.name.clone())
+                .collect();
+            function.span = Some(method.span);
+            function.add_local(
+                "this",
+                ir::Type::named(type_name.clone()),
+                false,
+                ir::LocalKind::Capture,
+            );
+            for (index, param) in method.params.iter().enumerate() {
+                let source_ty = param
+                    .ty
+                    .as_ref()
+                    .map(lower_type_ref)
+                    .unwrap_or(ir::Type::Unknown);
+                let runtime_ty = if param.lazy {
+                    lazy_storage_type(source_ty)
+                } else {
+                    source_ty
+                };
+                function.add_param(param.name.clone(), runtime_ty);
+                function.set_param_variadic(index, param.variadic);
+                function.set_param_lazy(index, param.lazy);
+            }
+            let id = self.program.add_function(function);
+            method_ids.push(id);
+            declared_methods.push((method, id));
+        }
+        self.program.types[owner.0].methods = method_ids;
+
+        self.push_scope();
+        let mut lowered_fields = Vec::new();
+        for field in fields {
+            let field_ty = self.program.types[owner.0]
+                .fields
+                .iter()
+                .find(|candidate| candidate.name == field.name)
+                .map(|candidate| candidate.ty.clone())
+                .unwrap_or(ir::Type::Unknown);
+            let value = field
+                .initializer
+                .as_ref()
+                .map(|initializer| self.lower_expr_with_expected(initializer, Some(&field_ty)))
+                .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
+            let local = self.add_local(field.name.clone(), field_ty, false, ir::LocalKind::Binding);
+            self.push_statement(ir::Statement {
+                span: Some(field.span),
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Local(local),
+                    value: ir::RValue::Use(value),
+                },
+            });
+            self.bind_existing(&field.name, local);
+            lowered_fields.push(ir::NamedOperand {
+                name: field.name.clone(),
+                value: ir::Operand::Copy(Box::new(ir::Place::Local(local))),
+            });
+        }
+        self.pop_scope();
+
+        let capture_sources = self.visible_capture_sources(Some("this"));
+        let mut lowered_methods = Vec::new();
+        for (method, function_id) in declared_methods {
+            let captures = {
+                let mut lowerer = FunctionLowerer::new(
+                    self.program,
+                    function_id,
+                    self.globals,
+                    self.functions,
+                    self.case_fields,
+                    self.diagnostics,
+                )
+                .with_capture_sources(capture_sources.clone());
+                if let Some(this_local) = lowerer.this_local {
+                    lowerer.bind_existing("this", this_local);
+                }
+                for (index, param) in method.params.iter().enumerate() {
+                    if let Some(local_id) = lowerer.function().params.get(index).copied() {
+                        lowerer.bind_param(param, local_id);
+                    }
+                }
+                lowerer.bind_reified_type_params();
+                if let Some(body) = &method.body {
+                    lowerer.lower_callable_body(body, method.span);
+                }
+                lowerer.finish_closure_captures()
+            };
+            lowered_methods.push(ir::AnonymousInterfaceMethod {
+                name: method.name.clone(),
+                function: function_id,
+                captures,
+            });
+        }
+
+        ir::RValue::AnonymousObject {
+            ty: ir::Type::named(type_name),
+            fields: lowered_fields,
+            methods: lowered_methods,
         }
     }
 
@@ -3463,7 +3645,8 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Call { .. }
             | Expr::RecordLiteral { .. }
             | Expr::ShapeLiteral { .. }
-            | Expr::Lambda { .. } => {
+            | Expr::Lambda { .. }
+            | Expr::AnonymousObject { .. } => {
                 self.lower_expr_from_rvalue_with_expected(expr, Some(expected))
             }
             Expr::Identifier { .. } | Expr::Member { .. }
@@ -3579,6 +3762,7 @@ impl<'a> FunctionLowerer<'a> {
             | Expr::ShapeLiteral { .. }
             | Expr::RecordLiteral { .. }
             | Expr::AnonymousInterface { .. }
+            | Expr::AnonymousObject { .. }
             | Expr::Unary { .. }
             | Expr::Binary { .. }
             | Expr::Call { .. }
@@ -4050,6 +4234,9 @@ impl<'a> FunctionLowerer<'a> {
                     ir::Type::Unknown
                 }
             }
+            Expr::AnonymousObject { span, .. } => {
+                ir::Type::named(crate::source::anonymous_object_type_name(*span))
+            }
             Expr::If { .. }
             | Expr::Block { .. }
             | Expr::Match { .. }
@@ -4520,7 +4707,7 @@ impl<'a> FunctionLowerer<'a> {
                     .program
                     .types
                     .iter()
-                    .find(|ty| ty.name == *name && ty.kind == ast::TypeKind::Single)?;
+                    .find(|ty| ty.name == *name && ty.kind == ast::TypeKind::Object)?;
                 return Some((ty, Vec::new()));
             }
             if self.lookup_scoped_type(name).is_none()
@@ -5000,6 +5187,11 @@ impl<'a> FunctionLowerer<'a> {
                 methods,
                 ..
             } => Some(self.lower_anonymous_interface_rvalue(interfaces, methods)),
+            Expr::AnonymousObject {
+                fields,
+                methods,
+                span,
+            } => Some(self.lower_anonymous_object_rvalue(fields, methods, *span)),
             Expr::RecordUpdate {
                 receiver, patch, ..
             } => Some(ir::RValue::RecordUpdate {
@@ -5257,7 +5449,7 @@ impl<'a> FunctionLowerer<'a> {
                 let member = &path[1];
                 if let Some((id, subst)) = self.named_method_expected_arg_target(
                     owner,
-                    ast::TypeKind::Single,
+                    ast::TypeKind::Object,
                     member,
                     ordered_args,
                 ) {
@@ -5701,7 +5893,7 @@ impl<'a> FunctionLowerer<'a> {
                     ty.name == *name
                         && matches!(
                             ty.kind,
-                            ast::TypeKind::Class | ast::TypeKind::Record | ast::TypeKind::Single
+                            ast::TypeKind::Class | ast::TypeKind::Record | ast::TypeKind::Object
                         )
                 }) {
                     if let Some(params) = self.constructor_param_names(type_def, args) {
@@ -5733,7 +5925,7 @@ impl<'a> FunctionLowerer<'a> {
                     return Some(vec!["text".to_string()]);
                 }
                 if let Some(params) =
-                    self.method_param_names_for_kind(owner, ast::TypeKind::Single, member, args)
+                    self.method_param_names_for_kind(owner, ast::TypeKind::Object, member, args)
                 {
                     return Some(params);
                 }
@@ -7134,16 +7326,16 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: Vec::new(),
             ret: Box::new(ir::Type::option(ir::Type::named("InterfaceType"))),
         }),
-        ("Type", "asSingle") => Some(ir::Type::Function {
+        ("Type", "asObject") => Some(ir::Type::Function {
             params: Vec::new(),
-            ret: Box::new(ir::Type::option(ir::Type::named("SingleType"))),
+            ret: Box::new(ir::Type::option(ir::Type::named("ObjectType"))),
         }),
         ("Type", "asAnnotation") => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir::Type::option(ir::Type::named("AnnotationType"))),
         }),
         (
-            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
+            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
             | "AnnotationType",
             "name" | "qualifiedName",
         ) => Some(ir::Type::Function {
@@ -7151,7 +7343,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             ret: Box::new(ir::Type::option(ir::Type::Str)),
         }),
         (
-            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
+            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
             | "AnnotationType",
             "kind",
         ) => Some(ir::Type::Function {
@@ -7159,7 +7351,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             ret: Box::new(ir::Type::named("TypeKind")),
         }),
         (
-            "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
+            "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
             | "AnnotationType" | "Field" | "Method" | "EnumCase",
             "annotation",
         ) => Some(ir::Type::Function {
@@ -7167,7 +7359,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             ret: Box::new(ir::Type::option(ir::Type::named("AnnotationValue"))),
         }),
         (
-            "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
+            "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
             | "AnnotationType" | "Field" | "Method" | "EnumCase",
             "hasAnnotation",
         ) => Some(ir::Type::Function {
@@ -7186,23 +7378,23 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: vec![ir::Type::Str],
             ret: Box::new(ir::Type::option(ir::Type::Str)),
         }),
-        ("ClassType" | "ShapeType" | "SingleType" | "AnnotationType", "fields") => {
+        ("ClassType" | "ShapeType" | "ObjectType" | "AnnotationType", "fields") => {
             Some(ir::Type::Function {
                 params: Vec::new(),
                 ret: Box::new(ir::Type::list(ir::Type::named("Field"))),
             })
         }
-        ("ClassType" | "SingleType", "field") => Some(ir::Type::Function {
+        ("ClassType" | "ObjectType", "field") => Some(ir::Type::Function {
             params: vec![ir::Type::Str],
             ret: Box::new(ir::Type::option(ir::Type::named("Field"))),
         }),
-        ("ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType", "methods") => {
+        ("ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType", "methods") => {
             Some(ir::Type::Function {
                 params: Vec::new(),
                 ret: Box::new(ir::Type::list(ir::Type::named("Method"))),
             })
         }
-        ("ClassType" | "SingleType", "method") => Some(ir::Type::Function {
+        ("ClassType" | "ObjectType", "method") => Some(ir::Type::Function {
             params: vec![ir::Type::Str],
             ret: Box::new(ir::Type::option(ir::Type::named("Method"))),
         }),
@@ -7325,7 +7517,7 @@ fn is_annotated_metadata_type(ty: &ir::Type) -> bool {
                     | "ShapeType"
                     | "EnumType"
                     | "InterfaceType"
-                    | "SingleType"
+                    | "ObjectType"
                     | "AnnotationType"
                     | "Field"
                     | "Method"
@@ -7952,7 +8144,7 @@ fn single_type_exists(program: &ir::Program, name: &str) -> bool {
     program
         .types
         .iter()
-        .any(|ty| ty.kind == ast::TypeKind::Single && ty.name == name)
+        .any(|ty| ty.kind == ast::TypeKind::Object && ty.name == name)
 }
 
 fn builtin_zero_arg_value_name(name: &str) -> bool {

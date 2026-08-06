@@ -75,11 +75,11 @@ Open construction helper naming direction:
 ### 5. Module / Visibility Polish
 
 Open module/use questions:
-- whether singleton methods should ever be usable directly beyond explicit `use module/Single/*` and builtin `OS` prelude behavior
+- whether named-object methods should ever be usable directly beyond explicit `use module/Object/*` and builtin `OS` prelude behavior
 - if both a wide module use and a renamed selective use target the same module, the wide use should come first and the `as` use should come after it
 - decide how enum cases are imported: if `EnumA` is imported, should users write `EnumA.CaseA`, or should `CaseA` also become directly available
 - decide whether extension-method imports should keep using ordinary wildcard module use, or get a dedicated import surface such as `use ext app/module/*` or `use ext app/module/TypeName`
-- decide whether extension methods should also be allowed on `single` types, or whether `impl single Name { ... }` is enough and keeps singleton behavior explicit
+- decide whether extension methods should also be allowed on named `object` types, or whether `impl object Name { ... }` is enough
 
 ### 6. Interface Method Conflict Resolution
 
@@ -255,7 +255,7 @@ recover the hidden concrete implementation type behind an interface value.
 Reifiable type arguments should probably include every closed type that has a
 runtime descriptor:
 - primitive types such as `Int`, `Float`, `Bool`, `Str`, `Rune`, and `Unit`
-- classes, enums, enum payload cases through their enum type, singles, annotations, and named shapes
+- classes, enums, enum payload cases through their enum type, named objects, annotations, and named shapes
 - interfaces, as interface metadata only
 - tuples and function types, if their component types are also reifiable
 - anonymous shapes only when the full static field shape is known
@@ -269,7 +269,7 @@ The critical distinction:
 
 Constraints to preserve:
 - automatic reification of every generic parameter
-- reified type parameters on classes, shapes, enums, annotations, or singles
+- reified type parameters on classes, shapes, enums, annotations, or named objects
 
 ### 13. Deferred Cleanup Follow-Ups
 
@@ -355,13 +355,13 @@ Open questions:
 - whether the result should be an anonymous shape or a named type when a context type is available
 - whether failure should produce `Option`, `Result`, or a runtime error
 
-### Singleton Factory Questions
+### Named Object Factory Questions
 
-- whether same-named `single` declarations should act as privileged factory companions
+- whether same-named `object` declarations should act as privileged factory companions
 - whether singleton factory methods should ever get hidden-field access to class internals
 
 Leaning:
-- `single` factory methods are useful as ordinary namespaced helpers, but hidden-field companion privileges should be a separate deliberate decision
+- named-object factory methods are useful as ordinary namespaced helpers, but hidden-field companion privileges should be a separate deliberate decision
 
 ## Suggested Priority Order
 

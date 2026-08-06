@@ -650,6 +650,21 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
                 rewrite_method_for_runtime(method, module, graph);
             }
         }
+        ast::Expr::AnonymousObject {
+            fields, methods, ..
+        } => {
+            for field in fields {
+                if let Some(ty) = &mut field.ty {
+                    rewrite_type_ref_for_runtime(ty, module);
+                }
+                if let Some(initializer) = &mut field.initializer {
+                    rewrite_expr_for_runtime(initializer, module, graph);
+                }
+            }
+            for method in methods {
+                rewrite_method_for_runtime(method, module, graph);
+            }
+        }
         ast::Expr::Unary { expr: inner, .. } => rewrite_expr_for_runtime(inner, module, graph),
         ast::Expr::Try { value, .. } => {
             rewrite_expr_for_runtime(value, module, graph);
@@ -809,8 +824,8 @@ fn rewritten_imported_symbol_path(module: &LoadedModule, name: &str) -> Option<V
 }
 
 fn imported_symbol_path(symbol: &crate::resolver::ImportedSymbol) -> Vec<String> {
-    if let Some(single_name) = &symbol.single_name {
-        vec![single_name.clone(), symbol.original_name.clone()]
+    if let Some(object_name) = &symbol.object_name {
+        vec![object_name.clone(), symbol.original_name.clone()]
     } else {
         vec![symbol.original_name.clone()]
     }
@@ -1170,7 +1185,7 @@ impl<'a> Interpreter<'a> {
         if specs.is_empty() {
             return Err(self.runtime_error(
                 None,
-                "no specs found; define a class or single that implements Spec",
+                "no specs found; define a class or object that implements Spec",
             ));
         }
 
@@ -1195,7 +1210,7 @@ impl<'a> Interpreter<'a> {
         self.runtime
             .types
             .iter()
-            .filter(|ty| matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Single))
+            .filter(|ty| matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Object))
             .filter(|ty| self.aggregate_matches_named_type(&ty.name, ty.kind, "Spec"))
             .map(|ty| SpecCandidate {
                 name: ty.name.clone(),
@@ -1217,10 +1232,10 @@ impl<'a> Interpreter<'a> {
                 .ok_or_else(|| {
                     self.runtime_error(spec.span, format!("cannot construct spec '{}'", spec.name))
                 }),
-            ast::TypeKind::Single => {
+            ast::TypeKind::Object => {
                 self.lookup_singleton(&spec.name, spec.span)?
                     .ok_or_else(|| {
-                        self.runtime_error(spec.span, format!("unknown single '{}'", spec.name))
+                        self.runtime_error(spec.span, format!("unknown object '{}'", spec.name))
                     })
             }
             _ => Err(self.runtime_error(
@@ -1691,6 +1706,33 @@ impl<'a> Interpreter<'a> {
                         .collect::<Result<Vec<_>, Diagnostic>>()?,
                 ))))
             }
+            ir::RValue::AnonymousObject {
+                fields, methods, ..
+            } => {
+                let mut values = fields
+                    .iter()
+                    .map(|field| {
+                        Ok((
+                            field.name.clone(),
+                            self.eval_operand_ref(frame, &field.value, span)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?;
+                for method in methods {
+                    values.push((
+                        method.name.clone(),
+                        Value::Closure(Rc::new(ClosureValue {
+                            function: method.function,
+                            captures: method
+                                .captures
+                                .iter()
+                                .map(|capture| self.eval_operand_ref(frame, capture, span))
+                                .collect::<Result<Vec<_>, _>>()?,
+                        })),
+                    ));
+                }
+                Ok(Value::Record(Rc::new(RefCell::new(values))))
+            }
             ir::RValue::RecordUpdate { base, patch } => {
                 let base = self.eval_operand_ref(frame, base, span)?;
                 let patch = self.eval_operand_ref(frame, patch, span)?;
@@ -2142,7 +2184,7 @@ impl<'a> Interpreter<'a> {
             "asInterface" => {
                 self.runtime_type_cast_value(runtime_type, "Interface", method, args, span)
             }
-            "asSingle" => self.runtime_type_cast_value(runtime_type, "Single", method, args, span),
+            "asObject" => self.runtime_type_cast_value(runtime_type, "Object", method, args, span),
             "asAnnotation" => {
                 self.runtime_type_cast_value(runtime_type, "Annotation", method, args, span)
             }
@@ -2396,7 +2438,7 @@ impl<'a> Interpreter<'a> {
                     crate::ast::TypeKind::Annotation => "Annotation",
                     crate::ast::TypeKind::Class => "Class",
                     crate::ast::TypeKind::Record => "Shape",
-                    crate::ast::TypeKind::Single => "Single",
+                    crate::ast::TypeKind::Object => "Object",
                     crate::ast::TypeKind::Interface => "Interface",
                     crate::ast::TypeKind::Enum => "Enum",
                 })
@@ -3154,7 +3196,7 @@ impl<'a> Interpreter<'a> {
             .find(|ty| {
                 ty.name == type_name
                     && ty.kind != crate::ast::TypeKind::Enum
-                    && ty.kind != crate::ast::TypeKind::Single
+                    && ty.kind != crate::ast::TypeKind::Object
             })
             .cloned()
         else {
@@ -4073,6 +4115,15 @@ impl<'a> Interpreter<'a> {
             }
             Value::Record(fields) => {
                 if let Some(value) = lookup_named_field(&fields.borrow(), method) {
+                    if let Value::Closure(closure) = value {
+                        return self.call_function(
+                            closure.function,
+                            Some(receiver.clone()),
+                            Some(closure.captures.clone()),
+                            args,
+                            span,
+                        );
+                    }
                     return self.invoke_value(value, args, span);
                 }
             }
@@ -4281,7 +4332,7 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Option<Value>, Diagnostic> {
         let Some(ty) = self
-            .lookup_type_by_kind(name, crate::ast::TypeKind::Single)
+            .lookup_type_by_kind(name, crate::ast::TypeKind::Object)
             .cloned()
         else {
             return Ok(None);
@@ -4303,7 +4354,7 @@ impl<'a> Interpreter<'a> {
             let _ = self.call_function(field_init, Some(value.clone()), None, Vec::new(), span)?;
         }
         if let Some(init) =
-            self.find_method_overload_for_kind(&ty.name, crate::ast::TypeKind::Single, "new", &[])
+            self.find_method_overload_for_kind(&ty.name, crate::ast::TypeKind::Object, "new", &[])
         {
             let _ = self.call_function(init, Some(value.clone()), None, Vec::new(), span)?;
         }
@@ -4807,7 +4858,7 @@ impl<'a> Interpreter<'a> {
                     "ShapeType" => self.runtime_type_kind_case(runtime_type) == "Shape",
                     "EnumType" => self.runtime_type_kind_case(runtime_type) == "Enum",
                     "InterfaceType" => self.runtime_type_kind_case(runtime_type) == "Interface",
-                    "SingleType" => self.runtime_type_kind_case(runtime_type) == "Single",
+                    "ObjectType" => self.runtime_type_kind_case(runtime_type) == "Object",
                     "AnnotationType" => self.runtime_type_kind_case(runtime_type) == "Annotation",
                     _ => false,
                 },
@@ -6912,7 +6963,7 @@ $name
     }
 
     #[test]
-    fn runs_enum_and_single_with_same_name() {
+    fn runs_enum_and_object_with_same_name() {
         let program = lower_inline(
             r#"
             enum Color {
@@ -6925,10 +6976,10 @@ $name
                 }
             }
 
-            single Color {
+            object Color {
             }
 
-            impl single Color {
+            impl object Color {
                 def palette() Str = "palette"
             }
 
@@ -6946,17 +6997,17 @@ $name
     }
 
     #[test]
-    fn runs_impl_single_with_explicit_single_decl() {
+    fn runs_impl_object_with_explicit_object_decl() {
         let program = lower_inline(
             r#"
             class Box {
                 value Int
             }
 
-            single Box {
+            object Box {
             }
 
-            impl single Box {
+            impl object Box {
                 def from(value Int) Box = Box { value: value }
             }
 
@@ -7530,7 +7581,7 @@ $name
     }
 
     #[test]
-    fn run_path_executes_symbol_and_single_import_forms() {
+    fn run_path_executes_symbol_and_object_import_forms() {
         let path = repo_root().join("examples/import_forms.lum");
         let run = run_path(path, None).expect("run use forms");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);

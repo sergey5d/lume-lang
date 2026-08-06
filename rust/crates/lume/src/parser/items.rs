@@ -29,7 +29,7 @@ impl<'a> Parser<'a> {
         let (segments, mut span) = self.parse_import_segments("expected use path")?;
         let mut import = ImportDecl {
             path: String::new(),
-            single_name: None,
+            object_name: None,
             wildcard: false,
             symbols: Vec::new(),
             span: start,
@@ -58,7 +58,7 @@ impl<'a> Parser<'a> {
                             self.expect_identifier("expected use symbol, '*', or '{' after '/'")?;
                         if self.match_token(TokenKind::Slash) {
                             import.path = segments.join("/");
-                            import.single_name = Some(name);
+                            import.object_name = Some(name);
                             if self.match_token(TokenKind::Star) {
                                 import.wildcard = true;
                                 span = span.cover(self.previous_span());
@@ -69,7 +69,7 @@ impl<'a> Parser<'a> {
                             } else {
                                 self.error_at_current(
                                     "unexpected_token",
-                                    "expected single member use '*', or '{'",
+                                    "expected object member use '*', or '{'",
                                 );
                                 return None;
                             }
@@ -120,7 +120,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Annotation)
             | TokenKind::Keyword(Keyword::Class)
             | TokenKind::Keyword(Keyword::Shape)
-            | TokenKind::Keyword(Keyword::Single)
+            | TokenKind::Keyword(Keyword::Object)
             | TokenKind::Keyword(Keyword::Interface)
             | TokenKind::Keyword(Keyword::Enum) => {
                 let decl = self.parse_type_decl(annotations, visibility)?;
@@ -170,7 +170,7 @@ impl<'a> Parser<'a> {
                 if self.at_keyword(Keyword::Var) {
                     self.error_at_current(
                         "top_level_mutable_binding",
-                        "top-level mutable bindings are not allowed; move mutable module state into a single, class instance, or function local",
+                        "top-level mutable bindings are not allowed; move mutable module state into an object, class instance, or function local",
                     );
                     return None;
                 }
@@ -341,10 +341,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 (TypeKind::Record, span)
             }
-            TokenKind::Keyword(Keyword::Single) => {
+            TokenKind::Keyword(Keyword::Object) => {
                 let span = self.current_span();
                 self.advance();
-                (TypeKind::Single, span)
+                (TypeKind::Object, span)
             }
             TokenKind::Keyword(Keyword::Interface) => {
                 let span = self.current_span();
@@ -359,7 +359,7 @@ impl<'a> Parser<'a> {
             _ => {
                 self.error_at_current(
                     "expected_type_decl",
-                    "expected annotation, class, shape, single, interface, or enum",
+                    "expected annotation, class, shape, object, interface, or enum",
                 );
                 return None;
             }
@@ -508,7 +508,7 @@ impl<'a> Parser<'a> {
                     let field = self.parse_field_decl(member_annotations, member_visibility)?;
                     if matches!(
                         kind,
-                        TypeKind::Class | TypeKind::Record | TypeKind::Enum | TypeKind::Single
+                        TypeKind::Class | TypeKind::Record | TypeKind::Enum | TypeKind::Object
                     ) {
                         match body_order {
                             TypeBodyOrder::Storage => {}
@@ -625,8 +625,8 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_impl_block(&mut self) -> Option<ImplBlock> {
         let start = self.consume_keyword(Keyword::Impl, "expected 'impl'")?;
-        let target_kind = if self.match_keyword(Keyword::Single) {
-            ImplTargetKind::Single
+        let target_kind = if self.match_keyword(Keyword::Object) {
+            ImplTargetKind::Object
         } else {
             ImplTargetKind::Instance
         };
@@ -1022,7 +1022,7 @@ fn type_kind_name(kind: TypeKind) -> &'static str {
         TypeKind::Annotation => "annotation",
         TypeKind::Class => "class",
         TypeKind::Record => "shape",
-        TypeKind::Single => "single",
+        TypeKind::Object => "object",
         TypeKind::Interface => "interface",
         TypeKind::Enum => "enum",
     }
@@ -1052,9 +1052,9 @@ fn type_body_constructor_message(kind: TypeKind, name: &str) -> String {
                 "shape '{name}' cannot declare custom constructors; use structural brace construction"
             )
         }
-        TypeKind::Single => {
+        TypeKind::Object => {
             format!(
-                "single '{name}' cannot declare custom constructors; reference '{name}' directly"
+                "object '{name}' cannot declare custom constructors; reference '{name}' directly"
             )
         }
         TypeKind::Interface => {

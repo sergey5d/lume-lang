@@ -3,17 +3,17 @@
 # desc 4 3 2 1
 # 0
 
-single Ascending with Ordering[Int] {
+object Ascending with Ordering[Int] {
 }
 
-impl single Ascending {
+impl object Ascending {
     def compare(left Int, right Int) Int = left - right
 }
 
-single Descending with Ordering[Int] {
+object Descending with Ordering[Int] {
 }
 
-impl single Descending {
+impl object Descending {
     def compare(left Int, right Int) Int = right - left
 }
 

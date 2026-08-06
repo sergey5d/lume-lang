@@ -2,7 +2,7 @@
 # top-level Ada
 # instance Grace
 # this Ada
-# single Grace
+# object Grace
 # assigned Katherine
 # assigned instance Alan
 # indexed 26
@@ -29,7 +29,7 @@ impl UserMapper {
         UserDto { id: user.id, name: user.name }
 }
 
-single User {
+object User {
     def toDto(user UserEntity) UserDto =
         UserDto { id: user.id, name: user.name }
 }
@@ -61,7 +61,7 @@ def main() Int {
     printAt("top-level", users.map(mapUser), 0)
     printAt("instance", users.map(mapper.mapUser), 1)
     printAt("this", service.fromThis(users), 0)
-    printAt("single", users.map(User.toDto), 1)
+    printAt("object", users.map(User.toDto), 1)
 
     topLevelFn (UserEntity) => UserDto = mapUser
     instanceFn (UserEntity) => UserDto = mapper.mapUser

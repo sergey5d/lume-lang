@@ -1,0 +1,7 @@
+# EXPECT_ERROR:
+# .*anonymous object field 'count' must appear before methods.*
+
+value = object {
+    value() Int = 1
+    count Int = 2
+}

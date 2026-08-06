@@ -109,7 +109,7 @@ public final class JsonRuntime {
         var type = LumeRuntime.runtimeTypeOf(value);
         if (type.kind() == LumeTypeKind.Class
                 || type.kind() == LumeTypeKind.Shape
-                || type.kind() == LumeTypeKind.Single) {
+                || type.kind() == LumeTypeKind.Object) {
             return encodeStructured(value, type);
         }
         if (type.kind() == LumeTypeKind.Enum) {

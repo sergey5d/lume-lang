@@ -144,7 +144,7 @@ fn describe_type_kind(kind: TypeKind) -> &'static str {
         TypeKind::Annotation => "annotation",
         TypeKind::Class => "class",
         TypeKind::Record => "shape",
-        TypeKind::Single => "single",
+        TypeKind::Object => "object",
         TypeKind::Interface => "interface",
         TypeKind::Enum => "enum",
     }

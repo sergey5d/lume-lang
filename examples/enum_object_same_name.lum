@@ -12,10 +12,10 @@ enum Color {
     }
 }
 
-single Color {
+object Color {
 }
 
-impl single Color {
+impl object Color {
     def palette() Str = "palette"
 }
 

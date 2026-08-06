@@ -382,7 +382,7 @@ struct ModuleInfo {
     extension_imports: Vec<PathBuf>,
     functions: HashMap<String, Vec<FunctionSig>>,
     types: HashMap<String, TypeSig>,
-    singles: HashMap<String, TypeSig>,
+    objects: HashMap<String, TypeSig>,
     extensions: HashMap<String, HashMap<String, Vec<FunctionSig>>>,
     global_binding_stmts: Vec<crate::ast::BindingStmt>,
 }
@@ -398,7 +398,7 @@ impl ModuleInfo {
             extension_imports: module.extension_imports.clone(),
             functions: HashMap::new(),
             types: HashMap::new(),
-            singles: HashMap::new(),
+            objects: HashMap::new(),
             extensions: HashMap::new(),
             global_binding_stmts: Vec::new(),
         };
@@ -416,7 +416,7 @@ impl ModuleInfo {
             extension_imports: Vec::new(),
             functions: HashMap::new(),
             types: HashMap::new(),
-            singles: HashMap::new(),
+            objects: HashMap::new(),
             extensions: HashMap::new(),
             global_binding_stmts: Vec::new(),
         };
@@ -436,8 +436,8 @@ impl ModuleInfo {
                 }
                 Item::Type(decl) => {
                     let sig = type_sig_from_decl(decl);
-                    if decl.kind == TypeKind::Single {
-                        self.singles.insert(decl.name.clone(), sig);
+                    if decl.kind == TypeKind::Object {
+                        self.objects.insert(decl.name.clone(), sig);
                     } else {
                         self.types.insert(decl.name.clone(), sig);
                     }
@@ -465,7 +465,7 @@ impl ModuleInfo {
         let target_type_params = impl_target_type_params(&block.target);
         let target = match block.target_kind {
             ImplTargetKind::Instance => self.types.get_mut(target_name),
-            ImplTargetKind::Single => self.singles.get_mut(target_name),
+            ImplTargetKind::Object => self.objects.get_mut(target_name),
         };
         if let Some(sig) = target {
             for method in &block.methods {
@@ -496,7 +496,7 @@ impl ModuleInfo {
 struct AmbientInfo {
     functions: HashMap<String, Vec<FunctionSig>>,
     types: HashMap<String, TypeSig>,
-    singles: HashMap<String, TypeSig>,
+    objects: HashMap<String, TypeSig>,
     enum_cases: HashMap<String, EnumCaseSig>,
     extensions: HashMap<String, HashMap<String, Vec<FunctionSig>>>,
 }
@@ -534,12 +534,12 @@ impl AmbientInfo {
                 }
                 ambient.types.insert(name, sig);
             }
-            for (name, sig) in module.singles {
-                ambient.singles.insert(name, sig);
+            for (name, sig) in module.objects {
+                ambient.objects.insert(name, sig);
             }
         }
 
-        if let Some(os) = ambient.singles.get("OS") {
+        if let Some(os) = ambient.objects.get("OS") {
             for builtin in ["print", "println", "printf"] {
                 if let Some(sigs) = os.methods.get(builtin) {
                     ambient.functions.insert(builtin.to_string(), sigs.clone());
@@ -556,7 +556,7 @@ fn type_kind_label(kind: TypeKind) -> &'static str {
         TypeKind::Annotation => "annotation",
         TypeKind::Class => "class",
         TypeKind::Record => "shape",
-        TypeKind::Single => "single",
+        TypeKind::Object => "object",
         TypeKind::Interface => "interface",
         TypeKind::Enum => "enum",
     }
@@ -580,8 +580,8 @@ fn custom_constructor_error(sig: &TypeSig) -> String {
             "only classes can declare custom constructors; interface '{}' cannot declare constructors",
             sig.name
         ),
-        TypeKind::Single => format!(
-            "only classes can declare custom constructors; single '{}' is initialized as a singleton value",
+        TypeKind::Object => format!(
+            "only classes can declare custom constructors; object '{}' declares one object value",
             sig.name
         ),
         TypeKind::Class => format!("class '{}' can declare custom constructors", sig.name),
@@ -690,9 +690,9 @@ impl World {
             return None;
         }
         let source = self.modules.get(&imported.module_path)?;
-        if let Some(single_name) = imported.single_name.as_deref() {
-            let single = source.singles.get(single_name)?;
-            return single.methods.get(&imported.original_name).cloned();
+        if let Some(object_name) = imported.object_name.as_deref() {
+            let object = source.objects.get(object_name)?;
+            return object.methods.get(&imported.original_name).cloned();
         }
         source.functions.get(&imported.original_name).cloned()
     }
@@ -706,10 +706,10 @@ impl World {
                 .types
                 .get(&imported.original_name)
                 .cloned(),
-            ImportedKind::Single => self
+            ImportedKind::Object => self
                 .modules
                 .get(&imported.module_path)?
-                .singles
+                .objects
                 .get(&imported.original_name)
                 .cloned(),
             _ => None,
@@ -813,6 +813,7 @@ struct Checker<'a> {
     next_capture_id: usize,
     capture_labels: HashMap<usize, String>,
     globals: HashMap<String, ValueInfo>,
+    anonymous_types: HashMap<String, TypeSig>,
 }
 
 impl<'a> Checker<'a> {
@@ -834,6 +835,7 @@ impl<'a> Checker<'a> {
             next_capture_id: 0,
             capture_labels: HashMap::new(),
             globals: HashMap::new(),
+            anonymous_types: HashMap::new(),
         }
     }
 
@@ -1237,7 +1239,7 @@ impl<'a> Checker<'a> {
                     }
                     return;
                 }
-                if type_sig.kind == TypeKind::Interface || type_sig.kind == TypeKind::Single {
+                if type_sig.kind == TypeKind::Interface || type_sig.kind == TypeKind::Object {
                     self.add_error(
                         "unknown_impl_target",
                         format!("unknown impl target '{}'", target_name),
@@ -1247,15 +1249,15 @@ impl<'a> Checker<'a> {
                 }
                 type_sig
             }
-            ImplTargetKind::Single => {
-                if let Some(single_sig) = self.lookup_single_local(target_name) {
-                    single_sig
+            ImplTargetKind::Object => {
+                if let Some(object_sig) = self.lookup_object_local(target_name) {
+                    object_sig
                 } else {
                     if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
                         self.add_error(
                             "invalid_type_arity",
                             format!(
-                                "single '{}' expects no type arguments; write 'impl single {}'",
+                                "object '{}' expects no type arguments; write 'impl object {}'",
                                 target_name, target_name
                             ),
                             block.span,
@@ -1265,7 +1267,7 @@ impl<'a> Checker<'a> {
                     self.add_error(
                         "unknown_impl_target",
                         format!(
-                            "unknown single impl target '{}'; declare 'single {} {{}}' before 'impl single {}'",
+                            "unknown object impl target '{}'; declare 'object {} {{}}' before 'impl object {}'",
                             target_name, target_name, target_name
                         ),
                         block.span,
@@ -1521,7 +1523,7 @@ impl<'a> Checker<'a> {
             );
             return;
         };
-        if matches!(type_sig.kind, TypeKind::Annotation | TypeKind::Single) {
+        if matches!(type_sig.kind, TypeKind::Annotation | TypeKind::Object) {
             self.add_error(
                 "invalid_extension_target",
                 format!(
@@ -1954,7 +1956,9 @@ impl<'a> Checker<'a> {
                     self.check_field_initializer_expr(value, owner, initialized_fields);
                 }
             }
-            Expr::AnonymousInterface { .. } | Expr::Lambda { .. } => {}
+            Expr::AnonymousInterface { .. }
+            | Expr::AnonymousObject { .. }
+            | Expr::Lambda { .. } => {}
             Expr::LiftedChain { base, segments, .. } => {
                 self.check_field_initializer_expr(base, owner, initialized_fields);
                 for segment in segments {
@@ -3996,6 +4000,11 @@ impl<'a> Checker<'a> {
                 methods,
                 span,
             } => self.check_anonymous_interface_expr(interfaces, methods, *span, expected),
+            Expr::AnonymousObject {
+                fields,
+                methods,
+                span,
+            } => self.check_anonymous_object_expr(fields, methods, *span),
             Expr::Try { value, span } => self.check_try_expr(value, *span),
             Expr::ExtractOr {
                 value,
@@ -4580,6 +4589,89 @@ impl<'a> Checker<'a> {
         } else {
             Ty::Unknown
         }
+    }
+
+    fn check_anonymous_object_expr(
+        &mut self,
+        fields: &[crate::ast::FieldDecl],
+        methods: &[MethodDecl],
+        span: crate::source::Span,
+    ) -> Ty {
+        let name = crate::source::anonymous_object_type_name(span);
+        let mut field_sigs = Vec::new();
+
+        self.push_scope();
+        for field in fields {
+            if field.mutable {
+                self.add_error(
+                    "mutable_anonymous_object_field",
+                    format!(
+                        "anonymous object field '{}' cannot be mutable; use a named class when the object owns mutable state",
+                        field.name
+                    ),
+                    field.span,
+                );
+            }
+            let declared = field.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
+            let actual = field
+                .initializer
+                .as_ref()
+                .map(|initializer| {
+                    declared
+                        .as_ref()
+                        .map(|expected| self.check_expr_against(initializer, expected))
+                        .unwrap_or_else(|| self.check_expr(initializer))
+                })
+                .unwrap_or(Ty::Unknown);
+            let ty = declared.unwrap_or(actual.clone());
+            if !matches!(actual, Ty::Unknown) {
+                self.require_assignable(
+                    &actual,
+                    &ty,
+                    field.span,
+                    "invalid_field_initializer_type",
+                    format!(
+                        "anonymous object field '{}' has type '{}' but its initializer has type '{}'",
+                        field.name,
+                        ty.describe(),
+                        actual.describe()
+                    ),
+                );
+            }
+            field_sigs.push(FieldSig {
+                name: field.name.clone(),
+                ty: ty.clone(),
+                mutable: false,
+                hidden: field.visibility == Visibility::Hidden,
+                has_initializer: true,
+                variadic: false,
+            });
+            self.define_local(&field.name, ty, false);
+        }
+        self.pop_scope();
+
+        let mut method_sigs = HashMap::<String, Vec<FunctionSig>>::new();
+        for method in methods {
+            method_sigs
+                .entry(method.name.clone())
+                .or_default()
+                .push(function_sig_from_method(method, &[]));
+        }
+        let sig = TypeSig {
+            kind: TypeKind::Object,
+            name: name.clone(),
+            type_params: Vec::new(),
+            with_bounds: Vec::new(),
+            fields: field_sigs,
+            methods: method_sigs,
+            enum_cases: HashMap::new(),
+        };
+        self.anonymous_types.insert(name.clone(), sig.clone());
+        for method in methods {
+            self.check_method(method, &sig);
+        }
+
+        Ty::Named(name, Vec::new())
     }
 
     fn interface_sig_from_type_ref(&mut self, interface: &TypeRef) -> Option<TypeSig> {
@@ -5324,7 +5416,7 @@ impl<'a> Checker<'a> {
                         parenthesized_record_arg,
                     ));
                 }
-                if let Some(sig) = self.lookup_any_single(name) {
+                if let Some(sig) = self.lookup_any_object(name) {
                     return Some(self.check_named_type_constructor(
                         &sig,
                         args,
@@ -5353,7 +5445,7 @@ impl<'a> Checker<'a> {
                             parenthesized_record_arg,
                         ));
                     }
-                    if let Some(sig) = module_info.singles.get(&member).cloned() {
+                    if let Some(sig) = module_info.objects.get(&member).cloned() {
                         return Some(self.check_named_type_constructor(
                             &sig,
                             args,
@@ -5380,7 +5472,7 @@ impl<'a> Checker<'a> {
                                 expected,
                             ));
                         }
-                        if sig.kind == TypeKind::Single {
+                        if sig.kind == TypeKind::Object {
                             return None;
                         }
                     }
@@ -5547,11 +5639,11 @@ impl<'a> Checker<'a> {
             return ret;
         }
 
-        if sig.kind == TypeKind::Single {
+        if sig.kind == TypeKind::Object {
             self.add_error(
-                "invalid_single_construction",
+                "invalid_object_construction",
                 format!(
-                    "single '{}' cannot be constructed; reference '{}' directly",
+                    "object '{}' cannot be constructed; reference '{}' directly",
                     sig.name, sig.name
                 ),
                 span,
@@ -6213,7 +6305,7 @@ impl<'a> Checker<'a> {
                 .lookup_type_local(name)
                 .or_else(|| self.world.lookup_imported_type(self.module, name))
                 .or_else(|| self.lookup_unique_module_type(name))
-                .or_else(|| self.lookup_any_single(name))
+                .or_else(|| self.lookup_any_object(name))
                 .or_else(|| self.world.ambient.types.get(name).cloned()),
             Expr::Member { .. } => module_alias_and_member(callee).and_then(|(alias, member)| {
                 self.world
@@ -6223,7 +6315,7 @@ impl<'a> Checker<'a> {
                             .types
                             .get(&member)
                             .cloned()
-                            .or_else(|| module.singles.get(&member).cloned())
+                            .or_else(|| module.objects.get(&member).cloned())
                     })
             }),
             _ => None,
@@ -6239,7 +6331,7 @@ impl<'a> Checker<'a> {
         else {
             return None;
         };
-        if let Some(sig) = self.lookup_any_single(type_name) {
+        if let Some(sig) = self.lookup_any_object(type_name) {
             if let Some(methods) = self.method_sigs_for_type(&sig, name) {
                 let first = methods.first()?;
                 return Some(Ty::Function(
@@ -6248,7 +6340,7 @@ impl<'a> Checker<'a> {
                 ));
             }
         }
-        let sig = self.lookup_any_non_single_type(type_name)?;
+        let sig = self.lookup_any_non_object_type(type_name)?;
         if let Some(case) = sig.enum_cases.get(name) {
             if case.params.is_empty() {
                 return Some(self.materialize_enum_case_result_against(&case.result, expected));
@@ -6264,10 +6356,10 @@ impl<'a> Checker<'a> {
         else {
             return None;
         };
-        if let Some(sig) = self.lookup_any_single(type_name) {
+        if let Some(sig) = self.lookup_any_object(type_name) {
             return self.method_sigs_for_type(&sig, name);
         }
-        let sig = self.lookup_any_non_single_type(type_name)?;
+        let sig = self.lookup_any_non_object_type(type_name)?;
         self.method_sigs_for_type(&sig, name)
     }
 
@@ -6276,8 +6368,8 @@ impl<'a> Checker<'a> {
         class_name: &str,
         args: &[crate::ast::CallArg],
     ) -> Option<String> {
-        let single = self.lookup_any_single(class_name)?;
-        self.method_sigs_for_type(&single, "create")?;
+        let object = self.lookup_any_object(class_name)?;
+        self.method_sigs_for_type(&object, "create")?;
         let args = format_factory_help_args(args)?;
         Some(format!("use {class_name}.create({args})"))
     }
@@ -6613,7 +6705,7 @@ impl<'a> Checker<'a> {
         match path {
             [case_name] => self.world.lookup_enum_case(self.module, case_name),
             [type_name, case_name] => self
-                .lookup_any_non_single_type(type_name)
+                .lookup_any_non_object_type(type_name)
                 .and_then(|sig| sig.enum_cases.get(case_name).cloned()),
             [module_alias, type_name, case_name] => self
                 .world
@@ -6648,7 +6740,7 @@ impl<'a> Checker<'a> {
                         .types
                         .get(name)
                         .cloned()
-                        .or_else(|| module.singles.get(name).cloned())
+                        .or_else(|| module.objects.get(name).cloned())
                 }),
             _ => None,
         }?;
@@ -7243,7 +7335,7 @@ impl<'a> Checker<'a> {
                     .collect(),
             ));
         }
-        if let Some(sig) = module.singles.get(&member) {
+        if let Some(sig) = module.objects.get(&member) {
             return Some(Ty::Named(
                 sig.name.clone(),
                 sig.type_params
@@ -7828,7 +7920,7 @@ impl<'a> Checker<'a> {
                     .collect(),
             ));
         }
-        if let Some(sig) = self.world.ambient.singles.get(name) {
+        if let Some(sig) = self.world.ambient.objects.get(name) {
             return Some(Ty::Named(
                 sig.name.clone(),
                 sig.type_params
@@ -7864,11 +7956,11 @@ impl<'a> Checker<'a> {
             .types
             .get(name)
             .cloned()
-            .or_else(|| self.module.singles.get(name).cloned())
+            .or_else(|| self.module.objects.get(name).cloned())
     }
 
-    fn lookup_single_local(&self, name: &str) -> Option<TypeSig> {
-        self.module.singles.get(name).cloned()
+    fn lookup_object_local(&self, name: &str) -> Option<TypeSig> {
+        self.module.objects.get(name).cloned()
     }
 
     fn lookup_unique_module_type(&self, name: &str) -> Option<TypeSig> {
@@ -7881,7 +7973,7 @@ impl<'a> Checker<'a> {
                     .types
                     .get(name)
                     .cloned()
-                    .or_else(|| module.singles.get(name).cloned())
+                    .or_else(|| module.objects.get(name).cloned())
             })
             .collect::<Vec<_>>();
         if matches.len() == 1 {
@@ -7891,12 +7983,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn lookup_unique_module_single(&self, name: &str) -> Option<TypeSig> {
+    fn lookup_unique_module_object(&self, name: &str) -> Option<TypeSig> {
         let mut matches = self
             .world
             .modules
             .values()
-            .filter_map(|module| module.singles.get(name).cloned())
+            .filter_map(|module| module.objects.get(name).cloned())
             .collect::<Vec<_>>();
         if matches.len() == 1 {
             matches.pop()
@@ -7905,21 +7997,21 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn lookup_any_single(&self, name: &str) -> Option<TypeSig> {
-        self.lookup_single_local(name)
+    fn lookup_any_object(&self, name: &str) -> Option<TypeSig> {
+        self.lookup_object_local(name)
             .or_else(|| {
                 self.module.symbol_imports.get(name).and_then(|imported| {
-                    (imported.kind == ImportedKind::Single)
+                    (imported.kind == ImportedKind::Object)
                         .then(|| self.world.modules.get(&imported.module_path))
                         .flatten()
-                        .and_then(|module| module.singles.get(&imported.original_name).cloned())
+                        .and_then(|module| module.objects.get(&imported.original_name).cloned())
                 })
             })
-            .or_else(|| self.lookup_unique_module_single(name))
-            .or_else(|| self.world.ambient.singles.get(name).cloned())
+            .or_else(|| self.lookup_unique_module_object(name))
+            .or_else(|| self.world.ambient.objects.get(name).cloned())
     }
 
-    fn lookup_any_non_single_type(&self, name: &str) -> Option<TypeSig> {
+    fn lookup_any_non_object_type(&self, name: &str) -> Option<TypeSig> {
         self.module
             .types
             .get(name)
@@ -7949,11 +8041,14 @@ impl<'a> Checker<'a> {
     }
 
     fn lookup_any_type(&self, name: &str) -> Option<TypeSig> {
-        self.lookup_type_local(name)
+        self.anonymous_types
+            .get(name)
+            .cloned()
+            .or_else(|| self.lookup_type_local(name))
             .or_else(|| self.world.lookup_imported_type(self.module, name))
             .or_else(|| self.lookup_unique_module_type(name))
             .or_else(|| self.world.ambient.types.get(name).cloned())
-            .or_else(|| self.world.ambient.singles.get(name).cloned())
+            .or_else(|| self.world.ambient.objects.get(name).cloned())
     }
 
     fn resolve_named_type(&self, name: &str, args: Vec<Ty>) -> Ty {
@@ -8609,7 +8704,9 @@ fn loop_control_targeting_current_loop_in_expr(expr: &Expr) -> Option<LoopContro
         }
         // Nested callables and anonymous interface methods are separate
         // control-flow boundaries.
-        Expr::Lambda { .. } | Expr::AnonymousInterface { .. } => None,
+        Expr::Lambda { .. } | Expr::AnonymousInterface { .. } | Expr::AnonymousObject { .. } => {
+            None
+        }
         Expr::Identifier { .. }
         | Expr::Placeholder { .. }
         | Expr::Integer { .. }
@@ -8753,7 +8850,9 @@ fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Sp
                     .find_map(|segment| lazy_arg_forbidden_control_flow_span(&segment.body))
             }),
         // Nested callables have their own control-flow boundary.
-        Expr::Lambda { .. } | Expr::AnonymousInterface { .. } => None,
+        Expr::Lambda { .. } | Expr::AnonymousInterface { .. } | Expr::AnonymousObject { .. } => {
+            None
+        }
         Expr::Group { inner, .. } => lazy_arg_forbidden_control_flow_span(inner),
         Expr::Identifier { .. }
         | Expr::Placeholder { .. }
@@ -9914,7 +10013,7 @@ fn is_reflection_metadata_type(name: &str) -> bool {
             | "ShapeType"
             | "EnumType"
             | "InterfaceType"
-            | "SingleType"
+            | "ObjectType"
             | "AnnotationType"
     )
 }
@@ -10036,10 +10135,10 @@ def main() Int {
     }
 
     #[test]
-    fn rejects_extension_methods_on_singles() {
+    fn rejects_extension_methods_on_objects() {
         let program = parse_inline(
             r#"
-single Tools {
+object Tools {
 }
 
 ext Tools {
@@ -10497,14 +10596,14 @@ def run() Result[Unit, Str] {
     }
 
     #[test]
-    fn rejects_impl_single_without_explicit_single_decl() {
+    fn rejects_impl_object_without_explicit_object_decl() {
         let program = parse_inline(
             r#"
 class User {
     name Str
 }
 
-impl single User {
+impl object User {
     def make(name Str) User = User { name: name }
 }
 
@@ -10517,7 +10616,7 @@ def main() User = User.make("Ada")
                 diag.code == "unknown_impl_target"
                     && diag
                         .message
-                        .contains("declare 'single User {}' before 'impl single User'")
+                        .contains("declare 'object User {}' before 'impl object User'")
             }),
             "{:#?}",
             result.diagnostics
@@ -11142,10 +11241,10 @@ impl User {
     }
 }
 
-single User {
+object User {
 }
 
-impl single User {
+impl object User {
     def create(name Str) User = User { name: name }
 }
 
@@ -12320,10 +12419,10 @@ impl Route {
     new(path Str) {}
 }
 
-single Config {
+object Config {
 }
 
-impl single Config {
+impl object Config {
     new() {}
 }
 "#,
@@ -12333,7 +12432,7 @@ impl single Config {
             "shape 'Point'",
             "enum 'Status'",
             "annotation 'Route'",
-            "single 'Config'",
+            "object 'Config'",
         ] {
             assert!(
                 result.diagnostics.iter().any(|diag| {
@@ -13011,7 +13110,7 @@ def main() Unit {
             "examples/shape_destructuring.lum",
             "examples/class_destructuring.lum",
             "examples/enums.lum",
-            "examples/enum_single_same_name.lum",
+            "examples/enum_object_same_name.lum",
             "examples/imports.lum",
             "examples/interface_default_methods.lum",
             "examples/list_hof.lum",

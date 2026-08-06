@@ -5,10 +5,10 @@ annotation Route {
     path Str
 }
 
-single Routes {
+object Routes {
 }
 
-impl single Routes {
+impl object Routes {
     def health() Str = "/health"
 }
 

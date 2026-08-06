@@ -1,7 +1,7 @@
 # EXPECT:
 # shape shape-value
 # enum ready
-# single hi
+# object hi
 # ref hi
 # annotation Annotation
 
@@ -40,10 +40,10 @@ impl Status {
     }
 }
 
-single Greeter with Labeled {
+object Greeter with Labeled {
 }
 
-impl single Greeter {
+impl object Greeter {
     def label() Str = this.hello()
 
     def hello() Str = "hi"
@@ -58,7 +58,7 @@ def main() Unit {
     println("enum", statusLabel.label())
 
     greeterLabel Labeled = Greeter
-    println("single", greeterLabel.label())
+    println("object", greeterLabel.label())
 
     a = Greeter
     println("ref", a.hello())

@@ -177,7 +177,7 @@
         },
         {
           "name": "keyword.declaration.lume",
-          "match": "\\b(?:def|new|annotation|class|shape|enum|interface|single|impl|ext|use|module|with|as|hidden|case|var|vararg|let)\\b"
+          "match": "\\b(?:def|new|annotation|class|shape|enum|interface|object|impl|ext|use|module|with|as|hidden|case|var|vararg|let)\\b"
         },
         {
           "name": "storage.modifier.generic.reified.lume",
@@ -229,7 +229,7 @@
       "patterns": [
         {
           "name": "support.type.builtin.lume",
-          "match": "\\b(?:Any|Int|Bool|Rune|Float|Str|Unit|Never|Array|List|Set|Map|Option|Result|Either|Iterator|Iterable|Range|Ordering|Eq|OS|Type|TypeKind|ClassType|ShapeType|EnumType|InterfaceType|SingleType|AnnotationType|Field|Method|Param|EnumCase|AnnotationValue|ReflectionError|Tuple2|Tuple3|Tuple4|Tuple5|Tuple6|Tuple7|Tuple8)\\b"
+          "match": "\\b(?:Any|Int|Bool|Rune|Float|Str|Unit|Never|Array|List|Set|Map|Option|Result|Either|Iterator|Iterable|Range|Ordering|Eq|OS|Type|TypeKind|ClassType|ShapeType|EnumType|InterfaceType|ObjectType|AnnotationType|Field|Method|Param|EnumCase|AnnotationValue|ReflectionError|Tuple2|Tuple3|Tuple4|Tuple5|Tuple6|Tuple7|Tuple8)\\b"
         },
         {
           "name": "entity.name.type.lume",

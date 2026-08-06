@@ -2,12 +2,12 @@
 # JAVA_SKIP
 # INTERPRETER
 
-single OS with Printer {
+object OS with Printer {
     stdout Printer
     stderr Printer
 }
 
-impl single OS {
+impl object OS {
     def print(vararg value [Str]) Unit = ()
     def println(vararg value [Str]) Unit = ()
     def printf(format Str, vararg value [Str]) Unit = ()

@@ -1,0 +1,6 @@
+# EXPECT_ERROR:
+# .*anonymous object field 'count' cannot be mutable; use a named class when the object owns mutable state.*
+
+value = object {
+    var count Int = 0
+}

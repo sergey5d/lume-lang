@@ -63,8 +63,8 @@ var retries = 3
 retries := retries - 1</code></pre>
         <p>Local bindings cannot silently shadow parameters, fields, or another live local. Field access can be qualified with <code>this</code> when a parameter has the same name.</p>
 
-        <h2 id="data-model">Classes, shapes, enums, and singles</h2>
-        <p>A <code>class</code> is nominal: construction and class-to-class assignment depend on its declared identity. A <code>shape</code> is structural data with public immutable fields. An <code>enum</code> describes tagged alternatives, and a <code>single</code> declares one singleton type and value.</p>
+        <h2 id="data-model">Classes, shapes, enums, and objects</h2>
+        <p>A <code>class</code> is nominal: construction and class-to-class assignment depend on its declared identity. A <code>shape</code> is structural data with public immutable fields. An <code>enum</code> describes tagged alternatives, and a named <code>object</code> declares one shared object value.</p>
         <pre><code>shape Location {
     city Str
     country Str
@@ -80,10 +80,10 @@ enum Access {
     Member { organization Str }
 }
 
-single Defaults {
+object Defaults {
     country Str = "US"
 }</code></pre>
-        <p>Interfaces describe behavior. Classes, shapes, enums, annotations, and singles can explicitly implement interfaces; enum cases cannot.</p>
+        <p>Interfaces describe behavior. Classes, shapes, enums, annotations, and named objects can explicitly implement interfaces; enum cases cannot.</p>
 
         <h2 id="construction">Construction</h2>
         <p>Class constructors are declared with <code>new(...)</code>. Braces supply construction fields by name, while parentheses supply explicitly positional constructor inputs in declaration order.</p>

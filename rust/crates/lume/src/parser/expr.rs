@@ -676,6 +676,14 @@ impl<'a> Parser<'a> {
         while self.match_keyword(Keyword::With) {
             interfaces.push(self.parse_type_ref()?);
         }
+        self.parse_anonymous_interface_body(start, interfaces)
+    }
+
+    fn parse_anonymous_interface_body(
+        &mut self,
+        start: Span,
+        interfaces: Vec<TypeRef>,
+    ) -> Option<Expr> {
         self.consume(
             TokenKind::LBrace,
             "expected '{' after anonymous interface list",
@@ -698,6 +706,109 @@ impl<'a> Parser<'a> {
         )?;
         Some(Expr::AnonymousInterface {
             interfaces,
+            methods,
+            span: start.cover(end),
+        })
+    }
+
+    fn parse_object_expr(&mut self) -> Option<Expr> {
+        let start = self.consume_keyword(Keyword::Object, "expected 'object'")?;
+        if self.match_keyword(Keyword::With) {
+            let mut interfaces = vec![self.parse_type_ref()?];
+            while self.match_keyword(Keyword::With) {
+                interfaces.push(self.parse_type_ref()?);
+            }
+            return self.parse_anonymous_interface_body(start, interfaces);
+        }
+
+        self.consume(TokenKind::LBrace, "expected '{' after 'object'")?;
+        self.skip_newlines();
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        let mut method_seen = false;
+        let mut member_names = Vec::<(String, Span)>::new();
+
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            let annotations = self.parse_annotations()?;
+            let visibility = self.parse_visibility();
+            if self.at_keyword(Keyword::Def) || self.starts_callable_decl() {
+                method_seen = true;
+                let method = self.parse_method_decl(annotations, visibility, false, true)?;
+                if method.name == "new" {
+                    self.diagnostics.push(Diagnostic::error(
+                        "invalid_anonymous_object_constructor",
+                        "anonymous objects cannot declare constructors; initialize fields in the object body",
+                        method.span,
+                    ));
+                }
+                if let Some((_, previous)) =
+                    member_names.iter().find(|(name, _)| name == &method.name)
+                {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "duplicate_object_member",
+                            format!("duplicate anonymous object member '{}'", method.name),
+                            method.span,
+                        )
+                        .with_note(format!(
+                            "the first '{}' member is at line {}",
+                            method.name, previous.start_pos.line
+                        )),
+                    );
+                } else {
+                    member_names.push((method.name.clone(), method.span));
+                }
+                methods.push(method);
+            } else {
+                let field = self.parse_field_decl(annotations, visibility)?;
+                if method_seen {
+                    self.diagnostics.push(Diagnostic::error(
+                        "invalid_member_order",
+                        format!(
+                            "anonymous object field '{}' must appear before methods",
+                            field.name
+                        ),
+                        field.span,
+                    ));
+                }
+                if field.initializer.is_none() {
+                    self.diagnostics.push(Diagnostic::error(
+                        "missing_anonymous_object_initializer",
+                        format!(
+                            "anonymous object field '{}' requires an initializer",
+                            field.name
+                        ),
+                        field.span,
+                    ));
+                }
+                if let Some((_, previous)) =
+                    member_names.iter().find(|(name, _)| name == &field.name)
+                {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "duplicate_object_member",
+                            format!("duplicate anonymous object member '{}'", field.name),
+                            field.span,
+                        )
+                        .with_note(format!(
+                            "the first '{}' member is at line {}",
+                            field.name, previous.start_pos.line
+                        )),
+                    );
+                } else {
+                    member_names.push((field.name.clone(), field.span));
+                }
+                fields.push(field);
+            }
+            self.skip_newlines();
+        }
+
+        let end = self.consume(
+            TokenKind::RBrace,
+            "expected '}' after anonymous object body",
+        )?;
+        Some(Expr::AnonymousObject {
+            fields,
             methods,
             span: start.cover(end),
         })
@@ -1505,6 +1616,9 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_primary_expr(&mut self) -> Option<Expr> {
+        if self.at_keyword(Keyword::Object) {
+            return self.parse_object_expr();
+        }
         if self.can_start_type_ref() && self.is_anonymous_interface_expr_start() {
             return self.parse_anonymous_interface_expr();
         }

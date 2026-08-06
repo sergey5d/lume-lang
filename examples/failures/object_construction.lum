@@ -1,7 +1,7 @@
 # FAIL_REGEX:
-# .*single 'Config' cannot be constructed; reference 'Config' directly.*
+# .*object 'Config' cannot be constructed; reference 'Config' directly.*
 
-single Config {
+object Config {
     value Int = 5
 }
 

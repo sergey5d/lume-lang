@@ -81,3 +81,8 @@ impl Span {
         }
     }
 }
+
+/// Returns the stable internal type name used for one anonymous object literal.
+pub(crate) fn anonymous_object_type_name(span: Span) -> String {
+    format!("__LumeObject_{}_{}", span.start, span.end)
+}

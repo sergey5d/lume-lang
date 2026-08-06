@@ -82,7 +82,7 @@ file. Right now it covers:
 
 - modules and use declarations
 - top-level functions, types, impl blocks, and top-level bindings
-- class/single/interface/enum declarations
+- class/object/interface/enum declarations
 - fields, methods, enum cases, and impl methods
 - blocks, bindings, assignments, `if`, `while`, `for`, `defer`, `return`,
   `break`, and `continue`
@@ -110,7 +110,7 @@ The `run` command executes the lowered IR for the current Rust implementation.
 It supports:
 
 - top-level globals and entry functions (`main` by default, then `run`)
-- user-defined classes/singles/enums with methods
+- user-defined classes/objects/enums with methods
 - `if`, `while`, `match`, `partial`, `for`, `for ... yield`, `defer`,
   `return`, `break`, and `continue`
 - `try` propagation and `expect` assertions over `Option`, `Result`, and `Either`

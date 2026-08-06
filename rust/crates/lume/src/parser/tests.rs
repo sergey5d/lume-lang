@@ -980,14 +980,14 @@ def main() {
 }
 
 #[test]
-fn parses_single_and_impl_single() {
+fn parses_named_object_and_impl_object() {
     let result = parse(
         r#"
-single Counter {
+object Counter {
     hidden value = 0
 }
 
-impl single Counter {
+impl object Counter {
     def next() Int = this.value + 1
 }
 "#,
@@ -996,11 +996,11 @@ impl single Counter {
     let program = result.program.expect("program");
     assert_eq!(program.items.len(), 2);
     match &program.items[0] {
-        Item::Type(decl) => assert_eq!(decl.kind, TypeKind::Single),
-        other => panic!("expected singleton type, got {other:#?}"),
+        Item::Type(decl) => assert_eq!(decl.kind, TypeKind::Object),
+        other => panic!("expected object type, got {other:#?}"),
     }
     match &program.items[1] {
-        Item::Impl(block) => assert_eq!(block.target_kind, ImplTargetKind::Single),
+        Item::Impl(block) => assert_eq!(block.target_kind, ImplTargetKind::Object),
         other => panic!("expected impl block, got {other:#?}"),
     }
 }
@@ -1031,10 +1031,10 @@ def health() Str = "ok"
 }
 
 #[test]
-fn parses_methods_in_single_body() {
+fn parses_methods_in_named_object_body() {
     let result = parse(
         r#"
-single Counter {
+object Counter {
     hidden value = 0
 
     def next() Int = 1
@@ -1045,11 +1045,69 @@ single Counter {
     let program = result.program.expect("program");
     match &program.items[0] {
         Item::Type(decl) => {
-            assert_eq!(decl.kind, TypeKind::Single);
+            assert_eq!(decl.kind, TypeKind::Object);
             assert_eq!(decl.members.len(), 2);
         }
-        other => panic!("expected singleton type, got {other:#?}"),
+        other => panic!("expected object type, got {other:#?}"),
     }
+}
+
+#[test]
+fn parses_anonymous_object_fields_and_methods() {
+    let result = parse(
+        r#"
+value = object {
+    count Int = 4
+    label Str = "items"
+
+    describe() Str = this.label + this.count.toStr()
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Statement(Stmt::Binding(binding)) = &program.items[0] else {
+        panic!("expected binding");
+    };
+    let Expr::AnonymousObject {
+        fields, methods, ..
+    } = &binding.values[0]
+    else {
+        panic!("expected anonymous object");
+    };
+    assert_eq!(fields.len(), 2);
+    assert_eq!(methods.len(), 1);
+}
+
+#[test]
+fn parses_object_with_interface_as_anonymous_implementation() {
+    let result = parse(
+        r#"
+interface Greeter {
+    greet() Str
+}
+
+greeter Greeter = object with Greeter {
+    greet() Str = "hello"
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Statement(Stmt::Binding(binding)) = &program.items[1] else {
+        panic!("expected binding");
+    };
+    assert!(matches!(
+        &binding.values[0],
+        Expr::AnonymousInterface { interfaces, methods, .. }
+            if interfaces.len() == 1 && methods.len() == 1
+    ));
+}
+
+#[test]
+fn rejects_removed_single_declaration_keyword() {
+    let result = parse("single Config {}\n");
+    assert!(!result.diagnostics.is_empty());
 }
 
 #[test]

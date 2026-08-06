@@ -21,7 +21,7 @@ enum TypeKind {
     case Shape
     case Enum
     case Interface
-    case Single
+    case Object
     case Annotation
     case Primitive
     case Tuple
@@ -38,7 +38,7 @@ interface Type[A] with Annotated {
     def asShape() Option[ShapeType[A]]
     def asEnum() Option[EnumType[A]]
     def asInterface() Option[InterfaceType[A]]
-    def asSingle() Option[SingleType[A]]
+    def asObject() Option[ObjectType[A]]
     def asAnnotation() Option[AnnotationType[A]]
 }
 
@@ -66,7 +66,7 @@ interface InterfaceType[A] with Type[A] {
     def methods() [Method]
 }
 
-interface SingleType[A] with Type[A] {
+interface ObjectType[A] with Type[A] {
     def fields() [Field]
     def methods() [Method]
     def field(name Str) Option[Field]

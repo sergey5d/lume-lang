@@ -26,7 +26,7 @@ pub struct ModuleDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportDecl {
     pub path: String,
-    pub single_name: Option<String>,
+    pub object_name: Option<String>,
     pub wildcard: bool,
     pub symbols: Vec<ImportSymbol>,
     pub span: Span,
@@ -70,7 +70,7 @@ pub enum TypeKind {
     Annotation,
     Class,
     Record,
-    Single,
+    Object,
     Interface,
     Enum,
 }
@@ -79,10 +79,10 @@ pub enum TypeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImplTargetKind {
     Instance,
-    Single,
+    Object,
 }
 
-/// An `annotation`, `class`, `shape`, `single`, `interface`, or `enum` declaration.
+/// An `annotation`, `class`, `shape`, `object`, `interface`, or `enum` declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDecl {
     pub annotations: Vec<Annotation>,
@@ -635,6 +635,11 @@ pub enum Expr {
         methods: Vec<MethodDecl>,
         span: Span,
     },
+    AnonymousObject {
+        fields: Vec<FieldDecl>,
+        methods: Vec<MethodDecl>,
+        span: Span,
+    },
     Try {
         value: Box<Expr>,
         span: Span,
@@ -732,6 +737,7 @@ impl Expr {
             | Expr::RecordUpdate { span, .. }
             | Expr::RecordLiteral { span, .. }
             | Expr::AnonymousInterface { span, .. }
+            | Expr::AnonymousObject { span, .. }
             | Expr::Try { span, .. }
             | Expr::ExtractOr { span, .. }
             | Expr::Return { span, .. }

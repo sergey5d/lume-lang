@@ -12,10 +12,10 @@
 # 246
 # 1
 
-single RowOrdering with Ordering[(Int, Int, Str)] {
+object RowOrdering with Ordering[(Int, Int, Str)] {
 }
 
-impl single RowOrdering {
+impl object RowOrdering {
     def compare(left (Int, Int, Str), right (Int, Int, Str)) Int {
         let (leftX Int, leftY Int, _) = left
         let (rightX Int, rightY Int, _) = right

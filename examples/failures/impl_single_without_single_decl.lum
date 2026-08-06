@@ -1,6 +1,0 @@
-# FAIL_REGEX:
-# .*unknown single impl target 'Logger'; declare 'single Logger \{\}' before 'impl single Logger'.*
-
-impl single Logger {
-    def info(message Str) Unit = println(message)
-}

@@ -180,11 +180,14 @@ fn render_type_shell(
     package: &JavaPackage,
     names: &JavaNames,
 ) -> String {
+    if is_anonymous_object_type(ty) {
+        return render_interface(bundle, ty, package, names);
+    }
     match ty.kind {
         TypeKind::Annotation => render_annotation(bundle, ty, package, names),
         TypeKind::Class => render_class(bundle, ty, package, names),
         TypeKind::Record => render_shape(bundle, ty, package, names),
-        TypeKind::Single => render_single(bundle, ty, package, names),
+        TypeKind::Object => render_single(bundle, ty, package, names),
         TypeKind::Interface => render_interface(bundle, ty, package, names),
         TypeKind::Enum => render_enum(bundle, ty, package, names),
     }
@@ -401,6 +404,10 @@ fn java_type_visibility(ty: &ir::TypeDef) -> &'static str {
     }
 }
 
+fn is_anonymous_object_type(ty: &ir::TypeDef) -> bool {
+    ty.kind == TypeKind::Object && ty.name.starts_with("__LumeObject_")
+}
+
 fn java_implements_clause(ty: &ir::TypeDef, names: &JavaNames) -> String {
     java_bound_clause(" implements ", ty, names)
 }
@@ -481,7 +488,7 @@ fn lume_type_kind_name(kind: TypeKind) -> &'static str {
         TypeKind::Annotation => "annotation",
         TypeKind::Class => "class",
         TypeKind::Record => "shape",
-        TypeKind::Single => "single",
+        TypeKind::Object => "object",
         TypeKind::Interface => "interface",
         TypeKind::Enum => "enum",
     }
@@ -566,9 +573,9 @@ fn type_descriptor_expr(
                 "lume.core.LumeType.shapeType({name}, {qualified}, {fields}, {methods}, {annotations})"
             )
         }
-        TypeKind::Single => {
+        TypeKind::Object => {
             format!(
-                "lume.core.LumeType.singleType({name}, {qualified}, {fields}, {methods}, {annotations})"
+                "lume.core.LumeType.objectType({name}, {qualified}, {fields}, {methods}, {annotations})"
             )
         }
         TypeKind::Interface => {
@@ -2131,6 +2138,12 @@ impl<'a> FunctionEmitter<'a> {
                     }
                     _ => None,
                 };
+                let anonymous_object_capture_initializers = match value {
+                    ir::RValue::AnonymousObject {
+                        fields, methods, ..
+                    } => Some(self.emit_anonymous_object_capture_snapshots(out, fields, methods)?),
+                    _ => None,
+                };
                 if matches!(
                     value,
                     ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit))
@@ -2165,6 +2178,21 @@ impl<'a> FunctionEmitter<'a> {
                     ir::RValue::Record(fields) => {
                         let target_ty = target_ty.as_ref()?;
                         self.emit_record_as_named_construct(target_ty, fields)?
+                    }
+                    ir::RValue::AnonymousObject {
+                        ty,
+                        fields,
+                        methods,
+                    } => {
+                        let (field_values, method_captures) =
+                            anonymous_object_capture_initializers.as_ref()?;
+                        self.emit_anonymous_object(
+                            ty,
+                            fields,
+                            methods,
+                            Some(field_values),
+                            Some(method_captures),
+                        )?
                     }
                     _ => self.emit_rvalue(value)?,
                 };
@@ -2312,6 +2340,11 @@ impl<'a> FunctionEmitter<'a> {
                 interfaces,
                 methods,
             } => self.emit_anonymous_interface(interfaces, methods),
+            ir::RValue::AnonymousObject {
+                ty,
+                fields,
+                methods,
+            } => self.emit_anonymous_object(ty, fields, methods, None, None),
             ir::RValue::Construct { ty, fields } => self.emit_construct(ty, fields),
             ir::RValue::Variant {
                 enum_name,
@@ -2331,9 +2364,11 @@ impl<'a> FunctionEmitter<'a> {
                     Some(ir::Type::Named {
                         name: ref type_name,
                         ..
-                    }) if self
-                        .type_def(type_name)
-                        .is_some_and(|ty| ty.kind == TypeKind::Record) =>
+                    }) if self.type_def(type_name).is_some_and(|ty| {
+                        ty.kind == TypeKind::Record
+                            || ((ty.kind == TypeKind::Interface || is_anonymous_object_type(ty))
+                                && ty.fields.iter().any(|field| field.name == *name))
+                    }) =>
                     {
                         Some(format!("{base_expr}.{}()", java_member_name(name)))
                     }
@@ -2470,7 +2505,7 @@ impl<'a> FunctionEmitter<'a> {
                     ir::FunctionKind::Method { owner } => {
                         let owner_ty = self.bundle.ir.types.get(owner.0)?;
                         let name = java_member_name(&target.name);
-                        if owner_ty.kind == TypeKind::Single {
+                        if owner_ty.kind == TypeKind::Object {
                             Some(format!(
                                 "{}.INSTANCE.{}({})",
                                 self.names.named_type(&owner_ty.name),
@@ -2780,7 +2815,7 @@ impl<'a> FunctionEmitter<'a> {
 
     fn is_lume_single_type(&self, name: &str) -> bool {
         self.type_def(name)
-            .is_some_and(|ty| ty.kind == TypeKind::Single)
+            .is_some_and(|ty| ty.kind == TypeKind::Object)
     }
 
     fn emit_intrinsic(&self, intrinsic: &ir::Intrinsic, args: &[String]) -> Option<String> {
@@ -3224,7 +3259,7 @@ impl<'a> FunctionEmitter<'a> {
         for method in methods {
             let function = self.bundle.ir.function(method.function)?;
             let capture_overrides =
-                self.push_anonymous_interface_capture_fields(&mut out, method, function)?;
+                self.push_anonymous_interface_capture_fields(&mut out, method, function, None)?;
 
             out.push_str("        @Override\n");
             out.push_str("        public ");
@@ -3240,16 +3275,143 @@ impl<'a> FunctionEmitter<'a> {
         Some(out)
     }
 
+    fn emit_anonymous_object(
+        &self,
+        ty: &ir::Type,
+        fields: &[ir::NamedOperand],
+        methods: &[ir::AnonymousInterfaceMethod],
+        field_initializers: Option<&[String]>,
+        method_capture_initializers: Option<&[Vec<String>]>,
+    ) -> Option<String> {
+        let ir::Type::Named { name, .. } = ty else {
+            return None;
+        };
+        let type_def = self.type_def(name)?;
+        let mut out = format!("new {}() {{\n", self.names.named_type(name));
+
+        for (field_index, field) in fields.iter().enumerate() {
+            let field_def = type_def
+                .fields
+                .iter()
+                .find(|item| item.name == field.name)?;
+            let java_field = format!("__field_{}", java_member_name(&field.name));
+            let value = field_initializers
+                .and_then(|values| values.get(field_index).cloned())
+                .unwrap_or(self.coerce_to_target_type(
+                    self.emit_operand(&field.value)?,
+                    self.operand_type(&field.value),
+                    &field_def.ty,
+                ));
+            out.push_str("        private final ");
+            out.push_str(&self.names.value_type(&field_def.ty));
+            out.push(' ');
+            out.push_str(&java_field);
+            out.push_str(" = ");
+            out.push_str(&value);
+            out.push_str(";\n\n        @Override\n        public ");
+            out.push_str(&self.names.return_type(&field_def.ty));
+            out.push(' ');
+            out.push_str(&java_member_name(&field.name));
+            out.push_str("() { return ");
+            out.push_str(&java_field);
+            out.push_str("; }\n");
+        }
+
+        for (method_index, method) in methods.iter().enumerate() {
+            let function = self.bundle.ir.function(method.function)?;
+            let capture_overrides = self.push_anonymous_interface_capture_fields(
+                &mut out,
+                method,
+                function,
+                method_capture_initializers
+                    .and_then(|values| values.get(method_index))
+                    .map(Vec::as_slice),
+            )?;
+            out.push_str("        @Override\n        public ");
+            push_function_signature_named(&mut out, function, self.names, &method.name);
+            out.push_str(
+                &FunctionEmitter::new(self.bundle, function, self.names)
+                    .with_capture_overrides(capture_overrides)
+                    .emit_body()?,
+            );
+        }
+
+        out.push_str("    }");
+        Some(out)
+    }
+
+    fn emit_anonymous_object_capture_snapshots(
+        &self,
+        out: &mut String,
+        fields: &[ir::NamedOperand],
+        methods: &[ir::AnonymousInterfaceMethod],
+    ) -> Option<(Vec<String>, Vec<Vec<String>>)> {
+        let mut field_names = Vec::new();
+        for (index, field) in fields.iter().enumerate() {
+            let name = format!("__object_field_value_{}_{}", self.function.id.0, index);
+            let ty = self.operand_type(&field.value).unwrap_or(ir::Type::Unknown);
+            out.push_str("                    final ");
+            out.push_str(&self.local_value_type(&ty));
+            out.push(' ');
+            out.push_str(&name);
+            out.push_str(" = ");
+            out.push_str(&self.emit_operand(&field.value)?);
+            out.push_str(";\n");
+            field_names.push(name);
+        }
+
+        let mut method_names = Vec::new();
+        for (method_index, method) in methods.iter().enumerate() {
+            let function = self.bundle.ir.function(method.function)?;
+            let capture_locals = function
+                .locals
+                .iter()
+                .filter(|local| {
+                    matches!(local.kind, ir::LocalKind::Capture)
+                        && !(matches!(function.kind, ir::FunctionKind::Method { .. })
+                            && local.name == "this")
+                })
+                .collect::<Vec<_>>();
+            if capture_locals.len() != method.captures.len() {
+                return None;
+            }
+            let mut names = Vec::new();
+            for (capture_index, (local, capture)) in
+                capture_locals.iter().zip(&method.captures).enumerate()
+            {
+                let name = format!(
+                    "__object_method_capture_{}_{}_{}",
+                    self.function.id.0, method_index, capture_index
+                );
+                out.push_str("                    final ");
+                out.push_str(&self.local_value_type(&local.ty));
+                out.push(' ');
+                out.push_str(&name);
+                out.push_str(" = ");
+                out.push_str(&self.emit_capture_initializer(capture)?);
+                out.push_str(";\n");
+                names.push(name);
+            }
+            method_names.push(names);
+        }
+        Some((field_names, method_names))
+    }
+
     fn push_anonymous_interface_capture_fields(
         &self,
         out: &mut String,
         method: &ir::AnonymousInterfaceMethod,
         function: &ir::Function,
+        capture_initializers: Option<&[String]>,
     ) -> Option<HashMap<ir::LocalId, String>> {
         let capture_locals = function
             .locals
             .iter()
-            .filter(|local| matches!(local.kind, ir::LocalKind::Capture))
+            .filter(|local| {
+                matches!(local.kind, ir::LocalKind::Capture)
+                    && !(matches!(function.kind, ir::FunctionKind::Method { .. })
+                        && local.name == "this")
+            })
             .collect::<Vec<_>>();
         if capture_locals.len() != method.captures.len() {
             return None;
@@ -3268,7 +3430,11 @@ impl<'a> FunctionEmitter<'a> {
             out.push(' ');
             out.push_str(&field_name);
             out.push_str(" = ");
-            out.push_str(&self.emit_capture_initializer(capture)?);
+            if let Some(initializer) = capture_initializers.and_then(|values| values.get(index)) {
+                out.push_str(initializer);
+            } else {
+                out.push_str(&self.emit_capture_initializer(capture)?);
+            }
             out.push_str(";\n");
             overrides.insert(local.id, field_name);
         }
@@ -3439,6 +3605,17 @@ impl<'a> FunctionEmitter<'a> {
                     Some(ir::Type::Tuple(_)) => {
                         let accessor = tuple_accessor_name(name)?;
                         Some(format!("{base_expr}.{accessor}()"))
+                    }
+                    Some(ir::Type::Named {
+                        name: ref type_name,
+                        ..
+                    }) if self.bundle.ir.types.iter().any(|ty| {
+                        ty.name == *type_name
+                            && (ty.kind == TypeKind::Interface || is_anonymous_object_type(ty))
+                            && ty.fields.iter().any(|field| field.name == *name)
+                    }) =>
+                    {
+                        Some(format!("{base_expr}.{}()", java_member_name(name)))
                     }
                     _ => Some(format!("{base_expr}.{}", java_member_name(name))),
                 }
@@ -4031,6 +4208,7 @@ impl<'a> FunctionEmitter<'a> {
             ir::RValue::AnonymousInterface { interfaces, .. } if interfaces.len() == 1 => {
                 interfaces.first().cloned()
             }
+            ir::RValue::AnonymousObject { ty, .. } => Some(ty.clone()),
             ir::RValue::Cast { ty, .. } => Some(ty.clone()),
             ir::RValue::Field { base, name } => {
                 let base_ty = self.operand_type(base)?;
@@ -4468,7 +4646,7 @@ impl JavaNames {
     fn is_java_single_type(&self, name: &str) -> bool {
         self.java_type_kinds
             .get(name)
-            .is_some_and(|kind| *kind == TypeKind::Single)
+            .is_some_and(|kind| *kind == TypeKind::Object)
     }
 
     fn java_constructor_type_args(&self, name: &str) -> &'static str {
@@ -4589,7 +4767,7 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Float" => Some("Double".to_string()),
         "Str" => Some("String".to_string()),
         "Rune" => Some("Integer".to_string()),
-        "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "SingleType"
+        "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
         | "AnnotationType" => Some("lume.core.LumeType".to_string()),
         "TypeKind" => Some("lume.core.LumeTypeKind".to_string()),
         "AnnotationValue" => Some("lume.core.LumeAnnotation".to_string()),
@@ -4610,7 +4788,7 @@ fn is_reflection_type(name: &str) -> bool {
             | "ShapeType"
             | "EnumType"
             | "InterfaceType"
-            | "SingleType"
+            | "ObjectType"
             | "AnnotationType"
     )
 }

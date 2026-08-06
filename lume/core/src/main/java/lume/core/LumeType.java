@@ -124,15 +124,15 @@ public final class LumeType {
                 List.of(annotations));
     }
 
-    public static LumeType singleType(
+    public static LumeType objectType(
             String name,
             String qualifiedName,
             LumeField[] fields,
             LumeMethod[] methods) {
-        return singleType(name, qualifiedName, fields, methods, new LumeAnnotation[] {});
+        return objectType(name, qualifiedName, fields, methods, new LumeAnnotation[] {});
     }
 
-    public static LumeType singleType(
+    public static LumeType objectType(
             String name,
             String qualifiedName,
             LumeField[] fields,
@@ -141,7 +141,7 @@ public final class LumeType {
         return new LumeType(
                 name,
                 qualifiedName,
-                LumeTypeKind.Single,
+                LumeTypeKind.Object,
                 List.of(fields),
                 List.of(methods),
                 List.of(),
@@ -197,8 +197,8 @@ public final class LumeType {
         return kind == LumeTypeKind.Interface ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
     }
 
-    public Option<LumeType> asSingle() {
-        return kind == LumeTypeKind.Single ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
+    public Option<LumeType> asObject() {
+        return kind == LumeTypeKind.Object ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
     }
 
     public Option<LumeType> asAnnotation() {

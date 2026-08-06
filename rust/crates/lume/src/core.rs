@@ -56,6 +56,18 @@ pub struct MethodDecl {
     pub span: Span,
 }
 
+/// A field in an anonymous object after its initializer has been desugared.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldDecl {
+    pub annotations: Vec<Annotation>,
+    pub visibility: Visibility,
+    pub mutable: bool,
+    pub name: String,
+    pub ty: Option<TypeRef>,
+    pub initializer: Option<Expr>,
+    pub span: Span,
+}
+
 /// The body of a callable, either as a block or a single expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CallableBody {
@@ -333,6 +345,11 @@ pub enum Expr {
         methods: Vec<MethodDecl>,
         span: Span,
     },
+    AnonymousObject {
+        fields: Vec<FieldDecl>,
+        methods: Vec<MethodDecl>,
+        span: Span,
+    },
     Try {
         value: Box<Expr>,
         span: Span,
@@ -425,6 +442,7 @@ impl Expr {
             | Expr::RecordUpdate { span, .. }
             | Expr::RecordLiteral { span, .. }
             | Expr::AnonymousInterface { span, .. }
+            | Expr::AnonymousObject { span, .. }
             | Expr::Try { span, .. }
             | Expr::ExtractOr { span, .. }
             | Expr::Return { span, .. }

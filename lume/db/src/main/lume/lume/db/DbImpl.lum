@@ -3,11 +3,11 @@ module lume/db
 use DbApi/{BoundExec, Database, Exec, Query, Row, RowQuery, Transaction}
 use lume/db/{DbError, JdbcDatabase, JdbcRow, JdbcRowDecoder, JdbcRunner, JdbcTransaction}
 
-hidden single JdbcRowDecoderCache {
+hidden object JdbcRowDecoderCache {
     hidden var decoders Map[Str, JdbcRowDecoder] = Map()
 }
 
-impl single JdbcRowDecoderCache {
+impl object JdbcRowDecoderCache {
     def decoder(targetType Type[_]) Result[JdbcRowDecoder, DbError] {
         key Str = this.key(targetType)
 

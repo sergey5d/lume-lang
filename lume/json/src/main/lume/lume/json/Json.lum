@@ -37,13 +37,13 @@ enum JsonValue {
     }
 }
 
-single Json {}
+object Json {}
 
 impl JsonValue {
     def stringify() Str = JsonRuntime.stringify(this)
 }
 
-impl single Json {
+impl object Json {
     def str(value Str) JsonValue = JsonRuntime.str(value)
 
     def int(value Int) JsonValue = JsonRuntime.int(value)

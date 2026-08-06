@@ -256,6 +256,26 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             methods: methods.iter().map(desugar_method_decl).collect(),
             span: *span,
         },
+        ast::Expr::AnonymousObject {
+            fields,
+            methods,
+            span,
+        } => core::Expr::AnonymousObject {
+            fields: fields
+                .iter()
+                .map(|field| core::FieldDecl {
+                    annotations: field.annotations.clone(),
+                    visibility: field.visibility,
+                    mutable: field.mutable,
+                    name: field.name.clone(),
+                    ty: field.ty.clone(),
+                    initializer: field.initializer.as_ref().map(desugar_expr),
+                    span: field.span,
+                })
+                .collect(),
+            methods: methods.iter().map(desugar_method_decl).collect(),
+            span: *span,
+        },
         ast::Expr::Try { value, span } => core::Expr::Try {
             value: Box::new(desugar_expr(value)),
             span: *span,

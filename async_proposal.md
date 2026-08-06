@@ -79,6 +79,6 @@ Mental model:
 
 Open questions:
 
-- Whether `keeper` is a new declaration kind or sugar over `single` plus synchronization.
+- Whether `keeper` is a new declaration kind or sugar over a named `object` plus synchronization.
 - Whether keeper methods may be async/forking themselves.
 - Whether keeper state is always process-local or can later be backed by a distributed implementation.

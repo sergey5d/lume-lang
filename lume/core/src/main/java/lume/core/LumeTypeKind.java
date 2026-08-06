@@ -5,7 +5,7 @@ public enum LumeTypeKind {
     Shape,
     Enum,
     Interface,
-    Single,
+    Object,
     Annotation,
     Primitive,
     Tuple,

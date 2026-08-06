@@ -215,7 +215,7 @@ Rules:
 
 - `typeOf[T]` is a built-in type metadata operator, not an index operation
 - `runtimeType` is available as a read-only synthetic field on values
-- `TypeKind` includes `Class`, `Shape`, `Enum`, `Interface`, `Single`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
+- `TypeKind` includes `Class`, `Shape`, `Enum`, `Interface`, `Object`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
 - field, method, parameter, and enum-case metadata are runtime values with methods such as `name()`, `fieldType()`, `isHidden()`, `params()`, and `returnType()`
 - annotation lookup is typed and reified: use `metadata.hasAnnotation[Route]()` and `metadata.annotation[Route]()`
 - reflective construction is supported for class and named shape metadata through `construct(args...)`
@@ -339,7 +339,7 @@ impl PrimitiveSpec {
 ```
 
 `spec` provides `Spec` and primitive `shouldBe` extension methods. A failed
-`shouldBe` panics. `lume test file.lum` discovers every class or single that
+`shouldBe` panics. `lume test file.lum` discovers every class or named object that
 implements `Spec`, constructs it, and calls `it()`.
 
 ## Top-Level Declarations
@@ -375,7 +375,7 @@ annotation Metadata {
 
 routePath Str = "/status"
 
-single Routes {
+object Routes {
     health Str = "/health"
 }
 
@@ -386,7 +386,7 @@ def status() Str = "ok"
 def health() Str = "ok"
 
 @Route { path: Routes.health }
-def healthFromSingle() Str = "ok"
+def healthFromObject() Str = "ok"
 
 @Route { path: "/health", method: "POST" }
 def health2() Str = "ok"
@@ -404,22 +404,22 @@ def health2() Str = "ok"
 def richMetadata() Str = "ok"
 ```
 
-`single Routes { ... }` declares one singleton value named `Routes`, so `Routes.health`
-is ordinary field access on that stable singleton value.
+`object Routes { ... }` declares one shared value named `Routes`, so `Routes.health`
+is ordinary field access on that stable object value.
 
 Annotation arguments are compile-time metadata values. They may only be literals, stable constants, aggregate literals made from allowed values, or constant expressions composed from allowed values:
 
 - immutable top-level constants, including constants brought in with `use`
-- immutable fields on `single` values, such as `Routes.health`; this is allowed because `single Name { ... }` declares the singleton value `Name`
+- immutable fields on named `object` values, such as `Routes.health`
 - immutable constants through a module alias, such as `routes.healthPath`
 - enum cases, such as `RouteVisibility.External`
 - arithmetic, comparison, boolean, and string-concatenation expressions whose operands are also annotation-safe
 
-Calls, constructors, indexing, mutable single fields, ordinary instance field reads, `try`, `for ... yield`, `match`, `if`, lambdas, and blocks are rejected in annotation arguments. Top-level mutable bindings are not allowed at all, so they are rejected before annotation argument checking.
+Calls, constructors, indexing, mutable object fields, ordinary instance field reads, `try`, `for ... yield`, `match`, `if`, lambdas, and blocks are rejected in annotation arguments. Top-level mutable bindings are not allowed at all, so they are rejected before annotation argument checking.
 
 Supported annotation targets:
 
-- top-level `def`, `annotation`, `interface`, `class`, `shape`, `single`, `enum`
+- top-level `def`, `annotation`, `interface`, `class`, `shape`, `object`, `enum`
 - fields
 - methods
 - interface methods
@@ -440,7 +440,7 @@ Top-level forms:
 - `interface`
 - `class`
 - `shape`
-- `single`
+- `object`
 - `enum`
 - `ext TypeName`
 - `name Type = expr`
@@ -450,7 +450,7 @@ Top-level forms:
 - `hidden interface`
 - `hidden class`
 - `hidden shape`
-- `hidden single`
+- `hidden object`
 - `hidden enum`
 
 Examples:
@@ -481,7 +481,7 @@ hidden shape InternalPoint {
     y Int
 }
 
-single Counter {
+object Counter {
     var count Int = 0
 }
 
@@ -524,7 +524,7 @@ hidden internalSeed Int = 0
 ```
 
 Top-level mutable bindings are not allowed. Mutable module state must live
-inside a `single`, class instance, or function local.
+inside a named `object`, class instance, or function local.
 
 Fields without initializers are only valid in class-like field declarations:
 
@@ -535,7 +535,7 @@ class Box {
 }
 ```
 
-`hidden` fields in classes and singles may infer their type from an initializer:
+`hidden` fields in classes and named objects may infer their type from an initializer:
 
 ```txt
 class Box {
@@ -543,12 +543,12 @@ class Box {
     hidden var hits = 0
 }
 
-single Greeter {
+object Greeter {
     hidden hello = "Hello"
 }
 ```
 
-Visible class fields, shape fields, enum fields, and single fields still require explicit field types.
+Visible class fields, shape fields, enum fields, and object fields still require explicit field types.
 
 ## Assignment and Update
 
@@ -873,6 +873,8 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 Type { field: value }            # brace field construction or enum field payload
 call { x => ... }                # trailing lambda
 Interface with Other { method(...) ... } # anonymous interface implementation
+object { field Type = value; method() Type = value } # anonymous object
+object with Interface { method() Type = value } # explicit anonymous interface implementation
 new(field Type)                  # constructor declaration
 shape(value, other)              # contextual anonymous-shape positional construction
 ```
@@ -1100,8 +1102,8 @@ mapped = maybe.map(value => value + 1)
 leftMapped = either.mapLeft(error => error.toStr())
 ```
 
-Classes, enums, and singles can declare methods in their declaration bodies.
-Classes, shapes, enums, and singles can also attach behavior through top-level
+Classes, enums, and named objects can declare methods in their declaration bodies.
+Classes, shapes, enums, and named objects can also attach behavior through top-level
 `impl` blocks. Shape bodies remain data-only, so shape methods must use
 `impl ShapeName { ... }`:
 
@@ -1131,7 +1133,7 @@ Extension rules:
 
 - extension blocks use `ext TypeName { method(...) ... }`; `def` is still accepted but optional
 - extension targets may be classes, shapes, enums, interfaces, or built-in primitive types such as `Int`, `Float`, `Bool`, `Str`, and `Rune`
-- extension targets cannot be singles, annotations, or enum cases
+- extension targets cannot be named objects, annotations, or enum cases
 - extension blocks cannot declare constructors
 - a module may declare multiple `ext` blocks for the same target type
 - extension methods use the same call syntax as regular methods
@@ -1153,7 +1155,7 @@ Custom constructors are class-only and use a dedicated `new(...)` declaration in
 - `new(...)` declares constructor inputs
 - `new(...) { body }` declares a block-bodied constructor
 - `new(...) = expression` declares an expression-bodied constructor
-- shape, enum, enum case, single, annotation, and interface declarations cannot define custom `new` constructors
+- shape, enum, enum case, object, annotation, and interface declarations cannot define custom `new` constructors
 - constructor parameters use `name Type`, with optional defaults such as `age Int = 0`
 - `Type { field: value }` constructs by matching constructor parameters by field name
 - `Type(value)` constructs by filling constructor parameters positionally by declaration order
@@ -1171,10 +1173,10 @@ Custom constructors are class-only and use a dedicated `new(...)` declaration in
 - class call sites use braces for construction fields, for example `Person { name: "Ada", age: 10 }`
 - class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
 - `this` is the instance receiver
-- instance fields on classes, enums, and singles may be accessed bare when they are not shadowed
+- instance fields on classes, enums, and named objects may be accessed bare when they are not shadowed
 - use `this.field` when a parameter/local shadows a field, for example `this.age`
 - member order is storage first, constructors next, methods last
-- class, shape, enum, and single bodies list storage fields before behavior
+- class, shape, enum, and object bodies list storage fields before behavior
 - enum cases count as enum storage and must appear before enum methods
 - class impl blocks list all `new` constructors before ordinary methods
 
@@ -1330,7 +1332,7 @@ dtos = users.map(this.mapUser)
 # same as: users.map(user => this.mapUser(user))
 
 dtos = users.map(User.toDto)
-# single method reference
+# named object method reference
 ```
 
 Supported callable references:
@@ -1338,7 +1340,7 @@ Supported callable references:
 - top-level function name
 - bound instance method, such as `mapper.mapUser`
 - bound `this` method, such as `this.mapUser`
-- bound `single` method, such as `User.toDto`
+- bound named-object method, such as `User.toDto`
 
 Fields still win over methods when names collide. A member field whose value is
 already a function is passed as that function value, not eta-expanded as a
@@ -1474,7 +1476,7 @@ Rules:
 - value-producing tail forms include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
 
-## Classes, Shapes, Singles, Interfaces, Enums
+## Classes, Shapes, Objects, Interfaces, Enums
 
 Class:
 
@@ -1488,20 +1490,20 @@ impl Box[T] {
 }
 ```
 
-When a class or single implements an interface method inside its body or an
+When a class or named object implements an interface method inside its body or an
 `impl ... { ... }` block, it uses an ordinary method declaration. `def` is
 optional.
 
-Singleton:
+Named object:
 
 ```txt
-single MathBox {
+object MathBox {
     value Int = 5
 
     valuePlusOne() Int = this.value + 1
 }
 
-impl single MathBox {
+impl object MathBox {
     double(value Int) Int = value * 2
 }
 
@@ -1509,11 +1511,44 @@ box = MathBox
 answer = box.valuePlusOne()
 ```
 
-`single Name { ... }` declares both a singleton type `Name` and one singleton value `Name`.
-The expression `Name` evaluates to that singleton value, so singles can be passed to functions, stored in locals, and called through later like any other value.
-Singles cannot be constructed with `Name()` or `Name {}`; reference `Name` directly.
+`object Name { ... }` declares one named object type and one value `Name`.
+The expression `Name` evaluates to that value, so named objects can be passed to functions, stored in locals, and called through later like any other value.
+Named objects cannot be constructed with `Name()` or `Name {}`; reference `Name` directly.
 
-`impl single Name { ... }` attaches methods only to an explicit `single Name { ... }` declaration. It never creates the singleton by itself; declare `single Name {}` first when no fields are needed.
+`impl object Name { ... }` attaches methods only to an explicit `object Name { ... }` declaration. It never creates the object by itself; declare `object Name {}` first when no fields are needed.
+
+Anonymous objects use an expression form:
+
+```txt
+value = object {
+    count Int = 4
+    label Str = "items"
+
+    describe() Str = this.label + ": " + this.count.toStr()
+}
+```
+
+Rules:
+
+- every anonymous-object field has an initializer
+- anonymous-object fields are immutable; use a named class for owned mutable state
+- fields appear before methods
+- anonymous objects cannot declare `new` constructors
+- fields and methods are statically typed and use ordinary member access
+- `this.field` and unqualified `field` are both available inside methods
+
+To explicitly implement an interface, use either the interface-led form or the
+equivalent object-led form:
+
+```txt
+greeter Greeter = Greeter {
+    greet() Str = "hello"
+}
+
+other Greeter = object with Greeter {
+    greet() Str = "hello"
+}
+```
 
 Another class example:
 
@@ -2746,14 +2781,14 @@ Supported today:
 - `hidden` on top-level `def`
 - `hidden` on top-level immutable bindings
 - `hidden` on top-level `interface`
-- `hidden` on top-level `class` / `shape` / `single` / `enum`
+- `hidden` on top-level `class` / `shape` / `object` / `enum`
 - `hidden` on fields
 - `hidden` on methods
 
 Default visibility is public. There is no `public` keyword.
 Use `hidden` for private top-level functions, constants, types, fields, and methods.
 Top-level mutable bindings are not allowed; mutable module state must live inside
-`single`, class instances, or function locals.
+named objects, class instances, or function locals.
 
 ## Notes
 

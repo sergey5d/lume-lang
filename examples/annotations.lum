@@ -29,16 +29,16 @@ annotation Metadata {
 
 routePath Str = "/health"
 
-single Routes {
+object Routes {
     health Str = "/health"
 }
 
-single LocalRoutes {
+object LocalRoutes {
     status Str = "/status"
 }
 
-single AnnotationConstants {
-    label Str = "from-single"
+object AnnotationConstants {
+    label Str = "from-object"
 }
 
 @Metadata {

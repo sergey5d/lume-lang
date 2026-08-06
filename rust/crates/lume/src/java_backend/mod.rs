@@ -263,7 +263,7 @@ fn collect_java_external_symbols_from_import(
     source_path: &Path,
     discovered: &mut JavaExternalSymbols,
 ) {
-    if import.single_name.is_some() || import.wildcard || import.symbols.is_empty() {
+    if import.object_name.is_some() || import.wildcard || import.symbols.is_empty() {
         return;
     }
     let package = import.path.replace('/', ".");
@@ -516,7 +516,7 @@ fn java_library_imports(
             names.dedup();
             ImportDecl {
                 path,
-                single_name: None,
+                object_name: None,
                 wildcard: false,
                 symbols: names
                     .into_iter()
@@ -1386,7 +1386,7 @@ fn parse_javap_lume_kind(output: &str) -> Option<TypeKind> {
         "annotation" => Some(TypeKind::Annotation),
         "class" => Some(TypeKind::Class),
         "shape" => Some(TypeKind::Record),
-        "single" => Some(TypeKind::Single),
+        "object" => Some(TypeKind::Object),
         "interface" => Some(TypeKind::Interface),
         "enum" => Some(TypeKind::Enum),
         _ => None,
@@ -2390,7 +2390,7 @@ class RuntimeBox {
     pair (Int, Str)
 }
 
-single Routes {
+object Routes {
     health Str = "/health"
 
     def healthPath() Str = this.health
@@ -2505,10 +2505,10 @@ def main() Unit {
         assert!(runtime_box.contains("lume.core.Either<String, Long> either;"));
         assert!(runtime_box.contains("lume.core.Tuple2<Long, String> pair;"));
 
-        let single = fs::read_to_string(out.join("demo/app/Routes.java")).expect("read single");
-        assert!(single.contains("final class Routes"));
-        assert!(single.contains("static final Routes INSTANCE"));
-        assert!(single.contains("String healthPath()"));
+        let object = fs::read_to_string(out.join("demo/app/Routes.java")).expect("read object");
+        assert!(object.contains("final class Routes"));
+        assert!(object.contains("static final Routes INSTANCE"));
+        assert!(object.contains("String healthPath()"));
 
         let interface =
             fs::read_to_string(out.join("demo/app/Named.java")).expect("read interface");
@@ -3842,20 +3842,20 @@ def err() Result[HttpResponse, HttpError] =
     }
 
     #[test]
-    fn emits_named_single_calls_from_reified_methods() {
-        let temp = temp_path("lume-java-single-reified-call");
-        let source = temp.join("single_reified.lum");
+    fn emits_named_object_calls_from_reified_methods() {
+        let temp = temp_path("lume-java-object-reified-call");
+        let source = temp.join("object_reified.lum");
         let out = temp.join("out");
         fs::create_dir_all(&temp).expect("create temp dir");
         fs::write(
             &source,
             r#"
-module demo/single_reified
+module demo/object_reified
 
-single Cache {
+object Cache {
 }
 
-impl single Cache {
+impl object Cache {
     def label(targetType Type[_]) Str =
         targetType.name().getOr("?")
 }
@@ -3876,7 +3876,7 @@ impl Reader {
 
         assert!(result.diagnostics.is_empty());
         let reader =
-            fs::read_to_string(out.join("demo/single_reified/Reader.java")).expect("read reader");
+            fs::read_to_string(out.join("demo/object_reified/Reader.java")).expect("read reader");
         assert!(!reader.contains("UnsupportedOperationException"));
         assert!(reader.contains("Cache.INSTANCE.label"));
         assert!(reader.contains("__type_T_1"));
@@ -3885,21 +3885,21 @@ impl Reader {
     }
 
     #[test]
-    fn emits_single_field_initializers() {
-        let temp = temp_path("lume-java-single-field-init");
-        let source = temp.join("single_field_init.lum");
+    fn emits_object_field_initializers() {
+        let temp = temp_path("lume-java-object-field-init");
+        let source = temp.join("object_field_init.lum");
         let out = temp.join("out");
         fs::create_dir_all(&temp).expect("create temp dir");
         fs::write(
             &source,
             r#"
-module demo/single_field_init
+module demo/object_field_init
 
-single Cache {
+object Cache {
     hidden var values Map[Str, Str] = Map()
 }
 
-impl single Cache {
+impl object Cache {
     def remember(key Str, value Str) Unit {
         updated Map[Str, Str] = this.values.put(key, value)
         this.values := updated
@@ -3913,7 +3913,7 @@ impl single Cache {
 
         assert!(result.diagnostics.is_empty());
         let cache =
-            fs::read_to_string(out.join("demo/single_field_init/Cache.java")).expect("read cache");
+            fs::read_to_string(out.join("demo/object_field_init/Cache.java")).expect("read cache");
         assert!(!cache.contains("UnsupportedOperationException"));
         assert!(cache.contains("this.values ="));
         assert!(cache.contains("lume.core.LumeMap"));

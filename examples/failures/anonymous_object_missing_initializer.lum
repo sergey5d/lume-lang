@@ -1,0 +1,6 @@
+# EXPECT_ERROR:
+# .*anonymous object field 'count' requires an initializer.*
+
+value = object {
+    count Int
+}

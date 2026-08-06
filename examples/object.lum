@@ -9,26 +9,22 @@ class B {
     size Int
 }
 
-single A {
+object A {
     var count Int = 2
 
-    def value() Int = this.count
+    value() Int = this.count
 }
 
-impl single A {
-    # explicit factory method
-    def create(sizeValue Int) B = B { size: sizeValue }
+impl object A {
+    create(sizeValue Int) B = B { size: sizeValue }
+    create(str Str) B = B { size: 1 }
 
-    # explicit factory method
-    def create(str Str) B = B { size: 1 }
-
-    def test(a Int) Int {
+    test(a Int) Int = {
         return a + this.value()
     }
 }
 
-def main() Int {
-
+main() Int = {
     b1 B = A.create(5)
     b2 B = A.create("string of strings")
 

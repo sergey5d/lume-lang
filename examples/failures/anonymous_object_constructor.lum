@@ -1,0 +1,7 @@
+# EXPECT_ERROR:
+# .*anonymous objects cannot declare constructors; initialize fields in the object body.*
+
+value = object {
+    count Int = 2
+    new() = ()
+}

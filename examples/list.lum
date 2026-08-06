@@ -21,10 +21,10 @@
 # size 3
 # spread 0 4 7 7
 
-single Descending with Ordering[Int] {
+object Descending with Ordering[Int] {
 }
 
-impl single Descending {
+impl object Descending {
     def compare(left Int, right Int) Int = right - left
 }
 

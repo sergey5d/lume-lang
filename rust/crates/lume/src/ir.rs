@@ -584,6 +584,11 @@ pub enum RValue {
         interfaces: Vec<Type>,
         methods: Vec<AnonymousInterfaceMethod>,
     },
+    AnonymousObject {
+        ty: Type,
+        fields: Vec<NamedOperand>,
+        methods: Vec<AnonymousInterfaceMethod>,
+    },
     RecordUpdate {
         base: Operand,
         patch: Operand,

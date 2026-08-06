@@ -13,17 +13,17 @@
 # two-pointer sample2 0 0 0
 # 0
 
-single Ascending with Ordering[Int] {
+object Ascending with Ordering[Int] {
 }
 
-impl single Ascending {
+impl object Ascending {
     def compare(left Int, right Int) Int = left - right
 }
 
-single Solution {
+object Solution {
 }
 
-impl single Solution {
+impl object Solution {
     def sol2(nums List[Int]) List[List[Int]] {
         nums.sort(Ascending)
 

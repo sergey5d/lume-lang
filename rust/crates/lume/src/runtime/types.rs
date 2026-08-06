@@ -339,7 +339,7 @@ impl RuntimeProgram {
             TypeKind::Record,
             TypeKind::Enum,
             TypeKind::Interface,
-            TypeKind::Single,
+            TypeKind::Object,
             TypeKind::Annotation,
         ]
         .into_iter()

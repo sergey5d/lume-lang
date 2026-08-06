@@ -1,7 +1,7 @@
 # EXPECT:
 # box 3
 # box2 7
-# single Hello 2
+# object Hello 2
 # 0
 
 class CounterBox {
@@ -17,11 +17,11 @@ impl CounterBox {
     def total() Int = this.hits
 }
 
-single Greeter {
+object Greeter {
     hidden hello = "Hello"
 }
 
-impl single Greeter {
+impl object Greeter {
     def greet(times Int) Str = this.hello + " " + times
 }
 
@@ -42,6 +42,6 @@ def main() Int {
     box2.bump()
     println("box2 " + box2.total())
 
-    println("single " + Greeter.greet(2))
+    println("object " + Greeter.greet(2))
     0
 }

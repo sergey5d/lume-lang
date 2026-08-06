@@ -20,10 +20,10 @@ impl B {
     def label() Str = "B"
 }
 
-single C {
+object C {
 }
 
-impl single C {
+impl object C {
     def bump(value Int) Int = value + 1
 
     def print(value Int) Int = value + 10
