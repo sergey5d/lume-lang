@@ -7,7 +7,7 @@ class Bad {
 }
 
 impl Bad {
-    new(vararg left [Int], vararg right [Int]) {
+    new(left [Int] vararg, right [Int] vararg) {
         this.left = left
         this.right = right
     }

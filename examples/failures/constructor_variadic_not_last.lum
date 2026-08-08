@@ -7,7 +7,7 @@ class Bad {
 }
 
 impl Bad {
-    new(vararg items [Int], suffix Int) {
+    new(items [Int] vararg, suffix Int) {
         this.items = items
         this.suffix = suffix
     }

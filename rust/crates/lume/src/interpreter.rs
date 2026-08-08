@@ -6319,7 +6319,7 @@ mod tests {
             }
 
             impl Path {
-                new(vararg segments [Str]) {
+                new(segments [Str] vararg) {
                     this.segments = segments
                 }
 

@@ -41,7 +41,17 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         if !self.at(TokenKind::RParen) {
             loop {
-                let (variadic, modifier_start) = self.parse_param_modifiers();
+                let prefix_vararg = if self.match_keyword(Keyword::Vararg) {
+                    let span = self.previous_span();
+                    self.diagnostics.push(Diagnostic::error(
+                        "invalid_variadic_param",
+                        "vararg must follow the parameter type, like 'args [T] vararg'",
+                        span,
+                    ));
+                    Some(span)
+                } else {
+                    None
+                };
                 let (name, start) = self.expect_identifier("expected parameter name")?;
                 let (lazy, ty) = if self.match_token(TokenKind::FatArrow) {
                     (true, Some(self.parse_type_ref()?))
@@ -50,21 +60,20 @@ impl<'a> Parser<'a> {
                 } else {
                     (false, None)
                 };
-                if self.match_keyword(Keyword::Vararg) {
-                    self.diagnostics.push(Diagnostic::error(
-                        "invalid_variadic_param",
-                        "vararg must appear before the parameter name, like 'vararg args [T]'",
-                        self.previous_span(),
-                    ));
-                }
-                let span = start.cover(ty.as_ref().map(TypeRef::span).unwrap_or(start));
+                let postfix_vararg = self.match_keyword(Keyword::Vararg);
+                let postfix_span = postfix_vararg.then(|| self.previous_span());
+                let variadic = prefix_vararg.is_some() || postfix_vararg;
+                let end = postfix_span
+                    .or_else(|| ty.as_ref().map(TypeRef::span))
+                    .unwrap_or(start);
+                let span = prefix_vararg.unwrap_or(start).cover(end);
                 params.push(Param {
                     name,
                     ty,
                     initializer: None,
                     variadic,
                     lazy,
-                    span: modifier_start.unwrap_or(span).cover(span),
+                    span,
                 });
                 self.skip_newlines();
                 if !self.match_token(TokenKind::Comma) {
@@ -75,20 +84,6 @@ impl<'a> Parser<'a> {
         }
         self.consume(TokenKind::RParen, "expected ')' after parameters")?;
         Some(params)
-    }
-
-    pub(super) fn parse_param_modifiers(&mut self) -> (bool, Option<Span>) {
-        let mut variadic = false;
-        let mut start = None;
-        loop {
-            if self.match_keyword(Keyword::Vararg) {
-                start.get_or_insert(self.previous_span());
-                variadic = true;
-            } else {
-                break;
-            }
-        }
-        (variadic, start)
     }
 
     pub(super) fn parse_optional_return_type(&mut self) -> Option<TypeRef> {

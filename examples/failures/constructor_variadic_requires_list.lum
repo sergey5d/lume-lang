@@ -6,7 +6,7 @@ class Bad {
 }
 
 impl Bad {
-    new(vararg items Int) {
+    new(items Int vararg) {
         this.items = items
     }
 }

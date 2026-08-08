@@ -22,7 +22,7 @@
 # - `this { field: value }` delegates to another constructor by construction fields
 # - positional construction fills constructor parameters from the beginning in order
 # - named construction can omit any constructor parameter that has a default
-# - a trailing `vararg items [T]` constructor parameter receives positional varargs as `[T]`
+# - a trailing `items [T] vararg` constructor parameter receives positional varargs as `[T]`
 # - construction fields can pass a vararg as a single `[T]` value
 # - defaulted varargs are used when the vararg is omitted
 
@@ -99,7 +99,7 @@ class Path {
 }
 
 impl Path {
-    new(vararg segments [Str] = ["default"]) {
+    new(segments [Str] vararg = ["default"]) {
         this.segments = segments
     }
 

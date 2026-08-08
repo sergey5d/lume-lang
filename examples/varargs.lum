@@ -9,7 +9,7 @@
 # ctor named config 2 etc/hosts
 # ctor default tmp 1 default
 
-def joinWords(separator Str, vararg words [Str]) Str {
+def joinWords(separator Str, words [Str] vararg) Str {
     var result = ""
     var first = true
     for word <- words {
@@ -23,7 +23,7 @@ def joinWords(separator Str, vararg words [Str]) Str {
     result
 }
 
-def describeTags(label Str, vararg tags [Str]) Str {
+def describeTags(label Str, tags [Str] vararg) Str {
     first = tags.get(0).getOr("none")
     label + " " + tags.size() + " " + first
 }
@@ -37,7 +37,7 @@ impl Reporter {
         this.prefix = prefix
     }
 
-    def line(name Str, vararg tags [Str]) Str {
+    def line(name Str, tags [Str] vararg) Str {
         this.prefix + ":" + name + "|" + tags.size() + "|" + joinWords(separator = ",", words = tags)
     }
 }
@@ -48,7 +48,7 @@ class Path {
 }
 
 impl Path {
-    new(label Str, vararg segments [Str] = ["default"]) {
+    new(label Str, segments [Str] vararg = ["default"]) {
         this.label = label
         this.segments = segments
     }

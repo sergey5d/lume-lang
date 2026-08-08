@@ -818,7 +818,19 @@ impl User {
 }
 
 #[test]
-fn parses_variadic_constructor_parameter() {
+fn parses_variadic_function_parameter() {
+    let result = parse("def collect(values [Str] vararg) Unit = ()");
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function");
+    };
+    assert_eq!(function.params.len(), 1);
+    assert!(function.params[0].variadic);
+}
+
+#[test]
+fn parses_defaulted_variadic_constructor_parameter() {
     let result = parse(
         r#"
 class Path {
@@ -826,7 +838,7 @@ class Path {
 }
 
 impl Path {
-    new(vararg segments [Str]) {
+    new(segments [Str] vararg = ["tmp"]) {
         this.segments = segments
     }
 }
@@ -839,20 +851,21 @@ impl Path {
     };
     assert_eq!(block.methods[0].params.len(), 1);
     assert!(block.methods[0].params[0].variadic);
+    assert!(block.methods[0].params[0].initializer.is_some());
 }
 
 #[test]
-fn rejects_suffix_variadic_parameter_marker() {
+fn rejects_prefix_variadic_parameter_marker() {
     let result = parse(
         r#"
-def bad(values [Str] vararg) Unit = ()
+def bad(vararg values [Str]) Unit = ()
 
 class Path {
     segments [Str]
 }
 
 impl Path {
-    new(segments [Str] vararg) {
+    new(vararg segments [Str]) {
         this.segments = segments
     }
 }
@@ -863,7 +876,7 @@ impl Path {
             diag.code == "invalid_variadic_param"
                 && diag
                     .message
-                    .contains("vararg must appear before the parameter name")
+                    .contains("vararg must follow the parameter type")
         }),
         "{:#?}",
         result.diagnostics
@@ -873,7 +886,7 @@ impl Path {
             diag.code == "invalid_variadic_param"
                 && diag
                     .message
-                    .contains("vararg must appear before the constructor parameter name")
+                    .contains("vararg must follow the constructor parameter type")
         }),
         "{:#?}",
         result.diagnostics

@@ -56,9 +56,9 @@ impl object Json {
 
     def field(name Str, value JsonValue) JsonField = JsonRuntime.field(name, value)
 
-    def array(vararg values [JsonValue]) JsonValue = JsonRuntime.array(values)
+    def array(values [JsonValue] vararg) JsonValue = JsonRuntime.array(values)
 
-    def obj(vararg fields [JsonField]) JsonValue = JsonRuntime.obj(fields)
+    def obj(fields [JsonField] vararg) JsonValue = JsonRuntime.obj(fields)
 
     def obj(value Any) JsonValue = JsonRuntime.encode(value)
 

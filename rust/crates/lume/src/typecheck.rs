@@ -1818,9 +1818,9 @@ impl<'a> Checker<'a> {
                     self.add_error(
                         "invalid_variadic_param",
                         if is_constructor {
-                            "variadic constructor parameter must use a list type like 'vararg args [T]'"
+                            "variadic constructor parameter must use a list type like 'args [T] vararg'"
                         } else {
-                            "variadic parameter must use a list type like 'vararg args [T]'"
+                            "variadic parameter must use a list type like 'args [T] vararg'"
                         },
                         param.span,
                     );
@@ -11305,7 +11305,7 @@ class Path {
 }
 
 impl Path {
-    new(vararg segments [Str]) {
+    new(segments [Str] vararg) {
         this.segments = segments
     }
 }
@@ -11330,7 +11330,7 @@ class Path {
 }
 
 impl Path {
-    new(vararg segments [Str] = ["tmp"]) {
+    new(segments [Str] vararg = ["tmp"]) {
         this.segments = segments
     }
 }
@@ -11356,7 +11356,7 @@ class Bad {
 }
 
 impl Bad {
-    new(vararg items [Int], suffix Int) {
+    new(items [Int] vararg, suffix Int) {
         this.items = items
         this.suffix = suffix
     }
@@ -11386,7 +11386,7 @@ class Bad {
 }
 
 impl Bad {
-    new(vararg left [Int], vararg right [Int]) {
+    new(left [Int] vararg, right [Int] vararg) {
         this.left = left
         this.right = right
     }
@@ -11410,7 +11410,7 @@ impl Bad {
     fn rejects_multiple_variadic_function_parameters() {
         let program = parse_inline(
             r#"
-def bad(vararg left [Int], vararg right [Int]) Unit = ()
+def bad(left [Int] vararg, right [Int] vararg) Unit = ()
 "#,
         );
         let result = check_program(&program);
@@ -11435,7 +11435,7 @@ class Bucket {
 }
 
 impl Bucket {
-    new(prefix Int = 0, vararg items [Int]) {
+    new(prefix Int = 0, items [Int] vararg) {
         this.items = items
     }
 }
@@ -11458,7 +11458,7 @@ class Bad {
 }
 
 impl Bad {
-    new(vararg items Int) {
+    new(items Int vararg) {
         this.items = items
     }
 }
@@ -11486,7 +11486,7 @@ class Path {
 }
 
 impl Path {
-    new(vararg segments [Str]) {
+    new(segments [Str] vararg) {
         this.segments = segments
     }
 }
@@ -12445,7 +12445,7 @@ impl Box {
     }
 }
 
-def bad(vararg values => [Int]) Unit = ()
+def bad(values => [Int] vararg) Unit = ()
 "#,
         );
         let result = check_program(&program);

@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*vararg must follow the parameter type.*args \[T\] vararg.*
+
+def oldStyle(vararg values [Int]) Unit = ()

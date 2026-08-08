@@ -840,7 +840,17 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_constructor_param(&mut self, terminator: TokenKind) -> Option<Param> {
-        let (variadic, modifier_start) = self.parse_param_modifiers();
+        let prefix_vararg = if self.match_keyword(Keyword::Vararg) {
+            let span = self.previous_span();
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_variadic_param",
+                "vararg must follow the constructor parameter type, like 'args [T] vararg'",
+                span,
+            ));
+            Some(span)
+        } else {
+            None
+        };
         let (name, start) = self.expect_identifier("expected constructor parameter name")?;
         let (lazy, ty) = if self.match_token(TokenKind::FatArrow) {
             (true, Some(self.parse_type_ref()?))
@@ -850,13 +860,9 @@ impl<'a> Parser<'a> {
             self.error_at_current("expected_type", "expected constructor parameter type");
             return None;
         };
-        if self.match_keyword(Keyword::Vararg) {
-            self.diagnostics.push(Diagnostic::error(
-                "invalid_variadic_param",
-                "vararg must appear before the constructor parameter name, like 'vararg args [T]'",
-                self.previous_span(),
-            ));
-        }
+        let postfix_vararg = self.match_keyword(Keyword::Vararg);
+        let postfix_span = postfix_vararg.then(|| self.previous_span());
+        let variadic = prefix_vararg.is_some() || postfix_vararg;
         let initializer = if self.match_token(TokenKind::Eq) {
             Some(self.parse_expr()?)
         } else {
@@ -872,6 +878,7 @@ impl<'a> Parser<'a> {
         let end = initializer
             .as_ref()
             .map(Expr::span)
+            .or(postfix_span)
             .or_else(|| ty.as_ref().map(TypeRef::span))
             .unwrap_or(start);
         Some(Param {
@@ -880,7 +887,7 @@ impl<'a> Parser<'a> {
             initializer,
             variadic,
             lazy,
-            span: modifier_start.unwrap_or(start).cover(end),
+            span: prefix_vararg.unwrap_or(start).cover(end),
         })
     }
 

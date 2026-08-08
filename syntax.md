@@ -819,7 +819,7 @@ Explicit constructor rules:
 - positional construction may omit only a trailing suffix whose parameters all have defaults
 - positional construction never skips a defaulted parameter to reach a later required parameter
 - if any explicit `new` exists, implicit field construction is disabled for that class
-- explicit constructors may use one trailing variadic constructor parameter such as `vararg items [T]`
+- explicit constructors may use one trailing variadic constructor parameter such as `items [T] vararg`
 - a variadic constructor parameter receives the extra positional arguments as `[T]`
 - only one variadic constructor parameter is allowed
 - construction fields can target a variadic constructor parameter by passing a `[T]` value
@@ -1022,15 +1022,36 @@ handlers[key]()        # invalid: parsed as generic call syntax
 ```
 
 Function and method parameters may end with one variadic list parameter. `vararg`
-is written before the parameter name:
+is written after the parameter type:
 
 ```txt
-println(vararg value [Str]) Unit
-printf(format Str, vararg value [Str]) Unit
+println(value [Str] vararg) Unit
+printf(format Str, value [Str] vararg) Unit
 ```
 
 The parameter is available as `[T]` inside the body, and call sites pass the
 extra values positionally.
+
+```txt
+callable-parameter    = name Type [vararg]
+                      | name => Type
+constructor-parameter = name Type [vararg] [= default]
+```
+
+Rules:
+
+- `vararg` is postfix-only; the removed prefix form `vararg values [T]` is invalid.
+- A variadic parameter must have an explicit list type `[T]`.
+- Only the final parameter may be variadic.
+- A parameter list may contain at most one variadic parameter.
+- A by-name parameter cannot also be variadic.
+- A variadic constructor parameter may have a default list value, written after `vararg`.
+
+```txt
+new(segments [Str] vararg = ["tmp"]) {
+    this.segments = segments
+}
+```
 
 Call sites may spread an existing list into a variadic tail with `...`:
 
@@ -1163,7 +1184,7 @@ the class body or an `impl` block.
 - named construction may omit any constructor parameter with a default
 - positional construction fills a prefix of constructor parameters and may omit only trailing parameters that all have defaults
 - positional construction never skips a defaulted parameter to reach a later required parameter
-- constructor parameters may end with one variadic list parameter such as `vararg items [Str]`
+- constructor parameters may end with one variadic list parameter such as `items [Str] vararg`
 - `hidden new(...) { body }` declares a private constructor
 - each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
 - `this(...)` inside a constructor delegates positionally to another constructor of the same class
@@ -1210,7 +1231,7 @@ class Path {
 }
 
 impl Path {
-    new(vararg segments [Str] = ["tmp"]) {
+    new(segments [Str] vararg = ["tmp"]) {
         this.segments = segments
     }
 }

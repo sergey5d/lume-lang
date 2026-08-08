@@ -1,9 +1,9 @@
 # PRELUDE_SKIP
 # INTERPRETER
 
-def panic(vararg value [Any]) Never = panic()
+def panic(value [Any] vararg) Never = panic()
 
-def assert(condition Bool, vararg message [Str]) Unit = assert(condition)
+def assert(condition Bool, message [Str] vararg) Unit = assert(condition)
 
 def identity[T](value T) T = value
 

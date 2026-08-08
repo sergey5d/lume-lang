@@ -3358,7 +3358,7 @@ def main() Unit {
 module demo/lib
 
 interface Binder {
-    def queryRow(sql Str, vararg values [Any]) Int
+    def queryRow(sql Str, values [Any] vararg) Int
 }
 "#,
         )
