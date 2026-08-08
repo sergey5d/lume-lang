@@ -51,31 +51,7 @@ shape HttpError {
 hidden class JavalinBackend {
     app Javalin
     port Int
-}
 
-hidden class JavalinHttpContext with HttpContext {
-    hidden raw JavalinRawContext
-}
-
-impl JavalinHttpContext {
-    new(raw JavalinRawContext) {
-        this.raw = raw
-    }
-
-    def queryParam(name Str) Option[Str] =
-        JavalinRuntimeContext.queryParam(this.raw, name)
-
-    def pathParam(name Str) Option[Str] =
-        JavalinRuntimeContext.pathParam(this.raw, name)
-
-    def header(name Str) Option[Str] =
-        JavalinRuntimeContext.header(this.raw, name)
-
-    def body() Str =
-        this.raw.body()
-}
-
-impl JavalinBackend {
     new(port Int) {
         this.app = Javalin.create()
         this.port = port
@@ -206,11 +182,31 @@ impl JavalinBackend {
     }
 }
 
-class HttpServer {
-    backend JavalinBackend
+hidden class JavalinHttpContext with HttpContext {
+    hidden raw JavalinRawContext
+
+    new(raw JavalinRawContext) {
+        this.raw = raw
+    }
+
+    def queryParam(name Str) Option[Str] =
+        JavalinRuntimeContext.queryParam(this.raw, name)
+
+    def pathParam(name Str) Option[Str] =
+        JavalinRuntimeContext.pathParam(this.raw, name)
+
+    def header(name Str) Option[Str] =
+        JavalinRuntimeContext.header(this.raw, name)
+
+    def body() Str =
+        this.raw.body()
 }
 
-impl HttpServer {
+
+
+class HttpServer {
+    backend JavalinBackend
+
     new(port Int) {
         this.backend = JavalinBackend(port)
     }

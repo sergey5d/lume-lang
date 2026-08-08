@@ -8,9 +8,7 @@ enum Either[L, R] {
     case Right {
         value R
     }
-}
 
-impl Either[L, R] {
     def isLeft() Bool = match this {
         case Left(_) => true
         case Right(_) => false
@@ -70,5 +68,4 @@ impl Either[L, R] {
         case Left(_) => panic("expected Either.Right")
         case Right(value) => value
     }
-
 }

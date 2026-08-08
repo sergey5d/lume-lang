@@ -20,11 +20,10 @@ interface WorkerLike {
 }
 
 class Worker with WorkerLike {
-}
 
-impl Worker {
     doWork() Int = 7
 }
+
 
 printBodyShape(value Int) {
     match value {

@@ -3,13 +3,12 @@
 
 class Counter {
     count Int
-}
 
-impl Counter {
     bad() Int {
         let Some(count) = Some(1) else return this.count
         this.count
     }
 }
+
 
 main() Unit {}

@@ -3,13 +3,12 @@
 
 class Box {
     value Int
-}
 
-impl Box {
     bad(value Int) Int {
         value = 2
         this.value
     }
 }
+
 
 main() Unit {}

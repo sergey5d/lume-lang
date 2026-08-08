@@ -81,9 +81,9 @@ The `parse` command lexes, parses, and pretty-prints the AST for the requested
 file. Right now it covers:
 
 - modules and use declarations
-- top-level functions, types, impl blocks, and top-level bindings
+- top-level functions, types, reserved empty impl placeholders, and top-level bindings
 - class/object/interface/enum declarations
-- fields, methods, enum cases, and impl methods
+- fields, methods, constructors, and enum cases in declaration bodies
 - blocks, bindings, assignments, `if`, `while`, `for`, `defer`, `return`,
   `break`, and `continue`
 - calls, member access, indexing, vectors, arrays, tuples, lambdas, and `if` expressions

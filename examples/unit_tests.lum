@@ -4,9 +4,8 @@
 
 use spec/*
 
-class PrimitiveSpec with Spec {}
+class PrimitiveSpec with Spec {
 
-impl PrimitiveSpec {
     it() Unit {
         5.shouldBe(5)
         true.shouldBe(true)
@@ -18,9 +17,9 @@ impl PrimitiveSpec {
     }
 }
 
-class AnotherSpec with Spec {}
 
-impl AnotherSpec {
+class AnotherSpec with Spec {
+
     it() Unit {
         (2 + 3).shouldBe(5)
     }

@@ -4,9 +4,8 @@
 # person
 # Ada Lovelace@London:19:11:false
 
-# Candidate class + impl shape where ordinary method definitions omit `def`.
-# Constructors use dedicated `new(...)`; method-like declarations are visually
-# separated from storage by being inside `impl`.
+# Class body where ordinary method definitions omit `def`.
+# Storage appears first, followed by constructors and then methods.
 
 interface Named {
     fullName() Str
@@ -25,10 +24,6 @@ hidden class Person with Named, Aged {
     hidden var archived Bool
     var internalScore Int = 1
 
-    kind() Str = "person"
-}
-
-impl Person {
     new(firstName Str, lastName Str) {
         this.firstName = firstName
         this.lastName = lastName
@@ -36,6 +31,8 @@ impl Person {
         this.city = "unknown"
         this.archived = false
     }
+
+    kind() Str = "person"
 
     hidden calc() Int {
         this.firstName.size() + this.lastName.size()
@@ -61,6 +58,7 @@ impl Person {
     debugLabel() Str =
         fullName() + "@" + this.city + ":" + this.age + ":" + this.internalScore + ":" + this.archived
 }
+
 
 makePerson(firstName Str, lastName Str) Person =
     Person(firstName, lastName)

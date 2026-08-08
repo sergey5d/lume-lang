@@ -451,30 +451,6 @@ impl ModuleInfo {
                 _ => {}
             }
         }
-        for item in &items {
-            if let Item::Impl(block) = item {
-                self.merge_impl(block);
-            }
-        }
-    }
-
-    fn merge_impl(&mut self, block: &ImplBlock) {
-        let Some(target_name) = type_ref_named_name(&block.target) else {
-            return;
-        };
-        let target_type_params = impl_target_type_params(&block.target);
-        let target = match block.target_kind {
-            ImplTargetKind::Instance => self.types.get_mut(target_name),
-            ImplTargetKind::Object => self.objects.get_mut(target_name),
-        };
-        if let Some(sig) = target {
-            for method in &block.methods {
-                sig.methods
-                    .entry(method.name.clone())
-                    .or_default()
-                    .push(function_sig_from_method(method, &target_type_params));
-            }
-        }
     }
 
     fn collect_extension(&mut self, block: &ExtensionBlock) {
@@ -1208,51 +1184,18 @@ impl<'a> Checker<'a> {
         let Some(target_name) = type_ref_named_name(&block.target) else {
             return;
         };
-        let type_sig = match block.target_kind {
+        match block.target_kind {
             ImplTargetKind::Instance => {
-                let Some(type_sig) = self.lookup_type_local(target_name) else {
+                if self.lookup_type_local(target_name).is_none() {
                     self.add_error(
                         "unknown_impl_target",
                         format!("unknown impl target '{}'", target_name),
                         block.span,
                     );
-                    return;
-                };
-                if type_sig.kind == TypeKind::Annotation {
-                    if let Some(constructor) =
-                        block.methods.iter().find(|method| method.name == "new")
-                    {
-                        self.add_error(
-                            "invalid_constructor_decl",
-                            custom_constructor_error(&type_sig),
-                            constructor.span,
-                        );
-                    } else {
-                        self.add_error(
-                            "invalid_annotation_impl",
-                            format!(
-                                "annotation '{}' cannot have impl methods; annotations are data-only metadata shapes",
-                                target_name
-                            ),
-                            block.span,
-                        );
-                    }
-                    return;
                 }
-                if type_sig.kind == TypeKind::Interface || type_sig.kind == TypeKind::Object {
-                    self.add_error(
-                        "unknown_impl_target",
-                        format!("unknown impl target '{}'", target_name),
-                        block.span,
-                    );
-                    return;
-                }
-                type_sig
             }
             ImplTargetKind::Object => {
-                if let Some(object_sig) = self.lookup_object_local(target_name) {
-                    object_sig
-                } else {
+                if self.lookup_object_local(target_name).is_none() {
                     if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
                         self.add_error(
                             "invalid_type_arity",
@@ -1262,33 +1205,19 @@ impl<'a> Checker<'a> {
                             ),
                             block.span,
                         );
-                        return;
+                    } else {
+                        self.add_error(
+                            "unknown_impl_target",
+                            format!(
+                                "unknown object impl target '{}'; declare 'object {} {{}}' before 'impl object {}'",
+                                target_name, target_name, target_name
+                            ),
+                            block.span,
+                        );
                     }
-                    self.add_error(
-                        "unknown_impl_target",
-                        format!(
-                            "unknown object impl target '{}'; declare 'object {} {{}}' before 'impl object {}'",
-                            target_name, target_name, target_name
-                        ),
-                        block.span,
-                    );
-                    return;
                 }
             }
-        };
-        self.push_type_params(type_sig.type_params.iter().map(String::as_str));
-        for method in &block.methods {
-            if method.name == "new" && type_sig.kind != TypeKind::Class {
-                self.add_error(
-                    "invalid_constructor_decl",
-                    custom_constructor_error(&type_sig),
-                    method.span,
-                );
-                continue;
-            }
-            self.check_method(method, &type_sig);
         }
-        self.pop_type_params();
     }
 
     fn check_constructor_delegation_cycles(&mut self) {
@@ -1329,25 +1258,6 @@ impl<'a> Checker<'a> {
                                 TypeMember::Method(method) if method.name == "new" => Some(method),
                                 _ => None,
                             })
-                            .map(|method| ConstructorCycleNode {
-                                method: method.clone(),
-                                sig: function_sig_from_method(method, &owner_type_params),
-                            }),
-                    );
-                }
-                Item::Impl(block) if block.target_kind == ImplTargetKind::Instance => {
-                    let Some(target_name) = type_ref_named_name(&block.target) else {
-                        continue;
-                    };
-                    if target_name != class_name {
-                        continue;
-                    }
-                    let owner_type_params = impl_target_type_params(&block.target);
-                    nodes.extend(
-                        block
-                            .methods
-                            .iter()
-                            .filter(|method| method.name == "new")
                             .map(|method| ConstructorCycleNode {
                                 method: method.clone(),
                                 sig: function_sig_from_method(method, &owner_type_params),
@@ -10596,14 +10506,13 @@ def main() Unit {
 class SecretUser {
     name Str
     hidden token Str
-}
 
-impl SecretUser {
     new(name Str) {
         this.name = name
         this.token = "secret"
     }
 }
+
 
 def main() Unit {
     _ SecretUser = SecretUser { name: "Ada" }
@@ -10621,13 +10530,12 @@ def main() Unit {
 class SecretUser {
     name Str
     hidden token Str
-}
 
-impl SecretUser {
     new(name Str) {
         this.name = name
     }
 }
+
 "#,
         );
         let result = check_program(&program);
@@ -10650,11 +10558,10 @@ class User {
     age Int
     city Str = "NYC"
     hidden score Int = 5
-}
 
-impl User {
     def scoreValue() Int = this.score
 }
+
 
 def main() Int {
     user User = User("Ada", 10)
@@ -10678,14 +10585,13 @@ class Page {
 class Article {
     body Str
     title Str
-}
 
-impl Article {
     new(body Str = "body", title Str) {
         this.body = body
         this.title = title
     }
 }
+
 
 def main() Unit {
     _ Page = Page("custom body", "Intro")
@@ -10711,14 +10617,13 @@ class Page {
 class Article {
     body Str
     title Str
-}
 
-impl Article {
     new(body Str = "body", title Str) {
         this.body = body
         this.title = title
     }
 }
+
 
 def main() Unit {
     _ Page = Page("Intro")
@@ -10888,9 +10793,7 @@ class User {
     name Str
 }
 
-impl object User {
-    def make(name Str) User = User { name: name }
-}
+impl object User {}
 
 def main() User = User.make("Ada")
 "#,
@@ -10909,17 +10812,16 @@ def main() User = User.make("Ada")
     }
 
     #[test]
-    fn allows_bare_method_calls_inside_impls() {
+    fn allows_bare_method_calls_inside_declaration_bodies() {
         let program = parse_inline(
             r#"
 class Counter {
     value Int
-}
 
-impl Counter {
     def add(delta Int) Int = this.value + delta
     def twice(delta Int) Int = add(delta) + add(delta)
 }
+
 
 def main() Int {
     counter Counter = Counter(5)
@@ -10968,9 +10870,7 @@ main() Unit {
             r#"
 class Counter {
     var count Int
-}
 
-impl Counter {
     new(initial Int) {
         this.count = initial
     }
@@ -10983,6 +10883,7 @@ impl Counter {
 
     def shadow(count Int) Int = this.count + count
 }
+
 
 def main() Unit {
     counter = Counter(5)
@@ -11096,16 +10997,12 @@ def health() Str = "ok"
     }
 
     #[test]
-    fn rejects_annotation_mutable_hidden_fields_and_impls() {
+    fn rejects_annotation_mutable_and_hidden_fields() {
         let program = parse_inline(
             r#"
 annotation Route {
     hidden path Str
     var method Str = "GET"
-}
-
-impl Route {
-    def path() Str = "nope"
 }
 "#,
         );
@@ -11125,15 +11022,6 @@ impl Route {
                 .iter()
                 .any(|diag| diag.code == "invalid_annotation_field"
                     && diag.message.contains("mutable field 'method'")),
-            "{:#?}",
-            result.diagnostics
-        );
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diag| diag.code == "invalid_annotation_impl"
-                    && diag.message.contains("cannot have impl methods")),
             "{:#?}",
             result.diagnostics
         );
@@ -11296,13 +11184,12 @@ def main(source Either[Int, Int]) Either[Str, Str] {
             r#"
 class User {
     name Str
-}
 
-impl User {
     new(name Str) {
         this.name = name
     }
 }
+
 
 def main() Unit {
     _ User = User("Ada")
@@ -11320,14 +11207,13 @@ def main() Unit {
 class User {
     name Str
     age Int
-}
 
-impl User {
     new(name Str, age Int = 0) {
         this.name = name
         this.age = age
     }
 }
+
 
 def main() Unit {
     _ User = User("Ada")
@@ -11345,13 +11231,12 @@ def main() Unit {
             r#"
 class Path {
     segments [Str]
-}
 
-impl Path {
     new(segments [Str] vararg) {
         this.segments = segments
     }
 }
+
 
 def main() Unit {
     _ Path = Path()
@@ -11370,13 +11255,12 @@ def main() Unit {
             r#"
 class Path {
     segments [Str]
-}
 
-impl Path {
     new(segments [Str] vararg = ["tmp"]) {
         this.segments = segments
     }
 }
+
 
 def main() Unit {
     _ Path = Path()
@@ -11396,14 +11280,13 @@ def main() Unit {
 class Bad {
     items [Int]
     suffix Int
-}
 
-impl Bad {
     new(items [Int] vararg, suffix Int) {
         this.items = items
         this.suffix = suffix
     }
 }
+
 "#,
         );
         let result = check_program(&program);
@@ -11426,14 +11309,13 @@ impl Bad {
 class Bad {
     left [Int]
     right [Int]
-}
 
-impl Bad {
     new(left [Int] vararg, right [Int] vararg) {
         this.left = left
         this.right = right
     }
 }
+
 "#,
         );
         let result = check_program(&program);
@@ -11475,13 +11357,12 @@ def bad(left [Int] vararg, right [Int] vararg) Unit = ()
             r#"
 class Bucket {
     items [Int]
-}
 
-impl Bucket {
     new(prefix Int = 0, items [Int] vararg) {
         this.items = items
     }
 }
+
 
 def main() Unit {
     _ Bucket = Bucket(1, 2, 3)
@@ -11498,13 +11379,12 @@ def main() Unit {
             r#"
 class Bad {
     items [Int]
-}
 
-impl Bad {
     new(items Int vararg) {
         this.items = items
     }
 }
+
 "#,
         );
         let result = check_program(&program);
@@ -11526,13 +11406,12 @@ impl Bad {
             r#"
 class Path {
     segments [Str]
-}
 
-impl Path {
     new(segments [Str] vararg) {
         this.segments = segments
     }
 }
+
 
 def main() Unit {
     _ Path = Path { segments: ["usr"] }
@@ -11549,20 +11428,16 @@ def main() Unit {
             r#"
 class User {
     name Str
-}
 
-impl User {
     hidden new(name Str) {
         this.name = name
     }
 }
 
 object User {
-}
-
-impl object User {
     def create(name Str) User = User { name: name }
 }
+
 
 def main() Unit {
     user = User { name: "Ada" }
@@ -11594,14 +11469,13 @@ def main() Unit {
 class Counter {
     hidden var count Int = 0
     name Str = "unknown"
-}
 
-impl Counter {
     new(count Int, name Str) {
         this.count = count
         this.name = name
     }
 }
+
 
 def main() Unit {
     _ Counter = Counter(1, "Ada")
@@ -11618,13 +11492,12 @@ def main() Unit {
             r#"
 class Counter {
     hidden var count Int = 0
-}
 
-impl Counter {
     new(count Int) {
         this.count := count
     }
 }
+
 "#,
         );
         let result = check_program(&program);
@@ -11795,11 +11668,10 @@ def main() Unit {
             r#"
 class AssetPrices {
     assets [Str] = this.makeAssets()
-}
 
-impl AssetPrices {
     def makeAssets() [Str] = []
 }
+
 "#,
         );
         let result = check_program(&program);
@@ -11914,15 +11786,14 @@ class SecretUser {
     name Str
     hidden token Str
     location Str
-}
 
-impl SecretUser {
     new(name Str, token Str, location Str) {
         this.name = name
         this.token = token
         this.location = location
     }
 }
+
 
 def main() Str {
     let { location, name } = SecretUser("Sergey", "secret", "Tampa")
@@ -12171,11 +12042,10 @@ interface Named {
 shape PointView with Named {
     x Int
     y Int
-}
 
-impl PointView {
     def label() Str = this.x + "," + this.y
 }
+
 
 class Pixel {
     x Int
@@ -12205,11 +12075,10 @@ interface Named {
 shape PointView with Named {
     x Int
     y Int
-}
 
-impl PointView {
     def label() Str = this.x + "," + this.y
 }
+
 
 class Pixel {
     x Int
@@ -12480,13 +12349,12 @@ def main() Unit {
             r#"
 class Box {
     value Int
-}
 
-impl Box {
     new(value => Int) {
         this.value = value
     }
 }
+
 
 def bad(values => [Int] vararg) Unit = ()
 "#,
@@ -12701,65 +12569,6 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    }
-
-    #[test]
-    fn rejects_custom_constructors_for_non_class_kinds() {
-        let program = parse_inline(
-            r#"
-shape Point {
-    x Int
-}
-
-impl Point {
-    new(x Int) {
-        this.x = x
-    }
-}
-
-enum Status {
-    case Ready {
-        value Int
-    }
-}
-
-impl Status {
-    new(value Int) = Status.Ready(value)
-}
-
-annotation Route {
-    path Str
-}
-
-impl Route {
-    new(path Str) {}
-}
-
-object Config {
-}
-
-impl object Config {
-    new() {}
-}
-"#,
-        );
-        let result = check_program(&program);
-        for expected in [
-            "shape 'Point'",
-            "enum 'Status'",
-            "annotation 'Route'",
-            "object 'Config'",
-        ] {
-            assert!(
-                result.diagnostics.iter().any(|diag| {
-                    diag.code == "invalid_constructor_decl"
-                        && diag.message.contains("only classes")
-                        && diag.message.contains(expected)
-                }),
-                "missing {expected}: {:#?}",
-                result.diagnostics
-            );
-        }
     }
 
     #[test]
@@ -13510,12 +13319,12 @@ def main() Unit {
     fn rejects_ambiguous_empty_collection_overload() {
         let program = parse_inline(
             r#"
-class Consumer {}
+class Consumer {
 
-impl Consumer {
     new(values [Str]) {}
     new(values [Str : Int]) {}
 }
+
 
 def main() Unit {
     consumer = Consumer([])

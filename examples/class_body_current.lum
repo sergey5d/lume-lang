@@ -1,7 +1,6 @@
 # SKIP
 #
-# Current inline class-method shape, kept as a comparison artifact against the
-# separated `class` + `impl` examples.
+# Current class-body form with fields, constructors, and methods together.
 
 class Person with Named, Aged {
     firstName Str

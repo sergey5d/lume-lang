@@ -3,8 +3,6 @@
 module use_support
 
 class A {
-}
 
-impl A {
     label() Str = "A"
 }

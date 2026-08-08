@@ -271,7 +271,7 @@ fn rewrite_item_for_runtime(item: &mut ast::Item, module: &LoadedModule, graph: 
     match item {
         ast::Item::Function(function) => rewrite_function_for_runtime(function, module, graph),
         ast::Item::Type(decl) => rewrite_type_decl_for_runtime(decl, module, graph),
-        ast::Item::Impl(block) => rewrite_impl_block_for_runtime(block, module, graph),
+        ast::Item::Impl(block) => rewrite_impl_block_for_runtime(block, module),
         ast::Item::Extension(block) => rewrite_extension_block_for_runtime(block, module, graph),
         ast::Item::Statement(stmt) => rewrite_stmt_for_runtime(stmt, module, graph),
     }
@@ -310,15 +310,8 @@ fn rewrite_type_decl_for_runtime(
     }
 }
 
-fn rewrite_impl_block_for_runtime(
-    block: &mut ast::ImplBlock,
-    module: &LoadedModule,
-    graph: &ModuleGraph,
-) {
+fn rewrite_impl_block_for_runtime(block: &mut ast::ImplBlock, module: &LoadedModule) {
     rewrite_type_ref_for_runtime(&mut block.target, module);
-    for method in &mut block.methods {
-        rewrite_method_for_runtime(method, module, graph);
-    }
 }
 
 fn rewrite_extension_block_for_runtime(
@@ -6219,9 +6212,8 @@ mod tests {
             r#"
             class Counter {
                 hidden var count Int
-            }
 
-            impl Counter {
+
                 new(count Int) {
                     this.count = count
                 }
@@ -6230,7 +6222,8 @@ mod tests {
                     this.count += delta
                     return this.count
                 }
-            }
+}
+
 
             seed Int = 1
 
@@ -6319,14 +6312,14 @@ mod tests {
             class User {
                 name Str
                 age Int
-            }
 
-            impl User {
+
                 new(name Str, age Int = 0) {
                     this.name = name
                     this.age = age
                 }
-            }
+}
+
 
             def main() Unit {
                 ada User = User("Ada")
@@ -6348,9 +6341,8 @@ mod tests {
             r#"
             class Path {
                 segments [Str]
-            }
 
-            impl Path {
+
                 new(segments [Str] vararg) {
                     this.segments = segments
                 }
@@ -6358,7 +6350,8 @@ mod tests {
                 def size() Int = this.segments.size()
 
                 def firstOr(value Str) Str = this.segments.get(0).getOr(value)
-            }
+}
+
 
             def run() Str {
                 empty Path = Path()
@@ -6379,9 +6372,8 @@ mod tests {
             r#"
             class Vec {
                 hidden var items Array[Int]
-            }
 
-            impl Vec {
+
                 new(left Int, right Int) {
                     this.items = Array(left, right)
                 }
@@ -6389,7 +6381,8 @@ mod tests {
                 def [](index Int) Int = this.items[index]
                 def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
                 def -() Vec = Vec(-this[0], -this[1])
-            }
+}
+
 
             def main() Unit {
                 items = Vector(1, 2)
@@ -6452,13 +6445,13 @@ mod tests {
                 hidden map Map[Int, Str] = Map()
                 hidden var currentTick Int = 0
                 hidden queue [Str] = []
-            }
 
-            impl OrderManager {
+
                 def current() Int = this.currentTick
                 def queued() Int = this.queue.size()
                 def entries() Int = this.map.size()
-            }
+}
+
 
             def main() Int {
                 manager = OrderManager {}
@@ -6545,15 +6538,15 @@ mod tests {
                 name Str
                 hidden token Str
                 location Str
-            }
 
-            impl SecretUser {
+
                 new(name Str, token Str, location Str) {
                     this.name = name
                     this.token = token
                     this.location = location
                 }
-            }
+}
+
 
             def main() Unit {
                 users = Vector(
@@ -7061,11 +7054,11 @@ $name
             }
 
             object Color {
-            }
 
-            impl object Color {
+
                 def palette() Str = "palette"
-            }
+}
+
 
             def main() Unit {
                 color Color = Color.Red
@@ -7089,11 +7082,11 @@ $name
             }
 
             object Box {
-            }
 
-            impl object Box {
+
                 def from(value Int) Box = Box { value: value }
-            }
+}
+
 
             def main() Unit {
                 box = Box.from(7)
@@ -7204,15 +7197,15 @@ $name
                 amount Int
                 description Str
                 count Int
-            }
 
-            impl Amount {
+
                 def multiple(other Amount) Amount = Amount {
                     amount: this.amount * other.amount
                     description: this.description + " " + other.description
                     count: 0
                 }
-            }
+}
+
 
             a1 = Amount(10, "description", 5)
             a2 = a1.multiple(a1)
@@ -7244,13 +7237,13 @@ $name
                 assets [Str] = ["btc", "usd"]
                 assetCount Int = this.assets.size()
                 total Int
-            }
 
-            impl Portfolio {
+
                 new() {
                     this.total = this.assetCount + 1
                 }
-            }
+}
+
 
             def main() Unit {
                 portfolio = Portfolio {}

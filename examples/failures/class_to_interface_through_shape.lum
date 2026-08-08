@@ -8,11 +8,10 @@ interface Named {
 shape PointView with Named {
     x Int
     y Int
-}
 
-impl PointView {
     label() Str = this.x + "," + this.y
 }
+
 
 class Pixel {
     x Int

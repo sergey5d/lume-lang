@@ -22,12 +22,11 @@ mapUser(user UserEntity) UserDto =
     UserDto { id: user.id, name: user.name }
 
 class UserMapper {
-}
 
-impl UserMapper {
     mapUser(user UserEntity) UserDto =
         UserDto { id: user.id, name: user.name }
 }
+
 
 object User {
     toDto(user UserEntity) UserDto =
@@ -35,15 +34,14 @@ object User {
 }
 
 class UserService {
-}
 
-impl UserService {
     toDto(user UserEntity) UserDto =
         UserDto { id: user.id, name: user.name }
 
     fromThis(users [UserEntity]) [UserDto] =
         users.map(this.toDto)
 }
+
 
 printAt(label Str, dtos [UserDto], index Int) Unit {
     let dto <- dtos.get(index) else panic("expected dto")

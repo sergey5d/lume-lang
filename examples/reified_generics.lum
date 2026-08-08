@@ -12,15 +12,14 @@ typeName[reified A](value A) Str =
     typeOf[A].name() !!
 
 class Inspector {
-}
 
-impl Inspector {
     valueTypeName[reified A](value A) Str =
         typeOf[A].name() !!
 
     namedTypeName[reified A]() Str =
         typeOf[A].name() !!
 }
+
 
 main() Int {
     user User = User { name: "Ada" }

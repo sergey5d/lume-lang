@@ -4,9 +4,7 @@
 class User {
     name Str
     age Int
-}
 
-impl User {
     def new(name Str, age Int) User {
         User {
             name: name
@@ -14,5 +12,6 @@ impl User {
         }
     }
 }
+
 
 main() Unit = ()

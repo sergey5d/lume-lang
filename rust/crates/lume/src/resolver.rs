@@ -899,38 +899,7 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
             _ => {}
         }
     }
-    for item in &program.items {
-        if let crate::ast::Item::Impl(block) = item {
-            merge_impl_decl_into_infos(&mut decls.types, &mut decls.objects, block);
-        }
-    }
     decls
-}
-
-fn merge_impl_decl_into_infos(
-    types: &mut HashMap<String, TypeInfo>,
-    objects: &mut HashMap<String, TypeInfo>,
-    block: &ImplBlock,
-) {
-    let Some(target_name) = type_ref_name(&block.target) else {
-        return;
-    };
-    let target = match block.target_kind {
-        ImplTargetKind::Instance => types.get_mut(target_name),
-        ImplTargetKind::Object => objects.get_mut(target_name),
-    };
-    let Some(target) = target else {
-        return;
-    };
-    for method in &block.methods {
-        target.methods.insert(
-            method.name.clone(),
-            DeclSpan {
-                visibility: method.visibility,
-                span: method.span,
-            },
-        );
-    }
 }
 
 fn summarize_type(decl: &TypeDecl) -> TypeInfo {
@@ -1084,47 +1053,6 @@ impl<'a> Resolver<'a> {
                     }
                 }
                 _ => {}
-            }
-        }
-        for item in &self.module.program.items {
-            if let crate::ast::Item::Impl(block) = item {
-                self.merge_impl_decl(block);
-            }
-        }
-    }
-
-    fn merge_impl_decl(&mut self, block: &ImplBlock) {
-        let Some(target_name) = type_ref_name(&block.target) else {
-            return;
-        };
-        match block.target_kind {
-            ImplTargetKind::Instance => {
-                let Some(target) = self.types.get_mut(target_name) else {
-                    return;
-                };
-                for method in &block.methods {
-                    target.methods.insert(
-                        method.name.clone(),
-                        DeclSpan {
-                            visibility: method.visibility,
-                            span: method.span,
-                        },
-                    );
-                }
-            }
-            ImplTargetKind::Object => {
-                let Some(target) = self.objects.get_mut(target_name) else {
-                    return;
-                };
-                for method in &block.methods {
-                    target.methods.insert(
-                        method.name.clone(),
-                        DeclSpan {
-                            visibility: method.visibility,
-                            span: method.span,
-                        },
-                    );
-                }
             }
         }
     }
@@ -1513,29 +1441,6 @@ impl<'a> Resolver<'a> {
         self.push_type_scope();
         self.install_impl_target_type_params(&block.target);
         self.resolve_impl_target(block);
-        let target_name = type_ref_name(&block.target);
-        let target_fields = target_name.and_then(|name| match block.target_kind {
-            ImplTargetKind::Instance => self.types.get(name).cloned(),
-            ImplTargetKind::Object => self.objects.get(name).cloned(),
-        });
-
-        self.push_scope();
-        if let Some(info) = &target_fields {
-            self.push_field_hints(info.kind, info.fields.iter().map(|field| field.name));
-        } else {
-            self.push_field_hints(TypeKind::Object, std::iter::empty());
-        }
-        self.push_method_hints(
-            target_fields
-                .iter()
-                .flat_map(|info| info.methods.keys().map(String::as_str)),
-        );
-        for method in &block.methods {
-            self.resolve_method(method);
-        }
-        self.pop_method_hints();
-        self.pop_field_hints();
-        self.pop_scope();
         self.pop_type_scope();
     }
 

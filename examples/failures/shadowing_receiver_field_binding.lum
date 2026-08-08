@@ -3,13 +3,12 @@
 
 class Counter {
     count Int
-}
 
-impl Counter {
     bad() Int {
         count = 1
         count
     }
 }
+
 
 main() Unit {}

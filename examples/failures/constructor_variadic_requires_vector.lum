@@ -3,9 +3,7 @@
 
 class Bad {
     items [Int]
-}
 
-impl Bad {
     new(items Int vararg) {
         this.items = items
     }

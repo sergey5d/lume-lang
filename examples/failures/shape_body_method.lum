@@ -1,8 +1,0 @@
-# FAIL_REGEX:
-# .*shape 'Point' cannot declare methods in its body; use 'impl Point'.*
-
-shape Point {
-    x Int
-
-    value() Int = this.x
-}

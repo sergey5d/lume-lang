@@ -3,12 +3,11 @@
 
 class User {
     name Str
-}
 
-impl User {
     new(name Str) = new {
         name: name
     }
 }
+
 
 main() Unit = ()

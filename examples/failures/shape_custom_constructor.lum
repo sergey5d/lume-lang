@@ -3,9 +3,7 @@
 
 shape Point {
     x Int
-}
 
-impl Point {
     new(x Int) {
         this.x = x
     }

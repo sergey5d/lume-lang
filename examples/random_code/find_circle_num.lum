@@ -9,9 +9,6 @@
 
 class DisjointSet {
     hidden var arr Array[Int]
-}
-
-impl DisjointSet {
 
     new(size Int) {
         this.arr = Array.generate(size, i => i)
@@ -44,6 +41,7 @@ impl DisjointSet {
         }
     }
 }
+
 
 findCircleNumUnion(isConnected [[Int]]) Int {
     set = DisjointSet(isConnected.size())

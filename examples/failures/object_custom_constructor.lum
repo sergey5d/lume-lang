@@ -2,9 +2,7 @@
 # .*only classes can declare custom constructors; object 'Config' declares one object value.*
 
 object Config {
-}
 
-impl object Config {
     new() {
     }
 }

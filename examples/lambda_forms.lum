@@ -32,9 +32,7 @@
 # twoDestructured 10
 
 class LambdaRunner {
-}
 
-impl LambdaRunner {
     zero(f fn() => Int) Int = f()
 
     one(f fn(Int) => Int, value Int) Int = f(value)
@@ -51,6 +49,7 @@ impl LambdaRunner {
 
     twoTuples(f fn((Int, Int), (Int, Int)) => Int, left (Int, Int), right (Int, Int)) Int = f(left, right)
 }
+
 
 class User {
     name Str

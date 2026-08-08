@@ -4,7 +4,7 @@
 # split: SOL-EUR-4
 # split: XTZ-SOL-8
 # result: XTZ -> BTC at 1.2,BTC -> USD at 5.0
-# next: 
+# next:
 # result: XTZ -> SOL at 8.0,SOL -> EUR at 4.0
 
 module asset/price
@@ -18,9 +18,7 @@ class AssetPrices {
         "XTZ-SOL-8"
     ]
     asset2PriceMap [Str: [(Str, Float)]]
-}
 
-impl AssetPrices {
     new() {
         this.asset2PriceMap = this.makePrices()
     }
@@ -45,7 +43,7 @@ impl AssetPrices {
             }
             fromPrices = result.get(fromAsset) !!
             fromPrices.add((split[1], price))
-            
+
             if !result.contains(toAsset) {
                 result.put(toAsset, [])
             }
@@ -99,6 +97,7 @@ impl AssetPrices {
         Option.when(results.nonEmpty(), results)
     }
 }
+
 
 main() {
 

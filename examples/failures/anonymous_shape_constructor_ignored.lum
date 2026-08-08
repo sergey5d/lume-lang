@@ -4,14 +4,13 @@
 class SecretBadge {
     name Str
     hidden code Int
-}
 
-impl SecretBadge {
     new(name Str) {
         this.name = name
         this.code = 99
     }
 }
+
 
 main() Unit {
     _ SecretBadge = SecretBadge({

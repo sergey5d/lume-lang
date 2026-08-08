@@ -3,14 +3,13 @@
 
 class User {
     name Str
-}
 
-impl User {
     new(name Str) {
         this {
             name: name
         }
     }
 }
+
 
 main() Unit = ()

@@ -1,16 +1,19 @@
 # EXPECT:
-# impl hello Ada
+# hello Ada
+
+# `impl` is reserved for future generic specialization. Its body is currently
+# required to be empty; all behavior belongs in the type declaration body.
 
 class Greeter {
     name Str
-}
 
-impl Greeter {
     greet() Str =
         "hello " + this.name
 }
 
+impl Greeter {}
+
 main() Unit {
     greeter Greeter = Greeter { name: "Ada" }
-    println("impl", greeter.greet())
+    println(greeter.greet())
 }

@@ -7,11 +7,10 @@ interface Greeter {
 }
 
 class OverrideBox with Greeter {
-}
 
-impl OverrideBox {
     greet() Str = "class"
 }
+
 
 interface FirstChoice {
     choose() Str = "first"

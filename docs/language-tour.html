@@ -73,6 +73,11 @@ retries := retries - 1</code></pre>
 class User {
     name Str
     location Location
+
+    new(name Str, location Location) = {
+        this.name = name
+        this.location = location
+    }
 }
 
 enum Access {
@@ -87,14 +92,7 @@ object Defaults {
 
         <h2 id="construction">Construction</h2>
         <p>Class constructors are declared with <code>new(...)</code>. Braces supply construction fields by name, while parentheses supply explicitly positional constructor inputs in declaration order.</p>
-        <pre><code>impl User {
-    new(name Str, location Location) = {
-        this.name = name
-        this.location = location
-    }
-}
-
-ada = User {
+        <pre><code>ada = User {
     name: "Ada"
     location: Location("London", "UK")
 }</code></pre>

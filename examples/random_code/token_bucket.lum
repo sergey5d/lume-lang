@@ -13,9 +13,7 @@ class TokenBucket {
     hidden refillPerTick Int
     hidden var tokens Int = 0
     hidden var lastTick Int = 0
-}
 
-impl TokenBucket {
     new(capacity Int, refillPerTick Int) {
         this.capacity = capacity
         this.refillPerTick = refillPerTick
@@ -56,6 +54,7 @@ impl TokenBucket {
 
     currentTokens() Int = this.tokens
 }
+
 
 main() Unit {
     # Capacity 5, refilling 1 token per tick.

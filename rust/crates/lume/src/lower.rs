@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{
-        self, BinaryOp as AstBinaryOp, ExtensionBlock, ImplBlock, ImplTargetKind, Item, TypeDecl,
-        TypeMember,
-    },
+    ast::{self, BinaryOp as AstBinaryOp, ExtensionBlock, Item, TypeDecl, TypeMember},
     core::{
         self, AssignOp, AssignmentStmt, Block, CallableBody, DestructureKind, ElseBranch,
         ElseExprBranch, Expr, FunctionDecl, MatchCaseBody, MethodDecl, Pattern, Stmt, TypeRef,
@@ -198,7 +195,7 @@ impl<'a> Lowerer<'a> {
         for item in items {
             match item {
                 Item::Type(decl) => self.define_type_decl(&decl),
-                Item::Impl(block) => self.define_impl_block(&block),
+                Item::Impl(_) => {}
                 Item::Extension(block) => self.define_extension_block(&block),
                 _ => {}
             }
@@ -313,42 +310,6 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn define_impl_block(&mut self, block: &ImplBlock) {
-        let Some(target_name) = named_type_name(&block.target) else {
-            self.add_error(
-                "lower_invariant",
-                "impl target should be resolved to a named type before lowering",
-                block.span,
-            );
-            return;
-        };
-        let Some(type_id) = self.impl_target_type_id(target_name, block.target_kind) else {
-            self.add_error(
-                "lower_invariant",
-                format!(
-                    "impl target '{}' should be declared before lowering methods",
-                    target_name
-                ),
-                block.span,
-            );
-            return;
-        };
-        let mut method_ids = Vec::new();
-        for method in &block.methods {
-            let (id, this_local) = self.declare_method_function(type_id, target_name, method);
-            method_ids.push(id);
-            self.method_work.push(MethodWork {
-                id,
-                decl: desugar::desugar_method_decl(method),
-                this_local,
-            });
-        }
-
-        if let Some(ty) = self.program.types.get_mut(type_id.0) {
-            ty.methods.extend(method_ids);
-        }
-    }
-
     fn define_extension_block(&mut self, block: &ExtensionBlock) {
         let Some(target_name) = named_type_name(&block.target) else {
             self.add_error(
@@ -382,22 +343,6 @@ impl<'a> Lowerer<'a> {
 
         if let Some(ty) = self.program.types.get_mut(type_id.0) {
             ty.methods.extend(method_ids);
-        }
-    }
-
-    fn impl_target_type_id(
-        &self,
-        target_name: &str,
-        target_kind: ImplTargetKind,
-    ) -> Option<ir::TypeId> {
-        match target_kind {
-            ImplTargetKind::Object => self
-                .type_ids
-                .get(&(target_name.to_string(), ast::TypeKind::Object))
-                .copied(),
-            ImplTargetKind::Instance => self.type_ids.iter().find_map(|((name, kind), id)| {
-                (name == target_name && *kind != ast::TypeKind::Object).then_some(*id)
-            }),
         }
     }
 
@@ -8638,11 +8583,11 @@ mod tests {
             r#"
             class Counter {
                 value Int
-            }
 
-            impl Counter {
+
                 def bump(delta Int) Int = this.value + delta
-            }
+}
+
             "#,
         );
 
@@ -8662,12 +8607,12 @@ mod tests {
             r#"
             class Counter {
                 value Int
-            }
 
-            impl Counter {
+
                 def add(delta Int) Int = this.value + delta
                 def twice(delta Int) Int = add(delta) + add(delta)
-            }
+}
+
             "#,
         );
 
@@ -8706,12 +8651,12 @@ mod tests {
             r#"
             class Exec {}
 
-            class Runner {}
+            class Runner {
 
-            impl Runner {
                 def exec(sql Str) Exec = Exec()
                 def exec(sql Str, first Any, rest [Any] vararg) Result[Int, Str] = Ok(1)
-            }
+}
+
 
             def main(r Runner) Unit {
                 staged = r.exec("update users")

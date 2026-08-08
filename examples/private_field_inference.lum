@@ -7,9 +7,7 @@
 class CounterBox {
     hidden count = 1
     hidden var hits = 0
-}
 
-impl CounterBox {
     bump() Unit {
         this.hits += this.count
     }
@@ -17,13 +15,13 @@ impl CounterBox {
     total() Int = this.hits
 }
 
+
 object Greeter {
     hidden hello = "Hello"
-}
 
-impl object Greeter {
     greet(times Int) Str = this.hello + " " + times
 }
+
 
 main() Int {
     box = CounterBox {}

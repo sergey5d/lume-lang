@@ -1,11 +1,11 @@
 # FAIL_REGEX:
 # .*trailing lambda syntax requires an explicit parameter arrow.*
 
-class Runner {}
+class Runner {
 
-impl Runner {
     zero(f fn() => Int) Int = f()
 }
+
 
 main() Unit {
     runner = Runner {}

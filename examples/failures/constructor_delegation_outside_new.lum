@@ -3,9 +3,7 @@
 
 class User {
     name Str
-}
 
-impl User {
     new(name Str) {
         this.name = name
     }
@@ -14,5 +12,6 @@ impl User {
         name: this.name
     }
 }
+
 
 main() Unit = ()

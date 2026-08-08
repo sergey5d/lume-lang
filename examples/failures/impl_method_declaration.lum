@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*impl blocks cannot declare methods; move 'increment' into the 'Counter' declaration body.*
+
+class Counter {
+    value Int
+}
+
+impl Counter {
+    increment() Int = this.value + 1
+}

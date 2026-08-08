@@ -1,12 +1,12 @@
 # FAIL_REGEX:
 # .*empty collection.*matches multiple vector/map overloads.*
 
-class Consumer {}
+class Consumer {
 
-impl Consumer {
     new(values [Str]) {}
     new(values [Str : Int]) {}
 }
+
 
 main() Unit {
     consumer = Consumer([])

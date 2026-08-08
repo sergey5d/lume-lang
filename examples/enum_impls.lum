@@ -16,14 +16,13 @@ enum Outcome {
         value Int
         tag = "right"
     }
-}
 
-impl Outcome {
     describe() Str = match this {
         case Left(value) => "left: " + value
         case Right(value) => "right: num " + value
     }
 }
+
 
 main() Unit {
     left Outcome = Outcome.Left("bad")

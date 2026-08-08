@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*annotation 'Route' cannot have impl methods.*
+# .*impl blocks cannot declare methods; move 'path' into the 'Route' declaration body.*
 
 annotation Route {
     path Str

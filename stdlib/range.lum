@@ -6,9 +6,7 @@ class IntRange with Iterable[Int] {
     start Int
     end Int
     step Int
-}
 
-impl IntRange {
     def iterator() Iterator[Int] = RangeIterator { start: this.start, end: this.end, step: this.step }
 
     def zip[X](other [X]) [(Int, X)] {
@@ -34,13 +32,12 @@ impl IntRange {
     }
 }
 
+
 hidden class RangeIterator with Iterator[Int] {
     var current Int
     var end Int
     var step Int
-}
 
-impl RangeIterator {
     new(start Int, end Int, step Int) {
         this.current = start
         this.end = end

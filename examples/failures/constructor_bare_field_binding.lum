@@ -3,12 +3,11 @@
 
 class Counter {
     count Int
-}
 
-impl Counter {
     new() {
         count = 0
     }
 }
+
 
 main() Unit {}

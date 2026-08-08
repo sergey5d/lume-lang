@@ -2,9 +2,7 @@ module bumper
 
 class Counter {
     hidden var count Int
-}
 
-impl Counter {
     new(count Int) {
         this.count = count
     }
@@ -14,6 +12,7 @@ impl Counter {
         return this.count
     }
 }
+
 
 seed Int = 1
 

@@ -112,12 +112,11 @@ pub struct EnumCaseDecl {
     pub span: Span,
 }
 
-/// An `impl` block that adds methods to an existing type.
+/// A reserved `impl` specialization declaration. Its body is currently empty.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplBlock {
     pub target_kind: ImplTargetKind,
     pub target: TypeRef,
-    pub methods: Vec<MethodDecl>,
     pub span: Span,
 }
 

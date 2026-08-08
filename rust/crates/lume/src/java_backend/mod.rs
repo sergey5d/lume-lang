@@ -2942,9 +2942,7 @@ enum Maybe[T] {
     case Some {
         value T
     }
-}
 
-impl Maybe[T] {
     def isDefined() Bool = match this {
         case Some(_) => true
         case None => false
@@ -2955,6 +2953,7 @@ impl Maybe[T] {
         case None => panic("expected Maybe.Some")
     }
 }
+
 "#,
         )
         .expect("write source");
@@ -3400,13 +3399,12 @@ use demo/lib/{Binder}
 
 class Client {
     binder Binder
-}
 
-impl Client {
     def run(sub Str) Int {
         this.binder.queryRow("select ?", sub)
     }
 }
+
 "#,
         )
         .expect("write app source");
@@ -3861,21 +3859,19 @@ def err() Result[HttpResponse, HttpError] =
 module demo/object_reified
 
 object Cache {
-}
 
-impl object Cache {
     def label(targetType Type[_]) Str =
         targetType.name().getOr("?")
 }
 
-class Reader {
-}
 
-impl Reader {
+class Reader {
+
     def read[reified T]() Str {
         Cache.label(typeOf[T])
     }
 }
+
 "#,
         )
         .expect("write source");
@@ -3905,14 +3901,13 @@ module demo/object_field_init
 
 object Cache {
     hidden var values Map[Str, Str] = Map()
-}
 
-impl object Cache {
     def remember(key Str, value Str) Unit {
         updated Map[Str, Str] = this.values.put(key, value)
         this.values := updated
     }
 }
+
 "#,
         )
         .expect("write source");
@@ -3947,9 +3942,7 @@ impl object Cache {
 module demo/callbacks
 
 class Runner {
-}
 
-impl Runner {
     def call(value Int, mapper fn(Int) => Result[Int, Str]) Result[Int, Str] {
         mapped Result[Int, Str] = mapper(value)
         match mapped {
@@ -3966,6 +3959,7 @@ impl Runner {
         }
     }
 }
+
 "#,
         )
         .expect("write source");

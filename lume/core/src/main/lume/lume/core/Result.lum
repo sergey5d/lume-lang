@@ -8,9 +8,7 @@ enum Result[T, E] {
     case Err {
         error E
     }
-}
 
-impl Result[T, E] {
     def isOk() Bool = match this {
         case Ok(_) => true
         case Err(_) => false
@@ -65,5 +63,4 @@ impl Result[T, E] {
         case Ok(_) => panic("Result has no error value")
         case Err(error) => error
     }
-
 }

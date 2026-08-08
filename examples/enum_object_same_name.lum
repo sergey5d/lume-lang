@@ -13,11 +13,10 @@ enum Color {
 }
 
 object Color {
-}
 
-impl object Color {
     palette() Str = "palette"
 }
+
 
 main() Unit {
     color Color = Color.Red

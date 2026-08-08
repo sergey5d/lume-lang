@@ -13,9 +13,7 @@ interface Jumper {
 }
 
 class Rabbit with Hopper, Jumper {
-}
 
-impl Rabbit {
     hop() Str = "hop"
 
     jump(steps Int) Str = "jump " + steps

@@ -7,13 +7,12 @@ module user
 class Person {
     name Str
     age Int
-}
 
-impl Person {
     name() Str = this.name
 
     age() Int = this.age
 }
+
 
 main() Unit {
     person = Person { name: "Ada", age: 36 }

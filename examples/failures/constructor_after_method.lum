@@ -1,11 +1,9 @@
 # FAIL_REGEX:
-# .*constructors must appear before methods in impl 'User'.*
+# .*constructors must appear before methods in class 'User'.*
 
 class User {
     name Str
-}
 
-impl User {
     label() Str = this.name
 
     new(name Str) {

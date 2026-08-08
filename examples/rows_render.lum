@@ -13,9 +13,7 @@
 # 1
 
 object RowOrdering with Ordering[(Int, Int, Str)] {
-}
 
-impl object RowOrdering {
     compare(left (Int, Int, Str), right (Int, Int, Str)) Int {
         let (leftX Int, leftY Int, _) = left
         let (rightX Int, rightY Int, _) = right
@@ -35,6 +33,7 @@ impl object RowOrdering {
         return 0
     }
 }
+
 
 syntax1(rows [(Int, Int, Str)]) Unit {
     var lastX = 0

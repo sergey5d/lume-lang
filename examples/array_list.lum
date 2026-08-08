@@ -9,9 +9,7 @@ class ArrayListIterator[T] with Iterator[T] {
     hidden var items [T]
     hidden var limit Int
     hidden var index Int = 0
-}
 
-impl ArrayListIterator[T] {
     new(items [T], limit Int) {
         this.items = items
         this.limit = limit
@@ -26,12 +24,11 @@ impl ArrayListIterator[T] {
     }
 }
 
+
 class ArrayList[T] with Iterable[T] {
     hidden var items [T]
     hidden var count Int = 0
-}
 
-impl ArrayList[T] {
     new(capacity Int) {
         this.items = []
     }
@@ -52,6 +49,7 @@ impl ArrayList[T] {
 
     iterator() Iterator[T] = ArrayListIterator[T] { items: this.items, limit: this.count }
 }
+
 
 main() Int {
     values ArrayList[Int] = ArrayList[Int](5)

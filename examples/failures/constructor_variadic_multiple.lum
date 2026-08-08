@@ -4,9 +4,7 @@
 class Bad {
     left [Int]
     right [Int]
-}
 
-impl Bad {
     new(left [Int] vararg, right [Int] vararg) {
         this.left = left
         this.right = right

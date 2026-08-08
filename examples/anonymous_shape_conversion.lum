@@ -25,9 +25,7 @@ class MutablePoint {
 class SecretBadge {
     name Str
     hidden code Int
-}
 
-impl SecretBadge {
     new(name Str) {
         this.name = name
         this.code = 99
@@ -36,15 +34,15 @@ impl SecretBadge {
     codeValue() Int = this.code
 }
 
+
 class MixedProfile {
     name Str
     age Int
     hidden score Int = 5
-}
 
-impl MixedProfile {
     scoreValue() Int = this.score
 }
+
 
 main() Unit {
     userShape = {

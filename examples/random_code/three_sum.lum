@@ -14,16 +14,13 @@
 # 0
 
 object Ascending with Ordering[Int] {
-}
 
-impl object Ascending {
     compare(left Int, right Int) Int = left - right
 }
 
-object Solution {
-}
 
-impl object Solution {
+object Solution {
+
     sol2(nums [Int]) [[Int]] {
         nums.sort(Ascending)
 
@@ -98,6 +95,7 @@ impl object Solution {
         res
     }
 }
+
 
 printTriplets(label Str, triplets [[Int]]) Unit {
     println(label + " size " + triplets.size())

@@ -7,23 +7,19 @@ interface Named {
 }
 
 class A with Named {
-}
 
-impl A {
     label() Str = "A"
 }
 
-class B with Named {
-}
 
-impl B {
+class B with Named {
+
     label() Str = "B"
 }
 
-object C {
-}
 
-impl object C {
+object C {
+
     bump(value Int) Int = value + 1
 
     print(value Int) Int = value + 10

@@ -3,13 +3,12 @@
 
 class Counter {
     hidden var count Int = 0
-}
 
-impl Counter {
     bump() Unit {
         this.count = 1
     }
 }
+
 
 main() Unit {
     Counter {}.bump()

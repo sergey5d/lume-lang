@@ -9,25 +9,22 @@ interface WorkerLike {
 }
 
 class Worker with WorkerLike {
-}
 
-impl Worker {
     doWork() Int = 7
 }
 
-class Other with WorkerLike {
-}
 
-impl Other {
+class Other with WorkerLike {
+
     doWork() Int = 3
 }
 
-class Slacker with WorkerLike {
-}
 
-impl Slacker {
+class Slacker with WorkerLike {
+
     doWork() Int = -1
 }
+
 
 describe(value WorkerLike) {
     match value {

@@ -332,9 +332,7 @@ not part of the prelude; specs are executed by the test runner:
 ```txt
 use spec/*
 
-class PrimitiveSpec with Spec {}
-
-impl PrimitiveSpec {
+class PrimitiveSpec with Spec {
     def it() Unit {
         5.shouldBe(5)
         "ok".shouldBe("ok")
@@ -429,7 +427,7 @@ Supported annotation targets:
 - interface methods
 - enum cases
 
-Annotations on `impl` blocks themselves are not supported; annotate the methods inside the block instead.
+Annotations are not supported on reserved `impl` placeholders.
 
 Module declaration:
 
@@ -446,6 +444,7 @@ Top-level forms:
 - `shape`
 - `object`
 - `enum`
+- `impl TypePattern`
 - `ext TypeName`
 - `name Type = expr`
 - `hidden def`
@@ -761,7 +760,7 @@ settings Settings = Settings {}
 Named shapes are data-only structural field views:
 - fields are always visible and read-only
 - fields are declared in the `shape` body
-- methods are declared with `impl ShapeName { ... }`
+- methods are declared directly in the `shape` body after fields
 - custom `new` constructors are not allowed
 - shapes may declare interface bounds with `shape Name with Interface`
 - brace field construction uses `ShapeName { field: value }`
@@ -771,9 +770,6 @@ Named shapes are data-only structural field views:
 shape Point {
     x Int
     y Int
-}
-
-impl Point {
     def sum() Int = this.x + this.y
 }
 
@@ -784,9 +780,6 @@ interface Named {
 shape NamedPoint with Named {
     x Int
     y Int
-}
-
-impl NamedPoint {
     def label() Str = this.x + "," + this.y
 }
 
@@ -833,9 +826,6 @@ Explicit constructor rules:
 class Article {
     body Str
     title Str
-}
-
-impl Article {
     new(body Str = "body", title Str) {
         this.body = body
         this.title = title
@@ -1127,17 +1117,12 @@ mapped = maybe.map(value => value + 1)
 leftMapped = either.mapLeft(error => error.toStr())
 ```
 
-Classes, enums, and named objects can declare methods in their declaration bodies.
-Classes, shapes, enums, and named objects can also attach behavior through top-level
-`impl` blocks. Shape bodies remain data-only, so shape methods must use
-`impl ShapeName { ... }`:
+Classes, shapes, enums, and named objects declare methods directly in their
+declaration bodies, after storage fields and constructors:
 
 ```txt
 class Counter {
     value Int
-}
-
-impl Counter {
     inc() Int = this.value + 1
 }
 ```
@@ -1176,7 +1161,7 @@ label = user.displayName()
 ```
 
 Custom constructors are class-only and use a dedicated `new(...)` declaration in
-the class body or an `impl` block.
+the class body.
 
 - `new(...)` declares constructor inputs
 - `new(...) { body }` declares a block-bodied constructor
@@ -1204,7 +1189,6 @@ the class body or an `impl` block.
 - member order is storage first, constructors next, methods last
 - class, shape, enum, and object bodies list storage fields before behavior
 - enum cases count as enum storage and must appear before enum methods
-- class impl blocks list all `new` constructors before ordinary methods
 - a class body may declare constructors after its fields and before its methods
 
 ```txt
@@ -1232,9 +1216,6 @@ inside the constructor body:
 ```txt
 class Path {
     segments [Str]
-}
-
-impl Path {
     new(segments [Str] vararg = ["tmp"]) {
         this.segments = segments
     }
@@ -1508,16 +1489,23 @@ Class:
 ```txt
 class Box[T] with Named {
     value T
-}
-
-impl Box[T] {
     label() Str = "box"
 }
 ```
 
-When a class or named object implements an interface method inside its body or an
-`impl ... { ... }` block, it uses an ordinary method declaration. `def` is
-optional.
+When a class, shape, enum, or named object implements an interface method inside
+its body, it uses an ordinary method declaration. `def` is optional.
+
+`impl` is reserved for future generic specialization. It currently has no
+specialization behavior and its body must be empty:
+
+```txt
+impl Either[T, T] {}
+impl Option[Str] {}
+```
+
+Constructors and methods are never declared in `impl`; put them directly in the
+owning type declaration body.
 
 Named object:
 
@@ -1526,9 +1514,6 @@ object MathBox {
     value Int = 5
 
     valuePlusOne() Int = this.value + 1
-}
-
-impl object MathBox {
     double(value Int) Int = value * 2
 }
 
@@ -1539,8 +1524,6 @@ answer = box.valuePlusOne()
 `object Name { ... }` declares one named object type and one value `Name`.
 The expression `Name` evaluates to that value, so named objects can be passed to functions, stored in locals, and called through later like any other value.
 Named objects cannot be constructed with `Name()` or `Name {}`; reference `Name` directly.
-
-`impl object Name { ... }` attaches methods only to an explicit `object Name { ... }` declaration. It never creates the object by itself; declare `object Name {}` first when no fields are needed.
 
 Anonymous objects use an expression form:
 
@@ -1581,9 +1564,6 @@ Another class example:
 class Amount with Named {
     value Int
     label Str
-}
-
-impl Amount {
     label() Str = this.label
 }
 ```
@@ -1613,9 +1593,6 @@ interface Named {
 }
 
 class Box with Named {
-}
-
-impl Box {
     label() Str = "box"
 }
 ```
@@ -1665,9 +1642,8 @@ Enum cases are data-only:
 - payload and shared fields with defaults may be omitted from enum case constructors
 - `None()`-style calls for zero-payload cases are invalid
 
-Behavior for enums belongs on the enum itself, either in the enum declaration
-body or in `impl Enum { ... }` blocks. Case-specific behavior should be
-expressed with `match`.
+Behavior for enums belongs directly in the enum declaration body. Case-specific
+behavior should be expressed with `match`.
 
 ## Calls
 

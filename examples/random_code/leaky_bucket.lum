@@ -13,9 +13,7 @@ class LeakyBucket {
     hidden leakPerTick Int
     hidden var level Int = 0
     hidden var lastTick Int = 0
-}
 
-impl LeakyBucket {
     new(capacity Int, leakPerTick Int) {
         this.capacity = capacity
         this.leakPerTick = leakPerTick
@@ -54,6 +52,7 @@ impl LeakyBucket {
 
     currentLevel() Int = this.level
 }
+
 
 main() Unit {
     # Capacity 5, leaking 1 unit per tick.

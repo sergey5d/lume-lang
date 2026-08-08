@@ -13,9 +13,7 @@ interface Named {
 shape PointView with Named {
     x Int
     y Int
-}
 
-impl PointView {
     label() Str = this.x + "," + this.y
 
     move(dx Int, dy Int) PointView = PointView {
@@ -23,6 +21,7 @@ impl PointView {
         y: this.y + dy
     }
 }
+
 
 class Pixel {
     x Int
@@ -44,4 +43,3 @@ main() Unit {
     println("view-is-named", view is Named)
     println("pixel-is-named", pixel is Named)
 }
-

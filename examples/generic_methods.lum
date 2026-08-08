@@ -6,13 +6,12 @@
 id[T](value T) T = value
 
 class Mapper {
-}
 
-impl Mapper {
     map[X](value Int, mapper fn(Int) => X) X {
         mapper(value)
     }
 }
+
 
 main() Int {
     mapper Mapper = Mapper {}

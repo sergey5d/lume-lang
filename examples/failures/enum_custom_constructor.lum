@@ -5,8 +5,6 @@ enum Status {
     case Ready {
         value Int
     }
-}
 
-impl Status {
     new(value Int) = Status.Ready(value)
 }

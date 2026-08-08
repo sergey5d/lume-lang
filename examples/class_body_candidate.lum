@@ -1,7 +1,6 @@
 # SKIP
 #
-# Candidate class shape where storage stays in `class` and behavior moves into
-# a separate `impl` block.
+# Class declaration with storage, constructors, and behavior in one body.
 
 hidden class Person with Named, Aged {
 
@@ -12,9 +11,6 @@ hidden class Person with Named, Aged {
 
     hidden var archived Bool
     var internalScore Int = 1
-}
-
-impl Person {
 
     new(firstName Str, lastName Str) {
         this.firstName = firstName

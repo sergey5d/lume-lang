@@ -3,9 +3,7 @@
 
 class Counter {
     hidden count Int
-}
 
-impl Counter {
     new(count Int) {
         this.count = count
     }
@@ -15,6 +13,7 @@ impl Counter {
         this.count
     }
 }
+
 
 main() Int {
     counter Counter = Counter(1)

@@ -6,9 +6,7 @@
 
 class Vec {
     hidden var items Array[Int]
-}
 
-impl Vec {
     new(left Int, right Int) {
         this.items = Array(left, right)
     }
@@ -17,6 +15,7 @@ impl Vec {
     +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
     -() Vec = Vec(-this[0], -this[1])
 }
+
 
 main() Unit {
     left Vec = Vec(1, 2)

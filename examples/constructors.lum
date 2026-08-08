@@ -49,9 +49,7 @@ class Profile {
 
 class Stock {
     hidden count Int = 5
-}
 
-impl Stock {
     new(count Int) {
         this.count = count
     }
@@ -59,11 +57,10 @@ impl Stock {
     value() Int = this.count
 }
 
+
 class Slots {
     hidden var items Array[Int]
-}
 
-impl Slots {
     new(left Int, right Int) {
         this.items = Array(left, right)
     }
@@ -73,12 +70,11 @@ impl Slots {
     right() Int = this.items[1]
 }
 
+
 class Account {
     name Str
     age Int
-}
 
-impl Account {
     new(name Str, age Int = 0) {
         this.name = name
         this.age = age
@@ -94,11 +90,10 @@ impl Account {
     label() Str = this.name + " " + this.age
 }
 
+
 class Path {
     segments [Str]
-}
 
-impl Path {
     new(segments [Str] vararg = ["default"]) {
         this.segments = segments
     }
@@ -107,6 +102,7 @@ impl Path {
 
     firstOr(value Str) Str = this.segments.get(0).getOr(value)
 }
+
 
 main() Unit {
     profile = Profile("Ada", 2)

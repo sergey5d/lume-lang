@@ -7,12 +7,6 @@ enum TypeBodyOrder {
     Method,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ImplBodyOrder {
-    Constructor,
-    Method,
-}
-
 impl<'a> Parser<'a> {
     pub(super) fn parse_module_decl(&mut self) -> Option<ModuleDecl> {
         let start = self.previous_span();
@@ -455,10 +449,6 @@ impl<'a> Parser<'a> {
                             "annotation '{}' cannot declare methods; annotations are data-only metadata shapes",
                             name
                         )),
-                        TypeKind::Record => Some(format!(
-                            "shape '{}' cannot declare methods in its body; use 'impl {}'",
-                            name, name
-                        )),
                         _ => None,
                     };
                     if let Some(message) = body_method_error {
@@ -471,6 +461,13 @@ impl<'a> Parser<'a> {
                         kind == TypeKind::Interface,
                         true,
                     )?;
+                    if method.name == "new" {
+                        self.diagnostics.push(Diagnostic::error(
+                            "old_constructor_syntax",
+                            "constructors omit 'def'; use `new(params) { body }` or `new(params) = expression`",
+                            method.span,
+                        ));
+                    }
                     body_order = TypeBodyOrder::Method;
                     members.push(TypeMember::Method(method));
                 }
@@ -479,10 +476,6 @@ impl<'a> Parser<'a> {
                         TypeKind::Annotation => Some(format!(
                             "annotation '{}' cannot declare methods; annotations are data-only metadata shapes",
                             name
-                        )),
-                        TypeKind::Record => Some(format!(
-                            "shape '{}' cannot declare methods in its body; use 'impl {}'",
-                            name, name
                         )),
                         _ => None,
                     };
@@ -548,7 +541,7 @@ impl<'a> Parser<'a> {
 
         for span in invalid_constructors {
             self.diagnostics.push(Diagnostic::error(
-                "unexpected_constructor_decl",
+                "invalid_constructor_decl",
                 type_body_constructor_message(kind, &name),
                 span,
             ));
@@ -652,8 +645,6 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::LBrace, "expected '{' after impl target")?;
         self.skip_newlines();
 
-        let mut methods = Vec::new();
-        let mut body_order = ImplBodyOrder::Constructor;
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             self.skip_newlines();
             if self.at(TokenKind::RBrace) {
@@ -665,18 +656,7 @@ impl<'a> Parser<'a> {
                 && self.current().lexeme == "new"
                 && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::LBrace))
             {
-                let constructor = self.parse_constructor_decl(annotations, visibility)?;
-                if body_order == ImplBodyOrder::Method {
-                    self.diagnostics.push(Diagnostic::error(
-                        "invalid_member_order",
-                        format!(
-                            "constructors must appear before methods in impl '{}'; move 'new' above method declarations",
-                            impl_target_name(&target)
-                        ),
-                        constructor.span,
-                    ));
-                }
-                constructor
+                self.parse_constructor_decl(annotations, visibility)?
             } else {
                 let method = self.parse_method_decl(annotations, visibility, false, true)?;
                 if method.name == "new" {
@@ -686,17 +666,28 @@ impl<'a> Parser<'a> {
                         method.span,
                     ));
                 }
-                body_order = ImplBodyOrder::Method;
                 method
             };
-            methods.push(method);
+            let member_kind = if method.name == "new" {
+                "constructor"
+            } else {
+                "method"
+            };
+            self.diagnostics.push(Diagnostic::error(
+                "impl_member_not_allowed",
+                format!(
+                    "impl blocks cannot declare {member_kind}s; move '{}' into the '{}' declaration body",
+                    method.name,
+                    impl_target_name(&target)
+                ),
+                method.span,
+            ));
             self.skip_newlines();
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after impl body")?;
         Some(ImplBlock {
             target_kind,
             target,
-            methods,
             span: start.cover(end),
         })
     }
@@ -1048,25 +1039,29 @@ fn type_body_constructor_message(kind: TypeKind, name: &str) -> String {
     match kind {
         TypeKind::Annotation => {
             format!(
-                "annotation '{name}' cannot declare constructors; annotations are data-only metadata shapes"
+                "only classes can declare custom constructors; annotation '{name}' cannot declare constructors"
             )
         }
         TypeKind::Class => unreachable!("class-body constructors are valid"),
         TypeKind::Record => {
             format!(
-                "shape '{name}' cannot declare custom constructors; use structural brace construction"
+                "only classes can declare custom constructors; shape '{name}' uses structural brace construction"
             )
         }
         TypeKind::Object => {
             format!(
-                "object '{name}' cannot declare custom constructors; reference '{name}' directly"
+                "only classes can declare custom constructors; object '{name}' declares one object value"
             )
         }
         TypeKind::Interface => {
-            format!("interface '{name}' cannot declare constructors")
+            format!(
+                "only classes can declare custom constructors; interface '{name}' cannot declare constructors"
+            )
         }
         TypeKind::Enum => {
-            format!("enum '{name}' cannot declare constructors; enum cases define values")
+            format!(
+                "only classes can declare custom constructors; enum '{name}' uses enum cases for construction"
+            )
         }
     }
 }

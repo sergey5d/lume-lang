@@ -34,9 +34,7 @@ class Cursor {
     hidden documents [Str]
     hidden var current Location
     hidden var valid Bool = false
-}
 
-impl Cursor {
     new(term Str, documents [Str]) {
         this.term = term
         this.documents = documents
@@ -94,6 +92,7 @@ impl Cursor {
     }
 }
 
+
 toBeOrNotToBe() Unit {
 
     documents [Str] = [
@@ -108,7 +107,7 @@ toBeOrNotToBe() Unit {
 
     c1 = Cursor("to", documents)
     c2 = Cursor("be", documents)
-    
+
     var loc1 = c1.get()
     var loc2 = c2.get()
 
@@ -178,7 +177,7 @@ toBeOrNotToBe2() Unit {
 
     c1 = Cursor("to", documents)
     c2 = Cursor("be", documents)
-    
+
     advanceContiniously(c Cursor) { begin Int, count Int, docId Int } {
         var counter = 1
         var loc = c.get()
@@ -229,7 +228,7 @@ toBeOrNotToBe2() Unit {
                     advance1 := advanceContiniously(c1)
                     advance2 := advanceContiniously(c2)
 
-                    if (advance1.docId > docId ||  !c1.isValid()) && 
+                    if (advance1.docId > docId ||  !c1.isValid()) &&
                             (advance2.docId > docId || !c2.isValid()) {
                         result.append(docId)
                     }
@@ -247,7 +246,7 @@ toBeOrNotToBe2() Unit {
         }
     }
 
-    if advance1.docId == advance2.docId && 
+    if advance1.docId == advance2.docId &&
             advance1.begin + advance1.count == advance2.begin && advance1.count == advance2.count {
         result.append(advance1.docId)
     }

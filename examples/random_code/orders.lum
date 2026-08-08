@@ -13,9 +13,6 @@ class OrderManager {
     hidden map [Int: Order] = []
     hidden var currentTick Int = 0
     hidden queue [Order] = []
-}
-
-impl OrderManager {
 
     parseOrder(str Str) Option[Order] {
 
@@ -29,7 +26,7 @@ impl OrderManager {
         asset = arr[2]
 
         let quantity <- Int.parse(arr[3]) else panic("expected quantity")
-        
+
         status = arr[4]
 
         Some(
@@ -72,7 +69,7 @@ impl OrderManager {
         order = savedOrder.getOr(parsedOrder)
 
         match parsedOrder.status {
-            case "NEW" => 
+            case "NEW" =>
                 # the only thing here is to update quantity, the rest will be propagated by other order types
                 order.quantity := parsedOrder.quantity
             case "FILL" => {
@@ -94,8 +91,8 @@ impl OrderManager {
                 } else {
                     order.status := "NEW"
                     this.queue.add(order)
-                }     
-                order.lastUpdated := this.currentTick                   
+                }
+                order.lastUpdated := this.currentTick
             }
         }
     }
@@ -113,6 +110,7 @@ impl OrderManager {
         orders
     }
 }
+
 
 main() {
 

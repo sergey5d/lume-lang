@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# unknown impl target 'Named'
+# .*impl blocks cannot declare methods; move 'other' into the 'Named' declaration body.*
 
 interface Named {
     name() Str = "named"

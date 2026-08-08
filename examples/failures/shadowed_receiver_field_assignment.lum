@@ -3,9 +3,7 @@
 
 class Counter {
     var count Int
-}
 
-impl Counter {
     new(count Int) {
         this.count = count
     }
@@ -14,5 +12,6 @@ impl Counter {
         count := count + 1
     }
 }
+
 
 main() Unit {}

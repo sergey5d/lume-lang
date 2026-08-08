@@ -11,9 +11,7 @@ interface ImplicitPrinter {
 }
 
 class Printer with ExplicitPrinter, ImplicitPrinter {
-}
 
-impl Printer {
     printExplicit() {
         println("explicit")
     }
@@ -22,6 +20,7 @@ impl Printer {
         println("implicit")
     }
 }
+
 
 main() Unit {
     printer Printer = Printer {}

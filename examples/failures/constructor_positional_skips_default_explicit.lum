@@ -4,14 +4,13 @@
 class Article {
     body Str
     title Str
-}
 
-impl Article {
     new(body Str = "body", title Str) {
         this.body = body
         this.title = title
     }
 }
+
 
 main() Unit {
     _ Article = Article("Intro")

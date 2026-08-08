@@ -4,9 +4,8 @@
 # method return value 5
 # method return missing
 
-class Extractor {}
+class Extractor {
 
-impl Extractor {
     withDefault(value Option[Int], defaultValue Int) Int =
         value ?? defaultValue
 
@@ -15,6 +14,7 @@ impl Extractor {
         "value " + item
     }
 }
+
 
 main() Unit {
     extractor = Extractor {}

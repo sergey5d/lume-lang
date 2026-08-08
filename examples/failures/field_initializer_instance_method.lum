@@ -3,8 +3,6 @@
 
 class AssetPrices {
     assets [Str] = this.makePrices()
-}
 
-impl AssetPrices {
     makePrices() [Str] = []
 }

@@ -18,9 +18,7 @@ class SlidingWindowLimiter {
     hidden capacity Int
     hidden windowSize Int
     hidden accepted LinkedList[WindowRequest]
-}
 
-impl SlidingWindowLimiter {
     new(capacity Int, windowSize Int) {
         this.capacity = capacity
         this.windowSize = windowSize
@@ -63,6 +61,7 @@ impl SlidingWindowLimiter {
 
     currentUsage(now Int) Int = this.usedInWindow(now)
 }
+
 
 main() Unit {
     # Capacity 5 over a 5-tick sliding window.

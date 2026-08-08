@@ -56,9 +56,7 @@ object AnnotationConstants {
 class Service {
     @Tag { name: "field" }
     name Str
-}
 
-impl Service {
     @Route { path: routePath }
     new() {
         this.name = "ok"
@@ -71,6 +69,7 @@ impl Service {
     @Route { path: LocalRoutes.status, method: "POST" }
     status() Str = "status"
 }
+
 
 main() Unit {
     serviceType Type[Service] = typeOf[Service]

@@ -4,11 +4,10 @@
 
 class Adder {
     amount Int
-}
 
-impl Adder {
     add(value Int) Int = this.amount + value
 }
+
 
 main() Int {
     adder Adder = Adder(5)

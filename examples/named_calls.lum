@@ -8,13 +8,12 @@
 # 0
 
 class Formatter {
-}
 
-impl Formatter {
 	format(prefix Str, value Int) Str {
 		return prefix + value
 	}
 }
+
 
 format(prefix Str, value Int) Str {
 	return prefix + value

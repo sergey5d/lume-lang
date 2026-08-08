@@ -2,9 +2,7 @@
 enum Side {
     case NS
     case EW
-}
 
-impl Side {
     reverse() Side {
         match this {
             case NS => EW
@@ -12,6 +10,7 @@ impl Side {
         }
     }
 }
+
 
 await(side Side, timeout Int) Int {
     return 1
@@ -74,7 +73,7 @@ doProcess() {
         } else {
             min - passedBeforeAwait
         }
-        
+
         passedInTry = await(control.side, tryTime)
 
         control.inc(passedInTry)
@@ -92,6 +91,6 @@ doProcess() {
         } else {
             set_light()
             control.reverseAndZero()
-        } 
+        }
     }
 }

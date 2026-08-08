@@ -209,11 +209,10 @@ class Box with Named {
     value Int
 
     doubled() Int = this.value * 2
-}
 
-impl Box {
     label() Str = "box"
 }
+
 
 ext Box {
     tripled() Int = this.value * 3
@@ -602,20 +601,20 @@ def run(items [Int]) [Int] {
 }
 
 #[test]
-fn parses_class_and_impl() {
+fn parses_class_members_and_empty_impl_placeholder() {
     let result = parse(
         r#"
 class Counter {
     hidden var count Int
-}
 
-impl Counter {
     new(count Int) {
         this.count = count
     }
 
     def bump(delta Int) Int = this.count + delta
 }
+
+impl Counter {}
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -706,7 +705,31 @@ class User {
 
 impl User {
     def label() Str = this.name
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "impl_member_not_allowed"
+                && diag.message.contains("impl blocks cannot declare methods")
+                && diag
+                    .message
+                    .contains("move 'label' into the 'User' declaration body")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
 
+#[test]
+fn rejects_constructor_in_impl_block() {
+    let result = parse(
+        r#"
+class User {
+    name Str
+}
+
+impl User {
     new(name Str) {
         this.name = name
     }
@@ -715,14 +738,42 @@ impl User {
     );
     assert!(
         result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_member_order"
+            diag.code == "impl_member_not_allowed"
                 && diag
                     .message
-                    .contains("constructors must appear before methods")
+                    .contains("impl blocks cannot declare constructors")
+                && diag
+                    .message
+                    .contains("move 'new' into the 'User' declaration body")
         }),
         "{:#?}",
         result.diagnostics
     );
+}
+
+#[test]
+fn parses_empty_generic_impl_placeholders() {
+    let result = parse(
+        r#"
+enum Either[L, R] {
+    case Left { value L }
+    case Right { value R }
+}
+
+enum Option[T] {
+    case Some { value T }
+    case None
+}
+
+impl Either[T, T] {}
+impl Option[Str] {}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    assert_eq!(program.items.len(), 4);
+    assert!(matches!(program.items[2], Item::Impl(_)));
+    assert!(matches!(program.items[3], Item::Impl(_)));
 }
 
 #[test]
@@ -799,20 +850,22 @@ fn parses_expression_bodied_constructor() {
         r#"
 class User {
     name Str
-}
 
-impl User {
     new(name Str) = this { name: name }
 }
+
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
-    let Item::Impl(block) = &program.items[1] else {
-        panic!("expected impl block");
+    let Item::Type(decl) = &program.items[0] else {
+        panic!("expected class declaration");
+    };
+    let TypeMember::Method(constructor) = &decl.members[1] else {
+        panic!("expected constructor");
     };
     assert!(matches!(
-        block.methods[0].body,
+        constructor.body,
         Some(CallableBody::Expr(Expr::Call { .. }))
     ));
 }
@@ -835,23 +888,25 @@ fn parses_defaulted_variadic_constructor_parameter() {
         r#"
 class Path {
     segments [Str]
-}
 
-impl Path {
     new(segments [Str] vararg = ["tmp"]) {
         this.segments = segments
     }
 }
+
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
-    let Item::Impl(block) = &program.items[1] else {
-        panic!("expected impl block");
+    let Item::Type(decl) = &program.items[0] else {
+        panic!("expected class declaration");
     };
-    assert_eq!(block.methods[0].params.len(), 1);
-    assert!(block.methods[0].params[0].variadic);
-    assert!(block.methods[0].params[0].initializer.is_some());
+    let TypeMember::Method(constructor) = &decl.members[1] else {
+        panic!("expected constructor");
+    };
+    assert_eq!(constructor.params.len(), 1);
+    assert!(constructor.params[0].variadic);
+    assert!(constructor.params[0].initializer.is_some());
 }
 
 #[test]
@@ -862,13 +917,12 @@ def bad(vararg values [Str]) Unit = ()
 
 class Path {
     segments [Str]
-}
 
-impl Path {
     new(vararg segments [Str]) {
         this.segments = segments
     }
 }
+
 "#,
     );
     assert!(
@@ -899,11 +953,11 @@ fn parses_by_name_function_and_method_parameters() {
         r#"
 def debug(message => Str) Unit = ()
 
-class Logger {}
+class Logger {
 
-impl Logger {
     def write(message => Str) Unit = ()
 }
+
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -912,10 +966,13 @@ impl Logger {
         panic!("expected function");
     };
     assert!(function.params[0].lazy);
-    let Item::Impl(block) = &program.items[2] else {
-        panic!("expected impl block");
+    let Item::Type(decl) = &program.items[1] else {
+        panic!("expected class declaration");
     };
-    assert!(block.methods[0].params[0].lazy);
+    let TypeMember::Method(method) = &decl.members[0] else {
+        panic!("expected method");
+    };
+    assert!(method.params[0].lazy);
 }
 
 #[test]
@@ -924,13 +981,12 @@ fn rejects_ellipsis_constructor_parameter() {
         r#"
 class Path {
     segments [Str]
-}
 
-impl Path {
     new(segments Str...) {
         this.segments = segments
     }
 }
+
 "#,
     );
     assert!(!result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -941,9 +997,7 @@ fn rejects_removed_symbolic_operator_methods_at_lexer() {
     for operator in ["++", "--", ":-", "::"] {
         let source = format!(
             r#"
-class Vec {{}}
-
-impl Vec {{
+class Vec {{
     def {operator}(other Vec) Vec = this
 }}
 "#
@@ -972,12 +1026,12 @@ def main() Unit {{
 fn parses_empty_method_body() {
     let result = parse(
         r#"
-class Counter {}
+class Counter {
 
-impl Counter {
     def reset() {
     }
 }
+
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -995,28 +1049,23 @@ def main() {
 }
 
 #[test]
-fn parses_named_object_and_impl_object() {
+fn parses_named_object_with_body_methods() {
     let result = parse(
         r#"
 object Counter {
     hidden value = 0
-}
 
-impl object Counter {
     def next() Int = this.value + 1
 }
+
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
-    assert_eq!(program.items.len(), 2);
+    assert_eq!(program.items.len(), 1);
     match &program.items[0] {
         Item::Type(decl) => assert_eq!(decl.kind, TypeKind::Object),
         other => panic!("expected object type, got {other:#?}"),
-    }
-    match &program.items[1] {
-        Item::Impl(block) => assert_eq!(block.target_kind, ImplTargetKind::Object),
-        other => panic!("expected impl block, got {other:#?}"),
     }
 }
 
@@ -1854,25 +1903,27 @@ fn parses_equals_before_assignment_statement_callable_body() {
         r#"
 class Counter {
     hidden var value Int = 0
-}
 
-impl Counter {
     reset() Unit =
         this.value := 0
 }
+
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
-    match &program.items[1] {
-        Item::Impl(block) => match block.methods[0].body.as_ref() {
-            Some(CallableBody::Block(block)) => match &block.statements[0] {
-                Stmt::Assignment(_) => {}
-                other => panic!("expected assignment statement, got {other:#?}"),
+    match &program.items[0] {
+        Item::Type(decl) => match &decl.members[1] {
+            TypeMember::Method(method) => match method.body.as_ref() {
+                Some(CallableBody::Block(block)) => match &block.statements[0] {
+                    Stmt::Assignment(_) => {}
+                    other => panic!("expected assignment statement, got {other:#?}"),
+                },
+                other => panic!("expected block body, got {other:#?}"),
             },
-            other => panic!("expected block body, got {other:#?}"),
+            other => panic!("expected method, got {other:#?}"),
         },
-        other => panic!("expected impl block, got {other:#?}"),
+        other => panic!("expected class declaration, got {other:#?}"),
     }
 }
 

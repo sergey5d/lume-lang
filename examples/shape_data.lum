@@ -25,9 +25,7 @@ class Amount with Hopper, Jumper {
     amount Int
     description Str
     count Int
-}
 
-impl Amount {
     multiple(other Amount) Amount = Amount {
         amount: this.amount * other.amount
         description: this.description + " " + other.description
@@ -42,6 +40,7 @@ impl Amount {
 
     jump(steps Int) Str = "Jump " + steps + " steps"
 }
+
 
 a1 = Amount(10, "description", 5)
 

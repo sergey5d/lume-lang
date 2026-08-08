@@ -5,9 +5,7 @@ use lume/db/{DbError, JdbcDatabase, JdbcRow, JdbcRowDecoder, JdbcRunner, JdbcTra
 
 hidden object JdbcRowDecoderCache {
     hidden var decoders Map[Str, JdbcRowDecoder] = Map()
-}
 
-impl object JdbcRowDecoderCache {
     def decoder(targetType Type[_]) Result[JdbcRowDecoder, DbError] {
         key Str = this.key(targetType)
 
@@ -25,11 +23,10 @@ impl object JdbcRowDecoderCache {
         targetType.qualifiedName().getOr(targetType.name().getOr("<anonymous>"))
 }
 
+
 hidden class JdbcRowImpl with Row {
     hidden backend JdbcRow
-}
 
-impl JdbcRowImpl {
     new(backend JdbcRow) {
         this.backend = backend
     }
@@ -68,13 +65,12 @@ impl JdbcRowImpl {
     def boolOpt(column Str) Result[Option[Bool], DbError] = this.backend.boolOpt(column)
 }
 
+
 hidden class JdbcQuery with Query {
     hidden runner JdbcRunner
     hidden sql Str
     hidden values [Any]
-}
 
-impl JdbcQuery {
     new(runner JdbcRunner, sql Str, values [Any] = []) {
         this.runner = runner
         this.sql = sql
@@ -147,13 +143,12 @@ impl JdbcQuery {
     }
 }
 
+
 hidden class JdbcRowQuery with RowQuery {
     hidden runner JdbcRunner
     hidden sql Str
     hidden values [Any]
-}
 
-impl JdbcRowQuery {
     new(runner JdbcRunner, sql Str, values [Any] = []) {
         this.runner = runner
         this.sql = sql
@@ -219,12 +214,11 @@ impl JdbcRowQuery {
     }
 }
 
+
 hidden class JdbcExec with Exec {
     hidden runner JdbcRunner
     hidden sql Str
-}
 
-impl JdbcExec {
     new(runner JdbcRunner, sql Str) {
         this.runner = runner
         this.sql = sql
@@ -235,13 +229,12 @@ impl JdbcExec {
     def run() Result[Int, DbError] = this.runner.exec(this.sql)
 }
 
+
 hidden class JdbcBoundExec with BoundExec {
     hidden runner JdbcRunner
     hidden sql Str
     hidden values [Any]
-}
 
-impl JdbcBoundExec {
     new(runner JdbcRunner, sql Str, values [Any] = []) {
         this.runner = runner
         this.sql = sql
@@ -251,11 +244,10 @@ impl JdbcBoundExec {
     def run() Result[Int, DbError] = this.runner.exec(this.sql, this.values)
 }
 
+
 hidden class JdbcTransactionImpl with Transaction {
     hidden backend JdbcTransaction
-}
 
-impl JdbcTransactionImpl {
     new(backend JdbcTransaction) {
         this.backend = backend
     }
@@ -275,11 +267,10 @@ impl JdbcTransactionImpl {
     def close() Result[Unit, DbError] = this.backend.close()
 }
 
+
 hidden class JdbcDatabaseImpl with Database {
     hidden backend JdbcDatabase
-}
 
-impl JdbcDatabaseImpl {
     new(backend JdbcDatabase) {
         this.backend = backend
     }

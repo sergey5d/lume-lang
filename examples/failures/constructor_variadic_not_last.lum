@@ -4,14 +4,13 @@
 class Bad {
     items [Int]
     suffix Int
-}
 
-impl Bad {
     new(items [Int] vararg, suffix Int) {
         this.items = items
         this.suffix = suffix
     }
 }
+
 
 main() Unit {
     _ Bad = Bad(1, 2, 3)

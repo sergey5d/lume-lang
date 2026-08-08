@@ -7,12 +7,11 @@ interface Named {
 
 class Person with Named {
     name Str
-}
 
-impl Person {
     name() Str =
         this.name
 }
+
 
 main() Unit {
     person Person = Person { name: "Ada" }

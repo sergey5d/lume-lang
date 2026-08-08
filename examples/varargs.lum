@@ -30,9 +30,7 @@ describeTags(label Str, tags [Str] vararg) Str {
 
 class Reporter {
     prefix Str
-}
 
-impl Reporter {
     new(prefix Str) {
         this.prefix = prefix
     }
@@ -42,12 +40,11 @@ impl Reporter {
     }
 }
 
+
 class Path {
     label Str
     segments [Str]
-}
 
-impl Path {
     new(label Str, segments [Str] vararg = ["default"]) {
         this.label = label
         this.segments = segments
@@ -55,6 +52,7 @@ impl Path {
 
     render() Str = this.label + " " + this.segments.size() + " " + joinWords(separator = "/", words = this.segments)
 }
+
 
 main() Unit {
     println("function tags", describeTags("alpha", "alpha", "beta", "gamma"), "joined", joinWords(" ", "alpha", "beta", "gamma"))

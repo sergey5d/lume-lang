@@ -10,9 +10,7 @@
 
 class Counter {
     var count Int
-}
 
-impl Counter {
     new(initial Int) {
         this.count = initial
     }
@@ -32,6 +30,7 @@ impl Counter {
         reader()
     }
 }
+
 
 enum Color {
     code Str

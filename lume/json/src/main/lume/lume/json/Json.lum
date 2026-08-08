@@ -35,15 +35,12 @@ enum JsonValue {
     case JsonObject {
         fields [JsonField]
     }
-}
 
-object Json {}
-
-impl JsonValue {
     def stringify() Str = JsonRuntime.stringify(this)
 }
 
-impl object Json {
+object Json {
+
     def str(value Str) JsonValue = JsonRuntime.str(value)
 
     def int(value Int) JsonValue = JsonRuntime.int(value)

@@ -3,22 +3,20 @@
 # 0
 
 object Ascending with Ordering[Int] {
-}
 
-impl object Ascending {
     compare(left Int, right Int) Int = left - right
 }
+
 
 class Box[T with Ordering[T]] {
     value T
 }
 
 class Mapper {
-}
 
-impl Mapper {
     pick[X with Ordering[X]](value X) X = value
 }
+
 
 pick[T with Ordering[T]](value T) T = value
 

@@ -6,20 +6,19 @@
 
 class Counter {
     hidden var value Int = 0
-}
 
-impl Counter {
     next() Int {
         this.value := this.value + 1
         this.value
     }
 
-    reset() Unit = 
+    reset() Unit =
         this.value := 0
 
-    current() Int = 
+    current() Int =
         this.value
 }
+
 
 twice(value => Int) Int =
     value + value

@@ -6,9 +6,7 @@ enum Option[T] {
     }
 
     case None
-}
 
-impl Option[T] {
     def isSet() Bool = match this {
         case Some(_) => true
         case None => false
@@ -63,5 +61,4 @@ impl Option[T] {
         case Some(value) => [value].iterator()
         case None => Vector().iterator()
     }
-
 }

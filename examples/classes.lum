@@ -19,30 +19,26 @@ class Profile {
     age Int
     city Str = "NYC"
     hidden score Int = 5
-}
 
-impl Profile {
     scoreValue() Int = this.score
 }
+
 
 class HiddenTail {
     name Str
     level Int
     hidden bonus Int = 7
-}
 
-impl HiddenTail {
     bonusValue() Int = this.bonus
 }
+
 
 class A {
     age Int
     name Str
 
     hidden var malnutritioned Bool = false
-}
 
-impl A {
     new(age Int, name Str) {
         this.age = age
         this.name = name
@@ -55,15 +51,14 @@ impl A {
     trueName() Str = this.name
 }
 
+
 class B {
     hidden age Int
     hidden name Str
     hidden var malnutritioned Bool = false
     hidden var unassigned Float
     hidden questionable Int
-}
 
-impl B {
     new(age Int, name Str = "Bobby") {
         this.age = age
         this.name = name
@@ -75,6 +70,7 @@ impl B {
 
     trueName() Str = this.name
 }
+
 
 main() Unit {
     named Profile = Profile {

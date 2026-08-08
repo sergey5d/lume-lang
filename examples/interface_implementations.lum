@@ -20,34 +20,31 @@ annotation Route with Metadata {
 
 shape NamedShape with Labeled {
     name Str
-}
 
-impl NamedShape {
     label() Str = this.name
 }
+
 
 enum Status with Labeled {
     case Ready
     case Failed {
         reason Str
     }
-}
 
-impl Status {
     label() Str = match this {
         case Ready => "ready"
         case Failed(reason) => reason
     }
 }
 
-object Greeter with Labeled {
-}
 
-impl object Greeter {
+object Greeter with Labeled {
+
     label() Str = this.hello()
 
     hello() Str = "hi"
 }
+
 
 main() Unit {
     named NamedShape = NamedShape { name: "shape-value" }

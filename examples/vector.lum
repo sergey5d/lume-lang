@@ -22,11 +22,10 @@
 # spread 0 4 7 7
 
 object Descending with Ordering[Int] {
-}
 
-impl object Descending {
     compare(left Int, right Int) Int = right - left
 }
+
 
 main() Unit {
     items = [1, 2, 3]

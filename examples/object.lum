@@ -13,9 +13,7 @@ object A {
     var count Int = 2
 
     value() Int = this.count
-}
 
-impl object A {
     create(sizeValue Int) B = B { size: sizeValue }
     create(str Str) B = B { size: 1 }
 
@@ -23,6 +21,7 @@ impl object A {
         return a + this.value()
     }
 }
+
 
 main() Int = {
     b1 B = A.create(5)
