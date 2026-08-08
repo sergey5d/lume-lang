@@ -1,5 +1,5 @@
 # EXPECT:
-# list
+# array
 # class
 # class
 # interface
@@ -23,9 +23,9 @@ class Amount {
     label Str
 }
 
-def describeList(value [Int]) {
+def describeArray(value [Int]) {
     match value {
-        case _ List => println("list")
+        case _ Array => println("array")
     }
 }
 
@@ -55,7 +55,7 @@ def describeNamedWorker(value Named) {
 }
 
 def main() Int {
-    describeList([1, 2, 3])
+    describeArray([1, 2, 3])
     describeClass(Worker("Ada"))
     describeShape(Amount(7, "usd"))
     describeInterface(Worker("Bob"))

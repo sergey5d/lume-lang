@@ -371,7 +371,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        let end = self.consume(TokenKind::RBracket, "expected ']' after list pattern")?;
+        let end = self.consume(TokenKind::RBracket, "expected ']' after array pattern")?;
         Some(Pattern::List {
             elements,
             rest,
@@ -382,7 +382,7 @@ impl<'a> Parser<'a> {
     fn parse_list_pattern_element(&mut self, depth: usize) -> Option<Pattern> {
         let checkpoint = self.checkpoint();
         if self.at(TokenKind::Identifier) || self.is_placeholder_identifier() {
-            let (name, start) = self.expect_binding_name("expected list pattern")?;
+            let (name, start) = self.expect_binding_name("expected array pattern")?;
             if self.binding_type_starts_on_same_line(start)
                 && matches!(
                     self.current_kind(),

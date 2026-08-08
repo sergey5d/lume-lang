@@ -3,39 +3,41 @@
 # INTERPRETER
 
 interface Array[T] with Iterable[T] {
-
-    # TODO: think more about whether [] should stay declared here
-    # or only exist as language-level operator surface.
-    # def [](idx Int) T
-    # def [](idx Int, val T)
-
-    def get(idx Int) Option[T]
-
-    def first() Option[T]
-    def last() Option[T]
-
-    def clone() Array[T]
-
+    def append(value T) Array[T]
+    def add(value T) Array[T]
+    def addAll(values Iterable[T]) Array[T]
     def map[X](f fn(T) => X) Array[X]
-    def forEach(f fn(T) => Unit)
-
-    def count(f fn(T) => Bool) Int
-
+    def flatMap[X](f fn(T) => Array[X]) Array[X]
+    def filter(f fn(T) => Bool) Array[T]
+    def fold[X](initial X, f fn(X, T) => X) X
+    def reduce[X](initial X, f fn(X, T) => X) X
+    def reduce(f fn(T, T) => T) Option[T]
     def exists(f fn(T) => Bool) Bool
     def forAll(f fn(T) => Bool) Bool
-
-    def contains(e T) Bool
-    def find(e T) Option[T]
-
-    def indexOf(e T) Int
-
-    # TODO: think more about whether these belong on Array directly.
-    # Arrays have fixed size, so the result shape is less obvious here.
-    # def filter(f fn(T) => Bool) List[T]
-    # def flatMap[X](f fn(T) => Iterable[X]) List[X]
-
+    def sort(ordering Ordering[T]) Array[T]
     def zip[X](other Array[X]) Array[(T, X)]
     def zipWithIndex() Array[(T, Int)]
-
+    def get(index Int) Option[T]
+    def head() Option[T]
+    def tail() Array[T]
+    def isEmpty() Bool
+    def nonEmpty() Bool = !this.isEmpty()
+    def remove(index Int) Option[T]
+    def removeFirst() Option[T]
+    def removeLast() Option[T]
     def size() Int
+    def forEach(f fn(T) => Unit)
+
+    def makeStr(separator Str) Str {
+        var result Str = ""
+        for idx <- Range(0, this.size()) {
+            if let Some(item) = this.get(idx) {
+                if idx > 0 {
+                    result := result + separator
+                }
+                result := result + item
+            }
+        }
+        result
+    }
 }

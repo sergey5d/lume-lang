@@ -20,7 +20,7 @@ public final class LumeIterator<T> {
                             java.util.List.of(LumeRuntime.extractSuccessValue(option)).iterator())
                     : new LumeIterator<>(java.util.List.of().iterator());
         }
-        if (source instanceof LumeList<?> list) {
+        if (source instanceof LumeArray<?> list) {
             return new LumeIterator<>(list.asJava().iterator());
         }
         if (source instanceof LumeLinkedList<?> list) {
@@ -29,7 +29,7 @@ public final class LumeIterator<T> {
         if (source instanceof LumeSet<?> set) {
             return new LumeIterator<>(set.asJava().iterator());
         }
-        if (source instanceof LumeArray<?> array) {
+        if (source instanceof LumeFixedArray<?> array) {
             return new LumeIterator<>(array.asJava().iterator());
         }
         if (source instanceof Iterable<?> iterable) {

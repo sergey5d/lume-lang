@@ -1,0 +1,41 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
+
+interface FixedArray[T] with Iterable[T] {
+
+    # TODO: think more about whether [] should stay declared here
+    # or only exist as language-level operator surface.
+    # def [](idx Int) T
+    # def [](idx Int, val T)
+
+    def get(idx Int) Option[T]
+
+    def first() Option[T]
+    def last() Option[T]
+
+    def clone() FixedArray[T]
+
+    def map[X](f fn(T) => X) FixedArray[X]
+    def forEach(f fn(T) => Unit)
+
+    def count(f fn(T) => Bool) Int
+
+    def exists(f fn(T) => Bool) Bool
+    def forAll(f fn(T) => Bool) Bool
+
+    def contains(e T) Bool
+    def find(e T) Option[T]
+
+    def indexOf(e T) Int
+
+    # TODO: think more about whether these belong on FixedArray directly.
+    # Arrays have fixed size, so the result shape is less obvious here.
+    # def filter(f fn(T) => Bool) Array[T]
+    # def flatMap[X](f fn(T) => Iterable[X]) Array[X]
+
+    def zip[X](other FixedArray[X]) FixedArray[(T, X)]
+    def zipWithIndex() FixedArray[(T, Int)]
+
+    def size() Int
+}

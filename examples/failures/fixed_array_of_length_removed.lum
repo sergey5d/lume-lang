@@ -2,6 +2,6 @@
 # .*ofLength.*
 
 def main() Unit {
-    values Array[Int] = Array.ofLength(2)
+    values FixedArray[Int] = FixedArray.ofLength(2)
     println(values[0])
 }

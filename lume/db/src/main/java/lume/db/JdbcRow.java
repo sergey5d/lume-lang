@@ -3,7 +3,7 @@ package lume.db;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 
-import lume.core.LumeList;
+import lume.core.LumeArray;
 import lume.core.LumeRuntime;
 import lume.core.LumeField;
 import lume.core.LumeType;
@@ -17,8 +17,8 @@ public final class JdbcRow {
         this.values = new LinkedHashMap<>(values);
     }
 
-    public LumeList<String> columns() {
-        return LumeList.from(values.keySet());
+    public LumeArray<String> columns() {
+        return LumeArray.from(values.keySet());
     }
 
     public Boolean has(String column) {

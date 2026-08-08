@@ -6,7 +6,7 @@ import java.sql.SQLException;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
-import lume.core.LumeList;
+import lume.core.LumeArray;
 import lume.core.LumeUnit;
 import lume.core.Result;
 
@@ -62,7 +62,7 @@ public final class JdbcDatabase implements JdbcRunner {
     }
 
     @Override
-    public Result<LumeList<JdbcRow>, DbError> query(String sql, Object... values) {
+    public Result<LumeArray<JdbcRow>, DbError> query(String sql, Object... values) {
         var bindings = SqlBindings.from(values);
         return run(connection ->
             Jdbc.query(connection, sql, bindings.positional(), bindings.named())

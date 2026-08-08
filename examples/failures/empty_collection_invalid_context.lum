@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*empty collection.*requires a list or map type.*Set\[Int\].*
+# .*empty collection.*requires an array or map type.*Set\[Int\].*
 
 def main() Unit {
     values Set[Int] = []

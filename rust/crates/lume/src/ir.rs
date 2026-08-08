@@ -702,7 +702,7 @@ impl Type {
 
     pub fn list(item: Type) -> Self {
         Self::Named {
-            name: "List".to_string(),
+            name: "Array".to_string(),
             args: vec![item],
         }
     }

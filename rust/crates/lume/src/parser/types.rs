@@ -269,9 +269,9 @@ impl<'a> Parser<'a> {
                     span: start.cover(end),
                 });
             }
-            let end = self.consume(TokenKind::RBracket, "expected ']' after list type")?;
+            let end = self.consume(TokenKind::RBracket, "expected ']' after array type")?;
             return Some(TypeRef::Named {
-                name: "List".to_string(),
+                name: "Array".to_string(),
                 args: vec![first],
                 span: start.cover(end),
             });

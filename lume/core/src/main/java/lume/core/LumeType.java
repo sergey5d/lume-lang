@@ -205,12 +205,12 @@ public final class LumeType {
         return kind == LumeTypeKind.Annotation ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
     }
 
-    public LumeList<LumeField> fields() {
-        return LumeList.from(fields);
+    public LumeArray<LumeField> fields() {
+        return LumeArray.from(fields);
     }
 
-    public LumeList<LumeMethod> methods() {
-        return LumeList.from(methods);
+    public LumeArray<LumeMethod> methods() {
+        return LumeArray.from(methods);
     }
 
     public Option<LumeField> field(String name) {
@@ -271,8 +271,8 @@ public final class LumeType {
                 + args.length + " arguments");
     }
 
-    public LumeList<LumeEnumCase> cases() {
-        return LumeList.from(cases);
+    public LumeArray<LumeEnumCase> cases() {
+        return LumeArray.from(cases);
     }
 
     public Option<LumeEnumCase> case_(String name) {

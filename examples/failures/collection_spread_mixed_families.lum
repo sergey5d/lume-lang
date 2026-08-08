@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*cannot mix map spreads with list or iterable spreads in the same bracket literal.*
+# .*cannot mix map spreads with array or iterable spreads in the same bracket literal.*
 
 def main() Unit {
     values = [1, 2]

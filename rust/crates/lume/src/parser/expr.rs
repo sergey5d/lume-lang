@@ -1900,7 +1900,7 @@ impl<'a> Parser<'a> {
                 if self.collection_literal_entry_has_colon() {
                     self.error_at_current(
                         "mixed_collection_literal_entries",
-                        "cannot mix list items and map entries in the same bracket literal",
+                        "cannot mix array items and map entries in the same bracket literal",
                     );
                     return None;
                 }
@@ -1908,7 +1908,7 @@ impl<'a> Parser<'a> {
                 self.skip_newlines();
             }
         }
-        let end = self.consume(TokenKind::RBracket, "expected ']' after list literal")?;
+        let end = self.consume(TokenKind::RBracket, "expected ']' after array literal")?;
         Some(Expr::ListLiteral {
             items,
             span: start.cover(end),
@@ -1930,7 +1930,7 @@ impl<'a> Parser<'a> {
                 if !self.collection_literal_entry_has_colon() {
                     self.error_at_current(
                         "mixed_collection_literal_entries",
-                        "cannot mix list items and map entries in the same bracket literal",
+                        "cannot mix array items and map entries in the same bracket literal",
                     );
                     return None;
                 }

@@ -1,0 +1,21 @@
+# EXPECT:
+# 1
+# 2
+# 3
+# 4
+# 0
+
+def main() Int {
+    explicit Array[Int] = Array(1, 2, 3)
+    shorthand [Int] = explicit
+    explicitAgain Array[Int] = shorthand
+
+    for value <- explicitAgain {
+        println(value)
+    }
+
+    literalAsExplicit Array[Int] = [4]
+    println(literalAsExplicit[0])
+
+    0
+}

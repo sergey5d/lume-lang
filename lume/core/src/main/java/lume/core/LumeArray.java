@@ -1,91 +1,77 @@
 package lume.core;
 
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.function.IntFunction;
-import java.util.function.Supplier;
 
 public final class LumeArray<T> {
-    private final Object[] values;
+    private final ArrayList<T> values;
 
-    private LumeArray(Object[] values) {
+    private LumeArray(ArrayList<T> values) {
         this.values = values;
     }
 
-    public static LumeArray<Long> ofInt(long length) {
-        var values = new Object[Math.toIntExact(length)];
-        Arrays.fill(values, 0L);
-        return new LumeArray<>(values);
+    public static <T> LumeArray<T> empty() {
+        return new LumeArray<>(new ArrayList<>());
     }
 
-    public static LumeArray<Double> ofFloat(long length) {
-        var values = new Object[Math.toIntExact(length)];
-        Arrays.fill(values, 0.0);
-        return new LumeArray<>(values);
+    @SafeVarargs
+    public static <T> LumeArray<T> of(T... values) {
+        var list = new ArrayList<T>();
+        Collections.addAll(list, values);
+        return new LumeArray<>(list);
     }
 
-    public static LumeArray<Boolean> ofBool(long length) {
-        var values = new Object[Math.toIntExact(length)];
-        Arrays.fill(values, false);
-        return new LumeArray<>(values);
-    }
-
-    public static LumeArray<String> ofStr(long length) {
-        var values = new Object[Math.toIntExact(length)];
-        Arrays.fill(values, "");
-        return new LumeArray<>(values);
-    }
-
-    public static LumeArray<Integer> ofRune(long length) {
-        var values = new Object[Math.toIntExact(length)];
-        Arrays.fill(values, 0);
-        return new LumeArray<>(values);
-    }
-
-    public static <T> LumeArray<T> fill(long length, T value) {
-        var values = new Object[Math.toIntExact(length)];
-        Arrays.fill(values, value);
-        return new LumeArray<>(values);
-    }
-
-    public static <T> LumeArray<T> fill(long length, Supplier<T> supplier) {
-        var values = new Object[Math.toIntExact(length)];
-        for (int i = 0; i < values.length; i++) {
-            values[i] = supplier.get();
+    public static <T> LumeArray<T> from(Iterable<T> values) {
+        var list = new ArrayList<T>();
+        for (var value : values) {
+            list.add(value);
         }
-        return new LumeArray<>(values);
-    }
-
-    public static <T> LumeArray<T> generate(long length, IntFunction<T> supplier) {
-        var values = new Object[Math.toIntExact(length)];
-        for (int i = 0; i < values.length; i++) {
-            values[i] = supplier.apply(i);
-        }
-        return new LumeArray<>(values);
+        return new LumeArray<>(list);
     }
 
     public long size() {
-        return values.length;
+        return values.size();
     }
 
     public Option<T> get(long index) {
-        if (index < 0 || index >= values.length) {
+        if (index < 0 || index >= values.size()) {
             return LumeRuntime.optionNone();
         }
-        return LumeRuntime.optionSome(valueAt(index));
+        return LumeRuntime.optionSome(values.get((int) index));
+    }
+
+    public LumeArray<T> add(T value) {
+        values.add(value);
+        return this;
     }
 
     public void set(long index, T value) {
-        values[Math.toIntExact(index)] = value;
+        values.set(Math.toIntExact(index), value);
     }
 
     @SuppressWarnings("unchecked")
+    public LumeArray<T> addAll(Object other) {
+        var iterator = LumeIterator.<T>from(other);
+        while (iterator.hasNext()) {
+            values.add((T) iterator.next());
+        }
+        return this;
+    }
+
+    public LumeArray<Tuple2<T, Long>> zipWithIndex() {
+        var indexed = new ArrayList<Tuple2<T, Long>>(values.size());
+        for (var index = 0; index < values.size(); index++) {
+            indexed.add(new Tuple2<>(values.get(index), (long) index));
+        }
+        return new LumeArray<>(indexed);
+    }
+
+    public LumeIterator<T> iterator() {
+        return LumeIterator.from(this);
+    }
+
     public List<T> asJava() {
-        return (List<T>) Arrays.asList(values);
-    }
-
-    @SuppressWarnings("unchecked")
-    private T valueAt(long index) {
-        return (T) values[Math.toIntExact(index)];
+        return List.copyOf(values);
     }
 }

@@ -1,8 +1,8 @@
 package lume.json;
 
-import lume.core.LumeArray;
+import lume.core.LumeFixedArray;
 import lume.core.LumeField;
-import lume.core.LumeList;
+import lume.core.LumeArray;
 import lume.core.LumeMap;
 import lume.core.LumeRuntime;
 import lume.core.LumeSet;
@@ -52,11 +52,11 @@ public final class JsonRuntime {
         return new JsonField(name, value);
     }
 
-    public static JsonValue obj(LumeList<JsonField> fields) {
+    public static JsonValue obj(LumeArray<JsonField> fields) {
         return new JsonValue.JsonObject(fields);
     }
 
-    public static JsonValue array(LumeList<JsonValue> values) {
+    public static JsonValue array(LumeArray<JsonValue> values) {
         return new JsonValue.JsonArray(values);
     }
 
@@ -84,10 +84,10 @@ public final class JsonRuntime {
         if (value instanceof Option<?> option) {
             return option.isDefined() ? encode(LumeRuntime.extractSuccessValue(option)) : nil();
         }
-        if (value instanceof LumeList<?> list) {
+        if (value instanceof LumeArray<?> list) {
             return encodeIterable(list.asJava());
         }
-        if (value instanceof LumeArray<?> array) {
+        if (value instanceof LumeFixedArray<?> array) {
             return encodeIterable(array.asJava());
         }
         if (value instanceof LumeSet<?> set) {
@@ -176,7 +176,7 @@ public final class JsonRuntime {
         for (var value : values) {
             out.add(encode(value));
         }
-        return new JsonValue.JsonArray(LumeList.from(out));
+        return new JsonValue.JsonArray(LumeArray.from(out));
     }
 
     private static JsonValue encodeJavaArray(Object array) {
@@ -185,7 +185,7 @@ public final class JsonRuntime {
         for (int index = 0; index < length; index++) {
             out.add(encode(java.lang.reflect.Array.get(array, index)));
         }
-        return new JsonValue.JsonArray(LumeList.from(out));
+        return new JsonValue.JsonArray(LumeArray.from(out));
     }
 
     private static JsonValue encodeMap(Map<?, ?> map) {
@@ -193,7 +193,7 @@ public final class JsonRuntime {
         for (var entry : map.entrySet()) {
             fields.add(field(String.valueOf(entry.getKey()), encode(entry.getValue())));
         }
-        return new JsonValue.JsonObject(LumeList.from(fields));
+        return new JsonValue.JsonObject(LumeArray.from(fields));
     }
 
     private static JsonValue encodeStructured(Object receiver, LumeType type) {
@@ -201,7 +201,7 @@ public final class JsonRuntime {
         for (var encodedField : ENCODER_CACHE.computeIfAbsent(type, JsonRuntime::buildEncoderFields)) {
             fields.add(field(encodedField.jsonName(), encode(readField(encodedField.field(), receiver))));
         }
-        return new JsonValue.JsonObject(LumeList.from(fields));
+        return new JsonValue.JsonObject(LumeArray.from(fields));
     }
 
     private static List<EncodedField> buildEncoderFields(LumeType type) {
@@ -255,7 +255,7 @@ public final class JsonRuntime {
         if (fields.isEmpty()) {
             return str(caseName);
         }
-        return new JsonValue.JsonObject(LumeList.of(field(caseName, encodeMap(fields))));
+        return new JsonValue.JsonObject(LumeArray.of(field(caseName, encodeMap(fields))));
     }
 
     private static String render(JsonValue value) {
@@ -325,16 +325,16 @@ public final class JsonRuntime {
                     null,
                     contextPackage));
         }
-        if (isListDescriptor(trimmed)) {
+        if (isArrayDescriptor(trimmed)) {
             if (!(value instanceof List<?> list)) {
                 throw new DecodeFailure("expected JSON array for " + trimmed);
             }
-            var inner = listInnerDescriptor(trimmed);
+            var inner = arrayInnerDescriptor(trimmed);
             var out = new ArrayList<>();
             for (var item : list) {
                 out.add(decodeByDescriptor(item, inner, null, contextPackage));
             }
-            return LumeList.from(out);
+            return LumeArray.from(out);
         }
         if (targetType != null
                 && (targetType.kind() == LumeTypeKind.Class || targetType.kind() == LumeTypeKind.Shape)) {
@@ -480,14 +480,14 @@ public final class JsonRuntime {
         return descriptor.equals("Option") || descriptor.startsWith("Option[");
     }
 
-    private static boolean isListDescriptor(String descriptor) {
-        return descriptor.startsWith("[") || descriptor.startsWith("List[");
+    private static boolean isArrayDescriptor(String descriptor) {
+        return descriptor.startsWith("[") || descriptor.startsWith("Array[");
     }
 
     private static Object defaultForDescriptor(String descriptor) {
         var trimmed = descriptor.trim();
-        if (isListDescriptor(trimmed)) {
-            return LumeList.empty();
+        if (isArrayDescriptor(trimmed)) {
+            return LumeArray.empty();
         }
         return switch (trimmed) {
             case "Str" -> "";
@@ -499,11 +499,11 @@ public final class JsonRuntime {
         };
     }
 
-    private static String listInnerDescriptor(String descriptor) {
+    private static String arrayInnerDescriptor(String descriptor) {
         if (descriptor.startsWith("[") && descriptor.endsWith("]")) {
             return descriptor.substring(1, descriptor.length() - 1).trim();
         }
-        return innerDescriptor(descriptor, "List");
+        return innerDescriptor(descriptor, "Array");
     }
 
     private static String innerDescriptor(String descriptor, String outer) {

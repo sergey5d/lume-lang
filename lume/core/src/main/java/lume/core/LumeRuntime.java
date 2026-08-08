@@ -173,9 +173,9 @@ public final class LumeRuntime {
     public static Object indexValue(Object base, Object index) {
         long offset = ((Number) index).longValue();
         Option<?> value;
-        if (base instanceof LumeList<?> list) {
+        if (base instanceof LumeArray<?> list) {
             value = list.get(offset);
-        } else if (base instanceof LumeArray<?> array) {
+        } else if (base instanceof LumeFixedArray<?> array) {
             value = array.get(offset);
         } else {
             throw new LumePanic("value is not indexable");
@@ -188,33 +188,33 @@ public final class LumeRuntime {
     }
 
     public static long listLen(Object value) {
-        if (value instanceof LumeList<?> list) {
+        if (value instanceof LumeArray<?> list) {
             return list.size();
         }
-        throw new LumePanic("expected List");
+        throw new LumePanic("expected Array");
     }
 
     public static Object listGet(Object value, Object index) {
-        if (value instanceof LumeList<?> list) {
+        if (value instanceof LumeArray<?> list) {
             var item = list.get(((Number) index).longValue());
             if (item instanceof Option.Some<?> some) {
                 return some.value();
             }
-            throw new LumePanic("list pattern index out of bounds");
+            throw new LumePanic("array pattern index out of bounds");
         }
-        throw new LumePanic("expected List");
+        throw new LumePanic("expected Array");
     }
 
-    public static LumeList<?> listSlice(Object value, Object start) {
-        if (value instanceof LumeList<?> list) {
+    public static LumeArray<?> listSlice(Object value, Object start) {
+        if (value instanceof LumeArray<?> list) {
             var javaValues = list.asJava();
             var offset = Math.max(0, ((Number) start).intValue());
             if (offset >= javaValues.size()) {
-                return LumeList.empty();
+                return LumeArray.empty();
             }
-            return LumeList.from(javaValues.subList(offset, javaValues.size()));
+            return LumeArray.from(javaValues.subList(offset, javaValues.size()));
         }
-        throw new LumePanic("expected List");
+        throw new LumePanic("expected Array");
     }
 
     public static <T> LumeIterator<T> iterInit(Object source) {

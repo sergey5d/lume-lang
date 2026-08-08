@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*list pattern requires a List value, got '\(Int, Int\)'.*
+# .*array pattern requires an Array value, got '\(Int, Int\)'.*
 
 def main() Unit {
     pair = (1, 2)

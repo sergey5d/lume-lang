@@ -1,0 +1,20 @@
+# EXPECT:
+# 0
+# 1
+# 2
+# 0
+
+def main() Int {
+    empty Map[Str, Int] = Map()
+    println(empty.size())
+
+    explicit Map[Str, Int] = ["one": 1]
+    shorthand [Str: Int] = explicit
+    explicitAgain Map[Str, Int] = shorthand
+
+    println(explicitAgain["one"].getOr(0))
+    shorthand.put("two", 2)
+    println(explicitAgain["two"].getOr(0))
+
+    0
+}

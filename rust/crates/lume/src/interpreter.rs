@@ -1592,7 +1592,7 @@ impl<'a> Interpreter<'a> {
     ) -> Option<&'t ir::Type> {
         let local = function.locals.get(function.params.get(index)?.0)?;
         match &local.ty {
-            ir::Type::Named { name, args } if name == "List" && args.len() == 1 => args.first(),
+            ir::Type::Named { name, args } if name == "Array" && args.len() == 1 => args.first(),
             _ => None,
         }
     }
@@ -1829,7 +1829,7 @@ impl<'a> Interpreter<'a> {
                     .collect(),
             ))),
             ir::Type::Named { name, args }
-                if name == "List" || name == "LinkedList" || name == "Array" =>
+                if name == "Array" || name == "LinkedList" || name == "FixedArray" =>
             {
                 let _ = args;
                 Value::list(Vec::new())
@@ -2008,7 +2008,7 @@ impl<'a> Interpreter<'a> {
                 .type_id_by_name_kind("Rune", crate::ast::TypeKind::Class),
             Value::List(_) => self
                 .runtime
-                .type_id_by_name_kind("List", crate::ast::TypeKind::Class),
+                .type_id_by_name_kind("Array", crate::ast::TypeKind::Class),
             Value::Set(_) => self
                 .runtime
                 .type_id_by_name_kind("Set", crate::ast::TypeKind::Class),
@@ -2811,22 +2811,22 @@ impl<'a> Interpreter<'a> {
             return self.invoke_os_method(&path[2], args, span);
         }
 
-        if path[0] == "Array" && path.len() == 2 {
+        if path[0] == "FixedArray" && path.len() == 2 {
             let method = path[1].as_str();
             match method {
                 "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" => {
                     if args.len() != 1 {
                         return Err(self.runtime_error(
                             span,
-                            format!("Array.{method} expects 1 argument, got {}", args.len()),
+                            format!("FixedArray.{method} expects 1 argument, got {}", args.len()),
                         ));
                     }
-                    let context = format!("Array.{method} length");
+                    let context = format!("FixedArray.{method} length");
                     let len = args[0].as_int(self, span, &context)?;
                     if len < 0 {
                         return Err(self.runtime_error(
                             span,
-                            format!("Array.{method} length must be non-negative"),
+                            format!("FixedArray.{method} length must be non-negative"),
                         ));
                     }
                     let default = match method {
@@ -2843,13 +2843,13 @@ impl<'a> Interpreter<'a> {
                     if args.len() != 2 {
                         return Err(self.runtime_error(
                             span,
-                            format!("Array.fill expects 2 arguments, got {}", args.len()),
+                            format!("FixedArray.fill expects 2 arguments, got {}", args.len()),
                         ));
                     }
-                    let len = args[0].as_int(self, span, "Array.fill length")?;
+                    let len = args[0].as_int(self, span, "FixedArray.fill length")?;
                     if len < 0 {
                         return Err(
-                            self.runtime_error(span, "Array.fill length must be non-negative")
+                            self.runtime_error(span, "FixedArray.fill length must be non-negative")
                         );
                     }
                     return Ok(Value::List(Rc::new(RefCell::new(vec![
@@ -2861,14 +2861,18 @@ impl<'a> Interpreter<'a> {
                     if args.len() != 2 {
                         return Err(self.runtime_error(
                             span,
-                            format!("Array.generate expects 2 arguments, got {}", args.len()),
+                            format!(
+                                "FixedArray.generate expects 2 arguments, got {}",
+                                args.len()
+                            ),
                         ));
                     }
-                    let len = args[0].as_int(self, span, "Array.generate length")?;
+                    let len = args[0].as_int(self, span, "FixedArray.generate length")?;
                     if len < 0 {
-                        return Err(
-                            self.runtime_error(span, "Array.generate length must be non-negative")
-                        );
+                        return Err(self.runtime_error(
+                            span,
+                            "FixedArray.generate length must be non-negative",
+                        ));
                     }
                     let callback = args[1].clone();
                     let mut values = Vec::with_capacity(len as usize);
@@ -2885,11 +2889,11 @@ impl<'a> Interpreter<'a> {
             }
         }
 
-        if path[0] == "List" && path.len() == 2 && path[1] == "from" {
+        if path[0] == "Array" && path.len() == 2 && path[1] == "from" {
             if args.len() != 1 {
                 return Err(self.runtime_error(
                     span,
-                    format!("List.from expects 1 argument, got {}", args.len()),
+                    format!("Array.from expects 1 argument, got {}", args.len()),
                 ));
             }
             let values = iterable_values(args[0].clone(), span, self)?;
@@ -3134,7 +3138,7 @@ impl<'a> Interpreter<'a> {
                     },
                 ))))
             }
-            "List" | "LinkedList" | "Array" => {
+            "Array" | "LinkedList" | "FixedArray" => {
                 Some(Value::List(Rc::new(RefCell::new(args.to_vec()))))
             }
             "Set" => Some(Value::Set(Rc::new(RefCell::new(unique_values(
@@ -3828,33 +3832,33 @@ impl<'a> Interpreter<'a> {
                 }
                 match &args[0] {
                     Value::List(items) => Ok(Value::Int(items.borrow().len() as i64)),
-                    _ => Err(self.runtime_error(span, "ListLen expects a List receiver")),
+                    _ => Err(self.runtime_error(span, "ListLen expects an Array receiver")),
                 }
             }
             ir::Intrinsic::ListGet => {
                 if args.len() != 2 {
                     return Err(self.runtime_error(span, "ListGet expects 2 arguments"));
                 }
-                let index = args[1].as_int(self, span, "list pattern index")?;
+                let index = args[1].as_int(self, span, "array pattern index")?;
                 match &args[0] {
                     Value::List(items) => {
                         let items = items.borrow();
                         let Some(value) = items.get(index as usize) else {
                             return Err(self.runtime_error(
                                 span,
-                                format!("list pattern index {} out of bounds", index),
+                                format!("array pattern index {} out of bounds", index),
                             ));
                         };
                         Ok(self.clone_value(value))
                     }
-                    _ => Err(self.runtime_error(span, "ListGet expects a List receiver")),
+                    _ => Err(self.runtime_error(span, "ListGet expects an Array receiver")),
                 }
             }
             ir::Intrinsic::ListSlice => {
                 if args.len() != 2 {
                     return Err(self.runtime_error(span, "ListSlice expects 2 arguments"));
                 }
-                let start = args[1].as_int(self, span, "list pattern slice start")?;
+                let start = args[1].as_int(self, span, "array pattern slice start")?;
                 match &args[0] {
                     Value::List(items) => {
                         let items = items.borrow();
@@ -3866,7 +3870,7 @@ impl<'a> Interpreter<'a> {
                             .collect();
                         Ok(Value::list(slice))
                     }
-                    _ => Err(self.runtime_error(span, "ListSlice expects a List receiver")),
+                    _ => Err(self.runtime_error(span, "ListSlice expects an Array receiver")),
                 }
             }
             ir::Intrinsic::ExtractSuccessIsSet => {
@@ -4104,7 +4108,7 @@ impl<'a> Interpreter<'a> {
                 items.borrow_mut().push(value);
                 Ok(list)
             }
-            _ => Err(self.runtime_error(span, "ListAppend expects a List receiver")),
+            _ => Err(self.runtime_error(span, "ListAppend expects an Array receiver")),
         }
     }
 
@@ -4120,7 +4124,7 @@ impl<'a> Interpreter<'a> {
                 items.borrow_mut().extend(values);
                 Ok(list)
             }
-            _ => Err(self.runtime_error(span, "ListExtend expects a List receiver")),
+            _ => Err(self.runtime_error(span, "ListExtend expects an Array receiver")),
         }
     }
 
@@ -4686,10 +4690,10 @@ impl<'a> Interpreter<'a> {
             Value::List(items) => {
                 let items = items.borrow();
                 let index = normalize_index(items.len(), index).ok_or_else(|| {
-                    self.runtime_error(span, format!("list index {} out of bounds", index))
+                    self.runtime_error(span, format!("array index {} out of bounds", index))
                 })?;
                 items.get(index).map_or_else(
-                    || Err(self.runtime_error(span, format!("list index {} out of bounds", index))),
+                    || Err(self.runtime_error(span, format!("array index {} out of bounds", index))),
                     |value| Ok(self.clone_value(value)),
                 )
             }
@@ -4722,11 +4726,11 @@ impl<'a> Interpreter<'a> {
             Value::List(items) => {
                 let mut items = items.borrow_mut();
                 let index = normalize_index(items.len(), index).ok_or_else(|| {
-                    self.runtime_error(span, format!("list index {} out of bounds", index))
+                    self.runtime_error(span, format!("array index {} out of bounds", index))
                 })?;
                 let Some(slot) = items.get_mut(index) else {
                     return Err(
-                        self.runtime_error(span, format!("list index {} out of bounds", index))
+                        self.runtime_error(span, format!("array index {} out of bounds", index))
                     );
                 };
                 *slot = value;
@@ -4861,7 +4865,7 @@ impl<'a> Interpreter<'a> {
             ir::Type::Float => matches!(value, Value::Float(_)),
             ir::Type::Str => matches!(value, Value::String(_)),
             ir::Type::Named { name, .. } => match value {
-                Value::List(_) => name == "List" || name == "LinkedList" || name == "Array",
+                Value::List(_) => name == "Array" || name == "LinkedList" || name == "FixedArray",
                 Value::Set(_) => name == "Set",
                 Value::Map(_) => name == "Map",
                 Value::Iterator(_) => name == "Iterator" || name == "IntRange",
@@ -6378,12 +6382,12 @@ mod tests {
         let program = lower_inline(
             r#"
             class Vec {
-                hidden var items Array[Int]
+                hidden var items FixedArray[Int]
             }
 
             impl Vec {
                 new(left Int, right Int) {
-                    this.items = Array(left, right)
+                    this.items = FixedArray(left, right)
                 }
 
                 def [](index Int) Int = this.items[index]
@@ -6392,9 +6396,9 @@ mod tests {
             }
 
             def main() Unit {
-                items = List(1, 2)
+                items = Array(1, 2)
                 items.add(3)
-                items.addAll(List(4, 5))
+                items.addAll(Array(4, 5))
                 OS.println(items[4])
 
                 seen = Set(1, 2)
@@ -6409,11 +6413,11 @@ mod tests {
                 OS.println((left + Vec(1, 2))[1])
                 OS.println((-left)[0])
 
-                ints = Array.ofInt(2)
-                floats = Array.ofFloat(1)
-                bools = Array.ofBool(1)
-                strs = Array.ofStr(1)
-                runes = Array.ofRune(1)
+                ints = FixedArray.ofInt(2)
+                floats = FixedArray.ofFloat(1)
+                bools = FixedArray.ofBool(1)
+                strs = FixedArray.ofStr(1)
+                runes = FixedArray.ofRune(1)
                 nul Rune = "\0".expectRuneAt(0)
                 OS.println(ints[0], floats[0], bools[0], strs[0], runes[0] == nul)
             }
@@ -6431,7 +6435,7 @@ mod tests {
         let program = lower_inline(
             r#"
             def main() Int {
-                values = List(1, 2, 3)
+                values = Array(1, 2, 3)
                 values.removeFirst()
                 return values.reduce(0, (acc, value) => acc + value)
             }
@@ -6556,7 +6560,7 @@ mod tests {
             }
 
             def main() Unit {
-                users = List(
+                users = Array(
                     SecretUser("Sergey", "secret-1", "Tampa"),
                     SecretUser("Ada", "secret-2", "London"),
                 )
@@ -6683,7 +6687,7 @@ $name
             r#"
             def main() Unit {
                 base = [1, 2]
-                grown = List.from(base)
+                grown = Array.from(base)
                 grown.add(3)
                 grown.addAll([4, 5])
 
@@ -7173,7 +7177,7 @@ $name
                 amount Amount = Amount(42, "hello")
                 pair PairBox = PairBox(5, 9)
                 values [MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3)]
-                partialMapped List[Option[Int]] = values.map(value => partial match value {
+                partialMapped Array[Option[Int]] = values.map(value => partial match value {
                     case SomeX(x) => x + 1
                 })
 
@@ -7364,7 +7368,7 @@ $name
                     OS.println("known yield", result)
                 }
 
-                pairs = List(Pair(1, 10), Pair(2, 20), Pair(3, 30))
+                pairs = Array(Pair(1, 10), Pair(2, 20), Pair(3, 30))
 
                 for pairItem <- pairs {
                     let Pair(left, right) = pairItem

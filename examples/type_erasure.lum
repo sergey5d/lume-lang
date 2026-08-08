@@ -3,27 +3,27 @@
 # 0
 # 0
 
-def acceptUnknownList(values [_]) Unit {
+def acceptUnknownArray(values [_]) Unit {
     println(values.size())
 }
 
 def same[T](left T, right T) Unit {}
 
-def intStrMap() Map[Int, Str] = Map()
+def intStrMap() [Int: Str] = []
 
-def strIntMap() Map[Str, Int] = Map()
+def strIntMap() [Str: Int] = []
 
 def main() Unit {
     values [_] = [1, 2, 3]
-    keyErased Map[_, Str] = intStrMap()
-    fullyErased Map[_, _] = strIntMap()
+    keyErased [_: Str] = intStrMap()
+    fullyErased [_: _] = strIntMap()
 
     first Any = values[0]
     captured = values[0]
     sameCapture = captured
 
     same(values[0], values[1])
-    acceptUnknownList(values)
+    acceptUnknownArray(values)
 
     println(keyErased.size())
     println(fullyErased.size())

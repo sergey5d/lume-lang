@@ -15,13 +15,13 @@ Primitive types:
 
 Built-in generic/container types:
 
-- `Array[T]`
+- `FixedArray[T]`
 - `[K : V]` (map; nominal spelling `Map[K, V]` is also accepted)
 - `Set[T]`
-- `List[T]` or `[T]`
+- `Array[T]` or `[T]`
 - `LinkedList[T]`
 
-List and map shorthand can be nested, for example:
+Array and map shorthand can be nested, for example:
 
 - `[[Int]]`
 - `[[[(Str, Int)]]]`
@@ -57,7 +57,7 @@ Universal value operations:
 It means "some definite type, but this code does not know which one."
 
 ```txt
-a List[_] = List(1, 2, 3)
+a Array[_] = Array(1, 2, 3)
 b [_ : Str] = intStrMap()
 c [_ : _] = strIntMap()
 ```
@@ -77,7 +77,7 @@ source:
 def same[T](left T, right T) Unit {}
 
 same(a[0], a[1])      # allowed; both values come from a
-same(a[0], b[0])      # rejected if b is a different List[_] source
+same(a[0], b[0])      # rejected if b is a different Array[_] source
 ```
 
 Capture is read-safe but not write-open. Methods that do not mention the
@@ -804,7 +804,7 @@ General construction rules:
 - function and method calls may still use named arguments in parentheses
 - `Type { value }` is not valid; use `Type(value)` only when the type supports positional construction
 - anonymous shapes use `{ field: value }` for field construction and `shape(...)` for contextual positional construction
-- builtin constructor forms such as `List(...)`, `Array(...)`, and `Range(...)` use parentheses
+- builtin constructor forms such as `Array(...)`, `FixedArray(...)`, and `Range(...)` use parentheses
 - `Type { ... }` resolves through the available explicit `new(...)` declaration or implicit field-construction inputs
 - `Type(...)` resolves through explicit class `new(...)`, implicit visible-field construction, named shape positional construction, or builtin constructor forms
 - class construction is nominal and constructor-gated; shape construction is structural
@@ -1025,7 +1025,7 @@ entries["a"]           # indexing
 handlers[key]()        # invalid: parsed as generic call syntax
 ```
 
-Function and method parameters may end with one variadic list parameter. `vararg`
+Function and method parameters may end with one variadic array parameter. `vararg`
 is written after the parameter type:
 
 ```txt
@@ -1045,11 +1045,11 @@ constructor-parameter = name Type [vararg] [= default]
 Rules:
 
 - `vararg` is postfix-only; the removed prefix form `vararg values [T]` is invalid.
-- A variadic parameter must have an explicit list type `[T]`.
+- A variadic parameter must have an explicit array type `[T]`.
 - Only the final parameter may be variadic.
 - A parameter list may contain at most one variadic parameter.
 - A by-name parameter cannot also be variadic.
-- A variadic constructor parameter may have a default list value, written after `vararg`.
+- A variadic constructor parameter may have a default array value, written after `vararg`.
 
 ```txt
 new(segments [Str] vararg = ["tmp"]) {
@@ -1057,7 +1057,7 @@ new(segments [Str] vararg = ["tmp"]) {
 }
 ```
 
-Call sites may spread an existing list into a variadic tail with `...`:
+Call sites may spread an existing array into a variadic tail with `...`:
 
 ```txt
 extra = ["beta", "gamma"]
@@ -1188,7 +1188,7 @@ the class body or an `impl` block.
 - named construction may omit any constructor parameter with a default
 - positional construction fills a prefix of constructor parameters and may omit only trailing parameters that all have defaults
 - positional construction never skips a defaulted parameter to reach a later required parameter
-- constructor parameters may end with one variadic list parameter such as `items [Str] vararg`
+- constructor parameters may end with one variadic array parameter such as `items [Str] vararg`
 - `hidden new(...) { body }` declares a private constructor
 - each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
 - `this(...)` inside a constructor delegates positionally to another constructor of the same class
@@ -1696,9 +1696,9 @@ Range construction is explicit:
 Range(10, 0, -1)
 ```
 
-## Lists, Arrays, Maps, Tuples
+## Arrays, Fixed Arrays, Maps, Tuples
 
-List literal:
+Array literal:
 
 ```txt
 [1, 2, 3]
@@ -1707,17 +1707,17 @@ List literal:
 copy = [...items]
 ```
 
-`...items` inside a list literal copies each element from an iterable into the
-new list. The copy is shallow: element values are reused, but the outer list is
-new. Multiple spreads may appear in one literal. A map is not a list-spread
-source; use `map.entries()` when a list of `(key, value)` tuples is wanted:
+`...items` inside an array literal copies each element from an iterable into the
+new array. The copy is shallow: element values are reused, but the outer array is
+new. Multiple spreads may appear in one literal. A map is not an array-spread
+source; use `map.entries()` when an array of `(key, value)` tuples is wanted:
 
 ```txt
 parts = [1, 2]
 more = [3, 4]
 combined = [0, ...parts, ...more, 5]
 
-entryList [(Str, Int)] = [...map.entries()]
+entryArray [(Str, Int)] = [...map.entries()]
 ```
 
 `LinkedList[T]` is a mutable doubly linked list. Use it when adding or removing
@@ -1738,28 +1738,28 @@ Indexing, `first()`, `last()`, `removeFirst()`, and `removeLast()` are safe and
 return `Option[T]`. `LinkedList {}` is the empty constructor; non-empty values
 use positional `LinkedList(...)` construction.
 
-Array construction:
+FixedArray construction:
 
 ```txt
-ints Array[Int] = Array.ofInt(3)       # [0, 0, 0]
-floats Array[Float] = Array.ofFloat(3) # [0.0, 0.0, 0.0]
-bools Array[Bool] = Array.ofBool(3)    # [false, false, false]
-texts Array[Str] = Array.ofStr(3)      # ["", "", ""]
-runes Array[Rune] = Array.ofRune(3)    # default NUL rune values
+ints FixedArray[Int] = FixedArray.ofInt(3)       # [0, 0, 0]
+floats FixedArray[Float] = FixedArray.ofFloat(3) # [0.0, 0.0, 0.0]
+bools FixedArray[Bool] = FixedArray.ofBool(3)    # [false, false, false]
+texts FixedArray[Str] = FixedArray.ofStr(3)      # ["", "", ""]
+runes FixedArray[Rune] = FixedArray.ofRune(3)    # default NUL rune values
 
-filled Array[Int] = Array.fill(3, 7)
-generated Array[Int] = Array.generate(3, idx => idx * 2)
+filled FixedArray[Int] = FixedArray.fill(3, 7)
+generated FixedArray[Int] = FixedArray.generate(3, idx => idx * 2)
 ```
 
-Arrays always contain initialized values. Use `Array.generate` when each slot
+Fixed arrays always contain initialized values. Use `FixedArray.generate` when each slot
 should be produced independently.
 
-Array elements can also be constructed directly:
+FixedArray elements can also be constructed directly:
 
 ```txt
-values Array[Int] = Array(1, 2, 3)
-boxes Array[Box] = Array(Box(1), Box(2))
-takeArray(Array(4, 5, 6))
+values FixedArray[Int] = FixedArray(1, 2, 3)
+boxes FixedArray[Box] = FixedArray(Box(1), Box(2))
+takeArray(FixedArray(4, 5, 6))
 ```
 
 Map construction:
@@ -1791,28 +1791,28 @@ Map entries and spreads are comma-separated and may be interleaved. Spreading
 a map copies its entries into a fresh map. Parts are evaluated from left to
 right, and a later entry or spread replaces an earlier value with the same key.
 
-Map entries cannot be mixed with list items. The spread source determines the
-collection family when a literal contains only spreads: `[...list]` is a list
+Map entries cannot be mixed with array items. The spread source determines the
+collection family when a literal contains only spreads: `[...array]` is an array
 and `[...map]` is a map. Multiple spread sources must belong to the same family.
-A map cannot be spread directly into a list, and an iterable/list cannot be
+A map cannot be spread directly into an array, and an iterable/array cannot be
 spread into a map.
 
 Collection literals are distinguished by their contents and spread sources:
 
 ```txt
-[]                    # contextual empty list or map
-[value, ...]          # list
+[]                    # contextual empty array or map
+[value, ...]          # array
 [key: value, ...]     # map
-[...list]             # list copy
+[...array]            # array copy
 [...map]              # map copy
 ```
 
 An empty `[]` literal contains no elements that identify its collection family
-or type arguments. It therefore requires an immediate expected list or map
+or type arguments. It therefore requires an immediate expected array or map
 type:
 
 ```txt
-names [Str] = []                 # empty list
+names [Str] = []                 # empty array
 counts [Str : Int] = []          # empty map
 
 emptyNames() [Str] = []
@@ -1824,10 +1824,10 @@ consumeCounts([])                 # valid when the parameter is [Str : Int]
 values = []                       # invalid: collection type is unknown
 ```
 
-The compiler does not default `[]` to a list, infer `[Any]` or `[Any : Any]`,
+The compiler does not default `[]` to an array, infer `[Any]` or `[Any : Any]`,
 or infer its type from later mutations. Only `[T]` and `[K : V]` provide valid
-contexts; `Set[T]`, `Array[T]`, and custom collection types retain their own
-construction syntax. If overloaded list and map parameters both match `[]`,
+contexts; `Set[T]`, `FixedArray[T]`, and custom collection types retain their own
+construction syntax. If overloaded array and map parameters both match `[]`,
 the call is ambiguous and requires an intermediate typed binding. The former
 empty-map spelling `[:]` is not supported.
 
@@ -2040,7 +2040,7 @@ let _ Worker = value else {
 }
 ```
 
-List-pattern binding is supported for `List[T]` / `[T]` values:
+Array-pattern binding is supported for `Array[T]` / `[T]` values:
 
 ```txt
 let [left, right] = values else {
@@ -2052,21 +2052,21 @@ let [name Str, age Int] = valuesOfAny else {
 }
 
 let [head, ...tail] = values else {
-    return Err("empty list")
+    return Err("empty array")
 }
 
 let [...all] = values
 ```
 
-List pattern rules:
+Array pattern rules:
 
 - `[a, b]` matches exactly two elements.
-- `[]` matches an empty list.
+- `[]` matches an empty array.
 - `[a, ...rest]` matches one or more elements and binds `rest` as `[T]`.
-- `[...rest]` matches any list and binds a shallow list tail copy as `[T]`.
+- `[...rest]` matches any array and binds a shallow array tail copy as `[T]`.
 - Only one `...rest` is allowed, and it must be last.
 - `..._` ignores the remaining elements.
-- List patterns are for `List[T]` / `[T]`; arrays are not part of this pattern surface.
+- Array patterns are for `Array[T]` / `[T]`; fixed arrays are not part of this pattern surface.
 
 Grouped refutable bindings share one fallback:
 
@@ -2567,7 +2567,7 @@ result = match value {
 }
 ```
 
-List patterns can be used in `match` cases:
+Array patterns can be used in `match` cases:
 
 ```txt
 result = match values {

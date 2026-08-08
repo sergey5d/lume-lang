@@ -10,7 +10,7 @@ class Order {
 }
 
 class OrderManager {
-    hidden map Map[Int, Order] = Map()
+    hidden map [Int: Order] = []
     hidden var currentTick Int = 0
     hidden queue [Order] = []
 }

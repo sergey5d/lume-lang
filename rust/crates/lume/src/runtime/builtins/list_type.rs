@@ -15,7 +15,7 @@ pub(super) fn define() -> RuntimeType {
         id: RuntimeTypeId(usize::MAX),
         ir_type_id: None,
         kind: TypeKind::Class,
-        name: "List".to_string(),
+        name: "Array".to_string(),
         fields: Vec::new(),
         field_init: None,
         methods: vec![
@@ -112,7 +112,7 @@ fn list_append_mut(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if args.len() != 1 {
-        return Err(interpreter.runtime_error(span, "List.append expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.append expects 1 argument"));
     }
     list_items(&receiver).borrow_mut().push(args[0].clone());
     Ok(receiver)
@@ -125,7 +125,7 @@ fn list_add_all(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     let [other] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "List.addAll expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.addAll expects 1 argument"));
     };
     let rhs = iterable_values(other.clone(), span, interpreter)?;
     list_items(&receiver).borrow_mut().extend(rhs);
@@ -139,9 +139,9 @@ fn list_map(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     let [callback] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "List.map expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.map expects 1 argument"));
     };
-    let values = list_values(interpreter, &receiver, span, "List.map")?;
+    let values = list_values(interpreter, &receiver, span, "Array.map")?;
     let mut out = Vec::with_capacity(values.len());
     for value in values {
         out.push(interpreter.invoke_value(callback.clone(), vec![value], span)?);
@@ -156,9 +156,9 @@ fn list_flat_map(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     let [callback] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "List.flatMap expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.flatMap expects 1 argument"));
     };
-    let values = list_values(interpreter, &receiver, span, "List.flatMap")?;
+    let values = list_values(interpreter, &receiver, span, "Array.flatMap")?;
     let mut out = Vec::new();
     for value in values {
         let mapped = interpreter.invoke_value(callback.clone(), vec![value], span)?;
@@ -174,14 +174,14 @@ fn list_filter(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     let [callback] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "List.filter expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.filter expects 1 argument"));
     };
-    let values = list_values(interpreter, &receiver, span, "List.filter")?;
+    let values = list_values(interpreter, &receiver, span, "Array.filter")?;
     let mut out = Vec::new();
     for value in values {
         if interpreter
             .invoke_value(callback.clone(), vec![value.clone()], span)?
-            .as_bool(interpreter, span, "List.filter predicate")?
+            .as_bool(interpreter, span, "Array.filter predicate")?
         {
             out.push(value);
         }
@@ -196,11 +196,11 @@ fn list_fold(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if args.len() != 2 {
-        return Err(interpreter.runtime_error(span, "List.fold expects 2 arguments"));
+        return Err(interpreter.runtime_error(span, "Array.fold expects 2 arguments"));
     }
     let mut acc = args[0].clone();
     let callback = args[1].clone();
-    let values = list_values(interpreter, &receiver, span, "List.fold")?;
+    let values = list_values(interpreter, &receiver, span, "Array.fold")?;
     for value in values {
         acc = interpreter.invoke_value(callback.clone(), vec![acc, value], span)?;
     }
@@ -214,9 +214,9 @@ fn list_reduce(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     let [callback] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "List.reduce expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.reduce expects 1 argument"));
     };
-    let values = list_values(interpreter, &receiver, span, "List.reduce")?;
+    let values = list_values(interpreter, &receiver, span, "Array.reduce")?;
     let Some((first, rest)) = values.split_first() else {
         return Ok(interpreter.option_none());
     };
@@ -234,7 +234,7 @@ fn list_reduce_with_initial(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if args.len() != 2 {
-        return Err(interpreter.runtime_error(span, "List.reduce expects 2 arguments"));
+        return Err(interpreter.runtime_error(span, "Array.reduce expects 2 arguments"));
     }
     list_fold(interpreter, receiver, args, span)
 }
@@ -246,13 +246,13 @@ fn list_exists(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     let [callback] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "List.exists expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.exists expects 1 argument"));
     };
-    let values = list_values(interpreter, &receiver, span, "List.exists")?;
+    let values = list_values(interpreter, &receiver, span, "Array.exists")?;
     for value in values {
         if interpreter
             .invoke_value(callback.clone(), vec![value], span)?
-            .as_bool(interpreter, span, "List.exists predicate")?
+            .as_bool(interpreter, span, "Array.exists predicate")?
         {
             return Ok(Value::Bool(true));
         }
@@ -267,9 +267,9 @@ fn list_for_each(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     let [callback] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "List.forEach expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.forEach expects 1 argument"));
     };
-    let values = list_values(interpreter, &receiver, span, "List.forEach")?;
+    let values = list_values(interpreter, &receiver, span, "Array.forEach")?;
     for value in values {
         let _ = interpreter.invoke_value(callback.clone(), vec![value], span)?;
     }
@@ -283,13 +283,13 @@ fn list_for_all(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     let [callback] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "List.forAll expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.forAll expects 1 argument"));
     };
-    let values = list_values(interpreter, &receiver, span, "List.forAll")?;
+    let values = list_values(interpreter, &receiver, span, "Array.forAll")?;
     for value in values {
         if !interpreter
             .invoke_value(callback.clone(), vec![value], span)?
-            .as_bool(interpreter, span, "List.forAll predicate")?
+            .as_bool(interpreter, span, "Array.forAll predicate")?
         {
             return Ok(Value::Bool(false));
         }
@@ -304,7 +304,7 @@ fn list_sort(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     let [ordering] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "List.sort expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.sort expects 1 argument"));
     };
     let items = list_items(&receiver);
     let mut values = {
@@ -336,9 +336,9 @@ fn list_zip(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     let [other] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "List.zip expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.zip expects 1 argument"));
     };
-    let lhs = list_values(interpreter, &receiver, span, "List.zip")?;
+    let lhs = list_values(interpreter, &receiver, span, "Array.zip")?;
     let rhs = iterable_values(other.clone(), span, interpreter)?;
     Ok(Value::list(
         lhs.into_iter()
@@ -355,9 +355,9 @@ fn list_zip_with_index(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "List.zipWithIndex expects 0 arguments"));
+        return Err(interpreter.runtime_error(span, "Array.zipWithIndex expects 0 arguments"));
     }
-    let items = list_values(interpreter, &receiver, span, "List.zipWithIndex")?;
+    let items = list_values(interpreter, &receiver, span, "Array.zipWithIndex")?;
     Ok(Value::list(
         items
             .into_iter()
@@ -374,7 +374,7 @@ fn list_size(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "List.size expects 0 arguments"));
+        return Err(interpreter.runtime_error(span, "Array.size expects 0 arguments"));
     }
     Ok(Value::Int(list_items(&receiver).borrow().len() as i64))
 }
@@ -386,7 +386,7 @@ fn list_is_empty(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "List.isEmpty expects 0 arguments"));
+        return Err(interpreter.runtime_error(span, "Array.isEmpty expects 0 arguments"));
     }
     Ok(Value::Bool(list_items(&receiver).borrow().is_empty()))
 }
@@ -398,7 +398,7 @@ fn list_non_empty(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "List.nonEmpty expects 0 arguments"));
+        return Err(interpreter.runtime_error(span, "Array.nonEmpty expects 0 arguments"));
     }
     Ok(Value::Bool(!list_items(&receiver).borrow().is_empty()))
 }
@@ -410,25 +410,25 @@ fn list_make_str(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     let [separator] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "List.makeStr expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.makeStr expects 1 argument"));
     };
     let Value::String(separator) = separator else {
         return Err(interpreter.runtime_error(
             span,
             format!(
-                "List.makeStr expects Str separator, got {}",
+                "Array.makeStr expects Str separator, got {}",
                 separator.render()
             ),
         ));
     };
 
-    let items = list_values(interpreter, &receiver, span, "List.makeStr")?;
+    let items = list_values(interpreter, &receiver, span, "Array.makeStr")?;
     let mut rendered = String::new();
     for (index, item) in items.iter().enumerate() {
         if index > 0 {
             rendered.push_str(separator);
         }
-        rendered.push_str(&interpreter.render_value(item, span, "List.makeStr")?);
+        rendered.push_str(&interpreter.render_value(item, span, "Array.makeStr")?);
     }
     Ok(Value::String(rendered))
 }
@@ -440,9 +440,9 @@ fn list_get(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if args.len() != 1 {
-        return Err(interpreter.runtime_error(span, "List.get expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.get expects 1 argument"));
     }
-    let index = args[0].as_int(interpreter, span, "List.get index")?;
+    let index = args[0].as_int(interpreter, span, "Array.get index")?;
     let items = list_items(&receiver);
     let items = items.borrow();
     let value = items
@@ -461,9 +461,9 @@ fn list_remove(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if args.len() != 1 {
-        return Err(interpreter.runtime_error(span, "List.remove expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Array.remove expects 1 argument"));
     }
-    let index = args[0].as_int(interpreter, span, "List.remove index")?;
+    let index = args[0].as_int(interpreter, span, "Array.remove index")?;
     let items = list_items(&receiver);
     let mut items = items.borrow_mut();
     if index < 0 || index as usize >= items.len() {
@@ -480,7 +480,7 @@ fn list_remove_first(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "List.removeFirst expects 0 arguments"));
+        return Err(interpreter.runtime_error(span, "Array.removeFirst expects 0 arguments"));
     }
     let items = list_items(&receiver);
     let mut items = items.borrow_mut();
@@ -498,7 +498,7 @@ fn list_remove_last(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "List.removeLast expects 0 arguments"));
+        return Err(interpreter.runtime_error(span, "Array.removeLast expects 0 arguments"));
     }
     let value = list_items(&receiver).borrow_mut().pop();
     Ok(match value {
@@ -514,7 +514,7 @@ fn list_head(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "List.head expects 0 arguments"));
+        return Err(interpreter.runtime_error(span, "Array.head expects 0 arguments"));
     }
     let items = list_items(&receiver);
     let items = items.borrow();
@@ -532,7 +532,7 @@ fn list_tail(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "List.tail expects 0 arguments"));
+        return Err(interpreter.runtime_error(span, "Array.tail expects 0 arguments"));
     }
     let items = list_items(&receiver);
     let values = items.borrow();
@@ -663,7 +663,7 @@ fn list_iterator(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "List.iterator expects 0 arguments"));
+        return Err(interpreter.runtime_error(span, "Array.iterator expects 0 arguments"));
     }
     Ok(Value::iterator_from_values(
         list_items(&receiver).borrow().clone(),

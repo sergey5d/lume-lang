@@ -757,10 +757,10 @@ fn is_reified_type_param_local(name: &str) -> bool {
 
 fn invoker_erased_container_type(name: &str, names: &JavaNames) -> String {
     match name {
-        "Array" => "lume.core.LumeArray".to_string(),
+        "FixedArray" => "lume.core.LumeFixedArray".to_string(),
         "Either" => "lume.core.Either".to_string(),
         "Iterator" => "lume.core.LumeIterator".to_string(),
-        "List" => "lume.core.LumeList".to_string(),
+        "Array" => "lume.core.LumeArray".to_string(),
         "LinkedList" => "lume.core.LumeLinkedList".to_string(),
         "Map" => "lume.core.LumeMap".to_string(),
         "Option" => "lume.core.Option".to_string(),
@@ -824,7 +824,7 @@ fn annotation_value_expr(value: &ir::AnnotationValue) -> String {
         ir::AnnotationValue::Float(value) => java_float_literal(*value),
         ir::AnnotationValue::String(value) => java_string_literal(value),
         ir::AnnotationValue::List(items) => format!(
-            "lume.core.LumeList.of({})",
+            "lume.core.LumeArray.of({})",
             items
                 .iter()
                 .map(annotation_value_expr)
@@ -843,7 +843,7 @@ fn annotation_value_expr(value: &ir::AnnotationValue) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("lume.core.LumeMap.fromEntries(lume.core.LumeList.of({entries}))")
+            format!("lume.core.LumeMap.fromEntries(lume.core.LumeArray.of({entries}))")
         }
         ir::AnnotationValue::EnumCase(path) => java_string_literal(&path.join(".")),
         ir::AnnotationValue::Unresolved(value) => java_string_literal(value),
@@ -1076,7 +1076,7 @@ fn java_param_list(function: &ir::Function, names: &JavaNames, skip_receiver: bo
 
 fn variadic_element_type(ty: &ir::Type) -> Option<&ir::Type> {
     match ty {
-        ir::Type::Named { name, args } if name == "List" && args.len() == 1 => args.first(),
+        ir::Type::Named { name, args } if name == "Array" && args.len() == 1 => args.first(),
         _ => None,
     }
 }
@@ -1139,7 +1139,7 @@ fn push_variadic_bridge_method(
             .get(variadic_index)
             .and_then(|default| default.as_ref())
             .map(java_constant)
-            .unwrap_or_else(|| "lume.core.LumeList.of()".to_string());
+            .unwrap_or_else(|| "lume.core.LumeArray.of()".to_string());
         push_variadic_bridge_overload(
             out,
             function,
@@ -1166,7 +1166,10 @@ fn push_variadic_bridge_method(
         method_name,
         &variadic_decl,
         &fixed_args,
-        format!("lume.core.LumeList.of({})", java_local_name(variadic_local)),
+        format!(
+            "lume.core.LumeArray.of({})",
+            java_local_name(variadic_local)
+        ),
     );
 }
 
@@ -1597,7 +1600,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     .iter()
                     .any(|item| matches!(item, ast::Expr::Spread { .. }))
                 {
-                    let mut out = "lume.core.LumeList.empty()".to_string();
+                    let mut out = "lume.core.LumeArray.empty()".to_string();
                     for item in items {
                         match item {
                             ast::Expr::Spread { value, .. } => {
@@ -1615,7 +1618,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         .iter()
                         .map(|item| self.emit_expr(item, bindings))
                         .collect::<Option<Vec<_>>>()?;
-                    Some(format!("lume.core.LumeList.of({})", items.join(", ")))
+                    Some(format!("lume.core.LumeArray.of({})", items.join(", ")))
                 }
             }
             ast::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
@@ -1700,7 +1703,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         ast::Expr::ListLiteral { items, .. } if items.is_empty()
                     ) =>
             {
-                Some("lume.core.LumeIterator.from(lume.core.LumeList.of())".to_string())
+                Some("lume.core.LumeIterator.from(lume.core.LumeArray.of())".to_string())
             }
             ast::Expr::Member { receiver, name, .. }
                 if name == "iterator"
@@ -1715,11 +1718,11 @@ impl<'a> SourceBodyEmitter<'a> {
                         } if args.is_empty()
                             && matches!(
                                 callee.as_ref(),
-                                ast::Expr::Identifier { name, .. } if name == "List"
+                                ast::Expr::Identifier { name, .. } if name == "Array"
                             )
                     ) =>
             {
-                Some("lume.core.LumeIterator.from(lume.core.LumeList.of())".to_string())
+                Some("lume.core.LumeIterator.from(lume.core.LumeArray.of())".to_string())
             }
             ast::Expr::Member { name, .. } if lazy_core_member_call_name(name) => None,
             ast::Expr::Member { receiver, name, .. } => {
@@ -2384,7 +2387,7 @@ impl<'a> FunctionEmitter<'a> {
             ir::RValue::Tuple(items) => self.emit_tuple(items),
             ir::RValue::List(items) => {
                 let args = self.emit_operands(items)?;
-                Some(format!("lume.core.LumeList.of({})", args.join(", ")))
+                Some(format!("lume.core.LumeArray.of({})", args.join(", ")))
             }
             ir::RValue::AnonymousInterface {
                 interfaces,
@@ -2476,7 +2479,7 @@ impl<'a> FunctionEmitter<'a> {
                     Some("lume.core.LumeType.primitive(\"Unit\")".to_string())
                 }
                 ir::Operand::Const(ir::Constant::List(_)) => {
-                    Some("lume.core.LumeType.primitive(\"List\")".to_string())
+                    Some("lume.core.LumeType.primitive(\"Array\")".to_string())
                 }
                 _ => None,
             })
@@ -2492,7 +2495,7 @@ impl<'a> FunctionEmitter<'a> {
                 Some(format!("{base_expr}.get({index_expr})"))
             }
             ir::Type::Named { ref name, ref args }
-                if (name == "List" || name == "Array") && args.len() == 1 =>
+                if (name == "Array" || name == "FixedArray") && args.len() == 1 =>
             {
                 let indexed =
                     format!("lume.core.LumeRuntime.indexValue({base_expr}, {index_expr})");
@@ -2516,7 +2519,7 @@ impl<'a> FunctionEmitter<'a> {
         let index_expr = self.emit_operand(index)?;
         match base_ty {
             ir::Type::Named { ref name, ref args }
-                if matches!(name.as_str(), "Array" | "List") && args.len() == 1 =>
+                if matches!(name.as_str(), "FixedArray" | "Array") && args.len() == 1 =>
             {
                 Some(format!("{base_expr}.set({index_expr}, {value})"))
             }
@@ -2694,9 +2697,9 @@ impl<'a> FunctionEmitter<'a> {
                     args.join(", ")
                 ))
             }
-            [owner] if owner == "List" => {
+            [owner] if owner == "Array" => {
                 let args = self.emit_operands(operands)?;
-                Some(format!("lume.core.LumeList.of({})", args.join(", ")))
+                Some(format!("lume.core.LumeArray.of({})", args.join(", ")))
             }
             [owner] if owner == "LinkedList" => {
                 let args = self.emit_operands(operands)?;
@@ -2792,11 +2795,11 @@ impl<'a> FunctionEmitter<'a> {
                     args.join(", ")
                 ))
             }
-            [owner, method] if owner == "Array" => {
+            [owner, method] if owner == "FixedArray" => {
                 let args = self.emit_operands(operands)?;
                 let target = match method.as_str() {
                     "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" | "fill" => {
-                        format!("lume.core.LumeArray.{}", java_member_name(method))
+                        format!("lume.core.LumeFixedArray.{}", java_member_name(method))
                     }
                     _ => return None,
                 };
@@ -3589,7 +3592,7 @@ impl<'a> FunctionEmitter<'a> {
                     .default
                     .as_ref()
                     .map(java_constant)
-                    .unwrap_or_else(|| "lume.core.LumeList.of()".to_string()),
+                    .unwrap_or_else(|| "lume.core.LumeArray.of()".to_string()),
             );
             return Some(args);
         }
@@ -3615,7 +3618,7 @@ impl<'a> FunctionEmitter<'a> {
                 })
             })
             .collect::<Option<Vec<_>>>()?;
-        args.push(format!("lume.core.LumeList.of({})", items.join(", ")));
+        args.push(format!("lume.core.LumeArray.of({})", items.join(", ")));
         Some(args)
     }
 
@@ -3751,8 +3754,8 @@ impl<'a> FunctionEmitter<'a> {
                     name: target_name,
                     args: target_args,
                 },
-            ) if source_name == "List"
-                && target_name == "List"
+            ) if source_name == "Array"
+                && target_name == "Array"
                 && source_args.len() == target_args.len()
         )
     }
@@ -3779,7 +3782,7 @@ impl<'a> FunctionEmitter<'a> {
     fn index_assignment_type(&self, ty: &ir::Type) -> Option<ir::Type> {
         match ty {
             ir::Type::Named { name, args }
-                if (name == "Array" || name == "List") && args.len() == 1 =>
+                if (name == "FixedArray" || name == "Array") && args.len() == 1 =>
             {
                 args.first().cloned()
             }
@@ -3929,8 +3932,8 @@ impl<'a> FunctionEmitter<'a> {
             [owner, case, method] if self.enum_case(owner, case).is_some() => {
                 self.type_method_return_type(owner, method, arg_len)
             }
-            [owner] if owner == "List" => Some(ir::Type::Named {
-                name: "List".to_string(),
+            [owner] if owner == "Array" => Some(ir::Type::Named {
+                name: "Array".to_string(),
                 args: vec![ir::Type::Unknown],
             }),
             [owner] if owner == "Map" => Some(ir::Type::Named {
@@ -4188,11 +4191,11 @@ impl<'a> FunctionEmitter<'a> {
             return true;
         }
         let Some(source_ty) = self.operand_type(operand) else {
-            return !matches!(target_ty, ir::Type::Named { name, .. } if name == "List");
+            return !matches!(target_ty, ir::Type::Named { name, .. } if name == "Array");
         };
         match target_ty {
-            ir::Type::Named { name, .. } if name == "List" => {
-                matches!(source_ty, ir::Type::Named { name, .. } if name == "List")
+            ir::Type::Named { name, .. } if name == "Array" => {
+                matches!(source_ty, ir::Type::Named { name, .. } if name == "Array")
             }
             ir::Type::Function { .. } => {
                 matches!(source_ty, ir::Type::Function { .. } | ir::Type::Unknown)
@@ -4234,7 +4237,7 @@ impl<'a> FunctionEmitter<'a> {
                 ir::Callee::Intrinsic(ir::Intrinsic::ListLen) => Some(ir::Type::Int),
                 ir::Callee::Intrinsic(ir::Intrinsic::ListGet) => {
                     args.first().and_then(|arg| match self.operand_type(arg)? {
-                        ir::Type::Named { name, args } if name == "List" && args.len() == 1 => {
+                        ir::Type::Named { name, args } if name == "Array" && args.len() == 1 => {
                             args.into_iter().next()
                         }
                         _ => Some(ir::Type::Unknown),
@@ -4288,7 +4291,7 @@ impl<'a> FunctionEmitter<'a> {
                     .find(|ty| !matches!(ty, ir::Type::Unknown))
                     .unwrap_or(ir::Type::Unknown);
                 Some(ir::Type::Named {
-                    name: "List".to_string(),
+                    name: "Array".to_string(),
                     args: vec![element_ty],
                 })
             }
@@ -4316,7 +4319,7 @@ impl<'a> FunctionEmitter<'a> {
                 Some(ir::Type::option(args[0].clone()))
             }
             ir::Type::Named { name, args }
-                if (name == "Array" || name == "List") && args.len() == 1 =>
+                if (name == "FixedArray" || name == "Array") && args.len() == 1 =>
             {
                 args.first().cloned()
             }
@@ -4703,7 +4706,7 @@ impl JavaNames {
                     .or_else(|| self.java_types.get(name).cloned())
                     .unwrap_or_else(|| java_type_name(name))
             }
-            ir::Type::Named { name, args } if name == "List" && args.len() == 1 => {
+            ir::Type::Named { name, args } if name == "Array" && args.len() == 1 => {
                 format!("{}[]", self.annotation_type(&args[0]))
             }
             _ => "String".to_string(),
@@ -4762,16 +4765,16 @@ impl JavaNames {
 
     fn builtin_container(&self, name: &str, args: &[ir::Type]) -> String {
         match name {
-            "Array" if args.len() == 1 => {
-                format!("lume.core.LumeArray<{}>", self.value_type(&args[0]))
+            "FixedArray" if args.len() == 1 => {
+                format!("lume.core.LumeFixedArray<{}>", self.value_type(&args[0]))
             }
             "Either" if args.len() == 2 => format!(
                 "lume.core.Either<{}, {}>",
                 self.value_type(&args[0]),
                 self.value_type(&args[1])
             ),
-            "List" if args.len() == 1 => {
-                format!("lume.core.LumeList<{}>", self.value_type(&args[0]))
+            "Array" if args.len() == 1 => {
+                format!("lume.core.LumeArray<{}>", self.value_type(&args[0]))
             }
             "LinkedList" if args.len() == 1 => {
                 format!("lume.core.LumeLinkedList<{}>", self.value_type(&args[0]))
@@ -4898,10 +4901,10 @@ fn java_named_builtin_annotation(name: &str) -> Option<String> {
 fn is_builtin_container(name: &str) -> bool {
     matches!(
         name,
-        "Array"
+        "FixedArray"
             | "Either"
             | "Iterator"
-            | "List"
+            | "Array"
             | "LinkedList"
             | "Map"
             | "Option"
@@ -4930,7 +4933,7 @@ fn builtin_method_param_types(
 ) -> Option<Vec<ir::Type>> {
     match receiver {
         ir::Type::Named { name, args }
-            if matches!(name.as_str(), "List" | "LinkedList" | "Array" | "Set")
+            if matches!(name.as_str(), "Array" | "LinkedList" | "FixedArray" | "Set")
                 && args.len() == 1 =>
         {
             match (method, arg_len) {
@@ -4958,7 +4961,7 @@ fn builtin_method_return_type(
 ) -> Option<ir::Type> {
     match receiver {
         ir::Type::Named { name, args }
-            if matches!(name.as_str(), "List" | "LinkedList")
+            if matches!(name.as_str(), "Array" | "LinkedList")
                 && args.len() == 1
                 && method == "zipWithIndex"
                 && arg_len == 0 =>
@@ -4977,7 +4980,7 @@ fn iterable_item_type(ty: &ir::Type) -> Option<ir::Type> {
         ir::Type::Named { name, args }
             if matches!(
                 name.as_str(),
-                "Array" | "Iterator" | "List" | "LinkedList" | "Option" | "Set"
+                "FixedArray" | "Iterator" | "Array" | "LinkedList" | "Option" | "Set"
             ) && args.len() == 1 =>
         {
             args.first().cloned()
@@ -5273,7 +5276,7 @@ fn java_constant(constant: &ir::Constant) -> String {
                 .map(java_constant)
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("lume.core.LumeList.of({items})")
+            format!("lume.core.LumeArray.of({items})")
         }
     }
 }

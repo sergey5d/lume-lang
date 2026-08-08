@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*cannot spread a map into a list literal.*
+# .*cannot spread a map into an array literal.*
 
 def main() Unit {
     entries [Str : Int] = ["one": 1]

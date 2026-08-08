@@ -48,8 +48,8 @@ public final class LumeEnumCase {
         return name;
     }
 
-    public LumeList<LumeField> fields() {
-        return LumeList.from(fields);
+    public LumeArray<LumeField> fields() {
+        return LumeArray.from(fields);
     }
 
     public Result<Object, ReflectionError> construct(Object... args) {

@@ -17,7 +17,7 @@ class AssetPrices {
         "SOL-EUR-4",
         "XTZ-SOL-8"
     ]
-    asset2PriceMap Map[Str, [(Str, Float)]]
+    asset2PriceMap [Str: [(Str, Float)]]
 }
 
 impl AssetPrices {
@@ -25,8 +25,8 @@ impl AssetPrices {
         this.asset2PriceMap = this.makePrices()
     }
 
-    def makePrices() Map[Str, [(Str, Float)]] {
-        result Map[Str, [(Str, Float)]] = Map()
+    def makePrices() [Str: [(Str, Float)]] {
+        result [Str: [(Str, Float)]] = []
 
         for asset <- this.assets {
 
@@ -78,7 +78,7 @@ impl AssetPrices {
                 continue
             }
 
-            newPrices = List.from(prices)
+            newPrices = Array.from(prices)
             newPrices.add(((currAsset, toAsset), price))
 
             if toAsset == endAsset {

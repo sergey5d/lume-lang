@@ -150,7 +150,7 @@ impl Ty {
     }
 
     fn list(item: Ty) -> Self {
-        Self::Named("List".to_string(), vec![item])
+        Self::Named("Array".to_string(), vec![item])
     }
 
     fn option(item: Ty) -> Self {
@@ -1818,9 +1818,9 @@ impl<'a> Checker<'a> {
                     self.add_error(
                         "invalid_variadic_param",
                         if is_constructor {
-                            "variadic constructor parameter must use a list type like 'args [T] vararg'"
+                            "variadic constructor parameter must use an array type like 'args [T] vararg'"
                         } else {
-                            "variadic parameter must use a list type like 'args [T] vararg'"
+                            "variadic parameter must use an array type like 'args [T] vararg'"
                         },
                         param.span,
                     );
@@ -3609,7 +3609,7 @@ impl<'a> Checker<'a> {
                 let index_ty = self.check_expr(index);
                 match &receiver_ty {
                     Ty::Named(name, args)
-                        if (name == "Array" || name == "List") && args.len() == 1 =>
+                        if (name == "Array" || name == "FixedArray") && args.len() == 1 =>
                     {
                         if !index_ty.is_int_like() && !matches!(index_ty, Ty::Unknown) {
                             self.add_error(
@@ -3812,7 +3812,7 @@ impl<'a> Checker<'a> {
             Expr::ListLiteral { items, span } => {
                 if items.is_empty() {
                     return match expected {
-                        Ty::Named(name, args) if name == "List" && args.len() == 1 => {
+                        Ty::Named(name, args) if name == "Array" && args.len() == 1 => {
                             Ty::Named(name.clone(), args.iter().map(materialize_type).collect())
                         }
                         Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
@@ -3821,7 +3821,7 @@ impl<'a> Checker<'a> {
                         Ty::Unknown => {
                             self.add_error(
                                 "cannot_infer_empty_collection_type",
-                                "cannot infer the type of empty collection '[]'; add a list or map type annotation",
+                                "cannot infer the type of empty collection '[]'; add an array or map type annotation",
                                 *span,
                             );
                             Ty::Unknown
@@ -3830,7 +3830,7 @@ impl<'a> Checker<'a> {
                             self.add_error(
                                 "invalid_empty_collection_context",
                                 format!(
-                                    "empty collection '[]' requires a list or map type, got '{}'",
+                                    "empty collection '[]' requires an array or map type, got '{}'",
                                     other.describe()
                                 ),
                                 *span,
@@ -3850,8 +3850,8 @@ impl<'a> Checker<'a> {
                         let spread_ty = self.check_expr(value);
                         if is_map_ty(&spread_ty) {
                             self.add_error(
-                                "invalid_list_spread",
-                                "cannot spread a map into a list literal",
+                                "invalid_array_spread",
+                                "cannot spread a map into an array literal",
                                 *span,
                             );
                             Ty::Unknown
@@ -3860,9 +3860,9 @@ impl<'a> Checker<'a> {
                         } else {
                             if !matches!(spread_ty, Ty::Unknown) {
                                 self.add_error(
-                                    "invalid_list_spread",
+                                    "invalid_array_spread",
                                     format!(
-                                        "list spread requires an iterable value, got '{}'",
+                                        "array spread requires an iterable value, got '{}'",
                                         spread_ty.describe()
                                     ),
                                     *span,
@@ -3880,7 +3880,7 @@ impl<'a> Checker<'a> {
             Expr::Spread { span, .. } => {
                 self.add_error(
                     "invalid_spread",
-                    "spread syntax is only valid inside list or map literals and positional vararg call arguments",
+                    "spread syntax is only valid inside array or map literals and positional vararg call arguments",
                     *span,
                 );
                 Ty::Unknown
@@ -3942,7 +3942,7 @@ impl<'a> Checker<'a> {
                 let index_ty = self.check_expr(index);
                 let valid_index = match &receiver_ty {
                     Ty::Named(name, args)
-                        if (name == "Array" || name == "List" || name == "LinkedList")
+                        if (name == "Array" || name == "FixedArray" || name == "LinkedList")
                             && args.len() == 1 =>
                     {
                         index_ty.is_int_like() || matches!(index_ty, Ty::Unknown)
@@ -4865,7 +4865,7 @@ impl<'a> Checker<'a> {
         };
 
         let result_name = match type_name.as_str() {
-            "List" => "List",
+            "Array" => "Array",
             "Set" => "Set",
             _ => return None,
         };
@@ -4914,11 +4914,14 @@ impl<'a> Checker<'a> {
         };
 
         match (type_name.as_str(), name.as_str()) {
-            ("Array", factory @ ("ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune")) => {
+            ("FixedArray", factory @ ("ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune")) => {
                 if args.len() != 1 {
                     self.add_error(
                         "invalid_argument_count",
-                        format!("Array.{factory} expects 1 argument, got {}", args.len()),
+                        format!(
+                            "FixedArray.{factory} expects 1 argument, got {}",
+                            args.len()
+                        ),
                         span,
                     );
                 }
@@ -4930,7 +4933,7 @@ impl<'a> Checker<'a> {
                         arg.span,
                         "invalid_argument_type",
                         format!(
-                            "Array.{factory} expects Int capacity, got '{}'",
+                            "FixedArray.{factory} expects Int capacity, got '{}'",
                             ty.describe()
                         ),
                     );
@@ -4943,13 +4946,13 @@ impl<'a> Checker<'a> {
                     "ofRune" => Ty::rune(),
                     _ => unreachable!(),
                 };
-                Some(Ty::Named("Array".to_string(), vec![item_ty]))
+                Some(Ty::Named("FixedArray".to_string(), vec![item_ty]))
             }
-            ("Array", "fill") => {
+            ("FixedArray", "fill") => {
                 if args.len() != 2 {
                     self.add_error(
                         "invalid_argument_count",
-                        format!("Array.fill expects 2 arguments, got {}", args.len()),
+                        format!("FixedArray.fill expects 2 arguments, got {}", args.len()),
                         span,
                     );
                 }
@@ -4960,20 +4963,26 @@ impl<'a> Checker<'a> {
                         &Ty::int(),
                         arg.span,
                         "invalid_argument_type",
-                        format!("Array.fill expects Int length, got '{}'", ty.describe()),
+                        format!(
+                            "FixedArray.fill expects Int length, got '{}'",
+                            ty.describe()
+                        ),
                     );
                 }
                 let item_ty = args
                     .get(1)
                     .map(|arg| self.check_expr(&arg.value))
                     .unwrap_or(Ty::Unknown);
-                Some(Ty::Named("Array".to_string(), vec![item_ty]))
+                Some(Ty::Named("FixedArray".to_string(), vec![item_ty]))
             }
-            ("Array", "generate") => {
+            ("FixedArray", "generate") => {
                 if args.len() != 2 {
                     self.add_error(
                         "invalid_argument_count",
-                        format!("Array.generate expects 2 arguments, got {}", args.len()),
+                        format!(
+                            "FixedArray.generate expects 2 arguments, got {}",
+                            args.len()
+                        ),
                         span,
                     );
                 }
@@ -4984,7 +4993,10 @@ impl<'a> Checker<'a> {
                         &Ty::int(),
                         arg.span,
                         "invalid_argument_type",
-                        format!("Array.generate expects Int length, got '{}'", ty.describe()),
+                        format!(
+                            "FixedArray.generate expects Int length, got '{}'",
+                            ty.describe()
+                        ),
                     );
                 }
                 let item_ty = args
@@ -5000,7 +5012,7 @@ impl<'a> Checker<'a> {
                                     self.add_error(
                                         "invalid_argument_type",
                                         format!(
-                                            "Array.generate expects fn(Int) => T generator, got '{}'",
+                                            "FixedArray.generate expects fn(Int) => T generator, got '{}'",
                                             Ty::Function(params.clone(), ret.clone()).describe()
                                         ),
                                         arg.span,
@@ -5013,7 +5025,7 @@ impl<'a> Checker<'a> {
                                 self.add_error(
                                     "invalid_argument_type",
                                     format!(
-                                        "Array.generate expects fn(Int) => T generator, got '{}'",
+                                        "FixedArray.generate expects fn(Int) => T generator, got '{}'",
                                         other.describe()
                                     ),
                                     arg.span,
@@ -5023,7 +5035,7 @@ impl<'a> Checker<'a> {
                         }
                     })
                     .unwrap_or(Ty::Unknown);
-                Some(Ty::Named("Array".to_string(), vec![item_ty]))
+                Some(Ty::Named("FixedArray".to_string(), vec![item_ty]))
             }
             ("Int", "parse") => {
                 if args.len() != 1 {
@@ -5646,7 +5658,7 @@ impl<'a> Checker<'a> {
                 }
                 Some(Ty::Named("IntRange".to_string(), Vec::new()))
             }
-            "List" | "LinkedList" => {
+            "Array" | "LinkedList" => {
                 self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
                 let mut item = Ty::Unknown;
                 for arg in args {
@@ -5662,13 +5674,13 @@ impl<'a> Checker<'a> {
                 }
                 Some(Ty::Named("Set".to_string(), vec![item]))
             }
-            "Array" => {
+            "FixedArray" => {
                 self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
                 let mut item = Ty::Unknown;
                 for arg in args {
                     item = join_types(&item, &self.check_expr(&arg.value));
                 }
-                Some(Ty::Named("Array".to_string(), vec![item]))
+                Some(Ty::Named("FixedArray".to_string(), vec![item]))
             }
             "Map" => {
                 self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
@@ -6211,7 +6223,7 @@ impl<'a> Checker<'a> {
         if let Some(diagnostic_span) = empty_collection_span {
             self.add_error(
                 "ambiguous_empty_collection",
-                "empty collection '[]' matches multiple list/map overloads; add an intermediate typed binding",
+                "empty collection '[]' matches multiple array/map overloads; add an intermediate typed binding",
                 diagnostic_span,
             );
         } else {
@@ -6641,7 +6653,7 @@ impl<'a> Checker<'a> {
                         self.add_error(
                             "invalid_destructure",
                             format!(
-                                "list pattern requires a List value, got '{}'",
+                                "array pattern requires an Array value, got '{}'",
                                 scrutinee.describe()
                             ),
                             pattern.span(),
@@ -6656,7 +6668,7 @@ impl<'a> Checker<'a> {
                     if rest.name != "_" {
                         self.define_local(
                             &rest.name,
-                            Ty::Named("List".to_string(), vec![element_ty]),
+                            Ty::Named("Array".to_string(), vec![element_ty]),
                             false,
                         );
                     }
@@ -6908,7 +6920,7 @@ impl<'a> Checker<'a> {
 
     fn list_element_type(&self, ty: &Ty) -> Option<Ty> {
         match ty {
-            Ty::Named(name, args) if name == "List" && args.len() == 1 => args.first().cloned(),
+            Ty::Named(name, args) if name == "Array" && args.len() == 1 => args.first().cloned(),
             _ => None,
         }
     }
@@ -7101,10 +7113,10 @@ impl<'a> Checker<'a> {
     fn known_iterable_item_type(&self, ty: &Ty) -> Option<Ty> {
         match ty {
             Ty::Named(name, args)
-                if (name == "List"
+                if (name == "Array"
                     || name == "LinkedList"
                     || name == "Set"
-                    || name == "Array"
+                    || name == "FixedArray"
                     || name == "Iterable"
                     || name == "Iterator")
                     && args.len() == 1 =>
@@ -7141,7 +7153,7 @@ impl<'a> Checker<'a> {
         );
         let expected_is_list = matches!(
             expected,
-            Ty::Named(name, args) if name == "List" && args.len() == 1
+            Ty::Named(name, args) if name == "Array" && args.len() == 1
         );
         let has_map = spread_types.iter().any(|(ty, _)| is_map_ty(ty));
         let has_known_non_map = spread_types
@@ -7156,7 +7168,7 @@ impl<'a> Checker<'a> {
                 .unwrap_or_else(|| items[0].span());
             self.add_error(
                 "mixed_collection_spreads",
-                "cannot mix map spreads with list or iterable spreads in the same bracket literal",
+                "cannot mix map spreads with array or iterable spreads in the same bracket literal",
                 span,
             );
             return Some(Ty::Unknown);
@@ -7165,8 +7177,8 @@ impl<'a> Checker<'a> {
         if has_map {
             if expected_is_list {
                 self.add_error(
-                    "invalid_list_spread",
-                    "cannot spread a map into a list literal",
+                    "invalid_array_spread",
+                    "cannot spread a map into an array literal",
                     items[0].span(),
                 );
                 return Some(Ty::Unknown);
@@ -7200,9 +7212,9 @@ impl<'a> Checker<'a> {
                 item_ty = join_types(&item_ty, &current);
             } else if !matches!(spread_ty, Ty::Unknown) {
                 self.add_error(
-                    "invalid_list_spread",
+                    "invalid_array_spread",
                     format!(
-                        "list spread requires an iterable value, got '{}'",
+                        "array spread requires an iterable value, got '{}'",
                         spread_ty.describe()
                     ),
                     item.span(),
@@ -7221,7 +7233,9 @@ impl<'a> Checker<'a> {
             Ty::Named(name, args) if name == "LinkedList" && args.len() == 1 => {
                 Ty::option(args[0].clone())
             }
-            Ty::Named(name, args) if (name == "Array" || name == "List") && args.len() == 1 => {
+            Ty::Named(name, args)
+                if (name == "Array" || name == "FixedArray") && args.len() == 1 =>
+            {
                 args[0].clone()
             }
             Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
@@ -9571,7 +9585,7 @@ fn infer_literal_type(expr: &Expr) -> Option<Ty> {
             let item = items.iter().fold(Ty::Unknown, |acc, item| {
                 join_types(&acc, &infer_literal_type(item).unwrap_or(Ty::Unknown))
             });
-            Some(Ty::Named("List".to_string(), vec![item]))
+            Some(Ty::Named("Array".to_string(), vec![item]))
         }
         _ => None,
     }
@@ -9585,7 +9599,7 @@ fn type_ref_named_name(reference: &TypeRef) -> Option<&str> {
 }
 
 fn is_list_type_ref(reference: &TypeRef) -> bool {
-    matches!(reference, TypeRef::Named { name, args, .. } if name == "List" && args.len() == 1)
+    matches!(reference, TypeRef::Named { name, args, .. } if name == "Array" && args.len() == 1)
 }
 
 fn is_map_ty(ty: &Ty) -> bool {
@@ -9596,7 +9610,7 @@ fn is_list_or_map_ty(ty: &Ty) -> bool {
     matches!(
         ty,
         Ty::Named(name, args)
-            if (name == "List" && args.len() == 1) || (name == "Map" && args.len() == 2)
+            if (name == "Array" && args.len() == 1) || (name == "Map" && args.len() == 2)
     )
 }
 
@@ -9644,7 +9658,7 @@ fn unit_function_param_span(reference: &TypeRef) -> Option<crate::source::Span> 
 
 fn variadic_arg_ty(ty: &Ty) -> Option<Ty> {
     match ty {
-        Ty::Named(name, args) if name == "List" && args.len() == 1 => args.first().cloned(),
+        Ty::Named(name, args) if name == "Array" && args.len() == 1 => args.first().cloned(),
         Ty::Unknown => Some(Ty::Unknown),
         _ => None,
     }
@@ -10253,7 +10267,7 @@ fn wildcard_capture_labels(type_name: &str, args: &[Ty]) -> Vec<Option<String>> 
                 return None;
             }
             match (type_name, index, args.len()) {
-                ("List" | "LinkedList" | "Array" | "Set", 0, 1) => {
+                ("Array" | "LinkedList" | "FixedArray" | "Set", 0, 1) => {
                     Some(format!("captured element type of {}", rendered(index)))
                 }
                 ("Map", 0, 2) => Some(format!("captured key type of {}", rendered(index))),
@@ -10836,7 +10850,7 @@ def main() Int {
         let program = parse_inline(
             r#"
 def main() Unit {
-    items = List(1, 2, 3)
+    items = Array(1, 2, 3)
     mapped = items.map { item => item + 1 }
     OS.println(mapped.size())
 }
@@ -11026,11 +11040,11 @@ def main() Unit {
         let program = parse_inline(
             r#"
 def main() Unit {
-    ints Array[Int] = Array.ofInt(3)
-    floats Array[Float] = Array.ofFloat(3)
-    bools Array[Bool] = Array.ofBool(3)
-    texts Array[Str] = Array.ofStr(3)
-    runes Array[Rune] = Array.ofRune(3)
+    ints FixedArray[Int] = FixedArray.ofInt(3)
+    floats FixedArray[Float] = FixedArray.ofFloat(3)
+    bools FixedArray[Bool] = FixedArray.ofBool(3)
+    texts FixedArray[Str] = FixedArray.ofStr(3)
+    runes FixedArray[Rune] = FixedArray.ofRune(3)
 }
 "#,
         );
@@ -11043,7 +11057,7 @@ def main() Unit {
         let program = parse_inline(
             r#"
 def main() Unit {
-    values Array[Int] = Array.fill(3, 7)
+    values FixedArray[Int] = FixedArray.fill(3, 7)
 }
 "#,
         );
@@ -11056,7 +11070,7 @@ def main() Unit {
         let program = parse_inline(
             r#"
 def main() Unit {
-    values Array[Int] = Array.generate(3, idx => idx + 1)
+    values FixedArray[Int] = FixedArray.generate(3, idx => idx + 1)
 }
 "#,
         );
@@ -11161,7 +11175,7 @@ def main(flag Bool) Unit {
         let program = parse_inline(
             r#"
 def main() Unit {
-    values = List(1, 2, 3)
+    values = Array(1, 2, 3)
     removed Option[Int] = values.removeFirst()
     total Int = values.reduce(0, (acc, value) => acc + value)
 }
@@ -11513,7 +11527,7 @@ impl Bad {
                 diag.code == "invalid_variadic_param"
                     && diag
                         .message
-                        .contains("variadic constructor parameter must use a list type")
+                        .contains("variadic constructor parameter must use an array type")
             }),
             "{:#?}",
             result.diagnostics
@@ -12396,7 +12410,7 @@ def main() Unit {
         let program = parse_inline(
             r#"
 def main() Unit {
-    items = List(1, 2, 3)
+    items = Array(1, 2, 3)
     mapped = items.map(_ + 1)
 }
 "#,
@@ -12552,7 +12566,7 @@ enum MaybeInt {
 }
 
 def main() Unit {
-    values List[MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX]
+    values Array[MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX]
     for value <- values {
         let SomeX(item) = value else continue
         OS.println(item)
@@ -12868,7 +12882,7 @@ def main(value) Int {
         let program = parse_inline(
             r#"
 	def main() Unit {
-	    values List[Option[Int]] = [Some(1), None]
+	    values Array[Option[Int]] = [Some(1), None]
 	    mapped = for {
 	        maybe <- values
 	        let Some(value) = maybe
@@ -13158,7 +13172,7 @@ def main() Unit {
     fn allows_existential_type_erasure_and_capture_reads() {
         let program = parse_inline(
             r#"
-def speak(values List[_]) Unit {
+def speak(values Array[_]) Unit {
     OS.println(values.size())
 }
 
@@ -13166,7 +13180,7 @@ def intStrMap() Map[Int, Str] = Map()
 def strIntMap() Map[Str, Int] = Map()
 
 def main() Unit {
-    a List[_] = List(1, 2, 3)
+    a Array[_] = Array(1, 2, 3)
     b Map[_, Str] = intStrMap()
     c Map[_, _] = strIntMap()
 
@@ -13188,7 +13202,7 @@ def main() Unit {
         let program = parse_inline(
             r#"
 def main() Unit {
-    values List[_] = List(1, 2, 3)
+    values Array[_] = Array(1, 2, 3)
     values.add(7)
 }
 "#,
@@ -13238,7 +13252,7 @@ class SomeType {
 }
 
 def main() Unit {
-    values List[_] = List(1, 2, 3)
+    values Array[_] = Array(1, 2, 3)
     concrete SomeType = values[0]
 }
 "#,
@@ -13263,7 +13277,7 @@ def main() Unit {
 def same[T](left T, right T) Unit {}
 
 def main() Unit {
-    values List[_] = List(1, 2, 3)
+    values Array[_] = Array(1, 2, 3)
     same(values[0], values[1])
 }
 "#,
@@ -13280,8 +13294,8 @@ def main() Unit {
 def same[T](left T, right T) Unit {}
 
 def main() Unit {
-    left List[_] = List(1)
-    right List[_] = List(2)
+    left Array[_] = Array(1)
+    right Array[_] = Array(2)
     same(left[0], right[0])
 }
 "#,
@@ -13383,14 +13397,14 @@ def main() Unit {
         let program = parse_inline(
             r#"
 def countMap(values [Str : Int]) Int = values.size()
-def countList(values [Str]) Int = values.size()
+def countArray(values [Str]) Int = values.size()
 def emptyMap() [Str : Int] = []
-def emptyList() [Str] = []
+def emptyArray() [Str] = []
 
 def main() Int {
     directMap [Str : Int] = []
-    directList [Str] = []
-    return directMap.size() + directList.size() + countMap([]) + countList([]) + emptyMap().size() + emptyList().size()
+    directArray [Str] = []
+    return directMap.size() + directArray.size() + countMap([]) + countArray([]) + emptyMap().size() + emptyArray().size()
 }
 "#,
         );
@@ -13447,7 +13461,7 @@ def main() Unit {
             result
                 .diagnostics
                 .iter()
-                .any(|diag| diag.code == "invalid_list_spread"),
+                .any(|diag| diag.code == "invalid_array_spread"),
             "{:#?}",
             result.diagnostics
         );
@@ -13489,7 +13503,7 @@ def main() Unit {
             r#"
 def main() Unit {
     values Set[Int] = []
-    array Array[Int] = []
+    array FixedArray[Int] = []
 }
 "#,
         );
@@ -13609,7 +13623,7 @@ def fromEither(value Either[Str, Int]) Int = value.orPanic()
             "examples/enum_object_same_name.lum",
             "examples/imports.lum",
             "examples/interface_default_methods.lum",
-            "examples/list_hof.lum",
+            "examples/array_hof.lum",
             "examples/set_map_hof.lum",
             "examples/placeholder_lambda.lum",
             "examples/zip.lum",

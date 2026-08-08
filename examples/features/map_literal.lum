@@ -5,7 +5,7 @@
 # tuple key 99
 # empty 0
 # empty value 5
-# list spread 6
+# array spread 6
 # map spread shared 20
 # map spread size 4
 # map entries 4
@@ -44,8 +44,8 @@ def main() Int {
 
     first = [1, 2]
     second = [3, 4]
-    spreadList = [0, ...first, ...second, 5]
-    println("list spread", spreadList.size())
+    spreadArray = [0, ...first, ...second, 5]
+    println("array spread", spreadArray.size())
 
     defaults [Str : Int] = ["one": 1, "shared": 2]
     overrides [Str : Int] = ["shared": 20, "three": 3]

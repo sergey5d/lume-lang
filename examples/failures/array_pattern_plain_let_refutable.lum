@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*plain 'let' pattern may fail for value of type 'List\[Int\]'; add an 'else' fallback.*
+# .*plain 'let' pattern may fail for value of type 'Array\[Int\]'; add an 'else' fallback.*
 
 def main() Unit {
     values [Int] = [1, 2]

@@ -1,47 +1,47 @@
 # EXPECT:
-# list zip 1 a
-# list zip 2 b
-# list zipWithIndex 3 2
-# array zip 5 y
-# array zipWithIndex 6 2
+# array zip 1 a
+# array zip 2 b
+# array zipWithIndex 3 2
+# fixed array zip 5 y
+# fixed array zipWithIndex 6 2
 # range zip 11 q
 # range zipWithIndex 8 1
 # pair sum 3
 # indexed sum 4
-# array pair sum 5
+# fixed array pair sum 5
 # range pair sum 21
 # range index sum 16
 
 def main() Unit {
     items = [1, 2, 3]
-    listPairs = items.zip(["a", "b"])
-    listIndexed = items.zipWithIndex()
+    arrayPairs = items.zip(["a", "b"])
+    arrayIndexed = items.zipWithIndex()
 
-    let Some(firstPair) = listPairs.get(0) else {
+    let Some(firstPair) = arrayPairs.get(0) else {
         return ()
     }
-    let Some(secondPair) = listPairs.get(1) else return ()
+    let Some(secondPair) = arrayPairs.get(1) else return ()
 
-    let Some(indexedPair) = listIndexed.get(2) else return ()
+    let Some(indexedPair) = arrayIndexed.get(2) else return ()
 
     let (firstLeft, firstRight) = firstPair
     let (secondLeft, secondRight) = secondPair
     let (indexedValue, indexedPos) = indexedPair
 
-    println("list zip", firstLeft, firstRight)
-    println("list zip", secondLeft, secondRight)
-    println("list zipWithIndex", indexedValue, indexedPos)
+    println("array zip", firstLeft, firstRight)
+    println("array zip", secondLeft, secondRight)
+    println("array zipWithIndex", indexedValue, indexedPos)
 
-    values = Array(4, 5, 6)
-    other = Array("x", "y")
-    arrayPairs = values.zip(other)
-    arrayIndexed = values.zipWithIndex()
+    values = FixedArray(4, 5, 6)
+    other = FixedArray("x", "y")
+    fixedArrayPairs = values.zip(other)
+    fixedArrayIndexed = values.zipWithIndex()
 
-    let (arrayLeft, arrayRight) = arrayPairs[1]
-    let (arrayIndexedValue, arrayIndexedPos) = arrayIndexed[2]
+    let (arrayLeft, arrayRight) = fixedArrayPairs[1]
+    let (arrayIndexedValue, arrayIndexedPos) = fixedArrayIndexed[2]
 
-    println("array zip", arrayLeft, arrayRight)
-    println("array zipWithIndex", arrayIndexedValue, arrayIndexedPos)
+    println("fixed array zip", arrayLeft, arrayRight)
+    println("fixed array zipWithIndex", arrayIndexedValue, arrayIndexedPos)
 
     rangePairs = Range(10, 13).zip(["p", "q"])
     rangeIndexed = Range(7, 9).zipWithIndex()
@@ -59,7 +59,7 @@ def main() Unit {
     println("range zipWithIndex", rangeIndexedValue, rangeIndexedPos)
 
     var pairSum = 0
-    for pair <- listPairs {
+    for pair <- arrayPairs {
         let (left, right) = pair
         if right == "a" || right == "b" {
             pairSum += left
@@ -68,7 +68,7 @@ def main() Unit {
     println("pair sum", pairSum)
 
     var indexedSum = 0
-    for indexed <- listIndexed {
+    for indexed <- arrayIndexed {
         let (value, index) = indexed
         if index < 2 {
             indexedSum += value + index
@@ -77,13 +77,13 @@ def main() Unit {
     println("indexed sum", indexedSum)
 
     var arrayPairSum = 0
-    for pair <- arrayPairs {
+    for pair <- fixedArrayPairs {
         let (left, right) = pair
         if right == "y" {
             arrayPairSum += left
         }
     }
-    println("array pair sum", arrayPairSum)
+    println("fixed array pair sum", arrayPairSum)
 
     var rangePairSum = 0
     for pair <- rangePairs {

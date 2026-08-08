@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*expected '\]' after list pattern.*
+# .*expected '\]' after array pattern.*
 
 def main() Unit {
     values [Int] = [1, 2, 3]

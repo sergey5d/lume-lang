@@ -17,7 +17,7 @@ def matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], p
             continue
         }
 
-        nextPath = List.from(path)
+        nextPath = Array.from(path)
         nextPath.add(word)
 
         if word == endWord {

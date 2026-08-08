@@ -40,8 +40,8 @@ public final class LumeMethod {
         return name;
     }
 
-    public LumeList<LumeParam> params() {
-        return LumeList.from(params);
+    public LumeArray<LumeParam> params() {
+        return LumeArray.from(params);
     }
 
     public LumeType returnType() {

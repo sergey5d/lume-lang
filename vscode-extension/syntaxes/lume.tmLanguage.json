@@ -233,7 +233,7 @@
       "patterns": [
         {
           "name": "support.type.builtin.lume",
-          "match": "\\b(?:Any|Int|Bool|Rune|Float|Str|Unit|Never|Array|List|LinkedList|Set|Map|Option|Result|Either|Iterator|Iterable|Range|Ordering|Eq|OS|Type|TypeKind|ClassType|ShapeType|EnumType|InterfaceType|ObjectType|AnnotationType|Field|Method|Param|EnumCase|AnnotationValue|ReflectionError|Tuple2|Tuple3|Tuple4|Tuple5|Tuple6|Tuple7|Tuple8)\\b"
+          "match": "\\b(?:Any|Int|Bool|Rune|Float|Str|Unit|Never|Array|FixedArray|LinkedList|Set|Map|Option|Result|Either|Iterator|Iterable|Range|Ordering|Eq|OS|Type|TypeKind|ClassType|ShapeType|EnumType|InterfaceType|ObjectType|AnnotationType|Field|Method|Param|EnumCase|AnnotationValue|ReflectionError|Tuple2|Tuple3|Tuple4|Tuple5|Tuple6|Tuple7|Tuple8)\\b"
         },
         {
           "name": "entity.name.type.lume",

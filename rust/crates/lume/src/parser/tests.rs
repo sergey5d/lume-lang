@@ -240,7 +240,7 @@ class Holder {
 fn rejects_for_tuple_destructuring_in_generator() {
     let result = parse(
         r#"
-def run(rows List[(Int, Int)]) Unit {
+def run(rows Array[(Int, Int)]) Unit {
     for (value, idx) <- rows {
         OS.println(value, idx)
     }
@@ -261,7 +261,7 @@ def run(rows List[(Int, Int)]) Unit {
 fn parses_for_let_tuple_destructuring_generator() {
     let result = parse(
         r#"
-def run(rows List[(Int, Int)]) Unit {
+def run(rows Array[(Int, Int)]) Unit {
     for let (value, idx) <- rows {
         println(value + idx)
     }
@@ -294,7 +294,7 @@ def run(rows List[(Int, Int)]) Unit {
 fn parses_for_let_shape_destructuring_generator() {
     let result = parse(
         r#"
-def run(users List[User]) Unit {
+def run(users Array[User]) Unit {
     for let { name, age Int } <- users {
         println(name)
         println(age)
@@ -328,7 +328,7 @@ def run(users List[User]) Unit {
 fn parses_for_let_refutable_generator_pattern() {
     let result = parse(
         r#"
-def run(values List[Option[Int]]) Unit {
+def run(values Array[Option[Int]]) Unit {
     for let Some(value) <- values {
         println(value)
     }
@@ -387,7 +387,7 @@ def run(events [Str]) Unit {
 fn rejects_for_shape_destructuring_in_generator() {
     let result = parse(
         r#"
-def run(rows List[Row]) Unit {
+def run(rows Array[Row]) Unit {
     for { value, label } <- rows {
         OS.println(value, label)
     }
@@ -408,7 +408,7 @@ def run(rows List[Row]) Unit {
 fn rejects_for_named_shape_destructuring_in_generator() {
     let result = parse(
         r#"
-def run(users List[User]) Unit {
+def run(users Array[User]) Unit {
     for { name, location Str as loc, country as skipped } <- users {
         OS.println(name, loc)
     }
@@ -429,7 +429,7 @@ def run(users List[User]) Unit {
 fn rejects_for_constructor_pattern_in_generator() {
     let result = parse(
         r#"
-def run(values List[Option[Int]]) Unit {
+def run(values Array[Option[Int]]) Unit {
     for Some(value) <- values {
         OS.println(value)
     }
@@ -450,7 +450,7 @@ def run(values List[Option[Int]]) Unit {
 fn rejects_for_tuple_destructuring_without_parentheses() {
     let result = parse(
         r#"
-def run(rows List[(Int, Int)]) Unit {
+def run(rows Array[(Int, Int)]) Unit {
     for value, idx <- rows {
         OS.println(value, idx)
     }
@@ -470,7 +470,7 @@ def run(rows List[(Int, Int)]) Unit {
 fn parses_for_yield_with_irrefutable_let_clauses() {
     let result = parse(
         r#"
-def run(pairs List[(Int, Int)], users List[User]) [Int] {
+def run(pairs Array[(Int, Int)], users Array[User]) [Int] {
 	    values = for {
 	        pair <- pairs
 	        let (left Int, right Int) = pair
@@ -511,7 +511,7 @@ def run(pairs List[(Int, Int)], users List[User]) [Int] {
 fn parses_for_yield_with_let_destructuring_generators() {
     let result = parse(
         r#"
-def run(pairs List[(Int, Int)], users List[User]) [Int] {
+def run(pairs Array[(Int, Int)], users Array[User]) [Int] {
     values = for {
         let (left, right) <- pairs
         let { age Int } <- users
@@ -547,7 +547,7 @@ def run(pairs List[(Int, Int)], users List[User]) [Int] {
 fn parses_for_yield_let_refutable_generator_pattern() {
     let result = parse(
         r#"
-def run(values List[Option[Int]]) [Int] {
+def run(values Array[Option[Int]]) [Int] {
     mapped = for {
         let Some(value) <- values
     } yield value
@@ -2110,7 +2110,7 @@ def run(values [Any]) Unit {
                     ));
                     assert_eq!(rest.name, "rest");
                 }
-                other => panic!("expected list pattern, got {other:#?}"),
+                other => panic!("expected array pattern, got {other:#?}"),
             },
             other => panic!("expected let else statement, got {other:#?}"),
         },
@@ -3103,23 +3103,23 @@ def wrap(input Map[Str, [Int]]) [[[(Str, Int)]]] {
     match &store.members[0] {
         TypeMember::Field(field) => match field.ty.as_ref().expect("field type") {
             TypeRef::Named { name, args, .. } => {
-                assert_eq!(name, "List");
+                assert_eq!(name, "Array");
                 assert_eq!(args.len(), 1);
                 assert!(matches!(&args[0], TypeRef::Named { name, .. } if name == "T"));
             }
-            other => panic!("expected List[T], got {other:#?}"),
+            other => panic!("expected Array[T], got {other:#?}"),
         },
         other => panic!("expected field, got {other:#?}"),
     }
     match &store.members[1] {
         TypeMember::Field(field) => match field.ty.as_ref().expect("field type") {
             TypeRef::Named { name, args, .. } => {
-                assert_eq!(name, "List");
+                assert_eq!(name, "Array");
                 assert!(
-                    matches!(&args[0], TypeRef::Named { name, args, .. } if name == "List" && matches!(&args[0], TypeRef::Named { name, .. } if name == "T"))
+                    matches!(&args[0], TypeRef::Named { name, args, .. } if name == "Array" && matches!(&args[0], TypeRef::Named { name, .. } if name == "T"))
                 );
             }
-            other => panic!("expected nested list shorthand, got {other:#?}"),
+            other => panic!("expected nested array shorthand, got {other:#?}"),
         },
         other => panic!("expected field, got {other:#?}"),
     }
@@ -3133,36 +3133,36 @@ def wrap(input Map[Str, [Int]]) [[[(Str, Int)]]] {
             assert_eq!(name, "Map");
             assert!(matches!(&args[0], TypeRef::Named { name, .. } if name == "Str"));
             assert!(
-                matches!(&args[1], TypeRef::Named { name, args, .. } if name == "List" && matches!(&args[0], TypeRef::Named { name, .. } if name == "Int"))
+                matches!(&args[1], TypeRef::Named { name, args, .. } if name == "Array" && matches!(&args[0], TypeRef::Named { name, .. } if name == "Int"))
             );
         }
-        other => panic!("expected Map[Str, List[Int]], got {other:#?}"),
+        other => panic!("expected Map[Str, Array[Int]], got {other:#?}"),
     }
     match function.return_type.as_ref().expect("return type") {
         TypeRef::Named { name, args, .. } => {
-            assert_eq!(name, "List");
+            assert_eq!(name, "Array");
             let level2 = &args[0];
             let level3 = match level2 {
                 TypeRef::Named { name, args, .. } => {
-                    assert_eq!(name, "List");
+                    assert_eq!(name, "Array");
                     &args[0]
                 }
-                other => panic!("expected second list layer, got {other:#?}"),
+                other => panic!("expected second array layer, got {other:#?}"),
             };
             match level3 {
                 TypeRef::Named { name, args, .. } => {
-                    assert_eq!(name, "List");
+                    assert_eq!(name, "Array");
                     match &args[0] {
                         TypeRef::Tuple { fields, .. } => assert_eq!(fields.len(), 2),
                         other => {
-                            panic!("expected tuple payload inside nested lists, got {other:#?}")
+                            panic!("expected tuple payload inside nested arrays, got {other:#?}")
                         }
                     }
                 }
-                other => panic!("expected third list layer, got {other:#?}"),
+                other => panic!("expected third array layer, got {other:#?}"),
             }
         }
-        other => panic!("expected nested list shorthand return type, got {other:#?}"),
+        other => panic!("expected nested array shorthand return type, got {other:#?}"),
     }
 }
 

@@ -60,12 +60,12 @@ impl Stock {
 }
 
 class Slots {
-    hidden var items Array[Int]
+    hidden var items FixedArray[Int]
 }
 
 impl Slots {
     new(left Int, right Int) {
-        this.items = Array(left, right)
+        this.items = FixedArray(left, right)
     }
 
     def left() Int = this.items[0]

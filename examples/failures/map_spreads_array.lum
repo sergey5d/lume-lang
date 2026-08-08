@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*cannot spread 'List\[Int\]' into a map literal; map spread requires a map value.*
+# .*cannot spread 'Array\[Int\]' into a map literal; map spread requires a map value.*
 
 def main() Unit {
     values = [1, 2]
