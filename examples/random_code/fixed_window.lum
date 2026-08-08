@@ -21,8 +21,6 @@ class FixedWindowRateLimiter {
         0
     }
 
-    getOUtHell () => Str = getCurrentTime
-
     allow(id Str) Bool = {
 
         now = getCurrentTime()
