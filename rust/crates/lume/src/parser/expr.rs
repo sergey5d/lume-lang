@@ -1838,17 +1838,17 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_list_literal(&mut self) -> Option<Expr> {
         let start = self.consume(TokenKind::LBracket, "expected '['")?;
         self.skip_newlines();
-        if self.match_token(TokenKind::Colon) {
-            self.skip_newlines();
-            if !self.at(TokenKind::RBracket) {
-                self.error_at_current(
-                    "invalid_empty_map_literal",
-                    "empty map literal must be exactly '[:]'",
-                );
-                return None;
+        if self.at(TokenKind::Colon) {
+            self.error_at_current(
+                "removed_empty_map_literal",
+                "empty map literal '[:]' was removed; use '[]' with an expected map type",
+            );
+            while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
+                self.advance();
             }
-            let end = self.consume(TokenKind::RBracket, "expected ']' after empty map literal")?;
-            return Some(Expr::EmptyMapLiteral {
+            let end = self.consume(TokenKind::RBracket, "expected ']' after map literal")?;
+            return Some(Expr::ListLiteral {
+                items: Vec::new(),
                 span: start.cover(end),
             });
         }

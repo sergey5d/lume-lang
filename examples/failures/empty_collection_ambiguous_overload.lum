@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*empty collection.*matches multiple list/map overloads.*
+
+class Consumer {}
+
+impl Consumer {
+    new(values [Str]) {}
+    new(values [Str : Int]) {}
+}
+
+def main() Unit {
+    consumer = Consumer([])
+}

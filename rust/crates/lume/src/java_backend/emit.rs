@@ -1434,7 +1434,7 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             _ => {
                 out.push_str(indent);
-                let expr = self.emit_expr(expr, bindings)?;
+                let expr = self.emit_expr_against(expr, bindings, &self.function.return_ty)?;
                 if is_java_void_type(&self.function.return_ty) {
                     out.push_str(&expr);
                     out.push_str(";\n");
@@ -1617,11 +1617,33 @@ impl<'a> SourceBodyEmitter<'a> {
                     Some(format!("lume.core.LumeList.of({})", items.join(", ")))
                 }
             }
-            ast::Expr::EmptyMapLiteral { .. } => Some("lume.core.LumeMap.empty()".to_string()),
             ast::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
             ast::Expr::Group { inner, .. } => self.emit_expr(inner, bindings),
             ast::Expr::Call { callee, args, .. } => self.emit_call(callee, args, bindings),
             _ => None,
+        }
+    }
+
+    fn emit_expr_against(
+        &self,
+        expr: &ast::Expr,
+        bindings: &HashMap<String, String>,
+        expected: &ir::Type,
+    ) -> Option<String> {
+        match expr {
+            ast::Expr::ListLiteral { items, .. }
+                if items.is_empty()
+                    && matches!(
+                        expected,
+                        ir::Type::Named { name, args } if name == "Map" && args.len() == 2
+                    ) =>
+            {
+                Some("lume.core.LumeMap.empty()".to_string())
+            }
+            ast::Expr::Group { inner, .. } => self
+                .emit_expr_against(inner, bindings, expected)
+                .map(|value| format!("({value})")),
+            _ => self.emit_expr(expr, bindings),
         }
     }
 
@@ -1675,6 +1697,25 @@ impl<'a> SourceBodyEmitter<'a> {
                     && matches!(
                         receiver.as_ref(),
                         ast::Expr::ListLiteral { items, .. } if items.is_empty()
+                    ) =>
+            {
+                Some("lume.core.LumeIterator.from(lume.core.LumeList.of())".to_string())
+            }
+            ast::Expr::Member { receiver, name, .. }
+                if name == "iterator"
+                    && args.is_empty()
+                    && matches!(
+                        receiver.as_ref(),
+                        ast::Expr::Call {
+                            callee,
+                            args,
+                            uses_brace_syntax: false,
+                            ..
+                        } if args.is_empty()
+                            && matches!(
+                                callee.as_ref(),
+                                ast::Expr::Identifier { name, .. } if name == "List"
+                            )
                     ) =>
             {
                 Some("lume.core.LumeIterator.from(lume.core.LumeList.of())".to_string())

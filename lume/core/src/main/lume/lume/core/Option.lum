@@ -61,7 +61,7 @@ impl Option[T] {
 
     def iterator() Iterator[T] = match this {
         case Some(value) => [value].iterator()
-        case None => [].iterator()
+        case None => List().iterator()
     }
 
     def orPanic() T = match this {

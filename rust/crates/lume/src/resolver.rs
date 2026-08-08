@@ -1310,8 +1310,7 @@ impl<'a> Resolver<'a> {
             | Expr::Float { .. }
             | Expr::String { .. }
             | Expr::Bool { .. }
-            | Expr::Unit { .. }
-            | Expr::EmptyMapLiteral { .. } => true,
+            | Expr::Unit { .. } => true,
             Expr::Group { inner, .. } => self.is_annotation_static_value(inner),
             Expr::Spread { .. } => false,
             Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => items
@@ -2067,8 +2066,7 @@ impl<'a> Resolver<'a> {
             | Expr::Float { .. }
             | Expr::String { .. }
             | Expr::Bool { .. }
-            | Expr::Unit { .. }
-            | Expr::EmptyMapLiteral { .. } => {}
+            | Expr::Unit { .. } => {}
             Expr::Spread { value, .. } => self.resolve_expr(value),
             Expr::ListLiteral { items, .. }
             | Expr::TupleLiteral { items, .. }

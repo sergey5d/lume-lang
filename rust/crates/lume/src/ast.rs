@@ -593,9 +593,6 @@ pub enum Expr {
         items: Vec<Expr>,
         span: Span,
     },
-    EmptyMapLiteral {
-        span: Span,
-    },
     TupleLiteral {
         items: Vec<Expr>,
         span: Span,
@@ -728,7 +725,6 @@ impl Expr {
             | Expr::Unit { span }
             | Expr::Spread { span, .. }
             | Expr::ListLiteral { span, .. }
-            | Expr::EmptyMapLiteral { span }
             | Expr::TupleLiteral { span, .. }
             | Expr::ShapeLiteral { span, .. }
             | Expr::Call { span, .. }

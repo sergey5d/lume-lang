@@ -1723,7 +1723,7 @@ Map construction:
 
 ```txt
 entries [Str : Int] = ["a": 1, "b": 2]
-empty [Str : Int] = [:]
+empty [Str : Int] = []
 value Option[Int] = entries["a"]
 
 defaults [Str : Int] = ["port": 80, "secure": 0]
@@ -1757,26 +1757,36 @@ spread into a map.
 Collection literals are distinguished by their contents and spread sources:
 
 ```txt
-[]                    # empty list
-[:]                   # empty map
+[]                    # contextual empty list or map
 [value, ...]          # list
 [key: value, ...]     # map
 [...list]             # list copy
 [...map]              # map copy
 ```
 
-An empty map has no key or value expressions from which to infer its type, so
-it requires an expected map type:
+An empty `[]` literal contains no elements that identify its collection family
+or type arguments. It therefore requires an immediate expected list or map
+type:
 
 ```txt
-counts [Str : Int] = [:]  # valid
-counts = [:]              # invalid: key and value types are unknown
+names [Str] = []                 # empty list
+counts [Str : Int] = []          # empty map
+
+emptyNames() [Str] = []
+emptyCounts() [Str : Int] = []
+
+consumeNames([])                  # valid when the parameter is [Str]
+consumeCounts([])                 # valid when the parameter is [Str : Int]
+
+values = []                       # invalid: collection type is unknown
 ```
 
-The compiler does not infer `[Any : Any]`. Whitespace inside the empty form is
-insignificant, so `[ : ]` is equivalent to `[:]`. A colon without a key is
-valid only in this exact empty-map form; `[: value]` and `["key":]` are
-invalid.
+The compiler does not default `[]` to a list, infer `[Any]` or `[Any : Any]`,
+or infer its type from later mutations. Only `[T]` and `[K : V]` provide valid
+contexts; `Set[T]`, `Array[T]`, and custom collection types retain their own
+construction syntax. If overloaded list and map parameters both match `[]`,
+the call is ambiguous and requires an intermediate typed binding. The former
+empty-map spelling `[:]` is not supported.
 
 Map construction belongs only to bracket literals. The former brace forms,
 including `Map { "key": value }` and `Map { [key]: value }`, are not

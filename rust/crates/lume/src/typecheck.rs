@@ -1875,8 +1875,7 @@ impl<'a> Checker<'a> {
             | Expr::Float { .. }
             | Expr::String { .. }
             | Expr::Bool { .. }
-            | Expr::Unit { .. }
-            | Expr::EmptyMapLiteral { .. } => {}
+            | Expr::Unit { .. } => {}
             Expr::Spread { value, .. } => {
                 self.check_field_initializer_expr(value, owner, initialized_fields);
             }
@@ -3810,7 +3809,36 @@ impl<'a> Checker<'a> {
             Expr::String { .. } => Ty::str(),
             Expr::Bool { .. } => Ty::bool(),
             Expr::Unit { .. } => Ty::unit(),
-            Expr::ListLiteral { items, .. } => {
+            Expr::ListLiteral { items, span } => {
+                if items.is_empty() {
+                    return match expected {
+                        Ty::Named(name, args) if name == "List" && args.len() == 1 => {
+                            Ty::Named(name.clone(), args.iter().map(materialize_type).collect())
+                        }
+                        Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
+                            Ty::Named(name.clone(), args.iter().map(materialize_type).collect())
+                        }
+                        Ty::Unknown => {
+                            self.add_error(
+                                "cannot_infer_empty_collection_type",
+                                "cannot infer the type of empty collection '[]'; add a list or map type annotation",
+                                *span,
+                            );
+                            Ty::Unknown
+                        }
+                        other => {
+                            self.add_error(
+                                "invalid_empty_collection_context",
+                                format!(
+                                    "empty collection '[]' requires a list or map type, got '{}'",
+                                    other.describe()
+                                ),
+                                *span,
+                            );
+                            Ty::Unknown
+                        }
+                    };
+                }
                 if let Some(collection_ty) =
                     self.check_spread_only_collection_literal(items, expected)
                 {
@@ -3849,30 +3877,6 @@ impl<'a> Checker<'a> {
                 }
                 Ty::list(item_ty)
             }
-            Expr::EmptyMapLiteral { span } => match expected {
-                Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
-                    Ty::Named(name.clone(), args.iter().map(materialize_type).collect())
-                }
-                Ty::Unknown => {
-                    self.add_error(
-                        "cannot_infer_empty_map_type",
-                        "cannot infer key and value types of empty map; add a type annotation",
-                        *span,
-                    );
-                    Ty::Unknown
-                }
-                other => {
-                    self.add_error(
-                        "invalid_empty_map_context",
-                        format!(
-                            "empty map literal '[:]' requires a map type, got '{}'",
-                            other.describe()
-                        ),
-                        *span,
-                    );
-                    Ty::Unknown
-                }
-            },
             Expr::Spread { span, .. } => {
                 self.add_error(
                     "invalid_spread",
@@ -6162,25 +6166,32 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
     ) {
-        if args
+        let shape_span = args
             .iter()
-            .all(|arg| first_shape_literal_span(&arg.value).is_none())
-        {
+            .find_map(|arg| first_shape_literal_span(&arg.value));
+        let empty_collection_span = args
+            .iter()
+            .find_map(|arg| empty_collection_literal_span(&arg.value));
+        if shape_span.is_none() && empty_collection_span.is_none() {
             return;
         }
         let candidate_count = self.shape_context_candidate_count(overloads, args);
         if candidate_count <= 1 {
             return;
         }
-        let diagnostic_span = args
-            .iter()
-            .find_map(|arg| first_shape_literal_span(&arg.value))
-            .unwrap_or(span);
-        self.add_error(
-            "ambiguous_shape_context",
-            "shape(...) in an overloaded call needs a unique expected anonymous shape type; add an intermediate anonymous shape annotation",
-            diagnostic_span,
-        );
+        if let Some(diagnostic_span) = empty_collection_span {
+            self.add_error(
+                "ambiguous_empty_collection",
+                "empty collection '[]' matches multiple list/map overloads; add an intermediate typed binding",
+                diagnostic_span,
+            );
+        } else {
+            self.add_error(
+                "ambiguous_shape_context",
+                "shape(...) in an overloaded call needs a unique expected anonymous shape type; add an intermediate anonymous shape annotation",
+                shape_span.unwrap_or(span),
+            );
+        }
     }
 
     fn shape_context_candidate_count(
@@ -6212,6 +6223,12 @@ impl<'a> Checker<'a> {
                             .iter()
                             .position(|candidate| std::ptr::eq(candidate, *arg))
                             .unwrap_or(0);
+                        if empty_collection_literal_span(&arg.value).is_some() {
+                            if !is_list_or_map_ty(&raw_expected) {
+                                return false;
+                            }
+                            continue;
+                        }
                         if first_shape_literal_span(&arg.value).is_some() {
                             if !self.shape_expr_can_use_expected(&arg.value, &raw_expected) {
                                 return false;
@@ -7764,6 +7781,13 @@ impl<'a> Checker<'a> {
                             .unwrap_or(0);
                         let actual = &arg_types[arg_index];
                         let expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
+                        if empty_collection_literal_span(&arg.value).is_some() {
+                            if is_list_or_map_ty(&expected) {
+                                score += 2;
+                                continue;
+                            }
+                            return None;
+                        }
                         if !matches!(actual, Ty::Unknown) {
                             if self.arg_matches_expected(arg, actual, &expected) {
                                 score += 2;
@@ -8600,6 +8624,14 @@ fn first_shape_literal_span(expr: &Expr) -> Option<crate::source::Span> {
     }
 }
 
+fn empty_collection_literal_span(expr: &Expr) -> Option<crate::source::Span> {
+    match expr {
+        Expr::ListLiteral { items, span } if items.is_empty() => Some(*span),
+        Expr::Group { inner, .. } => empty_collection_literal_span(inner),
+        _ => None,
+    }
+}
+
 fn constructor_body_delegates(body: &CallableBody) -> bool {
     match body {
         CallableBody::Expr(expr) => is_constructor_delegation_expr(expr),
@@ -8896,7 +8928,6 @@ fn loop_control_targeting_current_loop_in_expr(expr: &Expr) -> Option<LoopContro
         | Expr::String { .. }
         | Expr::Bool { .. }
         | Expr::Unit { .. }
-        | Expr::EmptyMapLiteral { .. }
         | Expr::TypeOf { .. } => None,
     }
 }
@@ -9043,7 +9074,6 @@ fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Sp
         | Expr::String { .. }
         | Expr::Bool { .. }
         | Expr::Unit { .. }
-        | Expr::EmptyMapLiteral { .. }
         | Expr::TypeOf { .. } => None,
     }
 }
@@ -9517,6 +9547,14 @@ fn is_list_type_ref(reference: &TypeRef) -> bool {
 
 fn is_map_ty(ty: &Ty) -> bool {
     matches!(ty, Ty::Named(name, args) if name == "Map" && args.len() == 2)
+}
+
+fn is_list_or_map_ty(ty: &Ty) -> bool {
+    matches!(
+        ty,
+        Ty::Named(name, args)
+            if (name == "List" && args.len() == 1) || (name == "Map" && args.len() == 2)
+    )
 }
 
 fn join_spread_map_types(expected: &Ty, spread_types: impl IntoIterator<Item = Ty>) -> Ty {
@@ -10855,7 +10893,7 @@ def main() Int {
         let program = parse_inline(
             r#"
 class Cache {
-    hidden var values [Str : Int] = [:]
+    hidden var values [Str : Int] = []
 
     new() {}
 
@@ -10866,7 +10904,7 @@ class Cache {
     }
 
     reset() Unit {
-        this.values := [:]
+        this.values := []
     }
 }
 
@@ -13298,15 +13336,18 @@ def main() Unit {
     }
 
     #[test]
-    fn checks_empty_map_literal_from_expected_type() {
+    fn checks_empty_collection_literal_from_expected_type() {
         let program = parse_inline(
             r#"
-def count(values [Str : Int]) Int = values.size()
-def empty() [Str : Int] = [:]
+def countMap(values [Str : Int]) Int = values.size()
+def countList(values [Str]) Int = values.size()
+def emptyMap() [Str : Int] = []
+def emptyList() [Str] = []
 
 def main() Int {
-    direct [Str : Int] = [:]
-    return direct.size() + count([:]) + empty().size()
+    directMap [Str : Int] = []
+    directList [Str] = []
+    return directMap.size() + directList.size() + countMap([]) + countList([]) + emptyMap().size() + emptyList().size()
 }
 "#,
         );
@@ -13378,22 +13419,72 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_empty_map_literal_without_expected_type() {
+    fn rejects_empty_collection_literal_without_expected_type() {
         let program = parse_inline(
             r#"
 def main() Unit {
-    values = [:]
+    values = []
 }
 "#,
         );
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diag| {
-                diag.code == "cannot_infer_empty_map_type"
+                diag.code == "cannot_infer_empty_collection_type"
                     && diag
                         .message
-                        .contains("cannot infer key and value types of empty map")
+                        .contains("cannot infer the type of empty collection '[]'")
             }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_empty_collection_literal_for_non_bracket_collection_types() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    values Set[Int] = []
+    array Array[Int] = []
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diag| diag.code == "invalid_empty_collection_context")
+                .count(),
+            2,
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_empty_collection_overload() {
+        let program = parse_inline(
+            r#"
+class Consumer {}
+
+impl Consumer {
+    new(values [Str]) {}
+    new(values [Str : Int]) {}
+}
+
+def main() Unit {
+    consumer = Consumer([])
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "ambiguous_empty_collection"),
             "{:#?}",
             result.diagnostics
         );

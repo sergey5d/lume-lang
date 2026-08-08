@@ -2728,7 +2728,7 @@ def main() Unit {
     copy [Str : Int] = [...entries]
     merged [Str : Int] = [...copy, "three": 3]
     entryList [(Str, Int)] = [...merged.entries()]
-    empty [Str : Int] = [:]
+    empty [Str : Int] = []
     println(entries.size(), copy.size(), merged.size(), entryList.size(), empty.size())
 }
 "#,
@@ -4198,19 +4198,24 @@ def main() Unit {
             r#"
 module demo/mapassignment
 
+emptyMap() [Str : Int] = []
+mapSize(values [Str : Int]) Int = values.size()
+
 class Cache {
-    hidden var values [Str : Int] = [:]
+    hidden var values [Str : Int] = []
 
     new() {}
 
     currentValue() Int = 7
+
+    empty() [Str : Int] = []
 
     store(key Str) Unit {
         values[key] := currentValue()
     }
 
     reset() Unit {
-        this.values := [:]
+        this.values := empty()
     }
 
     lookup(key Str) Int = values[key] ?? -1
@@ -4222,6 +4227,8 @@ main() Unit {
     println(cache.lookup("answer"))
     cache.reset()
     println(cache.lookup("answer"))
+    println(emptyMap().size())
+    println(mapSize([]))
 }
 "#,
         )
@@ -4252,7 +4259,7 @@ main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "7\n-1\n"
+            "7\n-1\n0\n0\n"
         );
 
         let _ = fs::remove_dir_all(temp);

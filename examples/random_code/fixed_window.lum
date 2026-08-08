@@ -8,7 +8,7 @@ class Window {
 
 class FixedWindowRateLimiter {
 
-    hidden map [Str: Window] = [:]
+    hidden map [Str: Window] = []
     hidden windowSize Int
     hidden limit Int
     
@@ -20,6 +20,8 @@ class FixedWindowRateLimiter {
     getCurrentTime() Int = {
         0
     }
+
+    getOUtHell () => Str = getCurrentTime
 
     allow(id Str) Bool = {
 

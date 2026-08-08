@@ -1336,19 +1336,19 @@ fn parses_map_literal_with_interleaved_spreads() {
 }
 
 #[test]
-fn parses_empty_map_literal() {
-    for source in ["[:]", "[ : ]"] {
-        assert!(
-            matches!(parse_expr_only(source), Expr::EmptyMapLiteral { .. }),
-            "expected empty map literal for {source}"
-        );
-    }
+fn parses_empty_bracket_collection_literal() {
+    assert!(
+        matches!(parse_expr_only("[]"), Expr::ListLiteral { items, .. } if items.is_empty()),
+        "expected empty bracket collection literal"
+    );
 }
 
 #[test]
-fn rejects_malformed_empty_map_and_missing_map_value() {
+fn rejects_removed_empty_map_literal_and_missing_map_value() {
     let cases = [
-        ("[: 5]", "invalid_empty_map_literal"),
+        ("[:]", "removed_empty_map_literal"),
+        ("[ : ]", "removed_empty_map_literal"),
+        ("[: 5]", "removed_empty_map_literal"),
         (r#"["a":]"#, "missing_map_literal_value"),
     ];
 

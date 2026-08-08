@@ -606,7 +606,13 @@ impl<'a> Lowerer<'a> {
             &mut self.diagnostics,
         );
         for job in jobs {
-            let value = lowerer.lower_expr(&job.expr);
+            let expected = lowerer
+                .program
+                .globals
+                .get(job.id.0)
+                .map(|global| global.ty.clone())
+                .unwrap_or(ir::Type::Unknown);
+            let value = lowerer.lower_expr_with_expected(&job.expr, Some(&expected));
             lowerer.push_statement(ir::Statement {
                 span: Some(job.expr.span()),
                 kind: ir::StatementKind::Assign {
@@ -1003,7 +1009,7 @@ impl<'a> FunctionLowerer<'a> {
                     });
                     let local_id = self.add_local(
                         local.name.clone(),
-                        ty,
+                        ty.clone(),
                         local.mutable,
                         ir::LocalKind::Binding,
                     );
@@ -1023,7 +1029,10 @@ impl<'a> FunctionLowerer<'a> {
                             )
                         })
                     } else {
-                        binding.values.get(index).map(|expr| self.lower_expr(expr))
+                        binding
+                            .values
+                            .get(index)
+                            .map(|expr| self.lower_expr_with_expected(expr, Some(&ty)))
                     } {
                         self.push_statement(ir::Statement {
                             span: Some(local.span),
@@ -1040,12 +1049,15 @@ impl<'a> FunctionLowerer<'a> {
                 for (target_expr, value_expr) in
                     assignment.targets.iter().zip(assignment.values.iter())
                 {
+                    let expected = self.infer_assignment_target_type(target_expr);
                     let Some(target) = self.lower_place(target_expr) else {
                         continue;
                     };
                     let value =
                         if matches!(assignment.operator, AssignOp::Assign | AssignOp::Reassign) {
-                            ir::RValue::Use(self.lower_expr(value_expr))
+                            ir::RValue::Use(
+                                self.lower_expr_with_expected(value_expr, Some(&expected)),
+                            )
                         } else {
                             let Some(op) = map_assign_op(assignment.operator) else {
                                 self.invariant(
@@ -3629,6 +3641,25 @@ impl<'a> FunctionLowerer<'a> {
         }
         match expr {
             Expr::ListLiteral { items, span }
+                if items.is_empty()
+                    && matches!(
+                        expected,
+                        ir::Type::Named { name, args } if name == "Map" && args.len() == 2
+                    ) =>
+            {
+                self.emit_temp_from_rvalue(
+                    ir::RValue::Call {
+                        callee: ir::Callee::Named {
+                            path: vec!["Map".to_string()],
+                        },
+                        args: Vec::new(),
+                        structural: false,
+                    },
+                    expected.clone(),
+                    Some(*span),
+                )
+            }
+            Expr::ListLiteral { items, span }
                 if list_literal_has_spread(items)
                     && self.spread_only_literal_is_map(items, Some(expected)) =>
             {
@@ -4154,6 +4185,22 @@ impl<'a> FunctionLowerer<'a> {
 
     fn infer_expr_type(&self, expr: &Expr) -> ir::Type {
         self.infer_expr_type_with_overrides(expr, &[])
+    }
+
+    fn infer_assignment_target_type(&self, expr: &Expr) -> ir::Type {
+        let Expr::Index { receiver, .. } = expr else {
+            return self.infer_expr_type(expr);
+        };
+        let receiver_ty = self.infer_expr_type(receiver);
+        match receiver_ty {
+            ir::Type::Named { name, args }
+                if (name == "Array" || name == "List") && args.len() == 1 =>
+            {
+                args[0].clone()
+            }
+            ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => args[1].clone(),
+            other => index_result_ir_type(&other),
+        }
     }
 
     fn infer_expr_type_with_overrides(
