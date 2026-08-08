@@ -8,7 +8,7 @@ class Window {
 
 class FixedWindowRateLimiter {
 
-    hidden map [Str: Window] = []
+    hidden map [Str: Window] = [:]
     hidden windowSize Int
     hidden limit Int
     
@@ -24,11 +24,9 @@ class FixedWindowRateLimiter {
     allow(id Str) Bool = {
 
         now = getCurrentTime()
+        windowed = now / windowSize
 
         if let window <- map[id] {
-
-            windowed = now / windowSize
-
             if window.start == windowed {
                 if window.count <= limit {
                     window.count += 1
@@ -50,17 +48,17 @@ class FixedWindowRateLimiter {
 
 main() = {
 
-    limiter = FixedWindowRateLimiter {windowSize : 5, limit 5 }
+    limiter = FixedWindowRateLimiter { windowSize: 5, limit: 5 }
 
     for i <- Range(0, 5) {
-        if !limiter.allow(4) {
+        if !limiter.allow("4") {
             println("unexpected not allow")
         }
     }
 
-    failed = limiter.allow(4)
+    allowed = limiter.allow("4")
 
-    if !failed {
+    if allowed {
         println("unexpected allowance")
     }
 

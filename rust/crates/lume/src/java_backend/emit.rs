@@ -2147,7 +2147,8 @@ impl<'a> FunctionEmitter<'a> {
                 if matches!(
                     value,
                     ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit))
-                ) && target_ty.as_ref().is_some_and(|ty| !is_java_void_type(ty))
+                ) && !matches!(target, ir::Place::Index { .. })
+                    && target_ty.as_ref().is_some_and(|ty| !is_java_void_type(ty))
                 {
                     let target_ty = target_ty.as_ref()?;
                     out.push_str("                    ");
@@ -2160,6 +2161,7 @@ impl<'a> FunctionEmitter<'a> {
                 if target_ty.as_ref().is_some_and(is_java_void_type)
                     && value_ty.as_ref().is_some_and(is_java_void_type)
                     && rvalue_can_be_java_statement(value)
+                    && !matches!(target, ir::Place::Index { .. })
                 {
                     out.push_str("                    ");
                     out.push_str(&self.emit_rvalue(value)?);
@@ -2198,6 +2200,12 @@ impl<'a> FunctionEmitter<'a> {
                 };
                 if let Some(target_ty) = target_ty {
                     value_expr = self.coerce_to_target_type(value_expr, value_ty, &target_ty);
+                }
+                if let ir::Place::Index { base, index } = target {
+                    out.push_str("                    ");
+                    out.push_str(&self.emit_index_assignment(base, index, &value_expr)?);
+                    out.push_str(";\n");
+                    return Some(());
                 }
                 out.push_str("                    ");
                 out.push_str(&self.emit_place(target)?);
@@ -2449,6 +2457,28 @@ impl<'a> FunctionEmitter<'a> {
                 Some(format!("{base_expr}.get({index_expr})"))
             }
             _ => self.unsupported("index expression"),
+        }
+    }
+
+    fn emit_index_assignment(
+        &self,
+        base: &ir::Operand,
+        index: &ir::Operand,
+        value: &str,
+    ) -> Option<String> {
+        let base_ty = self.operand_type(base)?;
+        let base_expr = self.emit_operand(base)?;
+        let index_expr = self.emit_operand(index)?;
+        match base_ty {
+            ir::Type::Named { ref name, ref args }
+                if matches!(name.as_str(), "Array" | "List") && args.len() == 1 =>
+            {
+                Some(format!("{base_expr}.set({index_expr}, {value})"))
+            }
+            ir::Type::Named { ref name, ref args } if name == "Map" && args.len() == 2 => {
+                Some(format!("{base_expr}.set({index_expr}, {value})"))
+            }
+            _ => self.unsupported("indexed assignment target"),
         }
     }
 
@@ -3648,7 +3678,10 @@ impl<'a> FunctionEmitter<'a> {
                 let base_ty = self.operand_type(base)?;
                 self.field_type(&base_ty, name)
             }
-            ir::Place::Index { .. } => None,
+            ir::Place::Index { base, .. } => {
+                let base_ty = self.operand_type(base)?;
+                self.index_assignment_type(&base_ty)
+            }
         }
     }
 
@@ -3695,6 +3728,21 @@ impl<'a> FunctionEmitter<'a> {
             ir::Type::Tuple(items) => tuple_field_index(field_name)
                 .and_then(|index| items.get(index))
                 .cloned(),
+            _ => None,
+        }
+    }
+
+    fn index_assignment_type(&self, ty: &ir::Type) -> Option<ir::Type> {
+        match ty {
+            ir::Type::Named { name, args }
+                if (name == "Array" || name == "List") && args.len() == 1 =>
+            {
+                args.first().cloned()
+            }
+            ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
+                args.get(1).cloned()
+            }
+            ir::Type::Unknown => Some(ir::Type::Unknown),
             _ => None,
         }
     }

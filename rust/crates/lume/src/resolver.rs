@@ -1477,6 +1477,10 @@ impl<'a> Resolver<'a> {
                 }
             }
         }
+        self.push_method_hints(decl.members.iter().filter_map(|member| match member {
+            TypeMember::Method(method) => Some(method.name.as_str()),
+            _ => None,
+        }));
         for member in &decl.members {
             match member {
                 TypeMember::Method(method) => self.resolve_method(method),
@@ -1500,6 +1504,7 @@ impl<'a> Resolver<'a> {
                 TypeMember::Field(_) => {}
             }
         }
+        self.pop_method_hints();
         self.pop_field_hints();
         self.pop_scope();
         self.pop_type_scope();

@@ -378,7 +378,7 @@ impl<'a> Parser<'a> {
 
         let mut members = Vec::new();
         let mut body_order = TypeBodyOrder::Storage;
-        let mut misplaced_constructors = Vec::new();
+        let mut invalid_constructors = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             self.skip_newlines();
             if self.at(TokenKind::RBrace) {
@@ -441,7 +441,9 @@ impl<'a> Parser<'a> {
                             constructor.span,
                         ));
                     }
-                    misplaced_constructors.push(constructor.span);
+                    if kind != TypeKind::Class {
+                        invalid_constructors.push(constructor.span);
+                    }
                     if body_order != TypeBodyOrder::Method {
                         body_order = TypeBodyOrder::Constructor;
                     }
@@ -544,7 +546,7 @@ impl<'a> Parser<'a> {
             self.skip_newlines();
         }
 
-        for span in misplaced_constructors {
+        for span in invalid_constructors {
             self.diagnostics.push(Diagnostic::error(
                 "unexpected_constructor_decl",
                 type_body_constructor_message(kind, &name),
@@ -1042,11 +1044,7 @@ fn type_body_constructor_message(kind: TypeKind, name: &str) -> String {
                 "annotation '{name}' cannot declare constructors; annotations are data-only metadata shapes"
             )
         }
-        TypeKind::Class => {
-            format!(
-                "class '{name}' constructors are declared in impl blocks; move 'new' into impl {name}"
-            )
-        }
+        TypeKind::Class => unreachable!("class-body constructors are valid"),
         TypeKind::Record => {
             format!(
                 "shape '{name}' cannot declare custom constructors; use structural brace construction"

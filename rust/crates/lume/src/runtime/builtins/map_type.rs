@@ -44,6 +44,7 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(13, "contains", vec![ir::Type::Unknown], map_contains),
             builtin_method(14, "size", Vec::new(), map_size),
             builtin_method(15, "entries", Vec::new(), map_entries_list),
+            builtin_method(16, "clear", Vec::new(), map_clear),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -115,6 +116,19 @@ fn map_entries_list(
             .map(|(key, value)| Value::Tuple(vec![key.clone(), value.clone()]))
             .collect(),
     ))
+}
+
+fn map_clear(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Map.clear expects 0 arguments"));
+    }
+    map_entries(&receiver).borrow_mut().clear();
+    Ok(Value::Unit)
 }
 
 fn map_map(

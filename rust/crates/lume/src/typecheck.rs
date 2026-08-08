@@ -1178,12 +1178,12 @@ impl<'a> Checker<'a> {
             };
             if let Some(initializer) = &field.initializer {
                 self.check_field_initializer_expr(initializer, owner, &initialized_fields);
-                let actual = self.check_expr(initializer);
-                let expected = field
-                    .ty
-                    .as_ref()
-                    .map(|ty| self.ty_from_type_ref(ty))
-                    .unwrap_or_else(|| actual.clone());
+                let expected = field.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
+                let actual = match &expected {
+                    Some(expected) => self.check_expr_against(initializer, expected),
+                    None => self.check_expr(initializer),
+                };
+                let expected = expected.unwrap_or_else(|| actual.clone());
                 self.require_assignable(
                     &actual,
                     &expected,
@@ -3441,14 +3441,27 @@ impl<'a> Checker<'a> {
     }
 
     fn check_assignment(&mut self, assignment: &AssignmentStmt) {
+        let expected_types = assignment
+            .targets
+            .iter()
+            .map(|target| self.assignment_target_type(target, assignment.operator))
+            .collect::<Vec<_>>();
         let value_types = assignment
             .values
             .iter()
-            .map(|expr| self.check_expr(expr))
+            .enumerate()
+            .map(|(index, expr)| match expected_types.get(index) {
+                Some(expected)
+                    if matches!(assignment.operator, AssignOp::Assign | AssignOp::Reassign) =>
+                {
+                    self.check_expr_against(expr, expected)
+                }
+                _ => self.check_expr(expr),
+            })
             .collect::<Vec<_>>();
         for (index, target) in assignment.targets.iter().enumerate() {
             let actual = value_types.get(index).cloned().unwrap_or(Ty::Unknown);
-            let expected = self.assignment_target_type(target, assignment.operator);
+            let expected = expected_types.get(index).cloned().unwrap_or(Ty::Unknown);
             self.require_assignable(
                 &actual,
                 &expected,
@@ -3594,8 +3607,52 @@ impl<'a> Checker<'a> {
                     );
                 }
                 let receiver_ty = self.check_expr(receiver);
-                self.check_expr(index);
-                self.index_result_type(&receiver_ty)
+                let index_ty = self.check_expr(index);
+                match &receiver_ty {
+                    Ty::Named(name, args)
+                        if (name == "Array" || name == "List") && args.len() == 1 =>
+                    {
+                        if !index_ty.is_int_like() && !matches!(index_ty, Ty::Unknown) {
+                            self.add_error(
+                                "invalid_index_type",
+                                format!(
+                                    "index assignment expects Int, got '{}'",
+                                    index_ty.describe()
+                                ),
+                                index.span(),
+                            );
+                        }
+                        args[0].clone()
+                    }
+                    Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
+                        if !self.is_assignable(&index_ty, &args[0])
+                            && !matches!(index_ty, Ty::Unknown)
+                        {
+                            self.add_error(
+                                "invalid_index_type",
+                                format!(
+                                    "map index assignment expects '{}', got '{}'",
+                                    args[0].describe(),
+                                    index_ty.describe()
+                                ),
+                                index.span(),
+                            );
+                        }
+                        args[1].clone()
+                    }
+                    Ty::Unknown => Ty::Unknown,
+                    _ => {
+                        self.add_error(
+                            "invalid_assignment_target",
+                            format!(
+                                "indexed assignment is not supported for '{}'",
+                                receiver_ty.describe()
+                            ),
+                            *span,
+                        );
+                        Ty::Unknown
+                    }
+                }
             }
             other => {
                 self.add_error(
@@ -10786,6 +10843,37 @@ impl Counter {
 def main() Int {
     counter Counter = Counter(5)
     return counter.twice(2)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_inline_constructors_receiver_calls_and_contextual_map_assignments() {
+        let program = parse_inline(
+            r#"
+class Cache {
+    hidden var values [Str : Int] = [:]
+
+    new() {}
+
+    currentValue() Int = 7
+
+    store(key Str) Unit {
+        values[key] := currentValue()
+    }
+
+    reset() Unit {
+        this.values := [:]
+    }
+}
+
+main() Unit {
+    cache = Cache()
+    cache.store("answer")
+    cache.reset()
 }
 "#,
         );

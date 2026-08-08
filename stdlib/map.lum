@@ -17,5 +17,6 @@ interface Map[K, V] with Iterable[(K, V)] {
     def get(key K) Option[V]
     def contains(key K) Bool
     def size() Int
+    def clear() Unit
     def entries() [(K, V)]
 }

@@ -748,14 +748,6 @@ class User {
         "{:#?}",
         result.diagnostics
     );
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "unexpected_constructor_decl"),
-        "{:#?}",
-        result.diagnostics
-    );
 }
 
 #[test]
@@ -781,14 +773,24 @@ class User {
         "{:#?}",
         result.diagnostics
     );
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "unexpected_constructor_decl"),
-        "{:#?}",
-        result.diagnostics
+}
+
+#[test]
+fn allows_constructor_in_class_body() {
+    let result = parse(
+        r#"
+class User {
+    name Str
+
+    new(name Str) {
+        this.name = name
+    }
+
+    label() Str = this.name
+}
+"#,
     );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]

@@ -1150,7 +1150,8 @@ user User = User { name: "Ada" }
 label = user.displayName()
 ```
 
-Custom constructors are class-only and use a dedicated `new(...)` declaration inside `impl`.
+Custom constructors are class-only and use a dedicated `new(...)` declaration in
+the class body or an `impl` block.
 
 - `new(...)` declares constructor inputs
 - `new(...) { body }` declares a block-bodied constructor
@@ -1179,14 +1180,13 @@ Custom constructors are class-only and use a dedicated `new(...)` declaration in
 - class, shape, enum, and object bodies list storage fields before behavior
 - enum cases count as enum storage and must appear before enum methods
 - class impl blocks list all `new` constructors before ordinary methods
+- a class body may declare constructors after its fields and before its methods
 
 ```txt
 class Person {
     age Int
     name Str
-}
 
-impl Person {
     new(age Int, name Str) {
         this.age = age
         this.name = name

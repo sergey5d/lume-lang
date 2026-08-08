@@ -4182,6 +4182,83 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_supports_inline_constructors_and_map_index_assignment() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java map assignment test because a JDK tool is unavailable");
+            return;
+        }
+
+        let temp = temp_path("lume-java-map-index-assignment");
+        let source = temp.join("map_index_assignment.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/mapassignment
+
+class Cache {
+    hidden var values [Str : Int] = [:]
+
+    new() {}
+
+    currentValue() Int = 7
+
+    store(key Str) Unit {
+        values[key] := currentValue()
+    }
+
+    reset() Unit {
+        this.values := [:]
+    }
+
+    lookup(key Str) Int = values[key] ?? -1
+}
+
+main() Unit {
+    cache = Cache()
+    cache.store("answer")
+    println(cache.lookup("answer"))
+    cache.reset()
+    println(cache.lookup("answer"))
+}
+"#,
+        )
+        .expect("write source");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.mapassignment.MapassignmentMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "7\n-1\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_supports_high_arity_lambdas() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java high-arity lambda test because a JDK tool is not available");

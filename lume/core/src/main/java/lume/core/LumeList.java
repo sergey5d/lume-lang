@@ -46,6 +46,10 @@ public final class LumeList<T> {
         return this;
     }
 
+    public void set(long index, T value) {
+        values.set(Math.toIntExact(index), value);
+    }
+
     @SuppressWarnings("unchecked")
     public LumeList<T> addAll(Object other) {
         var iterator = LumeIterator.<T>from(other);

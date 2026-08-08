@@ -45,6 +45,10 @@ public final class LumeMap<K, V> {
         return new LumeMap<>(copy);
     }
 
+    public void set(K key, V value) {
+        values.put(key, value);
+    }
+
     public Option<V> get(K key) {
         if (!values.containsKey(key)) {
             return LumeRuntime.optionNone();
@@ -54,6 +58,10 @@ public final class LumeMap<K, V> {
 
     public long size() {
         return values.size();
+    }
+
+    public void clear() {
+        values.clear();
     }
 
     public LumeList<Tuple2<K, V>> entries() {

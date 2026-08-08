@@ -71,9 +71,7 @@ shape Point {
 class User {
     name Str
     home Point
-}
 
-impl User {
     new(name Str, home Point) {
         this.name = name
         this.home = home

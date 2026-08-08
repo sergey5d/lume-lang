@@ -30,9 +30,7 @@ class Profile {
     name Str = "unknown"
     hidden var visits Int = 0
     hidden var active Bool = false
-}
 
-impl Profile {
     new(name Str, visits Int) {
         this.name = name
         this.visits = 0
