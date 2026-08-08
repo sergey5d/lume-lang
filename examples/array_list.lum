@@ -6,13 +6,13 @@
 # ArrayList[Int](5) and ArrayListIterator[T] { ... } are supported.
 
 class ArrayListIterator[T] with Iterator[T] {
-    hidden var items List[T]
+    hidden var items [T]
     hidden var limit Int
     hidden var index Int = 0
 }
 
 impl ArrayListIterator[T] {
-    new(items List[T], limit Int) {
+    new(items [T], limit Int) {
         this.items = items
         this.limit = limit
     }
@@ -27,13 +27,13 @@ impl ArrayListIterator[T] {
 }
 
 class ArrayList[T] with Iterable[T] {
-    hidden var items List[T]
+    hidden var items [T]
     hidden var count Int = 0
 }
 
 impl ArrayList[T] {
     new(capacity Int) {
-        this.items = List()
+        this.items = []
     }
 
     def append(value T) Unit {

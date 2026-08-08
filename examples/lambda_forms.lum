@@ -77,7 +77,7 @@ def main() Unit {
     println("typedPair " + typedPair(4, 6))
     println("block " + block(10))
 
-    values = List(1, 2, 3)
+    values = [1, 2, 3]
     doubled = values.map { item => item * 2 }
     println("trailing " + doubled.get(1).getOr(0))
 
@@ -103,14 +103,14 @@ def main() Unit {
     println("inlineMapParen " + inlineMapParen.get(1).getOr(0))
     println("inlineMapTyped " + inlineMapTyped.get(2).getOr(0))
 
-    pairs = List((2, 3), (4, 5))
+    pairs = [(2, 3), (4, 5)]
     tupleSums = pairs.map { pairValue =>
         let (x Int, y Int) = pairValue
         x + y
     }
     println("tupleMap " + tupleSums.get(0).getOr(0))
 
-    users = List(User { name: "Ada", age: 37 })
+    users = [User { name: "Ada", age: 37 }]
     userLabels = users.map { userValue =>
         let { name, age } = userValue
         "$name is $age"

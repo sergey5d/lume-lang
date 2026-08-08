@@ -11,13 +11,13 @@ enum MaybeInt {
 }
 
 def main() Unit {
-    values List[MaybeInt] = List(
+    values [MaybeInt] = [
         MaybeInt.SomeX(2),
         MaybeInt.NoneX,
         MaybeInt.SomeX(6)
-    )
+    ]
 
-    extracted List[Option[Int]] = values.map(value => partial match value {
+    extracted [Option[Int]] = values.map(value => partial match value {
         case SomeX(x) => x * 10
         }
     )

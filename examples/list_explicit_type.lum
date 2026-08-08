@@ -1,0 +1,15 @@
+# EXPECT:
+# 1
+# 2
+# 3
+# 0
+
+def main() Int {
+    values List[Int] = List(1, 2, 3)
+
+    for value <- values {
+        println(value)
+    }
+
+    0
+}

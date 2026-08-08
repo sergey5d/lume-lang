@@ -31,13 +31,13 @@ class Location {
 
 class Cursor {
     hidden term Str
-    hidden documents List[Str]
+    hidden documents [Str]
     hidden var current Location
     hidden var valid Bool = false
 }
 
 impl Cursor {
-    new(term Str, documents List[Str]) {
+    new(term Str, documents [Str]) {
         this.term = term
         this.documents = documents
         this.current = Location(-1, -1)
@@ -96,7 +96,7 @@ impl Cursor {
 
 def toBeOrNotToBe() Unit {
 
-    documents List[Str] = [
+    documents [Str] = [
         "this is to be",
         "method to to be be haha",
         "this is to cat",
@@ -112,7 +112,7 @@ def toBeOrNotToBe() Unit {
     var loc1 = c1.get()
     var loc2 = c2.get()
 
-    result List[Int] = []
+    result [Int] = []
 
     while c1.isValid() && c2.isValid() {
 
@@ -126,7 +126,7 @@ def toBeOrNotToBe() Unit {
         } else {
 
             currDocId = loc1.docId
-            c2Stack List[Int] = []
+            c2Stack [Int] = []
 
             while c2.isValid() && loc2.docId == currDocId {
                 c2Stack.append(loc2.position)
@@ -163,7 +163,7 @@ def toBeOrNotToBe() Unit {
 
 def toBeOrNotToBe2() Unit {
 
-    documents List[Str] = List(
+    documents [Str] = [
         "this is to be",
         "method to to be be haha",
         "this is to cat",
@@ -172,7 +172,7 @@ def toBeOrNotToBe2() Unit {
         "to equasion has to be",
         "to equasion is not be",
         "to second equasion has to be"
-    )
+    ]
 
     println("to be or not to be v2:")
 
@@ -206,7 +206,7 @@ def toBeOrNotToBe2() Unit {
         }
     }
 
-    result List[Int] = []
+    result [Int] = []
 
     var advance1 = advanceContiniously(c1)
     var advance2 = advanceContiniously(c2)
@@ -259,7 +259,7 @@ def toBeOrNotToBe2() Unit {
 
 def toBeOrNotToBe3() Unit {
 
-    documents List[Str] = List(
+    documents [Str] = [
         "this is to be",
         "method to to be be haha",
         "this is to cat",
@@ -268,15 +268,15 @@ def toBeOrNotToBe3() Unit {
         "to equasion has to be",
         "to equasion is not be",
         "to second equasion has to be"
-    )
+    ]
 
     println("to be or not to be v3:")
 
     toCursor = Cursor("to", documents)
     beCursor = Cursor("be", documents)
 
-    def collectPositions(cursor Cursor, docId Int) List[Int] {
-        positions List[Int] = []
+    def collectPositions(cursor Cursor, docId Int) [Int] {
+        positions [Int] = []
         while cursor.isValid() && cursor.get().docId == docId {
             positions.append(cursor.get().position)
             cursor.advance()
@@ -284,7 +284,7 @@ def toBeOrNotToBe3() Unit {
         positions
     }
 
-    def hasBeRun(bePositions List[Int], begin Int, count Int) Bool {
+    def hasBeRun(bePositions [Int], begin Int, count Int) Bool {
         var startIndex Int = 0
         var found = false
 
@@ -312,7 +312,7 @@ def toBeOrNotToBe3() Unit {
         true
     }
 
-    def containsPattern(toPositions List[Int], bePositions List[Int]) Bool {
+    def containsPattern(toPositions [Int], bePositions [Int]) Bool {
         var toStart Int = 0
 
         while toStart < toPositions.size() {
@@ -339,7 +339,7 @@ def toBeOrNotToBe3() Unit {
         false
     }
 
-    result List[Int] = []
+    result [Int] = []
 
     while toCursor.isValid() || beCursor.isValid() {
         var docId Int = -1
@@ -356,12 +356,12 @@ def toBeOrNotToBe3() Unit {
             docId := beCursor.get().docId
         }
 
-        var toPositions List[Int] = []
+        var toPositions [Int] = []
         if toCursor.isValid() && toCursor.get().docId == docId {
             toPositions := collectPositions(toCursor, docId)
         }
 
-        var bePositions List[Int] = []
+        var bePositions [Int] = []
         if beCursor.isValid() && beCursor.get().docId == docId {
             bePositions := collectPositions(beCursor, docId)
         }
@@ -377,11 +377,11 @@ def toBeOrNotToBe3() Unit {
 }
 
 def main() Int {
-    documents List[Str] = List(
+    documents [Str] = [
         "cat dog cat",
         "bird cat",
         "dog"
-    )
+    ]
 
     cursor = Cursor("cat", documents)
 

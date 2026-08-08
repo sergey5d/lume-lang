@@ -36,7 +36,7 @@ impl object RowOrdering {
     }
 }
 
-def syntax1(rows List[(Int, Int, Str)]) Unit {
+def syntax1(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
     if let Some(firstRow) = rows.get(0) {
         let (_, initialY Int, _) = firstRow
@@ -59,7 +59,7 @@ def syntax1(rows List[(Int, Int, Str)]) Unit {
     }
 }
 
-def syntax2(rows List[(Int, Int, Str)]) Unit {
+def syntax2(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
     if let Some(firstRow) = rows.get(0) {
         let (_, initialY Int, _) = firstRow
@@ -82,7 +82,7 @@ def syntax2(rows List[(Int, Int, Str)]) Unit {
     }
 }
 
-def syntax3(rows List[(Int, Int, Str)]) Unit {
+def syntax3(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
 
     if let Some(first) = rows.get(0) {
@@ -106,7 +106,7 @@ def syntax3(rows List[(Int, Int, Str)]) Unit {
     }
 }
 
-def syntax4(rows List[(Int, Int, Str)]) Unit {
+def syntax4(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
     if let Some(first) = rows.get(0) {
         let (_, initialY Int, _) = first
@@ -132,7 +132,7 @@ def syntax4(rows List[(Int, Int, Str)]) Unit {
 }
 
 def main() Unit {
-    rows List[(Int, Int, Str)] = [
+    rows [(Int, Int, Str)] = [
         (0, 0, "1"),
         (0, 1, "2"),
         (0, 2, "3"),

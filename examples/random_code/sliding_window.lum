@@ -69,7 +69,7 @@ def main() Unit {
     bucket = SlidingWindowLimiter(5, 5)
 
     # Each request carries construction fields instead of a positional tuple.
-    requests List[WindowRequest] = List(
+    requests [WindowRequest] = [
         WindowRequest { time: 0, cost: 3 },
         WindowRequest { time: 0, cost: 2 },
         WindowRequest { time: 0, cost: 1 },
@@ -77,7 +77,7 @@ def main() Unit {
         WindowRequest { time: 5, cost: 2 },
         WindowRequest { time: 6, cost: 4 },
         WindowRequest { time: 7, cost: 3 },
-    )
+    ]
 
     for request <- requests {
         allowed = bucket.allow(request.time, request.cost)

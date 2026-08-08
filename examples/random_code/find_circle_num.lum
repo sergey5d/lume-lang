@@ -45,7 +45,7 @@ impl DisjointSet {
     }
 }
 
-def findCircleNumUnion(isConnected List[List[Int]]) Int {
+def findCircleNumUnion(isConnected [[Int]]) Int {
     set = DisjointSet(isConnected.size())
 
     for i <- Range(0, isConnected.size()) {
@@ -66,7 +66,7 @@ def findCircleNumUnion(isConnected List[List[Int]]) Int {
     return parentSet.size()
 }
 
-def findCircleNumTraversal(isConnected List[List[Int]]) Int {
+def findCircleNumTraversal(isConnected [[Int]]) Int {
     directConns Array[Set[Int]] = Array.generate(isConnected.size(), idx => Set())
 
     for i <- Range(0, isConnected.size()) {
@@ -86,7 +86,7 @@ def findCircleNumTraversal(isConnected List[List[Int]]) Int {
         if !visitedAll.contains(i) {
             areaCount += 1
 
-            stack List[Int] = List(i)
+            stack [Int] = [i]
 
             while stack.size() != 0 {
                 idx = stack.remove(stack.size() - 1).getOr(-1)
@@ -102,17 +102,17 @@ def findCircleNumTraversal(isConnected List[List[Int]]) Int {
 }
 
 def main() Int {
-    connected1 List[List[Int]] = List(
-        List(1, 1, 0),
-        List(1, 1, 0),
-        List(0, 0, 1)
-    )
+    connected1 [[Int]] = [
+        [1, 1, 0],
+        [1, 1, 0],
+        [0, 0, 1]
+    ]
 
-    connected2 List[List[Int]] = List(
-        List(1, 0, 0),
-        List(0, 1, 0),
-        List(0, 0, 1)
-    )
+    connected2 [[Int]] = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1]
+    ]
 
     uf1 = findCircleNumUnion(connected1)
     dfs1 = findCircleNumTraversal(connected1)

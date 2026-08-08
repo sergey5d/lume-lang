@@ -63,12 +63,12 @@ def main() Int {
 
     println("combo size " + combos.size())
 
-    pairs List[(Int, Int)] = [(1, 2), (3, 4)]
+    pairs [(Int, Int)] = [(1, 2), (3, 4)]
     for let (left, right) <- pairs {
         println("pair " + (left + right))
     }
 
-    users List[User] = [User("Ada", 36), User("Bob", 42)]
+    users [User] = [User("Ada", 36), User("Bob", 42)]
     for let { name, age } <- users {
         println("user " + name + " " + age)
     }

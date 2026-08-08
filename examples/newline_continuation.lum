@@ -34,7 +34,7 @@ def main() Unit {
     ) *
         2
 
-    items List[Int] = [
+    items [Int] = [
         1,
         2,
         3

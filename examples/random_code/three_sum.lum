@@ -24,10 +24,10 @@ object Solution {
 }
 
 impl object Solution {
-    def sol2(nums List[Int]) List[List[Int]] {
+    def sol2(nums [Int]) [[Int]] {
         nums.sort(Ascending)
 
-        res List[List[Int]] = []
+        res [[Int]] = []
 
         for i <- Range(0, nums.size()) {
             if nums[i] > 0 {
@@ -40,7 +40,7 @@ impl object Solution {
         res
     }
 
-    def twoSum2(nums List[Int], idx Int, res List[List[Int]]) Unit {
+    def twoSum2(nums [Int], idx Int, res [[Int]]) Unit {
         seen Set[Int] = Set()
         var j Int = idx + 1
 
@@ -59,7 +59,7 @@ impl object Solution {
         }
     }
 
-    def twoSum(nums List[Int], idx Int, res List[List[Int]]) Unit {
+    def twoSum(nums [Int], idx Int, res [[Int]]) Unit {
         var low Int = idx + 1
         var high Int = nums.size() - 1
 
@@ -67,7 +67,7 @@ impl object Solution {
             sum = nums[low] + nums[high] + nums[idx]
 
             if sum == 0 {
-                res.append(List(nums[idx], nums[low], nums[high]))
+                res.append([nums[idx], nums[low], nums[high]])
                 low += 1
                 high -= 1
 
@@ -82,10 +82,10 @@ impl object Solution {
         }
     }
 
-    def threeSum(nums List[Int]) List[List[Int]] {
+    def threeSum(nums [Int]) [[Int]] {
         nums.sort(Ascending)
 
-        res List[List[Int]] = []
+        res [[Int]] = []
 
         for i <- Range(0, nums.size()) {
             if nums[i] > 0 {
@@ -99,7 +99,7 @@ impl object Solution {
     }
 }
 
-def printTriplets(label Str, triplets List[List[Int]]) Unit {
+def printTriplets(label Str, triplets [[Int]]) Unit {
     println(label + " size " + triplets.size())
     for triplet <- triplets {
         println(label + " " + triplet[0] + " " + triplet[1] + " " + triplet[2])
@@ -110,10 +110,10 @@ def main() Int {
 
     solver = Solution
 
-    sample1Hash List[Int] = List(-1, 0, 1, 2, -1, -4)
-    sample1TwoPointers List[Int] = List(-1, 0, 1, 2, -1, -4)
-    sample2Hash List[Int] = List(0, 0, 0, 0)
-    sample2TwoPointers List[Int] = List(0, 0, 0, 0)
+    sample1Hash [Int] = [-1, 0, 1, 2, -1, -4]
+    sample1TwoPointers [Int] = [-1, 0, 1, 2, -1, -4]
+    sample2Hash [Int] = [0, 0, 0, 0]
+    sample2TwoPointers [Int] = [0, 0, 0, 0]
 
     println("case [-1,0,1,2,-1,-4]")
     println("output [[-1,0,1],[-1,-1,2]]")

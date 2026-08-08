@@ -3,7 +3,7 @@
 # 0
 # 0
 
-def acceptUnknownList(values List[_]) Unit {
+def acceptUnknownList(values [_]) Unit {
     println(values.size())
 }
 
@@ -14,7 +14,7 @@ def intStrMap() Map[Int, Str] = Map()
 def strIntMap() Map[Str, Int] = Map()
 
 def main() Unit {
-    values List[_] = List(1, 2, 3)
+    values [_] = [1, 2, 3]
     keyErased Map[_, Str] = intStrMap()
     fullyErased Map[_, _] = strIntMap()
 

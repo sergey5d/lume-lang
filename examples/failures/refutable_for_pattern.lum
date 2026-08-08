@@ -2,7 +2,7 @@
 # .*for pattern must be irrefutable for value of type 'Option\[Int\]'.*
 
 def main() Unit {
-    values List[Option[Int]] = [Some(1), None]
+    values [Option[Int]] = [Some(1), None]
 
     mapped = for {
         maybe <- values

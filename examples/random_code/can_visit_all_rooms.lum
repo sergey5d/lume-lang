@@ -3,12 +3,12 @@
 # false
 # 0
 
-def canVisitAllRooms(rooms List[List[Int]]) Bool {
+def canVisitAllRooms(rooms [[Int]]) Bool {
 
     let Some(startKeys) = rooms.get(0) else return true
 
     seen = Set(0)
-    keys List[Int] = List()
+    keys [Int] = []
 
     for key <- startKeys {
         keys.append(key)
@@ -33,21 +33,21 @@ def canVisitAllRooms(rooms List[List[Int]]) Bool {
 }
 
 def main() Int {
-    emptyRoom List[Int] = List()
+    emptyRoom [Int] = []
 
-    reachable List[List[Int]] = List(
-        List(1),
-        List(2),
-        List(3),
+    reachable [[Int]] = [
+        [1],
+        [2],
+        [3],
         emptyRoom
-    )
+    ]
 
-    blocked List[List[Int]] = List(
-        List(1, 3),
-        List(3, 0, 1),
-        List(2),
-        List(0)
-    )
+    blocked [[Int]] = [
+        [1, 3],
+        [3, 0, 1],
+        [2],
+        [0]
+    ]
 
     println(canVisitAllRooms(reachable))
     println(canVisitAllRooms(blocked))

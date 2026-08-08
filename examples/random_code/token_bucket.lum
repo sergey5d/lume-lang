@@ -62,14 +62,14 @@ def main() Unit {
     bucket = TokenBucket(5, 1)
 
     # Each pair is (time, request cost).
-    requests List[(Int, Int)] = List(
+    requests [(Int, Int)] = [
         (0, 3),
         (0, 2),
         (0, 1),
         (2, 2),
         (3, 3),
         (7, 5),
-    )
+    ]
 
     for request <- requests {
         let (time, cost) = request

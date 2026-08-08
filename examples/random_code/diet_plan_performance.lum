@@ -41,11 +41,11 @@ def dietPlanPerformance(calories [Int], k Int, lower Int, upper Int) Int {
 }
 
 def main() Int {
-    println("sample1", dietPlanPerformance(List(1, 2, 3, 4, 5), 1, 3, 3))
-    println("sample2", dietPlanPerformance(List(3, 2), 2, 0, 1))
-    println("sample3", dietPlanPerformance(List(6, 5, 0, 0), 2, 1, 5))
-    println("low", dietPlanPerformance(List(1, 1, 1), 3, 5, 10))
-    println("high", dietPlanPerformance(List(10, 10, 1), 2, 5, 9))
+    println("sample1", dietPlanPerformance([1, 2, 3, 4, 5], 1, 3, 3))
+    println("sample2", dietPlanPerformance([3, 2], 2, 0, 1))
+    println("sample3", dietPlanPerformance([6, 5, 0, 0], 2, 1, 5))
+    println("low", dietPlanPerformance([1, 1, 1], 3, 5, 10))
+    println("high", dietPlanPerformance([10, 10, 1], 2, 5, 9))
 
     0
 }

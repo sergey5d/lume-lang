@@ -4,8 +4,8 @@
 def same[T](left T, right T) Unit {}
 
 def main() Unit {
-    left List[_] = List(1)
-    right List[_] = List(2)
+    left [_] = [1]
+    right [_] = [2]
 
     same(left[0], right[0])
 }

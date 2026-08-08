@@ -2,5 +2,5 @@
 # constructor parentheses accept positional arguments only; use braces for construction fields
 
 def main() Unit {
-    _ = List(value = 5)
+    _ = Set(value = 5)
 }

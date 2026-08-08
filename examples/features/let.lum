@@ -44,7 +44,7 @@ def sumBoth(left Option[Int], right Option[Int]) Result[Int, Str] {
     Ok(a + b)
 }
 
-def sumPrefix(values List[Option[Int]]) Int {
+def sumPrefix(values [Option[Int]]) Int {
     var total Int = 0
     for value <- values {
         let Some(item) = value else break

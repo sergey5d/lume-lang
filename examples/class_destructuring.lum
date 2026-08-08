@@ -69,10 +69,10 @@ def main() Int {
     let { name as visibleName, location as visibleLocation } = SecretUser("Sergey", "secret", "Tampa")
     println("hidden named", visibleName, visibleLocation)
 
-    users = List(
+    users = [
         SecretUser("Sergey", "secret-1", "Tampa"),
         SecretUser("Ada", "secret-2", "London"),
-    )
+    ]
     for user <- users {
         let { name as userName, location as userLocation } = user
         println("for named plain", userName, userLocation)

@@ -6,6 +6,6 @@ class SomeType {
 }
 
 def main() Unit {
-    values List[_] = List(1, 2, 3)
+    values [_] = [1, 2, 3]
     concrete SomeType = values[0]
 }

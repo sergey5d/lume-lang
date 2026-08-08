@@ -23,7 +23,7 @@ class Amount {
     label Str
 }
 
-def describeList(value List[Int]) {
+def describeList(value [Int]) {
     match value {
         case _ List => println("list")
     }

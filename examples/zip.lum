@@ -13,8 +13,8 @@
 # range index sum 16
 
 def main() Unit {
-    items = List(1, 2, 3)
-    listPairs = items.zip(List("a", "b"))
+    items = [1, 2, 3]
+    listPairs = items.zip(["a", "b"])
     listIndexed = items.zipWithIndex()
 
     let Some(firstPair) = listPairs.get(0) else {
@@ -43,7 +43,7 @@ def main() Unit {
     println("array zip", arrayLeft, arrayRight)
     println("array zipWithIndex", arrayIndexedValue, arrayIndexedPos)
 
-    rangePairs = Range(10, 13).zip(List("p", "q"))
+    rangePairs = Range(10, 13).zip(["p", "q"])
     rangeIndexed = Range(7, 9).zipWithIndex()
 
     let Some(rangePair) = rangePairs.get(1) else {

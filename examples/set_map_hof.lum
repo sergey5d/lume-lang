@@ -55,7 +55,7 @@ def main() Unit {
     mappedValues = values.mapValues(value => value * 100)
     println("mappedValues " + mappedValues["a"].getOr(0) + " " + mappedValues["b"].getOr(0))
 
-    expandedValues = values.flatMap((key, value) => List(value, value + 10))
+    expandedValues = values.flatMap((key, value) => [value, value + 10])
     println("expandedValues " + expandedValues.get(0).getOr(0) + " " + expandedValues.get(3).getOr(0))
 
     filteredMap = values.filter((key, value) => value > 1)

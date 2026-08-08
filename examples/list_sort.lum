@@ -18,11 +18,11 @@ impl object Descending {
 }
 
 def main() Int {
-    asc List[Int] = List(3, 1, 4, 2)
+    asc [Int] = [3, 1, 4, 2]
     asc.sort(Ascending)
     println("asc " + asc.get(0).getOr(0) + " " + asc.get(1).getOr(0) + " " + asc.get(2).getOr(0) + " " + asc.get(3).getOr(0))
 
-    desc List[Int] = List(3, 1, 4, 2)
+    desc [Int] = [3, 1, 4, 2]
     desc.sort(Descending)
     println("desc " + desc.get(0).getOr(0) + " " + desc.get(1).getOr(0) + " " + desc.get(2).getOr(0) + " " + desc.get(3).getOr(0))
 
