@@ -17,27 +17,18 @@ class FixedWindowRateLimiter {
         this.limit = limit
     }
 
-    getCurrentTime() Int = {
-        0
-    }
+    allow(now Int, id Str) Bool = {
 
-    allow(id Str) Bool = {
+        windowStart = now / windowSize
 
-        now = getCurrentTime()
-        windowed = now / windowSize
-
-        if let window <- map[id] {
-            if window.start == windowed {
-                if window.count <= limit {
-                    window.count += 1
-                }                    
-                return window.count <= limit
-            } else {
-                map[id] := Window { count: 1, start: windowed }
-            }
-        } else {
-            map[id] := Window { count: 1, start: windowed }
+        if let window <- map[id] && window.start == windowStart {
+            if window.count <= limit {
+                window.count += 1
+            }                    
+            return window.count <= limit
         }
+        map[id] := Window { count: 1, start: windowStart }
+
         true
     }
 
@@ -51,12 +42,12 @@ main() = {
     limiter = FixedWindowRateLimiter { windowSize: 5, limit: 5 }
 
     for i <- Range(0, 5) {
-        if !limiter.allow("4") {
+        if !limiter.allow(1, "4") {
             println("unexpected not allow")
         }
     }
 
-    allowed = limiter.allow("4")
+    allowed = limiter.allow(2, "4")
 
     if allowed {
         println("unexpected allowance")
