@@ -6,14 +6,14 @@ interface LinkedList[T] with Iterable[T] {
     def append(value T) LinkedList[T]
     def add(value T) LinkedList[T]
     def addAll(values Iterable[T]) LinkedList[T]
-    def map[X](f (T) => X) LinkedList[X]
-    def flatMap[X](f (T) => LinkedList[X]) LinkedList[X]
-    def filter(f (T) => Bool) LinkedList[T]
-    def fold[X](initial X, f (X, T) => X) X
-    def reduce[X](initial X, f (X, T) => X) X
-    def reduce(f (T, T) => T) Option[T]
-    def exists(f (T) => Bool) Bool
-    def forAll(f (T) => Bool) Bool
+    def map[X](f fn(T) => X) LinkedList[X]
+    def flatMap[X](f fn(T) => LinkedList[X]) LinkedList[X]
+    def filter(f fn(T) => Bool) LinkedList[T]
+    def fold[X](initial X, f fn(X, T) => X) X
+    def reduce[X](initial X, f fn(X, T) => X) X
+    def reduce(f fn(T, T) => T) Option[T]
+    def exists(f fn(T) => Bool) Bool
+    def forAll(f fn(T) => Bool) Bool
     def zip[X](other LinkedList[X]) LinkedList[(T, X)]
     def zipWithIndex() LinkedList[(T, Int)]
     def get(index Int) Option[T]
@@ -27,7 +27,7 @@ interface LinkedList[T] with Iterable[T] {
     def removeFirst() Option[T]
     def removeLast() Option[T]
     def size() Int
-    def forEach(f (T) => Unit)
+    def forEach(f fn(T) => Unit)
     def iterator() Iterator[T]
 
     def makeStr(separator Str) Str {

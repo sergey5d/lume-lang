@@ -5,15 +5,15 @@
 interface Map[K, V] with Iterable[(K, V)] {
     def put(key K, value V) Map[K, V]
     def iterator() Iterator[(K, V)]
-    def map[X](f (K, V) => X) List[X]
-    def mapValues[X](f (V) => X) Map[K, X]
-    def flatMap[X](f (K, V) => List[X]) List[X]
-    def filter(f (K, V) => Bool) Map[K, V]
-    def fold[X](initial X, f (X, K, V) => X) X
-    def reduce(f (K, V, K, V) => (K, V)) Option[(K, V)]
-    def exists(f (K, V) => Bool) Bool
-    def forAll(f (K, V) => Bool) Bool
-    def forEach(f (K, V) => Unit)
+    def map[X](f fn(K, V) => X) List[X]
+    def mapValues[X](f fn(V) => X) Map[K, X]
+    def flatMap[X](f fn(K, V) => List[X]) List[X]
+    def filter(f fn(K, V) => Bool) Map[K, V]
+    def fold[X](initial X, f fn(X, K, V) => X) X
+    def reduce(f fn(K, V, K, V) => (K, V)) Option[(K, V)]
+    def exists(f fn(K, V) => Bool) Bool
+    def forAll(f fn(K, V) => Bool) Bool
+    def forEach(f fn(K, V) => Unit)
     def get(key K) Option[V]
     def contains(key K) Bool
     def size() Int

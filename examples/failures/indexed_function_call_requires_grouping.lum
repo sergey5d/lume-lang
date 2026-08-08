@@ -2,6 +2,6 @@
 # .*callee\[\.\.\.\]\(\.\.\.\) is explicit generic application syntax; to call an indexed function value, write '\(callee\[key\]\)\(\)'.*
 
 def main() Unit {
-    handlers [() => Int] = [() => 26]
+    handlers [fn() => Int] = [() => 26]
     println(handlers[0]())
 }

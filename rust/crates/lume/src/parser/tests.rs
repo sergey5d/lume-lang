@@ -229,7 +229,7 @@ fn optional_def_does_not_reclassify_tuple_or_function_fields() {
         r#"
 class Holder {
     pair (Int, Int)
-    mapper (Int) => Int
+    mapper fn(Int) => Int
 }
 "#,
     );
@@ -3249,10 +3249,15 @@ def inspect(value Type[_]) Unit {}
 }
 
 #[test]
-fn parses_parenthesized_function_type_refs() {
+fn parses_fn_function_type_refs() {
     let result = parse(
         r#"
-def apply(f (Int) => Int, both (Int, Str) => Bool) Unit {}
+def apply(
+    f fn(Int) => Int,
+    both fn(Int, Str) => Bool,
+    empty fn() => Unit,
+    nested fn() => fn(Int) => Str
+) Unit {}
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -3278,6 +3283,21 @@ def apply(f (Int) => Int, both (Int, Str) => Bool) Unit {}
         }
         other => panic!("expected multi-param function type, got {other:#?}"),
     }
+    assert!(matches!(
+        function.params[2].ty.as_ref().expect("empty param type"),
+        TypeRef::Function { params, ret, .. }
+            if params.is_empty()
+                && matches!(ret.as_ref(), TypeRef::Named { name, .. } if name == "Unit")
+    ));
+    assert!(matches!(
+        function.params[3].ty.as_ref().expect("nested param type"),
+        TypeRef::Function { params, ret, .. }
+            if params.is_empty()
+                && matches!(ret.as_ref(), TypeRef::Function { params, ret, .. }
+                    if params.len() == 1
+                        && matches!(&params[0], TypeRef::Named { name, .. } if name == "Int")
+                        && matches!(ret.as_ref(), TypeRef::Named { name, .. } if name == "Str"))
+    ));
 }
 
 #[test]
@@ -3303,7 +3323,7 @@ def describe(value (name Str, age Int)) Unit {}
 }
 
 #[test]
-fn rejects_unparenthesized_function_type_refs() {
+fn rejects_bare_function_type_refs() {
     let result = parse(
         r#"
 def apply(f Int => Int) Unit {}
@@ -3311,10 +3331,56 @@ def apply(f Int => Int) Unit {}
     );
     assert!(
         result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_function_type" && diag.message.contains("fn(T) => U")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_removed_parenthesized_function_type_refs() {
+    let result = parse(
+        r#"
+def apply(f (Int) => Int) Unit {}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "removed_function_type_syntax" && diag.message.contains("fn(...) => T")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_space_between_fn_and_parameter_types() {
+    let result = parse(
+        r#"
+def apply(f fn (Int) => Int) Unit {}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
             diag.code == "invalid_function_type"
-                && diag
-                    .message
-                    .contains("function type parameters must be parenthesized")
+                && diag.message.contains("write 'fn(...)', not 'fn (...)'")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_arrow_in_fn_function_type() {
+    let result = parse(
+        r#"
+def apply(f fn(Int) -> Int) Unit {}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_function_type" && diag.message.contains("function types use '=>'")
         }),
         "{:#?}",
         result.diagnostics

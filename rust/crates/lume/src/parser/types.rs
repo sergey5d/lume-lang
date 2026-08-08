@@ -1,3 +1,4 @@
+use super::support::spans_touch;
 use super::*;
 
 impl<'a> Parser<'a> {
@@ -110,6 +111,9 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_type_ref(&mut self) -> Option<TypeRef> {
         self.skip_newlines();
+        if self.at_keyword(Keyword::Fn) {
+            return self.parse_function_type_ref();
+        }
         if self.at(TokenKind::LParen) {
             return self.parse_parenthesized_or_function_type_ref();
         }
@@ -120,9 +124,9 @@ impl<'a> Parser<'a> {
             self.error_at_current(
                 "invalid_function_type",
                 if old_arrow {
-                    "function type parameters must be parenthesized and use '=>'; write '(T) => U'"
+                    "function types use 'fn(...) => T'; write 'fn(T) => U'"
                 } else {
-                    "function type parameters must be parenthesized; use '(T) => U'"
+                    "function types use 'fn(...) => T'; write 'fn(T) => U'"
                 },
             );
             self.advance();
@@ -139,11 +143,74 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_pattern_type_ref(&mut self) -> Option<TypeRef> {
         self.skip_newlines();
+        if self.at_keyword(Keyword::Fn) {
+            return self.parse_function_type_ref();
+        }
         if self.at(TokenKind::LParen) {
             return self.parse_parenthesized_or_function_type_ref();
         }
 
         self.parse_primary_type_ref()
+    }
+
+    fn parse_function_type_ref(&mut self) -> Option<TypeRef> {
+        self.match_keyword(Keyword::Fn);
+        let start = self.previous_span();
+        if !self.at(TokenKind::LParen) {
+            self.error_at_current(
+                "invalid_function_type",
+                "expected '(' immediately after 'fn', as in 'fn(Int) => Str'",
+            );
+            return None;
+        }
+        if !spans_touch(start, self.current_span()) {
+            self.error_at_current(
+                "invalid_function_type",
+                "function type marker and parameter list must touch; write 'fn(...)', not 'fn (...)'",
+            );
+        }
+        self.advance();
+        self.skip_newlines();
+
+        let mut params = Vec::new();
+        if !self.at(TokenKind::RParen) {
+            loop {
+                params.push(self.parse_type_ref()?);
+                self.skip_newlines();
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+                self.skip_newlines();
+                if self.at(TokenKind::RParen) {
+                    break;
+                }
+            }
+        }
+        self.consume(
+            TokenKind::RParen,
+            "expected ')' after function parameter types",
+        )?;
+        self.skip_newlines();
+
+        if self.match_token(TokenKind::Arrow) {
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_function_type",
+                "function types use '=>'; write 'fn(...) => T'",
+                self.previous_span(),
+            ));
+        } else {
+            self.consume(
+                TokenKind::FatArrow,
+                "expected '=>' after function parameter types",
+            )?;
+        }
+        let ret = self.parse_type_ref()?;
+        let span = start.cover(ret.span());
+        Some(TypeRef::Function {
+            params,
+            ret: Box::new(ret),
+            span,
+        })
     }
 
     fn parse_parenthesized_or_function_type_ref(&mut self) -> Option<TypeRef> {
@@ -162,15 +229,12 @@ impl<'a> Parser<'a> {
         }
         let end = self.consume(TokenKind::RParen, "expected ')' after tuple type")?;
 
-        let uses_old_arrow = self.at(TokenKind::Arrow);
         if self.match_token(TokenKind::FatArrow) || self.match_token(TokenKind::Arrow) {
-            if uses_old_arrow {
-                self.diagnostics.push(crate::diagnostic::Diagnostic::error(
-                    "old_function_type_arrow",
-                    "function types use '=>'; replace '->' with '=>'",
-                    self.previous_span(),
-                ));
-            }
+            self.diagnostics.push(Diagnostic::error(
+                "removed_function_type_syntax",
+                "function types use 'fn(...) => T'; replace the parenthesized parameter-type form",
+                start.cover(self.previous_span()),
+            ));
             let ret = self.parse_type_ref()?;
             return Some(TypeRef::Function {
                 params: fields.into_iter().map(|field| field.ty).collect(),
@@ -190,6 +254,9 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_primary_type_ref(&mut self) -> Option<TypeRef> {
         self.skip_newlines();
+        if self.at_keyword(Keyword::Fn) {
+            return self.parse_function_type_ref();
+        }
         if self.match_token(TokenKind::LBracket) {
             let start = self.previous_span();
             let first = self.parse_type_ref()?;
@@ -285,7 +352,11 @@ impl<'a> Parser<'a> {
     pub(super) fn can_start_type_ref(&self) -> bool {
         matches!(
             self.current_kind(),
-            TokenKind::Identifier | TokenKind::LParen | TokenKind::LBrace | TokenKind::LBracket
+            TokenKind::Identifier
+                | TokenKind::Keyword(Keyword::Fn)
+                | TokenKind::LParen
+                | TokenKind::LBrace
+                | TokenKind::LBracket
         )
     }
 

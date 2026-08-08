@@ -396,6 +396,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Match) => "MATCH",
             TokenKind::Keyword(Keyword::Partial) => "PARTIAL",
             TokenKind::Keyword(Keyword::Reified) => "REIFIED",
+            TokenKind::Keyword(Keyword::Fn) => "FN",
             TokenKind::Keyword(Keyword::For) => "FOR",
             TokenKind::Keyword(Keyword::Yield) => "YIELD",
             TokenKind::Keyword(Keyword::Continue) => "CONTINUE",

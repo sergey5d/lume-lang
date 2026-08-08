@@ -182,6 +182,10 @@
         {
           "name": "storage.modifier.generic.reified.lume",
           "match": "\\b(?:reified)\\b"
+        },
+        {
+          "name": "storage.type.function.lume",
+          "match": "\\bfn(?=\\()"
         }
       ]
     },

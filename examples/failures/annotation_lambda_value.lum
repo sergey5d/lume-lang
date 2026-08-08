@@ -2,7 +2,7 @@
 # .*annotation arguments must be literals, stable constants, or constant expressions.*
 
 annotation Flag {
-    value (Int) => Int
+    value fn(Int) => Int
 }
 
 @Flag { value: x => x + 1 }

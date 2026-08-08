@@ -1,7 +1,7 @@
 # FAIL_REGEX:
-# .*function types use '=>'; replace '->' with '=>'.*
+# .*function types use '=>'; write 'fn\(\.\.\.\) => T'.*
 
 def main() Unit {
-    mapper (Int) -> Int = value => value + 1
+    mapper fn(Int) -> Int = value => value + 1
     println(mapper(4))
 }

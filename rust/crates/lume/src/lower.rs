@@ -8204,7 +8204,7 @@ fn describe_ir_type(ty: &ir::Type) -> String {
                 .join(", ")
         ),
         ir::Type::Function { params, ret } => format!(
-            "({}) => {}",
+            "fn({}) => {}",
             params
                 .iter()
                 .map(describe_ir_type)
@@ -8748,7 +8748,7 @@ mod tests {
         let program = parse_inline(
             r#"
             interface Runner {
-                def perform[T](work (Int) => Result[T, Str]) Result[T, Str]
+                def perform[T](work fn(Int) => Result[T, Str]) Result[T, Str]
             }
 
             def run(runner Runner) Result[Unit, Str] {
@@ -8844,7 +8844,7 @@ mod tests {
 
             def main() Int {
                 base = 10
-                inc (Int) => Int = value => value + 1
+                inc fn(Int) => Int = value => value + 1
                 plus = (value Int) => value + base
 
                 def add(value Int) Int = plus(value)

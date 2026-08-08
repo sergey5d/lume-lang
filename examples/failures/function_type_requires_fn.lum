@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*function type parameters must be parenthesized; use '\(T\) => U'.*
+# .*function types use 'fn\(\.\.\.\) => T'; write 'fn\(T\) => U'.*
 
 def main() Unit {
     mapper Int => Int = value => value + 1

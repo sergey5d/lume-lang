@@ -6,14 +6,14 @@ interface List[T] with Iterable[T] {
     def append(value T) List[T]
     def add(value T) List[T]
     def addAll(values Iterable[T]) List[T]
-    def map[X](f (T) => X) List[X]
-    def flatMap[X](f (T) => List[X]) List[X]
-    def filter(f (T) => Bool) List[T]
-    def fold[X](initial X, f (X, T) => X) X
-    def reduce[X](initial X, f (X, T) => X) X
-    def reduce(f (T, T) => T) Option[T]
-    def exists(f (T) => Bool) Bool
-    def forAll(f (T) => Bool) Bool
+    def map[X](f fn(T) => X) List[X]
+    def flatMap[X](f fn(T) => List[X]) List[X]
+    def filter(f fn(T) => Bool) List[T]
+    def fold[X](initial X, f fn(X, T) => X) X
+    def reduce[X](initial X, f fn(X, T) => X) X
+    def reduce(f fn(T, T) => T) Option[T]
+    def exists(f fn(T) => Bool) Bool
+    def forAll(f fn(T) => Bool) Bool
     def sort(ordering Ordering[T]) List[T]
     def zip[X](other List[X]) List[(T, X)]
     def zipWithIndex() List[(T, Int)]
@@ -26,7 +26,7 @@ interface List[T] with Iterable[T] {
     def removeFirst() Option[T]
     def removeLast() Option[T]
     def size() Int
-    def forEach(f (T) => Unit)
+    def forEach(f fn(T) => Unit)
 
     def makeStr(separator Str) Str {
         var result Str = ""

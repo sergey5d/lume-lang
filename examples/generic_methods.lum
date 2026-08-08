@@ -9,8 +9,8 @@ class Mapper {
 }
 
 impl Mapper {
-    def map[X](value Int, fn (Int) => X) X {
-        fn(value)
+    def map[X](value Int, mapper fn(Int) => X) X {
+        mapper(value)
     }
 }
 

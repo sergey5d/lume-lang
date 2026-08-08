@@ -225,7 +225,7 @@ impl Ty {
                     .join(", ")
             ),
             Ty::Function(params, ret) => format!(
-                "({}) => {}",
+                "fn({}) => {}",
                 params
                     .iter()
                     .map(Ty::describe)
@@ -5000,7 +5000,7 @@ impl<'a> Checker<'a> {
                                     self.add_error(
                                         "invalid_argument_type",
                                         format!(
-                                            "Array.generate expects (Int) => T generator, got '{}'",
+                                            "Array.generate expects fn(Int) => T generator, got '{}'",
                                             Ty::Function(params.clone(), ret.clone()).describe()
                                         ),
                                         arg.span,
@@ -5013,7 +5013,7 @@ impl<'a> Checker<'a> {
                                 self.add_error(
                                     "invalid_argument_type",
                                     format!(
-                                        "Array.generate expects (Int) => T generator, got '{}'",
+                                        "Array.generate expects fn(Int) => T generator, got '{}'",
                                         other.describe()
                                     ),
                                     arg.span,
@@ -10850,8 +10850,8 @@ def main() Unit {
     fn allows_trailing_block_call_for_explicit_zero_arg_lambda_argument() {
         let program = parse_inline(
             r#"
-def process(f () => Unit) Unit = f()
-def compute(f () => Int) Int = f()
+def process(f fn() => Unit) Unit = f()
+def compute(f fn() => Int) Int = f()
 
 def main() Unit {
     process { () => println("hehe") }
@@ -10868,7 +10868,7 @@ def main() Unit {
     fn infers_generic_result_type_from_trailing_lambda_body() {
         let program = parse_inline(
             r#"
-def transactionally[T](work () => Result[T, Str]) Result[T, Str] = work()
+def transactionally[T](work fn() => Result[T, Str]) Result[T, Str] = work()
 
 def run() Result[Unit, Str] {
     try transactionally { () => Ok(()) }
@@ -12416,9 +12416,9 @@ def main() Unit {
     fn allows_ignored_lambda_parameter_slots() {
         let program = parse_inline(
             r#"
-def consumeOne(f (Int) => Int) Int = f(10)
+def consumeOne(f fn(Int) => Int) Int = f(10)
 
-def consumeTwo(f (Int, Int) => Int) Int = f(20, 3)
+def consumeTwo(f fn(Int, Int) => Int) Int = f(20, 3)
 
 def main() Unit {
     one = consumeOne((_) => 1)
@@ -12438,7 +12438,7 @@ def main() Unit {
     fn rejects_reading_ignored_lambda_parameter_slot() {
         let program = parse_inline(
             r#"
-def consumeTwo(f (Int, Int) => Int) Int = f(20, 3)
+def consumeTwo(f fn(Int, Int) => Int) Int = f(20, 3)
 
 def main() Unit {
     value = consumeTwo((_, item) => _ + item)
@@ -12641,7 +12641,7 @@ def main() Unit {
     fn materializes_bare_zero_payload_enum_case_patterns() {
         let program = parse_inline(
             r#"
-def mapOption[X](value Option[Int], f (Int) => X) Option[X] {
+def mapOption[X](value Option[Int], f fn(Int) => X) Option[X] {
     match value {
         case Some(item) => Some(f(item))
         case None => None

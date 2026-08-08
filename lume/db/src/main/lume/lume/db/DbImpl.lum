@@ -96,7 +96,7 @@ impl JdbcQuery {
 
     def all() Result[[Row], DbError] = this.rows()
 
-    def map[T](mapper (Row) => T) Result[[T], DbError] {
+    def map[T](mapper fn(Row) => T) Result[[T], DbError] {
         rows [Row] = try this.rows()
         out [T] = []
 
@@ -107,7 +107,7 @@ impl JdbcQuery {
         Ok(out)
     }
 
-    def flatMap[T](mapper (Row) => Result[T, DbError]) Result[[T], DbError] {
+    def flatMap[T](mapper fn(Row) => Result[T, DbError]) Result[[T], DbError] {
         rows [Row] = try this.rows()
         out [T] = []
 
@@ -175,7 +175,7 @@ impl JdbcRowQuery {
         }
     }
 
-    def map[T](mapper (Row) => T) Result[Option[T], DbError] {
+    def map[T](mapper fn(Row) => T) Result[Option[T], DbError] {
         maybeRow Option[Row] = try this.row()
 
         match maybeRow {
@@ -184,7 +184,7 @@ impl JdbcRowQuery {
         }
     }
 
-    def flatMap[T](mapper (Row) => Result[T, DbError]) Result[Option[T], DbError] {
+    def flatMap[T](mapper fn(Row) => Result[T, DbError]) Result[Option[T], DbError] {
         maybeRow Option[Row] = try this.row()
 
         match maybeRow {
@@ -299,7 +299,7 @@ impl JdbcDatabaseImpl {
 
     def begin() Result[Transaction, DbError] = this.beginTransaction()
 
-    def transactionally[T](work (Transaction) => Result[T, DbError]) Result[T, DbError] {
+    def transactionally[T](work fn(Transaction) => Result[T, DbError]) Result[T, DbError] {
         tx Transaction = try this.beginTransaction()
 
         worked Result[T, DbError] = work(tx)

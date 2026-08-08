@@ -1,9 +1,8 @@
-# Function Type Proposal
+# Function Types
 
-This document proposes explicit `fn(...) => T` syntax for function types while
-keeping named functions and lambda expressions keyword-free. It is unsettled
-design material; `syntax.md` remains the reference for currently implemented
-syntax.
+Lume uses explicit `fn(...) => T` syntax for function types while keeping named
+functions and lambda expressions keyword-free. `syntax.md` remains the primary
+language reference; this document explains the rationale and migration.
 
 ## Motivation
 
@@ -30,7 +29,7 @@ mapper fn(Int) => Str = ...     # binding containing a function value
 value => value.toStr()          # anonymous function expression
 ```
 
-## Proposed Syntax
+## Syntax
 
 Use `fn(...) => T` as the canonical function-type syntax in every type
 position. Write `fn` directly before the parameter list, without a space.
@@ -63,7 +62,7 @@ becomes difficult to read when nested.
 
 ## By-Name Parameters
 
-The proposal makes the distinction between a by-name expression and a thunk
+This syntax makes the distinction between a by-name expression and a thunk
 explicit:
 
 ```txt
@@ -183,7 +182,7 @@ increment =
     value => value + 1
 ```
 
-The recommended direction is therefore:
+The language model is therefore:
 
 - keep named functions keyword-free
 - require `fn(...) => T` for function types

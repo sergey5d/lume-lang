@@ -110,7 +110,7 @@ Example:
 
 ```txt
 # If Dog <: Animal, then this is safe:
-expected (Dog) => Animal = (animal Animal) => Dog()
+expected fn(Dog) => Animal = (animal Animal) => Dog()
 ```
 
 Reason:

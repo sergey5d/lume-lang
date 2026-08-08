@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*function parameter 'callback' cannot use Unit as a callback parameter.*
 
-def run(callback (Unit) => Int) Unit = ()
+def run(callback fn(Unit) => Int) Unit = ()
 
 def main() Unit = ()

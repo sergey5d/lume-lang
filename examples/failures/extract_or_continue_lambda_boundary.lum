@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*continue used outside of a loop.*
 
-def run(work () => Unit) Unit {
+def run(work fn() => Unit) Unit {
     work()
 }
 

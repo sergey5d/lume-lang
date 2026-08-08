@@ -11,7 +11,7 @@ class FixedWindowRateLimiter {
     hidden map [Str: Window] = []
     hidden windowSize Int
     hidden limit Int
-    
+
     new(windowSize Int, limit Int) = {
         this.windowSize = windowSize
         this.limit = limit

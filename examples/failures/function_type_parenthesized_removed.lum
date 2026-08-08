@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*function types use 'fn\(\.\.\.\) => T'; replace the parenthesized parameter-type form.*
+
+def main() Unit {
+    mapper (Int) => Int = value => value + 1
+}
