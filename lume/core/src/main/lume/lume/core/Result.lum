@@ -66,8 +66,4 @@ impl Result[T, E] {
         case Err(error) => error
     }
 
-    def orPanic() T = match this {
-        case Ok(value) => value
-        case Err(_) => panic("expected Result.Ok")
-    }
 }

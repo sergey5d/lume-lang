@@ -23,8 +23,6 @@ enum Either[L, R] {
        case Right(value) => value
     }
 
-    def orPanic() R = this.expectRight()
-
     def expectLeft() L = match this {
        case Left(value) => value
        case Right(_) => panic("Either has no left value")

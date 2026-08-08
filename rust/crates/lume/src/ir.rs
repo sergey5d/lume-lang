@@ -551,6 +551,7 @@ pub enum Intrinsic {
     ListSlice,
     ExtractSuccessIsSet,
     ExtractSuccessValue,
+    UnsafeExtractSuccessValue,
     VariantIs(String),
     VariantField(String),
 }

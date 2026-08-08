@@ -304,7 +304,7 @@ public final class LumeType {
     }
 
     private static String annotationName(LumeType annotationType) {
-        return annotationType.name().orPanic();
+        return (String) LumeRuntime.extractSuccessValue(annotationType.name());
     }
 
     private <T> Result<T, ReflectionError> reflectionErr(String message) {

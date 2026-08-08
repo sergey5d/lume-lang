@@ -806,6 +806,7 @@ pub struct CallArg {
 pub enum UnaryOp {
     Neg,
     Not,
+    UnsafeExtract,
 }
 
 /// Supported binary operators in source syntax.

@@ -240,7 +240,7 @@ Parameter-based inference should also be considered:
 
 ```txt
 def describe[reified A](value A) Str {
-    typeOf[A].qualifiedName().orPanic()
+    typeOf[A].qualifiedName() !!
 }
 
 name = describe(User { name: "Ada" })
@@ -294,8 +294,6 @@ Open question:
 ### Irrefutable and Refutable Binding
 
 Open follow-ups:
-- consider removing `orPanic` from `Option`, `Result`, and `Either`, or at least discouraging it, because `let value <- source else panic(...)` is the clearer assertive extraction form
-- if `orPanic` stays, treat it as a low-level/interoperability escape hatch rather than normal application style
 - consider direct nested payload destructuring inside `if let`, for example `if let Some((_, initialY, _)) = rows.get(0) { ... }`
 - for now, prefer `if let Some(row) = rows.get(0) { ... }` and destructure `row` on the next line inside the branch
 - keep `if let` chaining limited to `&&` joins; if we ever extend it, do that deliberately rather than broadening it implicitly through general boolean syntax

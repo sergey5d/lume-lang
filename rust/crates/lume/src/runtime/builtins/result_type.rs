@@ -30,13 +30,12 @@ pub(super) fn define() -> RuntimeType {
                 }],
                 result_map,
             ),
-            builtin_method(3, "orPanic", Vec::new(), result_or_panic),
-            builtin_method(4, "getError", Vec::new(), result_get_error),
-            builtin_method(5, "getOr", vec![ir::Type::Unknown], result_get_or),
-            builtin_method(6, "orElse", vec![ir::Type::Unknown], result_or_else),
-            builtin_method(7, "isSuccess", Vec::new(), result_is_ok),
+            builtin_method(3, "getError", Vec::new(), result_get_error),
+            builtin_method(4, "getOr", vec![ir::Type::Unknown], result_get_or),
+            builtin_method(5, "orElse", vec![ir::Type::Unknown], result_or_else),
+            builtin_method(6, "isSuccess", Vec::new(), result_is_ok),
             builtin_method(
-                8,
+                7,
                 "flatMap",
                 vec![ir::Type::Function {
                     params: Vec::new(),
@@ -45,7 +44,7 @@ pub(super) fn define() -> RuntimeType {
                 result_flat_map,
             ),
             builtin_method(
-                9,
+                8,
                 "mapError",
                 vec![ir::Type::Function {
                     params: Vec::new(),
@@ -53,8 +52,8 @@ pub(super) fn define() -> RuntimeType {
                 }],
                 result_map_error,
             ),
-            builtin_method(10, "toOption", Vec::new(), result_to_option),
-            builtin_method(11, "toEither", Vec::new(), result_to_either),
+            builtin_method(9, "toOption", Vec::new(), result_to_option),
+            builtin_method(10, "toEither", Vec::new(), result_to_either),
         ],
         enum_cases: vec![
             RuntimeEnumCase {
@@ -180,20 +179,6 @@ fn result_map_error(
         Ok(interpreter.result_err(mapped))
     } else {
         Ok(receiver)
-    }
-}
-
-fn result_or_panic(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    _args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    let (case_id, first_field) = result_case(&receiver);
-    if case_id == OK_CASE {
-        Ok(first_field.expect("Result.Ok payload"))
-    } else {
-        Err(interpreter.runtime_error(span, "Result has no success value"))
     }
 }
 

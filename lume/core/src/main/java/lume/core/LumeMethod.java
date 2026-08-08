@@ -69,7 +69,7 @@ public final class LumeMethod {
     }
 
     private static String annotationName(LumeType annotationType) {
-        return annotationType.name().orPanic();
+        return (String) LumeRuntime.extractSuccessValue(annotationType.name());
     }
 
     public Object invoke(Object receiver, Object... args) {

@@ -35,9 +35,8 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(5, "getOr", vec![ir::Type::Unknown], either_get_or),
             builtin_method(6, "orElse", vec![ir::Type::Unknown], either_or_else),
             builtin_method(7, "isSuccess", Vec::new(), either_is_right),
-            builtin_method(8, "orPanic", Vec::new(), either_expect_right),
             builtin_method(
-                9,
+                8,
                 "flatMap",
                 vec![ir::Type::Function {
                     params: Vec::new(),
@@ -46,7 +45,7 @@ pub(super) fn define() -> RuntimeType {
                 either_flat_map,
             ),
             builtin_method(
-                10,
+                9,
                 "mapLeft",
                 vec![ir::Type::Function {
                     params: Vec::new(),
@@ -54,8 +53,8 @@ pub(super) fn define() -> RuntimeType {
                 }],
                 either_map_left,
             ),
-            builtin_method(11, "toOption", Vec::new(), either_to_option),
-            builtin_method(12, "toResult", Vec::new(), either_to_result),
+            builtin_method(10, "toOption", Vec::new(), either_to_option),
+            builtin_method(11, "toResult", Vec::new(), either_to_result),
         ],
         enum_cases: vec![
             RuntimeEnumCase {

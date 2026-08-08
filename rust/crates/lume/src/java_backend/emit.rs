@@ -761,6 +761,7 @@ fn invoker_erased_container_type(name: &str, names: &JavaNames) -> String {
         "Either" => "lume.core.Either".to_string(),
         "Iterator" => "lume.core.LumeIterator".to_string(),
         "List" => "lume.core.LumeList".to_string(),
+        "LinkedList" => "lume.core.LumeLinkedList".to_string(),
         "Map" => "lume.core.LumeMap".to_string(),
         "Option" => "lume.core.Option".to_string(),
         "Result" => "lume.core.Result".to_string(),
@@ -2487,6 +2488,9 @@ impl<'a> FunctionEmitter<'a> {
         let index_expr = self.emit_operand(index)?;
 
         match base_ty {
+            ir::Type::Named { ref name, ref args } if name == "LinkedList" && args.len() == 1 => {
+                Some(format!("{base_expr}.get({index_expr})"))
+            }
             ir::Type::Named { ref name, ref args }
                 if (name == "List" || name == "Array") && args.len() == 1 =>
             {
@@ -2609,20 +2613,6 @@ impl<'a> FunctionEmitter<'a> {
                         "lume.core.LumeRuntime.extractSuccessIsSet({receiver})"
                     ))
                 }
-                "orPanic" if args.is_empty() => {
-                    let receiver_expr = self.emit_operand(receiver)?;
-                    let extracted =
-                        format!("lume.core.LumeRuntime.extractSuccessValue({receiver_expr})");
-                    Some(match self.success_value_type(receiver) {
-                        Some(target_ty) if is_java_void_type(&target_ty) => extracted,
-                        Some(target_ty) => self.coerce_to_target_type(
-                            extracted,
-                            Some(ir::Type::Unknown),
-                            &target_ty,
-                        ),
-                        None => extracted,
-                    })
-                }
                 _ => {
                     let params = self
                         .method_param_specs_for_receiver(receiver, method, args)
@@ -2707,6 +2697,10 @@ impl<'a> FunctionEmitter<'a> {
             [owner] if owner == "List" => {
                 let args = self.emit_operands(operands)?;
                 Some(format!("lume.core.LumeList.of({})", args.join(", ")))
+            }
+            [owner] if owner == "LinkedList" => {
+                let args = self.emit_operands(operands)?;
+                Some(format!("lume.core.LumeLinkedList.of({})", args.join(", ")))
             }
             [owner] if owner == "Map" => {
                 let args = self.emit_operands(operands)?;
@@ -2939,6 +2933,15 @@ impl<'a> FunctionEmitter<'a> {
                 ))
             }
             ir::Intrinsic::ExtractSuccessValue => {
+                if args.len() != 1 {
+                    return None;
+                }
+                Some(format!(
+                    "lume.core.LumeRuntime.probeSuccessValue({})",
+                    args[0]
+                ))
+            }
+            ir::Intrinsic::UnsafeExtractSuccessValue => {
                 if args.len() != 1 {
                     return None;
                 }
@@ -4253,14 +4256,12 @@ impl<'a> FunctionEmitter<'a> {
                     .and_then(|arg| self.operand_type(arg))
                     .and_then(|ty| iterable_item_type(&ty)),
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue)
+                | ir::Callee::Intrinsic(ir::Intrinsic::UnsafeExtractSuccessValue)
                 | ir::Callee::Intrinsic(ir::Intrinsic::VariantField(_)) => Some(ir::Type::Unknown),
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet)
                 | ir::Callee::Intrinsic(ir::Intrinsic::VariantIs(_))
                 | ir::Callee::Intrinsic(ir::Intrinsic::IterHasNext) => Some(ir::Type::Bool),
                 ir::Callee::Method { receiver, method } => {
-                    if method == "orPanic" && args.is_empty() {
-                        return self.success_value_type(receiver);
-                    }
                     self.method_return_type_for_receiver(receiver, method, args.len())
                 }
                 ir::Callee::Named { path } => self.named_runtime_call_return_type(path, args.len()),
@@ -4311,6 +4312,9 @@ impl<'a> FunctionEmitter<'a> {
 
     fn index_result_type(&self, ty: &ir::Type) -> Option<ir::Type> {
         match ty {
+            ir::Type::Named { name, args } if name == "LinkedList" && args.len() == 1 => {
+                Some(ir::Type::option(args[0].clone()))
+            }
             ir::Type::Named { name, args }
                 if (name == "Array" || name == "List") && args.len() == 1 =>
             {
@@ -4449,18 +4453,6 @@ impl<'a> FunctionEmitter<'a> {
             return expr;
         }
         format!("(({}) ((Object) {expr}))", self.names.value_type(target_ty))
-    }
-
-    fn success_value_type(&self, receiver: &ir::Operand) -> Option<ir::Type> {
-        let receiver_ty = self.operand_type(receiver)?;
-        let ir::Type::Named { name, args } = receiver_ty else {
-            return None;
-        };
-        match name.as_str() {
-            "Option" | "Result" => args.first().cloned(),
-            "Either" => args.get(1).cloned(),
-            _ => None,
-        }
     }
 
     fn local_value_type(&self, ty: &ir::Type) -> String {
@@ -4781,6 +4773,9 @@ impl JavaNames {
             "List" if args.len() == 1 => {
                 format!("lume.core.LumeList<{}>", self.value_type(&args[0]))
             }
+            "LinkedList" if args.len() == 1 => {
+                format!("lume.core.LumeLinkedList<{}>", self.value_type(&args[0]))
+            }
             "Iterator" if args.len() == 1 => {
                 format!("lume.core.LumeIterator<{}>", self.value_type(&args[0]))
             }
@@ -4903,7 +4898,15 @@ fn java_named_builtin_annotation(name: &str) -> Option<String> {
 fn is_builtin_container(name: &str) -> bool {
     matches!(
         name,
-        "Array" | "Either" | "Iterator" | "List" | "Map" | "Option" | "Result" | "Set"
+        "Array"
+            | "Either"
+            | "Iterator"
+            | "List"
+            | "LinkedList"
+            | "Map"
+            | "Option"
+            | "Result"
+            | "Set"
     )
 }
 
@@ -4927,7 +4930,8 @@ fn builtin_method_param_types(
 ) -> Option<Vec<ir::Type>> {
     match receiver {
         ir::Type::Named { name, args }
-            if matches!(name.as_str(), "List" | "Array" | "Set") && args.len() == 1 =>
+            if matches!(name.as_str(), "List" | "LinkedList" | "Array" | "Set")
+                && args.len() == 1 =>
         {
             match (method, arg_len) {
                 ("add", 1) => Some(vec![args[0].clone()]),
@@ -4954,7 +4958,10 @@ fn builtin_method_return_type(
 ) -> Option<ir::Type> {
     match receiver {
         ir::Type::Named { name, args }
-            if name == "List" && args.len() == 1 && method == "zipWithIndex" && arg_len == 0 =>
+            if matches!(name.as_str(), "List" | "LinkedList")
+                && args.len() == 1
+                && method == "zipWithIndex"
+                && arg_len == 0 =>
         {
             Some(ir::Type::list(ir::Type::Tuple(vec![
                 args[0].clone(),
@@ -4970,7 +4977,7 @@ fn iterable_item_type(ty: &ir::Type) -> Option<ir::Type> {
         ir::Type::Named { name, args }
             if matches!(
                 name.as_str(),
-                "Array" | "Iterator" | "List" | "Option" | "Set"
+                "Array" | "Iterator" | "List" | "LinkedList" | "Option" | "Set"
             ) && args.len() == 1 =>
         {
             args.first().cloned()

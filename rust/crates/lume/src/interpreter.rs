@@ -1828,7 +1828,9 @@ impl<'a> Interpreter<'a> {
                     .map(|field| (field.name.clone(), self.default_value_for_type(&field.ty)))
                     .collect(),
             ))),
-            ir::Type::Named { name, args } if name == "List" || name == "Array" => {
+            ir::Type::Named { name, args }
+                if name == "List" || name == "LinkedList" || name == "Array" =>
+            {
                 let _ = args;
                 Value::list(Vec::new())
             }
@@ -3132,7 +3134,9 @@ impl<'a> Interpreter<'a> {
                     },
                 ))))
             }
-            "List" | "Array" => Some(Value::List(Rc::new(RefCell::new(args.to_vec())))),
+            "List" | "LinkedList" | "Array" => {
+                Some(Value::List(Rc::new(RefCell::new(args.to_vec()))))
+            }
             "Set" => Some(Value::Set(Rc::new(RefCell::new(unique_values(
                 args.to_vec(),
             ))))),
@@ -3893,6 +3897,34 @@ impl<'a> Interpreter<'a> {
                     }
                     _ => Value::Unit,
                 })
+            }
+            ir::Intrinsic::UnsafeExtractSuccessValue => {
+                if args.len() != 1 {
+                    return Err(
+                        self.runtime_error(span, "UnsafeExtractSuccessValue expects 1 argument")
+                    );
+                }
+                if matches!(
+                    &args[0],
+                    Value::Aggregate(variant)
+                        if matches!(
+                            variant.borrow().case_name.as_deref(),
+                            Some("Some" | "Ok" | "Right")
+                        )
+                ) {
+                    return Ok(pattern_field_value(&args[0], "value").unwrap_or(Value::Unit));
+                }
+
+                let expected = match &args[0] {
+                    Value::Aggregate(variant) => match variant.borrow().type_name.as_str() {
+                        "Option" => "Option.Some",
+                        "Result" => "Result.Ok",
+                        "Either" => "Either.Right",
+                        _ => "a successful lifted value",
+                    },
+                    _ => "a successful lifted value",
+                };
+                Err(self.runtime_error(span, format!("unsafe extraction expected {expected}")))
             }
             ir::Intrinsic::VariantIs(case_name) => {
                 if args.len() != 1 {
@@ -4829,7 +4861,7 @@ impl<'a> Interpreter<'a> {
             ir::Type::Float => matches!(value, Value::Float(_)),
             ir::Type::Str => matches!(value, Value::String(_)),
             ir::Type::Named { name, .. } => match value {
-                Value::List(_) => name == "List" || name == "Array",
+                Value::List(_) => name == "List" || name == "LinkedList" || name == "Array",
                 Value::Set(_) => name == "Set",
                 Value::Map(_) => name == "Map",
                 Value::Iterator(_) => name == "Iterator" || name == "IntRange",
@@ -6481,7 +6513,7 @@ mod tests {
                     item + 1
                 }
 
-                count = countItems(items).orPanic()
+                count = countItems(items) !!
 
                 var total Int = 0
                 for item <- items {
@@ -6673,6 +6705,51 @@ $name
         assert_eq!(
             run.output,
             "base 2 2\ngrown 5 5\nseen 2 false\nmore 4 true\n"
+        );
+    }
+
+    #[test]
+    fn runs_linked_list_and_unsafe_extract() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                values LinkedList[Int] = LinkedList {}
+                values.add(5)
+                values.add(8)
+
+                println(values[0] !!)
+                println(Some(13) !!)
+                println(Ok(21) !!)
+                println(Right(34) !!)
+                println(values.removeFirst() !!)
+                println(values[0] !!)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "5\n13\n21\n34\n5\n8\n");
+    }
+
+    #[test]
+    fn unsafe_extract_panics_on_missing_value() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                missing Option[Int] = None
+                println(missing !!)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(
+            run.diagnostics.iter().any(|diag| diag
+                .message
+                .contains("unsafe extraction expected Option.Some")),
+            "{:#?}",
+            run.diagnostics
         );
     }
 
@@ -7060,7 +7137,7 @@ $name
             def main() Unit {
                 someValue = Option.when(true, 7)
                 noValue = Option.when(false, 7)
-                OS.println(someValue.orPanic())
+                OS.println(someValue !!)
                 OS.println(noValue.isEmpty())
             }
             "#,

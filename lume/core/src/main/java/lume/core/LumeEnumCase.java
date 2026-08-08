@@ -106,7 +106,7 @@ public final class LumeEnumCase {
     }
 
     private static String annotationName(LumeType annotationType) {
-        return annotationType.name().orPanic();
+        return (String) LumeRuntime.extractSuccessValue(annotationType.name());
     }
 
     private static Result<Object, ReflectionError> reflectionErr(String message) {

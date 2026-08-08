@@ -79,7 +79,7 @@ def main() Unit {
     println("either left ${eitherLeft}")
 
     okFromSome Result[Int, Str] = some.toResult(fallbackStr("toResult eager", "missing"))
-    println("toResult ok ${okFromSome.orPanic()}")
+    println("toResult ok ${okFromSome !!}")
     errFromNone Result[Int, Str] = none.toResult(fallbackStr("toResult fallback", "missing"))
     println("toResult err ${errFromNone.getError()}")
 
@@ -88,14 +88,14 @@ def main() Unit {
     leftFromNone Either[Str, Int] = none.toEither(fallbackStr("toEither fallback", "missing"))
     println("toEither left ${leftFromNone.expectLeft()}")
 
-    optionOrElseSome Int = some.orElse(fallbackOption("option orElse eager", 9)).orPanic()
+    optionOrElseSome Int = some.orElse(fallbackOption("option orElse eager", 9)) !!
     println("option orElse some ${optionOrElseSome}")
-    optionOrElseNone Int = none.orElse(fallbackOption("option orElse fallback", 9)).orPanic()
+    optionOrElseNone Int = none.orElse(fallbackOption("option orElse fallback", 9)) !!
     println("option orElse none ${optionOrElseNone}")
 
-    resultOrElseOk Int = ok.orElse(fallbackResult("result orElse eager", 11)).orPanic()
+    resultOrElseOk Int = ok.orElse(fallbackResult("result orElse eager", 11)) !!
     println("result orElse ok ${resultOrElseOk}")
-    resultOrElseErr Int = err.orElse(fallbackResult("result orElse fallback", 11)).orPanic()
+    resultOrElseErr Int = err.orElse(fallbackResult("result orElse fallback", 11)) !!
     println("result orElse err ${resultOrElseErr}")
 
     eitherOrElseRight Int = right.orElse(fallbackEither("either orElse eager", 4)).expectRight()
@@ -104,7 +104,7 @@ def main() Unit {
     println("either orElse left ${eitherOrElseLeft}")
 
     mapErrorOk Result[Int, Str] = ok.mapError(error => fallbackStr("mapError eager", "mapped"))
-    println("mapError ok ${mapErrorOk.orPanic()}")
+    println("mapError ok ${mapErrorOk !!}")
     mapErrorErr Result[Int, Str] = err.mapError(error => fallbackStr("mapError fallback", "mapped"))
     println("mapError err ${mapErrorErr.getError()}")
 

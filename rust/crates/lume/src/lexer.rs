@@ -68,6 +68,7 @@ pub enum TokenKind {
     Percent,
     Eq,
     Bang,
+    BangBang,
     Less,
     Greater,
     Arrow,
@@ -380,6 +381,7 @@ impl<'a> Lexer<'a> {
             '=' if self.take('>') => Some(TokenKind::FatArrow),
             '=' if self.take('=') => Some(TokenKind::EqEq),
             '=' => Some(TokenKind::Eq),
+            '!' if self.take('!') => Some(TokenKind::BangBang),
             '!' if self.take('=') => Some(TokenKind::NotEq),
             '!' => Some(TokenKind::Bang),
             '<' if self.take('-') => Some(TokenKind::LeftArrow),
@@ -615,6 +617,20 @@ mod tests {
                 .any(|pair| pair[0] == TokenKind::Dot && pair[1] == TokenKind::Arrow)
         );
         assert!(!kinds.contains(&TokenKind::DotArrow));
+    }
+
+    #[test]
+    fn lexes_unsafe_extract_as_atomic_token() {
+        let result = lex(&source("value = wrapped !!\n"));
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert!(
+            result
+                .tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::BangBang && token.lexeme == "!!"),
+            "{:#?}",
+            result.tokens
+        );
     }
 
     #[test]

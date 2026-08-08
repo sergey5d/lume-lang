@@ -5,6 +5,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.List;
 
 import lume.core.LumeField;
+import lume.core.LumeRuntime;
 import lume.core.LumeType;
 import lume.core.LumeTypeKind;
 import lume.core.Result;
@@ -54,12 +55,13 @@ public final class JdbcRowDecoder {
                     + ": type has no Java qualified name");
         }
 
+        var javaName = (String) LumeRuntime.extractSuccessValue(qualifiedName);
         Class<?> targetClass;
         try {
-            targetClass = Class.forName(qualifiedName.orPanic());
+            targetClass = Class.forName(javaName);
         } catch (ClassNotFoundException err) {
             throw new JdbcRow.DecodeFailure("cannot decode SQL row as " + JdbcRow.typeLabel(targetType)
-                    + ": Java class '" + qualifiedName.orPanic() + "' is not available");
+                    + ": Java class '" + javaName + "' is not available");
         }
 
         var fields = targetType.fields().asJava().stream().toList();

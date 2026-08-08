@@ -16,10 +16,14 @@ public final class LumeIterator<T> {
         }
         if (source instanceof Option<?> option) {
             return option.isDefined()
-                    ? new LumeIterator<>(java.util.List.of(option.orPanic()).iterator())
+                    ? new LumeIterator<>(
+                            java.util.List.of(LumeRuntime.extractSuccessValue(option)).iterator())
                     : new LumeIterator<>(java.util.List.of().iterator());
         }
         if (source instanceof LumeList<?> list) {
+            return new LumeIterator<>(list.asJava().iterator());
+        }
+        if (source instanceof LumeLinkedList<?> list) {
             return new LumeIterator<>(list.asJava().iterator());
         }
         if (source instanceof LumeSet<?> set) {

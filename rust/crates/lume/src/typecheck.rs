@@ -3942,7 +3942,8 @@ impl<'a> Checker<'a> {
                 let index_ty = self.check_expr(index);
                 let valid_index = match &receiver_ty {
                     Ty::Named(name, args)
-                        if (name == "Array" || name == "List") && args.len() == 1 =>
+                        if (name == "Array" || name == "List" || name == "LinkedList")
+                            && args.len() == 1 =>
                     {
                         index_ty.is_int_like() || matches!(index_ty, Ty::Unknown)
                     }
@@ -4113,6 +4114,20 @@ impl<'a> Checker<'a> {
                     crate::ast::UnaryOp::Not => {
                         self.require_bool(&inner, *span, "unary '!' expects Bool");
                         Ty::bool()
+                    }
+                    crate::ast::UnaryOp::UnsafeExtract => {
+                        let extracted = self.unwrap_inner_type(&inner);
+                        if matches!(extracted, Ty::Unknown) && !matches!(inner, Ty::Unknown) {
+                            self.add_error(
+                                "invalid_unsafe_extract",
+                                format!(
+                                    "unsafe extraction '!!' requires Option[T], Result[T, E], or Either[L, R], got '{}'",
+                                    inner.describe()
+                                ),
+                                *span,
+                            );
+                        }
+                        extracted
                     }
                 }
             }
@@ -5442,6 +5457,20 @@ impl<'a> Checker<'a> {
                     );
                     return Some(Ty::Unknown);
                 }
+                if name == "LinkedList"
+                    && structural_record_arg
+                    && brace_record_constructor_args(args).is_some_and(|args| args.is_empty())
+                {
+                    let inferred = self
+                        .check_builtin_constructor(name, &[], span, uses_brace_syntax)
+                        .unwrap_or(Ty::Unknown);
+                    return Some(match expected {
+                        Ty::Named(expected_name, _) if expected_name == "LinkedList" => {
+                            expected.clone()
+                        }
+                        _ => inferred,
+                    });
+                }
                 if !structural_record_arg {
                     if let Some(ty) =
                         self.check_builtin_constructor(name, args, span, uses_brace_syntax)
@@ -5617,13 +5646,13 @@ impl<'a> Checker<'a> {
                 }
                 Some(Ty::Named("IntRange".to_string(), Vec::new()))
             }
-            "List" => {
+            "List" | "LinkedList" => {
                 self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
                 let mut item = Ty::Unknown;
                 for arg in args {
                     item = join_types(&item, &self.check_expr(&arg.value));
                 }
-                Some(Ty::Named("List".to_string(), vec![item]))
+                Some(Ty::Named(name.to_string(), vec![item]))
             }
             "Set" => {
                 self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
@@ -7073,6 +7102,7 @@ impl<'a> Checker<'a> {
         match ty {
             Ty::Named(name, args)
                 if (name == "List"
+                    || name == "LinkedList"
                     || name == "Set"
                     || name == "Array"
                     || name == "Iterable"
@@ -7188,6 +7218,9 @@ impl<'a> Checker<'a> {
 
     fn index_result_type(&self, ty: &Ty) -> Ty {
         match ty {
+            Ty::Named(name, args) if name == "LinkedList" && args.len() == 1 => {
+                Ty::option(args[0].clone())
+            }
             Ty::Named(name, args) if (name == "Array" || name == "List") && args.len() == 1 => {
                 args[0].clone()
             }
@@ -7592,6 +7625,16 @@ impl<'a> Checker<'a> {
     }
 
     fn unknown_member_message(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> String {
+        if name == "orPanic"
+            && !matches!(receiver_ty, Ty::Unknown)
+            && self.unwrap_lifted_type(receiver_ty).is_some()
+        {
+            return format!(
+                "method 'orPanic' was removed from '{}'; use postfix '!!' for unsafe extraction",
+                receiver_ty.describe(),
+            );
+        }
+
         if let Ty::Function(_, _) = receiver_ty {
             if let Expr::Member {
                 receiver: method_receiver,
@@ -10210,7 +10253,7 @@ fn wildcard_capture_labels(type_name: &str, args: &[Ty]) -> Vec<Option<String>> 
                 return None;
             }
             match (type_name, index, args.len()) {
-                ("List" | "Array" | "Set", 0, 1) => {
+                ("List" | "LinkedList" | "Array" | "Set", 0, 1) => {
                     Some(format!("captured element type of {}", rendered(index)))
                 }
                 ("Map", 0, 2) => Some(format!("captured key type of {}", rendered(index))),
@@ -13099,11 +13142,11 @@ def main() Unit {
     actual Type[User] = user.runtimeType
     unknown Type[_] = declared
     anyMetadata Type[Any] = typeOf[Any]
-    classType ClassType[User] = declared.asClass().orPanic()
+    classType ClassType[User] = declared.asClass() !!
     unknownClass ClassType[_] = classType
-    enumType EnumType[Status] = typeOf[Status].asEnum().orPanic()
-    fieldType Type[_] = classType.fields().get(0).orPanic().fieldType()
-    OS.println(actual.name().orPanic(), unknown.name().orPanic(), anyMetadata.kind(), unknownClass.name().orPanic(), enumType.name().orPanic(), fieldType.name().orPanic())
+    enumType EnumType[Status] = typeOf[Status].asEnum() !!
+    fieldType Type[_] = (classType.fields().get(0) !!).fieldType()
+    OS.println(actual.name() !!, unknown.name() !!, anyMetadata.kind(), unknownClass.name() !!, enumType.name() !!, fieldType.name() !!)
 }
 "#,
         );
@@ -13488,6 +13531,70 @@ def main() Unit {
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn checks_unsafe_extract_for_lifted_values_and_linked_list_indexing() {
+        let program = parse_inline(
+            r#"
+shape User {
+    name Str
+}
+
+def fromOption(value Option[User]) Str = (value !!).name
+def fromResult(value Result[Int, Str]) Int = value !!
+def fromEither(value Either[Str, Int]) Int = value !!
+
+def main() Unit {
+    values LinkedList[Int] = LinkedList {}
+    values.add(5)
+    first Int = values[0] !!
+    println(first)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_unsafe_extract_from_plain_values() {
+        let program = parse_inline(
+            r#"
+def invalid(value Int) Int = value !!
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_unsafe_extract"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_removed_or_panic_methods_on_lifted_values() {
+        let program = parse_inline(
+            r#"
+def fromOption(value Option[Int]) Int = value.orPanic()
+def fromResult(value Result[Int, Str]) Int = value.orPanic()
+def fromEither(value Either[Str, Int]) Int = value.orPanic()
+"#,
+        );
+        let result = check_program(&program);
+        let removed = result
+            .diagnostics
+            .iter()
+            .filter(|diag| {
+                diag.code == "unknown_member"
+                    && diag.message.contains("method 'orPanic' was removed")
+                    && diag.message.contains("postfix '!!'")
+            })
+            .count();
+        assert_eq!(removed, 3, "{:#?}", result.diagnostics);
     }
 
     #[test]

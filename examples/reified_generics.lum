@@ -9,17 +9,17 @@ class User {
 }
 
 def typeName[reified A](value A) Str =
-    typeOf[A].name().orPanic()
+    typeOf[A].name() !!
 
 class Inspector {
 }
 
 impl Inspector {
     def valueTypeName[reified A](value A) Str =
-        typeOf[A].name().orPanic()
+        typeOf[A].name() !!
 
     def namedTypeName[reified A]() Str =
-        typeOf[A].name().orPanic()
+        typeOf[A].name() !!
 }
 
 def main() Int {

@@ -2593,6 +2593,42 @@ def run(flag Bool) Int {
 }
 
 #[test]
+fn parses_unsafe_extract_and_grouped_followup_access() {
+    let result = parse(
+        r#"
+shape User {
+    name Str
+}
+
+def extract(value Option[Int]) Int = value !!
+def name(value Option[User]) Str = (value !!).name
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn rejects_postfix_access_after_ungrouped_unsafe_extract() {
+    let result = parse(
+        r#"
+shape User {
+    name Str
+}
+
+def name(value Option[User]) Str = value !!.name
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "unsafe_extract_requires_grouping"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_single_statement_match_case_body_without_braces() {
     let result = parse(
         r#"

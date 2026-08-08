@@ -96,7 +96,7 @@ public final class LumeField {
     }
 
     private static String annotationName(LumeType annotationType) {
-        return annotationType.name().orPanic();
+        return (String) LumeRuntime.extractSuccessValue(annotationType.name());
     }
 
     private static String reflectionMessage(Throwable err) {

@@ -30,7 +30,9 @@ public final class LumeAnnotation {
 
     public Option<String> str(String name) {
         Option<Object> value = field(name);
-        return value.isDefined() ? LumeRuntime.optionSome(String.valueOf(value.orPanic())) : LumeRuntime.optionNone();
+        return value.isDefined()
+                ? LumeRuntime.optionSome(String.valueOf(LumeRuntime.extractSuccessValue(value)))
+                : LumeRuntime.optionNone();
     }
 
     public Map<String, Object> asJava() {

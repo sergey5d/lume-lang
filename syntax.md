@@ -19,6 +19,7 @@ Built-in generic/container types:
 - `[K : V]` (map; nominal spelling `Map[K, V]` is also accepted)
 - `Set[T]`
 - `List[T]` or `[T]`
+- `LinkedList[T]`
 
 List and map shorthand can be nested, for example:
 
@@ -180,16 +181,16 @@ capture, not a separate metadata type.
 Common metadata operations:
 
 ```txt
-println(typeOf[User].name().orPanic())
+println(typeOf[User].name() !!)
 println(typeOf[User].kind())
 
-classType ClassType[User] = typeOf[User].asClass().orPanic()
+classType ClassType[User] = typeOf[User].asClass() !!
 fields = classType.fields()
 let Some(nameField) = classType.field("name") else panic("expected name field")
-println(nameField.fieldType().name().orPanic())
+println(nameField.fieldType().name() !!)
 println(nameField.isHidden())
 
-enumType EnumType[Status] = typeOf[Status].asEnum().orPanic()
+enumType EnumType[Status] = typeOf[Status].asEnum() !!
 let Some(pendingCase) = enumType.case("Pending") else panic("expected Pending case")
 println(pendingCase.name())
 constructedCase Result[Any, ReflectionError] = pendingCase.construct()
@@ -200,7 +201,7 @@ Safe reflective invocation uses `Result` values:
 ```txt
 constructed Result[User, ReflectionError] = classType.construct("Ada", 42)
 
-user User = constructed.orPanic()
+user User = constructed !!
 nameValue Result[Any, ReflectionError] = nameField.get(user)
 
 let Some(greetMethod) = classType.method("greet") else panic("expected greet method")
@@ -987,7 +988,7 @@ Reified generic functions and methods:
 
 ```txt
 typeName[reified A](value A) Str =
-    typeOf[A].name().orPanic()
+    typeOf[A].name() !!
 
 metadata[reified A]() Type[A] =
     typeOf[A]
@@ -1716,6 +1717,24 @@ combined = [0, ...parts, ...more, 5]
 entryList [(Str, Int)] = [...map.entries()]
 ```
 
+`LinkedList[T]` is a mutable doubly linked list. Use it when adding or removing
+values at either end is more important than random-access performance:
+
+```txt
+queue LinkedList[Int] = LinkedList {}
+queue.add(10)
+queue.add(20)
+
+first Option[Int] = queue[0]
+removed Option[Int] = queue.removeFirst()
+
+populated = LinkedList(1, 2, 3)
+```
+
+Indexing, `first()`, `last()`, `removeFirst()`, and `removeLast()` are safe and
+return `Option[T]`. `LinkedList {}` is the empty constructor; non-empty values
+use positional `LinkedList(...)` construction.
+
 Array construction:
 
 ```txt
@@ -2191,6 +2210,25 @@ iterable comprehensions; `Option`, `Result`, and `Either` comprehensions have no
 
 - `try` propagates the original failure.
 - `??` discards/replaces the failure with an explicit fallback.
+
+Unsafe extraction uses postfix `!!`:
+
+```txt
+value = wrapped !!
+```
+
+It extracts the success value from `Option[T]`, `Result[T, E]`, or
+`Either[L, T]` and panics when the value is empty / error / left. Use it only
+when failure is a programming error; prefer `try`, `??`, or `let ... else` for
+recoverable control flow.
+
+`!!` ends its postfix chain. Further calls, indexing, or member access require
+an explicit group:
+
+```txt
+name = wrapped !!.name       # invalid
+name = (wrapped !!).name     # valid
+```
 
 Multiple dependent unwraps can be written as sequential `let ... else` / `try`
 statements or as a grouped `let` block with `else`:
@@ -2702,6 +2740,7 @@ Other operators / constructs:
 - `is` for runtime type checks
 - `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
 - `??` for extract-or-fallback through `Option`, `Result`, and `Either`
+- `!!` for unsafe extraction through `Option`, `Result`, and `Either`
 - `=>` for parenthesized function types, lambdas, and by-name parameters
 - `=>` for match cases
 - `.->` for per-hop lifted access through `Option`, `Result`, and `Either`

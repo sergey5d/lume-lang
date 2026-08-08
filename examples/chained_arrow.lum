@@ -77,14 +77,14 @@ def main() Unit {
         .->profileOpt()
         .->nameOpt()
         .->first
-    println(optionName.orPanic())
+    println(optionName !!)
 
     resultSource Result[User, Int] = Ok(user)
     resultName Result[Str, Int] = resultSource
         .->profileResult()
         .->nameResult()
         .->first
-    println(resultName.orPanic())
+    println(resultName !!)
 
     eitherSource Either[Str, User] = Right(user)
     eitherName Either[Str, Str] = eitherSource
@@ -95,7 +95,7 @@ def main() Unit {
 
     # Each .-> hop crosses exactly one lifted boundary.
     displayName Option[Str] = optionSource.->profile().->primaryName().->display()
-    println(displayName.orPanic())
+    println(displayName !!)
 
     containerGetOr Str = optionSource.->profile().->primaryName().->display().getOr("unknown")
     println(containerGetOr)
@@ -106,33 +106,33 @@ def main() Unit {
         .->head()
         .->name()
         .->first
-    println(mixedFirstName.orPanic())
+    println(mixedFirstName !!)
 
-    parenthesizedContainerMethod Str = (optionSource.->profile().->primaryName()).orPanic().first
+    parenthesizedContainerMethod Str = ((optionSource.->profile().->primaryName()) !!).first
     println(parenthesizedContainerMethod)
 
     differentFamilyMaps Option[Result[Int, ParseError]] = optionSource
         .->profile()
         .->primaryName()
         .->parseFirstResult()
-    println(differentFamilyMaps.orPanic().orPanic())
+    println((differentFamilyMaps !!) !!)
 
     lineLeadingDisplayName Option[Str] = optionSource
         .->profile()
         .->primaryName()
         .->display()
-    println(lineLeadingDisplayName.orPanic())
+    println(lineLeadingDisplayName !!)
 
     lineLeadingFirstName Option[Str] = optionSource
         .->profileOpt()
         .->name()
         .->first
-    println(lineLeadingFirstName.orPanic())
+    println(lineLeadingFirstName !!)
 
     # This crosses each plain or lifted member one hop at a time.
     userBoxOpt Option[UserBox] = Some(UserBox { userValue: user })
     firstName Option[Str] = userBoxOpt.->user().->profile().->nameOpt().->first
-    println(firstName.orPanic())
+    println(firstName !!)
 
     profileSource Option[Profile] = Some(user.profile())
     let Some(boundName) = profileSource.->nameOpt().->first else return ()

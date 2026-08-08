@@ -30,15 +30,14 @@ pub(super) fn define() -> RuntimeType {
                 }],
                 option_map,
             ),
-            builtin_method(3, "orPanic", Vec::new(), option_or_panic),
-            builtin_method(4, "getOr", vec![ir::Type::Unknown], option_get_or),
-            builtin_method(5, "orElse", vec![ir::Type::Unknown], option_or_else),
-            builtin_method(6, "toResult", vec![ir::Type::Unknown], option_to_result),
-            builtin_method(7, "toEither", vec![ir::Type::Unknown], option_to_either),
-            builtin_method(8, "iterator", Vec::new(), option_iterator),
-            builtin_method(9, "isSuccess", Vec::new(), option_is_set),
+            builtin_method(3, "getOr", vec![ir::Type::Unknown], option_get_or),
+            builtin_method(4, "orElse", vec![ir::Type::Unknown], option_or_else),
+            builtin_method(5, "toResult", vec![ir::Type::Unknown], option_to_result),
+            builtin_method(6, "toEither", vec![ir::Type::Unknown], option_to_either),
+            builtin_method(7, "iterator", Vec::new(), option_iterator),
+            builtin_method(8, "isSuccess", Vec::new(), option_is_set),
             builtin_method(
-                10,
+                9,
                 "flatMap",
                 vec![ir::Type::Function {
                     params: Vec::new(),
@@ -144,22 +143,6 @@ fn option_flat_map(
     } else {
         Ok(interpreter.option_none())
     }
-}
-
-fn option_or_panic(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "Option.orPanic expects 0 arguments"));
-    }
-    let (case_id, first_field) = option_case(&receiver);
-    if case_id != SOME_CASE {
-        return Err(interpreter.runtime_error(span, "Option has no value"));
-    }
-    Ok(first_field.expect("Option.Some payload"))
 }
 
 fn option_get_or(

@@ -29,24 +29,24 @@ def main() Unit {
     declared Type[User] = typeOf[User]
     actual Type[User] = user.runtimeType
 
-    println(declared.name().orPanic())
-    println(actual.qualifiedName().orPanic())
+    println(declared.name() !!)
+    println(actual.qualifiedName() !!)
     println(declared.kind())
 
-    classType ClassType[User] = declared.asClass().orPanic()
+    classType ClassType[User] = declared.asClass() !!
     fields [Field] = classType.fields()
     println(fields.size())
 
-    nameField Field = fields.get(0).orPanic()
-    ageField Field = fields.get(1).orPanic()
+    nameField Field = fields.get(0) !!
+    ageField Field = fields.get(1) !!
 
     println(nameField.name())
-    println(nameField.fieldType().name().orPanic())
+    println(nameField.fieldType().name() !!)
     println(ageField.name())
-    println(ageField.fieldType().name().orPanic())
+    println(ageField.fieldType().name() !!)
 
-    enumType EnumType[Status] = typeOf[Status].asEnum().orPanic()
-    println(enumType.name().orPanic())
+    enumType EnumType[Status] = typeOf[Status].asEnum() !!
+    println(enumType.name() !!)
     println(enumType.kind())
-    println(enumType.case("Pending").orPanic().name())
+    println((enumType.case("Pending") !!).name())
 }

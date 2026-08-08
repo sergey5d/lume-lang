@@ -1134,6 +1134,7 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_postfix_expr(&mut self) -> Option<Expr> {
         let mut expr = self.parse_primary_expr()?;
         let mut chain_segment_count = 0;
+        let mut unsafe_extract_span = None;
         loop {
             if self.at(TokenKind::Newline)
                 && (self.at_next(TokenKind::Dot) || self.at_next(TokenKind::DotArrow))
@@ -1142,6 +1143,8 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.match_token(TokenKind::DotArrow) {
+                self.diagnose_unsafe_extract_chain(unsafe_extract_span, self.previous_span());
+                unsafe_extract_span = None;
                 let operator_span = self.previous_span();
                 let (name, end) = self.parse_member_name("expected member name after '.->'")?;
                 let param = format!("__lume_chain{}", chain_segment_count);
@@ -1162,6 +1165,8 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.match_token(TokenKind::LParen) {
+                self.diagnose_unsafe_extract_chain(unsafe_extract_span, self.previous_span());
+                unsafe_extract_span = None;
                 let args = self.parse_call_args()?;
                 let end = self.consume(TokenKind::RParen, "expected ')' after arguments")?;
                 let start = expr.span();
@@ -1174,6 +1179,8 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.match_token(TokenKind::Dot) {
+                self.diagnose_unsafe_extract_chain(unsafe_extract_span, self.previous_span());
+                unsafe_extract_span = None;
                 self.skip_newlines();
                 if self.at(TokenKind::Arrow) {
                     self.error_at_current(
@@ -1192,6 +1199,8 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.match_token(TokenKind::LBracket) {
+                self.diagnose_unsafe_extract_chain(unsafe_extract_span, self.previous_span());
+                unsafe_extract_span = None;
                 let start = expr.span();
                 if matches!(expr, Expr::Identifier { ref name, .. } if name == "typeOf") {
                     let ty = self.parse_type_ref()?;
@@ -1210,6 +1219,17 @@ impl<'a> Parser<'a> {
                     index: Box::new(index),
                     span: start.cover(end),
                 };
+                continue;
+            }
+            if self.match_token(TokenKind::BangBang) {
+                let operator_span = self.previous_span();
+                let start = expr.span();
+                expr = Expr::Unary {
+                    op: UnaryOp::UnsafeExtract,
+                    expr: Box::new(expr),
+                    span: start.cover(operator_span),
+                };
+                unsafe_extract_span = Some(operator_span);
                 continue;
             }
             if self.allow_shape_update_operator && self.match_token(TokenKind::ColonLess) {
@@ -1236,6 +1256,8 @@ impl<'a> Parser<'a> {
                 return None;
             }
             if self.allow_trailing_block_call && self.at(TokenKind::LBrace) {
+                self.diagnose_unsafe_extract_chain(unsafe_extract_span, self.current_span());
+                unsafe_extract_span = None;
                 let start = expr.span();
                 let open_span = self.current_span();
                 let arg = if self.looks_like_brace_record_literal(true)
@@ -1275,6 +1297,17 @@ impl<'a> Parser<'a> {
             break;
         }
         Some(expr)
+    }
+
+    fn diagnose_unsafe_extract_chain(&mut self, extract: Option<Span>, postfix: Span) {
+        let Some(extract) = extract else {
+            return;
+        };
+        self.diagnostics.push(Diagnostic::error(
+            "unsafe_extract_requires_grouping",
+            "unsafe extraction '!!' ends the postfix chain; group it before further access, for example '(value !!).member'",
+            extract.cover(postfix),
+        ));
     }
 
     fn parse_trailing_lambda_block_arg(&mut self, open_span: Span) -> Option<Expr> {

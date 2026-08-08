@@ -192,13 +192,13 @@ public final class JdbcRow {
 
     private static String typeName(LumeType type) {
         var name = type.name();
-        return name.isDefined() ? name.orPanic() : type.toString();
+        return name.isDefined() ? (String) LumeRuntime.extractSuccessValue(name) : type.toString();
     }
 
     static String typeLabel(LumeType type) {
         var qualified = type.qualifiedName();
         if (qualified.isDefined()) {
-            return qualified.orPanic();
+            return (String) LumeRuntime.extractSuccessValue(qualified);
         }
         return typeName(type);
     }

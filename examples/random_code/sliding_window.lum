@@ -9,40 +9,41 @@
 
 # A sliding-window limiter remembers accepted requests that still fall inside
 # the current time window. Old requests fall out of the window all at once.
+shape WindowRequest {
+    time Int
+    cost Int
+}
+
 class SlidingWindowLimiter {
     hidden capacity Int
     hidden windowSize Int
-    hidden var accepted List[{ time Int, cost Int }]
+    hidden accepted LinkedList[WindowRequest]
 }
 
 impl SlidingWindowLimiter {
     new(capacity Int, windowSize Int) {
         this.capacity = capacity
         this.windowSize = windowSize
-        this.accepted = []
+        this.accepted = LinkedList {}
     }
 
     def prune(now Int) Unit {
         # Keep only requests whose timestamp still belongs to the active window.
         windowStart = now - this.windowSize
-        kept List[{ time Int, cost Int }] = []
 
-        for request <- this.accepted {
-            if request.time > windowStart {
-                kept.add(request)
+        while !this.accepted.isEmpty() {
+            request = this.accepted[0] !!
+            if request.time <= windowStart {
+                this.accepted.removeFirst()
+            } else {
+                break
             }
         }
-
-        this.accepted := kept
     }
 
-    def usedInWindow() Int {
-        var total Int = 0
-
-        for request <- this.accepted {
-            total += request.cost
-        }
-
+    def usedInWindow(now Int) Int {
+        this.prune(now)
+        total Int = this.accepted.fold(0, (x, y) => x + y.cost)
         total
     }
 
@@ -50,19 +51,17 @@ impl SlidingWindowLimiter {
         # First drop requests that are no longer inside the sliding window.
         this.prune(now)
 
-        currentUsage = this.usedInWindow()
+        used Int = this.usedInWindow(now)
 
-        # Reject requests that would push total usage above the window limit.
-        if currentUsage + cost > this.capacity {
-            return false
+        if this.capacity - cost >= used {
+            this.accepted.add(WindowRequest { time: now, cost: cost })
+            true
+        } else {
+            false
         }
-
-        # Accepted requests are remembered until they age out of the window.
-        this.accepted.add({ time: now, cost: cost })
-        true
     }
 
-    def currentUsage() Int = this.usedInWindow()
+    def currentUsage(now Int) Int = this.usedInWindow(now)
 }
 
 def main() Unit {
@@ -70,19 +69,19 @@ def main() Unit {
     bucket = SlidingWindowLimiter(5, 5)
 
     # Each request carries construction fields instead of a positional tuple.
-    requests List[{ time Int, cost Int }] = List(
-        { time: 0, cost: 3 },
-        { time: 0, cost: 2 },
-        { time: 0, cost: 1 },
-        { time: 2, cost: 2 },
-        { time: 5, cost: 2 },
-        { time: 6, cost: 4 },
-        { time: 7, cost: 3 },
+    requests List[WindowRequest] = List(
+        WindowRequest { time: 0, cost: 3 },
+        WindowRequest { time: 0, cost: 2 },
+        WindowRequest { time: 0, cost: 1 },
+        WindowRequest { time: 2, cost: 2 },
+        WindowRequest { time: 5, cost: 2 },
+        WindowRequest { time: 6, cost: 4 },
+        WindowRequest { time: 7, cost: 3 },
     )
 
     for request <- requests {
         allowed = bucket.allow(request.time, request.cost)
         # Show whether the request passed and how much window usage remains live.
-        println("time", request.time, "cost", request.cost, "allowed", allowed, "usage", bucket.currentUsage())
+        println("time", request.time, "cost", request.cost, "allowed", allowed, "usage", bucket.currentUsage(request.time))
     }
 }

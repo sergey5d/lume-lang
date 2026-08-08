@@ -82,7 +82,7 @@ public final class JsonRuntime {
             return number((Number) value);
         }
         if (value instanceof Option<?> option) {
-            return option.isDefined() ? encode(option.orPanic()) : nil();
+            return option.isDefined() ? encode(LumeRuntime.extractSuccessValue(option)) : nil();
         }
         if (value instanceof LumeList<?> list) {
             return encodeIterable(list.asJava());
@@ -218,9 +218,13 @@ public final class JsonRuntime {
     private static String jsonFieldName(LumeField field) {
         var annotation = field.annotation("JsonName");
         if (annotation.isDefined()) {
-            var value = annotation.orPanic().str("value");
-            if (value.isDefined() && !value.orPanic().isBlank()) {
-                return value.orPanic();
+            var value = ((lume.core.LumeAnnotation) LumeRuntime.extractSuccessValue(annotation))
+                    .str("value");
+            if (value.isDefined()) {
+                var name = (String) LumeRuntime.extractSuccessValue(value);
+                if (!name.isBlank()) {
+                    return name;
+                }
             }
         }
         return field.name();
@@ -229,7 +233,7 @@ public final class JsonRuntime {
     private static Object readField(LumeField field, Object receiver) {
         var result = field.get(receiver);
         if (result.isOk()) {
-            return result.orPanic();
+            return LumeRuntime.extractSuccessValue(result);
         }
         throw new IllegalStateException(result.getError().message());
     }
@@ -362,9 +366,10 @@ public final class JsonRuntime {
             throw new DecodeFailure("cannot decode " + typeLabel(targetType) + ": type has no Java qualified name");
         }
 
+        var javaName = (String) LumeRuntime.extractSuccessValue(qualified);
         Class<?> targetClass;
         try {
-            targetClass = Class.forName(qualified.orPanic());
+            targetClass = Class.forName(javaName);
         } catch (ClassNotFoundException err) {
             throw new DecodeFailure("cannot decode " + typeLabel(targetType) + ": Java class is not available");
         }
@@ -541,13 +546,13 @@ public final class JsonRuntime {
 
     private static String typeName(LumeType type) {
         var name = type.name();
-        return name.isDefined() ? name.orPanic() : type.toString();
+        return name.isDefined() ? (String) LumeRuntime.extractSuccessValue(name) : type.toString();
     }
 
     private static String typeLabel(LumeType type) {
         var qualified = type.qualifiedName();
         if (qualified.isDefined()) {
-            return qualified.orPanic();
+            return (String) LumeRuntime.extractSuccessValue(qualified);
         }
         return typeName(type);
     }
@@ -557,7 +562,7 @@ public final class JsonRuntime {
         if (!qualified.isDefined()) {
             return "";
         }
-        var name = qualified.orPanic();
+        var name = (String) LumeRuntime.extractSuccessValue(qualified);
         var dot = name.lastIndexOf('.');
         return dot < 0 ? "" : name.substring(0, dot);
     }

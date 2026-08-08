@@ -1,0 +1,23 @@
+# EXPECT:
+# Ada
+# 7
+# 9
+# 13
+
+shape User {
+    name Str
+}
+
+def main() Unit {
+    maybeUser Option[User] = Some(User { name: "Ada" })
+    println((maybeUser !!).name)
+
+    result Result[Int, Str] = Ok(7)
+    either Either[Str, Int] = Right(9)
+    println(result !!)
+    println(either !!)
+
+    values LinkedList[Int] = LinkedList {}
+    values.add(13)
+    println(values[0] !!)
+}

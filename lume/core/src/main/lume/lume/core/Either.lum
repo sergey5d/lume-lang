@@ -71,8 +71,4 @@ impl Either[L, R] {
         case Right(value) => value
     }
 
-    def orPanic() R = match this {
-        case Left(_) => panic("expected Either.Right")
-        case Right(value) => value
-    }
 }

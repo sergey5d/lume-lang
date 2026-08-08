@@ -43,7 +43,7 @@ impl AssetPrices {
             if !result.contains(fromAsset) {
                 result.put(fromAsset, [])
             }
-            fromPrices = result.get(fromAsset).orPanic()
+            fromPrices = result.get(fromAsset) !!
             fromPrices.add((split[1], price))
             
             if !result.contains(toAsset) {

@@ -64,8 +64,4 @@ impl Option[T] {
         case None => List().iterator()
     }
 
-    def orPanic() T = match this {
-        case Some(value) => value
-        case None => panic("expected Option.Some")
-    }
 }

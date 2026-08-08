@@ -14,11 +14,6 @@ enum Option[T] {
 
     def isEmpty() Bool = !this.isSet()
 
-    def orPanic() T = match this {
-        case Some(value) => value
-        case Option.None => panic("Option has no value")
-    }
-
     def getOr(defaultValue => T) T = match this {
         case Some(value) => value
         case Option.None => defaultValue

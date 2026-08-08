@@ -2054,11 +2054,8 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = Some(then_block);
         let inner = self.emit_temp_from_rvalue(
             ir::RValue::Call {
-                callee: ir::Callee::Method {
-                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
-                    method: "orPanic".to_string(),
-                },
-                args: Vec::new(),
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
                 structural: false,
             },
             ir::Type::Unknown,
@@ -2161,11 +2158,8 @@ impl<'a> FunctionLowerer<'a> {
             self.current_block = Some(then_block);
             let inner = self.emit_temp_from_rvalue(
                 ir::RValue::Call {
-                    callee: ir::Callee::Method {
-                        receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
-                        method: "orPanic".to_string(),
-                    },
-                    args: Vec::new(),
+                    callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue),
+                    args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
                     structural: false,
                 },
                 ir::Type::Unknown,
@@ -3967,11 +3961,8 @@ impl<'a> FunctionLowerer<'a> {
         self.current_block = Some(success_block);
         let inner = self.emit_temp_from_rvalue(
             ir::RValue::Call {
-                callee: ir::Callee::Method {
-                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
-                    method: "orPanic".to_string(),
-                },
-                args: Vec::new(),
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
                 structural: false,
             },
             ir::Type::Unknown,
@@ -4302,6 +4293,16 @@ impl<'a> FunctionLowerer<'a> {
             }
             Expr::ExtractOr { value, .. } => {
                 let source_ty = self.infer_expr_type_with_overrides(value, overrides);
+                unwrap_lifted_ir_type(&source_ty)
+                    .map(|(_, inner)| inner)
+                    .unwrap_or(ir::Type::Unknown)
+            }
+            Expr::Unary {
+                op: ast::UnaryOp::UnsafeExtract,
+                expr,
+                ..
+            } => {
+                let source_ty = self.infer_expr_type_with_overrides(expr, overrides);
                 unwrap_lifted_ir_type(&source_ty)
                     .map(|(_, inner)| inner)
                     .unwrap_or(ir::Type::Unknown)
@@ -4889,6 +4890,12 @@ impl<'a> FunctionLowerer<'a> {
                 _ => None,
             });
         };
+        if matches!(type_name.as_str(), "List" | "LinkedList")
+            && matches!(name.as_str(), "fold" | "reduce")
+            && args.len() == 2
+        {
+            return Some(self.infer_expr_type_with_overrides(&args[0].value, overrides));
+        }
         let Some(ty) = self.program.types.iter().find(|ty| ty.name == *type_name) else {
             return builtin_member_type(&receiver_ty, name).and_then(|ty| match ty {
                 ir::Type::Function { ret, .. } => Some(*ret),
@@ -5227,10 +5234,20 @@ impl<'a> FunctionLowerer<'a> {
                     ))
                 }
             }
+            Expr::Unary {
+                op: ast::UnaryOp::UnsafeExtract,
+                expr,
+                ..
+            } => Some(ir::RValue::Call {
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::UnsafeExtractSuccessValue),
+                args: vec![self.lower_expr(expr)],
+                structural: false,
+            }),
             Expr::Unary { op, expr, .. } => Some(ir::RValue::Unary {
                 op: match op {
                     ast::UnaryOp::Neg => ir::UnaryOp::Neg,
                     ast::UnaryOp::Not => ir::UnaryOp::Not,
+                    ast::UnaryOp::UnsafeExtract => unreachable!(),
                 },
                 operand: self.lower_expr(expr),
             }),
@@ -5294,10 +5311,25 @@ impl<'a> FunctionLowerer<'a> {
             }),
             Expr::Index {
                 receiver, index, ..
-            } => Some(ir::RValue::Index {
-                base: self.lower_expr(receiver),
-                index: self.lower_expr(index),
-            }),
+            } => {
+                let receiver_ty = self.infer_expr_type(receiver);
+                if matches!(receiver_ty, ir::Type::Named { ref name, ref args } if name == "LinkedList" && args.len() == 1)
+                {
+                    Some(ir::RValue::Call {
+                        callee: ir::Callee::Method {
+                            receiver: self.lower_expr(receiver),
+                            method: "get".to_string(),
+                        },
+                        args: vec![self.lower_expr(index)],
+                        structural: false,
+                    })
+                } else {
+                    Some(ir::RValue::Index {
+                        base: self.lower_expr(receiver),
+                        index: self.lower_expr(index),
+                    })
+                }
+            }
             Expr::Is { left, target, .. } => Some(ir::RValue::TypeTest {
                 operand: self.lower_expr(left),
                 ty: lower_type_ref(target),
@@ -5574,6 +5606,28 @@ impl<'a> FunctionLowerer<'a> {
                     })]);
                 }
                 let receiver_ty = self.infer_expr_type(receiver);
+                if matches!(name.as_str(), "fold" | "reduce") && ordered_args.len() == 2 {
+                    if let ir::Type::Named { name, args } = &receiver_ty {
+                        if matches!(name.as_str(), "List" | "LinkedList") && args.len() == 1 {
+                            let accumulator = self.infer_expr_type(&ordered_args[0].value);
+                            return Some(vec![
+                                Some(ExpectedArgSpec {
+                                    ty: accumulator.clone(),
+                                    lazy: false,
+                                    variadic: false,
+                                }),
+                                Some(ExpectedArgSpec {
+                                    ty: ir::Type::Function {
+                                        params: vec![accumulator.clone(), args[0].clone()],
+                                        ret: Box::new(accumulator),
+                                    },
+                                    lazy: false,
+                                    variadic: false,
+                                }),
+                            ]);
+                        }
+                    }
+                }
                 if let Some((id, subst)) =
                     self.method_expected_arg_target(&receiver_ty, name, ordered_args)
                 {
@@ -5937,7 +5991,8 @@ impl<'a> FunctionLowerer<'a> {
             && (self.brace_call_targets_explicit_constructor(callee)
                 || self.brace_call_targets_implicit_constructor(callee)
                 || self.brace_call_targets_current_constructor(callee)
-                || self.brace_call_targets_enum_case(callee))
+                || self.brace_call_targets_enum_case(callee)
+                || is_empty_linked_list_constructor(callee, args))
         {
             if let Some(args) = brace_record_constructor_args(args) {
                 return args;
@@ -7001,6 +7056,9 @@ fn wrap_lifted_ir_type(family: &LiftedIrFamily, inner: ir::Type) -> ir::Type {
 
 fn index_result_ir_type(ty: &ir::Type) -> ir::Type {
     match ty {
+        ir::Type::Named { name, args } if name == "LinkedList" && args.len() == 1 => {
+            ir::Type::option(args[0].clone())
+        }
         ir::Type::Named { name, args }
             if (name == "Array" || name == "List") && args.len() == 1 =>
         {
@@ -7026,6 +7084,7 @@ fn known_iterable_ir_item_type(ty: &ir::Type) -> Option<ir::Type> {
                 || name == "Iterable"
                 || name == "Iterator"
                 || name == "List"
+                || name == "LinkedList"
                 || name == "Set")
                 && args.len() == 1 =>
         {
@@ -7321,17 +7380,9 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                 args: vec![ir::Type::Unknown, item.clone()],
             }),
         }),
-        ("Option", "orPanic") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(item),
-        }),
         ("Option", "isDefined") => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir::Type::Bool),
-        }),
-        ("Result", "orPanic") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(item),
         }),
         ("Result", "map") => {
             let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
@@ -7381,13 +7432,6 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                     name: "Result".to_string(),
                     args: vec![item.clone(), ir::Type::Unknown],
                 }),
-            })
-        }
-        ("Either", "orPanic") => {
-            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            Some(ir::Type::Function {
-                params: Vec::new(),
-                ret: Box::new(right),
             })
         }
         ("Either", "map") => {
@@ -7628,23 +7672,42 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                 args: vec![ir::Type::named("Any"), ir::Type::named("ReflectionError")],
             }),
         }),
-        ("List" | "Array", "head" | "first" | "last" | "removeFirst" | "removeLast") => {
-            Some(ir::Type::Function {
-                params: Vec::new(),
-                ret: Box::new(ir::Type::option(item)),
-            })
-        }
-        ("List" | "Array", "get" | "remove") => Some(ir::Type::Function {
+        (
+            "List" | "LinkedList" | "Array",
+            "head" | "first" | "last" | "removeFirst" | "removeLast",
+        ) => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::option(item)),
+        }),
+        ("List" | "LinkedList" | "Array", "get" | "remove") => Some(ir::Type::Function {
             params: vec![ir::Type::Int],
             ret: Box::new(ir::Type::option(item)),
         }),
-        ("List" | "Array" | "Set" | "Map" | "Str", "size" | "length") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Int),
+        ("List" | "LinkedList" | "Array" | "Set" | "Map" | "Str", "size" | "length") => {
+            Some(ir::Type::Function {
+                params: Vec::new(),
+                ret: Box::new(ir::Type::Int),
+            })
+        }
+        ("List" | "LinkedList" | "Array" | "Set" | "Map", "isEmpty" | "nonEmpty") => {
+            Some(ir::Type::Function {
+                params: Vec::new(),
+                ret: Box::new(ir::Type::Bool),
+            })
+        }
+        ("LinkedList", "add" | "append") => Some(ir::Type::Function {
+            params: vec![item],
+            ret: Box::new(receiver.clone()),
         }),
-        ("List" | "Array" | "Set" | "Map", "isEmpty" | "nonEmpty") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Bool),
+        ("LinkedList", "fold") => Some(ir::Type::Function {
+            params: vec![
+                ir::Type::Unknown,
+                ir::Type::Function {
+                    params: vec![ir::Type::Unknown, item],
+                    ret: Box::new(ir::Type::Unknown),
+                },
+            ],
+            ret: Box::new(ir::Type::Unknown),
         }),
         ("Map", "entries") if args.len() == 2 => Some(ir::Type::Function {
             params: Vec::new(),
@@ -8279,6 +8342,7 @@ fn builtin_callable_root_name(name: &str) -> bool {
         name,
         "OS" | "Range"
             | "List"
+            | "LinkedList"
             | "Array"
             | "Set"
             | "Map"
@@ -8426,6 +8490,11 @@ fn brace_record_constructor_args(args: &[core::CallArg]) -> Option<Vec<core::Cal
     }
 
     None
+}
+
+fn is_empty_linked_list_constructor(callee: &Expr, args: &[core::CallArg]) -> bool {
+    matches!(callee, Expr::Identifier { name, .. } if name == "LinkedList")
+        && brace_record_constructor_args(args).is_some_and(|args| args.is_empty())
 }
 
 fn param_names_from_function(function: &ir::Function) -> Vec<String> {

@@ -1,0 +1,45 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
+
+interface LinkedList[T] with Iterable[T] {
+    def append(value T) LinkedList[T]
+    def add(value T) LinkedList[T]
+    def addAll(values Iterable[T]) LinkedList[T]
+    def map[X](f (T) => X) LinkedList[X]
+    def flatMap[X](f (T) => LinkedList[X]) LinkedList[X]
+    def filter(f (T) => Bool) LinkedList[T]
+    def fold[X](initial X, f (X, T) => X) X
+    def reduce[X](initial X, f (X, T) => X) X
+    def reduce(f (T, T) => T) Option[T]
+    def exists(f (T) => Bool) Bool
+    def forAll(f (T) => Bool) Bool
+    def zip[X](other LinkedList[X]) LinkedList[(T, X)]
+    def zipWithIndex() LinkedList[(T, Int)]
+    def get(index Int) Option[T]
+    def head() Option[T]
+    def first() Option[T]
+    def last() Option[T]
+    def tail() LinkedList[T]
+    def isEmpty() Bool
+    def nonEmpty() Bool = !this.isEmpty()
+    def remove(index Int) Option[T]
+    def removeFirst() Option[T]
+    def removeLast() Option[T]
+    def size() Int
+    def forEach(f (T) => Unit)
+    def iterator() Iterator[T]
+
+    def makeStr(separator Str) Str {
+        var result Str = ""
+        for idx <- Range(0, this.size()) {
+            if let Some(item) = this.get(idx) {
+                if idx > 0 {
+                    result := result + separator
+                }
+                result := result + item
+            }
+        }
+        result
+    }
+}

@@ -65,7 +65,7 @@ public final class HttpResponder {
 
         LumeType runtimeType = LumeRuntime.runtimeTypeOf(value);
         Option<String> name = runtimeType.name();
-        return name.isDefined() && expectedName.equals(name.orPanic());
+        return name.isDefined() && expectedName.equals(LumeRuntime.extractSuccessValue(name));
     }
 
     private static int intField(Object value, String fieldName, int fallback) {

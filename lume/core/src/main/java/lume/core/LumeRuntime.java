@@ -135,6 +135,19 @@ public final class LumeRuntime {
                 new LumeMethod[] {});
     }
 
+    public static Object probeSuccessValue(Object value) {
+        if (value instanceof Option.Some<?> some) {
+            return some.value();
+        }
+        if (value instanceof Result.Ok<?, ?> ok) {
+            return ok.value();
+        }
+        if (value instanceof Either.Right<?, ?> right) {
+            return right.value();
+        }
+        return LumeUnit.INSTANCE;
+    }
+
     public static Object extractSuccessValue(Object value) {
         if (value instanceof Option.Some<?> some) {
             return some.value();
