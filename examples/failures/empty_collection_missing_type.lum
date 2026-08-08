@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*cannot infer the type of empty collection.*add an array or map type annotation.*
 
-def main() Unit {
+main() Unit {
     values = []
 }

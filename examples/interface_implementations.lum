@@ -6,11 +6,11 @@
 # annotation Annotation
 
 interface Labeled {
-    def label() Str
+    label() Str
 }
 
 interface Metadata {
-    def category() Str = "metadata"
+    category() Str = "metadata"
 }
 
 annotation Route with Metadata {
@@ -23,7 +23,7 @@ shape NamedShape with Labeled {
 }
 
 impl NamedShape {
-    def label() Str = this.name
+    label() Str = this.name
 }
 
 enum Status with Labeled {
@@ -34,7 +34,7 @@ enum Status with Labeled {
 }
 
 impl Status {
-    def label() Str = match this {
+    label() Str = match this {
         case Ready => "ready"
         case Failed(reason) => reason
     }
@@ -44,12 +44,12 @@ object Greeter with Labeled {
 }
 
 impl object Greeter {
-    def label() Str = this.hello()
+    label() Str = this.hello()
 
-    def hello() Str = "hi"
+    hello() Str = "hi"
 }
 
-def main() Unit {
+main() Unit {
     named NamedShape = NamedShape { name: "shape-value" }
     namedLabel Labeled = named
     println("shape", namedLabel.label())

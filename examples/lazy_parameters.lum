@@ -21,21 +21,21 @@ impl Counter {
         this.value
 }
 
-def twice(value => Int) Int =
+twice(value => Int) Int =
     value + value
 
-def inner(value => Int) Int =
+inner(value => Int) Int =
     value
 
-def outer(value => Int) Int =
+outer(value => Int) Int =
     inner(value) + inner(value)
 
-def cachedOnce(value => Int) Int {
+cachedOnce(value => Int) Int {
     cached Int = value
     cached + cached
 }
 
-def main() Unit {
+main() Unit {
     counter Counter = Counter()
 
     println(twice(counter.next()))

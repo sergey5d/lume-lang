@@ -14,11 +14,11 @@
 # plain data classes still work well with field-wise updates and destructuring
 
 interface Hopper {
-    def hop() Str
+    hop() Str
 }
 
 interface Jumper {
-    def jump(steps Int) Str
+    jump(steps Int) Str
 }
 
 class Amount with Hopper, Jumper {
@@ -28,19 +28,19 @@ class Amount with Hopper, Jumper {
 }
 
 impl Amount {
-    def multiple(other Amount) Amount = Amount {
+    multiple(other Amount) Amount = Amount {
         amount: this.amount * other.amount
         description: this.description + " " + other.description
         count: 0
     }
 
-    def reportAmount() {
+    reportAmount() {
         println("amount:", this.amount)
     }
 
-    def hop() Str = "Hop-hop"
+    hop() Str = "Hop-hop"
 
-    def jump(steps Int) Str = "Jump " + steps + " steps"
+    jump(steps Int) Str = "Jump " + steps + " steps"
 }
 
 a1 = Amount(10, "description", 5)
@@ -54,7 +54,7 @@ a3 = a2 :< { amount: 101, description: a2.description + " updated" }
 
 a4 = a3 :< { amount: 102 } :< { count: 7 }
 
-def main() Unit {
+main() Unit {
     println(amountAmount)
     println(amountDescr)
     println(a1.count)

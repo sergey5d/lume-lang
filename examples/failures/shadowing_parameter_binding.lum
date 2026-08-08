@@ -1,9 +1,9 @@
 # FAIL_REGEX:
 # .*binding 'value' shadows a function parameter; use a different name.*
 
-def bad(value Int) Int {
+bad(value Int) Int {
     value = 2
     value
 }
 
-def main() Int = bad(1)
+main() Int = bad(1)

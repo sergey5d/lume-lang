@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*cannot mix array items and map entries in the same bracket literal.*
 
-def main() Unit {
+main() Unit {
     values = [1, "two": 2]
 }

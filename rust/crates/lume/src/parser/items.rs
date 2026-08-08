@@ -203,7 +203,7 @@ impl<'a> Parser<'a> {
                 }
                 self.error_at_current(
                     "unexpected_top_level_statement",
-                    "top-level statements are not allowed; move executable code into a function such as 'def main() { ... }'",
+                    "top-level statements are not allowed; move executable code into a function such as 'main() { ... }'",
                 );
                 None
             }

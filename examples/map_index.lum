@@ -6,12 +6,12 @@
 # inferred 3
 # pure -1
 
-def plusOne(entries [Str: Int], key Str) Option[Int] {
+plusOne(entries [Str: Int], key Str) Option[Int] {
     value = try entries[key]
     Some(value + 1)
 }
 
-def main() Unit {
+main() Unit {
     entries [Str: Int] = ["a": 1, "b": 2]
     present = entries["a"]
     missing = entries["z"]

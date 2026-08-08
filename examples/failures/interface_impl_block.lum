@@ -2,11 +2,11 @@
 # unknown impl target 'Named'
 
 interface Named {
-    def name() Str = "named"
+    name() Str = "named"
 }
 
 impl Named {
-    def other() Str = "other"
+    other() Str = "other"
 }
 
-def main() Int = 0
+main() Int = 0

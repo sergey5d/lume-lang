@@ -8,6 +8,6 @@ enum Signal {
     case Stop
 }
 
-def main() Unit {
+main() Unit {
     value Signal = Signal.Stop()
 }

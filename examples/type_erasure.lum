@@ -3,17 +3,17 @@
 # 0
 # 0
 
-def acceptUnknownArray(values [_]) Unit {
+acceptUnknownArray(values [_]) Unit {
     println(values.size())
 }
 
-def same[T](left T, right T) Unit {}
+same[T](left T, right T) Unit {}
 
-def intStrMap() [Int: Str] = []
+intStrMap() [Int: Str] = []
 
-def strIntMap() [Str: Int] = []
+strIntMap() [Str: Int] = []
 
-def main() Unit {
+main() Unit {
     values [_] = [1, 2, 3]
     keyErased [_: Str] = intStrMap()
     fullyErased [_: _] = strIntMap()

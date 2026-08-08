@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*for-yield Result generator has failure type 'Int', but the comprehension already uses Result failure type 'Str'.*
 
-def main() Unit {
+main() Unit {
     first Result[Int, Str] = Ok(1)
     second Result[Int, Int] = Ok(2)
 

@@ -14,14 +14,14 @@
 # merge Ada Tampa
 # total 80
 
-def helper() Int =
+helper() Int =
     3 +
         4
 
-def splitValue() Int =
+splitValue() Int =
     5
 
-def main() Unit {
+main() Unit {
     split =
         5
 

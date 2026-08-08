@@ -10,9 +10,9 @@ impl Counter {
         this.count = count
     }
 
-    def bad(count Int) Unit {
+    bad(count Int) Unit {
         count := count + 1
     }
 }
 
-def main() Unit {}
+main() Unit {}

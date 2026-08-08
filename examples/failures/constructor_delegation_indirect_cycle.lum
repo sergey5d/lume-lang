@@ -12,4 +12,4 @@ impl User {
     new(age Int) = this("unknown")
 }
 
-def main() Unit = ()
+main() Unit = ()

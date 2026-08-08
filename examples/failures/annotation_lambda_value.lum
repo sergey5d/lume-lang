@@ -6,4 +6,4 @@ annotation Flag {
 }
 
 @Flag { value: x => x + 1 }
-def main() Unit {}
+main() Unit {}

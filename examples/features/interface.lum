@@ -2,7 +2,7 @@
 # interface Ada
 
 interface Named {
-    def name() Str
+    name() Str
 }
 
 class Person with Named {
@@ -10,14 +10,14 @@ class Person with Named {
 }
 
 impl Person {
-    def name() Str =
+    name() Str =
         this.name
 }
 
-def describe(value Named) Str =
+describe(value Named) Str =
     value.name()
 
-def main() Unit {
+main() Unit {
     person Person = Person { name: "Ada" }
     println("interface", describe(person))
 }

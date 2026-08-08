@@ -5,16 +5,16 @@ use lume/http/javalin/{HttpServer, Controller, Get, Post}
 @Controller { path: "/api" }
 class GreetingController {
     @Get { path: "/health" }
-    def health() Str = "ok"
+    health() Str = "ok"
 
     @Get { path: "/hello" }
-    def hello() Str = "{ \"message\": \"hello from Lume via Gradle\" }"
+    hello() Str = "{ \"message\": \"hello from Lume via Gradle\" }"
 
     @Post { path: "/echo" }
-    def echo(body Str) Str = """{ "echo": "$body" }"""
+    echo(body Str) Str = """{ "echo": "$body" }"""
 }
 
-def main() Unit {
+main() Unit {
     server HttpServer = HttpServer(7070).virtualThreads()
     server.addController(GreetingController())
     server.run()

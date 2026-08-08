@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*array pattern requires an Array value, got '\(Int, Int\)'.*
 
-def main() Unit {
+main() Unit {
     pair = (1, 2)
     let [left, right] = pair else return ()
 

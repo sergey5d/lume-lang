@@ -6,10 +6,10 @@ class Counter {
 }
 
 impl Counter {
-    def bad() Int {
+    bad() Int {
         let Some(count) = Some(1) else return this.count
         this.count
     }
 }
 
-def main() Unit {}
+main() Unit {}

@@ -2,7 +2,7 @@
 # .*parameter 'marker' cannot have type Unit; omit the parameter.*
 
 class Worker {
-    def run(marker Unit) Unit = ()
+    run(marker Unit) Unit = ()
 }
 
-def main() Unit = ()
+main() Unit = ()

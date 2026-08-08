@@ -8,7 +8,7 @@ enum Outcome {
 }
 
 impl Outcome.Left {
-    def describe() Str = this.value
+    describe() Str = this.value
 }
 
-def main() Int = 0
+main() Int = 0

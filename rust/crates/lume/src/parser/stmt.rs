@@ -78,6 +78,11 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Break) => self.parse_break_stmt().map(Stmt::Break),
             TokenKind::Keyword(Keyword::Continue) => self.parse_continue_stmt().map(Stmt::Continue),
             _ => {
+                if self.starts_local_callable_decl() {
+                    let function =
+                        self.parse_function_decl(Vec::new(), Visibility::Default, true)?;
+                    return Some(Stmt::LocalFunction(function));
+                }
                 if self.at_removed_assert_statement() {
                     self.error_at_current(
                         "removed_assert_statement",

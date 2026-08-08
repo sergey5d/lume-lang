@@ -9,7 +9,7 @@ annotation FeatureTag {
 class TaggedFeature {
 }
 
-def main() Unit {
+main() Unit {
     value TaggedFeature = TaggedFeature {}
     println("annotation ok")
 }

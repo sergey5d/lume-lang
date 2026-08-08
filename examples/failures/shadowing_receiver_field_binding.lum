@@ -6,10 +6,10 @@ class Counter {
 }
 
 impl Counter {
-    def bad() Int {
+    bad() Int {
         count = 1
         count
     }
 }
 
-def main() Unit {}
+main() Unit {}

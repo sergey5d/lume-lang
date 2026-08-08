@@ -11,4 +11,4 @@ impl User {
     }
 }
 
-def main() Unit = ()
+main() Unit = ()

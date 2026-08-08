@@ -25,10 +25,10 @@ object Descending with Ordering[Int] {
 }
 
 impl object Descending {
-    def compare(left Int, right Int) Int = right - left
+    compare(left Int, right Int) Int = right - left
 }
 
-def main() Unit {
+main() Unit {
     items = [1, 2, 3]
     items.append(4)
 

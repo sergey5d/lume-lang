@@ -8,21 +8,21 @@ class User {
     name Str
 }
 
-def typeName[reified A](value A) Str =
+typeName[reified A](value A) Str =
     typeOf[A].name() !!
 
 class Inspector {
 }
 
 impl Inspector {
-    def valueTypeName[reified A](value A) Str =
+    valueTypeName[reified A](value A) Str =
         typeOf[A].name() !!
 
-    def namedTypeName[reified A]() Str =
+    namedTypeName[reified A]() Str =
         typeOf[A].name() !!
 }
 
-def main() Int {
+main() Int {
     user User = User { name: "Ada" }
     inspector Inspector = Inspector {}
 

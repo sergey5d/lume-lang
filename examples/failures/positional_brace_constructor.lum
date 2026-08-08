@@ -5,6 +5,6 @@ class Box {
     value Int
 }
 
-def main() Unit {
+main() Unit {
     _ Box = Box { 1 }
 }

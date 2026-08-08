@@ -5,4 +5,4 @@ shape User {
     name Str
 }
 
-def main(value Option[User]) Str = value !!.name
+main(value Option[User]) Str = value !!.name

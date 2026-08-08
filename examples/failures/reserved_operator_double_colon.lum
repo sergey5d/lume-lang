@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*operator '::' is reserved and not currently supported.*
 
-def main() Unit {
+main() Unit {
     value = head :: tail
 }

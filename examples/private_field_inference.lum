@@ -10,11 +10,11 @@ class CounterBox {
 }
 
 impl CounterBox {
-    def bump() Unit {
+    bump() Unit {
         this.hits += this.count
     }
 
-    def total() Int = this.hits
+    total() Int = this.hits
 }
 
 object Greeter {
@@ -22,10 +22,10 @@ object Greeter {
 }
 
 impl object Greeter {
-    def greet(times Int) Str = this.hello + " " + times
+    greet(times Int) Str = this.hello + " " + times
 }
 
-def main() Int {
+main() Int {
     box = CounterBox {}
     box.bump()
     box.bump()

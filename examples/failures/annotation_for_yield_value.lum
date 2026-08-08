@@ -6,4 +6,4 @@ annotation Flag {
 }
 
 @Flag { values: for item <- [1, 2] yield { item } }
-def main() Unit {}
+main() Unit {}

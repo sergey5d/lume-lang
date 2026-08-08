@@ -1,9 +1,9 @@
 # FAIL_REGEX:
 # .*spread arguments are only valid as positional arguments for a vararg parameter.*
 
-def fixed(value Int) Unit = ()
+fixed(value Int) Unit = ()
 
-def main() Unit {
+main() Unit {
     values = [1, 2]
     fixed(...values)
 }

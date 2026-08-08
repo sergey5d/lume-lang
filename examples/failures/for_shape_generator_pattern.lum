@@ -6,7 +6,7 @@ shape User {
     age Int
 }
 
-def main() Unit {
+main() Unit {
     users [User] = [User("Ada", 37)]
 
     for { name, age } <- users {

@@ -10,12 +10,12 @@ enum MaybeInt {
     }
 }
 
-def partialValue(value MaybeInt) Option[Int] =
+partialValue(value MaybeInt) Option[Int] =
     partial match value {
         case SomeX(item) => item
     }
 
-def main() Unit {
+main() Unit {
     value = partialValue(MaybeInt.SomeX(5))
     missing = partialValue(MaybeInt.NoneX)
 

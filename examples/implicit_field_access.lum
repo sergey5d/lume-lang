@@ -17,17 +17,17 @@ impl Counter {
         this.count = initial
     }
 
-    def value() Int = count
+    value() Int = count
 
-    def bump() Unit {
+    bump() Unit {
         count := count + 1
     }
 
-    def plus(delta Int) Int = count + delta
+    plus(delta Int) Int = count + delta
 
-    def shadow(count Int) Int = this.count + count
+    shadow(count Int) Int = this.count + count
 
-    def lambdaValue() Int {
+    lambdaValue() Int {
         reader = () => count + 1
         reader()
     }
@@ -40,10 +40,10 @@ enum Color {
         code = "red"
     }
 
-    def label() Str = code
+    label() Str = code
 }
 
-def main() Unit {
+main() Unit {
     counter = Counter(5)
     println("initial", counter.value())
     counter.bump()

@@ -3,21 +3,21 @@
 # 0
 
 interface WorkerLike {
-    def doWork() Int
+    doWork() Int
 }
 
 class Worker with WorkerLike {
 }
 
 impl Worker {
-    def doWork() Int = 7
+    doWork() Int = 7
 }
 
 class Other with WorkerLike {
 }
 
 impl Other {
-    def doWork() Int = 3
+    doWork() Int = 3
 }
 
 class PairBox {
@@ -25,7 +25,7 @@ class PairBox {
     right Int
 }
 
-def main() Int {
+main() Int {
     workerLike WorkerLike = Worker {}
     println(match workerLike {
        case worker Worker => worker.doWork()

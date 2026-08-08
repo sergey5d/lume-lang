@@ -9,8 +9,8 @@ object Routes {
 }
 
 impl object Routes {
-    def health() Str = "/health"
+    health() Str = "/health"
 }
 
 @Route { path: Routes.health() }
-def main() Unit {}
+main() Unit {}

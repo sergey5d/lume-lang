@@ -6,11 +6,11 @@ class Greeter {
 }
 
 impl Greeter {
-    def greet() Str =
+    greet() Str =
         "hello " + this.name
 }
 
-def main() Unit {
+main() Unit {
     greeter Greeter = Greeter { name: "Ada" }
     println("impl", greeter.greet())
 }

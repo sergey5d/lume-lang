@@ -1,4 +1,4 @@
 # SKIP
 module util
 
-def greet(name Str) Str = "hello, " + name
+greet(name Str) Str = "hello, " + name

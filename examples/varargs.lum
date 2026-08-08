@@ -9,7 +9,7 @@
 # ctor named config 2 etc/hosts
 # ctor default tmp 1 default
 
-def joinWords(separator Str, words [Str] vararg) Str {
+joinWords(separator Str, words [Str] vararg) Str {
     var result = ""
     var first = true
     for word <- words {
@@ -23,7 +23,7 @@ def joinWords(separator Str, words [Str] vararg) Str {
     result
 }
 
-def describeTags(label Str, tags [Str] vararg) Str {
+describeTags(label Str, tags [Str] vararg) Str {
     first = tags.get(0).getOr("none")
     label + " " + tags.size() + " " + first
 }
@@ -37,7 +37,7 @@ impl Reporter {
         this.prefix = prefix
     }
 
-    def line(name Str, tags [Str] vararg) Str {
+    line(name Str, tags [Str] vararg) Str {
         this.prefix + ":" + name + "|" + tags.size() + "|" + joinWords(separator = ",", words = tags)
     }
 }
@@ -53,10 +53,10 @@ impl Path {
         this.segments = segments
     }
 
-    def render() Str = this.label + " " + this.segments.size() + " " + joinWords(separator = "/", words = this.segments)
+    render() Str = this.label + " " + this.segments.size() + " " + joinWords(separator = "/", words = this.segments)
 }
 
-def main() Unit {
+main() Unit {
     println("function tags", describeTags("alpha", "alpha", "beta", "gamma"), "joined", joinWords(" ", "alpha", "beta", "gamma"))
     extra = ["beta", "gamma"]
     println("function spread", describeTags("delta", "alpha", ...extra, "omega"), "joined", joinWords(" ", "alpha", ...extra, "omega"))

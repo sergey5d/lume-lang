@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # unknown_member at .*: type 'OS' has no field or method 'assert'
 
-def main() Unit {
+main() Unit {
     OS.assert(true)
 }

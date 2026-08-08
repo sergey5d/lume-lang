@@ -27,23 +27,23 @@ class Person with Named, Aged {
         this.city = "unknown"
     }
 
-    def fullName() Str = this.firstName + " " + this.lastName
+    fullName() Str = this.firstName + " " + this.lastName
 
-    def isAdult() Bool = this.age >= 18
+    isAdult() Bool = this.age >= 18
 
-    def moveTo(newCity Str) Unit {
+    moveTo(newCity Str) Unit {
         this.city := newCity
     }
 
-    def celebrateBirthday() Unit {
+    celebrateBirthday() Unit {
         this.age += 1
         this.internalScore += 10
     }
 
-    def archive() Unit {
+    archive() Unit {
         this.archived := true
     }
 
-    def debugLabel() Str =
+    debugLabel() Str =
         fullName() + "@" + this.city + ":" + this.age + ":" + this.internalScore + ":" + this.archived
 }

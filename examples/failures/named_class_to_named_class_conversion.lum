@@ -11,7 +11,7 @@ class Target {
     age Int
 }
 
-def main() Unit {
+main() Unit {
     source Source = Source {
         name: "Ada"
         age: 10

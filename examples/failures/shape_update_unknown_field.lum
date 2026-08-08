@@ -5,7 +5,7 @@ class Amount {
     amount Int
 }
 
-def main() Unit {
+main() Unit {
     value = Amount(10)
     updated = value :< { missing: 42 }
 }

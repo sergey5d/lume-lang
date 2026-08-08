@@ -9,4 +9,4 @@ enum Token {
     }
 }
 
-def main() Int = 0
+main() Int = 0

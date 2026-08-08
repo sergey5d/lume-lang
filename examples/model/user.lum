@@ -10,12 +10,12 @@ class Person {
 }
 
 impl Person {
-    def name() Str = this.name
+    name() Str = this.name
 
-    def age() Int = this.age
+    age() Int = this.age
 }
 
-def main() Unit {
+main() Unit {
     person = Person { name: "Ada", age: 36 }
     println(person.name())
     println(person.age())

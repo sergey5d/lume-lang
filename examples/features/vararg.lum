@@ -1,7 +1,7 @@
 # EXPECT:
 # vararg 6
 
-def sum(values [Int] vararg) Int {
+sum(values [Int] vararg) Int {
     var total Int = 0
 
     for value <- values {
@@ -11,6 +11,6 @@ def sum(values [Int] vararg) Int {
     total
 }
 
-def main() Unit {
+main() Unit {
     println("vararg", sum(1, 2, 3))
 }

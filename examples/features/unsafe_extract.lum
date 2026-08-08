@@ -8,7 +8,7 @@ shape User {
     name Str
 }
 
-def main() Unit {
+main() Unit {
     maybeUser Option[User] = Some(User { name: "Ada" })
     println((maybeUser !!).name)
 

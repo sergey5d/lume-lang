@@ -3,7 +3,7 @@
 # hi
 # 6
 
-def main() Unit {
+main() Unit {
     value Int = identity(5)
     text Str = identity("hi")
 

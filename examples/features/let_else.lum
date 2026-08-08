@@ -4,12 +4,12 @@
 # let else group 9
 # let else group missing
 
-def plusOne(value Option[Int]) Result[Int, Str] {
+plusOne(value Option[Int]) Result[Int, Str] {
     let Some(item) = value else return Err("missing")
     Ok(item + 1)
 }
 
-def sumBoth(left Option[Int], right Option[Int]) Result[Int, Str] {
+sumBoth(left Option[Int], right Option[Int]) Result[Int, Str] {
     let {
         Some(a) = left
         Some(b) = right
@@ -17,14 +17,14 @@ def sumBoth(left Option[Int], right Option[Int]) Result[Int, Str] {
     Ok(a + b)
 }
 
-def printResult(label Str, value Result[Int, Str]) Unit {
+printResult(label Str, value Result[Int, Str]) Unit {
     match value {
         case Ok(item) => println(label + " " + item)
         case Err(error) => println(label + " " + error)
     }
 }
 
-def main() Unit {
+main() Unit {
     printResult("let else option", plusOne(Some(5)))
     printResult("let else option", plusOne(None))
     printResult("let else group", sumBoth(Some(4), Some(5)))

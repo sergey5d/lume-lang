@@ -2,5 +2,5 @@
 # .*unknown object impl target 'Logger'; declare 'object Logger \{\}' before 'impl object Logger'.*
 
 impl object Logger {
-    def info(message Str) Unit = println(message)
+    info(message Str) Unit = println(message)
 }

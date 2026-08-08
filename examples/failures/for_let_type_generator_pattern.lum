@@ -3,7 +3,7 @@
 
 class Worker {}
 
-def main() Unit {
+main() Unit {
     values [Any] = [Worker()]
 
     for let worker Worker <- values {

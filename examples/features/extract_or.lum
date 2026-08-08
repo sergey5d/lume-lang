@@ -15,17 +15,17 @@
 # continue sum 6
 # break sum 6
 
-def fallback(label Str, value Int) Int {
+fallback(label Str, value Int) Int {
     println(label)
     value
 }
 
-def early(value Option[Int]) Str {
+early(value Option[Int]) Str {
     item = value ?? return "early missing"
     "early found " + item.toStr()
 }
 
-def continueSum(values [Option[Int]]) Int {
+continueSum(values [Option[Int]]) Int {
     var total Int = 0
     for maybe <- values {
         item = maybe ?? continue
@@ -34,7 +34,7 @@ def continueSum(values [Option[Int]]) Int {
     total
 }
 
-def breakSum(values [Int]) Int {
+breakSum(values [Int]) Int {
     var total Int = 0
     var index Int = 0
     while true {
@@ -45,13 +45,13 @@ def breakSum(values [Int]) Int {
     total
 }
 
-def blockFallback(value Option[Int]) Int =
+blockFallback(value Option[Int]) Int =
     value ?? {
         println("block fallback")
         42
     }
 
-def main() Unit {
+main() Unit {
     some Option[Int] = Some(5)
     none Option[Int] = None
     ok Result[Int, Str] = Ok(7)

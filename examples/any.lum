@@ -18,7 +18,7 @@ object Marker {
     label Str = "marker"
 }
 
-def main() Unit {
+main() Unit {
     person = Person { name: "Ada" }
     otherPerson = Person { name: "Ada" }
     println("class", person.equals(otherPerson), person.toStr())

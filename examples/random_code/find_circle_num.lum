@@ -17,7 +17,7 @@ impl DisjointSet {
         this.arr = FixedArray.generate(size, i => i)
     }
 
-    def findParent(v Int) Int {
+    findParent(v Int) Int {
         var current Int = v
         while this.arr[current] != current {
             current := this.arr[current]
@@ -25,7 +25,7 @@ impl DisjointSet {
         return current
     }
 
-    def union(v1 Int, v2 Int) {
+    union(v1 Int, v2 Int) {
         v1SelfParent = this.arr[v1] == v1
         v2SelfParent = this.arr[v2] == v2
 
@@ -45,7 +45,7 @@ impl DisjointSet {
     }
 }
 
-def findCircleNumUnion(isConnected [[Int]]) Int {
+findCircleNumUnion(isConnected [[Int]]) Int {
     set = DisjointSet(isConnected.size())
 
     for i <- Range(0, isConnected.size()) {
@@ -66,7 +66,7 @@ def findCircleNumUnion(isConnected [[Int]]) Int {
     return parentSet.size()
 }
 
-def findCircleNumTraversal(isConnected [[Int]]) Int {
+findCircleNumTraversal(isConnected [[Int]]) Int {
     directConns FixedArray[Set[Int]] = FixedArray.generate(isConnected.size(), idx => Set())
 
     for i <- Range(0, isConnected.size()) {
@@ -101,7 +101,7 @@ def findCircleNumTraversal(isConnected [[Int]]) Int {
     return areaCount
 }
 
-def main() Int {
+main() Int {
     connected1 [[Int]] = [
         [1, 1, 0],
         [1, 1, 0],

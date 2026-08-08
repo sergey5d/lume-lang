@@ -15,7 +15,7 @@ impl Label {
     }
 }
 
-def main() Unit {
+main() Unit {
     label = Label(shape("Ada", 10))
     println(label.value)
 }

@@ -4,10 +4,10 @@
 class Runner {}
 
 impl Runner {
-    def zero(f fn() => Int) Int = f()
+    zero(f fn() => Int) Int = f()
 }
 
-def main() Unit {
+main() Unit {
     runner = Runner {}
     println(runner.zero {
         26

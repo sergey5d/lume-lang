@@ -11,4 +11,4 @@ impl Counter {
     }
 }
 
-def main() Unit {}
+main() Unit {}

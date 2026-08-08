@@ -4,4 +4,4 @@ class Bad {
     value = 1
 }
 
-def main() Int = 0
+main() Int = 0

@@ -86,7 +86,7 @@ class FlagShape {
     value InnerFlag
 }
 
-def main() Unit {
+main() Unit {
     apple11 = Apple(11)
     appleBox = AppleBox { apple: apple11 }
     classInClass = match appleBox {

@@ -4,21 +4,21 @@
 # 0
 
 interface Hopper {
-    def hop() Str = "hop"
+    hop() Str = "hop"
 }
 
 interface Jumper {
-    def jump(steps Int) Str
+    jump(steps Int) Str
 }
 
 class Rabbit with Hopper, Jumper {
 }
 
 impl Rabbit {
-    def jump(steps Int) Str = "jump " + steps
+    jump(steps Int) Str = "jump " + steps
 }
 
-def main() Int {
+main() Int {
     rabbit Hopper = Rabbit {}
     jumper Jumper = Rabbit {}
     println(rabbit.hop())

@@ -2,12 +2,12 @@
 # .*anonymous implementation of interface 'Reader' is missing method 'close'.*
 
 interface Reader {
-    def read() Str
-    def close() Unit
+    read() Str
+    close() Unit
 }
 
-def main() Unit {
+main() Unit {
     handler Reader = Reader {
-        def read() Str = "open"
+        read() Str = "open"
     }
 }

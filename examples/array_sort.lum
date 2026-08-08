@@ -7,17 +7,17 @@ object Ascending with Ordering[Int] {
 }
 
 impl object Ascending {
-    def compare(left Int, right Int) Int = left - right
+    compare(left Int, right Int) Int = left - right
 }
 
 object Descending with Ordering[Int] {
 }
 
 impl object Descending {
-    def compare(left Int, right Int) Int = right - left
+    compare(left Int, right Int) Int = right - left
 }
 
-def main() Int {
+main() Int {
     asc [Int] = [3, 1, 4, 2]
     asc.sort(Ascending)
     println("asc " + asc.get(0).getOr(0) + " " + asc.get(1).getOr(0) + " " + asc.get(2).getOr(0) + " " + asc.get(3).getOr(0))

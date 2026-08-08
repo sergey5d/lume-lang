@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*function types use 'fn\(\.\.\.\) => T'; write 'fn\(T\) => U'.*
 
-def main() Unit {
+main() Unit {
     mapper Int => Int = value => value + 1
 }

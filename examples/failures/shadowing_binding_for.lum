@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*binding 'item' shadows a local binding; use a different name.*
 
-def main() Int {
+main() Int {
     item = 1
     for item <- [1, 2, 3] {
         println(item)

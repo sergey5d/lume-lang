@@ -5,12 +5,12 @@ class User {
     name Str
 }
 
-def typeLabel[reified A](value A) Str {
+typeLabel[reified A](value A) Str {
     let name <- typeOf[A].name() else panic("expected type name")
     name
 }
 
-def main() Unit {
+main() Unit {
     user User = User { name: "Ada" }
     println("reified", typeLabel(user))
 }

@@ -4,4 +4,4 @@ class Bad {
     hidden value
 }
 
-def main() Int = 0
+main() Int = 0

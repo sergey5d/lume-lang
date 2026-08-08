@@ -16,7 +16,7 @@ class User {
     hidden token Str = "secret"
 }
 
-def main() Unit {
+main() Unit {
     user User = User { name: "Ada", age: 42 }
 
     encoded Str = Json.stringify(user)

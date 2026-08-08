@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*map entry requires a value after ':'.*
 
-def main() Unit {
+main() Unit {
     values [Str : Int] = ["one":]
 }

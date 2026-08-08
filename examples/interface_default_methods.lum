@@ -3,28 +3,28 @@
 # conflict first
 
 interface Greeter {
-    def greet() Str = "interface"
+    greet() Str = "interface"
 }
 
 class OverrideBox with Greeter {
 }
 
 impl OverrideBox {
-    def greet() Str = "class"
+    greet() Str = "class"
 }
 
 interface FirstChoice {
-    def choose() Str = "first"
+    choose() Str = "first"
 }
 
 interface SecondChoice {
-    def choose() Str = "second"
+    choose() Str = "second"
 }
 
 class PreferFirst with FirstChoice, SecondChoice {
 }
 
-def main() Unit {
+main() Unit {
     greeter Greeter = OverrideBox {}
     prefer = PreferFirst {}
 

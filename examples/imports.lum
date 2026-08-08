@@ -6,7 +6,7 @@ module app
 use util
 use model/user
 
-def main() Unit {
+main() Unit {
     person = user.Person { name: "Ada", age: 36 }
     println(util.greet(person.name()))
     println(person.age())

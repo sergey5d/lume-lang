@@ -10,9 +10,9 @@ impl User {
         this.name = name
     }
 
-    def copy() User = this {
+    copy() User = this {
         name: this.name
     }
 }
 
-def main() Unit = ()
+main() Unit = ()

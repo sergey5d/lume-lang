@@ -11,4 +11,4 @@ annotation Flag {
         case _ => 0
     }
 }
-def main() Unit {}
+main() Unit {}

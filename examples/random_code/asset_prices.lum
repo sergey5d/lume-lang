@@ -25,7 +25,7 @@ impl AssetPrices {
         this.asset2PriceMap = this.makePrices()
     }
 
-    def makePrices() [Str: [(Str, Float)]] {
+    makePrices() [Str: [(Str, Float)]] {
         result [Str: [(Str, Float)]] = []
 
         for asset <- this.assets {
@@ -57,7 +57,7 @@ impl AssetPrices {
         result
     }
 
-    def makeResult(prices [((Str, Str), Float)]) Str {
+    makeResult(prices [((Str, Str), Float)]) Str {
         strings [Str] = prices.map(entry => match entry {
             case ((from, to), price) => from + " -> " + to + " at " + price
         })
@@ -65,7 +65,7 @@ impl AssetPrices {
         strings.makeStr(",")
     }
 
-    def findPrice(currAsset Str, endAsset Str, visited Set[Str], prices [((Str, Str), Float)]) Option[[Str]] {
+    findPrice(currAsset Str, endAsset Str, visited Set[Str], prices [((Str, Str), Float)]) Option[[Str]] {
 
         permutations = try this.asset2PriceMap.get(currAsset)
 
@@ -100,9 +100,9 @@ impl AssetPrices {
     }
 }
 
-def main() {
+main() {
 
-    def printResults(results Option[[Str]]) = match results {
+    printResults(results Option[[Str]]) = match results {
         case Some(list) => list.forEach { elem =>
             println("result: " + elem)
         }

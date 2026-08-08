@@ -2,7 +2,7 @@
 # 12.75
 # 0
 
-def findMaxAverage(nums FixedArray[Float], k Int) Float {
+findMaxAverage(nums FixedArray[Float], k Int) Float {
     if nums.size() < k {
         return -1.
     }
@@ -28,7 +28,7 @@ def findMaxAverage(nums FixedArray[Float], k Int) Float {
     return maxTotal / divisor
 }
 
-def main() Int {
+main() Int {
     nums FixedArray[Float] = FixedArray(1., 12., -5., -6., 50., 3.)
 
     println(findMaxAverage(nums, 4))

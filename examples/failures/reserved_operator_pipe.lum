@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*expected expression.*
 
-def main() Unit {
+main() Unit {
     value = left | right
 }

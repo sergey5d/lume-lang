@@ -8,7 +8,7 @@ enum MaybeInt {
     }
 }
 
-def main() Int =
+main() Int =
     match MaybeInt.SomeX(5) {
         case SomeX(x) => x
     }

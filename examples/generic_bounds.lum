@@ -6,7 +6,7 @@ object Ascending with Ordering[Int] {
 }
 
 impl object Ascending {
-    def compare(left Int, right Int) Int = left - right
+    compare(left Int, right Int) Int = left - right
 }
 
 class Box[T with Ordering[T]] {
@@ -17,13 +17,14 @@ class Mapper {
 }
 
 impl Mapper {
-    def pick[X with Ordering[X]](value X) X = value
+    pick[X with Ordering[X]](value X) X = value
 }
 
-def pick[T with Ordering[T]](value T) T = value
-def useBox(value Box[Int]) Int = value.value
+pick[T with Ordering[T]](value T) T = value
 
-def main() Int {
+useBox(value Box[Int]) Int = value.value
+
+main() Int {
     mapper Mapper = Mapper {}
     println(pick(3) + mapper.pick(4))
     0

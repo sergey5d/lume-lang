@@ -4,11 +4,11 @@
 class SecretBox {
     hidden value Str = "secret"
 
-    def reveal() Str =
+    reveal() Str =
         this.value
 }
 
-def main() Unit {
+main() Unit {
     box SecretBox = SecretBox {}
     println("hidden", box.reveal())
 }

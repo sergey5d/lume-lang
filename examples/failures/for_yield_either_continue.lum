@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*`continue` inside `for \.\.\. yield` is only supported for iterable comprehensions; Either comprehensions have no skip state.*
 
-def main() Either[Str, Int] =
+main() Either[Str, Int] =
     for item <- Right(1) yield {
         if item > 0 {
             continue

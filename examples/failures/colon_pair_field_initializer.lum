@@ -5,7 +5,7 @@ class Holder {
     entry (Str, Int)
 }
 
-def main() Unit {
+main() Unit {
     holder = Holder {
         entry: "a": 1
     }

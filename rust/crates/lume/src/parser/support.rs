@@ -177,6 +177,59 @@ impl<'a> Parser<'a> {
         true
     }
 
+    pub(super) fn starts_local_callable_decl(&self) -> bool {
+        self.starts_local_callable_decl_at(self.index)
+    }
+
+    pub(super) fn starts_local_callable_decl_at(&self, start: usize) -> bool {
+        let mut parser = Parser {
+            tokens: self.tokens,
+            index: start,
+            diagnostics: Vec::new(),
+            allow_trailing_block_call: self.allow_trailing_block_call,
+            allow_shape_update_operator: self.allow_shape_update_operator,
+        };
+
+        let Some((_, name_span)) = parser.parse_callable_name("expected callable name") else {
+            return false;
+        };
+
+        let mut head_end = name_span;
+        if parser.at(TokenKind::LBracket) {
+            if !spans_touch(head_end, parser.current_span()) {
+                return false;
+            }
+            if parser.parse_type_params().is_none() {
+                return false;
+            }
+            head_end = parser.previous_span();
+        }
+
+        if !parser.at(TokenKind::LParen) || !spans_touch(head_end, parser.current_span()) {
+            return false;
+        }
+        if parser.parse_param_list().is_none() || !parser.diagnostics.is_empty() {
+            return false;
+        }
+
+        let close = parser.previous_span();
+        if parser.current_span().start_pos.line != close.end_pos.line {
+            return false;
+        }
+        if parser.at(TokenKind::Eq) {
+            return true;
+        }
+        if parser.at(TokenKind::LBrace) {
+            return !parser.looks_like_trailing_lambda_block_start();
+        }
+
+        if !parser.can_start_type_ref() || parser.parse_type_ref().is_none() {
+            return false;
+        }
+        parser.skip_newlines();
+        matches!(parser.current_kind(), TokenKind::Eq | TokenKind::LBrace)
+    }
+
     pub(super) fn match_keyword(&mut self, keyword: Keyword) -> bool {
         if self.at_keyword(keyword) {
             self.advance();

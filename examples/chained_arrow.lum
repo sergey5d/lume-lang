@@ -16,51 +16,51 @@
 class UserBox {
     userValue User
 
-    def user() User = this.userValue
+    user() User = this.userValue
 }
 
 class User {
     profileValue Profile
 
-    def profile() Profile = this.profileValue
+    profile() Profile = this.profileValue
 
-    def profileOpt() Option[Profile] = Some(this.profileValue)
+    profileOpt() Option[Profile] = Some(this.profileValue)
 
-    def profileResult() Result[Profile, Int] = Ok(this.profileValue)
+    profileResult() Result[Profile, Int] = Ok(this.profileValue)
 
-    def profileEither() Either[Str, Profile] = Right(this.profileValue)
+    profileEither() Either[Str, Profile] = Right(this.profileValue)
 
-    def name() Name = this.profileValue.primaryName()
+    name() Name = this.profileValue.primaryName()
 }
 
 class Profile {
     nameValue Name
     users [User] = []
 
-    def primaryName() Name = this.nameValue
+    primaryName() Name = this.nameValue
 
-    def name() Name = this.nameValue
+    name() Name = this.nameValue
 
-    def nameOpt() Option[Name] = Some(this.nameValue)
+    nameOpt() Option[Name] = Some(this.nameValue)
 
-    def nameResult() Result[Name, Int] = Ok(this.nameValue)
+    nameResult() Result[Name, Int] = Ok(this.nameValue)
 
-    def nameEither() Either[Str, Name] = Right(this.nameValue)
+    nameEither() Either[Str, Name] = Right(this.nameValue)
 }
 
 class Name {
     first Str
 
-    def display() Str = this.first
+    display() Str = this.first
 
-    def parseFirstResult() Result[Int, ParseError] = Ok(1)
+    parseFirstResult() Result[Int, ParseError] = Ok(1)
 }
 
 class ParseError {
     message Str
 }
 
-def main() Unit {
+main() Unit {
     friendProfile = Profile {
         nameValue: Name { first: "Ada" }
     }

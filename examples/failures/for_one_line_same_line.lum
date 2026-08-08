@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # for requires a '\{ \.\.\. \}' block body; one-line for forms are not supported
 
-def main() Int {
+main() Int {
     values [Int] = [1, 2, 3]
     for value <- values println(value)
     0

@@ -6,11 +6,11 @@ class Counter {
 }
 
 impl Counter {
-    def bump() Unit {
+    bump() Unit {
         this.count = 1
     }
 }
 
-def main() Unit {
+main() Unit {
     Counter {}.bump()
 }

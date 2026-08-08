@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*cannot spread 'Array\[Int\]' into a map literal; map spread requires a map value.*
 
-def main() Unit {
+main() Unit {
     values = [1, 2]
     entries [Str : Int] = [...values]
 }

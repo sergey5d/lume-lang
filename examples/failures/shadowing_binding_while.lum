@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*binding 'value' shadows a local binding; use a different name.*
 
-def main() Int {
+main() Int {
     value = 1
     while true {
         value Int = 2

@@ -666,7 +666,7 @@ impl<'a> Parser<'a> {
             Some(TokenKind::At)
                 | Some(TokenKind::Keyword(Keyword::Hidden))
                 | Some(TokenKind::Keyword(Keyword::Def))
-        )
+        ) || self.starts_local_callable_decl_at(lookahead)
     }
 
     pub(super) fn parse_anonymous_interface_expr(&mut self) -> Option<Expr> {
@@ -1358,6 +1358,23 @@ impl<'a> Parser<'a> {
             },
             span: block_span,
         })
+    }
+
+    pub(super) fn looks_like_trailing_lambda_block_start(&self) -> bool {
+        if !self.at(TokenKind::LBrace) {
+            return false;
+        }
+        let mut parser = Parser {
+            tokens: self.tokens,
+            index: self.index,
+            diagnostics: Vec::new(),
+            allow_trailing_block_call: self.allow_trailing_block_call,
+            allow_shape_update_operator: self.allow_shape_update_operator,
+        };
+        let open = parser.current_span();
+        parser.advance();
+        parser.current_span().start_pos.line == open.start_pos.line
+            && parser.parse_lambda_head().is_some()
     }
 
     fn parse_lambda_head(&mut self) -> Option<(Vec<LambdaParam>, Span)> {

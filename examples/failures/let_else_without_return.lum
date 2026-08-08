@@ -8,7 +8,7 @@ enum MaybeInt {
     }
 }
 
-def main() Unit {
+main() Unit {
     value MaybeInt = MaybeInt.NoneX
     let SomeX(item) = value else ()
     println(item)

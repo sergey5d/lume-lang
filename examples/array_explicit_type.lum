@@ -5,7 +5,7 @@
 # 4
 # 0
 
-def main() Int {
+main() Int {
     explicit Array[Int] = Array(1, 2, 3)
     shorthand [Int] = explicit
     explicitAgain Array[Int] = shorthand

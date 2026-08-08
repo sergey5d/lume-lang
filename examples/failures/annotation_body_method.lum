@@ -4,5 +4,5 @@
 annotation Route {
     path Str
 
-    def label() Str = path
+    label() Str = path
 }

@@ -6,7 +6,7 @@ enum Direction {
     case South
 }
 
-def main() Unit {
+main() Unit {
     direction Direction = Direction.South
     label = match direction {
         case Direction.North => "North"

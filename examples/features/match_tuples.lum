@@ -5,7 +5,7 @@
 # tuple 1 2
 # 0
 
-def main() Int {
+main() Int {
     exactPair = match (1, 2) {
         case (1, 2) => "exact tuple"
         case _ => "miss"

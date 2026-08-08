@@ -38,13 +38,13 @@ class Profile {
         this.active = true
     }
 
-    def bump() Unit {
+    bump() Unit {
         this.visits := this.visits + 1
     }
 
-    def visitCount() Int = this.visits
+    visitCount() Int = this.visits
 
-    def isActive() Bool = this.active
+    isActive() Bool = this.active
 }
 
 class Stock {
@@ -56,7 +56,7 @@ impl Stock {
         this.count = count
     }
 
-    def value() Int = this.count
+    value() Int = this.count
 }
 
 class Slots {
@@ -68,9 +68,9 @@ impl Slots {
         this.items = FixedArray(left, right)
     }
 
-    def left() Int = this.items[0]
+    left() Int = this.items[0]
 
-    def right() Int = this.items[1]
+    right() Int = this.items[1]
 }
 
 class Account {
@@ -91,7 +91,7 @@ impl Account {
 
     new(years Int) = this("unknown", years)
 
-    def label() Str = this.name + " " + this.age
+    label() Str = this.name + " " + this.age
 }
 
 class Path {
@@ -103,12 +103,12 @@ impl Path {
         this.segments = segments
     }
 
-    def size() Int = this.segments.size()
+    size() Int = this.segments.size()
 
-    def firstOr(value Str) Str = this.segments.get(0).getOr(value)
+    firstOr(value Str) Str = this.segments.get(0).getOr(value)
 }
 
-def main() Unit {
+main() Unit {
     profile = Profile("Ada", 2)
     println("profile", profile.name, profile.visitCount(), profile.isActive())
 

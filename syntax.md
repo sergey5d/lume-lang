@@ -941,8 +941,8 @@ user = {
 
 ## Functions and Methods
 
-`def` is optional for top-level functions and methods. Both forms are valid,
-and declarations are recognized by the callable header shape
+`def` is optional for top-level functions, local functions, and methods. Both
+forms are valid, and declarations are recognized by the callable header shape
 `name[TypeParams](params)`:
 
 ```txt

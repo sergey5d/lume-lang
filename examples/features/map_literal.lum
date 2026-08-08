@@ -11,9 +11,9 @@
 # map entries 4
 # 0
 
-def makeKey() Str = "made"
+makeKey() Str = "made"
 
-def main() Int {
+main() Int {
     dynamicKey = "dynamic"
 
     builtIn [Str : Int] = [

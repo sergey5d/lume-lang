@@ -3,19 +3,19 @@
 # body inner outer
 # 0
 
-def basic() Unit {
+basic() Unit {
     OS.print("start ")
     defer println("done")
     OS.print("middle ")
 }
 
-def lifo() Unit {
+lifo() Unit {
     defer println("outer")
     defer OS.print("inner ")
     OS.print("body ")
 }
 
-def main() Int {
+main() Int {
     basic()
     lifo()
     0

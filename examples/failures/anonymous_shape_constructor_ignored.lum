@@ -13,7 +13,7 @@ impl SecretBadge {
     }
 }
 
-def main() Unit {
+main() Unit {
     _ SecretBadge = SecretBadge({
         name: "Mia"
     })

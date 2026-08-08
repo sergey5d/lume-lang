@@ -19,13 +19,13 @@ enum Outcome {
 }
 
 impl Outcome {
-    def describe() Str = match this {
+    describe() Str = match this {
         case Left(value) => "left: " + value
         case Right(value) => "right: num " + value
     }
 }
 
-def main() Unit {
+main() Unit {
     left Outcome = Outcome.Left("bad")
     right Outcome = Outcome.Right(7)
 

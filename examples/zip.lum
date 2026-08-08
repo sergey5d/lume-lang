@@ -12,7 +12,7 @@
 # range pair sum 21
 # range index sum 16
 
-def main() Unit {
+main() Unit {
     items = [1, 2, 3]
     arrayPairs = items.zip(["a", "b"])
     arrayIndexed = items.zipWithIndex()

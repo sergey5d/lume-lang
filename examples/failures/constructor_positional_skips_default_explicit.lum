@@ -13,6 +13,6 @@ impl Article {
     }
 }
 
-def main() Unit {
+main() Unit {
     _ Article = Article("Intro")
 }

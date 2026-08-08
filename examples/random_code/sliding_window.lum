@@ -27,7 +27,7 @@ impl SlidingWindowLimiter {
         this.accepted = LinkedList {}
     }
 
-    def prune(now Int) Unit {
+    prune(now Int) Unit {
         # Keep only requests whose timestamp still belongs to the active window.
         windowStart = now - this.windowSize
 
@@ -41,13 +41,13 @@ impl SlidingWindowLimiter {
         }
     }
 
-    def usedInWindow(now Int) Int {
+    usedInWindow(now Int) Int {
         this.prune(now)
         total Int = this.accepted.fold(0, (x, y) => x + y.cost)
         total
     }
 
-    def allow(now Int, cost Int) Bool {
+    allow(now Int, cost Int) Bool {
         # First drop requests that are no longer inside the sliding window.
         this.prune(now)
 
@@ -61,10 +61,10 @@ impl SlidingWindowLimiter {
         }
     }
 
-    def currentUsage(now Int) Int = this.usedInWindow(now)
+    currentUsage(now Int) Int = this.usedInWindow(now)
 }
 
-def main() Unit {
+main() Unit {
     # Capacity 5 over a 5-tick sliding window.
     bucket = SlidingWindowLimiter(5, 5)
 

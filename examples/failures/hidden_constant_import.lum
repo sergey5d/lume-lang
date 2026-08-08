@@ -5,6 +5,6 @@ module app
 
 use model/pubdemo/{secret}
 
-def main() Unit {
+main() Unit {
     println(secret)
 }

@@ -5,7 +5,7 @@ object Config {
     value Int = 5
 }
 
-def main() Unit {
+main() Unit {
     created = Config()
     alsoCreated = Config {}
 }

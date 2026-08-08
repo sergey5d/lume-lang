@@ -6,7 +6,7 @@ class SecretAmount {
     hidden secret Str = "hidden"
 }
 
-def main() Unit {
+main() Unit {
     value = SecretAmount(10)
     updated = value :< { secret: "changed" }
 }

@@ -1120,6 +1120,54 @@ greeter Greeter = object with Greeter {
 }
 
 #[test]
+fn parses_keyword_free_local_function_declarations() {
+    let result = parse(
+        r#"
+main() Int {
+    add(left Int, right Int) Int = left + right
+    zero() Int {
+        0
+    }
+    add(zero(), 2)
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(main) = &program.items[0] else {
+        panic!("expected function");
+    };
+    let CallableBody::Block(body) = &main.body else {
+        panic!("expected block body");
+    };
+    assert!(matches!(body.statements[0], Stmt::LocalFunction(_)));
+    assert!(matches!(body.statements[1], Stmt::LocalFunction(_)));
+    assert!(matches!(body.statements[2], Stmt::Expr(_)));
+}
+
+#[test]
+fn keeps_direct_trailing_lambda_calls_as_expressions() {
+    let result = parse(
+        r#"
+run(block fn() => Int) Int = block()
+
+main() Int {
+    run() { () => 5 }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(main) = &program.items[1] else {
+        panic!("expected main function");
+    };
+    let CallableBody::Block(body) = &main.body else {
+        panic!("expected block body");
+    };
+    assert!(matches!(body.statements[0], Stmt::Expr(_)));
+}
+
+#[test]
 fn rejects_removed_single_declaration_keyword() {
     let result = parse("single Config {}\n");
     assert!(!result.diagnostics.is_empty());

@@ -1,7 +1,7 @@
 # EXPECT:
 # break 3
 
-def main() Unit {
+main() Unit {
     var count Int = 0
 
     while count < 10 {

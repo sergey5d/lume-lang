@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # constructor parentheses accept positional arguments only; use braces for construction fields
 
-def main() Unit {
+main() Unit {
     _ = Set(value = 5)
 }

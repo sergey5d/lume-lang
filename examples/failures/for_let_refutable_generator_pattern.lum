@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*for pattern must be irrefutable for value of type 'Option\[Int\]'.*
 
-def main() Unit {
+main() Unit {
     values [Option[Int]] = [Some(1), None]
 
     for let Some(value) <- values {

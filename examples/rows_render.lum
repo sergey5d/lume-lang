@@ -16,7 +16,7 @@ object RowOrdering with Ordering[(Int, Int, Str)] {
 }
 
 impl object RowOrdering {
-    def compare(left (Int, Int, Str), right (Int, Int, Str)) Int {
+    compare(left (Int, Int, Str), right (Int, Int, Str)) Int {
         let (leftX Int, leftY Int, _) = left
         let (rightX Int, rightY Int, _) = right
 
@@ -36,7 +36,7 @@ impl object RowOrdering {
     }
 }
 
-def syntax1(rows [(Int, Int, Str)]) Unit {
+syntax1(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
     if let Some(firstRow) = rows.get(0) {
         let (_, initialY Int, _) = firstRow
@@ -59,7 +59,7 @@ def syntax1(rows [(Int, Int, Str)]) Unit {
     }
 }
 
-def syntax2(rows [(Int, Int, Str)]) Unit {
+syntax2(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
     if let Some(firstRow) = rows.get(0) {
         let (_, initialY Int, _) = firstRow
@@ -82,7 +82,7 @@ def syntax2(rows [(Int, Int, Str)]) Unit {
     }
 }
 
-def syntax3(rows [(Int, Int, Str)]) Unit {
+syntax3(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
 
     if let Some(first) = rows.get(0) {
@@ -106,7 +106,7 @@ def syntax3(rows [(Int, Int, Str)]) Unit {
     }
 }
 
-def syntax4(rows [(Int, Int, Str)]) Unit {
+syntax4(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
     if let Some(first) = rows.get(0) {
         let (_, initialY Int, _) = first
@@ -131,7 +131,7 @@ def syntax4(rows [(Int, Int, Str)]) Unit {
     }
 }
 
-def main() Unit {
+main() Unit {
     rows [(Int, Int, Str)] = [
         (0, 0, "1"),
         (0, 1, "2"),

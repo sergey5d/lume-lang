@@ -17,7 +17,7 @@ class OrderManager {
 
 impl OrderManager {
 
-    def parseOrder(str Str) Option[Order] {
+    parseOrder(str Str) Option[Order] {
 
         arr = str.split("\s*,\s*")
 
@@ -39,7 +39,7 @@ impl OrderManager {
         )
     }
 
-    def checkQueuedOrders() {
+    checkQueuedOrders() {
         while !this.queue.isEmpty() {
             first = this.queue[0]
             if first.status == "NEW" {
@@ -55,7 +55,7 @@ impl OrderManager {
         }
     }
 
-    def handleOrder(str Str) {
+    handleOrder(str Str) {
 
         this.currentTick += 1
 
@@ -100,7 +100,7 @@ impl OrderManager {
         }
     }
 
-    def testOrders() [Str] {
+    testOrders() [Str] {
 
         orders = [
             "1234, BUY, BTC, 10, NEW",
@@ -114,7 +114,7 @@ impl OrderManager {
     }
 }
 
-def main() {
+main() {
 
     manager = OrderManager {}
 

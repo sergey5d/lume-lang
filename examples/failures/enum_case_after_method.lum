@@ -2,6 +2,6 @@
 # .*enum cases must appear before methods in enum 'MaybeInt'.*case 'Some'.*
 
 enum MaybeInt {
-    def isSet() Bool = true
+    isSet() Bool = true
     case Some { value Int }
 }

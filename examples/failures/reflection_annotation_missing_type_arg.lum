@@ -7,7 +7,7 @@ annotation Route {
 
 class Service {}
 
-def main() Unit {
+main() Unit {
     metadata Type[Service] = typeOf[Service]
     metadata.hasAnnotation()
 }

@@ -6,5 +6,5 @@ annotation Route {
 }
 
 impl Route {
-    def path() Str = "nope"
+    path() Str = "nope"
 }

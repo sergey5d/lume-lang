@@ -66,13 +66,13 @@ impl Service {
 
     @Route { path: Routes.health }
     @Tag { name: "health" }
-    def health() Str = this.name
+    health() Str = this.name
 
     @Route { path: LocalRoutes.status, method: "POST" }
-    def status() Str = "status"
+    status() Str = "status"
 }
 
-def main() Unit {
+main() Unit {
     serviceType Type[Service] = typeOf[Service]
     hasMetadata Bool = serviceType.hasAnnotation[Metadata]()
     metadata Option[AnnotationValue] = serviceType.annotation[Metadata]()

@@ -8,10 +8,10 @@
 # binding 7
 # 0
 
-def pickMultiline(flag Bool) Int =
+pickMultiline(flag Bool) Int =
     if flag { 5 } else { 6 }
 
-def main() Int {
+main() Int {
     if true {
         println("then")
     } else {

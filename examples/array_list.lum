@@ -17,9 +17,9 @@ impl ArrayListIterator[T] {
         this.limit = limit
     }
 
-    def hasNext() Bool = this.index < this.limit
+    hasNext() Bool = this.index < this.limit
 
-    def next() T {
+    next() T {
         value T = this.items[this.index]
         this.index := this.index + 1
         value
@@ -36,24 +36,24 @@ impl ArrayList[T] {
         this.items = []
     }
 
-    def append(value T) Unit {
+    append(value T) Unit {
         this.items.add(value)
         this.count := this.count + 1
     }
 
-    def get(index Int) Option[T] =
+    get(index Int) Option[T] =
         if index < 0 || index >= this.count {
             None
         } else {
             Some(this.items[index])
         }
 
-    def size() Int = this.count
+    size() Int = this.count
 
-    def iterator() Iterator[T] = ArrayListIterator[T] { items: this.items, limit: this.count }
+    iterator() Iterator[T] = ArrayListIterator[T] { items: this.items, limit: this.count }
 }
 
-def main() Int {
+main() Int {
     values ArrayList[Int] = ArrayList[Int](5)
     values.append(10)
     values.append(20)

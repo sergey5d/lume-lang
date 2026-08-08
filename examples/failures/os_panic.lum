@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # unknown_member at .*: type 'OS' has no field or method 'panic'
 
-def main() Unit {
+main() Unit {
     OS.panic("boom ", 7)
 }

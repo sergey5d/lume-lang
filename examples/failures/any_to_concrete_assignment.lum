@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*cannot assign value of type 'Any' to binding 'name' of type 'Str'.*
 
-def main() Unit {
+main() Unit {
     value Any = "Ada"
     name Str = value
 }

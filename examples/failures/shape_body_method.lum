@@ -4,5 +4,5 @@
 shape Point {
     x Int
 
-    def value() Int = this.x
+    value() Int = this.x
 }

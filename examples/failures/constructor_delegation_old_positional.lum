@@ -15,4 +15,4 @@ impl User {
     new(label Str) = new(label, 0)
 }
 
-def main() Unit = ()
+main() Unit = ()

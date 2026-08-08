@@ -17,7 +17,7 @@
 # generated 0 4
 # size 3
 
-def main() Unit {
+main() Unit {
     values FixedArray[Int] = FixedArray(4, 5, 6)
     labels FixedArray[Str] = FixedArray("a", "b")
 

@@ -1,9 +1,9 @@
 # FAIL_REGEX:
 # .*tuple values cannot construct anonymous shape; use shape\(\.\.\.\) with an expected anonymous shape type.*
 
-def describe(user { name Str, age Int }) Str =
+describe(user { name Str, age Int }) Str =
     user.name + " " + user.age
 
-def main() Unit {
+main() Unit {
     println(describe(("Cara", 14)))
 }

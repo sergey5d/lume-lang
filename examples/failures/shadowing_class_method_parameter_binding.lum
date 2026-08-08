@@ -6,10 +6,10 @@ class Box {
 }
 
 impl Box {
-    def bad(value Int) Int {
+    bad(value Int) Int {
         value = 2
         this.value
     }
 }
 
-def main() Unit {}
+main() Unit {}

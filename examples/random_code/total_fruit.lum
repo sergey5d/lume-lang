@@ -7,7 +7,7 @@
 # empty 0
 # 0
 
-def maxInt(left Int, right Int) Int {
+maxInt(left Int, right Int) Int {
     if left > right {
         left
     } else {
@@ -15,7 +15,7 @@ def maxInt(left Int, right Int) Int {
     }
 }
 
-def minInt(left Int, right Int) Int {
+minInt(left Int, right Int) Int {
     if left < right {
         left
     } else {
@@ -23,7 +23,7 @@ def minInt(left Int, right Int) Int {
     }
 }
 
-def totalFruit(fruits [Int]) Int {
+totalFruit(fruits [Int]) Int {
     var maxFruits Int = 0
     var count Int = 0
     len Int = fruits.size()
@@ -80,7 +80,7 @@ def totalFruit(fruits [Int]) Int {
     maxFruits
 }
 
-def main() Int {
+main() Int {
     println("sample1", totalFruit([1, 2, 1]))
     println("sample2", totalFruit([0, 1, 2, 2]))
     println("sample3", totalFruit([1, 2, 3, 2, 2]))

@@ -10,7 +10,7 @@
 # tuple if 1 2
 # 0
 
-def main() Int {
+main() Int {
     let (a Int, b Str) = (5, "hehe")
     println("tuple", a, b)
 

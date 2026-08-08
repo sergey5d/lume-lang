@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*lambda syntax uses '=>'; replace '->' with '=>'.*
 
-def main() Unit {
+main() Unit {
     mapper = value -> value + 1
     println(mapper(4))
 }

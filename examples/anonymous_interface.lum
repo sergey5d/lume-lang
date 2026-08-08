@@ -4,21 +4,21 @@
 # solo
 
 interface Reader {
-    def read() Str
+    read() Str
 }
 
 interface Closer {
-    def close() Unit
+    close() Unit
 }
 
-def main() Unit {
+main() Unit {
     handler = Reader with Closer {
-        def read() Str = "x"
-        def close() Unit = println("closed")
+        read() Str = "x"
+        close() Unit = println("closed")
     }
 
     soloReader = Reader {
-        def read() Str = "solo"
+        read() Str = "solo"
     }
 
     println(handler.read())

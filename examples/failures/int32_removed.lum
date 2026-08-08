@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*undefined type 'Int32'.*
 
-def main() Unit {
+main() Unit {
     value Int32 = 1
 }

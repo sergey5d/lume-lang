@@ -6,4 +6,4 @@ annotation Flag {
 }
 
 @Flag { value: if true { 1 } else { 2 } }
-def main() Unit {}
+main() Unit {}

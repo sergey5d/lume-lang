@@ -1,10 +1,10 @@
 # EXPECT:
 # return 8
 
-def value() Int {
+value() Int {
     return 8
 }
 
-def main() Unit {
+main() Unit {
     println("return", value())
 }

@@ -6,7 +6,7 @@ class User {
     age Int
 }
 
-def main() Unit {
+main() Unit {
     data = {
         name: "Ada"
         age: 42

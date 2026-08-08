@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*lambda body accepts one statement or expression; use '\{ \.\.\. \}' for multiple statements.*
 
-def main() Unit {
+main() Unit {
     mapper = item =>
         next = item + 1
         next * 2

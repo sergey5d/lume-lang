@@ -19,7 +19,7 @@ enum Color {
         temperature = 2
     }
 
-    def isReddish() Bool = this.temperature % 5 == 0
+    isReddish() Bool = this.temperature % 5 == 0
 }
 
 # Naive implementation of option type
@@ -30,7 +30,7 @@ enum OptionX[T] {
         value T
     }
 
-    def isDefined() Bool = this != None
+    isDefined() Bool = this != None
 }
 
 black = Color.Black
@@ -41,7 +41,7 @@ noneInt = OptionX.NoneX
 
 someDefined = someInt.isDefined()
 
-def main() Unit {
+main() Unit {
     println("reddish:", reddish)
     println("some defined:", someDefined)
     println("none:", noneInt == OptionX.NoneX)

@@ -17,7 +17,7 @@ use model/things/*
 use model/things/C/*
 use model/things/C/{printLn as printN, print}
 
-def main() Int {
+main() Int {
     value A = A {}
     aliasA AliasA = AliasA {}
     valueB AliasB = AliasB {}

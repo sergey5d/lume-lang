@@ -8,6 +8,6 @@ impl Consumer {
     new(values [Str : Int]) {}
 }
 
-def main() Unit {
+main() Unit {
     consumer = Consumer([])
 }

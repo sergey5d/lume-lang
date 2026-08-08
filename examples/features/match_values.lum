@@ -2,7 +2,7 @@
 # exact value
 # 0
 
-def main() Int {
+main() Int {
     exactValue = match 5 {
         case 4 => "nope"
         case 5 => "exact value"

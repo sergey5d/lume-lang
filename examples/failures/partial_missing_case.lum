@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # expected 'case' before match pattern, got IDENT\("Some" @ .*?\)
 
-def main() Option[Int] =
+main() Option[Int] =
     partial match Some(1) {
         Some(x) => x
     }

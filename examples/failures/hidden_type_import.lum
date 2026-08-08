@@ -5,4 +5,4 @@ module app
 
 use model/pubdemo/{SecretBox}
 
-def main() Unit {}
+main() Unit {}

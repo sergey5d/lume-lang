@@ -1,9 +1,9 @@
 # FAIL_REGEX:
 # .*argument has captured element type of Array\[_\], but parameter expects a different captured element type of Array\[_\].*
 
-def same[T](left T, right T) Unit {}
+same[T](left T, right T) Unit {}
 
-def main() Unit {
+main() Unit {
     left [_] = [1]
     right [_] = [2]
 

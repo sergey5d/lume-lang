@@ -6,5 +6,5 @@ class AssetPrices {
 }
 
 impl AssetPrices {
-    def makePrices() [Str] = []
+    makePrices() [Str] = []
 }

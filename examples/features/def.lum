@@ -2,14 +2,14 @@
 # def function
 # def block
 
-def keywordFunction() Str =
+keywordFunction() Str =
     "function"
 
 blockWithEquals() Str = {
     "block"
 }
 
-def main() Unit {
+main() Unit {
     println("def", keywordFunction())
     println("def", blockWithEquals())
 }

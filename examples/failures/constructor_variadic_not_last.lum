@@ -13,6 +13,6 @@ impl Bad {
     }
 }
 
-def main() Unit {
+main() Unit {
     _ Bad = Bad(1, 2, 3)
 }

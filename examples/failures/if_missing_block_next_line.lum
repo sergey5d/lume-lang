@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # expected '\{' after if condition
 
-def main() Int {
+main() Int {
     if true
         println("haha")
     0

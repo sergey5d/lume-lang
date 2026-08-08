@@ -7,7 +7,7 @@ class Amount {
     description Str
 }
 
-def main() Unit {
+main() Unit {
     value = Amount(10, "x")
     updated = value :< { amount: 42 }
 

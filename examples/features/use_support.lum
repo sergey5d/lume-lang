@@ -6,5 +6,5 @@ class A {
 }
 
 impl A {
-    def label() Str = "A"
+    label() Str = "A"
 }

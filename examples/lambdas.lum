@@ -18,10 +18,10 @@ class Adder {
 }
 
 impl Adder {
-    def add(value Int) Int = this.amount + value
+    add(value Int) Int = this.amount + value
 }
 
-def main() Int {
+main() Int {
     adder Adder = Adder(5)
 
     emptyLambda = () => 4

@@ -6,6 +6,6 @@ class Page {
     title Str
 }
 
-def main() Unit {
+main() Unit {
     _ Page = Page("Intro")
 }

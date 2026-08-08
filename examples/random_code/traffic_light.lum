@@ -5,7 +5,7 @@ enum Side {
 }
 
 impl Side {
-    def reverse() Side {
+    reverse() Side {
         match this {
             case NS => EW
             case EW => NS
@@ -13,11 +13,11 @@ impl Side {
     }
 }
 
-def await(side Side, timeout Int) Int {
+await(side Side, timeout Int) Int {
     return 1
 }
 
-def set_light() {
+set_light() {
 }
 
 class TrafficControl {
@@ -27,7 +27,7 @@ class TrafficControl {
     var passedNS Int = 0
     var passedEW Int = 0
 
-    def inc(time Int) {
+    inc(time Int) {
         if this.side == NS {
             this.passedNS += time
         } else {
@@ -35,7 +35,7 @@ class TrafficControl {
         }
     }
 
-    def getPassed() Int {
+    getPassed() Int {
         if this.side == NS {
             this.passedNS
         } else {
@@ -43,14 +43,14 @@ class TrafficControl {
         }
     }
 
-    def reverseAndZero() {
+    reverseAndZero() {
         this.side := this.side.reverse()
         this.passedNS := 0
         this.passedEW := 0
     }
 }
 
-def doProcess() {
+doProcess() {
 
     min Int = 10
     max Int = 1000

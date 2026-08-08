@@ -3,27 +3,27 @@
 # implicit
 
 interface ExplicitPrinter {
-    def printExplicit() Unit
+    printExplicit() Unit
 }
 
 interface ImplicitPrinter {
-    def printImplicit()
+    printImplicit()
 }
 
 class Printer with ExplicitPrinter, ImplicitPrinter {
 }
 
 impl Printer {
-    def printExplicit() {
+    printExplicit() {
         println("explicit")
     }
 
-    def printImplicit() {
+    printImplicit() {
         println("implicit")
     }
 }
 
-def main() Unit {
+main() Unit {
     printer Printer = Printer {}
     printer.printExplicit()
     printer.printImplicit()

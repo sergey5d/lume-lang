@@ -23,7 +23,7 @@ impl TokenBucket {
         this.tokens = capacity
     }
 
-    def refill(now Int) Unit {
+    refill(now Int) Unit {
         # First bring the bucket forward to "now" by adding earned tokens.
         elapsed = now - this.lastTick
         if elapsed <= 0 {
@@ -40,7 +40,7 @@ impl TokenBucket {
         this.lastTick := now
     }
 
-    def allow(now Int, cost Int) Bool {
+    allow(now Int, cost Int) Bool {
         # Every request sees the bucket after time-based refill has happened.
         this.refill(now)
 
@@ -54,10 +54,10 @@ impl TokenBucket {
         true
     }
 
-    def currentTokens() Int = this.tokens
+    currentTokens() Int = this.tokens
 }
 
-def main() Unit {
+main() Unit {
     # Capacity 5, refilling 1 token per tick.
     bucket = TokenBucket(5, 1)
 

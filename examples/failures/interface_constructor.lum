@@ -1,8 +1,8 @@
 # FAIL_REGEX:
-# .*only classes can declare custom constructors; interface 'Bad' cannot declare constructors.*
+# .*interface 'Bad' cannot declare constructors.*
 
 interface Bad {
-    def new() Int
+    new() = 0
 }
 
-def main() Int = 0
+main() Int = 0

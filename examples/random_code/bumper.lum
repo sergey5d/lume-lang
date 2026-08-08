@@ -9,7 +9,7 @@ impl Counter {
         this.count = count
     }
 
-    def bump(delta Int) Int {
+    bump(delta Int) Int {
         this.count += delta
         return this.count
     }
@@ -17,7 +17,7 @@ impl Counter {
 
 seed Int = 1
 
-def run() Int {
+run() Int {
     c Counter = Counter(seed)
     return c.bump(2)
 }
