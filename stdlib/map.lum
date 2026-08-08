@@ -5,9 +5,9 @@
 interface Map[K, V] with Iterable[(K, V)] {
     def put(key K, value V) Map[K, V]
     def iterator() Iterator[(K, V)]
-    def map[X](f fn(K, V) => X) Array[X]
+    def map[X](f fn(K, V) => X) Vector[X]
     def mapValues[X](f fn(V) => X) Map[K, X]
-    def flatMap[X](f fn(K, V) => Array[X]) Array[X]
+    def flatMap[X](f fn(K, V) => Vector[X]) Vector[X]
     def filter(f fn(K, V) => Bool) Map[K, V]
     def fold[X](initial X, f fn(X, K, V) => X) X
     def reduce(f fn(K, V, K, V) => (K, V)) Option[(K, V)]

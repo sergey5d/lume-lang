@@ -1,79 +1,64 @@
 # EXPECT:
-# each 1
-# each 2
-# each 3
 # each 4
-# index 1 4
-# mapped 2 8
-# expanded 1 14
-# filtered 3 4
-# fold 10
-# reduce 10
+# each 5
+# each 6
+# index 4 6
+# get 5 true
+# first 4
+# last 6
+# mapped 8 12
 # exists true
 # forAll true
-# sorted 4 1
-# zip 2 b
-# zipIndex 4 3
-# get 3
-# head 1
-# tail 2 4
-# remove 2 3
+# zip 5 b
+# zipIndex 6 2
+# assigned 9 10
+# defaults 0.0 false  1
+# filled 7 7
+# generated 0 4
 # size 3
-# spread 0 4 7 7
-
-object Descending with Ordering[Int] {
-}
-
-impl object Descending {
-    compare(left Int, right Int) Int = right - left
-}
 
 main() Unit {
-    items = [1, 2, 3]
-    items.append(4)
+    values Array[Int] = Array(4, 5, 6)
+    labels Array[Str] = Array("a", "b")
 
-    mapped = items.map(item => item * 2)
-    expanded = items.flatMap(item => [item, item + 10])
-    filtered = items.filter(item => item > 2)
-    total = items.fold(0, (acc, item) => acc + item)
-    reduced = items.reduce((left, right) => left + right)
-    hasBig = items.exists(item => item > 3)
-    allPositive = items.forAll(item => item > 0)
+    mapped = values.map(item => item * 2)
+    hasBig = values.exists(item => item > 5)
+    allPositive = values.forAll(item => item > 0)
 
-    items.forEach(item => println("each " + item))
-    println("index " + items[0] + " " + items[3])
+    values.forEach(item => println("each " + item))
+    println("index " + values[0] + " " + values[2])
 
-    sorted = [3, 1, 4, 2]
-    sorted.sort(Descending)
+    let Some(middle) = values.get(1) else return ()
+    let Some(first) = values.first() else return ()
+    let Some(last) = values.last() else return ()
 
-    zipped = items.zip(["a", "b"])
-    indexed = items.zipWithIndex()
-    tailItems = items.tail()
+    pairs = values.zip(labels)
+    indexed = values.zipWithIndex()
 
-    let Some(zippedPair) = zipped.get(1) else return ()
-    let Some(indexedPair) = indexed.get(3) else return ()
-    let Some(head) = items.head() else return ()
-    let Some(removed) = items.remove(1) else return ()
+    let (zippedValue, zippedLabel) = pairs[1]
+    let (indexedValue, indexedPos) = indexed[2]
 
-    let (zipValue, zipLabel) = zippedPair
-    let (indexedValue, indexedPos) = indexedPair
+    assigned = Array.ofInt(2)
+    assigned[0] := 9
+    assigned[1] := 10
+    defaultFloats = Array.ofFloat(1)
+    defaultBools = Array.ofBool(1)
+    defaultStrs = Array.ofStr(1)
+    defaultRunes = Array.ofRune(1)
+    filled = Array.fill(2, 7)
+    generated = Array.generate(3, idx => idx * 2)
 
-    println("mapped " + mapped.get(0).getOr(0) + " " + mapped.get(3).getOr(0))
-    println("expanded " + expanded.get(0).getOr(0) + " " + expanded.get(7).getOr(0))
-    println("filtered " + filtered.get(0).getOr(0) + " " + filtered.get(1).getOr(0))
-    println("fold " + total)
-    println("reduce " + reduced.getOr(0))
+    println("get " + middle + " " + values.get(9).isEmpty())
+    println("first " + first)
+    println("last " + last)
+    println("mapped " + mapped[0] + " " + mapped[2])
     println("exists " + hasBig)
     println("forAll " + allPositive)
-    println("sorted " + sorted.get(0).getOr(0) + " " + sorted.get(3).getOr(0))
-    println("zip " + zipValue + " " + zipLabel)
+    println("zip " + zippedValue + " " + zippedLabel)
     println("zipIndex " + indexedValue + " " + indexedPos)
-    println("get " + items.get(1).getOr(0))
-    println("head " + head)
-    println("tail " + tailItems.get(0).getOr(0) + " " + tailItems.get(2).getOr(0))
-    println("remove " + removed + " " + items.size())
-    println("size " + items.size())
-
-    spreaded = [0, ...items, 5, ...[6, 7]]
-    println("spread " + spreaded.get(0).getOr(0) + " " + spreaded.get(3).getOr(0) + " " + spreaded.get(6).getOr(0) + " " + spreaded.size())
+    println("assigned " + assigned[0] + " " + assigned[1])
+    println("defaults " + defaultFloats[0] + " " + defaultBools[0] + " " + defaultStrs[0] + " " + defaultRunes.size())
+    println("filled " + filled[0] + " " + filled[1])
+    println("generated " + generated[0] + " " + generated[2])
+    println("size " + values.size())
 }

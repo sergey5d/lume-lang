@@ -114,7 +114,7 @@ label = match access {
     case Admin => "administrator"
     case Member { organization } => organization
 }</code></pre>
-        <p>Tuple, array, shape, class, and enum patterns are name-aware where the source data is named. Array patterns may capture a remainder with spread syntax.</p>
+        <p>Tuple, vector, shape, class, and enum patterns are name-aware where the source data is named. Vector patterns may capture a remainder with spread syntax.</p>
 
         <h2 id="failure">Option, Result, Either, and try</h2>
         <p>Lume represents optional values and recoverable failure explicitly. <code>try</code> unwraps the success side and propagates the container's failure. Use <code>mapError</code> or <code>mapLeft</code> before <code>try</code> when the enclosing function uses a different error type.</p>

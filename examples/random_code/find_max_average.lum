@@ -2,7 +2,7 @@
 # 12.75
 # 0
 
-findMaxAverage(nums FixedArray[Float], k Int) Float {
+findMaxAverage(nums Array[Float], k Int) Float {
     if nums.size() < k {
         return -1.
     }
@@ -29,7 +29,7 @@ findMaxAverage(nums FixedArray[Float], k Int) Float {
 }
 
 main() Int {
-    nums FixedArray[Float] = FixedArray(1., 12., -5., -6., 50., 3.)
+    nums Array[Float] = Array(1., 12., -5., -6., 50., 3.)
 
     println(findMaxAverage(nums, 4))
     0

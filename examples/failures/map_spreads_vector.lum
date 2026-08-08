@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*cannot spread 'Array\[Int\]' into a map literal; map spread requires a map value.*
+# .*cannot spread 'Vector\[Int\]' into a map literal; map spread requires a map value.*
 
 main() Unit {
     values = [1, 2]

@@ -1,8 +1,8 @@
 package lume.json;
 
-import lume.core.LumeFixedArray;
-import lume.core.LumeField;
 import lume.core.LumeArray;
+import lume.core.LumeField;
+import lume.core.LumeVector;
 import lume.core.LumeMap;
 import lume.core.LumeRuntime;
 import lume.core.LumeSet;
@@ -52,11 +52,11 @@ public final class JsonRuntime {
         return new JsonField(name, value);
     }
 
-    public static JsonValue obj(LumeArray<JsonField> fields) {
+    public static JsonValue obj(LumeVector<JsonField> fields) {
         return new JsonValue.JsonObject(fields);
     }
 
-    public static JsonValue array(LumeArray<JsonValue> values) {
+    public static JsonValue array(LumeVector<JsonValue> values) {
         return new JsonValue.JsonArray(values);
     }
 
@@ -84,10 +84,10 @@ public final class JsonRuntime {
         if (value instanceof Option<?> option) {
             return option.isDefined() ? encode(LumeRuntime.extractSuccessValue(option)) : nil();
         }
-        if (value instanceof LumeArray<?> list) {
+        if (value instanceof LumeVector<?> list) {
             return encodeIterable(list.asJava());
         }
-        if (value instanceof LumeFixedArray<?> array) {
+        if (value instanceof LumeArray<?> array) {
             return encodeIterable(array.asJava());
         }
         if (value instanceof LumeSet<?> set) {
@@ -176,7 +176,7 @@ public final class JsonRuntime {
         for (var value : values) {
             out.add(encode(value));
         }
-        return new JsonValue.JsonArray(LumeArray.from(out));
+        return new JsonValue.JsonArray(LumeVector.from(out));
     }
 
     private static JsonValue encodeJavaArray(Object array) {
@@ -185,7 +185,7 @@ public final class JsonRuntime {
         for (int index = 0; index < length; index++) {
             out.add(encode(java.lang.reflect.Array.get(array, index)));
         }
-        return new JsonValue.JsonArray(LumeArray.from(out));
+        return new JsonValue.JsonArray(LumeVector.from(out));
     }
 
     private static JsonValue encodeMap(Map<?, ?> map) {
@@ -193,7 +193,7 @@ public final class JsonRuntime {
         for (var entry : map.entrySet()) {
             fields.add(field(String.valueOf(entry.getKey()), encode(entry.getValue())));
         }
-        return new JsonValue.JsonObject(LumeArray.from(fields));
+        return new JsonValue.JsonObject(LumeVector.from(fields));
     }
 
     private static JsonValue encodeStructured(Object receiver, LumeType type) {
@@ -201,7 +201,7 @@ public final class JsonRuntime {
         for (var encodedField : ENCODER_CACHE.computeIfAbsent(type, JsonRuntime::buildEncoderFields)) {
             fields.add(field(encodedField.jsonName(), encode(readField(encodedField.field(), receiver))));
         }
-        return new JsonValue.JsonObject(LumeArray.from(fields));
+        return new JsonValue.JsonObject(LumeVector.from(fields));
     }
 
     private static List<EncodedField> buildEncoderFields(LumeType type) {
@@ -255,7 +255,7 @@ public final class JsonRuntime {
         if (fields.isEmpty()) {
             return str(caseName);
         }
-        return new JsonValue.JsonObject(LumeArray.of(field(caseName, encodeMap(fields))));
+        return new JsonValue.JsonObject(LumeVector.of(field(caseName, encodeMap(fields))));
     }
 
     private static String render(JsonValue value) {
@@ -334,7 +334,7 @@ public final class JsonRuntime {
             for (var item : list) {
                 out.add(decodeByDescriptor(item, inner, null, contextPackage));
             }
-            return LumeArray.from(out);
+            return LumeVector.from(out);
         }
         if (targetType != null
                 && (targetType.kind() == LumeTypeKind.Class || targetType.kind() == LumeTypeKind.Shape)) {
@@ -481,13 +481,13 @@ public final class JsonRuntime {
     }
 
     private static boolean isArrayDescriptor(String descriptor) {
-        return descriptor.startsWith("[") || descriptor.startsWith("Array[");
+        return descriptor.startsWith("[") || descriptor.startsWith("Vector[");
     }
 
     private static Object defaultForDescriptor(String descriptor) {
         var trimmed = descriptor.trim();
         if (isArrayDescriptor(trimmed)) {
-            return LumeArray.empty();
+            return LumeVector.empty();
         }
         return switch (trimmed) {
             case "Str" -> "";
@@ -503,7 +503,7 @@ public final class JsonRuntime {
         if (descriptor.startsWith("[") && descriptor.endsWith("]")) {
             return descriptor.substring(1, descriptor.length() - 1).trim();
         }
-        return innerDescriptor(descriptor, "Array");
+        return innerDescriptor(descriptor, "Vector");
     }
 
     private static String innerDescriptor(String descriptor, String outer) {

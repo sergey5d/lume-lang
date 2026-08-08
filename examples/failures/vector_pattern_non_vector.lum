@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*array pattern requires an Array value, got '\(Int, Int\)'.*
+# .*vector pattern requires a Vector value, got '\(Int, Int\)'.*
 
 main() Unit {
     pair = (1, 2)

@@ -473,9 +473,9 @@ fn java_library_name_is_exposed(name: &str, exposed_names: &HashSet<String>) -> 
             | "Str"
             | "Unit"
             | "Never"
-            | "FixedArray"
-            | "Iterator"
             | "Array"
+            | "Iterator"
+            | "Vector"
             | "LinkedList"
             | "Set"
             | "Map"
@@ -1595,7 +1595,7 @@ fn is_lume_builtin_java_bound(name: &str, args: &[TypeRef]) -> bool {
             name,
             "Any" | "Bool" | "Int" | "Float" | "Rune" | "Str" | "Unit"
         )
-        || matches!(name, "Array" | "LinkedList" | "Set" | "Map" | "Option")
+        || matches!(name, "Vector" | "LinkedList" | "Set" | "Map" | "Option")
 }
 
 fn parse_javap_callable_line(
@@ -1767,7 +1767,7 @@ fn parse_javap_params(params: &[&str], ctx: &JavaTypeContext<'_>) -> Vec<JavaExt
             let ty = java_type_to_lume_type_ref(raw_ty, ctx).map(|ty| {
                 if variadic {
                     TypeRef::Named {
-                        name: "Array".to_string(),
+                        name: "Vector".to_string(),
                         args: vec![ty],
                         span: ctx.span,
                     }
@@ -1900,7 +1900,7 @@ fn java_type_to_lume_type_ref(src: &str, ctx: &JavaTypeContext<'_>) -> Option<Ty
     let mut ty = java_non_array_type_to_lume_type_ref(src, ctx)?;
     for _ in 0..array_depth {
         ty = TypeRef::Named {
-            name: "FixedArray".to_string(),
+            name: "Array".to_string(),
             args: vec![ty],
             span: ctx.span,
         };
@@ -2037,13 +2037,13 @@ fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static 
         "java.util.List"
         | "java.util.Collection"
         | "java.lang.Iterable"
-        | "lume.core.LumeArray"
-        | "Array"
+        | "lume.core.LumeVector"
+        | "Vector"
         | "Collection"
         | "Iterable"
             if arg_count == 1 =>
         {
-            Some("Array")
+            Some("Vector")
         }
         "lume.core.LumeLinkedList" | "LinkedList" if arg_count == 1 => Some("LinkedList"),
         "lume.core.LumeIterator" | "Iterator" if arg_count == 1 => Some("Iterator"),
@@ -2052,7 +2052,7 @@ fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static 
         "java.util.Optional" | "lume.core.Option" | "Option" if arg_count == 1 => Some("Option"),
         "lume.core.Result" | "Result" if arg_count == 2 => Some("Result"),
         "lume.core.Either" | "Either" if arg_count == 2 => Some("Either"),
-        "lume.core.LumeFixedArray" | "FixedArray" if arg_count == 1 => Some("FixedArray"),
+        "lume.core.LumeArray" | "Array" if arg_count == 1 => Some("Array"),
         _ => None,
     }
 }
@@ -2245,7 +2245,7 @@ mod tests {
         };
 
         let rows = java_type_to_lume_type_ref(
-            "lume.core.Result<lume.core.LumeArray<lume.db.Row>, lume.db.DbError>",
+            "lume.core.Result<lume.core.LumeVector<lume.db.Row>, lume.db.DbError>",
             &ctx,
         )
         .expect("rows result type");
@@ -2255,7 +2255,7 @@ mod tests {
                 name: "Result".to_string(),
                 args: vec![
                     TypeRef::Named {
-                        name: "Array".to_string(),
+                        name: "Vector".to_string(),
                         args: vec![TypeRef::Named {
                             name: "Row".to_string(),
                             args: Vec::new(),
@@ -2315,7 +2315,7 @@ mod tests {
         };
 
         let parsed = parse_javap_callable_line(
-            "public abstract <T extends java.lang.Object> lume.core.Result<lume.core.LumeArray<T>, lume.db.DbError> decodeAll(lume.core.LumeType);",
+            "public abstract <T extends java.lang.Object> lume.core.Result<lume.core.LumeVector<T>, lume.db.DbError> decodeAll(lume.core.LumeType);",
             "lume.db.Query",
             ctx,
             true,
@@ -2499,10 +2499,10 @@ def main() Unit {
 
         let runtime_box =
             fs::read_to_string(out.join("demo/app/RuntimeBox.java")).expect("read runtime box");
-        assert!(runtime_box.contains("lume.core.LumeArray<Long> items;"));
+        assert!(runtime_box.contains("lume.core.LumeVector<Long> items;"));
         assert!(runtime_box.contains("lume.core.LumeSet<String> names;"));
         assert!(
-            runtime_box.contains("lume.core.LumeMap<String, lume.core.LumeArray<Long>> index;")
+            runtime_box.contains("lume.core.LumeMap<String, lume.core.LumeVector<Long>> index;")
         );
         assert!(runtime_box.contains("lume.core.Option<String> maybe;"));
         assert!(runtime_box.contains("lume.core.Result<Long, String> result;"));
@@ -3418,8 +3418,8 @@ impl Client {
         .expect("generate app");
         assert!(generated_app.diagnostics.is_empty());
         let client = fs::read_to_string(app_out.join("demo/app/Client.java")).expect("read client");
-        assert!(client.contains("queryRow(\"select ?\", lume.core.LumeArray.of(sub_"));
-        assert!(!client.contains("((lume.core.LumeArray<Object>) ((Object) sub_"));
+        assert!(client.contains("queryRow(\"select ?\", lume.core.LumeVector.of(sub_"));
+        assert!(!client.contains("((lume.core.LumeVector<Object>) ((Object) sub_"));
 
         let mut app_sources = core_runtime_sources();
         collect_java_sources(&app_out, &mut app_sources).expect("collect app java");
@@ -3668,7 +3668,7 @@ def main() Unit {
 module demo/runarray
 
 def main() Int {
-    runes FixedArray[Rune] = FixedArray.ofRune(2)
+    runes Array[Rune] = Array.ofRune(2)
     0
 }
 "#,
@@ -3686,7 +3686,7 @@ def main() Int {
         let module =
             fs::read_to_string(out.join("demo/runarray/RunarrayModule.java")).expect("read module");
         assert!(!module.contains("UnsupportedOperationException"));
-        assert!(module.contains("lume.core.LumeFixedArray.ofRune(2L)"));
+        assert!(module.contains("lume.core.LumeArray.ofRune(2L)"));
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");

@@ -6,7 +6,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import lume.core.LumeArray;
+import lume.core.LumeVector;
 import lume.core.LumeMap;
 import lume.core.Option;
 import lume.core.Tuple2;
@@ -56,7 +56,7 @@ final class SqlBindings {
         if (value instanceof LumeMap<?, ?> map) {
             return namedMap(map);
         }
-        if (value instanceof LumeArray<?> list) {
+        if (value instanceof LumeVector<?> list) {
             return positional(new ArrayList<>(list.asJava()));
         }
         if (value instanceof Tuple2<?, ?> tuple) {

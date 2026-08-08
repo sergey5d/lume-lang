@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*empty collection.*requires an array or map type.*Set\[Int\].*
+# .*empty collection.*requires a vector or map type.*Set\[Int\].*
 
 main() Unit {
     values Set[Int] = []

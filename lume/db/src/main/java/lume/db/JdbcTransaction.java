@@ -3,7 +3,7 @@ package lume.db;
 import java.sql.Connection;
 import java.sql.SQLException;
 
-import lume.core.LumeArray;
+import lume.core.LumeVector;
 import lume.core.LumeUnit;
 import lume.core.Result;
 
@@ -17,7 +17,7 @@ public final class JdbcTransaction implements JdbcRunner {
     }
 
     @Override
-    public Result<LumeArray<JdbcRow>, DbError> query(String sql, Object... values) {
+    public Result<LumeVector<JdbcRow>, DbError> query(String sql, Object... values) {
         var bindings = SqlBindings.from(values);
         return run(connection ->
             Jdbc.query(connection, sql, bindings.positional(), bindings.named())

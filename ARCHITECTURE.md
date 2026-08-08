@@ -160,7 +160,7 @@ AST program
   case metadata.
 - `runtime/builtins/` provides builtin runtime types and host-implemented
   methods for currently hardcoded builtins such as `Str`, `Option`, `Result`,
-  `Either`, `Array`, `FixedArray`, `Set`, and `Map`.
+  `Either`, `Vector`, `Array`, `Set`, and `Map`.
 
 One useful mental model is:
 

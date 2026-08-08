@@ -3224,7 +3224,7 @@ impl<'a> FunctionLowerer<'a> {
             } => {
                 let element_ty = self.list_element_type(&scrutinee);
                 let list_ty = ir::Type::Named {
-                    name: "Array".to_string(),
+                    name: "Vector".to_string(),
                     args: vec![element_ty.clone()],
                 };
                 let len = self.emit_temp_from_rvalue(
@@ -3372,7 +3372,7 @@ impl<'a> FunctionLowerer<'a> {
 
     fn list_element_type(&self, scrutinee: &ir::Operand) -> ir::Type {
         match self.operand_type(scrutinee) {
-            Some(ir::Type::Named { name, args }) if name == "Array" && args.len() == 1 => {
+            Some(ir::Type::Named { name, args }) if name == "Vector" && args.len() == 1 => {
                 args.into_iter().next().unwrap_or(ir::Type::Unknown)
             }
             _ => ir::Type::Unknown,
@@ -4185,7 +4185,7 @@ impl<'a> FunctionLowerer<'a> {
         let receiver_ty = self.infer_expr_type(receiver);
         match receiver_ty {
             ir::Type::Named { name, args }
-                if (name == "Array" || name == "FixedArray") && args.len() == 1 =>
+                if (name == "Vector" || name == "Array") && args.len() == 1 =>
             {
                 args[0].clone()
             }
@@ -4890,7 +4890,7 @@ impl<'a> FunctionLowerer<'a> {
                 _ => None,
             });
         };
-        if matches!(type_name.as_str(), "Array" | "LinkedList")
+        if matches!(type_name.as_str(), "Vector" | "LinkedList")
             && matches!(name.as_str(), "fold" | "reduce")
             && args.len() == 2
         {
@@ -5452,7 +5452,9 @@ impl<'a> FunctionLowerer<'a> {
                 variadic: true,
             });
         let element_ty = match &variadic_spec.ty {
-            ir::Type::Named { name, args } if name == "Array" && args.len() == 1 => args[0].clone(),
+            ir::Type::Named { name, args } if name == "Vector" && args.len() == 1 => {
+                args[0].clone()
+            }
             _ => ir::Type::Unknown,
         };
         let list = self.add_temp(variadic_spec.ty.clone());
@@ -5608,7 +5610,7 @@ impl<'a> FunctionLowerer<'a> {
                 let receiver_ty = self.infer_expr_type(receiver);
                 if matches!(name.as_str(), "fold" | "reduce") && ordered_args.len() == 2 {
                     if let ir::Type::Named { name, args } = &receiver_ty {
-                        if matches!(name.as_str(), "Array" | "LinkedList") && args.len() == 1 {
+                        if matches!(name.as_str(), "Vector" | "LinkedList") && args.len() == 1 {
                             let accumulator = self.infer_expr_type(&ordered_args[0].value);
                             return Some(vec![
                                 Some(ExpectedArgSpec {
@@ -6113,7 +6115,7 @@ impl<'a> FunctionLowerer<'a> {
                 let member = &path[1];
                 if matches!(
                     (owner.as_str(), member.as_str()),
-                    ("Array", "from") | ("Set", "from")
+                    ("Vector", "from") | ("Set", "from")
                 ) {
                     return Some(vec!["values".to_string()]);
                 }
@@ -7060,7 +7062,7 @@ fn index_result_ir_type(ty: &ir::Type) -> ir::Type {
             ir::Type::option(args[0].clone())
         }
         ir::Type::Named { name, args }
-            if (name == "Array" || name == "FixedArray") && args.len() == 1 =>
+            if (name == "Vector" || name == "Array") && args.len() == 1 =>
         {
             args[0].clone()
         }
@@ -7080,10 +7082,10 @@ fn index_result_ir_type(ty: &ir::Type) -> ir::Type {
 fn known_iterable_ir_item_type(ty: &ir::Type) -> Option<ir::Type> {
     match ty {
         ir::Type::Named { name, args }
-            if (name == "Array"
+            if (name == "Vector"
                 || name == "Iterable"
                 || name == "Iterator"
-                || name == "FixedArray"
+                || name == "Array"
                 || name == "LinkedList"
                 || name == "Set")
                 && args.len() == 1 =>
@@ -7673,23 +7675,23 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             }),
         }),
         (
-            "Array" | "LinkedList" | "FixedArray",
+            "Vector" | "LinkedList" | "Array",
             "head" | "first" | "last" | "removeFirst" | "removeLast",
         ) => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir::Type::option(item)),
         }),
-        ("Array" | "LinkedList" | "FixedArray", "get" | "remove") => Some(ir::Type::Function {
+        ("Vector" | "LinkedList" | "Array", "get" | "remove") => Some(ir::Type::Function {
             params: vec![ir::Type::Int],
             ret: Box::new(ir::Type::option(item)),
         }),
-        ("Array" | "LinkedList" | "FixedArray" | "Set" | "Map" | "Str", "size" | "length") => {
+        ("Vector" | "LinkedList" | "Array" | "Set" | "Map" | "Str", "size" | "length") => {
             Some(ir::Type::Function {
                 params: Vec::new(),
                 ret: Box::new(ir::Type::Int),
             })
         }
-        ("Array" | "LinkedList" | "FixedArray" | "Set" | "Map", "isEmpty" | "nonEmpty") => {
+        ("Vector" | "LinkedList" | "Array" | "Set" | "Map", "isEmpty" | "nonEmpty") => {
             Some(ir::Type::Function {
                 params: Vec::new(),
                 ret: Box::new(ir::Type::Bool),
@@ -8341,9 +8343,9 @@ fn builtin_callable_root_name(name: &str) -> bool {
     matches!(
         name,
         "OS" | "Range"
-            | "Array"
+            | "Vector"
             | "LinkedList"
-            | "FixedArray"
+            | "Array"
             | "Set"
             | "Map"
             | "Some"

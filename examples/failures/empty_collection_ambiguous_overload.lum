@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*empty collection.*matches multiple array/map overloads.*
+# .*empty collection.*matches multiple vector/map overloads.*
 
 class Consumer {}
 

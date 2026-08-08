@@ -6,15 +6,15 @@
 # 0
 
 main() Int {
-    explicit Array[Int] = Array(1, 2, 3)
+    explicit Vector[Int] = Vector(1, 2, 3)
     shorthand [Int] = explicit
-    explicitAgain Array[Int] = shorthand
+    explicitAgain Vector[Int] = shorthand
 
     for value <- explicitAgain {
         println(value)
     }
 
-    literalAsExplicit Array[Int] = [4]
+    literalAsExplicit Vector[Int] = [4]
     println(literalAsExplicit[0])
 
     0

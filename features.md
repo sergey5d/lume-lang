@@ -58,7 +58,7 @@ Open stdlib collection/query ergonomics:
 - clearer `Map` update ergonomics beyond `put`
 - maybe collection partitioning helpers
 - maybe unzip style helpers later
-- whether `FixedArray[T]` should grow `flatMap` and `filter`; if yes, decide whether those return `Array[...]`, `Iterable[...]`, fixed-size `FixedArray[...]`, or should stay omitted
+- whether fixed-size `Array[T]` should grow `flatMap` and `filter`; if yes, decide whether those return `Vector[...]`, `Iterable[...]`, `Array[...]`, or should stay omitted
 
 These can mostly live in the stdlib, but may still need runtime support in places.
 
@@ -259,7 +259,7 @@ runtime descriptor:
 - interfaces, as interface metadata only
 - tuples and function types, if their component types are also reifiable
 - anonymous shapes only when the full static field shape is known
-- generic instantiations such as `Array[User]` only when every type argument is reifiable
+- generic instantiations such as `Vector[User]` only when every type argument is reifiable
 
 The critical distinction:
 - `Type[User]` means metadata for the concrete class `User`

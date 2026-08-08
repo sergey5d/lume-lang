@@ -17,7 +17,7 @@ matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], path 
             continue
         }
 
-        nextPath = Array.from(path)
+        nextPath = Vector.from(path)
         nextPath.add(word)
 
         if word == endWord {

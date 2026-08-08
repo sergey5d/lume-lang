@@ -8,7 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import lume.core.LumeArray;
+import lume.core.LumeVector;
 import lume.core.Result;
 
 final class Jdbc {
@@ -27,7 +27,7 @@ final class Jdbc {
         return new Result.Err<>(DbError.message(message));
     }
 
-    static LumeArray<JdbcRow> query(
+    static LumeVector<JdbcRow> query(
         Connection connection,
         String sql,
         List<Object> positional,
@@ -50,7 +50,7 @@ final class Jdbc {
                 }
                 rows.add(new JdbcRow(values));
             }
-            return LumeArray.from(rows);
+            return LumeVector.from(rows);
         }
     }
 

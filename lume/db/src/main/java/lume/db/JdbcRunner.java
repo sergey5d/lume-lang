@@ -1,10 +1,10 @@
 package lume.db;
 
-import lume.core.LumeArray;
+import lume.core.LumeVector;
 import lume.core.Result;
 
 public interface JdbcRunner {
-    Result<LumeArray<JdbcRow>, DbError> query(String sql, Object... values);
+    Result<LumeVector<JdbcRow>, DbError> query(String sql, Object... values);
 
     Result<Long, DbError> exec(String sql);
 

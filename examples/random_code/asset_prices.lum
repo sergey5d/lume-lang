@@ -78,7 +78,7 @@ impl AssetPrices {
                 continue
             }
 
-            newPrices = Array.from(prices)
+            newPrices = Vector.from(prices)
             newPrices.add(((currAsset, toAsset), price))
 
             if toAsset == endAsset {

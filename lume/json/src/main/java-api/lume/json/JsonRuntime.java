@@ -1,6 +1,6 @@
 package lume.json;
 
-import lume.core.LumeArray;
+import lume.core.LumeVector;
 import lume.core.LumeType;
 import lume.core.Result;
 
@@ -32,11 +32,11 @@ public final class JsonRuntime {
         throw new UnsupportedOperationException("descriptor only");
     }
 
-    public static JsonValue array(LumeArray<JsonValue> values) {
+    public static JsonValue array(LumeVector<JsonValue> values) {
         throw new UnsupportedOperationException("descriptor only");
     }
 
-    public static JsonValue obj(LumeArray<JsonField> fields) {
+    public static JsonValue obj(LumeVector<JsonField> fields) {
         throw new UnsupportedOperationException("descriptor only");
     }
 

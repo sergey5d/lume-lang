@@ -1,10 +1,10 @@
 mod either_type;
-mod list_type;
 mod map_type;
 mod option_type;
 mod result_type;
 mod set_type;
 mod str_type;
+mod vector_type;
 
 use crate::{
     Diagnostic, Span,
@@ -62,7 +62,7 @@ pub(super) fn builtin_types() -> Vec<RuntimeType> {
         option_type::define(),
         result_type::define(),
         either_type::define(),
-        list_type::define(),
+        vector_type::define(),
         set_type::define(),
         map_type::define(),
     ]

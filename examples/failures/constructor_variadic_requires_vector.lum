@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# variadic constructor parameter must use an array type.*
+# variadic constructor parameter must use a vector type.*
 
 class Bad {
     items [Int]

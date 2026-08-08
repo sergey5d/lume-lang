@@ -5,12 +5,12 @@
 # 3
 
 class Vec {
-    hidden var items FixedArray[Int]
+    hidden var items Array[Int]
 }
 
 impl Vec {
     new(left Int, right Int) {
-        this.items = FixedArray(left, right)
+        this.items = Array(left, right)
     }
 
     [](index Int) Int = this.items[index]

@@ -1,5 +1,5 @@
 # EXPECT:
-# array
+# vector
 # class
 # class
 # interface
@@ -23,9 +23,9 @@ class Amount {
     label Str
 }
 
-describeArray(value [Int]) {
+describeVector(value [Int]) {
     match value {
-        case _ Array => println("array")
+        case _ Vector => println("vector")
     }
 }
 
@@ -55,7 +55,7 @@ describeNamedWorker(value Named) {
 }
 
 main() Int {
-    describeArray([1, 2, 3])
+    describeVector([1, 2, 3])
     describeClass(Worker("Ada"))
     describeShape(Amount(7, "usd"))
     describeInterface(Worker("Bob"))

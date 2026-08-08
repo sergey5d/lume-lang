@@ -86,7 +86,7 @@ file. Right now it covers:
 - fields, methods, enum cases, and impl methods
 - blocks, bindings, assignments, `if`, `while`, `for`, `defer`, `return`,
   `break`, and `continue`
-- calls, member access, indexing, arrays, tuples, lambdas, and `if` expressions
+- calls, member access, indexing, vectors, arrays, tuples, lambdas, and `if` expressions
 
 The `check` command resolves and type-checks the requested file and its `use` dependencies,
 installs ambient stdlib names from `stdlib/*.lum`, and reports diagnostics such
@@ -114,7 +114,7 @@ It supports:
 - `if`, `while`, `match`, `partial`, `for`, `for ... yield`, `defer`,
   `return`, `break`, and `continue`
 - `try` propagation and `expect` assertions over `Option`, `Result`, and `Either`
-- builtin constructors and helpers like `Range`, `Array`, `FixedArray`, `Some`, `None`,
+- builtin constructors and helpers like `Range`, `Vector`, `Array`, `Some`, `None`,
   `Ok`, `Err`, `Left`, `Right`, and `OS.println`
 - imported-module execution through the resolver/runtime merge path
 - string interpolation, multiline strings, and `%`-style `printf`

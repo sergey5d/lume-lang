@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*cannot mix map spreads with array or iterable spreads in the same bracket literal.*
+# .*cannot mix map spreads with vector or iterable spreads in the same bracket literal.*
 
 main() Unit {
     values = [1, 2]

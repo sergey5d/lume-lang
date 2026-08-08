@@ -64,8 +64,8 @@ public final class LumeMap<K, V> {
         values.clear();
     }
 
-    public LumeArray<Tuple2<K, V>> entries() {
-        var entries = LumeArray.<Tuple2<K, V>>empty();
+    public LumeVector<Tuple2<K, V>> entries() {
+        var entries = LumeVector.<Tuple2<K, V>>empty();
         for (var entry : values.entrySet()) {
             entries.add(new Tuple2<>(entry.getKey(), entry.getValue()));
         }

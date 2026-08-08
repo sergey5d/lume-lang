@@ -1,7 +1,0 @@
-# FAIL_REGEX:
-# .*argument has type 'Int' but parameter expects captured element type of Array\[_\].*
-
-main() Unit {
-    values [_] = [1, 2, 3]
-    values.add(7)
-}

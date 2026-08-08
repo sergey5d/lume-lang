@@ -269,9 +269,9 @@ impl<'a> Parser<'a> {
                     span: start.cover(end),
                 });
             }
-            let end = self.consume(TokenKind::RBracket, "expected ']' after array type")?;
+            let end = self.consume(TokenKind::RBracket, "expected ']' after vector type")?;
             return Some(TypeRef::Named {
-                name: "Array".to_string(),
+                name: "Vector".to_string(),
                 args: vec![first],
                 span: start.cover(end),
             });

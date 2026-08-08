@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*expected '\]' after array pattern.*
+# .*expected '\]' after vector pattern.*
 
 main() Unit {
     values [Int] = [1, 2, 3]
