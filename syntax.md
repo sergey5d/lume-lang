@@ -1684,7 +1684,16 @@ copy = [...items]
 
 `...items` inside a list literal copies each element from an iterable into the
 new list. The copy is shallow: element values are reused, but the outer list is
-new.
+new. Multiple spreads may appear in one literal. A map is not a list-spread
+source; use `map.entries()` when a list of `(key, value)` tuples is wanted:
+
+```txt
+parts = [1, 2]
+more = [3, 4]
+combined = [0, ...parts, ...more, 5]
+
+entryList [(Str, Int)] = [...map.entries()]
+```
 
 Array construction:
 
@@ -1716,6 +1725,11 @@ Map construction:
 entries [Str : Int] = ["a": 1, "b": 2]
 empty [Str : Int] = [:]
 value Option[Int] = entries["a"]
+
+defaults [Str : Int] = ["port": 80, "secure": 0]
+overrides [Str : Int] = ["port": 443]
+copy = [...defaults]
+merged = [...defaults, "retries": 3, ...overrides]
 ```
 
 `[K : V]` is the concise map type syntax and is equivalent to `Map[K, V]`.
@@ -1730,14 +1744,25 @@ scores [Str : Int] = [dynamic: 10, makeKey(): 20]
 positions [(Int, Int) : Str] = [(10, 20): "start"]
 ```
 
-Map entries are comma-separated and cannot be mixed with list items. Collection
-literals are distinguished by their contents:
+Map entries and spreads are comma-separated and may be interleaved. Spreading
+a map copies its entries into a fresh map. Parts are evaluated from left to
+right, and a later entry or spread replaces an earlier value with the same key.
+
+Map entries cannot be mixed with list items. The spread source determines the
+collection family when a literal contains only spreads: `[...list]` is a list
+and `[...map]` is a map. Multiple spread sources must belong to the same family.
+A map cannot be spread directly into a list, and an iterable/list cannot be
+spread into a map.
+
+Collection literals are distinguished by their contents and spread sources:
 
 ```txt
 []                    # empty list
 [:]                   # empty map
 [value, ...]          # list
 [key: value, ...]     # map
+[...list]             # list copy
+[...map]              # map copy
 ```
 
 An empty map has no key or value expressions from which to infer its type, so

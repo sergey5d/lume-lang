@@ -3754,11 +3754,23 @@ impl<'a> Checker<'a> {
             Expr::Bool { .. } => Ty::bool(),
             Expr::Unit { .. } => Ty::unit(),
             Expr::ListLiteral { items, .. } => {
+                if let Some(collection_ty) =
+                    self.check_spread_only_collection_literal(items, expected)
+                {
+                    return collection_ty;
+                }
                 let mut item_ty = Ty::Unknown;
                 for item in items {
                     let current = if let Expr::Spread { value, span } = item {
                         let spread_ty = self.check_expr(value);
-                        if let Some(item_ty) = self.known_iterable_item_type(&spread_ty) {
+                        if is_map_ty(&spread_ty) {
+                            self.add_error(
+                                "invalid_list_spread",
+                                "cannot spread a map into a list literal",
+                                *span,
+                            );
+                            Ty::Unknown
+                        } else if let Some(item_ty) = self.known_iterable_item_type(&spread_ty) {
                             item_ty
                         } else {
                             if !matches!(spread_ty, Ty::Unknown) {
@@ -3807,7 +3819,7 @@ impl<'a> Checker<'a> {
             Expr::Spread { span, .. } => {
                 self.add_error(
                     "invalid_spread",
-                    "spread syntax is only valid inside list literals and positional vararg call arguments",
+                    "spread syntax is only valid inside list or map literals and positional vararg call arguments",
                     *span,
                 );
                 Ty::Unknown
@@ -5573,6 +5585,26 @@ impl<'a> Checker<'a> {
                 let mut key = Ty::Unknown;
                 let mut value = Ty::Unknown;
                 for arg in args {
+                    if let Expr::Spread { value: spread, .. } = &arg.value {
+                        match self.check_expr(spread) {
+                            Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
+                                key = join_types(&key, &args[0]);
+                                value = join_types(&value, &args[1]);
+                            }
+                            Ty::Unknown => {}
+                            other => {
+                                self.add_error(
+                                    "invalid_map_spread",
+                                    format!(
+                                        "map spread requires a map value, got '{}'",
+                                        other.describe()
+                                    ),
+                                    arg.span,
+                                );
+                            }
+                        }
+                        continue;
+                    }
                     match self.check_expr(&arg.value) {
                         Ty::Tuple(items) if items.len() == 2 => {
                             key = join_types(&key, &items[0]);
@@ -6981,6 +7013,99 @@ impl<'a> Checker<'a> {
             Ty::Named(name, args) if name == "IntRange" && args.is_empty() => Some(Ty::int()),
             _ => None,
         }
+    }
+
+    fn check_spread_only_collection_literal(
+        &mut self,
+        items: &[Expr],
+        expected: &Ty,
+    ) -> Option<Ty> {
+        if items.is_empty() || !items.iter().all(|item| matches!(item, Expr::Spread { .. })) {
+            return None;
+        }
+
+        let spread_types = items
+            .iter()
+            .filter_map(|item| match item {
+                Expr::Spread { value, span } => Some((self.check_expr(value), *span)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let expected_is_map = matches!(
+            expected,
+            Ty::Named(name, args) if name == "Map" && args.len() == 2
+        );
+        let expected_is_list = matches!(
+            expected,
+            Ty::Named(name, args) if name == "List" && args.len() == 1
+        );
+        let has_map = spread_types.iter().any(|(ty, _)| is_map_ty(ty));
+        let has_known_non_map = spread_types
+            .iter()
+            .any(|(ty, _)| !matches!(ty, Ty::Unknown) && !is_map_ty(ty));
+
+        if has_map && has_known_non_map {
+            let span = spread_types
+                .iter()
+                .find(|(ty, _)| !matches!(ty, Ty::Unknown) && !is_map_ty(ty))
+                .map(|(_, span)| *span)
+                .unwrap_or_else(|| items[0].span());
+            self.add_error(
+                "mixed_collection_spreads",
+                "cannot mix map spreads with list or iterable spreads in the same bracket literal",
+                span,
+            );
+            return Some(Ty::Unknown);
+        }
+
+        if has_map {
+            if expected_is_list {
+                self.add_error(
+                    "invalid_list_spread",
+                    "cannot spread a map into a list literal",
+                    items[0].span(),
+                );
+                return Some(Ty::Unknown);
+            }
+            return Some(join_spread_map_types(
+                expected,
+                spread_types.into_iter().map(|part| part.0),
+            ));
+        }
+
+        if expected_is_map && has_known_non_map {
+            let (other, span) = spread_types
+                .iter()
+                .find(|(ty, _)| !matches!(ty, Ty::Unknown))
+                .cloned()
+                .unwrap_or((Ty::Unknown, items[0].span()));
+            self.add_error(
+                "invalid_map_spread",
+                format!(
+                    "cannot spread '{}' into a map literal; map spread requires a map value",
+                    other.describe()
+                ),
+                span,
+            );
+            return Some(Ty::Unknown);
+        }
+
+        let mut item_ty = Ty::Unknown;
+        for (item, (spread_ty, _)) in items.iter().zip(spread_types) {
+            if let Some(current) = self.known_iterable_item_type(&spread_ty) {
+                item_ty = join_types(&item_ty, &current);
+            } else if !matches!(spread_ty, Ty::Unknown) {
+                self.add_error(
+                    "invalid_list_spread",
+                    format!(
+                        "list spread requires an iterable value, got '{}'",
+                        spread_ty.describe()
+                    ),
+                    item.span(),
+                );
+            }
+        }
+        Some(Ty::list(item_ty))
     }
 
     fn iterable_item_type(&self, ty: &Ty) -> Ty {
@@ -9331,6 +9456,28 @@ fn type_ref_named_name(reference: &TypeRef) -> Option<&str> {
 
 fn is_list_type_ref(reference: &TypeRef) -> bool {
     matches!(reference, TypeRef::Named { name, args, .. } if name == "List" && args.len() == 1)
+}
+
+fn is_map_ty(ty: &Ty) -> bool {
+    matches!(ty, Ty::Named(name, args) if name == "Map" && args.len() == 2)
+}
+
+fn join_spread_map_types(expected: &Ty, spread_types: impl IntoIterator<Item = Ty>) -> Ty {
+    let (mut key, mut value) = match expected {
+        Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
+            (args[0].clone(), args[1].clone())
+        }
+        _ => (Ty::Unknown, Ty::Unknown),
+    };
+    for ty in spread_types {
+        if let Ty::Named(name, args) = ty {
+            if name == "Map" && args.len() == 2 {
+                key = join_types(&key, &args[0]);
+                value = join_types(&value, &args[1]);
+            }
+        }
+    }
+    Ty::Named("Map".to_string(), vec![key, value])
 }
 
 fn is_unit_type_ref(reference: &TypeRef) -> bool {
@@ -13077,6 +13224,69 @@ def main() Int {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_list_and_map_spread_literals() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    first = [1, 2]
+    second = [3, 4]
+    values [Int] = [0, ...first, ...second, 5]
+
+    defaults [Str : Int] = ["one": 1, "shared": 2]
+    overrides [Str : Int] = ["shared": 20, "three": 3]
+    copy [Str : Int] = [...defaults]
+    merged [Str : Int] = [...defaults, "two": 2, ...overrides]
+    entries [(Str, Int)] = [...merged.entries()]
+
+    println(values.size(), copy.size(), merged.size(), entries.size())
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_cross_family_collection_spreads() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    values = [1, 2]
+    entries [Str : Int] = ["one": 1]
+    mixed = [...values, ...entries]
+    invalidList = [0, ...entries]
+    invalidMap [Str : Int] = [...values]
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "mixed_collection_spreads"),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_list_spread"),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "invalid_map_spread"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

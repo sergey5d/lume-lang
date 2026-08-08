@@ -22,6 +22,23 @@ public final class LumeMap<K, V> {
         return new LumeMap<>(map);
     }
 
+    @SuppressWarnings("unchecked")
+    public static <K, V> LumeMap<K, V> fromParts(Object... parts) {
+        var map = new LinkedHashMap<K, V>();
+        for (var part : parts) {
+            if (part instanceof Tuple2<?, ?> entry) {
+                map.put((K) entry.first(), (V) entry.second());
+            } else if (part instanceof LumeMap<?, ?> spread) {
+                for (var entry : spread.values.entrySet()) {
+                    map.put((K) entry.getKey(), (V) entry.getValue());
+                }
+            } else {
+                throw new IllegalArgumentException("map construction expects entries or map spreads");
+            }
+        }
+        return new LumeMap<>(map);
+    }
+
     public LumeMap<K, V> put(K key, V value) {
         var copy = new LinkedHashMap<>(values);
         copy.put(key, value);
@@ -37,6 +54,14 @@ public final class LumeMap<K, V> {
 
     public long size() {
         return values.size();
+    }
+
+    public LumeList<Tuple2<K, V>> entries() {
+        var entries = LumeList.<Tuple2<K, V>>empty();
+        for (var entry : values.entrySet()) {
+            entries.add(new Tuple2<>(entry.getKey(), entry.getValue()));
+        }
+        return entries;
     }
 
     public Map<K, V> asJava() {

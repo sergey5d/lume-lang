@@ -43,6 +43,7 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(12, "get", vec![ir::Type::Unknown], map_get),
             builtin_method(13, "contains", vec![ir::Type::Unknown], map_contains),
             builtin_method(14, "size", Vec::new(), map_size),
+            builtin_method(15, "entries", Vec::new(), map_entries_list),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -90,6 +91,24 @@ fn map_iterator(
         return Err(interpreter.runtime_error(span, "Map.iterator expects 0 arguments"));
     }
     Ok(Value::iterator_from_values(
+        map_entries(&receiver)
+            .borrow()
+            .iter()
+            .map(|(key, value)| Value::Tuple(vec![key.clone(), value.clone()]))
+            .collect(),
+    ))
+}
+
+fn map_entries_list(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Map.entries expects 0 arguments"));
+    }
+    Ok(Value::list(
         map_entries(&receiver)
             .borrow()
             .iter()

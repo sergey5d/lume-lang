@@ -46,8 +46,12 @@ public final class LumeList<T> {
         return this;
     }
 
-    public LumeList<T> addAll(LumeList<T> other) {
-        values.addAll(other.values);
+    @SuppressWarnings("unchecked")
+    public LumeList<T> addAll(Object other) {
+        var iterator = LumeIterator.<T>from(other);
+        while (iterator.hasNext()) {
+            values.add((T) iterator.next());
+        }
         return this;
     }
 

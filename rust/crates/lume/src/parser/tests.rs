@@ -1308,6 +1308,32 @@ fn parses_bracket_map_literal_as_map_construction() {
 }
 
 #[test]
+fn parses_map_literal_with_interleaved_spreads() {
+    match parse_expr_only(r#"[...defaults, "fixed": 1, ...overrides]"#) {
+        Expr::Call {
+            callee,
+            args,
+            uses_brace_syntax,
+            ..
+        } => {
+            assert!(!uses_brace_syntax);
+            assert!(matches!(
+                callee.as_ref(),
+                Expr::Identifier { name, .. } if name == "Map"
+            ));
+            assert_eq!(args.len(), 3);
+            assert!(matches!(&args[0].value, Expr::Spread { .. }));
+            assert!(matches!(
+                &args[1].value,
+                Expr::TupleLiteral { items, .. } if items.len() == 2
+            ));
+            assert!(matches!(&args[2].value, Expr::Spread { .. }));
+        }
+        other => panic!("expected Map call with spreads, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_empty_map_literal() {
     for source in ["[:]", "[ : ]"] {
         assert!(

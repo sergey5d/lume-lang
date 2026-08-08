@@ -2725,8 +2725,11 @@ module demo/mapliteral
 
 def main() Unit {
     entries [Str : Int] = ["one": 1, "two": 2]
+    copy [Str : Int] = [...entries]
+    merged [Str : Int] = [...copy, "three": 3]
+    entryList [(Str, Int)] = [...merged.entries()]
     empty [Str : Int] = [:]
-    println(entries.size(), empty.size())
+    println(entries.size(), copy.size(), merged.size(), entryList.size(), empty.size())
 }
 "#,
         )
@@ -2737,8 +2740,9 @@ def main() Unit {
 
         let module = fs::read_to_string(out.join("demo/mapliteral/MapliteralModule.java"))
             .expect("read module");
-        assert!(module.contains("lume.core.LumeMap.fromEntries("));
+        assert!(module.contains("lume.core.LumeMap.fromParts("));
         assert!(module.contains("new lume.core.Tuple2<>("));
+        assert!(module.contains(".entries()"));
         assert!(module.contains("lume.core.LumeMap.empty()"));
 
         let _ = fs::remove_dir_all(temp);

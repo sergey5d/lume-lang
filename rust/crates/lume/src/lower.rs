@@ -3628,6 +3628,15 @@ impl<'a> FunctionLowerer<'a> {
             return ir::Operand::Const(ir::Constant::Unit);
         }
         match expr {
+            Expr::ListLiteral { items, span }
+                if list_literal_has_spread(items)
+                    && self.spread_only_literal_is_map(items, Some(expected)) =>
+            {
+                self.lower_spread_map_literal(items, *span, Some(expected))
+            }
+            Expr::ListLiteral { items, span } if list_literal_has_spread(items) => {
+                self.lower_spread_list_literal(items, *span)
+            }
             Expr::Match {
                 partial,
                 value,
@@ -3749,6 +3758,9 @@ impl<'a> FunctionLowerer<'a> {
                 yield_body,
                 span,
             } => self.lower_for_yield_expr(bindings, yield_body, *span),
+            Expr::ListLiteral { items, span } if self.spread_only_literal_is_map(items, None) => {
+                self.lower_spread_map_literal(items, *span, None)
+            }
             Expr::ListLiteral { items, span } if list_literal_has_spread(items) => {
                 self.lower_spread_list_literal(items, *span)
             }
@@ -3823,6 +3835,39 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         ir::Operand::Copy(Box::new(ir::Place::Local(list)))
+    }
+
+    fn lower_spread_map_literal(
+        &mut self,
+        items: &[Expr],
+        span: Span,
+        expected: Option<&ir::Type>,
+    ) -> ir::Operand {
+        let map_ty = expected
+            .cloned()
+            .unwrap_or_else(|| self.infer_spread_map_type(items));
+        let args = items
+            .iter()
+            .filter_map(|item| match item {
+                Expr::Spread { value, .. } => Some(self.lower_expr(value)),
+                _ => None,
+            })
+            .collect();
+        let map = self.add_temp(map_ty);
+        self.push_statement(ir::Statement {
+            span: Some(span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(map),
+                value: ir::RValue::Call {
+                    callee: ir::Callee::Named {
+                        path: vec!["Map".to_string()],
+                    },
+                    args,
+                    structural: false,
+                },
+            },
+        });
+        ir::Operand::Copy(Box::new(ir::Place::Local(map)))
     }
 
     fn lower_expr_from_rvalue_with_expected(
@@ -4132,6 +4177,9 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Bool { .. } => ir::Type::Bool,
             Expr::Unit { .. } => ir::Type::Unit,
             Expr::ListLiteral { items, .. } => {
+                if self.spread_only_literal_is_map(items, None) {
+                    return self.infer_spread_map_type(items);
+                }
                 let item_ty = items
                     .iter()
                     .map(|item| {
@@ -4276,6 +4324,55 @@ impl<'a> FunctionLowerer<'a> {
                 ir::Type::Named { name, args }
             }
             _ => ir::Type::Unknown,
+        }
+    }
+
+    fn spread_only_literal_is_map(&self, items: &[Expr], expected: Option<&ir::Type>) -> bool {
+        if items.is_empty() || !items.iter().all(|item| matches!(item, Expr::Spread { .. })) {
+            return false;
+        }
+
+        let mut has_map = false;
+        let mut has_known_non_map = false;
+        for item in items {
+            let Expr::Spread { value, .. } = item else {
+                continue;
+            };
+            match self.infer_expr_type(value) {
+                ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
+                    has_map = true;
+                }
+                ir::Type::Unknown => {}
+                _ => has_known_non_map = true,
+            }
+        }
+        if has_map {
+            return !has_known_non_map;
+        }
+        !has_known_non_map
+            && matches!(
+                expected,
+                Some(ir::Type::Named { name, args }) if name == "Map" && args.len() == 2
+            )
+    }
+
+    fn infer_spread_map_type(&self, items: &[Expr]) -> ir::Type {
+        let mut key = ir::Type::Unknown;
+        let mut value = ir::Type::Unknown;
+        for item in items {
+            let Expr::Spread { value: spread, .. } = item else {
+                continue;
+            };
+            if let ir::Type::Named { name, args } = self.infer_expr_type(spread) {
+                if name == "Map" && args.len() == 2 {
+                    key = join_ir_types(key, args[0].clone());
+                    value = join_ir_types(value, args[1].clone());
+                }
+            }
+        }
+        ir::Type::Named {
+            name: "Map".to_string(),
+            args: vec![key, value],
         }
     }
 
@@ -7501,6 +7598,13 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         ("List" | "Array" | "Set" | "Map", "isEmpty" | "nonEmpty") => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir::Type::Bool),
+        }),
+        ("Map", "entries") if args.len() == 2 => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::list(ir::Type::Tuple(vec![
+                args[0].clone(),
+                args[1].clone(),
+            ]))),
         }),
         _ => None,
     }

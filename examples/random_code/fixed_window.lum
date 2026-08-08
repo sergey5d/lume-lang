@@ -1,0 +1,68 @@
+# EXPECT:
+# we are done
+
+class Window {
+    var count Int
+    start Int
+}
+
+class FixedWindowRateLimiter {
+
+    hidden map [Str: Window] = []
+    hidden windowSize Int
+    hidden limit Int
+    
+    new(windowSize Int, limit Int) = {
+        this.windowSize = windowSize
+        this.limit = limit
+    }
+
+    getCurrentTime() Int = {
+        0
+    }
+
+    allow(id Str) Bool = {
+
+        now = getCurrentTime()
+
+        if let window <- map[id] {
+
+            windowed = now / windowSize
+
+            if window.start == windowed {
+                if window.count <= limit {
+                    window.count += 1
+                }                    
+                return window.count <= limit
+            } else {
+                map[id] := Window { count: 1, start: windowed }
+            }
+        } else {
+            map[id] := Window { count: 1, start: windowed }
+        }
+        true
+    }
+
+    reset() = {
+        map.clear()
+    }
+}
+
+main() = {
+
+    limiter = FixedWindowRateLimiter {windowSize : 5, limit 5 }
+
+    for i <- Range(0, 5) {
+        if !limiter.allow(4) {
+            println("unexpected not allow")
+        }
+    }
+
+    failed = limiter.allow(4)
+
+    if !failed {
+        println("unexpected allowance")
+    }
+
+    println("we are done")
+}

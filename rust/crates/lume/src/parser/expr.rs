@@ -1852,7 +1852,7 @@ impl<'a> Parser<'a> {
                 span: start.cover(end),
             });
         }
-        if !self.at(TokenKind::RBracket) && self.collection_literal_entry_has_colon() {
+        if !self.at(TokenKind::RBracket) && self.collection_literal_contains_map_entry() {
             return self.parse_map_literal_after_open(start);
         }
         let mut items = Vec::new();
@@ -1885,29 +1885,39 @@ impl<'a> Parser<'a> {
     fn parse_map_literal_after_open(&mut self, start: Span) -> Option<Expr> {
         let mut entries = Vec::new();
         loop {
-            if !self.collection_literal_entry_has_colon() {
-                self.error_at_current(
-                    "mixed_collection_literal_entries",
-                    "cannot mix map entries and list items in the same bracket literal",
-                );
-                return None;
+            if self.match_token(TokenKind::Ellipsis) {
+                let spread_start = self.previous_span();
+                let value = self.parse_expr()?;
+                let span = spread_start.cover(value.span());
+                entries.push(Expr::Spread {
+                    value: Box::new(value),
+                    span,
+                });
+            } else {
+                if !self.collection_literal_entry_has_colon() {
+                    self.error_at_current(
+                        "mixed_collection_literal_entries",
+                        "cannot mix list items and map entries in the same bracket literal",
+                    );
+                    return None;
+                }
+                let key = self.parse_or_expr()?;
+                self.consume(TokenKind::Colon, "expected ':' after map key")?;
+                self.skip_newlines();
+                if self.at(TokenKind::RBracket) {
+                    self.error_at_current(
+                        "missing_map_literal_value",
+                        "map entry requires a value after ':'",
+                    );
+                    return None;
+                }
+                let value = self.parse_expr()?;
+                let entry_span = key.span().cover(value.span());
+                entries.push(Expr::TupleLiteral {
+                    items: vec![key, value],
+                    span: entry_span,
+                });
             }
-            let key = self.parse_or_expr()?;
-            self.consume(TokenKind::Colon, "expected ':' after map key")?;
-            self.skip_newlines();
-            if self.at(TokenKind::RBracket) {
-                self.error_at_current(
-                    "missing_map_literal_value",
-                    "map entry requires a value after ':'",
-                );
-                return None;
-            }
-            let value = self.parse_expr()?;
-            let entry_span = key.span().cover(value.span());
-            entries.push(Expr::TupleLiteral {
-                items: vec![key, value],
-                span: entry_span,
-            });
             self.skip_newlines();
             if !self.match_token(TokenKind::Comma) {
                 break;
@@ -1936,6 +1946,29 @@ impl<'a> Parser<'a> {
             uses_brace_syntax: false,
             span,
         })
+    }
+
+    fn collection_literal_contains_map_entry(&self) -> bool {
+        let mut lookahead = self.index;
+        let mut parens = 0usize;
+        let mut brackets = 0usize;
+        let mut braces = 0usize;
+        while let Some(token) = self.tokens.get(lookahead) {
+            match token.kind {
+                TokenKind::LParen => parens += 1,
+                TokenKind::RParen => parens = parens.saturating_sub(1),
+                TokenKind::LBracket => brackets += 1,
+                TokenKind::RBracket if parens == 0 && brackets == 0 && braces == 0 => return false,
+                TokenKind::RBracket => brackets = brackets.saturating_sub(1),
+                TokenKind::LBrace => braces += 1,
+                TokenKind::RBrace => braces = braces.saturating_sub(1),
+                TokenKind::Colon if parens == 0 && brackets == 0 && braces == 0 => return true,
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+            lookahead += 1;
+        }
+        false
     }
 
     fn collection_literal_entry_has_colon(&self) -> bool {

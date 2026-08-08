@@ -5369,13 +5369,21 @@ fn map_entries_from_tuple_values(
 ) -> Result<Vec<(Value, Value)>, Diagnostic> {
     let mut entries = Vec::new();
     for value in values {
-        let Value::Tuple(items) = value else {
-            return Err(in_.runtime_error(span, "Map expects tuple pair arguments"));
-        };
-        if items.len() != 2 {
-            return Err(in_.runtime_error(span, "Map expects tuple pair arguments"));
+        match value {
+            Value::Tuple(items) if items.len() == 2 => {
+                map_put_entry(&mut entries, items[0].clone(), items[1].clone());
+            }
+            Value::Map(spread) => {
+                for (key, value) in spread.borrow().iter() {
+                    map_put_entry(&mut entries, key.clone(), value.clone());
+                }
+            }
+            _ => {
+                return Err(
+                    in_.runtime_error(span, "Map expects tuple pair arguments or map spreads")
+                );
+            }
         }
-        map_put_entry(&mut entries, items[0].clone(), items[1].clone());
     }
     Ok(entries)
 }

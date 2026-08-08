@@ -2642,10 +2642,7 @@ impl<'a> FunctionEmitter<'a> {
                 if args.is_empty() {
                     Some("lume.core.LumeMap.empty()".to_string())
                 } else {
-                    Some(format!(
-                        "lume.core.LumeMap.fromEntries(lume.core.LumeList.of({}))",
-                        args.join(", ")
-                    ))
+                    Some(format!("lume.core.LumeMap.fromParts({})", args.join(", ")))
                 }
             }
             [owner] if owner == "Set" && operands.is_empty() => {

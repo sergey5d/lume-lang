@@ -4,6 +4,10 @@
 # built-in made 4
 # tuple key 99
 # empty 0
+# list spread 6
+# map spread shared 20
+# map spread size 4
+# map entries 4
 # 0
 
 def makeKey() Str = "made"
@@ -33,6 +37,22 @@ def main() Int {
 
     empty [Str : Int] = [:]
     println("empty", empty.size())
+
+    first = [1, 2]
+    second = [3, 4]
+    spreadList = [0, ...first, ...second, 5]
+    println("list spread", spreadList.size())
+
+    defaults [Str : Int] = ["one": 1, "shared": 2]
+    overrides [Str : Int] = ["shared": 20, "three": 3]
+    copied [Str : Int] = [...defaults]
+    merged [Str : Int] = [...copied, "two": 2, ...overrides]
+    let Some(shared) = merged["shared"] else return 1
+    println("map spread shared", shared)
+    println("map spread size", merged.size())
+
+    entryList [(Str, Int)] = [...merged.entries()]
+    println("map entries", entryList.size())
 
     0
 }
