@@ -7310,6 +7310,7 @@ fn builtin_member_expected_arg_specs(
             Some(vec![spec(right, true)])
         }
         ("Either", "orElse") => Some(vec![spec(receiver.clone(), true)]),
+        ("Either", "merge") => Some(Vec::new()),
         ("Either", "mapLeft") => {
             let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
             let mapped = match expected {
@@ -7511,6 +7512,10 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         ("Either", "orElse") => Some(ir::Type::Function {
             params: vec![receiver.clone()],
             ret: Box::new(receiver.clone()),
+        }),
+        ("Either", "merge") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(item.clone()),
         }),
         ("Either", "mapLeft") => {
             let left = args.first().cloned().unwrap_or(ir::Type::Unknown);

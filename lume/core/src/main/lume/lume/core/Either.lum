@@ -39,6 +39,11 @@ enum Either[L, R] {
         case Right(value) => f(value)
     }
 
+    def merge[when L = R]() L = match this {
+        case Left(value) => value
+        case Right(value) => value
+    }
+
     def getOr(fallback => R) R = match this {
         case Left(_) => fallback
         case Right(value) => value

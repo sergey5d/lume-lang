@@ -55,6 +55,7 @@ pub(super) fn define() -> RuntimeType {
             ),
             builtin_method(10, "toOption", Vec::new(), either_to_option),
             builtin_method(11, "toResult", Vec::new(), either_to_result),
+            builtin_method(12, "merge", Vec::new(), either_merge),
         ],
         enum_cases: vec![
             RuntimeEnumCase {
@@ -277,4 +278,17 @@ fn either_to_result(
     } else {
         Ok(interpreter.result_err(first_field.expect("Either.Left payload")))
     }
+}
+
+fn either_merge(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Either.merge expects 0 arguments"));
+    }
+    let (_, first_field) = either_case(&receiver);
+    Ok(first_field.expect("Either payload"))
 }

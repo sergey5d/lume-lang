@@ -3054,7 +3054,9 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
                     "if (this instanceof Right<?, ?> __case1)",
                     "default <X> lume.core.Either<L, X> map(java.util.function.Function<R, X> f_1)",
                     "default <X> lume.core.Either<L, X> flatMap(java.util.function.Function<R, lume.core.Either<L, X>> f_1)",
+                    "default L merge()",
                     "return ((R) __case1.value());",
+                    "return ((L) ((Object) ((R) __case1.value())));",
                 ],
             ),
         ] {

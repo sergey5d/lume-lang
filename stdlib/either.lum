@@ -53,6 +53,11 @@ enum Either[L, R] {
        case Right(value) => f(value)
     }
 
+    def merge[when L = R]() L = match this {
+       case Left(value) => value
+       case Right(value) => value
+    }
+
     def toOption() Option[R] = match this {
        case Left(_) => None()
        case Right(value) => Some(value)

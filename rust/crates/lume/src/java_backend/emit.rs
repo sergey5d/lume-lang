@@ -1405,7 +1405,7 @@ impl<'a> SourceBodyEmitter<'a> {
     fn emit_body(&self, expr: &ast::Expr) -> Option<String> {
         let mut out = String::new();
         out.push_str(" {\n");
-        self.emit_returning_expr(&mut out, expr, "        ", &HashMap::new())?;
+        self.emit_returning_expr(&mut out, expr, "        ", &HashMap::new(), &HashMap::new())?;
         out.push_str("    }\n");
         Some(out)
     }
@@ -1416,6 +1416,7 @@ impl<'a> SourceBodyEmitter<'a> {
         expr: &ast::Expr,
         indent: &str,
         bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
     ) -> Option<()> {
         match expr {
             ast::Expr::Match {
@@ -1424,11 +1425,13 @@ impl<'a> SourceBodyEmitter<'a> {
                 cases,
                 ..
             } if self.owner.kind == TypeKind::Enum => {
-                self.emit_match_return(out, value, cases, indent, bindings)
+                self.emit_match_return(out, value, cases, indent, bindings, binding_types)
             }
             _ => {
                 out.push_str(indent);
-                let source_ty = self.expr_type(expr, bindings);
+                let source_ty = self
+                    .expr_type(expr, bindings)
+                    .or_else(|| self.pattern_binding_expr_type(expr, binding_types));
                 let mut emitted =
                     self.emit_expr_against(expr, bindings, &self.function.return_ty)?;
                 if let Some(source_ty) = source_ty
@@ -1461,13 +1464,15 @@ impl<'a> SourceBodyEmitter<'a> {
         cases: &[ast::MatchCase],
         indent: &str,
         bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
     ) -> Option<()> {
         let value = self.emit_expr(value, bindings)?;
         for (index, case) in cases.iter().enumerate() {
             if case.guard.is_some() {
                 return None;
             }
-            let matched = self.match_case_pattern(&case.pattern, &value, index, bindings)?;
+            let matched =
+                self.match_case_pattern(&case.pattern, &value, index, bindings, binding_types)?;
             out.push_str(indent);
             out.push_str("if (");
             out.push_str(&matched.condition);
@@ -1477,6 +1482,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 &case.body,
                 &format!("{indent}    "),
                 &matched.bindings,
+                &matched.binding_types,
             )?;
             out.push_str(indent);
             out.push_str("}\n");
@@ -1492,9 +1498,12 @@ impl<'a> SourceBodyEmitter<'a> {
         body: &ast::MatchCaseBody,
         indent: &str,
         bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
     ) -> Option<()> {
         match body {
-            ast::MatchCaseBody::Expr(expr) => self.emit_returning_expr(out, expr, indent, bindings),
+            ast::MatchCaseBody::Expr(expr) => {
+                self.emit_returning_expr(out, expr, indent, bindings, binding_types)
+            }
             ast::MatchCaseBody::Block(_) => None,
         }
     }
@@ -1505,15 +1514,29 @@ impl<'a> SourceBodyEmitter<'a> {
         value: &str,
         index: usize,
         parent_bindings: &HashMap<String, String>,
+        parent_binding_types: &HashMap<String, ir::Type>,
     ) -> Option<MatchedCase> {
         match pattern {
             ast::Pattern::Constructor { path, args, .. } => {
                 let case_name = path.last()?;
-                self.enum_case_match(case_name, args, value, index, parent_bindings)
+                self.enum_case_match(
+                    case_name,
+                    args,
+                    value,
+                    index,
+                    parent_bindings,
+                    parent_binding_types,
+                )
             }
-            ast::Pattern::Binding { name, .. } if self.enum_case(name).is_some() => {
-                self.enum_case_match(name, &[], value, index, parent_bindings)
-            }
+            ast::Pattern::Binding { name, .. } if self.enum_case(name).is_some() => self
+                .enum_case_match(
+                    name,
+                    &[],
+                    value,
+                    index,
+                    parent_bindings,
+                    parent_binding_types,
+                ),
             ast::Pattern::List { .. } => None,
             _ => None,
         }
@@ -1526,6 +1549,7 @@ impl<'a> SourceBodyEmitter<'a> {
         value: &str,
         index: usize,
         parent_bindings: &HashMap<String, String>,
+        parent_binding_types: &HashMap<String, ir::Type>,
     ) -> Option<MatchedCase> {
         let enum_case = self.enum_case(case_name)?;
         if enum_case.fields.len() != args.len() {
@@ -1547,6 +1571,7 @@ impl<'a> SourceBodyEmitter<'a> {
             format!("{value} instanceof {case_type}")
         };
         let mut bindings = parent_bindings.clone();
+        let mut binding_types = parent_binding_types.clone();
         for (arg, field) in args.iter().zip(&enum_case.fields) {
             match arg {
                 ast::Pattern::Wildcard { .. } => {}
@@ -1560,6 +1585,7 @@ impl<'a> SourceBodyEmitter<'a> {
                             java_member_name(&field.name)
                         ),
                     );
+                    binding_types.insert(name.clone(), field.ty.clone());
                 }
                 ast::Pattern::List { .. } => return None,
                 _ => return None,
@@ -1569,6 +1595,7 @@ impl<'a> SourceBodyEmitter<'a> {
         Some(MatchedCase {
             condition,
             bindings,
+            binding_types,
         })
     }
 
@@ -1803,6 +1830,18 @@ impl<'a> SourceBodyEmitter<'a> {
         }
     }
 
+    fn pattern_binding_expr_type(
+        &self,
+        expr: &ast::Expr,
+        binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<ir::Type> {
+        match expr {
+            ast::Expr::Identifier { name, .. } => binding_types.get(name).cloned(),
+            ast::Expr::Group { inner, .. } => self.pattern_binding_expr_type(inner, binding_types),
+            _ => None,
+        }
+    }
+
     fn type_param_name<'ty>(&self, ty: &'ty ir::Type) -> Option<&'ty str> {
         match ty {
             ir::Type::TypeParam(name) => Some(name),
@@ -1840,6 +1879,9 @@ impl<'a> SourceBodyEmitter<'a> {
         else {
             return false;
         };
+        if left == right {
+            return false;
+        }
         let mut equivalent = HashSet::from([left.to_string()]);
         loop {
             let mut changed = false;
@@ -1902,6 +1944,7 @@ impl<'a> SourceBodyEmitter<'a> {
 struct MatchedCase {
     condition: String,
     bindings: HashMap<String, String>,
+    binding_types: HashMap<String, ir::Type>,
 }
 
 fn java_wildcard_type_args(count: usize) -> String {

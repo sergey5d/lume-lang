@@ -1,0 +1,11 @@
+# EXPECT:
+# left
+# right
+
+main() Unit {
+    left Either[Str, Str] = Left("left")
+    right Either[Str, Str] = Right("right")
+
+    println(left.merge())
+    println(right.merge())
+}

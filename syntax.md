@@ -1029,6 +1029,17 @@ class Box[T with Callable] {
 box Box[Action] = Box { value: Action {} }
 ```
 
+The core `Either[L, R]` uses an owner equality condition for `merge`:
+
+```txt
+merge[when L = R]() L
+
+left Either[Str, Str] = Left("problem")
+value Str = left.merge()
+```
+
+`merge` is unavailable when the left and right types differ.
+
 Reified generic functions and methods:
 
 ```txt
