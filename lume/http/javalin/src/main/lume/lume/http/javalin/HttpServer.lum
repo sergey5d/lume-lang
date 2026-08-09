@@ -83,7 +83,7 @@ hidden class JavalinBackend {
                 if params.size() == 0 {
                     HttpResponder.render(ctx, method.invoke(controller), contentType)
                 } else {
-                    if let Some(firstValue) = params.get(0) {
+                    if let Some(firstValue) = params.at(0) {
                         first Param = firstValue
                         paramType Type[_] = first.paramType()
                         if paramType.name().getOr("") == "Context" {
@@ -108,7 +108,7 @@ hidden class JavalinBackend {
                 if params.size() == 0 {
                     HttpResponder.render(ctx, method.invoke(controller), contentType)
                 } else {
-                    if let Some(firstValue) = params.get(0) {
+                    if let Some(firstValue) = params.at(0) {
                         first Param = firstValue
                         paramType Type[_] = first.paramType()
                         if paramType.name().getOr("") == "Context" {
@@ -133,7 +133,7 @@ hidden class JavalinBackend {
                 if params.size() == 0 {
                     HttpResponder.render(ctx, method.invoke(controller), contentType)
                 } else {
-                    if let Some(firstValue) = params.get(0) {
+                    if let Some(firstValue) = params.at(0) {
                         first Param = firstValue
                         paramType Type[_] = first.paramType()
                         if paramType.name().getOr("") == "Context" {
@@ -158,7 +158,7 @@ hidden class JavalinBackend {
                 if params.size() == 0 {
                     HttpResponder.render(ctx, method.invoke(controller), contentType)
                 } else {
-                    if let Some(firstValue) = params.get(0) {
+                    if let Some(firstValue) = params.at(0) {
                         first Param = firstValue
                         paramType Type[_] = first.paramType()
                         if paramType.name().getOr("") == "Context" {

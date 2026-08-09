@@ -166,7 +166,7 @@ hidden class JdbcRowQuery with RowQuery {
         } else if count > 1 {
             Err(DbError("queryRow expected at most one row, got " + count))
         } else {
-            Ok(rows.get(0))
+            Ok(rows.at(0))
         }
     }
 
@@ -203,7 +203,7 @@ hidden class JdbcRowQuery with RowQuery {
         } else if count > 1 {
             Err(DbError("queryRow expected at most one row, got " + count))
         } else {
-            let Some(jdbcRow) = jdbcRows.get(0) else return Err(DbError("queryRow returned one row but row access failed"))
+            let Some(jdbcRow) = jdbcRows.at(0) else return Err(DbError("queryRow returned one row but row access failed"))
             decoder JdbcRowDecoder = try JdbcRowDecoderCache.decoder(typeOf[T])
             decoded Result[T, DbError] = decoder.decode(jdbcRow)
             match decoded {

@@ -3,13 +3,8 @@
 # INTERPRETER
 
 interface Array[T] with Iterable[T] {
-
-    # TODO: think more about whether [] should stay declared here
-    # or only exist as language-level operator surface.
-    # def [](idx Int) T
-    # def [](idx Int, val T)
-
-    def get(idx Int) Option[T]
+    def at(index Int) Option[T]
+    def setAt(index Int, value T) Result[T, InvalidIndex]
 
     def first() Option[T]
     def last() Option[T]
@@ -28,11 +23,6 @@ interface Array[T] with Iterable[T] {
     def find(e T) Option[T]
 
     def indexOf(e T) Int
-
-    # TODO: think more about whether these belong on Array directly.
-    # Arrays have fixed size, so the result shape is less obvious here.
-    # def filter(f fn(T) => Bool) Vector[T]
-    # def flatMap[X](f fn(T) => Iterable[X]) Vector[X]
 
     def zip[X](other Array[X]) Array[(T, X)]
     def zipWithIndex() Array[(T, Int)]

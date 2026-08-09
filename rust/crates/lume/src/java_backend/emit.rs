@@ -2407,11 +2407,13 @@ impl<'a> FunctionEmitter<'a> {
                     Some(ir::Type::Named {
                         name: ref type_name,
                         ..
-                    }) if self.type_def(type_name).is_some_and(|ty| {
-                        ty.kind == TypeKind::Record
-                            || ((ty.kind == TypeKind::Interface || is_anonymous_object_type(ty))
-                                && ty.fields.iter().any(|field| field.name == *name))
-                    }) =>
+                    }) if is_core_accessor_backed_type(type_name)
+                        || self.type_def(type_name).is_some_and(|ty| {
+                            ty.kind == TypeKind::Record
+                                || ((ty.kind == TypeKind::Interface
+                                    || is_anonymous_object_type(ty))
+                                    && ty.fields.iter().any(|field| field.name == *name))
+                        }) =>
                     {
                         Some(format!("{base_expr}.{}()", java_member_name(name)))
                     }
@@ -2481,9 +2483,6 @@ impl<'a> FunctionEmitter<'a> {
         let index_expr = self.emit_operand(index)?;
 
         match base_ty {
-            ir::Type::Named { ref name, ref args } if name == "LinkedList" && args.len() == 1 => {
-                Some(format!("{base_expr}.get({index_expr})"))
-            }
             ir::Type::Named { ref name, ref args }
                 if (name == "Vector" || name == "Array") && args.len() == 1 =>
             {
@@ -3673,11 +3672,12 @@ impl<'a> FunctionEmitter<'a> {
                     Some(ir::Type::Named {
                         name: ref type_name,
                         ..
-                    }) if self.bundle.ir.types.iter().any(|ty| {
-                        ty.name == *type_name
-                            && (ty.kind == TypeKind::Interface || is_anonymous_object_type(ty))
-                            && ty.fields.iter().any(|field| field.name == *name)
-                    }) =>
+                    }) if is_core_accessor_backed_type(type_name)
+                        || self.bundle.ir.types.iter().any(|ty| {
+                            ty.name == *type_name
+                                && (ty.kind == TypeKind::Interface || is_anonymous_object_type(ty))
+                                && ty.fields.iter().any(|field| field.name == *name)
+                        }) =>
                     {
                         Some(format!("{base_expr}.{}()", java_member_name(name)))
                     }
@@ -4305,9 +4305,6 @@ impl<'a> FunctionEmitter<'a> {
 
     fn index_result_type(&self, ty: &ir::Type) -> Option<ir::Type> {
         match ty {
-            ir::Type::Named { name, args } if name == "LinkedList" && args.len() == 1 => {
-                Some(ir::Type::option(args[0].clone()))
-            }
             ir::Type::Named { name, args }
                 if (name == "Array" || name == "Vector") && args.len() == 1 =>
             {
@@ -4850,8 +4847,13 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Param" => Some("lume.core.LumeParam".to_string()),
         "EnumCase" => Some("lume.core.LumeEnumCase".to_string()),
         "ReflectionError" => Some("lume.core.ReflectionError".to_string()),
+        "InvalidIndex" => Some("lume.core.InvalidIndex".to_string()),
         _ => None,
     }
+}
+
+fn is_core_accessor_backed_type(name: &str) -> bool {
+    matches!(name, "InvalidIndex" | "ReflectionError")
 }
 
 fn is_reflection_type(name: &str) -> bool {
@@ -4929,7 +4931,14 @@ fn builtin_method_param_types(
             match (method, arg_len) {
                 ("add", 1) => Some(vec![args[0].clone()]),
                 ("addAll", 1) => Some(vec![receiver.clone()]),
-                ("get" | "remove", 1) => Some(vec![ir::Type::Int]),
+                ("at", 1) => Some(vec![ir::Type::Int]),
+                ("setAt", 2) => Some(vec![ir::Type::Int, args[0].clone()]),
+                ("removeAt", 1) if matches!(name.as_str(), "Vector" | "LinkedList") => {
+                    Some(vec![ir::Type::Int])
+                }
+                ("insertAt", 2) if matches!(name.as_str(), "Vector" | "LinkedList") => {
+                    Some(vec![ir::Type::Int, args[0].clone()])
+                }
                 _ => None,
             }
         }

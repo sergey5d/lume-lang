@@ -37,8 +37,8 @@ main() Unit {
     fields [Field] = classType.fields()
     println(fields.size())
 
-    nameField Field = fields.get(0) !!
-    ageField Field = fields.get(1) !!
+    nameField Field = fields.at(0) !!
+    ageField Field = fields.at(1) !!
 
     println(nameField.name())
     println(nameField.fieldType().name() !!)

@@ -24,9 +24,9 @@ main() Int {
 
     doubled.forEach((item Int) => println("item " + item))
 
-    println("doubled " + doubled.get(0).getOr(0) + " " + doubled.get(2).getOr(0))
-    println("expanded " + expanded.get(0).getOr(0) + " " + expanded.get(5).getOr(0))
-    println("filtered " + filtered.get(0).getOr(0) + " " + filtered.get(1).getOr(0))
+    println("doubled " + doubled.at(0).getOr(0) + " " + doubled.at(2).getOr(0))
+    println("expanded " + expanded.at(0).getOr(0) + " " + expanded.at(5).getOr(0))
+    println("filtered " + filtered.at(0).getOr(0) + " " + filtered.at(1).getOr(0))
     println("fold " + total)
     println("reduce " + reduced.getOr(0))
     println("exists " + hasBig)

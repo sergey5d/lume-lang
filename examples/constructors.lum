@@ -100,7 +100,7 @@ class Path {
 
     size() Int = this.segments.size()
 
-    firstOr(value Str) Str = this.segments.get(0).getOr(value)
+    firstOr(value Str) Str = this.segments.at(0).getOr(value)
 }
 
 

@@ -137,11 +137,33 @@ public final class LumeLinkedList<T> {
         return result;
     }
 
-    public Option<T> get(long index) {
+    public Option<T> at(long index) {
         if (index < 0 || index >= values.size()) {
             return LumeRuntime.optionNone();
         }
         return LumeRuntime.optionSome(values.get(Math.toIntExact(index)));
+    }
+
+    public Result<T, InvalidIndex> setAt(long index, T value) {
+        if (index < 0 || index >= values.size()) {
+            return new Result.Err<>(new InvalidIndex(index, values.size()));
+        }
+        return new Result.Ok<>(values.set(Math.toIntExact(index), value));
+    }
+
+    public Result<LumeUnit, InvalidIndex> insertAt(long index, T value) {
+        if (index < 0 || index > values.size()) {
+            return new Result.Err<>(new InvalidIndex(index, values.size()));
+        }
+        values.add(Math.toIntExact(index), value);
+        return new Result.Ok<>(LumeUnit.INSTANCE);
+    }
+
+    public Result<T, InvalidIndex> removeAt(long index) {
+        if (index < 0 || index >= values.size()) {
+            return new Result.Err<>(new InvalidIndex(index, values.size()));
+        }
+        return new Result.Ok<>(values.remove(Math.toIntExact(index)));
     }
 
     public Option<T> head() {
@@ -169,13 +191,6 @@ public final class LumeLinkedList<T> {
 
     public boolean nonEmpty() {
         return !values.isEmpty();
-    }
-
-    public Option<T> remove(long index) {
-        if (index < 0 || index >= values.size()) {
-            return LumeRuntime.optionNone();
-        }
-        return LumeRuntime.optionSome(values.remove(Math.toIntExact(index)));
     }
 
     public Option<T> removeFirst() {

@@ -48,8 +48,20 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(15, "isEmpty", Vec::new(), list_is_empty),
             builtin_method(31, "nonEmpty", Vec::new(), list_non_empty),
             builtin_method(32, "makeStr", vec![ir::Type::Str], list_make_str),
-            builtin_method(16, "get", vec![ir::Type::Int], list_get),
-            builtin_method(17, "remove", vec![ir::Type::Int], list_remove),
+            builtin_method(16, "at", vec![ir::Type::Int], list_at),
+            builtin_method(
+                17,
+                "setAt",
+                vec![ir::Type::Int, ir::Type::Unknown],
+                list_set_at,
+            ),
+            builtin_method(
+                35,
+                "insertAt",
+                vec![ir::Type::Int, ir::Type::Unknown],
+                list_insert_at,
+            ),
+            builtin_method(36, "removeAt", vec![ir::Type::Int], list_remove_at),
             builtin_method(34, "removeFirst", Vec::new(), list_remove_first),
             builtin_method(18, "removeLast", Vec::new(), list_remove_last),
             builtin_method(19, "head", Vec::new(), list_head),
@@ -433,20 +445,21 @@ fn list_make_str(
     Ok(Value::String(rendered))
 }
 
-fn list_get(
+fn list_at(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
     args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if args.len() != 1 {
-        return Err(interpreter.runtime_error(span, "Vector.get expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "at expects 1 argument"));
     }
-    let index = args[0].as_int(interpreter, span, "Vector.get index")?;
+    let index = args[0].as_int(interpreter, span, "at index")?;
     let items = list_items(&receiver);
     let items = items.borrow();
-    let value = items
-        .get(index as usize)
+    let value = usize::try_from(index)
+        .ok()
+        .and_then(|index| items.get(index))
         .map(|value| interpreter.clone_value(value));
     Ok(match value {
         Some(value) => interpreter.option_some(value),
@@ -454,23 +467,67 @@ fn list_get(
     })
 }
 
-fn list_remove(
+fn list_set_at(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if args.len() != 2 {
+        return Err(interpreter.runtime_error(span, "setAt expects 2 arguments"));
+    }
+    let index = args[0].as_int(interpreter, span, "setAt index")?;
+    let items = list_items(&receiver);
+    let mut items = items.borrow_mut();
+    if index < 0 || index as usize >= items.len() {
+        return Ok(invalid_index_result(interpreter, index, items.len()));
+    }
+    let previous = std::mem::replace(&mut items[index as usize], args[1].clone());
+    Ok(interpreter.result_ok(previous))
+}
+
+fn list_insert_at(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if args.len() != 2 {
+        return Err(interpreter.runtime_error(span, "insertAt expects 2 arguments"));
+    }
+    let index = args[0].as_int(interpreter, span, "insertAt index")?;
+    let items = list_items(&receiver);
+    let mut items = items.borrow_mut();
+    if index < 0 || index as usize > items.len() {
+        return Ok(invalid_index_result(interpreter, index, items.len()));
+    }
+    items.insert(index as usize, args[1].clone());
+    Ok(interpreter.result_ok(Value::Unit))
+}
+
+fn list_remove_at(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
     args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if args.len() != 1 {
-        return Err(interpreter.runtime_error(span, "Vector.remove expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "removeAt expects 1 argument"));
     }
-    let index = args[0].as_int(interpreter, span, "Vector.remove index")?;
+    let index = args[0].as_int(interpreter, span, "removeAt index")?;
     let items = list_items(&receiver);
     let mut items = items.borrow_mut();
     if index < 0 || index as usize >= items.len() {
-        return Ok(interpreter.option_none());
+        return Ok(invalid_index_result(interpreter, index, items.len()));
     }
-    let value = items.remove(index as usize);
-    Ok(interpreter.option_some(value))
+    Ok(interpreter.result_ok(items.remove(index as usize)))
+}
+
+fn invalid_index_result(interpreter: &Interpreter<'_>, index: i64, size: usize) -> Value {
+    interpreter.result_err(Value::Record(Rc::new(RefCell::new(vec![
+        ("index".to_string(), Value::Int(index)),
+        ("size".to_string(), Value::Int(size as i64)),
+    ]))))
 }
 
 fn list_remove_first(

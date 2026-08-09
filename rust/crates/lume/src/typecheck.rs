@@ -3518,6 +3518,14 @@ impl<'a> Checker<'a> {
                 let receiver_ty = self.check_expr(receiver);
                 let index_ty = self.check_expr(index);
                 match &receiver_ty {
+                    Ty::Named(name, args) if name == "LinkedList" && args.len() == 1 => {
+                        self.add_error(
+                            "linked_list_indexed_assignment",
+                            "LinkedList does not support indexed assignment; use 'setAt(index, value)'",
+                            *span,
+                        );
+                        Ty::Unknown
+                    }
                     Ty::Named(name, args)
                         if (name == "Vector" || name == "Array") && args.len() == 1 =>
                     {
@@ -3846,14 +3854,24 @@ impl<'a> Checker<'a> {
                 })
             }
             Expr::Index {
-                receiver, index, ..
+                receiver,
+                index,
+                span,
             } => {
                 let receiver_ty = self.check_expr(receiver);
                 let index_ty = self.check_expr(index);
+                if matches!(&receiver_ty, Ty::Named(name, args) if name == "LinkedList" && args.len() == 1)
+                {
+                    self.add_error(
+                        "linked_list_indexed_access",
+                        "LinkedList does not support indexed access; use 'at(index)'",
+                        *span,
+                    );
+                    return Ty::Unknown;
+                }
                 let valid_index = match &receiver_ty {
                     Ty::Named(name, args)
-                        if (name == "Vector" || name == "Array" || name == "LinkedList")
-                            && args.len() == 1 =>
+                        if (name == "Vector" || name == "Array") && args.len() == 1 =>
                     {
                         index_ty.is_int_like() || matches!(index_ty, Ty::Unknown)
                     }
@@ -7128,9 +7146,6 @@ impl<'a> Checker<'a> {
 
     fn index_result_type(&self, ty: &Ty) -> Ty {
         match ty {
-            Ty::Named(name, args) if name == "LinkedList" && args.len() == 1 => {
-                Ty::option(args[0].clone())
-            }
             Ty::Named(name, args) if (name == "Vector" || name == "Array") && args.len() == 1 => {
                 args[0].clone()
             }
@@ -12954,7 +12969,7 @@ def main() Unit {
     classType ClassType[User] = declared.asClass() !!
     unknownClass ClassType[_] = classType
     enumType EnumType[Status] = typeOf[Status].asEnum() !!
-    fieldType Type[_] = (classType.fields().get(0) !!).fieldType()
+    fieldType Type[_] = (classType.fields().at(0) !!).fieldType()
     OS.println(actual.name() !!, unknown.name() !!, anyMetadata.kind(), unknownClass.name() !!, enumType.name() !!, fieldType.name() !!)
 }
 "#,
@@ -13343,7 +13358,7 @@ def main() Unit {
     }
 
     #[test]
-    fn checks_unsafe_extract_for_lifted_values_and_linked_list_indexing() {
+    fn checks_unsafe_extract_for_lifted_values_and_linked_list_access() {
         let program = parse_inline(
             r#"
 shape User {
@@ -13357,7 +13372,7 @@ def fromEither(value Either[Str, Int]) Int = value !!
 def main() Unit {
     values LinkedList[Int] = LinkedList {}
     values.add(5)
-    first Int = values[0] !!
+    first Int = values.at(0) !!
     println(first)
 }
 "#,

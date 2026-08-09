@@ -4070,8 +4070,8 @@ def main() Unit {
     fields [Field] = classType.fields()
     println(fields.size())
 
-    nameField Field = fields.get(0) !!
-    ageField Field = fields.get(1) !!
+    nameField Field = fields.at(0) !!
+    ageField Field = fields.at(1) !!
 
     println(nameField.name())
     println(nameField.fieldType().name() !!)
@@ -4180,7 +4180,7 @@ def main() Unit {
     }
 
     #[test]
-    fn generated_java_runs_linked_list_unsafe_extract() {
+    fn generated_java_runs_indexed_collection_methods() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java LinkedList test because javac/java is not available");
             return;
@@ -4204,8 +4204,29 @@ shape User {
 def main() Unit {
     users LinkedList[User] = LinkedList {}
     users.add(User { name: "Ada", cost: 3 })
-    println((users[0] !!).name)
+    inserted Unit = users.insertAt(0, User { name: "Bob", cost: 2 }) !!
+    println((users.at(0) !!).name)
+    println((users.setAt(0, User { name: "Cara", cost: 4 }) !!).name)
+    println((users.removeAt(1) !!).name)
     println(users.fold(0, (cost, user) => cost + user.cost))
+
+    values [Int] = [1, 2]
+    println(values.setAt(0, 3) !!)
+    vectorInserted Unit = values.insertAt(1, 4) !!
+    println(values.removeAt(2) !!)
+    println(values[0])
+    match values.removeAt(9) {
+        case Err(error) => {
+            println(error.index)
+            println(error.size)
+        }
+        case Ok(_) => ()
+    }
+
+    array Array[Int] = Array.fill(2, 5)
+    println(array.at(1) !!)
+    println(array.setAt(1, 7) !!)
+    println(array[1])
 
     result Result[Int, Str] = Ok(7)
     println(result !!)
@@ -4244,7 +4265,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Ada\n3\n7\n"
+            "Bob\nBob\nAda\n4\n1\n2\n3\n9\n2\n5\n5\n7\n7\n"
         );
 
         let _ = fs::remove_dir_all(temp);

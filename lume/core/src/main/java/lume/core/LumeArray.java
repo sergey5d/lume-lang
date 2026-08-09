@@ -68,11 +68,20 @@ public final class LumeArray<T> {
         return values.length;
     }
 
-    public Option<T> get(long index) {
+    public Option<T> at(long index) {
         if (index < 0 || index >= values.length) {
             return LumeRuntime.optionNone();
         }
         return LumeRuntime.optionSome(valueAt(index));
+    }
+
+    public Result<T, InvalidIndex> setAt(long index, T value) {
+        if (index < 0 || index >= values.length) {
+            return new Result.Err<>(new InvalidIndex(index, values.length));
+        }
+        var previous = valueAt(index);
+        values[Math.toIntExact(index)] = value;
+        return new Result.Ok<>(previous);
     }
 
     public void set(long index, T value) {

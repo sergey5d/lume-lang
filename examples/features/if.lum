@@ -28,7 +28,7 @@ main() Int {
     println("picked " + picked)
 
     values = [7]
-    if let Some(value) = values.get(0) {
+    if let Some(value) = values.at(0) {
         println("binding " + value)
     } else {
         println("binding none")

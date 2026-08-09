@@ -17,12 +17,14 @@ interface Vector[T] with Iterable[T] {
     def sort(ordering Ordering[T]) Vector[T]
     def zip[X](other Vector[X]) Vector[(T, X)]
     def zipWithIndex() Vector[(T, Int)]
-    def get(index Int) Option[T]
+    def at(index Int) Option[T]
+    def setAt(index Int, value T) Result[T, InvalidIndex]
+    def insertAt(index Int, value T) Result[Unit, InvalidIndex]
+    def removeAt(index Int) Result[T, InvalidIndex]
     def head() Option[T]
     def tail() Vector[T]
     def isEmpty() Bool
     def nonEmpty() Bool = !this.isEmpty()
-    def remove(index Int) Option[T]
     def removeFirst() Option[T]
     def removeLast() Option[T]
     def size() Int
@@ -31,7 +33,7 @@ interface Vector[T] with Iterable[T] {
     def makeStr(separator Str) Str {
         var result Str = ""
         for idx <- Range(0, this.size()) {
-            if let Some(item) = this.get(idx) {
+            if let Some(item) = this.at(idx) {
                 if idx > 0 {
                     result := result + separator
                 }

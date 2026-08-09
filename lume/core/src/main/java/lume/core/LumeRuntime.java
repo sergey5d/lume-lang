@@ -174,9 +174,9 @@ public final class LumeRuntime {
         long offset = ((Number) index).longValue();
         Option<?> value;
         if (base instanceof LumeVector<?> list) {
-            value = list.get(offset);
+            value = list.at(offset);
         } else if (base instanceof LumeArray<?> array) {
-            value = array.get(offset);
+            value = array.at(offset);
         } else {
             throw new LumePanic("value is not indexable");
         }
@@ -196,7 +196,7 @@ public final class LumeRuntime {
 
     public static Object listGet(Object value, Object index) {
         if (value instanceof LumeVector<?> list) {
-            var item = list.get(((Number) index).longValue());
+            var item = list.at(((Number) index).longValue());
             if (item instanceof Option.Some<?> some) {
                 return some.value();
             }

@@ -13,8 +13,8 @@ class Person with Named, Aged {
 
     new(fullName Str, age Int, city Str) {
         parts = fullName.split(" ")
-        this.firstName = parts.get(0).getOr("")
-        this.lastName = parts.get(1).getOr("")
+        this.firstName = parts.at(0).getOr("")
+        this.lastName = parts.at(1).getOr("")
         this.age = age
         this.city = city
     }

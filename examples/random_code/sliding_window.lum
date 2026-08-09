@@ -30,7 +30,7 @@ class SlidingWindowLimiter {
         windowStart = now - this.windowSize
 
         while !this.accepted.isEmpty() {
-            request = this.accepted[0] !!
+            request = this.accepted.at(0) !!
             if request.time <= windowStart {
                 this.accepted.removeFirst()
             } else {

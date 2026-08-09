@@ -1,0 +1,8 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
+
+shape InvalidIndex {
+    index Int
+    size Int
+}

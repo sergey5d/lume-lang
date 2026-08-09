@@ -4,6 +4,6 @@
 main() Unit {
     values = for value <- [1, 2, 3] yield value * 2
 
-    let third <- values.get(2) else panic("expected third value")
+    let third <- values.at(2) else panic("expected third value")
     println("yield", third)
 }

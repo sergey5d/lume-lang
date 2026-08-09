@@ -50,13 +50,13 @@ main() Unit {
     values = ["a": 1, "b": 2]
 
     mapped = values.map((key, value) => value * 10)
-    println("mapped " + mapped.get(0).getOr(0) + " " + mapped.get(1).getOr(0))
+    println("mapped " + mapped.at(0).getOr(0) + " " + mapped.at(1).getOr(0))
 
     mappedValues = values.mapValues(value => value * 100)
     println("mappedValues " + mappedValues["a"].getOr(0) + " " + mappedValues["b"].getOr(0))
 
     expandedValues = values.flatMap((key, value) => [value, value + 10])
-    println("expandedValues " + expandedValues.get(0).getOr(0) + " " + expandedValues.get(3).getOr(0))
+    println("expandedValues " + expandedValues.at(0).getOr(0) + " " + expandedValues.at(3).getOr(0))
 
     filteredMap = values.filter((key, value) => value > 1)
     println("filteredMap " + filteredMap.contains("b") + " " + filteredMap.size())

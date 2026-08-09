@@ -55,7 +55,7 @@ main() Unit {
     println(a1)
     println(v)
     println(branch)
-    println(yielded.get(0).getOr(0))
-    println(yielded.get(1).getOr(0))
+    println(yielded.at(0).getOr(0))
+    println(yielded.at(1).getOr(0))
     println(matched)
 }

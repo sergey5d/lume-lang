@@ -78,7 +78,7 @@ main() Unit {
 
     values = [1, 2, 3]
     doubled = values.map { item => item * 2 }
-    println("trailing " + doubled.get(1).getOr(0))
+    println("trailing " + doubled.at(1).getOr(0))
 
     runner = LambdaRunner {}
     println("inlineZero " + runner.zero(() => 20))
@@ -98,23 +98,23 @@ main() Unit {
     inlineMapBare = values.map(x => x + 10)
     inlineMapParen = values.map((x) => x + 20)
     inlineMapTyped = values.map((x Int) => x + 30)
-    println("inlineMapBare " + inlineMapBare.get(0).getOr(0))
-    println("inlineMapParen " + inlineMapParen.get(1).getOr(0))
-    println("inlineMapTyped " + inlineMapTyped.get(2).getOr(0))
+    println("inlineMapBare " + inlineMapBare.at(0).getOr(0))
+    println("inlineMapParen " + inlineMapParen.at(1).getOr(0))
+    println("inlineMapTyped " + inlineMapTyped.at(2).getOr(0))
 
     pairs = [(2, 3), (4, 5)]
     tupleSums = pairs.map { pairValue =>
         let (x Int, y Int) = pairValue
         x + y
     }
-    println("tupleMap " + tupleSums.get(0).getOr(0))
+    println("tupleMap " + tupleSums.at(0).getOr(0))
 
     users = [User { name: "Ada", age: 37 }]
     userLabels = users.map { userValue =>
         let { name, age } = userValue
         "$name is $age"
     }
-    println("userMap " + userLabels.get(0).getOr(""))
+    println("userMap " + userLabels.at(0).getOr(""))
 
     bob User = User { name: "Bob", age: 40 }
     println("tupleMethod " + runner.tupleOne(pairValue => {

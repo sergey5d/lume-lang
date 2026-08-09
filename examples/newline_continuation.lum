@@ -59,8 +59,8 @@ main() Unit {
 
     collected = for item <- [2, 3] yield item
 
-    fromFor Int = collected.get(0).getOr(0) +
-        collected.get(1).getOr(0)
+    fromFor Int = collected.at(0).getOr(0) +
+        collected.at(1).getOr(0)
 
     var fromMatchStmt = 0
     match 2 {

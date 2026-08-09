@@ -19,5 +19,5 @@ main() Unit {
 
     values LinkedList[Int] = LinkedList {}
     values.add(13)
-    println(values[0] !!)
+    println(values.at(0) !!)
 }

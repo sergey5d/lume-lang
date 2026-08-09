@@ -38,7 +38,7 @@ breakSum(values [Int]) Int {
     var total Int = 0
     var index Int = 0
     while true {
-        item = values.get(index) ?? break
+        item = values.at(index) ?? break
         total += item
         index += 1
     }

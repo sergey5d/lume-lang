@@ -6349,7 +6349,7 @@ mod tests {
 
                 def size() Int = this.segments.size()
 
-                def firstOr(value Str) Str = this.segments.get(0).getOr(value)
+                def firstOr(value Str) Str = this.segments.at(0).getOr(value)
 }
 
 
@@ -6685,8 +6685,8 @@ $name
                 more.add(3)
                 more.addAll([2, 4, 4])
 
-                OS.println("base", base.size(), base.get(1).getOr(0))
-                OS.println("grown", grown.size(), grown.get(4).getOr(0))
+                OS.println("base", base.size(), base.at(1).getOr(0))
+                OS.println("grown", grown.size(), grown.at(4).getOr(0))
                 OS.println("seen", seen.size(), seen.contains(3))
                 OS.println("more", more.size(), more.contains(4))
             }
@@ -6710,12 +6710,12 @@ $name
                 values.add(5)
                 values.add(8)
 
-                println(values[0] !!)
+                println(values.at(0) !!)
                 println(Some(13) !!)
                 println(Ok(21) !!)
                 println(Right(34) !!)
                 println(values.removeFirst() !!)
-                println(values[0] !!)
+                println(values.at(0) !!)
             }
             "#,
         );
@@ -6791,8 +6791,8 @@ $name
                 mapped = values.map { value => value + 5 }
 
                 OS.println(mappedEmpty.size())
-                OS.println(mapped.get(0).getOr(0))
-                OS.println(mapped.get(1).getOr(0))
+                OS.println(mapped.at(0).getOr(0))
+                OS.println(mapped.at(1).getOr(0))
                 OS.println(mapped.size())
             }
             "#,
@@ -7176,8 +7176,8 @@ $name
                 OS.println(match pair {
                     case PairBox(left, right) => left + right
                 })
-                let Some(first) = partialMapped.get(0) else return ()
-                let Some(second) = partialMapped.get(1) else return ()
+                let Some(first) = partialMapped.at(0) else return ()
+                let Some(second) = partialMapped.at(1) else return ()
                 OS.println(first.getOr(0))
                 OS.println(second.isEmpty())
             }
@@ -7312,7 +7312,7 @@ $name
             r#"
             def main() Int {
                 values = [7]
-                if let Some(value) = values.get(0) {
+                if let Some(value) = values.at(0) {
                     OS.println("binding " + value)
                 } else {
                     OS.println("binding none")

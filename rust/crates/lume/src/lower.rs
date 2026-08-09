@@ -5256,25 +5256,10 @@ impl<'a> FunctionLowerer<'a> {
             }),
             Expr::Index {
                 receiver, index, ..
-            } => {
-                let receiver_ty = self.infer_expr_type(receiver);
-                if matches!(receiver_ty, ir::Type::Named { ref name, ref args } if name == "LinkedList" && args.len() == 1)
-                {
-                    Some(ir::RValue::Call {
-                        callee: ir::Callee::Method {
-                            receiver: self.lower_expr(receiver),
-                            method: "get".to_string(),
-                        },
-                        args: vec![self.lower_expr(index)],
-                        structural: false,
-                    })
-                } else {
-                    Some(ir::RValue::Index {
-                        base: self.lower_expr(receiver),
-                        index: self.lower_expr(index),
-                    })
-                }
-            }
+            } => Some(ir::RValue::Index {
+                base: self.lower_expr(receiver),
+                index: self.lower_expr(index),
+            }),
             Expr::Is { left, target, .. } => Some(ir::RValue::TypeTest {
                 operand: self.lower_expr(left),
                 ty: lower_type_ref(target),
@@ -7626,9 +7611,30 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: Vec::new(),
             ret: Box::new(ir::Type::option(item)),
         }),
-        ("Vector" | "LinkedList" | "Array", "get" | "remove") => Some(ir::Type::Function {
+        ("Vector" | "LinkedList" | "Array", "at") => Some(ir::Type::Function {
             params: vec![ir::Type::Int],
             ret: Box::new(ir::Type::option(item)),
+        }),
+        ("Vector" | "LinkedList" | "Array", "setAt") => Some(ir::Type::Function {
+            params: vec![ir::Type::Int, item.clone()],
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![item, ir::Type::named("InvalidIndex")],
+            }),
+        }),
+        ("Vector" | "LinkedList", "insertAt") => Some(ir::Type::Function {
+            params: vec![ir::Type::Int, item],
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::Unit, ir::Type::named("InvalidIndex")],
+            }),
+        }),
+        ("Vector" | "LinkedList", "removeAt") => Some(ir::Type::Function {
+            params: vec![ir::Type::Int],
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![item, ir::Type::named("InvalidIndex")],
+            }),
         }),
         ("Vector" | "LinkedList" | "Array" | "Set" | "Map" | "Str", "size" | "length") => {
             Some(ir::Type::Function {

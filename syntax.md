@@ -616,6 +616,10 @@ values[0] := 1
 values[1] := values[0] + 4
 ```
 
+Bracket access and assignment are unsafe operations supported by `Vector[T]`
+and `Array[T]`; an invalid index panics. `LinkedList[T]` deliberately does not
+support brackets because indexed traversal is linear.
+
 Shape update:
 
 ```txt
@@ -1704,15 +1708,32 @@ queue LinkedList[Int] = LinkedList {}
 queue.add(10)
 queue.add(20)
 
-first Option[Int] = queue[0]
+first Option[Int] = queue.at(0)
 removed Option[Int] = queue.removeFirst()
 
 populated = LinkedList(1, 2, 3)
 ```
 
-Indexing, `first()`, `last()`, `removeFirst()`, and `removeLast()` are safe and
-return `Option[T]`. `LinkedList {}` is the empty constructor; non-empty values
-use positional `LinkedList(...)` construction.
+`at`, `first()`, `last()`, `removeFirst()`, and `removeLast()` are safe and
+return `Option[T]`. Indexed mutations return `Result` with an `InvalidIndex`
+that records the rejected index and the collection size. `setAt` returns the
+replaced value, `removeAt` returns the removed value, and `insertAt` accepts
+indices from zero through the current size and returns `Unit`:
+
+```txt
+shape InvalidIndex {
+    index Int
+    size Int
+}
+
+previous Result[Int, InvalidIndex] = queue.setAt(0, 20)
+inserted Result[Unit, InvalidIndex] = queue.insertAt(1, 30)
+removedAt Result[Int, InvalidIndex] = queue.removeAt(0)
+```
+
+`LinkedList {}` is the empty constructor; non-empty values use positional
+`LinkedList(...)` construction. The old indexed `get` and `remove` methods are
+not part of the collection API.
 
 Array construction:
 
@@ -1728,7 +1749,9 @@ generated Array[Int] = Array.generate(3, idx => idx * 2)
 ```
 
 Arrays have fixed size and always contain initialized values. Use
-`Array.generate` when each slot should be produced independently.
+`Array.generate` when each slot should be produced independently. Arrays expose
+`at(index)` and `setAt(index, value)`, but not insertion or removal because
+their size cannot change.
 
 Array elements can also be constructed directly:
 
@@ -1737,6 +1760,10 @@ values Array[Int] = Array(1, 2, 3)
 boxes Array[Box] = Array(Box(1), Box(2))
 takeArray(Array(4, 5, 6))
 ```
+
+Vectors expose `at`, `setAt`, `insertAt`, and `removeAt` with the same safe
+return types as LinkedList. Vector and Array bracket access remains available
+as the explicit unsafe alternative.
 
 Map construction:
 

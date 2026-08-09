@@ -44,7 +44,7 @@ class UserService {
 
 
 printAt(label Str, dtos [UserDto], index Int) Unit {
-    let dto <- dtos.get(index) else panic("expected dto")
+    let dto <- dtos.at(index) else panic("expected dto")
     println(label, dto.name)
 }
 
