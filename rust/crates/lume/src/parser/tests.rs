@@ -3748,6 +3748,53 @@ $name
 }
 
 #[test]
+fn parses_advanced_generic_bound_clauses() {
+    let result = parse(
+        r#"
+interface Callable {
+    call() Unit
+}
+
+something[
+    LocalT with Callable,
+    LocalR
+    when GlobalT with Callable,
+         LocalR = GlobalR
+](t LocalT, r LocalR) GlobalT = t.call()
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[1] else {
+        panic!("expected generic function");
+    };
+    assert_eq!(function.type_params.len(), 2);
+    assert_eq!(function.type_params[0].bounds.len(), 1);
+    assert_eq!(function.type_conditions.len(), 2);
+    assert!(matches!(
+        function.type_conditions[0],
+        GenericCondition::Bound { .. }
+    ));
+    assert!(matches!(
+        function.type_conditions[1],
+        GenericCondition::Equal { .. }
+    ));
+}
+
+#[test]
+fn rejects_repeated_when_in_generic_clause() {
+    let result = parse("merge[T when T with Any, when T = T](value T) T = value");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "duplicate_when_clause"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_repo_sources_except_skipped_and_failures() {
     let root = workspace_root();
     let mut files = Vec::new();

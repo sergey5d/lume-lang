@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*generic bound 'Plain' is a class; bounds must name interfaces.*
+
+class Plain {}
+
+invalid[T with Plain](value T) T = value

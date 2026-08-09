@@ -9,9 +9,9 @@ use crate::{
     ast::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
         ElseBranch, ElseExprBranch, Expr, ExtensionBlock, FieldDecl, ForBinding, FunctionDecl,
-        IfConditionClause, IfStmt, ImplBlock, ImplTargetKind, Item, LambdaBody, MatchCase,
-        MatchCaseBody, MatchStmt, MethodDecl, Param, Pattern, PatternBindingStmt, Program, Stmt,
-        TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
+        GenericCondition, IfConditionClause, IfStmt, ImplBlock, ImplTargetKind, Item, LambdaBody,
+        MatchCase, MatchCaseBody, MatchStmt, MethodDecl, Param, Pattern, PatternBindingStmt,
+        Program, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
     },
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, ModuleLoadOptions,
@@ -281,10 +281,17 @@ struct ParamSig {
 struct FunctionSig {
     type_params: Vec<String>,
     reified_type_params: Vec<String>,
+    generic_conditions: Vec<GenericConditionSig>,
     params: Vec<ParamSig>,
     ret: Ty,
     visibility: Visibility,
     has_body: bool,
+}
+
+#[derive(Debug, Clone)]
+enum GenericConditionSig {
+    Bound { subject: Ty, bound: Ty },
+    Equal { left: Ty, right: Ty },
 }
 
 #[derive(Debug, Clone)]
@@ -303,6 +310,7 @@ struct ConstructorCycleNode {
 struct TypeParamScope {
     names: HashSet<String>,
     reified: HashSet<String>,
+    conditions: Vec<GenericConditionSig>,
 }
 
 fn universal_member_type(name: &str) -> Option<Ty> {
@@ -320,6 +328,7 @@ fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
         "toStr" => FunctionSig {
             type_params: Vec::new(),
             reified_type_params: Vec::new(),
+            generic_conditions: Vec::new(),
             params: Vec::new(),
             ret: Ty::str(),
             visibility: Visibility::Default,
@@ -328,6 +337,7 @@ fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
         "equals" => FunctionSig {
             type_params: Vec::new(),
             reified_type_params: Vec::new(),
+            generic_conditions: Vec::new(),
             params: vec![ParamSig {
                 name: "other".to_string(),
                 ty: Ty::any(),
@@ -366,6 +376,7 @@ struct TypeSig {
     kind: TypeKind,
     name: String,
     type_params: Vec<String>,
+    generic_conditions: Vec<GenericConditionSig>,
     with_bounds: Vec<Ty>,
     fields: Vec<FieldSig>,
     methods: HashMap<String, Vec<FunctionSig>>,
@@ -572,6 +583,7 @@ fn builtin_extension_type_sig(name: &str) -> Option<TypeSig> {
         kind: TypeKind::Class,
         name: name.to_string(),
         type_params: Vec::new(),
+        generic_conditions: Vec::new(),
         with_bounds: Vec::new(),
         fields: Vec::new(),
         methods: HashMap::new(),
@@ -832,6 +844,11 @@ impl<'a> Checker<'a> {
     fn check_global_bindings(&mut self) {
         self.push_scope();
         for binding_stmt in &self.module.global_binding_stmts {
+            for binding in &binding_stmt.bindings {
+                if let Some(ty) = &binding.ty {
+                    self.validate_type_ref_generic_applications(ty);
+                }
+            }
             let value_types = binding_stmt
                 .values
                 .iter()
@@ -894,7 +911,16 @@ impl<'a> Checker<'a> {
         let previous_return = self.current_return.clone();
         let previous_defer_depth = self.defer_depth;
         let previous_callable_depth = self.callable_depth;
-        self.push_ast_type_params(&function.type_params);
+        self.push_ast_type_params(&function.type_params, &function.type_conditions);
+        self.validate_generic_clause(&function.type_params, &function.type_conditions);
+        if let Some(return_type) = &function.return_type {
+            self.validate_type_ref_generic_applications(return_type);
+        }
+        for param in &function.params {
+            if let Some(ty) = &param.ty {
+                self.validate_type_ref_generic_applications(ty);
+            }
+        }
         let expected_return = function
             .return_type
             .as_ref()
@@ -955,7 +981,25 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        self.push_type_params(type_sig.type_params.iter().map(String::as_str));
+        self.push_ast_type_params(&decl.type_params, &decl.type_conditions);
+        self.validate_generic_clause(&decl.type_params, &decl.type_conditions);
+        for member in &decl.members {
+            match member {
+                TypeMember::Field(field) => {
+                    if let Some(ty) = &field.ty {
+                        self.validate_type_ref_generic_applications(ty);
+                    }
+                }
+                TypeMember::Case(case) => {
+                    for field in &case.fields {
+                        if let Some(ty) = &field.ty {
+                            self.validate_type_ref_generic_applications(ty);
+                        }
+                    }
+                }
+                TypeMember::Method(_) => {}
+            }
+        }
 
         if decl.kind == TypeKind::Enum && type_sig.enum_cases.is_empty() {
             self.add_error(
@@ -1446,7 +1490,10 @@ impl<'a> Checker<'a> {
         }
         let previous_extension_target = self.current_extension_target.clone();
         self.current_extension_target = Some(target_name.to_string());
-        self.push_type_params(type_sig.type_params.iter().map(String::as_str));
+        self.push_type_params_with_conditions(
+            type_sig.type_params.iter().map(String::as_str),
+            type_sig.generic_conditions.clone(),
+        );
         for method in &block.methods {
             if method.name == "new" {
                 self.add_error(
@@ -1468,7 +1515,16 @@ impl<'a> Checker<'a> {
         let previous_method = self.current_method.clone();
         let previous_defer_depth = self.defer_depth;
         let previous_callable_depth = self.callable_depth;
-        self.push_ast_type_params(&method.type_params);
+        self.push_ast_type_params(&method.type_params, &method.type_conditions);
+        self.validate_generic_clause(&method.type_params, &method.type_conditions);
+        if let Some(return_type) = &method.return_type {
+            self.validate_type_ref_generic_applications(return_type);
+        }
+        for param in &method.params {
+            if let Some(ty) = &param.ty {
+                self.validate_type_ref_generic_applications(ty);
+            }
+        }
         let expected_return = method
             .return_type
             .as_ref()
@@ -2498,6 +2554,11 @@ impl<'a> Checker<'a> {
     fn check_stmt(&mut self, statement: &Stmt) -> Ty {
         match statement {
             Stmt::Binding(binding_stmt) => {
+                for binding in &binding_stmt.bindings {
+                    if let Some(ty) = &binding.ty {
+                        self.validate_type_ref_generic_applications(ty);
+                    }
+                }
                 let value_types = binding_stmt
                     .values
                     .iter()
@@ -4677,6 +4738,7 @@ impl<'a> Checker<'a> {
             kind: TypeKind::Object,
             name: name.clone(),
             type_params: Vec::new(),
+            generic_conditions: Vec::new(),
             with_bounds: Vec::new(),
             fields: field_sigs,
             methods: method_sigs,
@@ -5172,6 +5234,9 @@ impl<'a> Checker<'a> {
             span,
             subst,
         );
+        if argument_shape_valid {
+            self.check_call_generic_conditions(&selection.sig.generic_conditions, &subst, span);
+        }
         let missing = if argument_shape_valid {
             selection
                 .sig
@@ -5198,6 +5263,73 @@ impl<'a> Checker<'a> {
             );
         }
         ret
+    }
+
+    fn check_call_generic_conditions(
+        &mut self,
+        conditions: &[GenericConditionSig],
+        subst: &HashMap<String, Ty>,
+        span: crate::source::Span,
+    ) {
+        for condition in conditions {
+            match substitute_generic_condition(condition, subst) {
+                GenericConditionSig::Bound { subject, bound } => {
+                    if matches!(subject, Ty::Unknown | Ty::TypeParam(_))
+                        && !self.is_assignable(&subject, &bound)
+                    {
+                        self.add_error(
+                            "cannot_infer_bounded_type",
+                            format!(
+                                "cannot prove that generic type '{}' satisfies bound '{}'",
+                                subject.describe(),
+                                bound.describe()
+                            ),
+                            span,
+                        );
+                    } else if !self.is_assignable(&subject, &bound) {
+                        self.add_error(
+                            "generic_bound_not_satisfied",
+                            format!(
+                                "type '{}' does not satisfy generic bound '{}'",
+                                subject.describe(),
+                                bound.describe()
+                            ),
+                            span,
+                        );
+                    }
+                }
+                GenericConditionSig::Equal { left, right } => {
+                    if matches!(left, Ty::Unknown) || matches!(right, Ty::Unknown) {
+                        self.add_error(
+                            "cannot_infer_generic_equality",
+                            format!(
+                                "cannot prove generic equality condition '{} = {}'",
+                                left.describe(),
+                                right.describe()
+                            ),
+                            span,
+                        );
+                    } else if !self.generic_types_are_equal(&left, &right) {
+                        self.add_error(
+                            "generic_equality_not_satisfied",
+                            format!(
+                                "generic equality condition '{} = {}' is not satisfied",
+                                left.describe(),
+                                right.describe()
+                            ),
+                            span,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn generic_types_are_equal(&self, left: &Ty, right: &Ty) -> bool {
+        match (left, right) {
+            (Ty::TypeParam(left), Ty::TypeParam(right)) => self.type_params_are_equal(left, right),
+            _ => left == right,
+        }
     }
 
     fn check_signature_call_with_subst(
@@ -7278,6 +7410,16 @@ impl<'a> Checker<'a> {
                 .find(|(field_name, _)| field_name == name)
                 .map(|(_, ty)| ty.clone())
                 .or_else(|| universal_member_type(name)),
+            Ty::TypeParam(param) => self
+                .type_param_method_sigs(param, name)
+                .first()
+                .map(|method| {
+                    Ty::Function(
+                        method.params.iter().map(|param| param.ty.clone()).collect(),
+                        Box::new(method.ret.clone()),
+                    )
+                })
+                .or_else(|| universal_member_type(name)),
             Ty::Unknown => Some(Ty::Unknown),
             _ => universal_member_type(name),
         }
@@ -7320,6 +7462,11 @@ impl<'a> Checker<'a> {
                         .map(|method| FunctionSig {
                             type_params: method.type_params,
                             reified_type_params: method.reified_type_params,
+                            generic_conditions: method
+                                .generic_conditions
+                                .into_iter()
+                                .map(|condition| substitute_generic_condition(&condition, &subst))
+                                .collect(),
                             params: method
                                 .params
                                 .into_iter()
@@ -7339,8 +7486,45 @@ impl<'a> Checker<'a> {
                 )
             }
             Ty::Unknown => universal_method_sigs(name),
+            Ty::TypeParam(param) => {
+                let methods = self.type_param_method_sigs(param, name);
+                if methods.is_empty() {
+                    universal_method_sigs(name)
+                } else {
+                    Some(methods)
+                }
+            }
             _ => universal_method_sigs(name),
         }
+    }
+
+    fn type_param_method_sigs(&self, param: &str, name: &str) -> Vec<FunctionSig> {
+        self.type_param_bounds(param)
+            .into_iter()
+            .flat_map(|bound| self.method_sigs_for_generic_bound(&bound, name))
+            .collect()
+    }
+
+    fn method_sigs_for_generic_bound(&self, bound: &Ty, name: &str) -> Vec<FunctionSig> {
+        let Ty::Named(bound_name, args) = bound else {
+            return Vec::new();
+        };
+        let Some(sig) = self.lookup_any_type(bound_name) else {
+            return Vec::new();
+        };
+        let Some(methods) = self.method_sigs_for_type(&sig, name) else {
+            return Vec::new();
+        };
+        let subst = sig
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        methods
+            .into_iter()
+            .map(|method| instantiate_function_sig(method, &subst))
+            .collect()
     }
 
     fn extension_method_sigs_for_named_type(
@@ -7365,6 +7549,11 @@ impl<'a> Checker<'a> {
             .map(|method| FunctionSig {
                 type_params: method.type_params,
                 reified_type_params: method.reified_type_params,
+                generic_conditions: method
+                    .generic_conditions
+                    .into_iter()
+                    .map(|condition| substitute_generic_condition(&condition, &subst))
+                    .collect(),
                 params: method
                     .params
                     .into_iter()
@@ -8234,14 +8423,25 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn push_type_params<'b>(&mut self, params: impl Iterator<Item = &'b str>) {
+    fn push_type_params_with_conditions<'b>(
+        &mut self,
+        params: impl Iterator<Item = &'b str>,
+        conditions: Vec<GenericConditionSig>,
+    ) {
         self.type_params.push(TypeParamScope {
             names: params.map(|name| name.to_string()).collect::<HashSet<_>>(),
             reified: HashSet::new(),
+            conditions,
         });
     }
 
-    fn push_ast_type_params(&mut self, params: &[TypeParam]) {
+    fn push_ast_type_params(&mut self, params: &[TypeParam], conditions: &[GenericCondition]) {
+        let mut known = self
+            .type_params
+            .iter()
+            .flat_map(|scope| scope.names.iter().cloned())
+            .collect::<HashSet<_>>();
+        known.extend(params.iter().map(|param| param.name.clone()));
         self.type_params.push(TypeParamScope {
             names: params
                 .iter()
@@ -8252,7 +8452,98 @@ impl<'a> Checker<'a> {
                 .filter(|param| param.reified)
                 .map(|param| param.name.clone())
                 .collect::<HashSet<_>>(),
+            conditions: generic_condition_sigs(params, conditions, &known),
         });
+    }
+
+    fn validate_generic_clause(&mut self, params: &[TypeParam], conditions: &[GenericCondition]) {
+        for param in params {
+            for bound in &param.bounds {
+                self.validate_interface_generic_bound(bound, bound.span());
+            }
+        }
+        for condition in conditions {
+            if let GenericCondition::Bound {
+                subject,
+                bound,
+                span,
+            } = condition
+            {
+                if !matches!(self.ty_from_type_ref(subject), Ty::TypeParam(_)) {
+                    self.add_error(
+                        "invalid_generic_condition_subject",
+                        "the left side of a generic bound condition must be a local or enclosing type parameter",
+                        subject.span(),
+                    );
+                }
+                self.validate_interface_generic_bound(bound, *span);
+            }
+        }
+    }
+
+    fn validate_interface_generic_bound(&mut self, bound: &TypeRef, span: crate::source::Span) {
+        let Ty::Named(name, _) = self.ty_from_type_ref(bound) else {
+            self.add_error(
+                "invalid_generic_bound",
+                "generic bounds must name an interface",
+                span,
+            );
+            return;
+        };
+        let Some(sig) = self.lookup_any_type(&name) else {
+            return;
+        };
+        if sig.kind != TypeKind::Interface {
+            self.add_error(
+                "invalid_generic_bound",
+                format!(
+                    "generic bound '{}' is a {}; bounds must name interfaces",
+                    name,
+                    type_kind_label(sig.kind)
+                ),
+                span,
+            );
+        }
+    }
+
+    fn validate_type_ref_generic_applications(&mut self, reference: &TypeRef) {
+        match reference {
+            TypeRef::Wildcard { .. } => {}
+            TypeRef::Named { name, args, span } => {
+                for arg in args {
+                    self.validate_type_ref_generic_applications(arg);
+                }
+                let Some(sig) = self.lookup_any_type(name) else {
+                    return;
+                };
+                if sig.generic_conditions.is_empty() || sig.type_params.len() != args.len() {
+                    return;
+                }
+                let subst = sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().map(|arg| self.ty_from_type_ref(arg)))
+                    .collect::<HashMap<_, _>>();
+                self.check_call_generic_conditions(&sig.generic_conditions, &subst, *span);
+            }
+            TypeRef::Tuple { fields, .. } => {
+                for field in fields {
+                    self.validate_type_ref_generic_applications(&field.ty);
+                }
+            }
+            TypeRef::Record { fields, .. } => {
+                for field in fields {
+                    self.validate_type_ref_generic_applications(&field.ty);
+                }
+            }
+            TypeRef::Function { params, ret, .. } => {
+                for param in params {
+                    self.validate_type_ref_generic_applications(param);
+                }
+                self.validate_type_ref_generic_applications(ret);
+            }
+        }
     }
 
     fn pop_type_params(&mut self) {
@@ -8271,6 +8562,54 @@ impl<'a> Checker<'a> {
             .iter()
             .rev()
             .any(|scope| scope.reified.contains(name))
+    }
+
+    fn type_param_bounds(&self, name: &str) -> Vec<Ty> {
+        let equivalent = self.equivalent_type_params(name);
+        self.type_params
+            .iter()
+            .flat_map(|scope| scope.conditions.iter())
+            .filter_map(|condition| match condition {
+                GenericConditionSig::Bound {
+                    subject: Ty::TypeParam(subject),
+                    bound,
+                } if equivalent.contains(subject) => Some(bound.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn equivalent_type_params(&self, name: &str) -> HashSet<String> {
+        let mut equivalent = HashSet::from([name.to_string()]);
+        loop {
+            let mut changed = false;
+            for condition in self
+                .type_params
+                .iter()
+                .flat_map(|scope| scope.conditions.iter())
+            {
+                let GenericConditionSig::Equal {
+                    left: Ty::TypeParam(left),
+                    right: Ty::TypeParam(right),
+                } = condition
+                else {
+                    continue;
+                };
+                if equivalent.contains(left) {
+                    changed |= equivalent.insert(right.clone());
+                }
+                if equivalent.contains(right) {
+                    changed |= equivalent.insert(left.clone());
+                }
+            }
+            if !changed {
+                return equivalent;
+            }
+        }
+    }
+
+    fn type_params_are_equal(&self, left: &str, right: &str) -> bool {
+        self.equivalent_type_params(left).contains(right)
     }
 
     fn require_assignable(
@@ -8438,6 +8777,20 @@ impl<'a> Checker<'a> {
     ) -> bool {
         if is_assignable(actual, expected) {
             return true;
+        }
+        if let (Ty::TypeParam(left), Ty::TypeParam(right)) = (actual, expected) {
+            if self.type_params_are_equal(left, right) {
+                return true;
+            }
+        }
+        if let Ty::TypeParam(name) = actual {
+            if self
+                .type_param_bounds(name)
+                .into_iter()
+                .any(|bound| self.is_assignable_inner(&bound, expected, seen))
+            {
+                return true;
+            }
         }
         if self.structurally_assignable_to_shape(actual, expected) {
             return true;
@@ -9214,6 +9567,11 @@ fn function_sig_from_function(
             .filter(|param| param.reified)
             .map(|param| param.name.clone())
             .collect(),
+        generic_conditions: generic_condition_sigs(
+            &function.type_params,
+            &function.type_conditions,
+            &type_params,
+        ),
         params: function
             .params
             .iter()
@@ -9239,6 +9597,33 @@ fn function_sig_from_function(
     }
 }
 
+fn generic_condition_sigs(
+    params: &[TypeParam],
+    conditions: &[GenericCondition],
+    type_params: &HashSet<String>,
+) -> Vec<GenericConditionSig> {
+    let mut result = Vec::new();
+    for param in params {
+        for bound in &param.bounds {
+            result.push(GenericConditionSig::Bound {
+                subject: Ty::TypeParam(param.name.clone()),
+                bound: convert_type_ref(bound, type_params),
+            });
+        }
+    }
+    result.extend(conditions.iter().map(|condition| match condition {
+        GenericCondition::Bound { subject, bound, .. } => GenericConditionSig::Bound {
+            subject: convert_type_ref(subject, type_params),
+            bound: convert_type_ref(bound, type_params),
+        },
+        GenericCondition::Equal { left, right, .. } => GenericConditionSig::Equal {
+            left: convert_type_ref(left, type_params),
+            right: convert_type_ref(right, type_params),
+        },
+    }));
+    result
+}
+
 fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -> FunctionSig {
     let type_params = method
         .type_params
@@ -9258,6 +9643,11 @@ fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -
             .filter(|param| param.reified)
             .map(|param| param.name.clone())
             .collect(),
+        generic_conditions: generic_condition_sigs(
+            &method.type_params,
+            &method.type_conditions,
+            &type_params,
+        ),
         params: method
             .params
             .iter()
@@ -9380,6 +9770,11 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
             .iter()
             .map(|param| param.name.clone())
             .collect(),
+        generic_conditions: generic_condition_sigs(
+            &decl.type_params,
+            &decl.type_conditions,
+            &owner_params,
+        ),
         with_bounds: decl
             .with_bounds
             .iter()
@@ -9926,6 +10321,48 @@ fn substitute_type(ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
             Box::new(substitute_type(ret, subst)),
         ),
         Ty::Unknown => Ty::Unknown,
+    }
+}
+
+fn substitute_generic_condition(
+    condition: &GenericConditionSig,
+    subst: &HashMap<String, Ty>,
+) -> GenericConditionSig {
+    match condition {
+        GenericConditionSig::Bound { subject, bound } => GenericConditionSig::Bound {
+            subject: substitute_type(subject, subst),
+            bound: substitute_type(bound, subst),
+        },
+        GenericConditionSig::Equal { left, right } => GenericConditionSig::Equal {
+            left: substitute_type(left, subst),
+            right: substitute_type(right, subst),
+        },
+    }
+}
+
+fn instantiate_function_sig(method: FunctionSig, subst: &HashMap<String, Ty>) -> FunctionSig {
+    FunctionSig {
+        type_params: method.type_params,
+        reified_type_params: method.reified_type_params,
+        generic_conditions: method
+            .generic_conditions
+            .into_iter()
+            .map(|condition| substitute_generic_condition(&condition, subst))
+            .collect(),
+        params: method
+            .params
+            .into_iter()
+            .map(|param| ParamSig {
+                name: param.name,
+                ty: substitute_type(&param.ty, subst),
+                variadic: param.variadic,
+                lazy: param.lazy,
+                has_initializer: param.has_initializer,
+            })
+            .collect(),
+        ret: substitute_type(&method.ret, subst),
+        visibility: method.visibility,
+        has_body: method.has_body,
     }
 }
 
@@ -13358,6 +13795,190 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_direct_generic_bounds_and_cross_parameter_equality() {
+        let program = parse_inline(
+            r#"
+interface Callable {
+    call() Unit
+}
+
+class Action with Callable {
+    call() Unit = ()
+}
+
+invoke[T with Callable](value T) Unit = value.call()
+
+same[L, R when L = R](left L, right R) L = right
+
+main() Unit {
+    invoke(Action {})
+    value Int = same(1, 2)
+    println(value)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_conditions_on_generic_type_applications() {
+        let program = parse_inline(
+            r#"
+interface Callable {
+    call() Unit
+}
+
+class Action with Callable {
+    call() Unit = ()
+}
+
+class Plain {}
+
+class Box[T with Callable] {
+    value T
+}
+
+class Pair[L, R when L = R] {
+    left L
+    right R
+}
+
+valid(value Box[Action]) Unit = value.value.call()
+invalid(value Box[Plain]) Unit = ()
+validPair(value Pair[Int, Int]) Unit = ()
+invalidPair(value Pair[Int, Str]) Unit = ()
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "generic_bound_not_satisfied")
+                .count(),
+            1,
+            "{:#?}",
+            result.diagnostics
+        );
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "generic_equality_not_satisfied")
+                .count(),
+            1,
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_unsatisfied_generic_bounds_and_equalities() {
+        let program = parse_inline(
+            r#"
+interface Callable {
+    call() Unit
+}
+
+class Plain {}
+
+invoke[T with Callable](value T) Unit = value.call()
+same[L, R when L = R](left L, right R) L = right
+
+main() Unit {
+    invoke(Plain {})
+    _ = same(1, "two")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "generic_bound_not_satisfied"),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "generic_equality_not_satisfied"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn checks_owner_type_conditions_on_generic_methods() {
+        let program = parse_inline(
+            r#"
+interface Callable {
+    call() Unit
+}
+
+class Action with Callable {
+    call() Unit = ()
+}
+
+class Context[L, R] {
+    invoke[when L with Callable](value L) Unit = value.call()
+    merge[when L = R](value R) L = value
+}
+
+useContext(context Context[Action, Action], action Action) Action {
+    context.invoke(action)
+    return context.merge(action)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_unsatisfied_owner_type_conditions() {
+        let program = parse_inline(
+            r#"
+interface Callable {
+    call() Unit
+}
+
+class Plain {}
+
+class Context[L, R] {
+    invoke[when L with Callable](value L) Unit = value.call()
+    merge[when L = R](value R) L = value
+}
+
+invalid(context Context[Plain, Str], plain Plain) Unit {
+    context.invoke(plain)
+    _ = context.merge("value")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "generic_bound_not_satisfied"),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "generic_equality_not_satisfied"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

@@ -114,6 +114,11 @@ impl<'a> Lowerer<'a> {
                         .iter()
                         .map(|param| param.name.clone())
                         .collect();
+                    ty.generic_conditions = lower_generic_conditions(
+                        &decl.type_params,
+                        &decl.type_conditions,
+                        &ty.type_params,
+                    );
                     ty.with_bounds = decl.with_bounds.iter().map(lower_type_ref).collect();
                     ty.span = Some(decl.span);
                     let id = self.program.add_type(ty);
@@ -129,6 +134,8 @@ impl<'a> Lowerer<'a> {
                         function.visibility,
                         &function.annotations,
                         &function.type_params,
+                        &function.type_conditions,
+                        &[],
                         function.return_type.as_ref(),
                         ir::FunctionKind::TopLevel,
                         &function.params,
@@ -366,6 +373,8 @@ impl<'a> Lowerer<'a> {
         visibility: ast::Visibility,
         annotations: &[ast::Annotation],
         type_params: &[ast::TypeParam],
+        type_conditions: &[ast::GenericCondition],
+        owner_type_params: &[String],
         return_type: Option<&TypeRef>,
         kind: ir::FunctionKind,
         params: &[core::Param],
@@ -376,11 +385,16 @@ impl<'a> Lowerer<'a> {
             .iter()
             .map(|param| param.name.clone())
             .collect::<Vec<_>>();
+        let available_type_params = type_param_names
+            .iter()
+            .cloned()
+            .chain(owner_type_params.iter().cloned())
+            .collect::<Vec<_>>();
         let mut function = ir::Function::new(
             name.to_string(),
             kind,
             return_type
-                .map(|ty| lower_type_ref_with_type_params(ty, &type_param_names))
+                .map(|ty| lower_type_ref_with_type_params(ty, &available_type_params))
                 .unwrap_or(ir::Type::Unknown),
         );
         function.annotations = lower_annotations(annotations);
@@ -391,6 +405,8 @@ impl<'a> Lowerer<'a> {
             .filter(|param| param.reified)
             .map(|param| param.name.clone())
             .collect();
+        function.generic_conditions =
+            lower_generic_conditions(type_params, type_conditions, &available_type_params);
         function.span = Some(span);
         if let Some((this_name, this_ty)) = this_local {
             function.add_local(this_name, this_ty, false, ir::LocalKind::Capture);
@@ -399,7 +415,7 @@ impl<'a> Lowerer<'a> {
             let source_ty = param
                 .ty
                 .as_ref()
-                .map(|ty| lower_type_ref_with_type_params(ty, &type_param_names))
+                .map(|ty| lower_type_ref_with_type_params(ty, &available_type_params))
                 .unwrap_or(ir::Type::Unknown);
             let runtime_ty = if param.lazy {
                 lazy_storage_type(source_ty)
@@ -432,11 +448,14 @@ impl<'a> Lowerer<'a> {
         owner_name: &str,
         method: &ast::MethodDecl,
     ) -> (ir::FunctionId, ir::LocalId) {
+        let owner_type_params = self.program.types[owner.0].type_params.clone();
         let id = self.declare_function(
             &method.name,
             method.visibility,
             &method.annotations,
             &method.type_params,
+            &method.type_conditions,
+            &owner_type_params,
             method.return_type.as_ref(),
             ir::FunctionKind::Method { owner },
             &method.params,
@@ -458,6 +477,8 @@ impl<'a> Lowerer<'a> {
             ast::Visibility::Hidden,
             &[],
             &[],
+            &[],
+            &self.program.types[owner.0].type_params.clone(),
             Some(&TypeRef::Named {
                 name: "Unit".to_string(),
                 args: Vec::new(),
@@ -4710,6 +4731,10 @@ impl<'a> FunctionLowerer<'a> {
                 .iter()
                 .find(|field| field.name == name)
                 .map(|field| field.ty.clone()),
+            ir::Type::TypeParam(param) => self
+                .generic_bounds_for_type_param(param)
+                .into_iter()
+                .find_map(|bound| self.infer_member_type(&bound, name)),
             ir::Type::Unknown => Some(ir::Type::Unknown),
             _ => builtin_member_type(receiver, name),
         }
@@ -4830,6 +4855,27 @@ impl<'a> FunctionLowerer<'a> {
             args: type_args,
         } = &receiver_ty
         else {
+            if let ir::Type::TypeParam(param) = &receiver_ty {
+                for bound in self.generic_bounds_for_type_param(param) {
+                    let ir::Type::Named {
+                        name: bound_name,
+                        args: bound_args,
+                    } = bound
+                    else {
+                        continue;
+                    };
+                    let Some(bound_ty) = self.program.types.iter().find(|ty| ty.name == bound_name)
+                    else {
+                        continue;
+                    };
+                    let subst = ir_type_subst(bound_ty, &bound_args);
+                    if let Some(ret) =
+                        self.find_method_call_return_type(bound_ty, name, &subst, args)
+                    {
+                        return Some(ret);
+                    }
+                }
+            }
             return builtin_member_type(&receiver_ty, name).and_then(|ty| match ty {
                 ir::Type::Function { ret, .. } => Some(*ret),
                 _ => None,
@@ -4860,6 +4906,30 @@ impl<'a> FunctionLowerer<'a> {
             }
         }
         Some(return_ty)
+    }
+
+    fn generic_bounds_for_type_param(&self, name: &str) -> Vec<ir::Type> {
+        let owner_conditions = match self.function().kind {
+            ir::FunctionKind::Method { owner } => self
+                .program
+                .types
+                .get(owner.0)
+                .map(|ty| ty.generic_conditions.as_slice())
+                .unwrap_or(&[]),
+            _ => &[],
+        };
+        self.function()
+            .generic_conditions
+            .iter()
+            .chain(owner_conditions.iter())
+            .filter_map(|condition| match condition {
+                ir::GenericCondition::Bound {
+                    subject: ir::Type::TypeParam(subject),
+                    bound,
+                } if subject == name => Some(bound.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     fn find_method_call_return_type(
@@ -6675,6 +6745,33 @@ fn lower_type_ref_with_type_params(reference: &TypeRef, type_params: &[String]) 
             ret: Box::new(lower_type_ref_with_type_params(ret, type_params)),
         },
     }
+}
+
+fn lower_generic_conditions(
+    params: &[ast::TypeParam],
+    conditions: &[ast::GenericCondition],
+    type_params: &[String],
+) -> Vec<ir::GenericCondition> {
+    let mut lowered = Vec::new();
+    for param in params {
+        for bound in &param.bounds {
+            lowered.push(ir::GenericCondition::Bound {
+                subject: ir::Type::TypeParam(param.name.clone()),
+                bound: lower_type_ref_with_type_params(bound, type_params),
+            });
+        }
+    }
+    lowered.extend(conditions.iter().map(|condition| match condition {
+        ast::GenericCondition::Bound { subject, bound, .. } => ir::GenericCondition::Bound {
+            subject: lower_type_ref_with_type_params(subject, type_params),
+            bound: lower_type_ref_with_type_params(bound, type_params),
+        },
+        ast::GenericCondition::Equal { left, right, .. } => ir::GenericCondition::Equal {
+            left: lower_type_ref_with_type_params(left, type_params),
+            right: lower_type_ref_with_type_params(right, type_params),
+        },
+    }));
+    lowered
 }
 
 fn ir_exact_runtime_type(represented: ir::Type) -> ir::Type {

@@ -90,6 +90,7 @@ pub struct TypeDecl {
     pub kind: TypeKind,
     pub name: String,
     pub type_params: Vec<TypeParam>,
+    pub type_conditions: Vec<GenericCondition>,
     pub with_bounds: Vec<TypeRef>,
     pub members: Vec<TypeMember>,
     pub span: Span,
@@ -135,6 +136,7 @@ pub struct FunctionDecl {
     pub visibility: Visibility,
     pub name: String,
     pub type_params: Vec<TypeParam>,
+    pub type_conditions: Vec<GenericCondition>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeRef>,
     pub body: CallableBody,
@@ -148,6 +150,7 @@ pub struct MethodDecl {
     pub visibility: Visibility,
     pub name: String,
     pub type_params: Vec<TypeParam>,
+    pub type_conditions: Vec<GenericCondition>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeRef>,
     pub body: Option<CallableBody>,
@@ -180,6 +183,29 @@ pub struct TypeParam {
     pub reified: bool,
     pub bounds: Vec<TypeRef>,
     pub span: Span,
+}
+
+/// A broader condition in the `when` section of a generic clause.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GenericCondition {
+    Bound {
+        subject: TypeRef,
+        bound: TypeRef,
+        span: Span,
+    },
+    Equal {
+        left: TypeRef,
+        right: TypeRef,
+        span: Span,
+    },
+}
+
+impl GenericCondition {
+    pub fn span(&self) -> Span {
+        match self {
+            GenericCondition::Bound { span, .. } | GenericCondition::Equal { span, .. } => *span,
+        }
+    }
 }
 
 /// A named callable parameter.

@@ -398,6 +398,7 @@ fn java_library_local_placeholder_items(
                 kind: TypeKind::Interface,
                 name,
                 type_params: Vec::new(),
+                type_conditions: Vec::new(),
                 with_bounds: Vec::new(),
                 members: Vec::new(),
                 span,
@@ -427,6 +428,7 @@ fn java_library_type_decl(
                 span,
             })
             .collect(),
+        type_conditions: Vec::new(),
         with_bounds: external_class
             .with_bounds
             .iter()
@@ -844,6 +846,7 @@ fn java_library_method(
                 span,
             })
             .collect(),
+        type_conditions: Vec::new(),
         params: callable
             .params
             .iter()

@@ -978,10 +978,55 @@ Generic function:
 id[T](value T) T = value
 ```
 
-Generic bounds:
+Generic clauses:
 
 ```txt
-sort[T with Ordering[T]](value T) T = value
+identity[T](value T) T = value
+
+invoke[T with Callable](value T) Unit =
+    value.call()
+
+class Merger[L, R] {
+    merge[when L = R]() L =
+        ...
+}
+
+class Context[GlobalT, GlobalR] {
+    something[
+        LocalT with Callable,
+        LocalR
+        when GlobalT with Callable,
+             LocalR = GlobalR
+    ](value LocalT) GlobalT =
+        ...
+}
+```
+
+A direct bound stays attached to a type parameter declared by that clause:
+`T with Callable`. Conditions involving multiple parameters or an enclosing
+type parameter follow one `when`, inside the same brackets.
+
+Rules:
+
+- ordinary local type parameters use `T`
+- a local parameter may carry a direct interface bound: `T with Callable`
+- `when` introduces broader bound and exact-type equality conditions
+- a clause contains at most one `when`; separate its conditions with commas
+- write `[when L with Callable, L = R]`, not multiple `when` keywords
+- a bound condition's left side must be a local or enclosing type parameter
+- bounds must name interfaces
+- `L = R` requires both sides to resolve to exactly the same type
+- conditions are checked after explicit type arguments and argument inference
+
+Generic type declarations use the same direct-bound and `when` rules. A use of
+the resulting type must satisfy its conditions:
+
+```txt
+class Box[T with Callable] {
+    value T
+}
+
+box Box[Action] = Box { value: Action {} }
 ```
 
 Reified generic functions and methods:
@@ -2756,6 +2801,7 @@ Other operators / constructs:
 - `=>` for match cases
 - `.->` for per-hop lifted access through `Option`, `Result`, and `Either`
 - `with` for interface implementation and generic bounds
+- `when` for generic bound and equality conditions
 - `:` inside map types, map literals, and construction field lists
 - `:<` for class, shape, and anonymous-shape update
 

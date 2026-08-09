@@ -2,9 +2,10 @@
 # 7
 # 0
 
-object Ascending with Ordering[Int] {
+class OrderedInt with Ordering[OrderedInt] {
+    value Int
 
-    compare(left Int, right Int) Int = left - right
+    compare(left OrderedInt, right OrderedInt) Int = left.value - right.value
 }
 
 
@@ -20,10 +21,12 @@ class Mapper {
 
 pick[T with Ordering[T]](value T) T = value
 
-useBox(value Box[Int]) Int = value.value
+useBox(value Box[OrderedInt]) Int = value.value.value
 
 main() Int {
     mapper Mapper = Mapper {}
-    println(pick(3) + mapper.pick(4))
+    left = OrderedInt { value: 3 }
+    right = OrderedInt { value: 4 }
+    println(pick(left).value + mapper.pick(right).value)
     0
 }

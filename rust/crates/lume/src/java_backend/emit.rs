@@ -1428,13 +1428,25 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             _ => {
                 out.push_str(indent);
-                let expr = self.emit_expr_against(expr, bindings, &self.function.return_ty)?;
+                let source_ty = self.expr_type(expr, bindings);
+                let mut emitted =
+                    self.emit_expr_against(expr, bindings, &self.function.return_ty)?;
+                if let Some(source_ty) = source_ty
+                    && source_ty != self.function.return_ty
+                    && self.generic_types_are_equal(&source_ty, &self.function.return_ty)
+                {
+                    emitted = format!(
+                        "(({}) ((Object) {}))",
+                        self.names.value_type(&self.function.return_ty),
+                        emitted
+                    );
+                }
                 if is_java_void_type(&self.function.return_ty) {
-                    out.push_str(&expr);
+                    out.push_str(&emitted);
                     out.push_str(";\n");
                 } else {
                     out.push_str("return ");
-                    out.push_str(&expr);
+                    out.push_str(&emitted);
                     out.push_str(";\n");
                 }
                 Some(())
@@ -1716,14 +1728,21 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             ast::Expr::Member { name, .. } if lazy_core_member_call_name(name) => None,
             ast::Expr::Member { receiver, name, .. } => {
-                let receiver = self.emit_expr(receiver, bindings)?;
+                let mut receiver_expr = self.emit_expr(receiver, bindings)?;
+                if let Some(receiver_ty) = self.expr_type(receiver, bindings)
+                    && let Some(param) = self.type_param_name(&receiver_ty)
+                    && let Some(bound) = self.generic_bound_for_type_param(param)
+                {
+                    receiver_expr =
+                        format!("(({}) {})", self.names.value_type(&bound), receiver_expr);
+                }
                 let args = args
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
                 Some(format!(
                     "{}.{}({})",
-                    receiver,
+                    receiver_expr,
                     java_member_name(name),
                     args.join(", ")
                 ))
@@ -1768,6 +1787,82 @@ impl<'a> SourceBodyEmitter<'a> {
             .iter()
             .filter_map(|param| self.function.locals.get(param.0))
             .find(|local| local.name == name && matches!(local.ty, ir::Type::Function { .. }))
+    }
+
+    fn expr_type(&self, expr: &ast::Expr, _bindings: &HashMap<String, String>) -> Option<ir::Type> {
+        match expr {
+            ast::Expr::Identifier { name, .. } => self
+                .function
+                .params
+                .iter()
+                .filter_map(|param| self.function.locals.get(param.0))
+                .find(|local| local.name == *name)
+                .map(|local| local.ty.clone()),
+            ast::Expr::Group { inner, .. } => self.expr_type(inner, _bindings),
+            _ => None,
+        }
+    }
+
+    fn type_param_name<'ty>(&self, ty: &'ty ir::Type) -> Option<&'ty str> {
+        match ty {
+            ir::Type::TypeParam(name) => Some(name),
+            ir::Type::Named { name, args }
+                if args.is_empty()
+                    && (self.function.type_params.contains(name)
+                        || self.owner.type_params.contains(name)) =>
+            {
+                Some(name)
+            }
+            _ => None,
+        }
+    }
+
+    fn generic_conditions(&self) -> impl Iterator<Item = &ir::GenericCondition> {
+        self.function
+            .generic_conditions
+            .iter()
+            .chain(self.owner.generic_conditions.iter())
+    }
+
+    fn generic_bound_for_type_param(&self, name: &str) -> Option<ir::Type> {
+        self.generic_conditions()
+            .find_map(|condition| match condition {
+                ir::GenericCondition::Bound {
+                    subject: ir::Type::TypeParam(subject),
+                    bound,
+                } if subject == name => Some(bound.clone()),
+                _ => None,
+            })
+    }
+
+    fn generic_types_are_equal(&self, left: &ir::Type, right: &ir::Type) -> bool {
+        let (Some(left), Some(right)) = (self.type_param_name(left), self.type_param_name(right))
+        else {
+            return false;
+        };
+        let mut equivalent = HashSet::from([left.to_string()]);
+        loop {
+            let mut changed = false;
+            for condition in self.generic_conditions() {
+                let ir::GenericCondition::Equal { left, right } = condition else {
+                    continue;
+                };
+                let (Some(left), Some(right)) =
+                    (self.type_param_name(left), self.type_param_name(right))
+                else {
+                    continue;
+                };
+                if equivalent.contains(left) {
+                    changed |= equivalent.insert(right.to_string());
+                }
+                if equivalent.contains(right) {
+                    changed |= equivalent.insert(left.to_string());
+                }
+            }
+            if !changed {
+                return equivalent.contains(right);
+            }
+        }
     }
 
     fn is_lazy_param(&self, name: &str) -> bool {
@@ -2194,7 +2289,6 @@ impl<'a> FunctionEmitter<'a> {
                     return Some(());
                 }
                 if target_ty.as_ref().is_some_and(is_java_void_type)
-                    && value_ty.as_ref().is_some_and(is_java_void_type)
                     && rvalue_can_be_java_statement(value)
                     && !matches!(target, ir::Place::Index { .. })
                 {
@@ -2610,10 +2704,16 @@ impl<'a> FunctionEmitter<'a> {
                         .method_param_specs_for_receiver(receiver, method, args)
                         .unwrap_or_default();
                     let args = self.emit_operands_for_param_specs(args, &params)?;
-                    let receiver = self.emit_operand(receiver)?;
+                    let mut receiver_expr = self.emit_operand(receiver)?;
+                    if let Some(ir::Type::TypeParam(param)) = self.operand_type(receiver)
+                        && let Some(bound) = self.generic_bound_for_type_param(&param)
+                    {
+                        receiver_expr =
+                            format!("(({}) {})", self.names.value_type(&bound), receiver_expr);
+                    }
                     Some(format!(
                         "{}.{}({})",
-                        receiver,
+                        receiver_expr,
                         java_member_name(method),
                         args.join(", ")
                     ))
@@ -4486,6 +4586,30 @@ impl<'a> FunctionEmitter<'a> {
                     .is_some_and(|ty| ty.type_params.iter().any(|param| param == name)),
                 _ => false,
             }
+    }
+
+    fn generic_bound_for_type_param(&self, name: &str) -> Option<ir::Type> {
+        let owner_conditions = match self.function.kind {
+            ir::FunctionKind::Method { owner } => self
+                .bundle
+                .ir
+                .types
+                .get(owner.0)
+                .map(|ty| ty.generic_conditions.as_slice())
+                .unwrap_or(&[]),
+            _ => &[],
+        };
+        self.function
+            .generic_conditions
+            .iter()
+            .chain(owner_conditions.iter())
+            .find_map(|condition| match condition {
+                ir::GenericCondition::Bound {
+                    subject: ir::Type::TypeParam(subject),
+                    bound,
+                } if subject == name => Some(bound.clone()),
+                _ => None,
+            })
     }
 
     fn type_params_are_bound(&self, ty: &ir::Type) -> bool {

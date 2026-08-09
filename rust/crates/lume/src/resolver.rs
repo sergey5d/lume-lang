@@ -9,10 +9,10 @@ use crate::{
     ast::{
         Annotation, AssignOp, AssignmentStmt, Binding, Block, CallableBody, ElseBranch,
         ElseExprBranch, Expr, ExprStmt, ExtensionBlock, ForBinding, ForStmt, FunctionDecl,
-        IfConditionClause, IfStmt, ImplBlock, ImplTargetKind, ImportSymbol, LambdaBody,
-        LetElseStmt, MatchCase, MatchCaseBody, MethodDecl, Pattern, PatternBindingStmt, Program,
-        RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
-        WhileStmt,
+        GenericCondition, IfConditionClause, IfStmt, ImplBlock, ImplTargetKind, ImportSymbol,
+        LambdaBody, LetElseStmt, MatchCase, MatchCaseBody, MethodDecl, Pattern, PatternBindingStmt,
+        Program, RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef,
+        Visibility, WhileStmt,
     },
     lexer::lex,
     parser::parse_program,
@@ -1321,6 +1321,7 @@ impl<'a> Resolver<'a> {
             self.define_type_param(param);
         }
         self.resolve_type_parameter_bounds(&function.type_params);
+        self.resolve_generic_conditions(&function.type_conditions);
         self.resolve_type_ref(function.return_type.as_ref());
         self.push_scope();
         for param in &function.params {
@@ -1347,6 +1348,7 @@ impl<'a> Resolver<'a> {
             self.define_type_param(param);
         }
         self.resolve_type_parameter_bounds(&decl.type_params);
+        self.resolve_generic_conditions(&decl.type_conditions);
         for bound in &decl.with_bounds {
             self.resolve_type_ref(Some(bound));
         }
@@ -1639,6 +1641,7 @@ impl<'a> Resolver<'a> {
             self.define_type_param(param);
         }
         self.resolve_type_parameter_bounds(&method.type_params);
+        self.resolve_generic_conditions(&method.type_conditions);
         self.resolve_type_ref(method.return_type.as_ref());
         self.push_scope();
         self.define_implicit_this(Some(method.span));
@@ -1768,6 +1771,7 @@ impl<'a> Resolver<'a> {
             self.define_type_param(param);
         }
         self.resolve_type_parameter_bounds(&function.type_params);
+        self.resolve_generic_conditions(&function.type_conditions);
         self.resolve_type_ref(function.return_type.as_ref());
         self.push_scope();
         for param in &function.params {
@@ -2399,6 +2403,21 @@ impl<'a> Resolver<'a> {
         for param in params {
             for bound in &param.bounds {
                 self.resolve_type_ref(Some(bound));
+            }
+        }
+    }
+
+    fn resolve_generic_conditions(&mut self, conditions: &[GenericCondition]) {
+        for condition in conditions {
+            match condition {
+                GenericCondition::Bound { subject, bound, .. } => {
+                    self.resolve_type_ref(Some(subject));
+                    self.resolve_type_ref(Some(bound));
+                }
+                GenericCondition::Equal { left, right, .. } => {
+                    self.resolve_type_ref(Some(left));
+                    self.resolve_type_ref(Some(right));
+                }
             }
         }
     }

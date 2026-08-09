@@ -102,6 +102,7 @@ pub struct TypeDef {
     pub kind: TypeKind,
     pub name: String,
     pub type_params: Vec<String>,
+    pub generic_conditions: Vec<GenericCondition>,
     pub with_bounds: Vec<Type>,
     pub fields: Vec<Field>,
     pub field_init: Option<FunctionId>,
@@ -119,6 +120,7 @@ impl TypeDef {
             kind,
             name: name.into(),
             type_params: Vec::new(),
+            generic_conditions: Vec::new(),
             with_bounds: Vec::new(),
             fields: Vec::new(),
             field_init: None,
@@ -187,6 +189,14 @@ pub enum FunctionKind {
     Synthetic,
 }
 
+/// A compile-time generic condition retained for backend type emission and
+/// constrained member resolution.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GenericCondition {
+    Bound { subject: Type, bound: Type },
+    Equal { left: Type, right: Type },
+}
+
 /// A lowered function body with locals and control-flow blocks.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
@@ -197,6 +207,7 @@ pub struct Function {
     pub name: String,
     pub type_params: Vec<String>,
     pub reified_type_params: Vec<String>,
+    pub generic_conditions: Vec<GenericCondition>,
     pub params: Vec<LocalId>,
     pub param_defaults: Vec<Option<Constant>>,
     pub param_variadic: Vec<bool>,
@@ -219,6 +230,7 @@ impl Function {
             name: name.into(),
             type_params: Vec::new(),
             reified_type_params: Vec::new(),
+            generic_conditions: Vec::new(),
             params: Vec::new(),
             param_defaults: Vec::new(),
             param_variadic: Vec::new(),

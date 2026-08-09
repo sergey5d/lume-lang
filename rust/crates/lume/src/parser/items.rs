@@ -293,7 +293,7 @@ impl<'a> Parser<'a> {
             return None;
         };
         let (name, _) = self.parse_callable_name("expected function name")?;
-        let type_params = self.parse_type_params()?;
+        let generic_clause = self.parse_generic_clause()?;
         let params = self.parse_param_list()?;
         let return_type = if self.callable_body_starts_here() {
             None
@@ -306,7 +306,8 @@ impl<'a> Parser<'a> {
             annotations,
             visibility,
             name,
-            type_params,
+            type_params: generic_clause.params,
+            type_conditions: generic_clause.conditions,
             params,
             return_type,
             body,
@@ -360,7 +361,7 @@ impl<'a> Parser<'a> {
         };
 
         let (name, _) = self.expect_identifier("expected type name")?;
-        let type_params = self.parse_type_params()?;
+        let generic_clause = self.parse_generic_clause()?;
         let with_bounds = if self.match_keyword(Keyword::With) {
             self.parse_type_ref_list()?
         } else {
@@ -553,7 +554,8 @@ impl<'a> Parser<'a> {
             visibility,
             kind,
             name,
-            type_params,
+            type_params: generic_clause.params,
+            type_conditions: generic_clause.conditions,
             with_bounds,
             members,
             span: start.cover(end),
@@ -778,6 +780,7 @@ impl<'a> Parser<'a> {
             visibility,
             name,
             type_params: Vec::new(),
+            type_conditions: Vec::new(),
             params,
             return_type: None,
             body: Some(body),
@@ -898,7 +901,7 @@ impl<'a> Parser<'a> {
             return None;
         };
         let (name, _) = self.parse_callable_name("expected method name")?;
-        let type_params = self.parse_type_params()?;
+        let generic_clause = self.parse_generic_clause()?;
         let params = self.parse_param_list()?;
         let return_type = if self.callable_body_starts_here() {
             None
@@ -922,7 +925,8 @@ impl<'a> Parser<'a> {
             annotations,
             visibility,
             name,
-            type_params,
+            type_params: generic_clause.params,
+            type_conditions: generic_clause.conditions,
             params,
             return_type,
             body,

@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*type 'Plain' does not satisfy generic bound 'Callable'.*
+
+interface Callable {
+    call() Unit
+}
+
+class Plain {}
+
+class Box[T with Callable] {
+    value T
+}
+
+invalid(value Box[Plain]) Unit = ()

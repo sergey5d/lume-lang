@@ -1,0 +1,31 @@
+# EXPECT:
+# called
+# called
+# same 2
+
+interface Callable {
+    call() Unit
+}
+
+class Action with Callable {
+    call() Unit = println("called")
+}
+
+invoke[T with Callable](value T) Unit = value.call()
+
+same[L, R when L = R](left L, right R) L = right
+
+class BoundContext[L, R] {
+
+    invokeOwner[when L with Callable](value L) Unit = value.call()
+
+    merge[when L = R](value R) L = value
+}
+
+main() Unit {
+    invoke(Action {})
+    context BoundContext[Action, Action] = BoundContext {}
+    context.invokeOwner(Action {})
+    _ = context.merge(Action {})
+    println("same", same(1, 2))
+}

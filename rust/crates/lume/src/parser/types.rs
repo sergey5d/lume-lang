@@ -3,21 +3,73 @@ use super::*;
 
 impl<'a> Parser<'a> {
     pub(super) fn parse_type_params(&mut self) -> Option<Vec<TypeParam>> {
+        self.parse_generic_clause().map(|clause| clause.params)
+    }
+
+    pub(super) fn parse_generic_clause(&mut self) -> Option<ParsedGenericClause> {
         if !self.match_token(TokenKind::LBracket) {
-            return Some(Vec::new());
+            return Some(ParsedGenericClause::default());
         }
         let mut params = Vec::new();
+        let mut conditions = Vec::new();
         self.skip_newlines();
-        if !self.at(TokenKind::RBracket) {
-            loop {
+        while !self.at(TokenKind::RBracket) && !self.at(TokenKind::Eof) {
+            if self.match_keyword(Keyword::When) {
+                self.skip_newlines();
+                if self.at(TokenKind::RBracket) {
+                    self.error_at_current(
+                        "missing_generic_condition",
+                        "expected a bound or equality condition after 'when'",
+                    );
+                    return None;
+                }
+                loop {
+                    if self.match_keyword(Keyword::When) {
+                        self.diagnostics.push(Diagnostic::error(
+                            "duplicate_when_clause",
+                            "a generic clause may contain only one 'when'; separate conditions with commas",
+                            self.previous_span(),
+                        ));
+                    }
+                    let left = self.parse_type_ref()?;
+                    let start = left.span();
+                    if self.match_keyword(Keyword::With) {
+                        let bound = self.parse_type_ref()?;
+                        let span = start.cover(bound.span());
+                        conditions.push(GenericCondition::Bound {
+                            subject: left,
+                            bound,
+                            span,
+                        });
+                    } else if self.match_token(TokenKind::Eq) {
+                        let right = self.parse_type_ref()?;
+                        let span = start.cover(right.span());
+                        conditions.push(GenericCondition::Equal { left, right, span });
+                    } else {
+                        self.error_at_current(
+                            "invalid_generic_condition",
+                            "generic conditions use 'Type with Interface' or 'Left = Right'",
+                        );
+                        return None;
+                    }
+                    self.skip_newlines();
+                    if !self.match_token(TokenKind::Comma) {
+                        break;
+                    }
+                    self.skip_newlines();
+                    if self.at(TokenKind::RBracket) {
+                        break;
+                    }
+                }
+                break;
+            } else {
                 let reified = self.match_keyword(Keyword::Reified);
                 let reified_span = reified.then(|| self.previous_span());
                 let (name, start) = self.expect_identifier("expected type parameter name")?;
-                let bounds = if self.match_keyword(Keyword::With) {
-                    self.parse_type_ref_list()?
-                } else {
-                    Vec::new()
-                };
+                let mut bounds = Vec::new();
+                while self.match_keyword(Keyword::With) {
+                    bounds.push(self.parse_type_ref()?);
+                }
                 let end = bounds.last().map(TypeRef::span).unwrap_or(start);
                 params.push(TypeParam {
                     name,
@@ -26,6 +78,9 @@ impl<'a> Parser<'a> {
                     span: reified_span.unwrap_or(start).cover(end),
                 });
                 self.skip_newlines();
+                if self.at_keyword(Keyword::When) {
+                    continue;
+                }
                 if !self.match_token(TokenKind::Comma) {
                     break;
                 }
@@ -33,7 +88,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.consume(TokenKind::RBracket, "expected ']' after type parameters")?;
-        Some(params)
+        Some(ParsedGenericClause { params, conditions })
     }
 
     pub(super) fn parse_param_list(&mut self) -> Option<Vec<Param>> {
@@ -378,4 +433,10 @@ impl<'a> Parser<'a> {
         }
         Some(path)
     }
+}
+
+#[derive(Debug, Default)]
+pub(super) struct ParsedGenericClause {
+    pub params: Vec<TypeParam>,
+    pub conditions: Vec<GenericCondition>,
 }

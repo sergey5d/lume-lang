@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*generic equality condition 'Int = Str' is not satisfied.*
+
+same[L, R when L = R](left L, right R) L = right
+
+main() Unit {
+    _ = same(1, "two")
+}
