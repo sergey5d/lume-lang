@@ -2,5 +2,5 @@
 # constructor parentheses accept positional arguments only; use braces for construction fields
 
 main() Unit {
-    _ = Set(value = 5)
+    _ = Vector(value = 5)
 }

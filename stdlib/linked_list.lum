@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-interface LinkedList[T] with Iterable[T] {
+hidden interface LinkedListApi[T] with Iterable[T] {
     def append(value T) LinkedList[T]
     def add(value T) LinkedList[T]
     def addAll(values Iterable[T]) LinkedList[T]
@@ -44,4 +44,9 @@ interface LinkedList[T] with Iterable[T] {
         }
         result
     }
+}
+
+class LinkedList[T] with LinkedListApi[T] {
+    new(values [T] vararg) =
+        panic("LinkedList construction is provided by the active runtime")
 }

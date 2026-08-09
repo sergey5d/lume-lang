@@ -6336,6 +6336,35 @@ mod tests {
     }
 
     #[test]
+    fn runs_defaulted_function_and_method_parameters() {
+        let program = lower_inline(
+            r#"
+            def increment(value Int, amount Int = 1) Int = value + amount
+
+            class Counter {
+                value Int
+
+                new(value Int) {
+                    this.value = value
+                }
+
+                add(amount Int = 1) Int = this.value + amount
+            }
+
+            def main() Unit {
+                counter Counter = Counter(10)
+                println(increment(4), increment(4, 3))
+                println(counter.add(), counter.add(5))
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "5 7\n11 15\n");
+    }
+
+    #[test]
     fn runs_variadic_constructor_parameters() {
         let program = lower_inline(
             r#"

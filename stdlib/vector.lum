@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-interface Vector[T] with Iterable[T] {
+hidden interface VectorApi[T] with Iterable[T] {
     def append(value T) Vector[T]
     def add(value T) Vector[T]
     def addAll(values Iterable[T]) Vector[T]
@@ -42,4 +42,9 @@ interface Vector[T] with Iterable[T] {
         }
         result
     }
+}
+
+class Vector[T] with VectorApi[T] {
+    new(values [T] vararg) =
+        panic("Vector construction is provided by the active runtime")
 }

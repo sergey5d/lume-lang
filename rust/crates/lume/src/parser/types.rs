@@ -64,14 +64,22 @@ impl<'a> Parser<'a> {
                 let postfix_vararg = self.match_keyword(Keyword::Vararg);
                 let postfix_span = postfix_vararg.then(|| self.previous_span());
                 let variadic = prefix_vararg.is_some() || postfix_vararg;
-                let end = postfix_span
+                let initializer = if self.match_token(TokenKind::Eq) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                let end = initializer
+                    .as_ref()
+                    .map(Expr::span)
+                    .or(postfix_span)
                     .or_else(|| ty.as_ref().map(TypeRef::span))
                     .unwrap_or(start);
                 let span = prefix_vararg.unwrap_or(start).cover(end);
                 params.push(Param {
                     name,
                     ty,
-                    initializer: None,
+                    initializer,
                     variadic,
                     lazy,
                     span,

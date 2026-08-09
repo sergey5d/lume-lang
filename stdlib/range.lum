@@ -2,6 +2,9 @@
 # JAVA_SKIP
 # INTERPRETER
 
+def Range(start Int, end Int, step Int = 1) IntRange =
+    panic("Range construction is provided by the active runtime")
+
 class IntRange with Iterable[Int] {
     start Int
     end Int

@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-interface Array[T] with Iterable[T] {
+hidden interface ArrayApi[T] with Iterable[T] {
     def at(index Int) Option[T]
     def setAt(index Int, value T) Result[T, InvalidIndex]
 
@@ -28,4 +28,9 @@ interface Array[T] with Iterable[T] {
     def zipWithIndex() Array[(T, Int)]
 
     def size() Int
+}
+
+class Array[T] with ArrayApi[T] {
+    new(values [T] vararg) =
+        panic("Array construction is provided by the active runtime")
 }

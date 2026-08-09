@@ -5924,7 +5924,7 @@ impl<'a> FunctionLowerer<'a> {
                 || self.brace_call_targets_implicit_constructor(callee)
                 || self.brace_call_targets_current_constructor(callee)
                 || self.brace_call_targets_enum_case(callee)
-                || is_empty_linked_list_constructor(callee, args))
+                || self.brace_call_targets_runtime_collection_constructor(callee))
         {
             if let Some(args) = brace_record_constructor_args(args) {
                 return args;
@@ -5951,6 +5951,13 @@ impl<'a> FunctionLowerer<'a> {
                         .is_some_and(|function| function.name == "new")
                 })
             })
+    }
+
+    fn brace_call_targets_runtime_collection_constructor(&self, callee: &Expr) -> bool {
+        let Expr::Identifier { name, .. } = callee else {
+            return false;
+        };
+        runtime_collection_constructor_name(name)
     }
 
     fn brace_call_targets_implicit_constructor(&self, callee: &Expr) -> bool {
@@ -8276,13 +8283,13 @@ fn is_named_runtime_callee_path(program: &ir::Program, path: &[String]) -> bool 
         return true;
     }
     if path.len() == 1 {
-        return builtin_callable_root_name(&path[0])
+        return runtime_callable_root_name(&path[0])
             || declared_type_exists(program, &path[0])
             || unique_bare_enum_case_exists(program, &path[0]);
     }
     explicit_enum_case_exists(program, &path[0], &path[1])
         || single_type_exists(program, &path[0])
-        || builtin_callable_root_name(&path[0])
+        || runtime_callable_root_name(&path[0])
         || declared_type_exists(program, &path[0])
 }
 
@@ -8290,7 +8297,9 @@ fn declared_type_exists(program: &ir::Program, name: &str) -> bool {
     program.types.iter().any(|ty| ty.name == name)
 }
 
-fn builtin_callable_root_name(name: &str) -> bool {
+// Standard-library factory signatures are checked from source declarations.
+// This list only routes the checked calls to their runtime ABI entry points.
+fn runtime_callable_root_name(name: &str) -> bool {
     matches!(
         name,
         "OS" | "Range"
@@ -8306,6 +8315,10 @@ fn builtin_callable_root_name(name: &str) -> bool {
             | "Left"
             | "Right"
     )
+}
+
+fn runtime_collection_constructor_name(name: &str) -> bool {
+    matches!(name, "Array" | "LinkedList" | "Map" | "Set" | "Vector")
 }
 
 fn single_type_exists(program: &ir::Program, name: &str) -> bool {
@@ -8443,11 +8456,6 @@ fn brace_record_constructor_args(args: &[core::CallArg]) -> Option<Vec<core::Cal
     }
 
     None
-}
-
-fn is_empty_linked_list_constructor(callee: &Expr, args: &[core::CallArg]) -> bool {
-    matches!(callee, Expr::Identifier { name, .. } if name == "LinkedList")
-        && brace_record_constructor_args(args).is_some_and(|args| args.is_empty())
 }
 
 fn param_names_from_function(function: &ir::Function) -> Vec<String> {

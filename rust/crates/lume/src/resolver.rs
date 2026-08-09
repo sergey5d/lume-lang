@@ -43,7 +43,7 @@ pub struct CheckResult {
 }
 
 pub fn resolve_program(program: &Program) -> CheckResult {
-    let ambient = AmbientRegistry::with_builtin_values();
+    let ambient = default_inline_ambient_registry();
     let modules = HashMap::new();
     let module = LoadedModule {
         path: PathBuf::from("<memory>"),
@@ -61,6 +61,13 @@ pub fn resolve_program(program: &Program) -> CheckResult {
     CheckResult {
         diagnostics: resolver.into_diagnostics(),
     }
+}
+
+fn default_inline_ambient_registry() -> AmbientRegistry {
+    find_stdlib_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
+        .ok()
+        .and_then(|stdlib_dir| AmbientRegistry::load_from_stdlib(&stdlib_dir).ok())
+        .unwrap_or_else(AmbientRegistry::with_builtin_values)
 }
 
 pub fn resolve_path(path: impl AsRef<Path>) -> Result<ResolveResult, String> {
@@ -197,8 +204,8 @@ impl AmbientRegistry {
     fn with_builtin_values() -> Self {
         let mut registry = AmbientRegistry::default();
         for value in [
-            "Vector", "Map", "Set", "Array", "Range", "Int", "Bool", "Rune", "Float", "Str",
-            "Unit", "Never", "print", "println", "printf", "panic", "assert", "ensure", "identity",
+            "Vector", "Map", "Int", "Bool", "Rune", "Float", "Str", "Unit", "Never", "print",
+            "println", "printf", "panic", "assert", "ensure", "identity",
         ] {
             registry.values.insert(value.to_string());
         }

@@ -13,13 +13,13 @@ Primitive types:
 - `Rune`
 - `Unit`
 
-Built-in generic/container types:
+Intrinsic collection types:
 
-- `Array[T]`
 - `[K : V]` (map; nominal spelling `Map[K, V]` is also accepted)
-- `Set[T]`
 - `Vector[T]` or `[T]`
-- `LinkedList[T]`
+
+`Vector` and `Map` are concrete classes with intrinsic bracket type/literal
+syntax. The remaining collection classes are provided by the standard library.
 
 Vector and map shorthand can be nested, for example:
 
@@ -30,6 +30,9 @@ Vector and map shorthand can be nested, for example:
 
 Common stdlib/prelude types:
 
+- `Array[T]`
+- `Set[T]`
+- `LinkedList[T]`
 - `Option[T]`
 - `Result[T, E]`
 - `Either[L, R]`
@@ -801,9 +804,9 @@ General construction rules:
 - function and method calls may still use named arguments in parentheses
 - `Type { value }` is not valid; use `Type(value)` only when the type supports positional construction
 - anonymous shapes use `{ field: value }` for field construction and `shape(...)` for contextual positional construction
-- builtin constructor forms such as `Vector(...)`, `Array(...)`, and `Range(...)` use parentheses
+- runtime-backed collection classes such as `Vector`, `Map`, `Array`, `LinkedList`, and `Set` use normal class construction; `Range(...)` is a stdlib factory
 - `Type { ... }` resolves through the available explicit `new(...)` declaration or implicit field-construction inputs
-- `Type(...)` resolves through explicit class `new(...)`, implicit visible-field construction, named shape positional construction, or builtin constructor forms
+- `Type(...)` resolves through explicit class `new(...)`, implicit visible-field construction, named shape positional construction, or an intrinsic collection form
 - class construction is nominal and constructor-gated; shape construction is structural
 - tuple values cannot construct classes or shapes; write `shape(...)`, `Point(...)`, `User(...)`, or construction fields
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
@@ -1031,8 +1034,8 @@ The parameter is available as `[T]` inside the body, and call sites pass the
 extra values positionally.
 
 ```txt
-callable-parameter    = name Type [vararg]
-                      | name => Type
+callable-parameter    = name Type [vararg] [= default]
+                      | name => Type [= default]
 constructor-parameter = name Type [vararg] [= default]
 ```
 
@@ -1043,7 +1046,8 @@ Rules:
 - Only the final parameter may be variadic.
 - A parameter list may contain at most one variadic parameter.
 - A by-name parameter cannot also be variadic.
-- A variadic constructor parameter may have a default vector value, written after `vararg`.
+- Parameters with defaults must form a trailing suffix.
+- A variadic parameter may have a default vector value, written after `vararg`.
 
 ```txt
 new(segments [Str] vararg = ["tmp"]) {
@@ -1731,9 +1735,9 @@ inserted Result[Unit, InvalidIndex] = queue.insertAt(1, 30)
 removedAt Result[Int, InvalidIndex] = queue.removeAt(0)
 ```
 
-`LinkedList {}` is the empty constructor; non-empty values use positional
-`LinkedList(...)` construction. The old indexed `get` and `remove` methods are
-not part of the collection API.
+`LinkedList {}` is named empty construction and `LinkedList()` is its positional
+equivalent; non-empty values use `LinkedList(...)`. The old indexed `get` and
+`remove` methods are not part of the collection API.
 
 Array construction:
 

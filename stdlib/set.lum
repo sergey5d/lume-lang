@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-interface Set[T] with Iterable[T] {
+hidden interface SetApi[T] with Iterable[T] {
     def add(value T) Set[T]
     def addAll(values Iterable[T]) Set[T]
     def iterator() Iterator[T]
@@ -16,4 +16,9 @@ interface Set[T] with Iterable[T] {
     def forEach(f fn(T) => Unit)
     def contains(value T) Bool
     def size() Int
+}
+
+class Set[T] with SetApi[T] {
+    new(values [T] vararg) =
+        panic("Set construction is provided by the active runtime")
 }

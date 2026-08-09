@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-interface Map[K, V] with Iterable[(K, V)] {
+hidden interface MapApi[K, V] with Iterable[(K, V)] {
     def put(key K, value V) Map[K, V]
     def iterator() Iterator[(K, V)]
     def map[X](f fn(K, V) => X) Vector[X]
@@ -19,4 +19,9 @@ interface Map[K, V] with Iterable[(K, V)] {
     def size() Int
     def clear() Unit
     def entries() [(K, V)]
+}
+
+class Map[K, V] with MapApi[K, V] {
+    new(entries [(K, V)] vararg) =
+        panic("Map construction is provided by the active runtime")
 }

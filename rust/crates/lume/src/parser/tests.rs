@@ -883,6 +883,19 @@ fn parses_variadic_function_parameter() {
 }
 
 #[test]
+fn parses_defaulted_function_parameter() {
+    let result = parse("def range(start Int, step Int = 1) Int = start + step");
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function");
+    };
+    assert_eq!(function.params.len(), 2);
+    assert!(function.params[0].initializer.is_none());
+    assert!(function.params[1].initializer.is_some());
+}
+
+#[test]
 fn parses_defaulted_variadic_constructor_parameter() {
     let result = parse(
         r#"

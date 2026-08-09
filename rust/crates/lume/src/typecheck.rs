@@ -1766,7 +1766,7 @@ impl<'a> Checker<'a> {
         if infer_literal_type(initializer).is_none() {
             self.add_error(
                 "invalid_constructor_default",
-                "constructor parameter defaults must be literal constants for now",
+                "parameter defaults must be literal constants for now",
                 initializer.span(),
             );
         }
@@ -5385,24 +5385,13 @@ impl<'a> Checker<'a> {
                     );
                     return Some(Ty::Unknown);
                 }
-                if name == "LinkedList"
-                    && structural_record_arg
-                    && brace_record_constructor_args(args).is_some_and(|args| args.is_empty())
-                {
-                    let inferred = self
-                        .check_builtin_constructor(name, &[], span, uses_brace_syntax)
-                        .unwrap_or(Ty::Unknown);
-                    return Some(match expected {
-                        Ty::Named(expected_name, _) if expected_name == "LinkedList" => {
-                            expected.clone()
-                        }
-                        _ => inferred,
-                    });
-                }
                 if !structural_record_arg {
-                    if let Some(ty) =
-                        self.check_builtin_constructor(name, args, span, uses_brace_syntax)
-                    {
+                    if let Some(ty) = self.check_intrinsic_collection_constructor(
+                        name,
+                        args,
+                        span,
+                        uses_brace_syntax,
+                    ) {
                         return Some(ty);
                     }
                 }
@@ -5539,7 +5528,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_builtin_constructor(
+    fn check_intrinsic_collection_constructor(
         &mut self,
         name: &str,
         args: &[crate::ast::CallArg],
@@ -5547,56 +5536,13 @@ impl<'a> Checker<'a> {
         uses_brace_syntax: bool,
     ) -> Option<Ty> {
         match name {
-            "Range" => {
-                self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
-                if !(args.len() == 2 || args.len() == 3) {
-                    self.add_error(
-                        "invalid_argument_count",
-                        format!(
-                            "Range constructor expects 2 or 3 arguments, got {}",
-                            args.len()
-                        ),
-                        span,
-                    );
-                }
-                for arg in args {
-                    let ty = self.check_expr(&arg.value);
-                    self.require_assignable(
-                        &ty,
-                        &Ty::int(),
-                        arg.span,
-                        "invalid_argument_type",
-                        format!(
-                            "Range constructor arguments must be Int, got '{}'",
-                            ty.describe()
-                        ),
-                    );
-                }
-                Some(Ty::Named("IntRange".to_string(), Vec::new()))
-            }
-            "Vector" | "LinkedList" => {
+            "Vector" => {
                 self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
                 let mut item = Ty::Unknown;
                 for arg in args {
                     item = join_types(&item, &self.check_expr(&arg.value));
                 }
                 Some(Ty::Named(name.to_string(), vec![item]))
-            }
-            "Set" => {
-                self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
-                let mut item = Ty::Unknown;
-                for arg in args {
-                    item = join_types(&item, &self.check_expr(&arg.value));
-                }
-                Some(Ty::Named("Set".to_string(), vec![item]))
-            }
-            "Array" => {
-                self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
-                let mut item = Ty::Unknown;
-                for arg in args {
-                    item = join_types(&item, &self.check_expr(&arg.value));
-                }
-                Some(Ty::Named("Array".to_string(), vec![item]))
             }
             "Map" => {
                 self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
@@ -13370,10 +13316,43 @@ def fromResult(value Result[Int, Str]) Int = value !!
 def fromEither(value Either[Str, Int]) Int = value !!
 
 def main() Unit {
-    values LinkedList[Int] = LinkedList {}
+    values LinkedList[Int] = LinkedList()
     values.add(5)
     first Int = values.at(0) !!
     println(first)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn models_runtime_collections_as_concrete_classes() {
+        let ambient = default_inline_ambient();
+        for name in ["Vector", "Map", "Array", "Set", "LinkedList"] {
+            let ty = ambient
+                .types
+                .get(name)
+                .unwrap_or_else(|| panic!("missing stdlib type {name}"));
+            assert_eq!(ty.kind, TypeKind::Class, "{name} should be a class");
+            assert!(
+                ty.methods.contains_key("new"),
+                "{name} should declare construction"
+            );
+        }
+    }
+
+    #[test]
+    fn constructs_runtime_collection_classes_with_normal_class_syntax() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    vector Vector[Int] = Vector {}
+    map Map[Str, Int] = Map {}
+    array Array[Int] = Array(1, 2)
+    set Set[Int] = Set(1, 2)
+    linked LinkedList[Int] = LinkedList {}
 }
 "#,
         );
