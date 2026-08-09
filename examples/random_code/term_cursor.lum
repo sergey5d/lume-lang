@@ -12,16 +12,7 @@
 # to be or not to be:
 # document: 0
 # document: 1
-# to be or not to be v2:
-# document: 0
-# document: 1
-# document: 5
-# document: 7
-# to be or not to be v3:
-# document: 0
-# document: 1
-# document: 5
-# document: 7
+# document: 2
 # 0
 
 class Location {
@@ -62,7 +53,7 @@ class Cursor {
         }
 
         while docId < this.documents.size() && !found {
-            docTerms = this.documents[docId].split(" ")
+            docTerms Array[Str] = this.documents[docId].split(" ")
             var pos Int = 0
 
             if docId == location.docId && location.position >= 0 {
@@ -96,277 +87,74 @@ class Cursor {
 toBeOrNotToBe() Unit {
 
     documents [Str] = [
-        "this is to be",
-        "method to to be be haha",
-        "this is to cat",
-        "method to to be haha",
-        "things can't be to"
+        "to be",
+        "to to be be",
+        "to be to be",
+        "to to be",
+        "be to",
+        "to be be to"
     ]
 
     println("to be or not to be:")
 
     c1 = Cursor("to", documents)
     c2 = Cursor("be", documents)
-
-    var loc1 = c1.get()
-    var loc2 = c2.get()
-
     result [Int] = []
 
     while c1.isValid() && c2.isValid() {
-
-        loc1 := c1.get()
-        loc2 := c2.get()
+        loc1 = c1.get()
+        loc2 = c2.get()
 
         if loc1.docId > loc2.docId {
             c2.seek(Location(loc1.docId, 0))
         } else if loc1.docId < loc2.docId {
             c1.seek(Location(loc2.docId, 0))
         } else {
+            docId = loc1.docId
 
-            currDocId = loc1.docId
-            c2Stack [Int] = []
+            var balance Int = 0
+            var previousPosition Int = -1
+            var valid = true
 
-            while c2.isValid() && loc2.docId == currDocId {
-                c2Stack.append(loc2.position)
-                c2.advance()
-                loc2 := c2.get()
-            }
+            while true {
 
-            c1Orig = loc1
+                c1InDocument = c1.isValid() && c1.get().docId == docId
+                c2InDocument = c2.isValid() && c2.get().docId == docId
 
-            var failed = false
-
-            while c1.isValid() && loc1.docId == currDocId && !c2Stack.isEmpty() {
-                let Some(c2Loc) = c2Stack.removeLast() else panic()
-                if c2Loc < loc1.position {
-                    failed := true
+                if !c1InDocument && !c2InDocument {
                     break
                 }
-                c1.advance()
-                loc1 := c1.get()
-            }
 
-            if !failed && c2Stack.isEmpty() && loc1.docId > c1Orig.docId {
-                result.append(c1Orig.docId)
-            } else {
-                c1.seek(Location(loc2.docId, 0))
-            }
-        }
-    }
+                var position Int = -1
 
-    for res <- result {
-        println("document: " + res)
-    }
-}
-
-toBeOrNotToBe2() Unit {
-
-    documents [Str] = [
-        "this is to be",
-        "method to to be be haha",
-        "this is to cat",
-        "method to to be haha",
-        "things can't be to",
-        "to equasion has to be",
-        "to equasion is not be",
-        "to second equasion has to be"
-    ]
-
-    println("to be or not to be v2:")
-
-    c1 = Cursor("to", documents)
-    c2 = Cursor("be", documents)
-
-    advanceContiniously(c Cursor) { begin Int, count Int, docId Int } {
-        var counter = 1
-        var loc = c.get()
-        begin = loc.position
-        docId = loc.docId
-        var prev = loc.position
-
-        c.advance()
-        loc := c.get()
-
-         while c.isValid() && prev + 1 == loc.position && docId == loc.docId {
-            counter += 1
-            prev := loc.position
-            c.advance()
-            loc := c.get()
-        }
-        shape(begin, counter, docId)
-    }
-
-    alignDocs(doc1 Int, doc2 Int) {
-        if doc1 > doc2 {
-            c2.seek(Location(doc1, 0))
-        } else if doc1 < doc2 {
-            c1.seek(Location(doc2, 0))
-        }
-    }
-
-    result [Int] = []
-
-    var advance1 = advanceContiniously(c1)
-    var advance2 = advanceContiniously(c2)
-
-    alignDocs(advance1.docId, advance2.docId)
-
-    while c1.isValid() || c2.isValid() {
-
-        if advance1.docId > advance2.docId {
-            alignDocs(advance1.docId, advance2.docId)
-            advance2 := advanceContiniously(c2)
-        } else if advance1.docId < advance2.docId {
-            alignDocs(advance1.docId, advance2.docId)
-            advance1 := advanceContiniously(c1)
-        } else {
-            if advance1.begin + advance1.count == advance2.begin {
-                if advance1.count == advance2.count {
-                    docId = advance1.docId
-
-                    advance1 := advanceContiniously(c1)
-                    advance2 := advanceContiniously(c2)
-
-                    if (advance1.docId > docId ||  !c1.isValid()) &&
-                            (advance2.docId > docId || !c2.isValid()) {
-                        result.append(docId)
-                    }
+                if c1InDocument && (!c2InDocument || c1.get().position < c2.get().position) {
+                    position := c1.get().position
+                    balance += 1
+                    c1.advance()
                 } else {
-                    advance1 := advanceContiniously(c1)
-                    advance2 := advanceContiniously(c2)
-                }
-            } else {
-                if advance1.begin > advance2.begin {
-                    advance2 := advanceContiniously(c2)
-                } else {
-                    advance1 := advanceContiniously(c1)
-                }
-            }
-        }
-    }
-
-    if advance1.docId == advance2.docId &&
-            advance1.begin + advance1.count == advance2.begin && advance1.count == advance2.count {
-        result.append(advance1.docId)
-    }
-
-    for res <- result {
-        println("document: " + res)
-    }
-}
-
-toBeOrNotToBe3() Unit {
-
-    documents [Str] = [
-        "this is to be",
-        "method to to be be haha",
-        "this is to cat",
-        "method to to be haha",
-        "things can't be to",
-        "to equasion has to be",
-        "to equasion is not be",
-        "to second equasion has to be"
-    ]
-
-    println("to be or not to be v3:")
-
-    toCursor = Cursor("to", documents)
-    beCursor = Cursor("be", documents)
-
-    collectPositions(cursor Cursor, docId Int) [Int] {
-        positions [Int] = []
-        while cursor.isValid() && cursor.get().docId == docId {
-            positions.append(cursor.get().position)
-            cursor.advance()
-        }
-        positions
-    }
-
-    hasBeRun(bePositions [Int], begin Int, count Int) Bool {
-        var startIndex Int = 0
-        var found = false
-
-        while startIndex < bePositions.size() && !found {
-            if bePositions[startIndex] == begin {
-                found := true
-            } else {
-                startIndex += 1
-            }
-        }
-
-        if !found {
-            return false
-        }
-
-        var offset Int = 0
-        while offset < count {
-            currentIndex = startIndex + offset
-            if currentIndex >= bePositions.size() || bePositions[currentIndex] != begin + offset {
-                return false
-            }
-            offset += 1
-        }
-
-        true
-    }
-
-    containsPattern(toPositions [Int], bePositions [Int]) Bool {
-        var toStart Int = 0
-
-        while toStart < toPositions.size() {
-            startPos = toPositions[toStart]
-            if !(toStart > 0 && toPositions[toStart - 1] == startPos - 1) {
-                var runLen Int = 0
-
-                while toStart + runLen < toPositions.size() && toPositions[toStart + runLen] == startPos + runLen {
-                    runLen += 1
-                }
-
-                var count Int = 1
-                while count <= runLen {
-                    if hasBeRun(bePositions, startPos + count, count) {
-                        return true
+                    position := c2.get().position
+                    balance -= 1
+                    if balance < 0 {
+                        valid := false
                     }
-                    count += 1
+                    c2.advance()
+                }
+
+                if previousPosition >= 0 && position != previousPosition + 1 {
+                    valid := false
+                }
+                previousPosition := position
+
+                if !valid {
+                    c1.seek(Location(docId + 1, 0))
+                    c2.seek(Location(docId + 1, 0))
+                    break
                 }
             }
 
-            toStart += 1
-        }
-
-        false
-    }
-
-    result [Int] = []
-
-    while toCursor.isValid() || beCursor.isValid() {
-        var docId Int = -1
-
-        if toCursor.isValid() && beCursor.isValid() {
-            if toCursor.get().docId < beCursor.get().docId {
-                docId := toCursor.get().docId
-            } else {
-                docId := beCursor.get().docId
+            if valid && balance == 0 {
+                result.append(docId)
             }
-        } else if toCursor.isValid() {
-            docId := toCursor.get().docId
-        } else {
-            docId := beCursor.get().docId
-        }
-
-        var toPositions [Int] = []
-        if toCursor.isValid() && toCursor.get().docId == docId {
-            toPositions := collectPositions(toCursor, docId)
-        }
-
-        var bePositions [Int] = []
-        if beCursor.isValid() && beCursor.get().docId == docId {
-            bePositions := collectPositions(beCursor, docId)
-        }
-
-        if containsPattern(toPositions, bePositions) {
-            result.append(docId)
         }
     }
 
@@ -409,8 +197,6 @@ main() Int {
     println("loc4 " + loc4.docId + ":" + loc4.position)
 
     toBeOrNotToBe()
-    toBeOrNotToBe2()
-    toBeOrNotToBe3()
 
     0
 }
