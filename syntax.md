@@ -430,8 +430,6 @@ Supported annotation targets:
 - interface methods
 - enum cases
 
-Annotations are not supported on reserved `impl` placeholders.
-
 Module declaration:
 
 ```txt
@@ -447,7 +445,6 @@ Top-level forms:
 - `shape`
 - `object`
 - `enum`
-- `impl TypePattern`
 - `ext TypeName`
 - `name Type = expr`
 - `hidden def`
@@ -1560,17 +1557,6 @@ class Box[T] with Named {
 When a class, shape, enum, or named object implements an interface method inside
 its body, it uses an ordinary method declaration. `def` is optional.
 
-`impl` is reserved for future generic specialization. It currently has no
-specialization behavior and its body must be empty:
-
-```txt
-impl Either[T, T] {}
-impl Option[Str] {}
-```
-
-Constructors and methods are never declared in `impl`; put them directly in the
-owning type declaration body.
-
 Named object:
 
 ```txt
@@ -1699,7 +1685,6 @@ Enum cases are data-only:
 - cases may assign shared enum fields
 - cases may not declare methods
 - cases may not declare custom constructors
-- there is no `impl Enum.Case { ... }` form
 - zero-payload cases are values and are written without call syntax, for example `None`
 - payload cases use positional constructor syntax, for example `Some(value)`
 - payload cases may also use construction fields in braces, for example `Some { value: value }`

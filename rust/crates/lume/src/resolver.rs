@@ -9,10 +9,10 @@ use crate::{
     ast::{
         Annotation, AssignOp, AssignmentStmt, Binding, Block, CallableBody, ElseBranch,
         ElseExprBranch, Expr, ExprStmt, ExtensionBlock, ForBinding, ForStmt, FunctionDecl,
-        GenericCondition, IfConditionClause, IfStmt, ImplBlock, ImplTargetKind, ImportSymbol,
-        LambdaBody, LetElseStmt, MatchCase, MatchCaseBody, MethodDecl, Pattern, PatternBindingStmt,
-        Program, RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef,
-        Visibility, WhileStmt,
+        GenericCondition, IfConditionClause, IfStmt, ImportSymbol, LambdaBody, LetElseStmt,
+        MatchCase, MatchCaseBody, MethodDecl, Pattern, PatternBindingStmt, Program,
+        RecordTypeField, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
+        WhileStmt,
     },
     lexer::lex,
     parser::parse_program,
@@ -1189,7 +1189,6 @@ impl<'a> Resolver<'a> {
             match item {
                 crate::ast::Item::Function(function) => self.resolve_function(function),
                 crate::ast::Item::Type(decl) => self.resolve_type_decl(decl),
-                crate::ast::Item::Impl(block) => self.resolve_impl(block),
                 crate::ast::Item::Extension(block) => self.resolve_extension(block),
                 crate::ast::Item::Statement(Stmt::Binding(_)) => {}
                 crate::ast::Item::Statement(statement) => self.resolve_stmt(statement),
@@ -1446,16 +1445,9 @@ impl<'a> Resolver<'a> {
         self.pop_type_scope();
     }
 
-    fn resolve_impl(&mut self, block: &ImplBlock) {
-        self.push_type_scope();
-        self.install_impl_target_type_params(&block.target);
-        self.resolve_impl_target(block);
-        self.pop_type_scope();
-    }
-
     fn resolve_extension(&mut self, block: &ExtensionBlock) {
         self.push_type_scope();
-        self.install_impl_target_type_params(&block.target);
+        self.install_extension_target_type_params(&block.target);
         self.resolve_extension_target(block);
         let target_name = type_ref_name(&block.target);
         let target_fields = target_name.and_then(|name| self.lookup_type(name).cloned());
@@ -1486,7 +1478,7 @@ impl<'a> Resolver<'a> {
         self.pop_type_scope();
     }
 
-    fn install_impl_target_type_params(&mut self, target: &TypeRef) {
+    fn install_extension_target_type_params(&mut self, target: &TypeRef) {
         if let TypeRef::Named { args, .. } = target {
             for arg in args {
                 if let TypeRef::Named { name, args, span } = arg {
@@ -1495,74 +1487,6 @@ impl<'a> Resolver<'a> {
                     }
                 }
             }
-        }
-    }
-
-    fn resolve_impl_target(&mut self, block: &ImplBlock) {
-        let target = &block.target;
-        match target {
-            TypeRef::Named { name, args, span } => {
-                for arg in args {
-                    self.resolve_type_ref(Some(arg));
-                }
-                match block.target_kind {
-                    ImplTargetKind::Instance => {
-                        if let Some(info) = self.types.get(name) {
-                            if args.len() != info.arity {
-                                self.add_error(
-                                    "invalid_type_arity",
-                                    format!(
-                                        "type '{}' expects {} type arguments",
-                                        name,
-                                        arity_label(info.arity)
-                                    ),
-                                    *span,
-                                );
-                            }
-                        } else {
-                            self.add_error(
-                                "undefined_type",
-                                format!("undefined type '{}'", name),
-                                *span,
-                            );
-                        }
-                    }
-                    ImplTargetKind::Object => {
-                        if let Some(info) = self.objects.get(name) {
-                            if args.len() != info.arity {
-                                self.add_error(
-                                    "invalid_type_arity",
-                                    format!(
-                                        "object '{}' expects {} type arguments",
-                                        name,
-                                        arity_label(info.arity)
-                                    ),
-                                    *span,
-                                );
-                            }
-                        } else if !args.is_empty() {
-                            self.add_error(
-                                "invalid_type_arity",
-                                format!(
-                                    "object '{}' expects no type arguments; write 'impl object {}'",
-                                    name, name
-                                ),
-                                *span,
-                            );
-                        } else {
-                            self.add_error(
-                                "unknown_impl_target",
-                                format!(
-                                    "unknown object impl target '{}'; declare 'object {} {{}}' before 'impl object {}'",
-                                    name, name, name
-                                ),
-                                *span,
-                            );
-                        }
-                    }
-                }
-            }
-            other => self.resolve_type_ref(Some(other)),
         }
     }
 

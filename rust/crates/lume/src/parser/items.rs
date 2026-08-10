@@ -120,24 +120,6 @@ impl<'a> Parser<'a> {
                 let decl = self.parse_type_decl(annotations, visibility)?;
                 Some(Item::Type(decl))
             }
-            TokenKind::Keyword(Keyword::Impl) => {
-                if !annotations.is_empty() {
-                    self.error_at_current(
-                        "unexpected_annotation",
-                        "impl blocks do not accept annotations",
-                    );
-                    return None;
-                }
-                if visibility != Visibility::Default {
-                    self.error_at_current(
-                        "unexpected_visibility",
-                        "impl blocks do not accept visibility modifiers",
-                    );
-                    return None;
-                }
-                let block = self.parse_impl_block()?;
-                Some(Item::Impl(block))
-            }
             TokenKind::Keyword(Keyword::Ext) => {
                 if !annotations.is_empty() {
                     self.error_at_current(
@@ -620,80 +602,6 @@ impl<'a> Parser<'a> {
         Some(end)
     }
 
-    pub(super) fn parse_impl_block(&mut self) -> Option<ImplBlock> {
-        let start = self.consume_keyword(Keyword::Impl, "expected 'impl'")?;
-        let target_kind = if self.match_keyword(Keyword::Object) {
-            ImplTargetKind::Object
-        } else {
-            ImplTargetKind::Instance
-        };
-        let target = self.parse_type_ref()?;
-        if self.match_token(TokenKind::Dot) {
-            let _ = self.expect_identifier("expected enum case name after '.'")?;
-            let owner = match &target {
-                TypeRef::Named { name, .. } => name.as_str(),
-                _ => "enum",
-            };
-            self.error_at_current(
-                "unexpected_impl_target",
-                format!(
-                    "enum cases cannot declare methods; move methods to enum '{}'",
-                    owner
-                ),
-            );
-            return None;
-        }
-        self.skip_newlines();
-        self.consume(TokenKind::LBrace, "expected '{' after impl target")?;
-        self.skip_newlines();
-
-        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            self.skip_newlines();
-            if self.at(TokenKind::RBrace) {
-                break;
-            }
-            let annotations = self.parse_annotations()?;
-            let visibility = self.parse_visibility();
-            let method = if self.at(TokenKind::Identifier)
-                && self.current().lexeme == "new"
-                && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::LBrace))
-            {
-                self.parse_constructor_decl(annotations, visibility)?
-            } else {
-                let method = self.parse_method_decl(annotations, visibility, false, true)?;
-                if method.name == "new" {
-                    self.diagnostics.push(Diagnostic::error(
-                        "old_constructor_syntax",
-                        "constructors omit 'def'; use `new(params) { body }` or `new(params) = expression`",
-                        method.span,
-                    ));
-                }
-                method
-            };
-            let member_kind = if method.name == "new" {
-                "constructor"
-            } else {
-                "method"
-            };
-            self.diagnostics.push(Diagnostic::error(
-                "impl_member_not_allowed",
-                format!(
-                    "impl blocks cannot declare {member_kind}s; move '{}' into the '{}' declaration body",
-                    method.name,
-                    impl_target_name(&target)
-                ),
-                method.span,
-            ));
-            self.skip_newlines();
-        }
-        let end = self.consume(TokenKind::RBrace, "expected '}' after impl body")?;
-        Some(ImplBlock {
-            target_kind,
-            target,
-            span: start.cover(end),
-        })
-    }
-
     pub(super) fn parse_extension_block(&mut self) -> Option<ExtensionBlock> {
         let start = self.consume_keyword(Keyword::Ext, "expected 'ext'")?;
         let target = self.parse_type_ref()?;
@@ -1029,13 +937,6 @@ fn type_kind_name(kind: TypeKind) -> &'static str {
         TypeKind::Object => "object",
         TypeKind::Interface => "interface",
         TypeKind::Enum => "enum",
-    }
-}
-
-fn impl_target_name(target: &TypeRef) -> &str {
-    match target {
-        TypeRef::Named { name, .. } => name,
-        _ => "target",
     }
 }
 

@@ -601,7 +601,7 @@ def run(items [Int]) [Int] {
 }
 
 #[test]
-fn parses_class_members_and_empty_impl_placeholder() {
+fn parses_class_members() {
     let result = parse(
         r#"
 class Counter {
@@ -613,15 +613,21 @@ class Counter {
 
     def bump(delta Int) Int = this.count + delta
 }
-
-impl Counter {}
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
-    assert_eq!(program.items.len(), 2);
+    assert_eq!(program.items.len(), 1);
     assert!(matches!(program.items[0], Item::Type(_)));
-    assert!(matches!(program.items[1], Item::Impl(_)));
+}
+
+#[test]
+fn rejects_removed_impl_syntax() {
+    let result = parse("impl Counter {}");
+    assert!(
+        !result.diagnostics.is_empty(),
+        "expected impl syntax to fail"
+    );
 }
 
 #[test]
@@ -693,87 +699,6 @@ enum MaybeInt {
         "{:#?}",
         result.diagnostics
     );
-}
-
-#[test]
-fn rejects_constructor_after_impl_method() {
-    let result = parse(
-        r#"
-class User {
-    name Str
-}
-
-impl User {
-    def label() Str = this.name
-}
-"#,
-    );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "impl_member_not_allowed"
-                && diag.message.contains("impl blocks cannot declare methods")
-                && diag
-                    .message
-                    .contains("move 'label' into the 'User' declaration body")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
-}
-
-#[test]
-fn rejects_constructor_in_impl_block() {
-    let result = parse(
-        r#"
-class User {
-    name Str
-}
-
-impl User {
-    new(name Str) {
-        this.name = name
-    }
-}
-"#,
-    );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "impl_member_not_allowed"
-                && diag
-                    .message
-                    .contains("impl blocks cannot declare constructors")
-                && diag
-                    .message
-                    .contains("move 'new' into the 'User' declaration body")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
-}
-
-#[test]
-fn parses_empty_generic_impl_placeholders() {
-    let result = parse(
-        r#"
-enum Either[L, R] {
-    case Left { value L }
-    case Right { value R }
-}
-
-enum Option[T] {
-    case Some { value T }
-    case None
-}
-
-impl Either[T, T] {}
-impl Option[Str] {}
-"#,
-    );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    assert_eq!(program.items.len(), 4);
-    assert!(matches!(program.items[2], Item::Impl(_)));
-    assert!(matches!(program.items[3], Item::Impl(_)));
 }
 
 #[test]

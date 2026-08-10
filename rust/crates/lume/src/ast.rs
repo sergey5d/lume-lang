@@ -52,7 +52,6 @@ pub struct Annotation {
 pub enum Item {
     Function(FunctionDecl),
     Type(TypeDecl),
-    Impl(ImplBlock),
     Extension(ExtensionBlock),
     Statement(Stmt),
 }
@@ -73,13 +72,6 @@ pub enum TypeKind {
     Object,
     Interface,
     Enum,
-}
-
-/// Distinguishes instance-side impls from singleton-side impls.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImplTargetKind {
-    Instance,
-    Object,
 }
 
 /// An `annotation`, `class`, `shape`, `object`, `interface`, or `enum` declaration.
@@ -110,14 +102,6 @@ pub struct EnumCaseDecl {
     pub annotations: Vec<Annotation>,
     pub name: String,
     pub fields: Vec<FieldDecl>,
-    pub span: Span,
-}
-
-/// A reserved `impl` specialization declaration. Its body is currently empty.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ImplBlock {
-    pub target_kind: ImplTargetKind,
-    pub target: TypeRef,
     pub span: Span,
 }
 

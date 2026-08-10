@@ -271,29 +271,13 @@ Constraints to preserve:
 - automatic reification of every generic parameter
 - reified type parameters on classes, shapes, enums, annotations, or named objects
 
-### 13. Generic Specialization
-
-`impl TypePattern {}` is reserved as a possible future generic-specialization
-surface. Its body is currently required to be empty and the compiler does not
-apply specialization semantics.
-
-Possible future heads include:
-
-```txt
-impl Either[T, T] {}
-impl Option[Str] {}
-```
-
-Open work includes specialization matching, overlap and ambiguity rules,
-ordering, visibility, and what declarations a specialization body may contain.
-
-### 14. Deferred Cleanup Follow-Ups
+### 13. Deferred Cleanup Follow-Ups
 
 Open questions:
 - whether runtime errors should also run pending defers
 - whether future async/concurrency features need a stronger cleanup model
 
-### 15. Explicit Tuple Projection
+### 14. Explicit Tuple Projection
 
 Possible later syntax:
 

@@ -15,7 +15,6 @@ impl<'a> Parser<'a> {
                 | TokenKind::Keyword(Keyword::Object)
                 | TokenKind::Keyword(Keyword::Interface)
                 | TokenKind::Keyword(Keyword::Enum)
-                | TokenKind::Keyword(Keyword::Impl)
                 | TokenKind::Keyword(Keyword::Ext) => return,
                 _ => self.advance(),
             }

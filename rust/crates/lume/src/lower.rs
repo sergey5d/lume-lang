@@ -202,7 +202,6 @@ impl<'a> Lowerer<'a> {
         for item in items {
             match item {
                 Item::Type(decl) => self.define_type_decl(&decl),
-                Item::Impl(_) => {}
                 Item::Extension(block) => self.define_extension_block(&block),
                 _ => {}
             }

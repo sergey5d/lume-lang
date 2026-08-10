@@ -9,9 +9,9 @@ use crate::{
     ast::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
         ElseBranch, ElseExprBranch, Expr, ExtensionBlock, FieldDecl, ForBinding, FunctionDecl,
-        GenericCondition, IfConditionClause, IfStmt, ImplBlock, ImplTargetKind, Item, LambdaBody,
-        MatchCase, MatchCaseBody, MatchStmt, MethodDecl, Param, Pattern, PatternBindingStmt,
-        Program, Stmt, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
+        GenericCondition, IfConditionClause, IfStmt, Item, LambdaBody, MatchCase, MatchCaseBody,
+        MatchStmt, MethodDecl, Param, Pattern, PatternBindingStmt, Program, Stmt, TypeDecl,
+        TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
     },
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, ModuleLoadOptions,
@@ -833,7 +833,6 @@ impl<'a> Checker<'a> {
             match item {
                 Item::Function(function) => self.check_function(function),
                 Item::Type(decl) => self.check_type_decl(decl),
-                Item::Impl(block) => self.check_impl(block),
                 Item::Extension(block) => self.check_extension(block),
                 _ => {}
             }
@@ -1222,46 +1221,6 @@ impl<'a> Checker<'a> {
 
         self.pop_scope();
         self.current_owner = previous_owner;
-    }
-
-    fn check_impl(&mut self, block: &ImplBlock) {
-        let Some(target_name) = type_ref_named_name(&block.target) else {
-            return;
-        };
-        match block.target_kind {
-            ImplTargetKind::Instance => {
-                if self.lookup_type_local(target_name).is_none() {
-                    self.add_error(
-                        "unknown_impl_target",
-                        format!("unknown impl target '{}'", target_name),
-                        block.span,
-                    );
-                }
-            }
-            ImplTargetKind::Object => {
-                if self.lookup_object_local(target_name).is_none() {
-                    if matches!(&block.target, TypeRef::Named { args, .. } if !args.is_empty()) {
-                        self.add_error(
-                            "invalid_type_arity",
-                            format!(
-                                "object '{}' expects no type arguments; write 'impl object {}'",
-                                target_name, target_name
-                            ),
-                            block.span,
-                        );
-                    } else {
-                        self.add_error(
-                            "unknown_impl_target",
-                            format!(
-                                "unknown object impl target '{}'; declare 'object {} {{}}' before 'impl object {}'",
-                                target_name, target_name, target_name
-                            ),
-                            block.span,
-                        );
-                    }
-                }
-            }
-        }
     }
 
     fn check_constructor_delegation_cycles(&mut self) {
@@ -11181,32 +11140,6 @@ def run() Result[Unit, Str] {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    }
-
-    #[test]
-    fn rejects_impl_object_without_explicit_object_decl() {
-        let program = parse_inline(
-            r#"
-class User {
-    name Str
-}
-
-impl object User {}
-
-def main() User = User.make("Ada")
-"#,
-        );
-        let result = check_program(&program);
-        assert!(
-            result.diagnostics.iter().any(|diag| {
-                diag.code == "unknown_impl_target"
-                    && diag
-                        .message
-                        .contains("declare 'object User {}' before 'impl object User'")
-            }),
-            "{:#?}",
-            result.diagnostics
-        );
     }
 
     #[test]

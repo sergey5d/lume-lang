@@ -271,7 +271,6 @@ fn rewrite_item_for_runtime(item: &mut ast::Item, module: &LoadedModule, graph: 
     match item {
         ast::Item::Function(function) => rewrite_function_for_runtime(function, module, graph),
         ast::Item::Type(decl) => rewrite_type_decl_for_runtime(decl, module, graph),
-        ast::Item::Impl(block) => rewrite_impl_block_for_runtime(block, module),
         ast::Item::Extension(block) => rewrite_extension_block_for_runtime(block, module, graph),
         ast::Item::Statement(stmt) => rewrite_stmt_for_runtime(stmt, module, graph),
     }
@@ -308,10 +307,6 @@ fn rewrite_type_decl_for_runtime(
             }
         }
     }
-}
-
-fn rewrite_impl_block_for_runtime(block: &mut ast::ImplBlock, module: &LoadedModule) {
-    rewrite_type_ref_for_runtime(&mut block.target, module);
 }
 
 fn rewrite_extension_block_for_runtime(
