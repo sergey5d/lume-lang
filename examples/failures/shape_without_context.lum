@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*shape\(\.\.\.\) requires an expected anonymous shape type.*
 
-main() Unit {
+def main() Unit {
     point = shape(4, 5)
 }

@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*cannot mix map spreads with vector or iterable spreads in the same bracket literal.*
 
-main() Unit {
+def main() Unit {
     values = [1, 2]
     entries [Str : Int] = ["one": 1]
     mixed = [...values, ...entries]

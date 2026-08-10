@@ -108,7 +108,7 @@ impl<'a> Parser<'a> {
         let visibility = self.parse_visibility();
         match self.current_kind() {
             TokenKind::Keyword(Keyword::Def) => {
-                let function = self.parse_function_decl(annotations, visibility, true)?;
+                let function = self.parse_function_decl(annotations, visibility)?;
                 Some(Item::Function(function))
             }
             TokenKind::Keyword(Keyword::Annotation)
@@ -140,7 +140,7 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 if self.starts_callable_decl() {
-                    let function = self.parse_function_decl(annotations, visibility, true)?;
+                    let function = self.parse_function_decl(annotations, visibility)?;
                     return Some(Item::Function(function));
                 }
                 if self.at_keyword(Keyword::Var) {
@@ -264,15 +264,16 @@ impl<'a> Parser<'a> {
         &mut self,
         annotations: Vec<Annotation>,
         visibility: Visibility,
-        allow_omitted_def: bool,
     ) -> Option<FunctionDecl> {
         let start = if self.match_keyword(Keyword::Def) {
             self.previous_span()
-        } else if allow_omitted_def {
-            self.current_span()
         } else {
-            self.error_at_current("unexpected_token", "expected 'def'");
-            return None;
+            let span = self.current_span();
+            self.error_at_current(
+                "missing_def",
+                "function declarations require 'def'; write `def name(...) ...`",
+            );
+            span
         };
         let (name, _) = self.parse_callable_name("expected function name")?;
         let generic_clause = self.parse_generic_clause()?;
@@ -442,7 +443,6 @@ impl<'a> Parser<'a> {
                         member_annotations,
                         member_visibility,
                         kind == TypeKind::Interface,
-                        true,
                     )?;
                     if method.name == "new" {
                         self.diagnostics.push(Diagnostic::error(
@@ -470,7 +470,6 @@ impl<'a> Parser<'a> {
                         member_annotations,
                         member_visibility,
                         kind == TypeKind::Interface,
-                        true,
                     )?;
                     if method.name == "new" {
                         self.diagnostics.push(Diagnostic::error(
@@ -642,7 +641,7 @@ impl<'a> Parser<'a> {
                 );
                 return None;
             }
-            let method = self.parse_method_decl(annotations, visibility, false, true)?;
+            let method = self.parse_method_decl(annotations, visibility, false)?;
             if method.name == "new" {
                 self.diagnostics.push(Diagnostic::error(
                     "invalid_extension_constructor",
@@ -798,15 +797,16 @@ impl<'a> Parser<'a> {
         annotations: Vec<Annotation>,
         visibility: Visibility,
         allow_signature_only: bool,
-        allow_omitted_def: bool,
     ) -> Option<MethodDecl> {
         let start = if self.match_keyword(Keyword::Def) {
             self.previous_span()
-        } else if allow_omitted_def {
-            self.current_span()
         } else {
-            self.error_at_current("unexpected_token", "expected 'def'");
-            return None;
+            let span = self.current_span();
+            self.error_at_current(
+                "missing_def",
+                "method declarations require 'def'; write `def name(...) ...`",
+            );
+            span
         };
         let (name, _) = self.parse_callable_name("expected method name")?;
         let generic_clause = self.parse_generic_clause()?;

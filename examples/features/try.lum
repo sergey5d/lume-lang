@@ -1,12 +1,12 @@
 # EXPECT:
 # try 3
 
-increment(value Option[Int]) Option[Int] {
+def increment(value Option[Int]) Option[Int] {
     item = try value
     Some(item + 1)
 }
 
-main() Unit {
+def main() Unit {
     let value <- increment(Some(2)) else panic("expected incremented value")
     println("try", value)
 }

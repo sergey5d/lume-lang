@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*postfix match is not supported; use 'match value \{ \.\.\. \}'.*
 
-main(flag Bool) Int {
+def main(flag Bool) Int {
     value = flag match {
         case true => 1
         case false => 0

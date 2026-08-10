@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*for yield clauses only support 'name <- iterable', 'let \(x, y\) <- iterable', 'let \{ \.\.\. \} <- iterable', 'name = expr', and 'let pattern = expr'.*
 
-main() Unit {
+def main() Unit {
     var total = 0
 
     mapped = for {

@@ -12,4 +12,4 @@ annotation Route {
 }
 
 @Route { path: config.path }
-main() Unit {}
+def main() Unit {}

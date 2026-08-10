@@ -6,7 +6,7 @@ class MixedProfile {
     age Int
 }
 
-main() Unit {
+def main() Unit {
     _ MixedProfile = MixedProfile({
         name: "Liam"
         age: 8

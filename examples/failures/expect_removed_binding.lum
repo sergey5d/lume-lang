@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*expect binding syntax was removed; use 'let PATTERN = value else panic\(\.\.\.\)' for assertive refutable bindings.*
 
-main() Unit {
+def main() Unit {
     expect item <- Some(5)
     println(item)
 }

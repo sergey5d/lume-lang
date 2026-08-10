@@ -3,11 +3,11 @@
 
 # "First" means first successful path in `allWords` order.
 
-firstLetter(word Str) Rune = word.expectRuneAt(0)
+def firstLetter(word Str) Rune = word.expectRuneAt(0)
 
-lastLetter(word Str) Rune = word.expectRuneAt(word.size() - 1)
+def lastLetter(word Str) Rune = word.expectRuneAt(word.size() - 1)
 
-matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], path [Str]) Option[[Str]] {
+def matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], path [Str]) Option[[Str]] {
     for word <- allWords {
         if pickedWords.contains(word) {
             continue
@@ -35,7 +35,7 @@ matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], path 
     None
 }
 
-firstPath(startWord Str, endWord Str, allWords [Str]) Option[[Str]] {
+def firstPath(startWord Str, endWord Str, allWords [Str]) Option[[Str]] {
     if startWord == endWord {
         return Some([startWord])
     }
@@ -43,7 +43,7 @@ firstPath(startWord Str, endWord Str, allWords [Str]) Option[[Str]] {
     matches(lastLetter(startWord), endWord, allWords, Set(startWord), [startWord])
 }
 
-renderPath(path [Str]) Str {
+def renderPath(path [Str]) Str {
     if path.isEmpty() {
         return ""
     }
@@ -53,7 +53,7 @@ renderPath(path [Str]) Str {
     rest.fold(first, (acc, word) => acc + " -> " + word)
 }
 
-main() Unit {
+def main() Unit {
     words [Str] = [
         "apple",
         "egg",

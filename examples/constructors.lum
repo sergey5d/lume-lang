@@ -38,13 +38,13 @@ class Profile {
         this.active = true
     }
 
-    bump() Unit {
+    def bump() Unit {
         this.visits := this.visits + 1
     }
 
-    visitCount() Int = this.visits
+    def visitCount() Int = this.visits
 
-    isActive() Bool = this.active
+    def isActive() Bool = this.active
 }
 
 class Stock {
@@ -54,7 +54,7 @@ class Stock {
         this.count = count
     }
 
-    value() Int = this.count
+    def value() Int = this.count
 }
 
 
@@ -65,9 +65,9 @@ class Slots {
         this.items = Array(left, right)
     }
 
-    left() Int = this.items[0]
+    def left() Int = this.items[0]
 
-    right() Int = this.items[1]
+    def right() Int = this.items[1]
 }
 
 
@@ -87,7 +87,7 @@ class Account {
 
     new(years Int) = this("unknown", years)
 
-    label() Str = this.name + " " + this.age
+    def label() Str = this.name + " " + this.age
 }
 
 
@@ -98,13 +98,13 @@ class Path {
         this.segments = segments
     }
 
-    size() Int = this.segments.size()
+    def size() Int = this.segments.size()
 
-    firstOr(value Str) Str = this.segments.at(0).getOr(value)
+    def firstOr(value Str) Str = this.segments.at(0).getOr(value)
 }
 
 
-main() Unit {
+def main() Unit {
     profile = Profile("Ada", 2)
     println("profile", profile.name, profile.visitCount(), profile.isActive())
 

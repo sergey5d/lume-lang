@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*shape field 'age' already exists.*use ':<' to update existing fields.*
 
-main() Unit {
+def main() Unit {
     user = { name: "Ada", age: 41 }
     updated = {
         ...user

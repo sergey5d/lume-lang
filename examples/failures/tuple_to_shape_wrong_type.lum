@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # shape field 'y' expects 'Str' but got 'Int'
 
-main() Unit {
+def main() Unit {
     point { x Int, y Str } = shape(4, 5)
 }

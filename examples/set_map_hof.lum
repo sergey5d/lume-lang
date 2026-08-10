@@ -21,7 +21,7 @@
 # pair b 2
 # total 9
 
-main() Unit {
+def main() Unit {
     seen = Set(1, 2, 3)
 
     doubled = seen.map(item => item * 2)

@@ -1,4 +1,4 @@
 # FAIL_REGEX:
 # unknown_member at .*: method 'orPanic' was removed from 'Option\[Int\]'; use postfix '!!' for unsafe extraction
 
-main(value Option[Int]) Int = value.orPanic()
+def main(value Option[Int]) Int = value.orPanic()

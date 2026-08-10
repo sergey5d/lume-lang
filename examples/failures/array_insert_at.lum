@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*type 'Array\[Int\]' has no field or method 'insertAt'.*
 
-main() Unit {
+def main() Unit {
     values Array[Int] = Array(1, 2)
     values.insertAt(1, 3)
 }

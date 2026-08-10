@@ -8,5 +8,5 @@ hidden class SecretBox {
     value Str
 }
 
-greet(name Str) Str = prefix + ", " + name
-hidden whisper() Str = secret
+def greet(name Str) Str = prefix + ", " + name
+hidden def whisper() Str = secret

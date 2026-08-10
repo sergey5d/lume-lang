@@ -10,9 +10,9 @@
 # 4
 # 10
 
-applyTwice(f fn(Int) => Int, value Int) Int = f(f(value))
+def applyTwice(f fn(Int) => Int, value Int) Int = f(f(value))
 
-main() Unit {
+def main() Unit {
     inc fn(Int) => Int = value => value + 1
     items = [1, 2, 3]
     mapped = items.map(item => item + 1)

@@ -4,22 +4,22 @@
 # lazy error
 # error: too small
 
-makeError(message Str) Str {
+def makeError(message Str) Str {
     println("lazy error")
     message
 }
 
-requireLarge(value Int) Result[Unit, Str] {
+def requireLarge(value Int) Result[Unit, Str] {
     try ensure(value > 10, makeError("too small"))
     Ok(())
 }
 
-requireLargeInt(value Int) Result[Int, Str] {
+def requireLargeInt(value Int) Result[Int, Str] {
     try ensure(value > 10, makeError("too small"))
     Ok(value)
 }
 
-main() Unit {
+def main() Unit {
     first Result[Unit, Str] = requireLarge(20)
     match first {
         case Ok(_) => println("ok")

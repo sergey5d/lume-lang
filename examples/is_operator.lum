@@ -15,7 +15,7 @@ class Counter with CounterPrecursor {
 interface Breaker {
 }
 
-main() Int {
+def main() Int {
 	counter = Counter {}
 	println("value is Counter? " + (counter is Counter))
 	println("counter is CounterPrecursor? " + (counter is CounterPrecursor))

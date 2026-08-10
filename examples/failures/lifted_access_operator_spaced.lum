@@ -4,6 +4,6 @@
 class User {
 }
 
-main(userOpt Option[User]) Unit {
+def main(userOpt Option[User]) Unit {
     name = userOpt. ->profileOpt()
 }

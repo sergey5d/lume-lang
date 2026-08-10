@@ -1,7 +1,7 @@
 # EXPECT:
 # as Tampa
 
-main() Unit {
+def main() Unit {
     user = {
         name: "Ada"
         location: "Tampa"

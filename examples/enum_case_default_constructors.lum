@@ -14,7 +14,7 @@ enum Outcome {
     }
 }
 
-main() Unit {
+def main() Unit {
     omitted Outcome = Outcome.Left("bad")
     explicit Outcome = Outcome.Left("bad", "custom")
     namedOmitted Outcome = Outcome.Left { value: "named" }

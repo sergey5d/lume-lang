@@ -4,11 +4,11 @@
 class Counter {
     count Int
 
-    bad() Int {
+    def bad() Int {
         count = 1
         count
     }
 }
 
 
-main() Unit {}
+def main() Unit {}

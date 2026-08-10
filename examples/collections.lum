@@ -3,7 +3,7 @@
 # sum 9
 # 0
 
-main() Int {
+def main() Int {
 	values = [1, 2, 3]
 	items = for item <- values yield {
 		item + 1

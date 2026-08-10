@@ -7,16 +7,16 @@
 # pixel-is-named false
 
 interface Named {
-    label() Str
+    def label() Str
 }
 
 shape PointView with Named {
     x Int
     y Int
 
-    label() Str = this.x + "," + this.y
+    def label() Str = this.x + "," + this.y
 
-    move(dx Int, dy Int) PointView = PointView {
+    def move(dx Int, dy Int) PointView = PointView {
         x: this.x + dx
         y: this.y + dy
     }
@@ -28,7 +28,7 @@ class Pixel {
     y Int
 }
 
-main() Unit {
+def main() Unit {
     point PointView = PointView(3, 4)
     moved = point.move(10, 20)
     named Named = point

@@ -6,7 +6,7 @@
 # size 4
 # 0
 
-main() Int {
+def main() Int {
 	items = for {
 		left <- [1, 2]
 		right <- [10, 20]

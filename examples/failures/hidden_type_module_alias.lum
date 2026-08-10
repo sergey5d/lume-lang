@@ -5,6 +5,6 @@ module app
 
 use model/pubdemo
 
-main() Unit {
+def main() Unit {
     value = pubdemo.SecretBox { value: "x" }
 }

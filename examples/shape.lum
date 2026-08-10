@@ -15,9 +15,9 @@ shape Point {
     x Int
     y Int
 
-    sum() Int = this.x + this.y
+    def sum() Int = this.x + this.y
 
-    move(dx Int, dy Int) Point = Point {
+    def move(dx Int, dy Int) Point = Point {
         x: this.x + dx
         y: this.y + dy
     }
@@ -28,9 +28,9 @@ shape HorizontalPoint {
 }
 
 
-horizontal(point HorizontalPoint) Int = point.x
+def horizontal(point HorizontalPoint) Int = point.x
 
-main() Unit {
+def main() Unit {
     origin = Point(3, 4)
     named = Point { x: 5, y: 6 }
     positional Point = Point(8, 9)

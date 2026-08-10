@@ -27,7 +27,7 @@ class User {
     age Int
 }
 
-main() Int {
+def main() Int {
     var total Int = 0
 
     for item <- [1, 2, 3] {

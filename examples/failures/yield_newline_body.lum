@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # yield body must stay on the same line unless it uses '\{ \.\.\. \}'
 
-main() [Int] =
+def main() [Int] =
     for item <- [1, 2] yield
         item

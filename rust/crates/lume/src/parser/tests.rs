@@ -180,7 +180,7 @@ def run(limit Int) Int {
 }
 
 #[test]
-fn parses_top_level_function_without_def() {
+fn rejects_top_level_function_without_def() {
     let result = parse(
         r#"
 main() Unit {
@@ -188,17 +188,18 @@ main() Unit {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    assert_eq!(program.items.len(), 1);
-    match &program.items[0] {
-        Item::Function(function) => assert_eq!(function.name, "main"),
-        other => panic!("expected function, got {other:#?}"),
-    }
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "missing_def"),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
-fn parses_methods_without_def_in_declaration_contexts() {
+fn rejects_methods_without_def_in_declaration_contexts() {
     let result = parse(
         r#"
 interface Named {
@@ -219,11 +220,20 @@ ext Box {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    assert_eq!(
+        result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "missing_def")
+            .count(),
+        4,
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
-fn optional_def_does_not_reclassify_tuple_or_function_fields() {
+fn callable_lookahead_does_not_reclassify_tuple_or_function_fields() {
     let result = parse(
         r#"
 class Holder {
@@ -762,7 +772,7 @@ class User {
         this.name = name
     }
 
-    label() Str = this.name
+    def label() Str = this.name
 }
 "#,
     );
@@ -1062,7 +1072,7 @@ value = object {
     count Int = 4
     label Str = "items"
 
-    describe() Str = this.label + this.count.toStr()
+    def describe() Str = this.label + this.count.toStr()
 }
 "#,
     );
@@ -1086,11 +1096,11 @@ fn parses_object_with_interface_as_anonymous_implementation() {
     let result = parse(
         r#"
 interface Greeter {
-    greet() Str
+    def greet() Str
 }
 
 greeter Greeter = object with Greeter {
-    greet() Str = "hello"
+    def greet() Str = "hello"
 }
 "#,
     );
@@ -1107,7 +1117,7 @@ greeter Greeter = object with Greeter {
 }
 
 #[test]
-fn parses_keyword_free_local_function_declarations() {
+fn rejects_keyword_free_local_function_declarations() {
     let result = parse(
         r#"
 main() Int {
@@ -1119,7 +1129,16 @@ main() Int {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    assert_eq!(
+        result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "missing_def")
+            .count(),
+        3,
+        "{:#?}",
+        result.diagnostics
+    );
     let program = result.program.expect("program");
     let Item::Function(main) = &program.items[0] else {
         panic!("expected function");
@@ -1136,9 +1155,9 @@ main() Int {
 fn keeps_direct_trailing_lambda_calls_as_expressions() {
     let result = parse(
         r#"
-run(block fn() => Int) Int = block()
+def run(block fn() => Int) Int = block()
 
-main() Int {
+def main() Int {
     run() { () => 5 }
 }
 "#,
@@ -1842,7 +1861,7 @@ fn parses_equals_before_assignment_statement_callable_body() {
 class Counter {
     hidden var value Int = 0
 
-    reset() Unit =
+    def reset() Unit =
         this.value := 0
 }
 
@@ -3677,10 +3696,10 @@ fn parses_advanced_generic_bound_clauses() {
     let result = parse(
         r#"
 interface Callable {
-    call() Unit
+    def call() Unit
 }
 
-something[
+def something[
     LocalT with Callable,
     LocalR
     when GlobalT with Callable,

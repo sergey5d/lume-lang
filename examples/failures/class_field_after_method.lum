@@ -2,6 +2,6 @@
 # .*storage fields must appear before methods in class 'User'.*field 'name'.*
 
 class User {
-    label() Str = "user"
+    def label() Str = "user"
     name Str
 }

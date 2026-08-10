@@ -1,8 +1,8 @@
 # FAIL_REGEX:
 # .*trailing brace call syntax only accepts lambda arguments; use parentheses for ordinary arguments.*
 
-wrap(value Int) Int = value
+def wrap(value Int) Int = value
 
-main() Int {
+def main() Int {
     wrap { value: 5 }
 }

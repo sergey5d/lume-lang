@@ -5,7 +5,7 @@
 # out line
 # done
 
-main() Unit {
+def main() Unit {
     OS.print("hello")
     println(" world")
     OS.printf("fmt %d\n", 7)

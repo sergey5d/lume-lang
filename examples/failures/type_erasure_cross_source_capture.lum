@@ -1,9 +1,9 @@
 # FAIL_REGEX:
 # .*argument has captured element type of Vector\[_\], but parameter expects a different captured element type of Vector\[_\].*
 
-same[T](left T, right T) Unit {}
+def same[T](left T, right T) Unit {}
 
-main() Unit {
+def main() Unit {
     left [_] = [1]
     right [_] = [2]
 

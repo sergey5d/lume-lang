@@ -1,7 +1,7 @@
 # FAIL:
 # destructuring bindings require 'let (...) = value' or 'let { ... } = value'
 
-main() Unit {
+def main() Unit {
     pair = (1, "x")
     left, right = pair
 }

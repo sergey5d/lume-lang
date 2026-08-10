@@ -4,15 +4,15 @@
 # person
 # Ada Lovelace@London:19:11:false
 
-# Class body where ordinary method definitions omit `def`.
+# Class body with required `def` method declarations.
 # Storage appears first, followed by constructors and then methods.
 
 interface Named {
-    fullName() Str
+    def fullName() Str
 }
 
 interface Aged {
-    isAdult() Bool
+    def isAdult() Bool
 }
 
 hidden class Person with Named, Aged {
@@ -32,38 +32,38 @@ hidden class Person with Named, Aged {
         this.archived = false
     }
 
-    kind() Str = "person"
+    def kind() Str = "person"
 
-    hidden calc() Int {
+    hidden def calc() Int {
         this.firstName.size() + this.lastName.size()
     }
 
-    fullName() Str = this.firstName + " " + this.lastName
+    def fullName() Str = this.firstName + " " + this.lastName
 
-    isAdult() Bool = this.age >= 18
+    def isAdult() Bool = this.age >= 18
 
-    moveTo(newCity Str) Unit {
+    def moveTo(newCity Str) Unit {
         this.city := newCity
     }
 
-    celebrateBirthday() Unit {
+    def celebrateBirthday() Unit {
         this.age += 1
         this.internalScore += 10
     }
 
-    archive() Unit {
+    def archive() Unit {
         this.archived := true
     }
 
-    debugLabel() Str =
+    def debugLabel() Str =
         fullName() + "@" + this.city + ":" + this.age + ":" + this.internalScore + ":" + this.archived
 }
 
 
-makePerson(firstName Str, lastName Str) Person =
+def makePerson(firstName Str, lastName Str) Person =
     Person(firstName, lastName)
 
-main() Unit {
+def main() Unit {
     person Person = makePerson("Ada", "Lovelace")
     println(person.fullName())
     println(person.isAdult())

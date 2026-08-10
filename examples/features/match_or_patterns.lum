@@ -13,14 +13,14 @@ enum Token {
     }
 }
 
-describe(token Token) Str = {
+def describe(token Token) Str = {
     match token {
         case Token.Start | Token.Stop => "edge"
         case Word(value) | Number(value) => "number " + value
     }
 }
 
-main() Unit = {
+def main() Unit = {
     println("token", describe(Token.Start))
     println(describe(Token.Number("42")))
 }

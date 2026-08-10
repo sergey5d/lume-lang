@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # else body must stay on the same line unless it uses '\{ \.\.\. \}'
 
-main() Int =
+def main() Int =
     if true { 1 } else
         0

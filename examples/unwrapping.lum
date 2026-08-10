@@ -8,29 +8,29 @@
 # either combo 11
 # either combo left size bad
 
-plusOneOption(value Option[Int]) Option[Int] {
+def plusOneOption(value Option[Int]) Option[Int] {
     item = try value
     return Some(item + 1)
 }
 
-plusOneResult(value Result[Int, Str]) Result[Int, Str] {
+def plusOneResult(value Result[Int, Str]) Result[Int, Str] {
     item = try value
     return Ok(item + 1)
 }
 
-plusOneEither(value Either[Str, Int]) Either[Str, Int] {
+def plusOneEither(value Either[Str, Int]) Either[Str, Int] {
     item = try value
     return Right(item + 1)
 }
 
-twoEithers(value Either[Str, Int], value2 Either[Str, Str]) Either[Str, Int] {
+def twoEithers(value Either[Str, Int], value2 Either[Str, Str]) Either[Str, Int] {
     item = try value
     str = try value2
     size = try value2.map((s Str) => s.size())
     return Right(item + str.size() / 2 + size)
 }
 
-main() {
+def main() {
     optionSome = plusOneOption(Some(5))
     optionNone = plusOneOption(None)
 

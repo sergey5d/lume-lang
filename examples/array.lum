@@ -17,7 +17,7 @@
 # generated 0 4
 # size 3
 
-main() Unit {
+def main() Unit {
     values Array[Int] = Array(4, 5, 6)
     labels Array[Str] = Array("a", "b")
 

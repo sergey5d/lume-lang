@@ -23,7 +23,7 @@ enum Status {
     }
 }
 
-main() Unit {
+def main() Unit {
     user User = User("Ada", 42)
 
     declared Type[User] = typeOf[User]

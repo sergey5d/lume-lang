@@ -1,17 +1,18 @@
 # Function Types
 
-Lume uses explicit `fn(...) => T` syntax for function types while keeping named
-functions and lambda expressions keyword-free. `syntax.md` remains the primary
-language reference; this document explains the rationale and migration.
+Lume uses `def` for named function and method declarations and explicit
+`fn(...) => T` syntax for function types. Lambda expressions remain
+keyword-free. `syntax.md` remains the primary language reference; this document
+explains how those forms fit together.
 
 ## Motivation
 
-Requiring `def` on nearly every function merely to distinguish the relatively
-rare function-valued binding puts the readability cost on the common case.
-Instead, mark the uncommon type:
+`def` makes declaration sites explicit, while `fn` makes function-valued types
+explicit. The two markers distinguish declarations, stored callable values,
+and lambdas without relying on whitespace or type-directed parsing:
 
 ```txt
-getCurrentTime() Int =
+def getCurrentTime() Int =
     0
 
 getTimeRef fn() => Int =
@@ -24,7 +25,7 @@ adderRef fn(Int, Int) => Int =
 These forms remain visually distinct:
 
 ```txt
-calculate(value Int) Int = ...  # named function declaration
+def calculate(value Int) Int = ...  # named function declaration
 mapper fn(Int) => Str = ...     # binding containing a function value
 value => value.toStr()          # anonymous function expression
 ```
@@ -35,10 +36,10 @@ Use `fn(...) => T` as the canonical function-type syntax in every type
 position. Write `fn` directly before the parameter list, without a space.
 
 ```txt
-run(operation fn() => Unit) Unit =
+def run(operation fn() => Unit) Unit =
     operation()
 
-mapValue(value Int, mapper fn(Int) => Str) Str =
+def mapValue(value Int, mapper fn(Int) => Str) Str =
     mapper(value)
 
 handlers [Str : fn(Request) => Response]
@@ -73,10 +74,10 @@ fallback fn() => Int  # zero-argument function value
 For example:
 
 ```txt
-twice(value => Int) Int =
+def twice(value => Int) Int =
     value + value
 
-twiceThunk(value fn() => Int) Int =
+def twiceThunk(value fn() => Int) Int =
     value() + value()
 
 twice(expensive())
@@ -94,7 +95,7 @@ The `fn` marker keeps nested function types readable:
 factory fn() => fn(Int) => Str
 transform fn(Int) => fn(Str) => Bool
 
-compose(
+def compose(
     first fn(Int) => Str,
     second fn(Str) => Bool
 ) fn(Int) => Bool =
@@ -103,23 +104,23 @@ compose(
 
 ## Declaration Disambiguation
 
-Named function declaration parameters should have explicit types. Lambda
-parameters may continue to infer their types.
+Named function declarations begin with `def`, and their parameters should have
+explicit types. Lambda parameters may continue to infer their types.
 
 ```txt
-sum(left Int, right Int) Int =
+def sum(left Int, right Int) Int =
     left + right
 
 pair (Int, Int) =
     (1, 2)
 ```
 
-This lets the parser distinguish a named function declaration from a
-tuple-typed binding by their internal grammar rather than whitespace around
-`(`. Zero-argument forms remain unambiguous:
+The `def` marker lets the parser distinguish a named function declaration from
+a tuple-typed binding without inspecting the declaration's parameter grammar.
+Zero-argument forms are equally explicit:
 
 ```txt
-now() Int = 0
+def now() Int = 0
 nowRef fn() => Int = now
 ```
 
@@ -158,7 +159,7 @@ type.
 
 ```txt
 # Named function
-getCurrentTime() Int =
+def getCurrentTime() Int =
     0
 
 # Function-valued binding
@@ -166,15 +167,15 @@ getTimeRef fn() => Int =
     getCurrentTime
 
 # Function-valued parameter
-run(operation fn() => Unit) Unit =
+def run(operation fn() => Unit) Unit =
     operation()
 
 # Function-valued return
-makeAdder(base Int) fn(Int) => Int =
+def makeAdder(base Int) fn(Int) => Int =
     value => base + value
 
 # By-name parameter
-getOr(defaultValue => Int) Int =
+def getOr(defaultValue => Int) Int =
     ...
 
 # Lambda expression
@@ -184,8 +185,7 @@ increment =
 
 The language model is therefore:
 
-- keep named functions keyword-free
+- require `def` on named functions and methods
 - require `fn(...) => T` for function types
 - keep arrow-only lambda expressions
-- place the explicit marker on the uncommon function-value type rather than
-  on every named function declaration
+- keep constructors distinct with `new(...)`, without `def`

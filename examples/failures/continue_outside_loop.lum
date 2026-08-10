@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # invalid_continue at .*: continue used outside of a loop
 
-main() Int {
+def main() Int {
     continue
 }

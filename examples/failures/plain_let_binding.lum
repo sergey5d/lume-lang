@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*plain 'let name = value' is not supported; use 'name = value' for ordinary bindings.*
 
-main() Unit {
+def main() Unit {
     let value = 5
     println(value)
 }

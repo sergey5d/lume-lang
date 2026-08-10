@@ -9,7 +9,7 @@ enum MaybeInt {
     case NoneX
 }
 
-main() Int {
+def main() Int {
     value = 3
     maybe = MaybeInt.SomeX(1)
     match maybe {

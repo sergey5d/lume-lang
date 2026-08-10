@@ -1,7 +1,7 @@
 # EXPECT:
 # else branch
 
-main() Unit {
+def main() Unit {
     value = if 2 > 3 {
         "if"
     } else {

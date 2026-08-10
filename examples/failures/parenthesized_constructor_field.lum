@@ -5,6 +5,6 @@ class User {
     name Str
 }
 
-main() Unit {
+def main() Unit {
     _ User = User(name = "Ada")
 }

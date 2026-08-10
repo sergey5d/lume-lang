@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*callee\[\.\.\.\]\(\.\.\.\) is explicit generic application syntax; to call an indexed function value, write '\(callee\[key\]\)\(\)'.*
 
-main() Unit {
+def main() Unit {
     handlers [fn() => Int] = [() => 26]
     println(handlers[0]())
 }

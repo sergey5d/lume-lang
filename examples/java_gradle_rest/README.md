@@ -71,7 +71,7 @@ The controller is pure Lume:
 @Controller { path: "/api" }
 class GreetingController {
     @Get { path: "/health" }
-    health() Str = "ok"
+    def health() Str = "ok"
 }
 ```
 

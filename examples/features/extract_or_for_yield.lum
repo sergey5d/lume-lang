@@ -4,7 +4,7 @@
 # yield continue 8
 # yield break 2
 
-sum(values [Int]) Int {
+def sum(values [Int]) Int {
     var total Int = 0
     for value <- values {
         total += value
@@ -12,10 +12,10 @@ sum(values [Int]) Int {
     total
 }
 
-defaultValues(values [Option[Int]]) [Int] =
+def defaultValues(values [Option[Int]]) [Int] =
     for maybe <- values yield maybe ?? 10
 
-returnOnMissing(values [Option[Int]]) Str {
+def returnOnMissing(values [Option[Int]]) Str {
     doubled = for maybe <- values yield {
         value = maybe ?? return "missing"
         value * 2
@@ -23,19 +23,19 @@ returnOnMissing(values [Option[Int]]) Str {
     "complete " + doubled.size()
 }
 
-continueOnMissing(values [Option[Int]]) [Int] =
+def continueOnMissing(values [Option[Int]]) [Int] =
     for maybe <- values yield {
         value = maybe ?? continue
         value * 2
     }
 
-breakOnMissing(values [Option[Int]]) [Int] =
+def breakOnMissing(values [Option[Int]]) [Int] =
     for maybe <- values yield {
         value = maybe ?? break
         value * 2
     }
 
-main() Unit {
+def main() Unit {
     values [Option[Int]] = [Some(1), None, Some(3)]
 
     println("yield default " + sum(defaultValues(values)))

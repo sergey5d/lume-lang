@@ -6,6 +6,6 @@ class User {
     age Int
 }
 
-main() Unit {
+def main() Unit {
     mapper = let { name, age } => name
 }

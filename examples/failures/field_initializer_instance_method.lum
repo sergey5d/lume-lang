@@ -4,5 +4,5 @@
 class AssetPrices {
     assets [Str] = this.makePrices()
 
-    makePrices() [Str] = []
+    def makePrices() [Str] = []
 }

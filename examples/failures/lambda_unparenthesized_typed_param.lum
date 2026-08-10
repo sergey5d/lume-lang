@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*typed single-parameter lambdas must use parentheses.*
 
-main() Unit {
+def main() Unit {
     mapper = value Int => value + 1
 }

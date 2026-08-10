@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*empty collection.*requires a vector or map type.*Set\[Int\].*
 
-main() Unit {
+def main() Unit {
     values Set[Int] = []
 }

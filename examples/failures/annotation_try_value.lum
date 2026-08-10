@@ -6,4 +6,4 @@ annotation Flag {
 }
 
 @Flag { value: try Some(1) }
-main() Unit {}
+def main() Unit {}

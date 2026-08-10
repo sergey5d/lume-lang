@@ -34,17 +34,17 @@ class Cursor {
         this.seek(Location(-1, -1))
     }
 
-    isValid() Bool = this.valid
+    def isValid() Bool = this.valid
 
-    get() Location = this.current
+    def get() Location = this.current
 
-    advance() Unit {
+    def advance() Unit {
         if this.valid {
             this.seek(Location(this.current.docId, this.current.position + 1))
         }
     }
 
-    seek(location Location) Unit {
+    def seek(location Location) Unit {
         var docId Int = 0
         var found Bool = false
 
@@ -84,7 +84,7 @@ class Cursor {
 }
 
 
-toBeOrNotToBe() Unit {
+def toBeOrNotToBe() Unit {
 
     documents [Str] = [
         "to be",
@@ -163,7 +163,7 @@ toBeOrNotToBe() Unit {
     }
 }
 
-main() Int {
+def main() Int {
     documents [Str] = [
         "cat dog cat",
         "bird cat",

@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*let '<-' extraction requires an 'else' fallback; write 'let name <- value else \.\.\.'.*
 
-main() Int {
+def main() Int {
     let item <- Some(5)
     item
 }

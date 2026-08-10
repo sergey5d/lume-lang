@@ -10,14 +10,14 @@ enum MaybeInt {
     }
 }
 
-describe(value MaybeInt) Int =
+def describe(value MaybeInt) Int =
     match value {
         case SomeX(x) if x > 10 => x
         case SomeX(_) => 10
         case MaybeInt.NoneX => 0
     }
 
-main() Unit {
+def main() Unit {
     large MaybeInt = MaybeInt.SomeX(12)
     small MaybeInt = MaybeInt.SomeX(3)
     empty MaybeInt = MaybeInt.NoneX

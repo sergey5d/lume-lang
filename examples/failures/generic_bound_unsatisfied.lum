@@ -2,11 +2,11 @@
 # .*type 'Plain' does not satisfy generic bound 'Callable'.*
 
 interface Callable {
-    call() Unit
+    def call() Unit
 }
 
 class Plain {}
 
-invoke[T with Callable](value T) Unit = value.call()
+def invoke[T with Callable](value T) Unit = value.call()
 
-main() Unit = invoke(Plain {})
+def main() Unit = invoke(Plain {})

@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*break used outside of a loop.*
 
-main() Int {
+def main() Int {
     maybe Option[Int] = None
     maybe ?? break
 }

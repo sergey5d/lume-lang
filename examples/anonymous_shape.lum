@@ -13,17 +13,17 @@
 # typed Ada 42
 # Dana is 21
 
-describe(user { name Str, age Int }) Str =
+def describe(user { name Str, age Int }) Str =
     user.name + " is " + user.age
 
-makeCounter(base Int) { count Int, next Int } {
+def makeCounter(base Int) { count Int, next Int } {
     return shape(base, base + 1)
 }
 
-makeUser(name Str, age Int) { name Str, age Int } =
+def makeUser(name Str, age Int) { name Str, age Int } =
     shape(name, age)
 
-main() Unit {
+def main() Unit {
     full = {
         name: "Ana"
         age: 10

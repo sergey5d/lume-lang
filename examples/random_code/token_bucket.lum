@@ -21,7 +21,7 @@ class TokenBucket {
         this.tokens = capacity
     }
 
-    refill(now Int) Unit {
+    def refill(now Int) Unit {
         # First bring the bucket forward to "now" by adding earned tokens.
         elapsed = now - this.lastTick
         if elapsed <= 0 {
@@ -38,7 +38,7 @@ class TokenBucket {
         this.lastTick := now
     }
 
-    allow(now Int, cost Int) Bool {
+    def allow(now Int, cost Int) Bool {
         # Every request sees the bucket after time-based refill has happened.
         this.refill(now)
 
@@ -52,11 +52,11 @@ class TokenBucket {
         true
     }
 
-    currentTokens() Int = this.tokens
+    def currentTokens() Int = this.tokens
 }
 
 
-main() Unit {
+def main() Unit {
     # Capacity 5, refilling 1 token per tick.
     bucket = TokenBucket(5, 1)
 

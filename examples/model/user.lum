@@ -8,13 +8,13 @@ class Person {
     name Str
     age Int
 
-    name() Str = this.name
+    def name() Str = this.name
 
-    age() Int = this.age
+    def age() Int = this.age
 }
 
 
-main() Unit {
+def main() Unit {
     person = Person { name: "Ada", age: 36 }
     println(person.name())
     println(person.age())

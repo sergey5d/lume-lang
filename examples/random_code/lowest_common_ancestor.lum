@@ -10,10 +10,10 @@ class TreeNode {
     right Option[TreeNode]
 }
 
-chooseNode(left Option[TreeNode], right Option[TreeNode]) Option[TreeNode] =
+def chooseNode(left Option[TreeNode], right Option[TreeNode]) Option[TreeNode] =
     if !left.isEmpty() { left } else { right }
 
-find(
+def find(
     node Option[TreeNode],
     valP Int,
     valQ Int,
@@ -57,10 +57,10 @@ find(
     shape(currentFoundP, currentFoundQ, None)
 }
 
-lowestCommonAncestor(root TreeNode, valP Int, valQ Int) Option[TreeNode] =
+def lowestCommonAncestor(root TreeNode, valP Int, valQ Int) Option[TreeNode] =
     find(Some(root), valP, valQ, None, None).ancestor
 
-main() Unit {
+def main() Unit {
     root = TreeNode(
         3,
         Some(TreeNode(

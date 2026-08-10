@@ -5,7 +5,7 @@
 # binding 7
 # 0
 
-main() Int {
+def main() Int {
     if true {
         println("then")
     } else {

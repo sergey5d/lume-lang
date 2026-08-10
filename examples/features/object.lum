@@ -7,14 +7,14 @@
 object Settings {
     name Str = "settings"
 
-    label() Str = this.name
+    def label() Str = this.name
 }
 
 interface Greeter {
-    greet() Str
+    def greet() Str
 }
 
-main() Unit = {
+def main() Unit = {
     println(Settings.label())
 
     prefix = "hello"
@@ -22,14 +22,14 @@ main() Unit = {
         count Int = 4
         label Str = prefix
 
-        describe() Str = this.label + " " + this.count.toStr()
-        doubled() Int = count * 2
+        def describe() Str = this.label + " " + this.count.toStr()
+        def doubled() Int = count * 2
     }
     println(value.describe())
     println(value.doubled())
 
     greeter Greeter = object with Greeter {
-        greet() Str = "welcome"
+        def greet() Str = "welcome"
     }
     println(greeter.greet())
 }

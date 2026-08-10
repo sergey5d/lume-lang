@@ -6,7 +6,7 @@ shape Point {
     y Int
 }
 
-main() Unit {
+def main() Unit {
     point Point = Point { x: 1, y: 2 }
     println("shape", point.x + point.y)
 }

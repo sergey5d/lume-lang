@@ -11,12 +11,12 @@
 # after loop
 # 0
 
-next(label Str, value Int) Int {
+def next(label Str, value Int) Int {
     println(label + " " + value)
     value + 1
 }
 
-main() Int {
+def main() Int {
     var count Int = 0
     while count < 3 {
         println("block " + count)

@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*if expression requires 'else'; use statement form 'if condition \{ \.\.\. \}' when no value is needed.*
 
-main(flag Bool) Int {
+def main(flag Bool) Int {
     value = if flag {
         1
     }

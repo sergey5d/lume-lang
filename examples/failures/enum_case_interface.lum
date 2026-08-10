@@ -2,7 +2,7 @@
 # .*enum case 'Outcome.Left' cannot implement interfaces; put 'with ...' on enum 'Outcome'.*
 
 interface Labeled {
-    label() Str
+    def label() Str
 }
 
 enum Outcome {

@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*assert condition has type 'Int' but expects 'Bool'.*
 
-main() Unit {
+def main() Unit {
     assert(1)
 }

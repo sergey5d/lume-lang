@@ -5,21 +5,21 @@
 # true
 
 interface Hopper {
-    hop() Str
+    def hop() Str
 }
 
 interface Jumper {
-    jump(steps Int) Str
+    def jump(steps Int) Str
 }
 
 class Rabbit with Hopper, Jumper {
 
-    hop() Str = "hop"
+    def hop() Str = "hop"
 
-    jump(steps Int) Str = "jump " + steps
+    def jump(steps Int) Str = "jump " + steps
 }
 
-main() Unit {
+def main() Unit {
     rabbit = Rabbit {}
     println(rabbit.hop())
     println(rabbit.jump(3))

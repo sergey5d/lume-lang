@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*':' pair expressions are no longer supported.*
 
-main() Unit {
+def main() Unit {
     triple = "a": 1: true
 }

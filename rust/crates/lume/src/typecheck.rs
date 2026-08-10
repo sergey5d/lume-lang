@@ -11173,18 +11173,18 @@ class Cache {
 
     new() {}
 
-    currentValue() Int = 7
+    def currentValue() Int = 7
 
-    store(key Str) Unit {
+    def store(key Str) Unit {
         values[key] := currentValue()
     }
 
-    reset() Unit {
+    def reset() Unit {
         this.values := []
     }
 }
 
-main() Unit {
+def main() Unit {
     cache = Cache()
     cache.store("answer")
     cache.reset()
@@ -13735,18 +13735,18 @@ def main() Unit {
         let program = parse_inline(
             r#"
 interface Callable {
-    call() Unit
+    def call() Unit
 }
 
 class Action with Callable {
-    call() Unit = ()
+    def call() Unit = ()
 }
 
-invoke[T with Callable](value T) Unit = value.call()
+def invoke[T with Callable](value T) Unit = value.call()
 
-same[L, R when L = R](left L, right R) L = right
+def same[L, R when L = R](left L, right R) L = right
 
-main() Unit {
+def main() Unit {
     invoke(Action {})
     value Int = same(1, 2)
     println(value)
@@ -13762,11 +13762,11 @@ main() Unit {
         let program = parse_inline(
             r#"
 interface Callable {
-    call() Unit
+    def call() Unit
 }
 
 class Action with Callable {
-    call() Unit = ()
+    def call() Unit = ()
 }
 
 class Plain {}
@@ -13780,10 +13780,10 @@ class Pair[L, R when L = R] {
     right R
 }
 
-valid(value Box[Action]) Unit = value.value.call()
-invalid(value Box[Plain]) Unit = ()
-validPair(value Pair[Int, Int]) Unit = ()
-invalidPair(value Pair[Int, Str]) Unit = ()
+def valid(value Box[Action]) Unit = value.value.call()
+def invalid(value Box[Plain]) Unit = ()
+def validPair(value Pair[Int, Int]) Unit = ()
+def invalidPair(value Pair[Int, Str]) Unit = ()
 "#,
         );
         let result = check_program(&program);
@@ -13814,15 +13814,15 @@ invalidPair(value Pair[Int, Str]) Unit = ()
         let program = parse_inline(
             r#"
 interface Callable {
-    call() Unit
+    def call() Unit
 }
 
 class Plain {}
 
-invoke[T with Callable](value T) Unit = value.call()
-same[L, R when L = R](left L, right R) L = right
+def invoke[T with Callable](value T) Unit = value.call()
+def same[L, R when L = R](left L, right R) L = right
 
-main() Unit {
+def main() Unit {
     invoke(Plain {})
     _ = same(1, "two")
 }
@@ -13852,19 +13852,19 @@ main() Unit {
         let program = parse_inline(
             r#"
 interface Callable {
-    call() Unit
+    def call() Unit
 }
 
 class Action with Callable {
-    call() Unit = ()
+    def call() Unit = ()
 }
 
 class Context[L, R] {
-    invoke[when L with Callable](value L) Unit = value.call()
-    merge[when L = R](value R) L = value
+    def invoke[when L with Callable](value L) Unit = value.call()
+    def merge[when L = R](value R) L = value
 }
 
-useContext(context Context[Action, Action], action Action) Action {
+def useContext(context Context[Action, Action], action Action) Action {
     context.invoke(action)
     return context.merge(action)
 }
@@ -13879,17 +13879,17 @@ useContext(context Context[Action, Action], action Action) Action {
         let program = parse_inline(
             r#"
 interface Callable {
-    call() Unit
+    def call() Unit
 }
 
 class Plain {}
 
 class Context[L, R] {
-    invoke[when L with Callable](value L) Unit = value.call()
-    merge[when L = R](value R) L = value
+    def invoke[when L with Callable](value L) Unit = value.call()
+    def merge[when L = R](value R) L = value
 }
 
-invalid(context Context[Plain, Str], plain Plain) Unit {
+def invalid(context Context[Plain, Str], plain Plain) Unit {
     context.invoke(plain)
     _ = context.merge("value")
 }

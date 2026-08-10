@@ -14,22 +14,22 @@
 # ifLet 89
 # visibleExtractWithFallback 124
 
-letElseOption(value Option[Int]) Int {
+def letElseOption(value Option[Int]) Int {
     let item <- value else return 0
     item + 10
 }
 
-letElseResult(value Result[Int, Str]) Int {
+def letElseResult(value Result[Int, Str]) Int {
     let item <- value else return -2
     item + 20
 }
 
-letElseEither(value Either[Str, Int]) Int {
+def letElseEither(value Either[Str, Int]) Int {
     let item <- value else return -3
     item + 30
 }
 
-letElseGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
+def letElseGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
     let {
         a <- left
         b <- middle
@@ -38,22 +38,22 @@ letElseGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) 
     a + b + c
 }
 
-panicOption(value Option[Int]) Int {
+def panicOption(value Option[Int]) Int {
     let item <- value else panic("expected option")
     item
 }
 
-panicResult(value Result[Int, Str]) Int {
+def panicResult(value Result[Int, Str]) Int {
     let item <- value else panic("expected result")
     item
 }
 
-panicEither(value Either[Str, Int]) Int {
+def panicEither(value Either[Str, Int]) Int {
     let item <- value else panic("expected either")
     item
 }
 
-panicGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
+def panicGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
     let {
         a <- left
         b <- middle
@@ -62,19 +62,19 @@ panicGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) In
     a + b + c
 }
 
-ifLetValue(value Option[Int]) Int {
+def ifLetValue(value Option[Int]) Int {
     if let item <- value {
         return item
     }
     return -1
 }
 
-visibleExtractWithFallback(value Int) Int {
+def visibleExtractWithFallback(value Int) Int {
     let item <- Some(value) else panic("expected visible value")
     item + 1
 }
 
-main() Unit {
+def main() Unit {
     println("letElseOptionSome " + letElseOption(Some(5)))
     println("letElseOptionNone " + letElseOption(None))
     println("letElseResultOk " + letElseResult(Ok(1)))

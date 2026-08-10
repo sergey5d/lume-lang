@@ -16,11 +16,11 @@
 class Adder {
     amount Int
 
-    add(value Int) Int = this.amount + value
+    def add(value Int) Int = this.amount + value
 }
 
 
-main() Int {
+def main() Int {
     adder Adder = Adder(5)
 
     emptyLambda = () => 4

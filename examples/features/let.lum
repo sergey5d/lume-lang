@@ -8,19 +8,19 @@
 # sumFail sum-missing
 # prefix 6
 
-plusOne(value Option[Int]) Result[Int, Str] {
+def plusOne(value Option[Int]) Result[Int, Str] {
     let Some(item) = value else {
         return Err("missing")
     }
     Ok(item + 1)
 }
 
-plusThree(value Option[Int]) Option[Int] {
+def plusThree(value Option[Int]) Option[Int] {
     item = try value
     Some(item + 3)
 }
 
-pairwise(left Option[Int], right Option[Str]) { count Int, label Str } {
+def pairwise(left Option[Int], right Option[Str]) { count Int, label Str } {
     let Some(count) = left else {
         return { count: 0, label: "no-left" }
     }
@@ -38,13 +38,13 @@ pairwise(left Option[Int], right Option[Str]) { count Int, label Str } {
     shape(groupedCount, groupedLabel)
 }
 
-sumBoth(left Option[Int], right Option[Int]) Result[Int, Str] {
+def sumBoth(left Option[Int], right Option[Int]) Result[Int, Str] {
     let Some(a) = left else return Err("sum-missing")
     let Some(b) = right else return Err("sum-missing")
     Ok(a + b)
 }
 
-sumPrefix(values [Option[Int]]) Int {
+def sumPrefix(values [Option[Int]]) Int {
     var total Int = 0
     for value <- values {
         let Some(item) = value else break
@@ -53,7 +53,7 @@ sumPrefix(values [Option[Int]]) Int {
     total
 }
 
-main() Unit {
+def main() Unit {
     some = plusOne(Some(5))
     none = plusOne(None)
     optSome = plusThree(Some(5))

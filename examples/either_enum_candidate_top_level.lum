@@ -13,12 +13,12 @@ enum Either[L, R] {
         value R
     }
 
-    isLeft() Bool = match this {
+    def isLeft() Bool = match this {
         case Left(_) => true
         case Right(_) => false
     }
 
-    map[T](f fn(R) => T) Either[L, T] = match this {
+    def map[T](f fn(R) => T) Either[L, T] = match this {
         case Left(value) => Left(value)
         case Right(value) => Right(f(value))
     }

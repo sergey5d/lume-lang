@@ -7,13 +7,13 @@
 # 0
 
 interface Named {
-    label() Str
+    def label() Str
 }
 
 class Worker with Named {
     name Str
 
-    label() Str = this.name
+    def label() Str = this.name
 }
 
 
@@ -22,38 +22,38 @@ class Amount {
     label Str
 }
 
-describeVector(value [Int]) {
+def describeVector(value [Int]) {
     match value {
         case _ Vector => println("vector")
     }
 }
 
-describeClass(value Worker) {
+def describeClass(value Worker) {
     match value {
         case _ Worker => println("class")
     }
 }
 
-describeShape(value Amount) {
+def describeShape(value Amount) {
     match value {
         case _ Amount => println("class")
     }
 }
 
-describeInterface(value Named) {
+def describeInterface(value Named) {
     match value {
         case _ Named => println("interface")
     }
 }
 
-describeNamedWorker(value Named) {
+def describeNamedWorker(value Named) {
     match value {
         case worker Worker => println("named " + worker.label())
         case _ => println("unknown")
     }
 }
 
-main() Int {
+def main() Int {
     describeVector([1, 2, 3])
     describeClass(Worker("Ada"))
     describeShape(Amount(7, "usd"))

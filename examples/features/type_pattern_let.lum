@@ -11,7 +11,7 @@ interface CounterPrecursor {
 class Counter with CounterPrecursor {
 }
 
-run(value CounterPrecursor) Int {
+def run(value CounterPrecursor) Int {
     if let counter Counter = value {
         println("if-let binding " + (counter is Counter))
     }
@@ -33,4 +33,4 @@ run(value CounterPrecursor) Int {
     0
 }
 
-main() Int = run(Counter {})
+def main() Int = run(Counter {})

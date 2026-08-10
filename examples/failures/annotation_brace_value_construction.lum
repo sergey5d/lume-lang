@@ -5,6 +5,6 @@ annotation Route {
     path Str
 }
 
-main() Unit {
+def main() Unit {
     route = Route { path: "/health" }
 }

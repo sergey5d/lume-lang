@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*for pattern must be irrefutable for value of type 'Option\[Int\]'.*
 
-main() Unit {
+def main() Unit {
     values [Option[Int]] = [Some(1), None]
 
     mapped = for {

@@ -1,4 +1,4 @@
 # FAIL_REGEX:
 # .*a generic clause may contain only one 'when'; separate conditions with commas.*
 
-invalid[T when T = T, when T = T](value T) T = value
+def invalid[T when T = T, when T = T](value T) T = value

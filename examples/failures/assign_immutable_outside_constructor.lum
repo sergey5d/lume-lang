@@ -8,14 +8,14 @@ class Counter {
         this.count = count
     }
 
-    bump() Int {
+    def bump() Int {
         this.count := this.count + 1
         this.count
     }
 }
 
 
-main() Int {
+def main() Int {
     counter Counter = Counter(1)
     counter.bump()
 }

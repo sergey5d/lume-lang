@@ -5,6 +5,6 @@ module app
 
 use model/pubdemo/{whisper}
 
-main() Unit {
+def main() Unit {
     println(whisper())
 }

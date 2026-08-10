@@ -18,7 +18,7 @@ class Triple {
     last Str
 }
 
-main() Int {
+def main() Int {
     let { left Int as c, right Str as d } = Pair(7, "world")
     println("class", c, d)
 

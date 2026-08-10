@@ -3,7 +3,7 @@
 
 use use_support/A
 
-main() Unit {
+def main() Unit {
     value A = A {}
     println("use", value.label())
 }

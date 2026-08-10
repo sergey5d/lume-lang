@@ -10,7 +10,7 @@ enum MaybeInt {
     }
 }
 
-main() Unit {
+def main() Unit {
     values [MaybeInt] = [
         MaybeInt.SomeX(2),
         MaybeInt.NoneX,

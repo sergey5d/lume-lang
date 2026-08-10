@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*parameter 'marker' cannot have type Unit; omit the parameter.*
 
-bad(marker Unit) Unit = ()
+def bad(marker Unit) Unit = ()
 
-main() Unit = ()
+def main() Unit = ()

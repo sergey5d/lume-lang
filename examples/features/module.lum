@@ -3,6 +3,6 @@
 
 module examples/features/module_keyword
 
-main() Unit {
+def main() Unit {
     println("module ok")
 }

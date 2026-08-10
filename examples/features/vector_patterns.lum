@@ -9,27 +9,27 @@
 # single 9
 # many 3 rest 2
 
-pairSum(values [Int]) Str {
+def pairSum(values [Int]) Str {
     let [left, right] = values else return "pair fallback"
     "pair " + (left + right)
 }
 
-typedSummary(values [Any]) Str {
+def typedSummary(values [Any]) Str {
     let [name Str, age Int] = values else return "typed fallback"
     "typed " + name + " " + age
 }
 
-headTail(values [Int]) Str {
+def headTail(values [Int]) Str {
     let [head, ...tail] = values else return "empty head"
     "head " + head + " tail " + tail.size()
 }
 
-copyAll(values [Int]) Str {
+def copyAll(values [Int]) Str {
     let [...all] = values
     "all " + all.size()
 }
 
-describe(values [Int]) Str {
+def describe(values [Int]) Str {
     match values {
         case [] => "empty"
         case [only] => "single " + only
@@ -37,7 +37,7 @@ describe(values [Int]) Str {
     }
 }
 
-main() Unit {
+def main() Unit {
     println(pairSum([3, 4]))
     println(pairSum([3, 4, 5]))
     println(typedSummary(["Ada", 42]))

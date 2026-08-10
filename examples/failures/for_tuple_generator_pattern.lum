@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*for generator must bind a plain identifier or '_' before '<-'.*
 
-main() Unit {
+def main() Unit {
     pairs [(Int, Int)] = [(1, 2)]
 
     for (left, right) <- pairs {

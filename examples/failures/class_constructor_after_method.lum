@@ -2,7 +2,7 @@
 # .*constructors must appear before methods in class 'User'.*
 
 class User {
-    label() Str = "user"
+    def label() Str = "user"
 
     new(name Str) {
         this.name = name

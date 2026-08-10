@@ -10,4 +10,4 @@ class Counter {
 }
 
 
-main() Unit {}
+def main() Unit {}

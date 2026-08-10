@@ -35,7 +35,6 @@ class IntRange with Iterable[Int] {
     }
 }
 
-
 hidden class RangeIterator with Iterator[Int] {
     var current Int
     var end Int

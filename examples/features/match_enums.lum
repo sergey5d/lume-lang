@@ -20,7 +20,7 @@ enum PairText {
     }
 }
 
-printOption(value MaybeInt) {
+def printOption(value MaybeInt) {
     match value {
         case SomeX(x) => {
             println("some " + x)
@@ -31,12 +31,12 @@ printOption(value MaybeInt) {
     }
 }
 
-matchSingleLine(value MaybeInt) Int = match value {
+def matchSingleLine(value MaybeInt) Int = match value {
     case SomeX(x) => x
     case MaybeInt.NoneX => 100
 }
 
-main() Int {
+def main() Int {
     some MaybeInt = MaybeInt.SomeX(5)
     none MaybeInt = MaybeInt.NoneX
     printOption(some)

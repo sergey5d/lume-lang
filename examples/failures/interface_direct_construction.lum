@@ -2,10 +2,10 @@
 # .*interface 'Reader' cannot be constructed directly; use an anonymous implementation that defines all required members.*
 
 interface Reader {
-    read() Str
+    def read() Str
 }
 
-main() Unit {
+def main() Unit {
     reader = Reader()
     alsoReader = Reader {}
 }

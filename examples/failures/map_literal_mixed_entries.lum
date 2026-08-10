@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*cannot mix vector items and map entries in the same bracket literal.*
 
-main() Unit {
+def main() Unit {
     values = [1, "two": 2]
 }

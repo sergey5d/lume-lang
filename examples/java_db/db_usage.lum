@@ -8,13 +8,13 @@ class User {
     active Bool
 }
 
-loadActiveUsers(db Database) Result[[User], DbError] {
+def loadActiveUsers(db Database) Result[[User], DbError] {
     db.query("select id, name, active from users where active = ?")
         .bind(true)
         .decodeAll[User]()
 }
 
-readUser(row Row) Result[User, DbError] {
+def readUser(row Row) Result[User, DbError] {
     id Int = try row.int("id")
     name Str = try row.str("name")
     active Bool = try row.bool("active")
@@ -26,19 +26,19 @@ readUser(row Row) Result[User, DbError] {
     })
 }
 
-loadByIdAndName(db Database, id Int, name Str) Result[[Row], DbError] {
+def loadByIdAndName(db Database, id Int, name Str) Result[[Row], DbError] {
     db.query("select id, name from users where id = ? and name = ?")
         .bind(id, name)
         .rows()
 }
 
-loadOneUser(db Database, id Int) Result[Option[User], DbError] {
+def loadOneUser(db Database, id Int) Result[Option[User], DbError] {
     db.queryRow("select id, name, active from users where id = ?")
         .bind(id)
         .decodeOne[User]()
 }
 
-loadNamed(db Database, active Bool) Result[[Str], DbError] {
+def loadNamed(db Database, active Bool) Result[[Str], DbError] {
     params [Str : Any] = ["active": active]
 
     db.query("select name from users where active = :active")
@@ -46,16 +46,16 @@ loadNamed(db Database, active Bool) Result[[Str], DbError] {
         .flatMap(row => row.str("name"))
 }
 
-activateUser(db Database, id Int) Result[Int, DbError] {
+def activateUser(db Database, id Int) Result[Int, DbError] {
     db.exec("update users set active = ? where id = ?", true, id)
 }
 
-activateUserStaged(db Database, id Int) Result[Int, DbError] {
+def activateUserStaged(db Database, id Int) Result[Int, DbError] {
     statement BoundExec = db.exec("update users set active = ? where id = ?").bind(true, id)
     statement.run()
 }
 
-replaceUser(db Database, id Int, name Str) Result[Unit, DbError] {
+def replaceUser(db Database, id Int, name Str) Result[Unit, DbError] {
     db.transactionally(tx => {
         deleted Int = try tx.exec("delete from users where id = ?", id)
         inserted Int = try tx.exec("insert into users(id, name, active) values (?, ?, ?)", id, name, true)

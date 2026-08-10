@@ -1,7 +1,7 @@
 # EXPECT:
 # for 6
 
-main() Unit {
+def main() Unit {
     var total Int = 0
 
     for value <- [1, 2, 3] {

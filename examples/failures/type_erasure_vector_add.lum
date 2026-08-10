@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*argument has type 'Int' but parameter expects captured element type of Vector\[_\].*
 
-main() Unit {
+def main() Unit {
     values [_] = [1, 2, 3]
     values.add(7)
 }

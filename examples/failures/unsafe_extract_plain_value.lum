@@ -1,4 +1,4 @@
 # FAIL_REGEX:
 # .*unsafe extraction '!!' requires Option.*Result.*Either.*got 'Int'.*
 
-main(value Int) Int = value !!
+def main(value Int) Int = value !!

@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*map brace construction has been removed; construct a map with '\[key: value\]'.*
 
-main() Unit {
+def main() Unit {
     values = Map {
         "one": 1
     }

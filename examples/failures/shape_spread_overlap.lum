@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*shape field 'name' already exists.*
 
-main() Unit {
+def main() Unit {
     left = { name: "Ada", age: 42 }
     right = { name: "Bob" }
     value = {

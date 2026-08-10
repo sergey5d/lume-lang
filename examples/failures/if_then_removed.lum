@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*'then' is unsupported; use 'if condition \{ \.\.\. \}'.*
 
-main() Int {
+def main() Int {
     if true then 1 else 0
     0
 }

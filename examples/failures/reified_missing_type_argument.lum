@@ -1,9 +1,9 @@
 # FAIL_REGEX:
 # .*cannot infer reified type parameter 'A'; pass an explicit type argument.*
 
-metadata[reified A]() Type[A] =
+def metadata[reified A]() Type[A] =
     typeOf[A]
 
-main() Unit {
+def main() Unit {
     value = metadata()
 }

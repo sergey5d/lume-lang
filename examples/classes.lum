@@ -20,7 +20,7 @@ class Profile {
     city Str = "NYC"
     hidden score Int = 5
 
-    scoreValue() Int = this.score
+    def scoreValue() Int = this.score
 }
 
 
@@ -29,7 +29,7 @@ class HiddenTail {
     level Int
     hidden bonus Int = 7
 
-    bonusValue() Int = this.bonus
+    def bonusValue() Int = this.bonus
 }
 
 
@@ -46,9 +46,9 @@ class A {
 
     new(maturity Int) = this(maturity - 15, "5")
 
-    trueAge() Int = this.age
+    def trueAge() Int = this.age
 
-    trueName() Str = this.name
+    def trueName() Str = this.name
 }
 
 
@@ -66,13 +66,13 @@ class B {
         this.questionable = 1
     }
 
-    trueAge() Int = this.age
+    def trueAge() Int = this.age
 
-    trueName() Str = this.name
+    def trueName() Str = this.name
 }
 
 
-main() Unit {
+def main() Unit {
     named Profile = Profile {
         name: "Sammy"
         age: 15

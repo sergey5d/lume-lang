@@ -2,7 +2,7 @@
 # left
 # right
 
-main() Unit {
+def main() Unit {
     left Either[Str, Str] = Left("left")
     right Either[Str, Str] = Right("right")
 

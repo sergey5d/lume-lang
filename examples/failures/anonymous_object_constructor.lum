@@ -3,5 +3,5 @@
 
 value = object {
     count Int = 2
-    new() = ()
+    def new() = ()
 }

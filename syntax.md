@@ -870,9 +870,9 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 { expr }                         # block expression
 Type { field: value }            # brace field construction or enum field payload
 call { x => ... }                # trailing lambda
-Interface with Other { method(...) ... } # anonymous interface implementation
-object { field Type = value; method() Type = value } # anonymous object
-object with Interface { method() Type = value } # explicit anonymous interface implementation
+Interface with Other { def method(...) ... } # anonymous interface implementation
+object { field Type = value; def method() Type = value } # anonymous object
+object with Interface { def method() Type = value } # explicit anonymous interface implementation
 new(field Type)                  # constructor declaration
 shape(value, other)              # contextual anonymous-shape positional construction
 ```
@@ -935,33 +935,30 @@ user = {
 
 ## Functions and Methods
 
-`def` is optional for top-level functions, local functions, and methods. Both
-forms are valid, and declarations are recognized by the callable header shape
-`name[TypeParams](params)`:
+`def` is required for top-level functions, local functions, and methods.
+Constructors are the exception: they begin with `new` and never use `def`.
 
 ```txt
-greet(name Str) Str = "hello, " + name
 def greet(name Str) Str = "hello, " + name
 ```
 
-The parameter list is attached to the callable name. `name(...)` starts a
-callable declaration; `name (...)` does not. Function-valued bindings carry
-the explicit `fn` type marker, as in `mapper fn(Int) => Int`.
+Function-valued bindings carry the explicit `fn` type marker, as in
+`mapper fn(Int) => Int`.
 
 Expression-bodied function:
 
 ```txt
-greet(name Str) Str = "hello, " + name
+def greet(name Str) Str = "hello, " + name
 ```
 
 Block-bodied function:
 
 ```txt
-add(left Int, right Int) Int {
+def add(left Int, right Int) Int {
     return left + right
 }
 
-addWithEquals(left Int, right Int) Int = {
+def addWithEquals(left Int, right Int) Int = {
     return left + right
 }
 ```
@@ -972,24 +969,24 @@ still use `=`.
 Generic function:
 
 ```txt
-id[T](value T) T = value
+def id[T](value T) T = value
 ```
 
 Generic clauses:
 
 ```txt
-identity[T](value T) T = value
+def identity[T](value T) T = value
 
-invoke[T with Callable](value T) Unit =
+def invoke[T with Callable](value T) Unit =
     value.call()
 
 class Merger[L, R] {
-    merge[when L = R]() L =
+    def merge[when L = R]() L =
         ...
 }
 
 class Context[GlobalT, GlobalR] {
-    something[
+    def something[
         LocalT with Callable,
         LocalR
         when GlobalT with Callable,
@@ -1040,10 +1037,10 @@ value Str = left.merge()
 Reified generic functions and methods:
 
 ```txt
-typeName[reified A](value A) Str =
+def typeName[reified A](value A) Str =
     typeOf[A].name() !!
 
-metadata[reified A]() Type[A] =
+def metadata[reified A]() Type[A] =
     typeOf[A]
 
 name = typeName(User { name: "Ada" }) # A inferred from value
@@ -1184,7 +1181,7 @@ declaration bodies, after storage fields and constructors:
 ```txt
 class Counter {
     value Int
-    inc() Int = this.value + 1
+    def inc() Int = this.value + 1
 }
 ```
 
@@ -1193,7 +1190,7 @@ own implementation:
 
 ```txt
 ext Counter {
-    doubled() Int = this.value * 2
+    def doubled() Int = this.value * 2
 }
 
 counter = Counter { value: 3 }
@@ -1202,7 +1199,7 @@ println(counter.doubled())
 
 Extension rules:
 
-- extension blocks use `ext TypeName { method(...) ... }`; `def` is still accepted but optional
+- extension blocks use `ext TypeName { def method(...) ... }`
 - extension targets may be classes, shapes, enums, interfaces, or built-in primitive types such as `Int`, `Float`, `Bool`, `Str`, and `Rune`
 - extension targets cannot be named objects, annotations, or enum cases
 - extension blocks cannot declare constructors
@@ -1550,12 +1547,12 @@ Class:
 ```txt
 class Box[T] with Named {
     value T
-    label() Str = "box"
+    def label() Str = "box"
 }
 ```
 
 When a class, shape, enum, or named object implements an interface method inside
-its body, it uses an ordinary method declaration. `def` is optional.
+its body, it uses an ordinary `def` method declaration.
 
 Named object:
 
@@ -1563,8 +1560,8 @@ Named object:
 object MathBox {
     value Int = 5
 
-    valuePlusOne() Int = this.value + 1
-    double(value Int) Int = value * 2
+    def valuePlusOne() Int = this.value + 1
+    def double(value Int) Int = value * 2
 }
 
 box = MathBox
@@ -1582,7 +1579,7 @@ value = object {
     count Int = 4
     label Str = "items"
 
-    describe() Str = this.label + ": " + this.count.toStr()
+    def describe() Str = this.label + ": " + this.count.toStr()
 }
 ```
 
@@ -1600,11 +1597,11 @@ equivalent object-led form:
 
 ```txt
 greeter Greeter = Greeter {
-    greet() Str = "hello"
+    def greet() Str = "hello"
 }
 
 other Greeter = object with Greeter {
-    greet() Str = "hello"
+    def greet() Str = "hello"
 }
 ```
 
@@ -1614,7 +1611,7 @@ Another class example:
 class Amount with Named {
     value Int
     label Str
-    label() Str = this.label
+    def label() Str = this.label
 }
 ```
 
@@ -1622,7 +1619,7 @@ Interfaces:
 
 ```txt
 interface Named {
-    label() Str
+    def label() Str
 }
 ```
 
@@ -1630,8 +1627,8 @@ Interfaces may also provide default methods by attaching a body:
 
 ```txt
 interface Named {
-    label() Str
-    greeting() Str = "Hello " + this.label()
+    def label() Str
+    def greeting() Str = "Hello " + this.label()
 }
 ```
 
@@ -1639,11 +1636,11 @@ Methods that satisfy an interface just use ordinary method declarations:
 
 ```txt
 interface Named {
-    label() Str
+    def label() Str
 }
 
 class Box with Named {
-    label() Str = "box"
+    def label() Str = "box"
 }
 ```
 
@@ -1651,8 +1648,8 @@ Anonymous interface implementation expressions:
 
 ```txt
 handler = Reader with Closer {
-    read() Str = "x"
-    close() Unit = ()
+    def read() Str = "x"
+    def close() Unit = ()
 }
 ```
 
@@ -1863,8 +1860,8 @@ type:
 names [Str] = []                 # empty vector
 counts [Str : Int] = []          # empty map
 
-emptyNames() [Str] = []
-emptyCounts() [Str : Int] = []
+def emptyNames() [Str] = []
+def emptyCounts() [Str : Int] = []
 
 consumeNames([])                  # valid when the parameter is [Str]
 consumeCounts([])                 # valid when the parameter is [Str : Int]

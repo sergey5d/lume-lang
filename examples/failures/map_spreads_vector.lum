@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*cannot spread 'Vector\[Int\]' into a map literal; map spread requires a map value.*
 
-main() Unit {
+def main() Unit {
     values = [1, 2]
     entries [Str : Int] = [...values]
 }

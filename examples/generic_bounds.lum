@@ -5,7 +5,7 @@
 class OrderedInt with Ordering[OrderedInt] {
     value Int
 
-    compare(left OrderedInt, right OrderedInt) Int = left.value - right.value
+    def compare(left OrderedInt, right OrderedInt) Int = left.value - right.value
 }
 
 
@@ -15,15 +15,15 @@ class Box[T with Ordering[T]] {
 
 class Mapper {
 
-    pick[X with Ordering[X]](value X) X = value
+    def pick[X with Ordering[X]](value X) X = value
 }
 
 
-pick[T with Ordering[T]](value T) T = value
+def pick[T with Ordering[T]](value T) T = value
 
-useBox(value Box[OrderedInt]) Int = value.value.value
+def useBox(value Box[OrderedInt]) Int = value.value.value
 
-main() Int {
+def main() Int {
     mapper Mapper = Mapper {}
     left = OrderedInt { value: 3 }
     right = OrderedInt { value: 4 }

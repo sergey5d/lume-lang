@@ -6343,7 +6343,7 @@ mod tests {
                     this.value = value
                 }
 
-                add(amount Int = 1) Int = this.value + amount
+                def add(amount Int = 1) Int = this.value + amount
             }
 
             def main() Unit {

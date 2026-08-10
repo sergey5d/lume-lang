@@ -5,7 +5,7 @@ class SomeType {
     value Int
 }
 
-main() Unit {
+def main() Unit {
     values [_] = [1, 2, 3]
     concrete SomeType = values[0]
 }

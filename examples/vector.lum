@@ -23,11 +23,11 @@
 
 object Descending with Ordering[Int] {
 
-    compare(left Int, right Int) Int = right - left
+    def compare(left Int, right Int) Int = right - left
 }
 
 
-main() Unit {
+def main() Unit {
     items = [1, 2, 3]
     items.append(4)
 

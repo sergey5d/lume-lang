@@ -2,14 +2,14 @@
 # cannot assign value of type 'Pixel'.*type 'Named'
 
 interface Named {
-    label() Str
+    def label() Str
 }
 
 shape PointView with Named {
     x Int
     y Int
 
-    label() Str = this.x + "," + this.y
+    def label() Str = this.x + "," + this.y
 }
 
 
@@ -18,7 +18,7 @@ class Pixel {
     y Int
 }
 
-main() Unit {
+def main() Unit {
     pixel Pixel = Pixel(9, 10)
     named Named = pixel
 }

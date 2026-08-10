@@ -4293,30 +4293,30 @@ def main() Unit {
             r#"
 module demo/mapassignment
 
-emptyMap() [Str : Int] = []
-mapSize(values [Str : Int]) Int = values.size()
+def emptyMap() [Str : Int] = []
+def mapSize(values [Str : Int]) Int = values.size()
 
 class Cache {
     hidden var values [Str : Int] = []
 
     new() {}
 
-    currentValue() Int = 7
+    def currentValue() Int = 7
 
-    empty() [Str : Int] = []
+    def empty() [Str : Int] = []
 
-    store(key Str) Unit {
+    def store(key Str) Unit {
         values[key] := currentValue()
     }
 
-    reset() Unit {
+    def reset() Unit {
         this.values := empty()
     }
 
-    lookup(key Str) Int = values[key] ?? -1
+    def lookup(key Str) Int = values[key] ?? -1
 }
 
-main() Unit {
+def main() Unit {
     cache = Cache()
     cache.store("answer")
     println(cache.lookup("answer"))

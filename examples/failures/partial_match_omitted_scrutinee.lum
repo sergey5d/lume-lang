@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*partial match requires a value before '\{'; use 'partial match value \{ \.\.\. \}'.*
 
-main() Option[Int] =
+def main() Option[Int] =
     partial match {
         case Some(value) => value
     }

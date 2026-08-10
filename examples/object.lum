@@ -12,18 +12,18 @@ class B {
 object A {
     var count Int = 2
 
-    value() Int = this.count
+    def value() Int = this.count
 
-    create(sizeValue Int) B = B { size: sizeValue }
-    create(str Str) B = B { size: 1 }
+    def create(sizeValue Int) B = B { size: sizeValue }
+    def create(str Str) B = B { size: 1 }
 
-    test(a Int) Int = {
+    def test(a Int) Int = {
         return a + this.value()
     }
 }
 
 
-main() Int = {
+def main() Int = {
     b1 B = A.create(5)
     b2 B = A.create("string of strings")
 

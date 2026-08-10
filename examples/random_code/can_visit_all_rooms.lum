@@ -3,7 +3,7 @@
 # false
 # 0
 
-canVisitAllRooms(rooms [[Int]]) Bool {
+def canVisitAllRooms(rooms [[Int]]) Bool {
 
     let Some(startKeys) = rooms.at(0) else return true
 
@@ -32,7 +32,7 @@ canVisitAllRooms(rooms [[Int]]) Bool {
     return seen.size() == rooms.size()
 }
 
-main() Int {
+def main() Int {
     emptyRoom [Int] = []
 
     reachable [[Int]] = [

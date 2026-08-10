@@ -7,34 +7,34 @@
 class Counter {
     hidden var value Int = 0
 
-    next() Int {
+    def next() Int {
         this.value := this.value + 1
         this.value
     }
 
-    reset() Unit =
+    def reset() Unit =
         this.value := 0
 
-    current() Int =
+    def current() Int =
         this.value
 }
 
 
-twice(value => Int) Int =
+def twice(value => Int) Int =
     value + value
 
-inner(value => Int) Int =
+def inner(value => Int) Int =
     value
 
-outer(value => Int) Int =
+def outer(value => Int) Int =
     inner(value) + inner(value)
 
-cachedOnce(value => Int) Int {
+def cachedOnce(value => Int) Int {
     cached Int = value
     cached + cached
 }
 
-main() Unit {
+def main() Unit {
     counter Counter = Counter()
 
     println(twice(counter.next()))

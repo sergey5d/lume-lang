@@ -1,9 +1,9 @@
 # FAIL_REGEX:
 # .*argument has type 'Int' but parameter expects captured key type of Map\[_, Str\].*
 
-intStrMap() [Int: Str] = []
+def intStrMap() [Int: Str] = []
 
-main() Unit {
+def main() Unit {
     keyErased [_: Str] = intStrMap()
     keyErased.put(1, "one")
 }

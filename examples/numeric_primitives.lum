@@ -2,7 +2,7 @@
 # 1
 # 1.5
 
-main() Unit {
+def main() Unit {
     intValue Int = 1
     floatValue Float = 1.5
 

@@ -18,37 +18,37 @@ class UserDto {
     name Str
 }
 
-mapUser(user UserEntity) UserDto =
+def mapUser(user UserEntity) UserDto =
     UserDto { id: user.id, name: user.name }
 
 class UserMapper {
 
-    mapUser(user UserEntity) UserDto =
+    def mapUser(user UserEntity) UserDto =
         UserDto { id: user.id, name: user.name }
 }
 
 
 object User {
-    toDto(user UserEntity) UserDto =
+    def toDto(user UserEntity) UserDto =
         UserDto { id: user.id, name: user.name }
 }
 
 class UserService {
 
-    toDto(user UserEntity) UserDto =
+    def toDto(user UserEntity) UserDto =
         UserDto { id: user.id, name: user.name }
 
-    fromThis(users [UserEntity]) [UserDto] =
+    def fromThis(users [UserEntity]) [UserDto] =
         users.map(this.toDto)
 }
 
 
-printAt(label Str, dtos [UserDto], index Int) Unit {
+def printAt(label Str, dtos [UserDto], index Int) Unit {
     let dto <- dtos.at(index) else panic("expected dto")
     println(label, dto.name)
 }
 
-main() Int {
+def main() Int {
     users = [
         UserEntity { id: 1, name: "Ada" },
         UserEntity { id: 2, name: "Grace" }

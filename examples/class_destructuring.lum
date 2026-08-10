@@ -46,7 +46,7 @@ class SecretUser {
 }
 
 
-main() Int {
+def main() Int {
     let { value Int as e, label Str as f } = Box(9, "boxed")
     println("class", e, f)
 

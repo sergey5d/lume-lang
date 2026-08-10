@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*generic equality condition 'Str = Int' is not satisfied.*
 
-invalid(value Either[Str, Int]) Unit {
+def invalid(value Either[Str, Int]) Unit {
     _ = value.merge()
 }

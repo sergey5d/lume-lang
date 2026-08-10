@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*shape spread requires a shape value.*
 
-main() Unit {
+def main() Unit {
     value = { ...10, age: 42 }
 }

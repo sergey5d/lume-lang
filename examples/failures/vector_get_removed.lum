@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*type 'Vector\[Int\]' has no field or method 'get'.*
 
-main() Unit {
+def main() Unit {
     values [Int] = [1, 2]
     println(values.get(0))
 }

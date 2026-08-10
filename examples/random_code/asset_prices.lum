@@ -23,7 +23,7 @@ class AssetPrices {
         this.asset2PriceMap = this.makePrices()
     }
 
-    makePrices() [Str: [(Str, Float)]] {
+    def makePrices() [Str: [(Str, Float)]] {
         result [Str: [(Str, Float)]] = []
 
         for asset <- this.assets {
@@ -55,7 +55,7 @@ class AssetPrices {
         result
     }
 
-    makeResult(prices [((Str, Str), Float)]) Str {
+    def makeResult(prices [((Str, Str), Float)]) Str {
         strings [Str] = prices.map(entry => match entry {
             case ((from, to), price) => from + " -> " + to + " at " + price
         })
@@ -63,7 +63,7 @@ class AssetPrices {
         strings.makeStr(",")
     }
 
-    findPrice(currAsset Str, endAsset Str, visited Set[Str], prices [((Str, Str), Float)]) Option[[Str]] {
+    def findPrice(currAsset Str, endAsset Str, visited Set[Str], prices [((Str, Str), Float)]) Option[[Str]] {
 
         permutations = try this.asset2PriceMap.get(currAsset)
 
@@ -99,9 +99,9 @@ class AssetPrices {
 }
 
 
-main() {
+def main() {
 
-    printResults(results Option[[Str]]) = match results {
+    def printResults(results Option[[Str]]) = match results {
         case Some(list) => list.forEach { elem =>
             println("result: " + elem)
         }

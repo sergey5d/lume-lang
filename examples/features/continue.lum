@@ -7,7 +7,7 @@
 # yielded 6
 # 0
 
-main() Int {
+def main() Int {
     var current Int = 0
 
     while current < 4 {

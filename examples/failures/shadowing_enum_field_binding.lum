@@ -8,10 +8,10 @@ enum Color {
         code = "red"
     }
 
-    bad() Str {
+    def bad() Str {
         code = "shadow"
         this.code
     }
 }
 
-main() Unit {}
+def main() Unit {}

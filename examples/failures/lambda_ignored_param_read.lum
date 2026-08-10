@@ -1,8 +1,8 @@
 # FAIL_REGEX:
 # .*'_' is not a value.*
 
-consume(f fn(Int, Int) => Int) Int = f(1, 2)
+def consume(f fn(Int, Int) => Int) Int = f(1, 2)
 
-main() Unit {
+def main() Unit {
     value = consume((_, item) => _ + item)
 }

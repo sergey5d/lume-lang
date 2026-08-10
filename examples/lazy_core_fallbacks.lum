@@ -30,32 +30,32 @@
 # mapLeft fallback
 # mapLeft left mapped
 
-fallbackInt(label Str, value Int) Int {
+def fallbackInt(label Str, value Int) Int {
     println(label)
     value
 }
 
-fallbackStr(label Str, value Str) Str {
+def fallbackStr(label Str, value Str) Str {
     println(label)
     value
 }
 
-fallbackOption(label Str, value Int) Option[Int] {
+def fallbackOption(label Str, value Int) Option[Int] {
     println(label)
     Some(value)
 }
 
-fallbackResult(label Str, value Int) Result[Int, Str] {
+def fallbackResult(label Str, value Int) Result[Int, Str] {
     println(label)
     Ok(value)
 }
 
-fallbackEither(label Str, value Int) Either[Str, Int] {
+def fallbackEither(label Str, value Int) Either[Str, Int] {
     println(label)
     Right(value)
 }
 
-main() Unit {
+def main() Unit {
     some Option[Int] = Some(5)
     none Option[Int] = None
     ok Result[Int, Str] = Ok(7)

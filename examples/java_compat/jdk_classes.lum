@@ -4,7 +4,7 @@ use java/lang/StringBuilder
 use java/time/Instant
 use java/util/ArrayDeque
 
-main() Unit {
+def main() Unit {
     now Instant = Instant.now()
 
     builder StringBuilder = StringBuilder()

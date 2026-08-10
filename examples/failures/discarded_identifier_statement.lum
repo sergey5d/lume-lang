@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # discarded_expression at .*: discarded expression has no effect; did you mean to assign it or return it\?
 
-main() Int {
+def main() Int {
     value Int = 10
     value
     return 0

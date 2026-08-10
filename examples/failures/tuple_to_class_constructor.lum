@@ -6,6 +6,6 @@ class User {
     age Int
 }
 
-main() Unit {
+def main() Unit {
     user User = ("Ada", 42)
 }

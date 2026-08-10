@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # constructor parentheses accept positional arguments only; use braces for construction fields
 
-main() Unit {
+def main() Unit {
     _ = Vector(value = 5)
 }

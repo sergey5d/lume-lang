@@ -4,7 +4,7 @@
 class Worker {
 }
 
-main() Unit {
+def main() Unit {
     value Any = Worker {}
 
     if value is Worker {

@@ -14,7 +14,7 @@ enum MaybeInt {
     }
 }
 
-main() Unit {
+def main() Unit {
     a1 = {
         1 + 7
     }

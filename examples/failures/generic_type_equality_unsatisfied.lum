@@ -6,4 +6,4 @@ class Pair[L, R when L = R] {
     right R
 }
 
-invalid(value Pair[Int, Str]) Unit = ()
+def invalid(value Pair[Int, Str]) Unit = ()

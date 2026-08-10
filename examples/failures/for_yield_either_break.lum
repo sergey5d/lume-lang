@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*`break` inside `for \.\.\. yield` is only supported for iterable comprehensions; Either comprehensions have no early-exit state.*
 
-main() Either[Str, Int] =
+def main() Either[Str, Int] =
     for item <- Right(1) yield {
         if item > 0 {
             break

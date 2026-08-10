@@ -17,7 +17,7 @@
 # \nraw
 # done
 
-main() Unit {
+def main() Unit {
     name Str = "world"
     count Int = 2
     user_name Str = "Ada"

@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*assert message has type 'Int' but expects 'Str'.*
 
-main() Unit {
+def main() Unit {
     assert(false, 5)
 }

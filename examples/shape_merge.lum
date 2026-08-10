@@ -12,7 +12,7 @@ class SecretName {
     hidden secret Str = "hidden"
 }
 
-main() Unit {
+def main() Unit {
     named = { name: "Ada" }
     located = { age: 42, location: "Tampa" }
     user = {

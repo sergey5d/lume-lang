@@ -1,7 +1,7 @@
 # EXPECT:
 # var 2
 
-main() Unit {
+def main() Unit {
     var count Int = 1
     count := count + 1
     println("var", count)

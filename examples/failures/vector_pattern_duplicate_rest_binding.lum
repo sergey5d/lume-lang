@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*binding 'tail' shadows a local binding; use a different name.*
 
-main() Unit {
+def main() Unit {
     values [Int] = [1, 2, 3]
     let [head, tail, ...tail] = values else return ()
 

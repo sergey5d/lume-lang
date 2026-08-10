@@ -10,4 +10,4 @@ annotation Owner {
 }
 
 @Owner { value: User("Ada") }
-main() Unit {}
+def main() Unit {}

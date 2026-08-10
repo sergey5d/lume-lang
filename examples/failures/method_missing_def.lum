@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*method declarations require 'def'.*
+
+class Counter {
+    value Int
+
+    current() Int = this.value
+}

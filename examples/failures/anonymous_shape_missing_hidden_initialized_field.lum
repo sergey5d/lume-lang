@@ -7,7 +7,7 @@ class MixedProfile {
     hidden score Int = 5
 }
 
-main() Unit {
+def main() Unit {
     _ MixedProfile = MixedProfile {
         name: "Liam"
         age: 8

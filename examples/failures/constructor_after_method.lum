@@ -4,7 +4,7 @@
 class User {
     name Str
 
-    label() Str = this.name
+    def label() Str = this.name
 
     new(name Str) {
         this.name = name

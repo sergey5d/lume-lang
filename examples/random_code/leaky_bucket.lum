@@ -19,7 +19,7 @@ class LeakyBucket {
         this.leakPerTick = leakPerTick
     }
 
-    drain(now Int) Unit {
+    def drain(now Int) Unit {
         # First advance the bucket state to "now" by leaking water out.
         elapsed = now - this.lastTick
         if elapsed <= 0 {
@@ -36,7 +36,7 @@ class LeakyBucket {
         this.lastTick := now
     }
 
-    allow(now Int, cost Int) Bool {
+    def allow(now Int, cost Int) Bool {
         # Every request sees the bucket after time-based leaking has happened.
         this.drain(now)
 
@@ -50,11 +50,11 @@ class LeakyBucket {
         true
     }
 
-    currentLevel() Int = this.level
+    def currentLevel() Int = this.level
 }
 
 
-main() Unit {
+def main() Unit {
     # Capacity 5, leaking 1 unit per tick.
     bucket = LeakyBucket(5, 1)
 

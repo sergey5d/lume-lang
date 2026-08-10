@@ -17,14 +17,14 @@ enum Outcome {
         tag = "right"
     }
 
-    describe() Str = match this {
+    def describe() Str = match this {
         case Left(value) => "left: " + value
         case Right(value) => "right: num " + value
     }
 }
 
 
-main() Unit {
+def main() Unit {
     left Outcome = Outcome.Left("bad")
     right Outcome = Outcome.Right(7)
 

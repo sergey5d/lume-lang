@@ -8,22 +8,22 @@ class CounterBox {
     hidden count = 1
     hidden var hits = 0
 
-    bump() Unit {
+    def bump() Unit {
         this.hits += this.count
     }
 
-    total() Int = this.hits
+    def total() Int = this.hits
 }
 
 
 object Greeter {
     hidden hello = "Hello"
 
-    greet(times Int) Str = this.hello + " " + times
+    def greet(times Int) Str = this.hello + " " + times
 }
 
 
-main() Int {
+def main() Int {
     box = CounterBox {}
     box.bump()
     box.bump()

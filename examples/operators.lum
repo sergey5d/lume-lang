@@ -11,13 +11,13 @@ class Vec {
         this.items = Array(left, right)
     }
 
-    [](index Int) Int = this.items[index]
-    +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
-    -() Vec = Vec(-this[0], -this[1])
+    def [](index Int) Int = this.items[index]
+    def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
+    def -() Vec = Vec(-this[0], -this[1])
 }
 
 
-main() Unit {
+def main() Unit {
     left Vec = Vec(1, 2)
     right Vec = Vec(3, 4)
     total Vec = left + right

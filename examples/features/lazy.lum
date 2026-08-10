@@ -3,19 +3,19 @@
 # lazy evaluated
 # lazy fallback
 
-choose(usePrimary Bool, fallback => Str) Str =
+def choose(usePrimary Bool, fallback => Str) Str =
     if usePrimary {
         "yes"
     } else {
         fallback
     }
 
-expensiveFallback() Str {
+def expensiveFallback() Str {
     println("lazy evaluated")
     "fallback"
 }
 
-main() Unit {
+def main() Unit {
     println("lazy", choose(1 == 1, expensiveFallback()))
     println("lazy", choose(1 == 2, expensiveFallback()))
 }

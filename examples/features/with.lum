@@ -2,18 +2,18 @@
 # with Ada
 
 interface Named {
-    name() Str
+    def name() Str
 }
 
 class Person with Named {
     name Str
 
-    name() Str =
+    def name() Str =
         this.name
 }
 
 
-main() Unit {
+def main() Unit {
     person Person = Person { name: "Ada" }
     println("with", person.name())
 }

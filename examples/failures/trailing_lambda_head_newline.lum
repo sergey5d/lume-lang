@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*trailing lambda parameters must start on the same line as '\{'.*
 
-main() Unit {
+def main() Unit {
     items = [1, 2, 3]
     mapped = items.map {
         item => item + 1

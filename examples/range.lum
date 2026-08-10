@@ -19,7 +19,7 @@
 # stepped total 24
 # remainder 2
 
-main() Unit {
+def main() Unit {
     var total Int = 0
     for item <- Range(1, 4) {
         println("range", item)

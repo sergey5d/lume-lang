@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*operator ':\+' is reserved.*
 
-main() Unit {
+def main() Unit {
     left = { name: "Ada" }
     right = { age: 42 }
     value = left :+ right

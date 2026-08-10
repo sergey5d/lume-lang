@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*expected match case body; use '\(\)' for Unit or '\{\}' for an empty block.*
 
-main() Int =
+def main() Int =
     match Some(1) {
         case Some(x) =>
         case None => 0

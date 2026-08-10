@@ -7,7 +7,7 @@ module app
 use model/pubdemo
 use model/pubdemo/{prefix}
 
-main() Unit {
+def main() Unit {
     println(pubdemo.greet("Ada"))
     println(prefix + "!")
 }

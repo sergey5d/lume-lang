@@ -8,10 +8,10 @@ class Profile {
 class User {
     profile Profile
 
-    profileOpt() Option[Profile] = Some(this.profile)
+    def profileOpt() Option[Profile] = Some(this.profile)
 }
 
-main() Unit {
+def main() Unit {
     user = User {
         profile: Profile { name: "Ada" }
     }

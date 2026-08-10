@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*operator '\+\+' is reserved and not currently supported.*
 
-main() Unit {
+def main() Unit {
     value = current ++ next
 }

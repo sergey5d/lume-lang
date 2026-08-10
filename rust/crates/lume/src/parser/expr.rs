@@ -697,7 +697,7 @@ impl<'a> Parser<'a> {
                 self.error_at_current("unexpected_token", "expected anonymous interface member");
                 return None;
             }
-            methods.push(self.parse_method_decl(annotations, visibility, false, true)?);
+            methods.push(self.parse_method_decl(annotations, visibility, false)?);
             self.skip_newlines();
         }
         let end = self.consume(
@@ -733,7 +733,7 @@ impl<'a> Parser<'a> {
             let visibility = self.parse_visibility();
             if self.at_keyword(Keyword::Def) || self.starts_callable_decl() {
                 method_seen = true;
-                let method = self.parse_method_decl(annotations, visibility, false, true)?;
+                let method = self.parse_method_decl(annotations, visibility, false)?;
                 if method.name == "new" {
                     self.diagnostics.push(Diagnostic::error(
                         "invalid_anonymous_object_constructor",

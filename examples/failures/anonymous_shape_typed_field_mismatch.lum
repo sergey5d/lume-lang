@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*field 'name' is annotated as 'Str' but initializer has type 'Int'.*
 
-main() Unit {
+def main() Unit {
     user = {
         name Str: 42
     }

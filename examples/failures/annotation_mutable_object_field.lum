@@ -10,4 +10,4 @@ object Routes {
 }
 
 @Route { path: Routes.health }
-main() Unit {}
+def main() Unit {}

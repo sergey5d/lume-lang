@@ -15,13 +15,13 @@
 
 object Ascending with Ordering[Int] {
 
-    compare(left Int, right Int) Int = left - right
+    def compare(left Int, right Int) Int = left - right
 }
 
 
 object Solution {
 
-    sol2(nums [Int]) [[Int]] {
+    def sol2(nums [Int]) [[Int]] {
         nums.sort(Ascending)
 
         res [[Int]] = []
@@ -37,7 +37,7 @@ object Solution {
         res
     }
 
-    twoSum2(nums [Int], idx Int, res [[Int]]) Unit {
+    def twoSum2(nums [Int], idx Int, res [[Int]]) Unit {
         seen Set[Int] = Set()
         var j Int = idx + 1
 
@@ -56,7 +56,7 @@ object Solution {
         }
     }
 
-    twoSum(nums [Int], idx Int, res [[Int]]) Unit {
+    def twoSum(nums [Int], idx Int, res [[Int]]) Unit {
         var low Int = idx + 1
         var high Int = nums.size() - 1
 
@@ -79,7 +79,7 @@ object Solution {
         }
     }
 
-    threeSum(nums [Int]) [[Int]] {
+    def threeSum(nums [Int]) [[Int]] {
         nums.sort(Ascending)
 
         res [[Int]] = []
@@ -97,14 +97,14 @@ object Solution {
 }
 
 
-printTriplets(label Str, triplets [[Int]]) Unit {
+def printTriplets(label Str, triplets [[Int]]) Unit {
     println(label + " size " + triplets.size())
     for triplet <- triplets {
         println(label + " " + triplet[0] + " " + triplet[1] + " " + triplet[2])
     }
 }
 
-main() Int {
+def main() Int {
 
     solver = Solution
 

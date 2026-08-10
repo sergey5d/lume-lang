@@ -5,7 +5,7 @@ annotation Route {
     path Str
 }
 
-makePath() Str = "/runtime"
+def makePath() Str = "/runtime"
 
 @Route { path: makePath() }
-main() Unit {}
+def main() Unit {}

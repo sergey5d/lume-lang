@@ -6,11 +6,11 @@
 # true
 
 interface Hopper {
-    hop() Str
+    def hop() Str
 }
 
 interface Jumper {
-    jump(steps Int) Str
+    def jump(steps Int) Str
 }
 
 interface Acrobat with Hopper, Jumper {
@@ -18,13 +18,13 @@ interface Acrobat with Hopper, Jumper {
 
 class Rabbit with Acrobat {
 
-    hop() Str = "hop"
+    def hop() Str = "hop"
 
-    jump(steps Int) Str = "jump " + steps
+    def jump(steps Int) Str = "jump " + steps
 }
 
 
-main() Unit {
+def main() Unit {
     rabbit = Rabbit {}
     println(rabbit.hop())
     println(rabbit.jump(3))

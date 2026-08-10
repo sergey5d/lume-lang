@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*`break` inside `for \.\.\. yield` is only supported for iterable comprehensions; Result comprehensions have no early-exit state.*
 
-main() Result[Int, Str] =
+def main() Result[Int, Str] =
     for item <- Ok(1) yield {
         if item > 0 {
             break

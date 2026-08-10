@@ -16,10 +16,10 @@ class Profile {
 class User {
     profile Profile
 
-    loadProfile() Result[Profile, ProfileError] = Ok(this.profile)
+    def loadProfile() Result[Profile, ProfileError] = Ok(this.profile)
 }
 
-main() Unit {
+def main() Unit {
     user = User {
         profile: Profile { name: "Ada" }
     }

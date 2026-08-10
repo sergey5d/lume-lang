@@ -4,7 +4,7 @@
 # for continue 4
 # for break 1
 
-defaultValues(values [Option[Int]]) Int {
+def defaultValues(values [Option[Int]]) Int {
     var total Int = 0
     for maybe <- values {
         value = maybe ?? 10
@@ -13,14 +13,14 @@ defaultValues(values [Option[Int]]) Int {
     total
 }
 
-returnOnMissing(values [Option[Int]]) Str {
+def returnOnMissing(values [Option[Int]]) Str {
     for maybe <- values {
         value = maybe ?? return "missing"
     }
     "complete"
 }
 
-continueOnMissing(values [Option[Int]]) Int {
+def continueOnMissing(values [Option[Int]]) Int {
     var total Int = 0
     for maybe <- values {
         value = maybe ?? continue
@@ -29,7 +29,7 @@ continueOnMissing(values [Option[Int]]) Int {
     total
 }
 
-breakOnMissing(values [Option[Int]]) Int {
+def breakOnMissing(values [Option[Int]]) Int {
     var total Int = 0
     for maybe <- values {
         value = maybe ?? break
@@ -38,7 +38,7 @@ breakOnMissing(values [Option[Int]]) Int {
     total
 }
 
-main() Unit {
+def main() Unit {
     values [Option[Int]] = [Some(1), None, Some(3)]
 
     println("for default " + defaultValues(values))

@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*for yield let clauses cannot use 'else'.*
 
-main() Unit {
+def main() Unit {
     values [Option[Int]] = [Some(1)]
 
     mapped = for {

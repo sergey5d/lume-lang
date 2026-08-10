@@ -4,25 +4,25 @@
 # same 2
 
 interface Callable {
-    call() Unit
+    def call() Unit
 }
 
 class Action with Callable {
-    call() Unit = println("called")
+    def call() Unit = println("called")
 }
 
-invoke[T with Callable](value T) Unit = value.call()
+def invoke[T with Callable](value T) Unit = value.call()
 
-same[L, R when L = R](left L, right R) L = right
+def same[L, R when L = R](left L, right R) L = right
 
 class BoundContext[L, R] {
 
-    invokeOwner[when L with Callable](value L) Unit = value.call()
+    def invokeOwner[when L with Callable](value L) Unit = value.call()
 
-    merge[when L = R](value R) L = value
+    def merge[when L = R](value R) L = value
 }
 
-main() Unit {
+def main() Unit {
     invoke(Action {})
     context BoundContext[Action, Action] = BoundContext {}
     context.invokeOwner(Action {})

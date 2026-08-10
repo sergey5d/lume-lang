@@ -4,20 +4,20 @@
 # 0
 
 interface Hopper {
-    hop() Str = "hop"
+    def hop() Str = "hop"
 }
 
 interface Jumper {
-    jump(steps Int) Str
+    def jump(steps Int) Str
 }
 
 class Rabbit with Hopper, Jumper {
 
-    jump(steps Int) Str = "jump " + steps
+    def jump(steps Int) Str = "jump " + steps
 }
 
 
-main() Int {
+def main() Int {
     rabbit Hopper = Rabbit {}
     jumper Jumper = Rabbit {}
     println(rabbit.hop())

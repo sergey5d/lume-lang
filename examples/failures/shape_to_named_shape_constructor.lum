@@ -6,6 +6,6 @@ shape Point {
     y Int
 }
 
-main() Unit {
+def main() Unit {
     point Point = shape(1, 2)
 }

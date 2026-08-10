@@ -7,7 +7,7 @@ class Amount {
     label Str
 }
 
-main() Int {
+def main() Int {
     amount Amount = Amount(42, "hello")
     println(match amount {
         case Amount(count, label) => count + "-" + label

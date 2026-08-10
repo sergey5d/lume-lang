@@ -2,21 +2,21 @@
 # interface Ada
 
 interface Named {
-    name() Str
+    def name() Str
 }
 
 class Person with Named {
     name Str
 
-    name() Str =
+    def name() Str =
         this.name
 }
 
 
-describe(value Named) Str =
+def describe(value Named) Str =
     value.name()
 
-main() Unit {
+def main() Unit {
     person Person = Person { name: "Ada" }
     println("interface", describe(person))
 }

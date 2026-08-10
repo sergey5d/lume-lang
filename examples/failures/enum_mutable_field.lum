@@ -8,4 +8,4 @@ enum CounterState {
     case Running
 }
 
-main() Int = 0
+def main() Int = 0

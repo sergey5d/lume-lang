@@ -11,4 +11,4 @@ class User {
 }
 
 
-main() Unit = ()
+def main() Unit = ()

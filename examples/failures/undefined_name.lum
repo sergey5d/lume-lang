@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # undefined_name at .*: undefined name 'missing'
 
-main() Int {
+def main() Int {
     missing
 }

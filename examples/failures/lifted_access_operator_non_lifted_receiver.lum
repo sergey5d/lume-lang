@@ -5,7 +5,7 @@ class User {
     name Str
 }
 
-main() Unit {
+def main() Unit {
     user = User { name: "Ada" }
     name = user.->name
 }

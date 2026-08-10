@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*lambda parameters cannot use 'let' destructuring.*
 
-main() Unit {
+def main() Unit {
     mapper = (let (x, y), index) => x + y + index
 }

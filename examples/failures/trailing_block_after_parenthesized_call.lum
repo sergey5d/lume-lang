@@ -1,10 +1,10 @@
 # FAIL_REGEX:
 # .*trailing block cannot follow an already completed call; pass the callback inside the same argument list.*
 
-it(title Str, block fn() => Unit) Unit =
+def it(title Str, block fn() => Unit) Unit =
     block()
 
-main() Unit {
+def main() Unit {
     it("bad") { () =>
         println("this should be passed as an explicit argument")
     }

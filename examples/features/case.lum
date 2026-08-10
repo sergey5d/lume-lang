@@ -6,7 +6,7 @@ enum Size {
     case Large
 }
 
-main() Unit {
+def main() Unit {
     size Size = Size.Large
     label = match size {
         case Size.Small => "small"

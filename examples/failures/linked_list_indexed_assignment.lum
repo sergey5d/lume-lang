@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*LinkedList does not support indexed assignment; use 'setAt\(index, value\)'.*
 
-main() Unit {
+def main() Unit {
     values LinkedList[Int] = LinkedList(1, 2)
     values[0] := 3
 }

@@ -5,7 +5,7 @@ class KeywordBox {
     value Str
 }
 
-main() Unit {
+def main() Unit {
     box KeywordBox = KeywordBox { value: "box" }
     println("class", box.value)
 }

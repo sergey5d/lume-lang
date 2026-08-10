@@ -4,7 +4,7 @@
 # 2
 # 0
 
-main() Int {
+def main() Int {
     empty Map[Str, Int] = Map()
     println(empty.size())
 

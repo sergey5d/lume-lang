@@ -6,7 +6,7 @@ enum Color {
     case Red
     case Blue
 
-    label() Str = match this {
+    def label() Str = match this {
         case Color.Red => "red"
         case Color.Blue => "blue"
     }
@@ -14,11 +14,11 @@ enum Color {
 
 object Color {
 
-    palette() Str = "palette"
+    def palette() Str = "palette"
 }
 
 
-main() Unit {
+def main() Unit {
     color Color = Color.Red
     println(color.label())
     println(Color.palette())

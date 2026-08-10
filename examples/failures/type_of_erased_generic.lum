@@ -1,5 +1,5 @@
 # FAIL_REGEX:
 # .*generic type 'A' is not available at runtime; pass a Type\[A\] parameter or mark 'A' as reified.*
 
-erased[A]() Type[A] =
+def erased[A]() Type[A] =
     typeOf[A]

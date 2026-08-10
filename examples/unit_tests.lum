@@ -6,7 +6,7 @@ use spec/*
 
 class PrimitiveSpec with Spec {
 
-    it() Unit {
+    def it() Unit {
         5.shouldBe(5)
         true.shouldBe(true)
         "lume".shouldBe("lume")
@@ -20,7 +20,7 @@ class PrimitiveSpec with Spec {
 
 class AnotherSpec with Spec {
 
-    it() Unit {
+    def it() Unit {
         (2 + 3).shouldBe(5)
     }
 }
