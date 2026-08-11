@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*lifted access operator '\.->' was removed; use map or flatMap explicitly.*
+
+def main(value Option[Int]) Unit {
+    text = value.->toStr()
+}

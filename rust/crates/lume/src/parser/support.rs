@@ -472,7 +472,6 @@ impl<'a> Parser<'a> {
             TokenKind::FatArrow => "=>",
             TokenKind::LeftArrow => "<-",
             TokenKind::QuestionQuestion => "??",
-            TokenKind::DotArrow => ".->",
             TokenKind::ColonLess => ":<",
             TokenKind::PercentEq => "%=",
             TokenKind::Newline => "NEWLINE",

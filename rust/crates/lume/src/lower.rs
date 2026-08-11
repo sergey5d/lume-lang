@@ -1306,48 +1306,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn lower_lifted_segment_closure(
-        &mut self,
-        param: &str,
-        param_ty: ir::Type,
-        body: &Expr,
-        span: Span,
-    ) -> ir::RValue {
-        let nested_name = format!(
-            "lifted${}${}",
-            self.function_id.0,
-            self.function().blocks.len()
-        );
-        let mut nested =
-            ir::Function::new(nested_name, ir::FunctionKind::Lambda, ir::Type::Unknown);
-        nested.span = Some(span);
-        nested.add_param(param.to_string(), param_ty);
-        let function_id = self.program.add_function(nested);
-        let capture_sources = self.visible_capture_sources(None);
-        let captures = {
-            let mut lowerer = FunctionLowerer::new(
-                self.program,
-                function_id,
-                self.globals,
-                self.functions,
-                self.case_fields,
-                self.diagnostics,
-            )
-            .with_capture_sources(capture_sources);
-            if let Some(local_id) = lowerer.function().params.first().copied() {
-                if param != "_" {
-                    lowerer.bind_existing(param, local_id);
-                }
-            }
-            lowerer.lower_callable_body(&CallableBody::Expr(body.clone()), span);
-            lowerer.finish_closure_captures()
-        };
-        ir::RValue::Closure {
-            function: function_id,
-            captures,
-        }
-    }
-
     fn lower_callable_closure(
         &mut self,
         name: &str,
@@ -3754,11 +3712,6 @@ impl<'a> FunctionLowerer<'a> {
             Expr::ListLiteral { items, span } if list_literal_has_spread(items) => {
                 self.lower_spread_list_literal(items, *span)
             }
-            Expr::LiftedChain {
-                base,
-                segments,
-                span,
-            } => self.lower_lifted_chain_expr(base, segments, *span),
             Expr::ListLiteral { .. }
             | Expr::TupleLiteral { .. }
             | Expr::ShapeLiteral { .. }
@@ -4073,72 +4026,6 @@ impl<'a> FunctionLowerer<'a> {
         ir::Operand::Const(ir::Constant::Unit)
     }
 
-    fn lower_lifted_chain_expr(
-        &mut self,
-        base: &Expr,
-        segments: &[core::LiftedChainSegment],
-        span: Span,
-    ) -> ir::Operand {
-        let mut current = self.lower_expr(base);
-        let mut current_ty = self.infer_expr_type(base);
-
-        for segment in segments {
-            let Some((family, inner_ty)) = unwrap_lifted_ir_type(&current_ty) else {
-                self.add_error(
-                    "lower_invariant",
-                    format!(
-                        ".-> receiver should be lifted before lowering, got '{}'",
-                        describe_ir_type(&current_ty)
-                    ),
-                    segment.span,
-                );
-                return current;
-            };
-            let segment_ty = self.infer_lifted_segment_type(segment, &inner_ty);
-            let method = if lifted_ir_segment_flattens(self.program, &family, &segment_ty) {
-                "flatMap"
-            } else {
-                "map"
-            };
-            let result_ty =
-                lifted_ir_segment_result_type(self.program, &family, segment_ty.clone());
-            let closure = self.lower_lifted_segment_closure(
-                &segment.param,
-                inner_ty,
-                &segment.body,
-                segment.span,
-            );
-            let closure_operand =
-                self.emit_temp_from_rvalue(closure, ir::Type::Unknown, Some(segment.span));
-            current = self.emit_temp_from_rvalue(
-                ir::RValue::Call {
-                    callee: ir::Callee::Method {
-                        receiver: current,
-                        method: method.to_string(),
-                    },
-                    args: vec![closure_operand],
-                    structural: false,
-                },
-                result_ty.clone(),
-                Some(span),
-            );
-            current_ty = result_ty;
-        }
-
-        current
-    }
-
-    fn infer_lifted_segment_type(
-        &self,
-        segment: &core::LiftedChainSegment,
-        inner_ty: &ir::Type,
-    ) -> ir::Type {
-        self.infer_expr_type_with_overrides(
-            &segment.body,
-            &[(segment.param.clone(), inner_ty.clone())],
-        )
-    }
-
     fn infer_expr_type(&self, expr: &Expr) -> ir::Type {
         self.infer_expr_type_with_overrides(expr, &[])
     }
@@ -4271,20 +4158,6 @@ impl<'a> FunctionLowerer<'a> {
                 unwrap_lifted_ir_type(&source_ty)
                     .map(|(_, inner)| inner)
                     .unwrap_or(ir::Type::Unknown)
-            }
-            Expr::LiftedChain { base, segments, .. } => {
-                let mut current = self.infer_expr_type_with_overrides(base, overrides);
-                for segment in segments {
-                    let Some((family, inner)) = unwrap_lifted_ir_type(&current) else {
-                        return ir::Type::Unknown;
-                    };
-                    let segment_ty = self.infer_expr_type_with_overrides(
-                        &segment.body,
-                        &[(segment.param.clone(), inner)],
-                    );
-                    current = lifted_ir_segment_result_type(self.program, &family, segment_ty);
-                }
-                current
             }
             Expr::TypeOf { ty, .. } => ir_exact_runtime_type(lower_type_ref(ty)),
             Expr::Return { .. } | Expr::Break { .. } | Expr::Continue { .. } => ir::Type::Never,
@@ -7014,67 +6887,6 @@ fn known_lifted_ir_type(ty: &ir::Type) -> Option<(LiftedIrFamily, ir::Type)> {
     }
 }
 
-fn lifted_ir_segment_flattens(
-    program: &ir::Program,
-    family: &LiftedIrFamily,
-    segment_ty: &ir::Type,
-) -> bool {
-    match (family, segment_ty) {
-        (LiftedIrFamily::Option, ir::Type::Named { name, args })
-            if name == "Option" && args.len() == 1 =>
-        {
-            true
-        }
-        (LiftedIrFamily::Result { error }, ir::Type::Named { name, args })
-            if name == "Result" && args.len() == 2 =>
-        {
-            ir_type_assignable(program, &args[1], error)
-        }
-        (LiftedIrFamily::Either { left }, ir::Type::Named { name, args })
-            if name == "Either" && args.len() == 2 =>
-        {
-            ir_type_assignable(program, &args[0], left)
-        }
-        _ => false,
-    }
-}
-
-fn lifted_ir_segment_result_type(
-    program: &ir::Program,
-    family: &LiftedIrFamily,
-    segment_ty: ir::Type,
-) -> ir::Type {
-    match (family, &segment_ty) {
-        (LiftedIrFamily::Option, ir::Type::Named { name, args })
-            if name == "Option" && args.len() == 1 =>
-        {
-            return ir::Type::option(args[0].clone());
-        }
-        (LiftedIrFamily::Result { error }, ir::Type::Named { name, args })
-            if name == "Result"
-                && args.len() == 2
-                && ir_type_assignable(program, &args[1], error) =>
-        {
-            return ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![args[0].clone(), error.clone()],
-            };
-        }
-        (LiftedIrFamily::Either { left }, ir::Type::Named { name, args })
-            if name == "Either"
-                && args.len() == 2
-                && ir_type_assignable(program, &args[0], left) =>
-        {
-            return ir::Type::Named {
-                name: "Either".to_string(),
-                args: vec![left.clone(), args[1].clone()],
-            };
-        }
-        _ => {}
-    }
-    wrap_lifted_ir_type(family, segment_ty)
-}
-
 fn wrap_lifted_ir_type(family: &LiftedIrFamily, inner: ir::Type) -> ir::Type {
     match family {
         LiftedIrFamily::Option => ir::Type::option(inner),
@@ -8182,98 +7994,6 @@ fn generic_call_type_ref_from_expr(expr: &Expr) -> Option<TypeRef> {
             })
         }
         _ => None,
-    }
-}
-
-fn ir_type_assignable(program: &ir::Program, actual: &ir::Type, expected: &ir::Type) -> bool {
-    let mut seen = Vec::new();
-    ir_type_assignable_inner(program, actual, expected, &mut seen)
-}
-
-fn ir_type_assignable_inner(
-    program: &ir::Program,
-    actual: &ir::Type,
-    expected: &ir::Type,
-    seen: &mut Vec<(String, String)>,
-) -> bool {
-    if actual == expected
-        || matches!(actual, ir::Type::Never | ir::Type::Unknown)
-        || matches!(expected, ir::Type::Unknown)
-    {
-        return true;
-    }
-    let (
-        ir::Type::Named {
-            name: actual_name,
-            args: actual_args,
-        },
-        ir::Type::Named {
-            name: expected_name,
-            ..
-        },
-    ) = (actual, expected)
-    else {
-        return false;
-    };
-    let key = (actual_name.clone(), expected_name.clone());
-    if seen.iter().any(|item| item == &key) {
-        return false;
-    }
-    seen.push(key);
-    let Some(actual_def) = program.types.iter().find(|ty| ty.name == *actual_name) else {
-        return false;
-    };
-    let subst = ir_type_subst(actual_def, actual_args);
-    actual_def.with_bounds.iter().any(|bound| {
-        let bound_ty = substitute_ir_type(bound, &subst);
-        ir_type_assignable_inner(program, &bound_ty, expected, seen)
-    })
-}
-
-fn describe_ir_type(ty: &ir::Type) -> String {
-    match ty {
-        ir::Type::Unknown => "<unknown>".to_string(),
-        ir::Type::Never => "Never".to_string(),
-        ir::Type::Unit => "Unit".to_string(),
-        ir::Type::Bool => "Bool".to_string(),
-        ir::Type::Int => "Int".to_string(),
-        ir::Type::Float => "Float".to_string(),
-        ir::Type::Str => "Str".to_string(),
-        ir::Type::Named { name, args } if args.is_empty() => name.clone(),
-        ir::Type::Named { name, args } => format!(
-            "{}[{}]",
-            name,
-            args.iter()
-                .map(describe_ir_type)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        ir::Type::Tuple(items) => format!(
-            "({})",
-            items
-                .iter()
-                .map(describe_ir_type)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        ir::Type::Record(fields) => format!(
-            "{{{}}}",
-            fields
-                .iter()
-                .map(|field| format!("{} {}", field.name, describe_ir_type(&field.ty)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        ir::Type::Function { params, ret } => format!(
-            "fn({}) => {}",
-            params
-                .iter()
-                .map(describe_ir_type)
-                .collect::<Vec<_>>()
-                .join(", "),
-            describe_ir_type(ret)
-        ),
-        ir::Type::TypeParam(name) => name.clone(),
     }
 }
 

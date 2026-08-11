@@ -711,11 +711,6 @@ pub enum Expr {
         body: LambdaBody,
         span: Span,
     },
-    LiftedChain {
-        base: Box<Expr>,
-        segments: Vec<LiftedChainSegment>,
-        span: Span,
-    },
     Group {
         inner: Box<Expr>,
         span: Span,
@@ -757,7 +752,6 @@ impl Expr {
             | Expr::Match { span, .. }
             | Expr::ForYield { span, .. }
             | Expr::Lambda { span, .. }
-            | Expr::LiftedChain { span, .. }
             | Expr::Group { span, .. } => *span,
         }
     }
@@ -791,14 +785,6 @@ pub struct LambdaParamDestructure {
 pub enum LambdaBody {
     Expr(Box<Expr>),
     Block(Block),
-}
-
-/// One `.->` segment. The body is expressed in terms of `param`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct LiftedChainSegment {
-    pub param: String,
-    pub body: Expr,
-    pub span: Span,
 }
 
 /// A call argument, optionally carrying a source-level name.

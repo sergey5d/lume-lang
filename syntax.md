@@ -111,48 +111,6 @@ The return type may itself be a function type, as in
 `fn() => fn(Int) => Str`. Lambda expressions remain keyword-free, for example
 `value => value + 1`.
 
-## Lifted Access Operator
-
-Use `.->` to access a member of the value inside a lifted container:
-`Option[T]`, `Result[T, E]`, or `Either[L, T]`. The lifted access operator is
-one token; whitespace inside `.->` is invalid.
-
-Each `.->` is one hop. The member resolves against the inner success type,
-together with any immediately following call or index postfixes:
-
-```txt
-firstName = userOpt
-    .->profile
-    .->name()
-    .->first
-```
-
-Rules:
-
-- `x.->m` requires `x` to be `Option`, `Result`, or `Either`; `m` resolves
-  against the inner type
-- a hop is one member plus its immediate `(...)` / `[...]` postfixes; the
-  next `.` or `.->` starts the next hop
-- if the hop result is plain, the hop lowers to `map`
-- if the hop result is the same lifted family the hop lowers to
-  `flatMap`
-- otherwise the result nests; there is no cross-family flattening
-- plain `.m` on a lifted value is an ordinary method call on the container
-  type itself, for example `userOpt.->name().getOr("unknown")`
-
-```txt
-userOpt.->profileOpt().->name   # inner access on every hop
-userOpt.->profileOpt().name     # error: Option[Profile] has no member
-                                # 'name'; use '.->name'
-```
-
-Chains normally stay lifted and are consumed by `try`, `let ... else`,
-`if let`, or `match`:
-
-```txt
-name = try userOpt.->profile.->name
-```
-
 ## Runtime Metadata
 
 Runtime metadata is exposed through the `Type[A]` hierarchy declared in
@@ -2262,8 +2220,8 @@ while true {
 ```
 
 `return` targets the current callable. `break` and `continue` require an
-enclosing loop and cannot jump across lambda or lifted-access callback
-boundaries. `continue` and `break` inside `for ... yield` are valid only for
+enclosing loop and cannot jump across lambda boundaries. `continue` and
+`break` inside `for ... yield` are valid only for
 iterable comprehensions; `Option`, `Result`, and `Either` comprehensions have no
 “skip item” or “early-exit item” state.
 
@@ -2805,7 +2763,6 @@ Other operators / constructs:
 - `fn(...) => T` for function types
 - `=>` for lambdas and by-name parameters
 - `=>` for match cases
-- `.->` for per-hop lifted access through `Option`, `Result`, and `Either`
 - `with` for interface implementation and generic bounds
 - `when` for generic bound and equality conditions
 - `:` inside map types, map literals, and construction field lists
@@ -2865,7 +2822,7 @@ Current operator overloading constraints:
 Newline continuation:
 
 - Ordinary expressions are no longer broadly newline-insensitive.
-- A newline continues the current expression only when the previous line clearly ends in a continuation form, except postfix chains may continue when the next line starts with `.` or `.->`.
+- A newline continues the current expression only when the previous line clearly ends in a continuation form, except postfix chains may continue when the next line starts with `.`.
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
   - extraction/fallback operators: `??`
@@ -2873,7 +2830,7 @@ Newline continuation:
   - unary prefixes: unary `-`, `!`, `try`
   - runtime type check keyword: `is`
   - match arrow: `=>`
-  - separators / chaining markers: `,`, `.`, `.->`
+  - separators / chaining markers: `,`, `.`
 - Delimited forms allow layout after opening delimiters and after commas, but they do not make leading binary/update operators valid by themselves.
 - Binding/callable `=` may start its expression on the same line or the next indented line.
 - Callable bodies have three accepted forms:
@@ -2925,11 +2882,6 @@ size = "hello".
 
 size = "hello"
     .size()
-
-name = userOpt
-    .->profileOpt()
-    .->name()
-    .->first
 ```
 
 ## Visibility

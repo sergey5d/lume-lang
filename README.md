@@ -40,8 +40,8 @@ Control flow is expression-friendly but still explicit:
 - `match` is exhaustive; `partial match` returns `Option`.
 - `let` and `if let` are pattern-oriented binding forms;
   `assert(...)` handles boolean assertions.
-- `try` and lifted access (`.->`) handle `Option`, `Result`, and `Either` flow
-  without turning every method call into special syntax.
+- `try`, pattern bindings, `??`, and explicit `map`/`flatMap` calls handle
+  `Option`, `Result`, and `Either` flow.
 
 ## Quick Start
 

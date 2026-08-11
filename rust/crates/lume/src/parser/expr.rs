@@ -1,12 +1,6 @@
 use super::support::spans_touch;
 use super::*;
 
-struct ChainSegment {
-    param: String,
-    body: Expr,
-    span: Span,
-}
-
 impl<'a> Parser<'a> {
     pub(super) fn parse_expr(&mut self) -> Option<Expr> {
         self.skip_newlines();
@@ -1133,35 +1127,10 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_postfix_expr(&mut self) -> Option<Expr> {
         let mut expr = self.parse_primary_expr()?;
-        let mut chain_segment_count = 0;
         let mut unsafe_extract_span = None;
         loop {
-            if self.at(TokenKind::Newline)
-                && (self.at_next(TokenKind::Dot) || self.at_next(TokenKind::DotArrow))
-            {
+            if self.at(TokenKind::Newline) && self.at_next(TokenKind::Dot) {
                 self.advance();
-                continue;
-            }
-            if self.match_token(TokenKind::DotArrow) {
-                self.diagnose_unsafe_extract_chain(unsafe_extract_span, self.previous_span());
-                unsafe_extract_span = None;
-                let operator_span = self.previous_span();
-                let (name, end) = self.parse_member_name("expected member name after '.->'")?;
-                let param = format!("__lume_chain{}", chain_segment_count);
-                chain_segment_count += 1;
-                let receiver = Expr::Identifier {
-                    name: param.clone(),
-                    span: end,
-                };
-                let start = receiver.span();
-                let body = Expr::Member {
-                    receiver: Box::new(receiver),
-                    name,
-                    span: start.cover(end),
-                };
-                let body = self.parse_lifted_hop_postfixes(body)?;
-                let span = operator_span.cover(body.span());
-                expr = Self::append_lifted_hop(expr, ChainSegment { param, body, span });
                 continue;
             }
             if self.match_token(TokenKind::LParen) {
@@ -1184,8 +1153,8 @@ impl<'a> Parser<'a> {
                 self.skip_newlines();
                 if self.at(TokenKind::Arrow) {
                     self.error_at_current(
-                        "spaced_lifted_access_operator",
-                        "lifted access operator must be written as '.->' without whitespace",
+                        "removed_lifted_access_operator",
+                        "lifted access operator '.->' was removed; use map or flatMap explicitly",
                     );
                     return None;
                 }
@@ -1502,36 +1471,6 @@ impl<'a> Parser<'a> {
         false
     }
 
-    fn parse_lifted_hop_postfixes(&mut self, mut body: Expr) -> Option<Expr> {
-        loop {
-            if self.match_token(TokenKind::LParen) {
-                let args = self.parse_call_args()?;
-                let end = self.consume(TokenKind::RParen, "expected ')' after arguments")?;
-                let start = body.span();
-                body = Expr::Call {
-                    callee: Box::new(body),
-                    args,
-                    uses_brace_syntax: false,
-                    span: start.cover(end),
-                };
-                continue;
-            }
-            if self.match_token(TokenKind::LBracket) {
-                let start = body.span();
-                let index = self.parse_expr()?;
-                let end = self.consume(TokenKind::RBracket, "expected ']' after index")?;
-                body = Expr::Index {
-                    receiver: Box::new(body),
-                    index: Box::new(index),
-                    span: start.cover(end),
-                };
-                continue;
-            }
-            break;
-        }
-        Some(body)
-    }
-
     fn at_removed_lift_operator(&self) -> bool {
         if self.current_kind() != TokenKind::Identifier || self.current().lexeme != "lift" {
             return false;
@@ -1555,40 +1494,6 @@ impl<'a> Parser<'a> {
             Some((token.lexeme, token.span))
         } else {
             self.expect_identifier(message)
-        }
-    }
-
-    fn append_lifted_hop(expr: Expr, segment: ChainSegment) -> Expr {
-        match expr {
-            Expr::LiftedChain {
-                base,
-                mut segments,
-                span: chain_span,
-            } => {
-                let span = chain_span.cover(segment.span);
-                segments.push(LiftedChainSegment {
-                    param: segment.param,
-                    body: segment.body,
-                    span: segment.span,
-                });
-                Expr::LiftedChain {
-                    base,
-                    segments,
-                    span,
-                }
-            }
-            other => {
-                let span = other.span().cover(segment.span);
-                Expr::LiftedChain {
-                    base: Box::new(other),
-                    segments: vec![LiftedChainSegment {
-                        param: segment.param,
-                        body: segment.body,
-                        span: segment.span,
-                    }],
-                    span,
-                }
-            }
         }
     }
 

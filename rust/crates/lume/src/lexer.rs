@@ -58,7 +58,6 @@ pub enum TokenKind {
     RBracket,
     Comma,
     Dot,
-    DotArrow,
     Colon,
     At,
     Ellipsis,
@@ -354,7 +353,13 @@ impl<'a> Lexer<'a> {
             '.' if self.peek() == Some('-') && self.peek_n(1) == Some('>') => {
                 self.bump();
                 self.bump();
-                Some(TokenKind::DotArrow)
+                self.error(
+                    "removed_lifted_access_operator",
+                    "lifted access operator '.->' was removed; use map or flatMap explicitly",
+                    start,
+                    self.mark(),
+                );
+                return;
             }
             '.' if self.take('.') && self.take('.') => Some(TokenKind::Ellipsis),
             '.' => Some(TokenKind::Dot),
@@ -573,7 +578,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) => Str = value => value.toStr()\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\ncount %= 2\nlifted = value.->name()\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) => Str = value => value.toStr()\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -587,7 +592,6 @@ mod tests {
         assert!(kinds.contains(&TokenKind::ColonLess));
         assert!(kinds.contains(&TokenKind::QuestionQuestion));
         assert!(kinds.contains(&TokenKind::PercentEq));
-        assert!(kinds.contains(&TokenKind::DotArrow));
         assert!(kinds.contains(&TokenKind::Pipe));
         assert!(kinds.contains(&TokenKind::Float));
         assert!(
@@ -599,27 +603,12 @@ mod tests {
     }
 
     #[test]
-    fn lexes_lifted_access_operator_as_atomic_token() {
-        let exact = lex(&source("user.->name()"));
-        assert!(exact.diagnostics.is_empty(), "{:#?}", exact.diagnostics);
-        assert!(
-            exact
-                .tokens
-                .iter()
-                .any(|token| token.kind == TokenKind::DotArrow && token.lexeme == ".->"),
-            "{:#?}",
-            exact.tokens
-        );
-
-        let spaced = lex(&source("user. ->name()"));
-        assert!(spaced.diagnostics.is_empty(), "{:#?}", spaced.diagnostics);
-        let kinds: Vec<TokenKind> = spaced.tokens.iter().map(|token| token.kind).collect();
-        assert!(
-            kinds
-                .windows(2)
-                .any(|pair| pair[0] == TokenKind::Dot && pair[1] == TokenKind::Arrow)
-        );
-        assert!(!kinds.contains(&TokenKind::DotArrow));
+    fn rejects_removed_lifted_access_operator() {
+        let result = lex(&source("user.->name()"));
+        assert!(result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "removed_lifted_access_operator"
+                && diagnostic.message.contains("use map or flatMap explicitly")
+        }));
     }
 
     #[test]

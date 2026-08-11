@@ -280,10 +280,6 @@
           "match": ":<"
         },
         {
-          "name": "keyword.operator.lifted-access.lume",
-          "match": "\\.->"
-        },
-        {
           "name": "keyword.operator.extract-or.lume",
           "match": "\\?\\?"
         },

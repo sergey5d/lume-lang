@@ -115,13 +115,6 @@ enum Ty {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum LiftedFamily {
-    Option,
-    Result { error: Ty },
-    Either { left: Ty },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 enum ForYieldFamily {
     Iterable,
     Option,
@@ -797,7 +790,6 @@ struct Checker<'a> {
     callable_depth: usize,
     loop_depth: usize,
     defer_depth: usize,
-    lifted_segment_depth: usize,
     next_capture_id: usize,
     capture_labels: HashMap<usize, String>,
     globals: HashMap<String, ValueInfo>,
@@ -819,7 +811,6 @@ impl<'a> Checker<'a> {
             callable_depth: 0,
             loop_depth: 0,
             defer_depth: 0,
-            lifted_segment_depth: 0,
             next_capture_id: 0,
             capture_labels: HashMap::new(),
             globals: HashMap::new(),
@@ -1883,12 +1874,6 @@ impl<'a> Checker<'a> {
             Expr::AnonymousInterface { .. }
             | Expr::AnonymousObject { .. }
             | Expr::Lambda { .. } => {}
-            Expr::LiftedChain { base, segments, .. } => {
-                self.check_field_initializer_expr(base, owner, initialized_fields);
-                for segment in segments {
-                    self.check_field_initializer_expr(&segment.body, owner, initialized_fields);
-                }
-            }
             Expr::Try { value, .. }
             | Expr::Unary { expr: value, .. }
             | Expr::Group { inner: value, .. } => {
@@ -4168,156 +4153,8 @@ impl<'a> Checker<'a> {
                 self.wrap_for_yield_type(family.as_ref(), yield_ty)
             }
             Expr::Lambda { params, body, .. } => self.check_lambda_expr(params, body, expected),
-            Expr::LiftedChain { base, segments, .. } => self.check_lifted_chain(base, segments),
             Expr::Group { inner, .. } => self.check_expr(inner),
         }
-    }
-
-    fn check_lifted_chain(
-        &mut self,
-        base: &Expr,
-        segments: &[crate::ast::LiftedChainSegment],
-    ) -> Ty {
-        let mut current = self.check_expr(base);
-        for segment in segments {
-            let Some((family, inner)) = self.unwrap_lifted_type(&current) else {
-                if !matches!(current, Ty::Unknown) {
-                    self.add_error(
-                        "invalid_lifted_access_operator",
-                        format!(
-                            ".-> lifted access operator requires a lifted receiver, but receiver has type '{}'; use '.' for ordinary member access",
-                            current.describe()
-                        ),
-                        segment.span,
-                    );
-                }
-                self.push_scope();
-                self.define_local(&segment.param, Ty::Unknown, false);
-                let previous_return = self.current_return.clone();
-                let previous_callable_depth = self.callable_depth;
-                let previous_loop_depth = self.loop_depth;
-                self.current_return = Ty::Unknown;
-                self.callable_depth = 0;
-                self.loop_depth = 0;
-                self.check_expr(&segment.body);
-                self.current_return = previous_return;
-                self.callable_depth = previous_callable_depth;
-                self.loop_depth = previous_loop_depth;
-                self.pop_scope();
-                return Ty::Unknown;
-            };
-
-            self.push_scope();
-            self.define_local(&segment.param, inner.clone(), false);
-            let previous_return = self.current_return.clone();
-            let previous_callable_depth = self.callable_depth;
-            let previous_loop_depth = self.loop_depth;
-            self.current_return = Ty::Unknown;
-            self.callable_depth = 0;
-            self.loop_depth = 0;
-            self.lifted_segment_depth += 1;
-            let segment_ty = self.check_expr(&segment.body);
-            self.lifted_segment_depth -= 1;
-            self.current_return = previous_return;
-            self.callable_depth = previous_callable_depth;
-            self.loop_depth = previous_loop_depth;
-            self.pop_scope();
-
-            current = self.lifted_segment_result_type(&current, &family, &segment_ty, segment.span);
-        }
-        current
-    }
-
-    fn unwrap_lifted_type(&self, ty: &Ty) -> Option<(LiftedFamily, Ty)> {
-        match ty {
-            Ty::Named(name, args) if name == "Option" && args.len() == 1 => {
-                Some((LiftedFamily::Option, args[0].clone()))
-            }
-            Ty::Named(name, args) if name == "Result" && args.len() == 2 => Some((
-                LiftedFamily::Result {
-                    error: args[1].clone(),
-                },
-                args[0].clone(),
-            )),
-            Ty::Named(name, args) if name == "Either" && args.len() == 2 => Some((
-                LiftedFamily::Either {
-                    left: args[0].clone(),
-                },
-                args[1].clone(),
-            )),
-            Ty::Unknown => Some((LiftedFamily::Option, Ty::Unknown)),
-            _ => None,
-        }
-    }
-
-    fn lifted_segment_result_type(
-        &mut self,
-        current: &Ty,
-        family: &LiftedFamily,
-        segment_ty: &Ty,
-        span: crate::source::Span,
-    ) -> Ty {
-        match (family, segment_ty) {
-            (LiftedFamily::Option, Ty::Named(name, args))
-                if name == "Option" && args.len() == 1 =>
-            {
-                Ty::Named("Option".to_string(), vec![args[0].clone()])
-            }
-            (LiftedFamily::Result { error }, Ty::Named(name, args))
-                if name == "Result" && args.len() == 2 =>
-            {
-                if self.is_assignable(&args[1], error) {
-                    Ty::Named("Result".to_string(), vec![args[0].clone(), error.clone()])
-                } else {
-                    self.add_incompatible_lifted_error(current, segment_ty, &args[1], error, span);
-                    Ty::Unknown
-                }
-            }
-            (LiftedFamily::Either { left }, Ty::Named(name, args))
-                if name == "Either" && args.len() == 2 =>
-            {
-                if self.is_assignable(&args[0], left) {
-                    Ty::Named("Either".to_string(), vec![left.clone(), args[1].clone()])
-                } else {
-                    self.add_incompatible_lifted_error(current, segment_ty, &args[0], left, span);
-                    Ty::Unknown
-                }
-            }
-            _ => self.wrap_lifted_type(family, segment_ty.clone()),
-        }
-    }
-
-    fn wrap_lifted_type(&self, family: &LiftedFamily, inner: Ty) -> Ty {
-        match family {
-            LiftedFamily::Option => Ty::Named("Option".to_string(), vec![inner]),
-            LiftedFamily::Result { error } => {
-                Ty::Named("Result".to_string(), vec![inner, error.clone()])
-            }
-            LiftedFamily::Either { left } => {
-                Ty::Named("Either".to_string(), vec![left.clone(), inner])
-            }
-        }
-    }
-
-    fn add_incompatible_lifted_error(
-        &mut self,
-        current: &Ty,
-        segment_ty: &Ty,
-        actual_error: &Ty,
-        expected_error: &Ty,
-        span: crate::source::Span,
-    ) {
-        self.add_error(
-            "incompatible_lifted_error",
-            format!(
-                "lifted hop returns '{}', but the current chain is '{}'; '{}' is not assignable to '{}'; convert the error explicitly before using .->",
-                segment_ty.describe(),
-                current.describe(),
-                actual_error.describe(),
-                expected_error.describe()
-            ),
-            span,
-        );
     }
 
     fn check_call_arg_expr_against(&mut self, expr: &Expr, expected: &Ty) -> Ty {
@@ -7646,7 +7483,7 @@ impl<'a> Checker<'a> {
     fn unknown_member_message(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> String {
         if name == "orPanic"
             && !matches!(receiver_ty, Ty::Unknown)
-            && self.unwrap_lifted_type(receiver_ty).is_some()
+            && self.unwrap_known_lifted_type(receiver_ty).is_some()
         {
             return format!(
                 "method 'orPanic' was removed from '{}'; use postfix '!!' for unsafe extraction",
@@ -7690,12 +7527,13 @@ impl<'a> Checker<'a> {
             );
         }
 
-        if !matches!(receiver_ty, Ty::Unknown) && self.unwrap_lifted_type(receiver_ty).is_some() {
+        if !matches!(receiver_ty, Ty::Unknown)
+            && self.unwrap_known_lifted_type(receiver_ty).is_some()
+        {
             return format!(
-                "cannot access member '{}' on lifted value '{}'; use '.->{}' to continue through the lifted value",
+                "cannot access member '{}' directly on lifted value '{}'; use map or flatMap explicitly",
                 name,
-                receiver_ty.describe(),
-                name
+                receiver_ty.describe()
             );
         }
 
@@ -9135,13 +8973,6 @@ fn loop_control_targeting_current_loop_in_expr(expr: &Expr) -> Option<LoopContro
                         .find_map(loop_control_targeting_current_loop_in_expr)
                 })
         }),
-        Expr::LiftedChain { base, segments, .. } => {
-            loop_control_targeting_current_loop_in_expr(base).or_else(|| {
-                segments
-                    .iter()
-                    .find_map(|segment| loop_control_targeting_current_loop_in_expr(&segment.body))
-            })
-        }
         // Nested callables and anonymous interface methods are separate
         // control-flow boundaries.
         Expr::Lambda { .. } | Expr::AnonymousInterface { .. } | Expr::AnonymousObject { .. } => {
@@ -9282,12 +9113,6 @@ fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Sp
                     })
             })
             .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(yield_body)),
-        Expr::LiftedChain { base, segments, .. } => lazy_arg_forbidden_control_flow_span(base)
-            .or_else(|| {
-                segments
-                    .iter()
-                    .find_map(|segment| lazy_arg_forbidden_control_flow_span(&segment.body))
-            }),
         // Nested callables have their own control-flow boundary.
         Expr::Lambda { .. } | Expr::AnonymousInterface { .. } | Expr::AnonymousObject { .. } => {
             None

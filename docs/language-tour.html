@@ -122,7 +122,7 @@ label = match access {
 
     Ok(decodeUser(row))
 }</code></pre>
-        <p>The lifted access operator <code>.-></code> accesses one member inside <code>Option</code>, <code>Result</code>, or <code>Either</code>. Each hop maps a plain result or flat-maps the same container family.</p>
+        <p>Use explicit <code>map</code> and <code>flatMap</code> calls when transforming values inside <code>Option</code>, <code>Result</code>, or <code>Either</code>.</p>
 
         <h2 id="collections">Lists and maps</h2>
         <p>Collection types and literals use parallel bracket syntax. Empty collections stay self-describing.</p>
