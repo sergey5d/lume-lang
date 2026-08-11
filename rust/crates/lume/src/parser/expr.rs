@@ -1748,12 +1748,13 @@ impl<'a> Parser<'a> {
                         span: start.cover(end),
                     });
                 }
-                let message = if self.at(TokenKind::LBrace) {
-                    "anonymous shape literals use '{ ... }'; 'shape { ... }' is not supported"
-                } else {
-                    "shape positional construction uses 'shape(...)'"
-                };
-                self.error_at_current("unexpected_token", message);
+                if self.match_token(TokenKind::LBrace) {
+                    return self.finish_brace_record_literal_expr(start);
+                }
+                self.error_at_current(
+                    "unexpected_token",
+                    "anonymous shape construction uses 'shape { field: value }' or positional 'shape(...)'",
+                );
                 None
             }
             TokenKind::Keyword(Keyword::Match) => {

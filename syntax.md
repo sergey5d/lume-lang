@@ -688,14 +688,24 @@ Zero-payload enum cases are bare values, not calls:
 none = None
 ```
 
-Anonymous shapes use plain braces for construction fields:
+Anonymous shapes use either bare braces or the explicit `shape` prefix for
+construction fields. The forms are equivalent:
 
 ```txt
 user = {
     name: "Ada"
     age: 10
 }
+
+explicitUser = shape {
+    name: "Ada"
+    age: 10
+}
 ```
+
+The explicit form is useful where several brace forms appear together. It also
+provides the unambiguous empty anonymous shape `shape {}`; bare `{}` remains an
+empty block expression.
 
 Anonymous shape fields may infer their type from the initializer:
 
@@ -800,7 +810,7 @@ General construction rules:
 - constructor parentheses accept positional arguments only; use braces for construction fields
 - function and method calls may still use named arguments in parentheses
 - `Type { value }` is not valid; use `Type(value)` only when the type supports positional construction
-- anonymous shapes use `{ field: value }` for field construction and `shape(...)` for contextual positional construction
+- anonymous shapes use `{ field: value }` or `shape { field: value }` for field construction and `shape(...)` for contextual positional construction
 - runtime-backed collection classes such as `Vector`, `Map`, `Array`, `LinkedList`, and `Set` use normal class construction; `Range(...)` is a stdlib factory
 - `Type { ... }` resolves through the available explicit `new(...)` declaration or implicit field-construction inputs
 - `Type(...)` resolves through explicit class `new(...)`, implicit visible-field construction, named shape positional construction, or an intrinsic collection form
@@ -867,6 +877,8 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 ```txt
 { field: value }                 # anonymous shape literal
 { field Type: value }            # typed anonymous shape literal
+shape { field: value }           # explicit anonymous shape literal
+shape {}                         # explicit empty anonymous shape literal
 { expr }                         # block expression
 Type { field: value }            # brace field construction or enum field payload
 call { x => ... }                # trailing lambda
@@ -877,7 +889,7 @@ new(field Type)                  # constructor declaration
 shape(value, other)              # contextual anonymous-shape positional construction
 ```
 
-Single-expression braces such as `{ value }` are block expressions, not anonymous shapes. To construct an anonymous shape, use construction fields with `:`.
+Single-expression braces such as `{ value }` are block expressions, not anonymous shapes. To construct an anonymous shape, use construction fields with `:`. Bare `{}` is an empty block; use `shape {}` for an empty anonymous shape.
 
 Shape conversion rules:
 - field names and field types must match at compile time
@@ -895,6 +907,7 @@ Shape conversion rules:
 - shape-to-class is not implicit; use a class constructor
 - tuple-to-shape and tuple-to-class are not allowed; use `shape(...)`, named shape construction, or class constructors
 - ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
+- `shape { ... }` is exactly the explicit spelling of an anonymous shape literal and accepts the same typed fields and spreads as bare field braces
 - construction fields inside braces use `field: value`
 - construction fields may carry an explicit initializer type as `field Type: value`
 - single-expression braces like `{ value }` are still block expressions, not anonymous shapes

@@ -29,10 +29,11 @@ def main() Unit {
         age: 10
         city: "NYC"
     }
-    smaller = {
+    smaller = shape {
         name: "Ben"
         age: 12
     }
+    empty = shape {}
     a = 1
     inferred = {
         count: a

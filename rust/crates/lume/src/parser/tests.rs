@@ -1210,6 +1210,24 @@ fn parses_shape_literal_forms() {
         other => panic!("expected named shape literal, got {other:#?}"),
     }
 
+    match parse_expr_only(r#"shape { name: "Ana", age: 10 }"#) {
+        Expr::RecordLiteral { fields, values, .. } => {
+            assert!(values.is_empty());
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name.as_deref(), Some("name"));
+            assert_eq!(fields[1].name.as_deref(), Some("age"));
+        }
+        other => panic!("expected explicit anonymous shape literal, got {other:#?}"),
+    }
+
+    match parse_expr_only("shape {}") {
+        Expr::RecordLiteral { fields, values, .. } => {
+            assert!(fields.is_empty());
+            assert!(values.is_empty());
+        }
+        other => panic!("expected empty anonymous shape literal, got {other:#?}"),
+    }
+
     match parse_expr_only(r#"{ name Str: "Ana", age Int: 10 }"#) {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(values.is_empty());
@@ -1271,6 +1289,16 @@ fn parses_shape_literal_forms() {
             assert_eq!(fields[1].name.as_deref(), Some("age"));
         }
         other => panic!("expected spread shape literal, got {other:#?}"),
+    }
+
+    match parse_expr_only(r#"shape { ...base, location: "Tampa" }"#) {
+        Expr::RecordLiteral { fields, values, .. } => {
+            assert!(values.is_empty());
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, None);
+            assert_eq!(fields[1].name.as_deref(), Some("location"));
+        }
+        other => panic!("expected explicit spread shape literal, got {other:#?}"),
     }
 
     match parse_expr_only("Person { name: name, age: age }") {
