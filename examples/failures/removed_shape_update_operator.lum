@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*shape update operator ':<' was removed.*use 'value with patch'.*
+
+def main() Unit {
+    value = { age: 41 }
+    updated = value :< { age: 42 }
+}

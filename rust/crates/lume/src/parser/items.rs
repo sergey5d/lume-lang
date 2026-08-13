@@ -916,7 +916,7 @@ impl<'a> Parser<'a> {
                     index: self.index,
                     diagnostics: Vec::new(),
                     allow_trailing_block_call: self.allow_trailing_block_call,
-                    allow_shape_update_operator: self.allow_shape_update_operator,
+                    allow_shape_update: self.allow_shape_update,
                 };
                 if parser.parse_type_ref().is_some() {
                     parser.skip_newlines();

@@ -578,16 +578,16 @@ Bracket access and assignment are unsafe operations supported by `Vector[T]`
 and `Array[T]`; an invalid index panics. `LinkedList[T]` deliberately does not
 support brackets because indexed traversal is linear.
 
-Shape update:
+Shape composition and exact update:
 
 ```txt
-updated = value :< {
+updated = value with {
     age: 42
     name: "Bob"
 }
 
 patch = { age: 43 }
-updated2 = value :< patch
+updated2 = value with patch
 ```
 
 Anonymous-shape spread:
@@ -604,19 +604,45 @@ merged = {
     ...namePart
     ...agePart
 }
+
+selected = {
+    ...point
+    ...dot
+    x: point.x
+}
+
+layered = {
+    ...defaults
+    override ...environment
+    override ...commandLine
+}
 ```
 
 Spread entries copy fields from a class, shape, or anonymous-shape value into a
-new anonymous shape. Spread is additive only: duplicate field names are an
-error, including an explicit field after a spread. To update an existing field,
-use `:<`.
+new anonymous shape. Ordinary spreads are collision-protected. The compiler
+checks the complete literal, and every resulting field must have one
+unambiguous final provider. A field has a final provider when it comes from only
+one source, an explicit `field: value` selects it, or an
+`override ...source` spread gives that source precedence over earlier spreads.
 
-`base :< patch` updates existing visible fields. `base` must be a class, named
+An explicit field resolves that field regardless of whether it appears before
+or after the colliding spreads. Duplicate explicit fields remain invalid.
+`override ...source` adds unique fields and selects that source for every field
+that overlaps an earlier spread. A later ordinary spread can introduce a new
+unresolved collision. This strict default prevents newly added source fields
+from silently changing an existing merge.
+
+For example, `{ ...point, ...dot }` is invalid when both values provide `x`.
+Use `{ ...point, ...dot, x: point.x }` to resolve only `x`, or
+`{ ...point, override ...dot }` to accept all current and future overlaps from
+`dot`.
+
+`base with patch` updates existing visible fields. `base` must be a class, named
 shape, or anonymous shape. `patch` must be a statically known shape-like value.
 Every visible field in `patch` must already exist on `base`, and each patch
 field type must be assignable to the corresponding base field type. The result
 keeps the same class/shape view as `base`. Hidden fields are not updated through
-`:<`.
+`with`, and the source value is not mutated.
 
 ## Construction
 
@@ -2763,10 +2789,10 @@ Other operators / constructs:
 - `fn(...) => T` for function types
 - `=>` for lambdas and by-name parameters
 - `=>` for match cases
-- `with` for interface implementation and generic bounds
+- `with` for interface implementation, generic bounds, and exact shape update
+- `override ...source` for whole-source precedence in shape construction
 - `when` for generic bound and equality conditions
 - `:` inside map types, map literals, and construction field lists
-- `:<` for class, shape, and anonymous-shape update
 
 Examples:
 
@@ -2781,7 +2807,7 @@ pair = ("a", 1)
 name = maybeName ?? "unknown"
 ```
 
-Shape copy, extension, and distinct merge:
+Shape copy, extension, and collision-protected merge:
 
 ```txt
 copy = { ...user }
@@ -2826,7 +2852,7 @@ Newline continuation:
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
   - extraction/fallback operators: `??`
-  - shape/update operators: `:<`
+  - exact shape update introducer: `with`
   - unary prefixes: unary `-`, `!`, `try`
   - runtime type check keyword: `is`
   - match arrow: `=>`
@@ -2852,7 +2878,7 @@ a =
 a = 1 +
     2
 
-updated = user :<
+updated = user with
     { age: 42 }
 ```
 

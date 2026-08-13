@@ -180,6 +180,10 @@
           "match": "\\b(?:def|new|annotation|class|shape|enum|interface|object|ext|use|module|with|when|as|hidden|case|var|vararg|let)\\b"
         },
         {
+          "name": "keyword.operator.shape.lume",
+          "match": "\\boverride\\b"
+        },
+        {
           "name": "storage.modifier.generic.reified.lume",
           "match": "\\b(?:reified)\\b"
         },
@@ -274,10 +278,6 @@
         {
           "name": "keyword.operator.assignment.lume",
           "match": "<-|:=|\\+=|-=|\\*=|/=|%=|="
-        },
-        {
-          "name": "keyword.operator.shape.lume",
-          "match": ":<"
         },
         {
           "name": "keyword.operator.extract-or.lume",

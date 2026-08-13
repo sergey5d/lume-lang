@@ -76,7 +76,7 @@ def main() Unit {
     }
 
     user = { name: "Ada", age: 41 }
-    updated = user :<
+    updated = user with
         { age: 42 }
 
     named = { name: "Ada" }

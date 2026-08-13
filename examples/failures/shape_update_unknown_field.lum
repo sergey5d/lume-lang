@@ -7,5 +7,5 @@ class Amount {
 
 def main() Unit {
     value = Amount(10)
-    updated = value :< { missing: 42 }
+    updated = value with { missing: 42 }
 }

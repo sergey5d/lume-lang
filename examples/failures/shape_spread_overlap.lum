@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*shape field 'name' already exists.*
+# .*field 'name' is provided by both 'left' and 'right'.*select a value explicitly or use 'override' on one spread.*
 
 def main() Unit {
     left = { name: "Ada", age: 42 }

@@ -1,8 +1,5 @@
 # Shape Composition and Update
 
-> Design proposal. The current language reference still documents `:<` for
-> exact-shape updates. This proposal replaces that surface with `with`.
-
 Lume needs three visible operations, but they reduce to two underlying
 mechanisms:
 
@@ -20,8 +17,7 @@ composed = {
 }
 ```
 
-Composition is collision-safe. The source shapes must have distinct field
-names; an accidental overlap is an error.
+Composition is collision-safe. An accidental unresolved overlap is an error.
 
 ```lume
 # Error when both values contain `name`.
@@ -31,8 +27,8 @@ invalid = {
 }
 ```
 
-The diagnostic should identify the duplicate field and require explicit
-override intent.
+The diagnostic identifies both providers and requires an explicit field choice
+or `override` intent.
 
 ## Construction Overrides
 
@@ -47,17 +43,39 @@ replaced = {
 }
 ```
 
-An explicit `field: value` after a spread deliberately replaces that field.
-It may also add a field that was not present in an earlier spread.
+An explicit `field: value` resolves that field regardless of whether it appears
+before or after the colliding spreads. It may also add a field that was not
+present in any spread. Duplicate explicit fields remain invalid.
 
 `override ...b` makes collisions from that spread intentional:
 
 - fields unique to `b` are added
 - fields shared with earlier entries are replaced by values from `b`
 - field types must remain valid for the resulting statically known shape
+- a later ordinary spread can make a field ambiguous again
 
 An ordinary `...b` remains collision-protected. The programmer must write
 `override ...b` when replacement is intended.
+
+The compiler analyzes the complete literal rather than rejecting a collision
+as soon as it is encountered:
+
+```lume
+point = { x: 1, y: 2 }
+dot = { x: 3, time: 4 }
+
+selected = {
+    ...point
+    ...dot
+    x: point.x
+}
+```
+
+Here `x` has an explicit winner, while `y` and `time` each have one provider.
+If both source shapes later gain another shared field, that new collision is a
+compile-time error until it is explicitly resolved. By contrast,
+`override ...dot` deliberately accepts all current and future overlaps from
+`dot`, which is useful for configuration layering.
 
 ## Exact-Shape Update
 

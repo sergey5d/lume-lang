@@ -1531,8 +1531,8 @@ fn rejects_equals_in_named_shape_literal_fields() {
 }
 
 #[test]
-fn parses_colon_shape_update_fields() {
-    match parse_expr_only("value :< { amount: 42, label: value.label }") {
+fn parses_with_shape_update_fields() {
+    match parse_expr_only("value with { amount: 42, label: value.label }") {
         Expr::RecordUpdate { patch, .. } => match *patch {
             Expr::RecordLiteral { fields, .. } => {
                 assert_eq!(fields.len(), 2);
@@ -1549,7 +1549,7 @@ fn parses_colon_shape_update_fields() {
 fn parses_newline_separated_shape_update_fields() {
     match parse_expr_only(
         r#"
-value :< {
+value with {
     amount: 42
     label: value.label,
     count: 3
@@ -1571,13 +1571,50 @@ value :< {
 
 #[test]
 fn rejects_same_line_shape_update_fields_without_separator() {
-    let result = parse(r#"def run(value Amount) Unit = value :< { amount: 42 label: "x" }"#);
+    let result = parse(r#"def run(value Amount) Unit = value with { amount: 42 label: "x" }"#);
     assert!(
         result.diagnostics.iter().any(|diag| {
             diag.code == "unexpected_token"
                 && diag
                     .message
                     .contains("expected ',' or newline between brace entries")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn parses_override_shape_spread() {
+    match parse_expr_only("{ ...left, override ...right }") {
+        Expr::RecordLiteral { fields, .. } => {
+            assert_eq!(fields.len(), 2);
+            assert!(matches!(
+                fields[0].value,
+                Expr::Spread {
+                    override_existing: false,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                fields[1].value,
+                Expr::Spread {
+                    override_existing: true,
+                    ..
+                }
+            ));
+        }
+        other => panic!("expected shape literal, got {other:#?}"),
+    }
+}
+
+#[test]
+fn requires_spread_after_override_in_shape_construction() {
+    let result = parse("def run() Unit = { override right }");
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "expected_token"
+                || diag.message.contains("expected '...' after 'override'")
         }),
         "{:#?}",
         result.diagnostics
@@ -3494,7 +3531,7 @@ def main() Unit {
     leadingSize Int = "haha"
         .size()
     user = { name: "Ada", age: 41 }
-    updated = user :<
+    updated = user with
         { age: 42 }
     named = { name: "Ada" }
     located = { location: "Tampa" }
@@ -3532,7 +3569,7 @@ def main() Unit {
 def main() Unit {
     user = { age: 41 }
     updated = user
-        :< { age: 42 }
+        with { age: 42 }
 }
 "#,
     );

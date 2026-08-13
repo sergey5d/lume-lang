@@ -27,6 +27,7 @@ pub enum Keyword {
     Match,
     Module,
     Object,
+    Override,
     Partial,
     Return,
     Reified,
@@ -75,7 +76,6 @@ pub enum TokenKind {
     FatArrow,
     LeftArrow,
     QuestionQuestion,
-    ColonLess,
     ColonAssign,
     EqEq,
     NotEq,
@@ -315,6 +315,7 @@ impl<'a> Lexer<'a> {
             "let" => TokenKind::Keyword(Keyword::Let),
             "match" => TokenKind::Keyword(Keyword::Match),
             "module" => TokenKind::Keyword(Keyword::Module),
+            "override" => TokenKind::Keyword(Keyword::Override),
             "partial" => TokenKind::Keyword(Keyword::Partial),
             "return" => TokenKind::Keyword(Keyword::Return),
             "reified" => TokenKind::Keyword(Keyword::Reified),
@@ -366,7 +367,15 @@ impl<'a> Lexer<'a> {
             ':' if self.take('+') => return self.unsupported_operator(start, ":+"),
             ':' if self.take('-') => return self.unsupported_operator(start, ":-"),
             ':' if self.take(':') => return self.unsupported_operator(start, "::"),
-            ':' if self.take('<') => Some(TokenKind::ColonLess),
+            ':' if self.take('<') => {
+                self.error(
+                    "removed_shape_update_operator",
+                    "shape update operator ':<' was removed; use 'value with patch'",
+                    start,
+                    self.mark(),
+                );
+                return;
+            }
             ':' if self.take('=') => Some(TokenKind::ColonAssign),
             ':' => Some(TokenKind::Colon),
             '@' => Some(TokenKind::At),
@@ -578,7 +587,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) => Str = value => value.toStr()\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value :< { amount: 1 }\nmerged = { ...left ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) => Str = value => value.toStr()\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -589,7 +598,7 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Reified)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Vararg)));
-        assert!(kinds.contains(&TokenKind::ColonLess));
+        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Override)));
         assert!(kinds.contains(&TokenKind::QuestionQuestion));
         assert!(kinds.contains(&TokenKind::PercentEq));
         assert!(kinds.contains(&TokenKind::Pipe));
@@ -608,6 +617,15 @@ mod tests {
         assert!(result.diagnostics.iter().any(|diagnostic| {
             diagnostic.code == "removed_lifted_access_operator"
                 && diagnostic.message.contains("use map or flatMap explicitly")
+        }));
+    }
+
+    #[test]
+    fn rejects_removed_shape_update_operator() {
+        let result = lex(&source("updated = value :< { amount: 1 }"));
+        assert!(result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "removed_shape_update_operator"
+                && diagnostic.message.contains("use 'value with patch'")
         }));
     }
 

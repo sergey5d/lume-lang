@@ -9,7 +9,7 @@ class Amount {
 
 def main() Unit {
     value = Amount(10, "x")
-    updated = value :< { amount: 42 }
+    updated = value with { amount: 42 }
 
     println("original " + value.amount + " " + value.description)
     println("updated " + updated.amount + " " + updated.description)

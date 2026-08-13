@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*field 'x' is provided by both 'second' and 'third'.*select a value explicitly or use 'override' on one spread.*
+
+def main() Unit {
+    first = { x: 1 }
+    second = { x: 2 }
+    third = { x: 3 }
+    merged = {
+        ...first
+        override ...second
+        ...third
+    }
+}

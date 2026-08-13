@@ -123,6 +123,13 @@ enum ForYieldFamily {
     Unknown,
 }
 
+#[derive(Debug, Clone)]
+struct ShapeFieldProvider {
+    source: String,
+    conflicting_source: Option<String>,
+    span: crate::source::Span,
+}
+
 fn describe_for_yield_family(family: &ForYieldFamily) -> &'static str {
     match family {
         ForYieldFamily::Iterable => "iterable",
@@ -2299,27 +2306,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn push_unique_shape_field(
-        &mut self,
-        fields: &mut Vec<(String, Ty)>,
-        name: String,
-        ty: Ty,
-        span: crate::source::Span,
-    ) {
-        if fields.iter().any(|(field, _)| field == &name) {
-            self.add_error(
-                "duplicate_shape_field",
-                format!(
-                    "shape field '{}' already exists; spread can only add fields, use ':<' to update existing fields",
-                    name
-                ),
-                span,
-            );
-        } else {
-            fields.push((name, ty));
-        }
-    }
-
     fn check_block(&mut self, block: &Block) -> Ty {
         self.check_block_against(block, &Ty::Unknown)
     }
@@ -3769,7 +3755,7 @@ impl<'a> Checker<'a> {
                 }
                 let mut item_ty = Ty::Unknown;
                 for item in items {
-                    let current = if let Expr::Spread { value, span } = item {
+                    let current = if let Expr::Spread { value, span, .. } = item {
                         let spread_ty = self.check_expr(value);
                         if is_map_ty(&spread_ty) {
                             self.add_error(
@@ -3919,6 +3905,12 @@ impl<'a> Checker<'a> {
                         Ty::Record(fields) => fields.as_slice(),
                         _ => &[],
                     };
+                    let explicit_names = fields
+                        .iter()
+                        .filter_map(|field| field.name.clone())
+                        .collect::<HashSet<_>>();
+                    let mut explicit_seen = HashSet::new();
+                    let mut providers = HashMap::<String, ShapeFieldProvider>::new();
                     let mut actual_fields = Vec::new();
                     for field in fields {
                         if let Some(name) = &field.name {
@@ -3949,26 +3941,92 @@ impl<'a> Checker<'a> {
                             } else {
                                 actual
                             };
-                            self.push_unique_shape_field(
-                                &mut actual_fields,
+                            if !explicit_seen.insert(name.clone()) {
+                                self.add_error(
+                                    "duplicate_shape_field",
+                                    format!("duplicate shape field '{}'", name),
+                                    field.span,
+                                );
+                            }
+                            upsert_shape_field(&mut actual_fields, name.clone(), field_ty);
+                            providers.insert(
                                 name.clone(),
-                                field_ty,
-                                field.span,
+                                ShapeFieldProvider {
+                                    source: format!("explicit field '{}'", name),
+                                    conflicting_source: None,
+                                    span: field.span,
+                                },
                             );
                         } else {
-                            let spread_ty = self.check_expr(&field.value);
+                            let Expr::Spread {
+                                value,
+                                override_existing,
+                                ..
+                            } = &field.value
+                            else {
+                                self.add_error(
+                                    "invalid_shape_spread",
+                                    "internal shape spread representation is invalid",
+                                    field.span,
+                                );
+                                continue;
+                            };
+                            let spread_ty = self.check_expr(value);
                             if let Some(spread_fields) =
                                 self.record_spread_shape_fields(&spread_ty, field.span)
                             {
+                                let source = self
+                                    .describe_member_path(value)
+                                    .unwrap_or_else(|| "spread expression".to_string());
                                 for (name, ty) in spread_fields {
-                                    self.push_unique_shape_field(
-                                        &mut actual_fields,
-                                        name,
-                                        ty,
-                                        field.span,
-                                    );
+                                    if explicit_names.contains(&name) {
+                                        if !actual_fields
+                                            .iter()
+                                            .any(|(existing, _)| existing == &name)
+                                        {
+                                            actual_fields.push((name, ty));
+                                        }
+                                        continue;
+                                    }
+
+                                    if *override_existing {
+                                        upsert_shape_field(&mut actual_fields, name.clone(), ty);
+                                        providers.insert(
+                                            name,
+                                            ShapeFieldProvider {
+                                                source: source.clone(),
+                                                conflicting_source: None,
+                                                span: field.span,
+                                            },
+                                        );
+                                    } else if let Some(provider) = providers.get_mut(&name) {
+                                        provider.conflicting_source = Some(source.clone());
+                                        provider.span = field.span;
+                                    } else {
+                                        actual_fields.push((name.clone(), ty));
+                                        providers.insert(
+                                            name,
+                                            ShapeFieldProvider {
+                                                source: source.clone(),
+                                                conflicting_source: None,
+                                                span: field.span,
+                                            },
+                                        );
+                                    }
                                 }
                             }
+                        }
+                    }
+                    for (name, provider) in providers {
+                        if let Some(conflicting_source) = provider.conflicting_source {
+                            self.add_error(
+                                "ambiguous_shape_field",
+                                format!(
+                                    "field '{}' is provided by both '{}' and '{}'; select a value explicitly or use 'override' on one spread",
+                                    name, provider.source, conflicting_source
+                                ),
+                                provider.span,
+                            );
                         }
                     }
                     return Ty::Record(actual_fields);
@@ -6933,7 +6991,7 @@ impl<'a> Checker<'a> {
         let spread_types = items
             .iter()
             .filter_map(|item| match item {
-                Expr::Spread { value, span } => Some((self.check_expr(value), *span)),
+                Expr::Spread { value, span, .. } => Some((self.check_expr(value), *span)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -11717,7 +11775,7 @@ def main() Unit {
             r#"
 def main() Unit {
     base = { name: "Ada", age: 10 }
-    aged = base :< { age: 42 }
+    aged = base with { age: 42 }
     updated = { ...aged, city: "Tampa" }
     name Str = updated.name
     age Int = updated.age
@@ -11727,6 +11785,94 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn explicit_shape_field_resolves_spread_overlap() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    point = { x: 1, y: 2 }
+    dot = { x: 3, time: 4 }
+    merged = {
+        ...point
+        ...dot
+        x: point.x
+    }
+    x Int = merged.x
+    y Int = merged.y
+    time Int = merged.time
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_unresolved_shape_spread_overlap() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    point = { x: 1, y: 2 }
+    dot = { x: 3, time: 4 }
+    merged = { ...point, ...dot }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "ambiguous_shape_field"
+                    && diag.message.contains("field 'x'")
+                    && diag.message.contains("point")
+                    && diag.message.contains("dot")
+                    && diag.message.contains("override")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn override_shape_spread_resolves_earlier_overlap() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    point = { x: 1, y: 2 }
+    dot = { x: 3, time: 4 }
+    merged = { ...point, override ...dot }
+    x Int = merged.x
+    y Int = merged.y
+    time Int = merged.time
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn later_protected_spread_reopens_overlap_after_override() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    first = { x: 1 }
+    second = { x: 2 }
+    third = { x: 3 }
+    merged = { ...first, override ...second, ...third }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "ambiguous_shape_field"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

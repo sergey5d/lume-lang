@@ -461,6 +461,7 @@ impl<'a> Parser<'a> {
             },
             Spread {
                 value: Expr,
+                override_existing: bool,
                 span: Span,
             },
             Positional {
@@ -471,12 +472,25 @@ impl<'a> Parser<'a> {
         let mut entries = Vec::new();
         self.skip_newlines();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let entry = if self.match_token(TokenKind::Ellipsis) {
+            let entry = if self.match_keyword(Keyword::Override) {
+                let start = self.previous_span();
+                self.consume(
+                    TokenKind::Ellipsis,
+                    "expected '...' after 'override' in shape construction",
+                )?;
+                let value = self.parse_expr()?;
+                RecordEntry::Spread {
+                    span: start.cover(value.span()),
+                    value,
+                    override_existing: true,
+                }
+            } else if self.match_token(TokenKind::Ellipsis) {
                 let start = self.previous_span();
                 let value = self.parse_expr()?;
                 RecordEntry::Spread {
                     span: start.cover(value.span()),
                     value,
+                    override_existing: false,
                 }
             } else if self.match_token(TokenKind::LBracket) {
                 self.error_at_current(
@@ -583,11 +597,19 @@ impl<'a> Parser<'a> {
                             span,
                         });
                     }
-                    RecordEntry::Spread { value, span } => {
+                    RecordEntry::Spread {
+                        value,
+                        override_existing,
+                        span,
+                    } => {
                         fields.push(CallArg {
                             name: None,
                             ty: None,
-                            value,
+                            value: Expr::Spread {
+                                value: Box::new(value),
+                                override_existing,
+                                span,
+                            },
                             span,
                         });
                     }
@@ -627,7 +649,7 @@ impl<'a> Parser<'a> {
             index: self.index,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
-            allow_shape_update_operator: self.allow_shape_update_operator,
+            allow_shape_update: self.allow_shape_update,
         };
         let Some(_) = parser.parse_type_ref() else {
             return false;
@@ -1201,13 +1223,13 @@ impl<'a> Parser<'a> {
                 unsafe_extract_span = Some(operator_span);
                 continue;
             }
-            if self.allow_shape_update_operator && self.match_token(TokenKind::ColonLess) {
+            if self.allow_shape_update && self.match_keyword(Keyword::With) {
                 let start = expr.span();
                 self.skip_newlines();
-                let previous = self.allow_shape_update_operator;
-                self.allow_shape_update_operator = false;
+                let previous = self.allow_shape_update;
+                self.allow_shape_update = false;
                 let patch = self.parse_expr();
-                self.allow_shape_update_operator = previous;
+                self.allow_shape_update = previous;
                 let patch = patch?;
                 let end = patch.span();
                 expr = Expr::RecordUpdate {
@@ -1338,7 +1360,7 @@ impl<'a> Parser<'a> {
             index: self.index,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
-            allow_shape_update_operator: self.allow_shape_update_operator,
+            allow_shape_update: self.allow_shape_update,
         };
         let open = parser.current_span();
         parser.advance();
@@ -1535,6 +1557,7 @@ impl<'a> Parser<'a> {
                     span,
                     value: Expr::Spread {
                         value: Box::new(value),
+                        override_existing: false,
                         span,
                     },
                 });
@@ -1713,11 +1736,12 @@ impl<'a> Parser<'a> {
         {
             return allow_empty;
         }
-        if self
-            .tokens
-            .get(lookahead)
-            .is_some_and(|token| token.kind == TokenKind::Ellipsis)
-        {
+        if self.tokens.get(lookahead).is_some_and(|token| {
+            matches!(
+                token.kind,
+                TokenKind::Ellipsis | TokenKind::Keyword(Keyword::Override)
+            )
+        }) {
             return true;
         }
         if self
@@ -1738,7 +1762,7 @@ impl<'a> Parser<'a> {
                 index: lookahead + 1,
                 diagnostics: Vec::new(),
                 allow_trailing_block_call: self.allow_trailing_block_call,
-                allow_shape_update_operator: self.allow_shape_update_operator,
+                allow_shape_update: self.allow_shape_update,
             };
             if parser.parse_type_ref().is_some() && parser.at(TokenKind::Colon) {
                 return true;
@@ -1848,6 +1872,7 @@ impl<'a> Parser<'a> {
                 let span = spread_start.cover(value.span());
                 entries.push(Expr::Spread {
                     value: Box::new(value),
+                    override_existing: false,
                     span,
                 });
             } else {
@@ -1959,6 +1984,7 @@ impl<'a> Parser<'a> {
             let span = start.cover(value.span());
             return Some(Expr::Spread {
                 value: Box::new(value),
+                override_existing: false,
                 span,
             });
         }

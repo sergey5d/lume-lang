@@ -3557,24 +3557,36 @@ impl<'a> Interpreter<'a> {
         parts: &[ir::RecordSpreadPart],
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
+        let explicit_names = parts
+            .iter()
+            .filter_map(|part| match part {
+                ir::RecordSpreadPart::Field(field) => Some(field.name.as_str()),
+                ir::RecordSpreadPart::Spread { .. } => None,
+            })
+            .collect::<HashSet<_>>();
         let mut out = Vec::new();
         for part in parts {
             match part {
-                ir::RecordSpreadPart::Spread(operand) => {
+                ir::RecordSpreadPart::Spread {
+                    value: operand,
+                    override_existing,
+                } => {
                     let value = self.eval_operand_ref(frame, operand, span)?;
                     for (name, value) in self.record_spread_runtime_fields(value, span)? {
-                        push_unique_runtime_record_field(&mut out, name, value, span, self)?;
+                        if explicit_names.contains(name.as_str()) {
+                            if !out.iter().any(|(existing, _)| existing == &name) {
+                                out.push((name, value));
+                            }
+                        } else if *override_existing {
+                            upsert_runtime_record_field(&mut out, name, value);
+                        } else {
+                            push_unique_runtime_record_field(&mut out, name, value, span, self)?;
+                        }
                     }
                 }
                 ir::RecordSpreadPart::Field(field) => {
                     let value = self.eval_operand_ref(frame, &field.value, span)?;
-                    push_unique_runtime_record_field(
-                        &mut out,
-                        field.name.clone(),
-                        value,
-                        span,
-                        self,
-                    )?;
+                    upsert_runtime_record_field(&mut out, field.name.clone(), value);
                 }
             }
         }
@@ -5932,13 +5944,21 @@ fn push_unique_runtime_record_field(
         Err(interpreter.runtime_error(
             span,
             format!(
-                "shape field '{}' already exists; spread can only add fields, use ':<' to update existing fields",
+                "field '{}' is provided by multiple spreads; select a value explicitly or use 'override' on one spread",
                 name
             ),
         ))
     } else {
         fields.push((name, value));
         Ok(())
+    }
+}
+
+fn upsert_runtime_record_field(fields: &mut Vec<(String, Value)>, name: String, value: Value) {
+    if let Some((_, existing_value)) = fields.iter_mut().find(|(field, _)| field == &name) {
+        *existing_value = value;
+    } else {
+        fields.push((name, value));
     }
 }
 
@@ -7227,8 +7247,8 @@ $name
 
             a1 = Amount(10, "description", 5)
             a2 = a1.multiple(a1)
-            a3 = a2 :< { amount: 101, description: a2.description + " updated" }
-            a4 = (a3 :< { amount: 102 }) :< { count: 7 }
+            a3 = a2 with { amount: 101, description: a2.description + " updated" }
+            a4 = (a3 with { amount: 102 }) with { count: 7 }
 
             def main() Unit {
                 OS.println(a2.amount, a2.description)
@@ -7245,6 +7265,29 @@ $name
             run.output,
             "100 description description\n101 description description updated\n102 description description updated\n7\n"
         );
+    }
+
+    #[test]
+    fn resolves_shape_spread_collisions_at_runtime() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                point = { x: 1, y: 2 }
+                dot = { x: 3, time: 4 }
+                selected = { ...point, ...dot, x: point.x }
+                selectedFirst = { x: dot.x, ...point, ...dot }
+                overridden = { ...point, override ...dot }
+
+                OS.println(selected.x, selected.y, selected.time)
+                OS.println(selectedFirst.x, selectedFirst.y, selectedFirst.time)
+                OS.println(overridden.x, overridden.y, overridden.time)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "1 2 4\n3 2 4\n3 2 4\n");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     ast::{self, BinaryOp as AstBinaryOp, ExtensionBlock, Item, TypeDecl, TypeMember},
@@ -3755,7 +3755,7 @@ impl<'a> FunctionLowerer<'a> {
 
         for item in items {
             let (intrinsic, value, item_span) = match item {
-                Expr::Spread { value, span } => {
+                Expr::Spread { value, span, .. } => {
                     (ir::Intrinsic::ListExtend, self.lower_expr(value), *span)
                 }
                 _ => (
@@ -4101,6 +4101,10 @@ impl<'a> FunctionLowerer<'a> {
                             .collect(),
                     );
                 }
+                let explicit_names = fields
+                    .iter()
+                    .filter_map(|field| field.name.as_deref())
+                    .collect::<HashSet<_>>();
                 let mut out = Vec::new();
                 for field in fields {
                     if let Some(name) = &field.name {
@@ -4115,7 +4119,11 @@ impl<'a> FunctionLowerer<'a> {
                         &self.infer_expr_type_with_overrides(&field.value, overrides),
                     ) {
                         for spread_field in spread_fields {
-                            upsert_ir_record_field(&mut out, spread_field);
+                            if !explicit_names.contains(spread_field.name.as_str()) {
+                                upsert_ir_record_field(&mut out, spread_field);
+                            } else if !out.iter().any(|field| field.name == spread_field.name) {
+                                out.push(spread_field);
+                            }
                         }
                     }
                 }
@@ -5104,7 +5112,20 @@ impl<'a> FunctionLowerer<'a> {
                                         value: self.lower_expr(&field.value),
                                     })
                                 } else {
-                                    ir::RecordSpreadPart::Spread(self.lower_expr(&field.value))
+                                    let Expr::Spread {
+                                        value,
+                                        override_existing,
+                                        ..
+                                    } = &field.value
+                                    else {
+                                        unreachable!(
+                                            "shape spread fields are represented by Expr::Spread"
+                                        )
+                                    };
+                                    ir::RecordSpreadPart::Spread {
+                                        value: self.lower_expr(value),
+                                        override_existing: *override_existing,
+                                    }
                                 }
                             })
                             .collect(),
@@ -5339,7 +5360,7 @@ impl<'a> FunctionLowerer<'a> {
         });
         for arg in args.iter().skip(variadic_index) {
             let (intrinsic, value, span) = match &arg.value {
-                Expr::Spread { value, span } => {
+                Expr::Spread { value, span, .. } => {
                     (ir::Intrinsic::ListExtend, self.lower_expr(value), *span)
                 }
                 _ => (
@@ -8632,7 +8653,7 @@ mod tests {
                 def add(value Int) Int = plus(value)
 
                 current = Amount(1, "a")
-                updated = current :< { amount: add(inc(1)) }
+                updated = current with { amount: add(inc(1)) }
                 return updated.amount
             }
             "#,

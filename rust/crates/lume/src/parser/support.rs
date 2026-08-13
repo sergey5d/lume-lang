@@ -46,7 +46,7 @@ impl<'a> Parser<'a> {
             index: self.index,
             diagnostics_len: self.diagnostics.len(),
             allow_trailing_block_call: self.allow_trailing_block_call,
-            allow_shape_update_operator: self.allow_shape_update_operator,
+            allow_shape_update: self.allow_shape_update,
         }
     }
 
@@ -54,7 +54,7 @@ impl<'a> Parser<'a> {
         self.index = checkpoint.index;
         self.diagnostics.truncate(checkpoint.diagnostics_len);
         self.allow_trailing_block_call = checkpoint.allow_trailing_block_call;
-        self.allow_shape_update_operator = checkpoint.allow_shape_update_operator;
+        self.allow_shape_update = checkpoint.allow_shape_update;
     }
 
     pub(super) fn skip_newlines(&mut self) {
@@ -147,7 +147,7 @@ impl<'a> Parser<'a> {
             index: start,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
-            allow_shape_update_operator: self.allow_shape_update_operator,
+            allow_shape_update: self.allow_shape_update,
         };
 
         let Some((_, name_span)) = parser.parse_callable_name("expected callable name") else {
@@ -186,7 +186,7 @@ impl<'a> Parser<'a> {
             index: start,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
-            allow_shape_update_operator: self.allow_shape_update_operator,
+            allow_shape_update: self.allow_shape_update,
         };
 
         let Some((_, name_span)) = parser.parse_callable_name("expected callable name") else {
@@ -272,7 +272,7 @@ impl<'a> Parser<'a> {
             index: start,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
-            allow_shape_update_operator: self.allow_shape_update_operator,
+            allow_shape_update: self.allow_shape_update,
         };
         if parser.parse_pattern().is_none() {
             return false;
@@ -472,7 +472,6 @@ impl<'a> Parser<'a> {
             TokenKind::FatArrow => "=>",
             TokenKind::LeftArrow => "<-",
             TokenKind::QuestionQuestion => "??",
-            TokenKind::ColonLess => ":<",
             TokenKind::PercentEq => "%=",
             TokenKind::Newline => "NEWLINE",
             TokenKind::Eof => "EOF",

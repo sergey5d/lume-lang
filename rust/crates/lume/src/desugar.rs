@@ -159,8 +159,13 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             span: *span,
         },
         ast::Expr::Unit { span } => core::Expr::Unit { span: *span },
-        ast::Expr::Spread { value, span } => core::Expr::Spread {
+        ast::Expr::Spread {
+            value,
+            override_existing,
+            span,
+        } => core::Expr::Spread {
             value: Box::new(desugar_expr(value)),
+            override_existing: *override_existing,
             span: *span,
         },
         ast::Expr::ListLiteral { items, span } => core::Expr::ListLiteral {
