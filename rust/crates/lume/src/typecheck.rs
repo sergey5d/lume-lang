@@ -266,6 +266,13 @@ impl Ty {
 struct ValueInfo {
     ty: Ty,
     mutable: bool,
+    stable: bool,
+}
+
+#[derive(Debug, Clone)]
+struct TypeNarrowing {
+    name: String,
+    ty: Ty,
 }
 
 #[derive(Debug, Clone)]
@@ -897,6 +904,7 @@ impl<'a> Checker<'a> {
                     ValueInfo {
                         ty,
                         mutable: binding.mutable,
+                        stable: !binding.mutable,
                     },
                 );
             }
@@ -939,6 +947,9 @@ impl<'a> Checker<'a> {
             }
             let ty = self.param_local_type(param, elem_ty);
             self.define_local(&param.name, ty, false);
+            if param.lazy {
+                self.mark_current_local_unstable(&param.name);
+            }
         }
         let actual = self.check_callable_body(&function.body);
         self.require_assignable(
@@ -1506,6 +1517,9 @@ impl<'a> Checker<'a> {
             }
             let ty = self.param_local_type(param, elem_ty);
             self.define_local(&param.name, ty, false);
+            if param.lazy {
+                self.mark_current_local_unstable(&param.name);
+            }
         }
         if let Some(body) = &method.body {
             let actual = self.check_callable_body(body);
@@ -2310,6 +2324,20 @@ impl<'a> Checker<'a> {
         self.check_block_against(block, &Ty::Unknown)
     }
 
+    fn check_block_with_narrowing(
+        &mut self,
+        block: &Block,
+        narrowing: Option<&TypeNarrowing>,
+    ) -> Ty {
+        self.push_scope();
+        if let Some(narrowing) = narrowing {
+            self.define_local(&narrowing.name, narrowing.ty.clone(), false);
+        }
+        let result = self.check_block(block);
+        self.pop_scope();
+        result
+    }
+
     fn check_block_against(&mut self, block: &Block, expected: &Ty) -> Ty {
         self.push_scope();
         let mut last = Ty::unit();
@@ -2438,13 +2466,62 @@ impl<'a> Checker<'a> {
             let condition_ty = self.check_expr(condition);
             self.require_bool(&condition_ty, condition.span(), "if condition must be Bool");
         }
-        let then_ty = self.check_block_against(&stmt.then_block, expected);
+        let then_narrowing = stmt
+            .condition
+            .as_ref()
+            .and_then(|condition| self.type_narrowing_for_condition(condition, true));
+        let else_narrowing = stmt
+            .condition
+            .as_ref()
+            .and_then(|condition| self.type_narrowing_for_condition(condition, false));
+        let then_ty = self.check_block_against_with_narrowing(
+            &stmt.then_block,
+            expected,
+            then_narrowing.as_ref(),
+        );
         let else_ty = stmt
             .else_branch
             .as_ref()
-            .map(|branch| self.check_else_branch_value(branch, expected))
+            .map(|branch| {
+                self.check_else_branch_value_with_narrowing(
+                    branch,
+                    expected,
+                    else_narrowing.as_ref(),
+                )
+            })
             .unwrap_or_else(Ty::unit);
+
+        let then_exits = self.block_guarantees_control_exit(&stmt.then_block);
+        let else_exits = stmt
+            .else_branch
+            .as_ref()
+            .is_some_and(|branch| self.else_branch_guarantees_control_exit(branch));
+        if then_exits && !else_exits {
+            if let Some(narrowing) = else_narrowing {
+                self.define_local(&narrowing.name, narrowing.ty, false);
+            }
+        } else if else_exits && !then_exits {
+            if let Some(narrowing) = then_narrowing {
+                self.define_local(&narrowing.name, narrowing.ty, false);
+            }
+        }
+
         join_types(&then_ty, &else_ty)
+    }
+
+    fn check_block_against_with_narrowing(
+        &mut self,
+        block: &Block,
+        expected: &Ty,
+        narrowing: Option<&TypeNarrowing>,
+    ) -> Ty {
+        self.push_scope();
+        if let Some(narrowing) = narrowing {
+            self.define_local(&narrowing.name, narrowing.ty.clone(), false);
+        }
+        let result = self.check_block_against(block, expected);
+        self.pop_scope();
+        result
     }
 
     fn check_else_branch_value(&mut self, branch: &ElseBranch, expected: &Ty) -> Ty {
@@ -2452,6 +2529,21 @@ impl<'a> Checker<'a> {
             ElseBranch::If(stmt) => self.check_if_stmt_value(stmt, expected),
             ElseBranch::Block(block) => self.check_block_against(block, expected),
         }
+    }
+
+    fn check_else_branch_value_with_narrowing(
+        &mut self,
+        branch: &ElseBranch,
+        expected: &Ty,
+        narrowing: Option<&TypeNarrowing>,
+    ) -> Ty {
+        self.push_scope();
+        if let Some(narrowing) = narrowing {
+            self.define_local(&narrowing.name, narrowing.ty.clone(), false);
+        }
+        let result = self.check_else_branch_value(branch, expected);
+        self.pop_scope();
+        result
     }
 
     fn check_match_stmt_value(&mut self, stmt: &crate::ast::MatchStmt, expected: &Ty) -> Ty {
@@ -4134,7 +4226,8 @@ impl<'a> Checker<'a> {
             }
             Expr::Is { left, target, .. } => {
                 self.check_expr(left);
-                self.ty_from_type_ref(target);
+                let target_ty = self.ty_from_type_ref(target);
+                self.validate_runtime_type_ref(target, &target_ty, "type tests");
                 Ty::bool()
             }
             Expr::TypeOf { ty, .. } => {
@@ -4150,8 +4243,11 @@ impl<'a> Checker<'a> {
             } => {
                 let cond_ty = self.check_expr(condition);
                 self.require_bool(&cond_ty, condition.span(), "if condition must be Bool");
-                let then_ty = self.check_block(then_block);
-                let else_ty = self.check_else_expr_branch(else_branch);
+                let then_narrowing = self.type_narrowing_for_condition(condition, true);
+                let else_narrowing = self.type_narrowing_for_condition(condition, false);
+                let then_ty = self.check_block_with_narrowing(then_block, then_narrowing.as_ref());
+                let else_ty = self
+                    .check_else_expr_branch_with_narrowing(else_branch, else_narrowing.as_ref());
                 join_types(&then_ty, &else_ty)
             }
             Expr::Block { body, .. } => self.check_block_against(body, expected),
@@ -6455,6 +6551,107 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn check_else_expr_branch_with_narrowing(
+        &mut self,
+        branch: &ElseExprBranch,
+        narrowing: Option<&TypeNarrowing>,
+    ) -> Ty {
+        self.push_scope();
+        if let Some(narrowing) = narrowing {
+            self.define_local(&narrowing.name, narrowing.ty.clone(), false);
+        }
+        let result = self.check_else_expr_branch(branch);
+        self.pop_scope();
+        result
+    }
+
+    fn type_narrowing_for_condition(
+        &self,
+        condition: &Expr,
+        condition_is_true: bool,
+    ) -> Option<TypeNarrowing> {
+        match condition {
+            Expr::Group { inner, .. } => {
+                self.type_narrowing_for_condition(inner, condition_is_true)
+            }
+            Expr::Unary {
+                op: crate::ast::UnaryOp::Not,
+                expr,
+                ..
+            } => self.type_narrowing_for_condition(expr, !condition_is_true),
+            Expr::Is { left, target, .. } if condition_is_true => {
+                let Expr::Identifier { name, .. } = left.as_ref() else {
+                    return None;
+                };
+                let value = self.lookup_scoped_value(name)?;
+                if !value.stable || runtime_type_ref_has_arguments(target) {
+                    return None;
+                }
+                let ty = self.ty_from_type_ref(target);
+                if matches!(ty, Ty::TypeParam(_) | Ty::Wildcard) {
+                    return None;
+                }
+                Some(TypeNarrowing {
+                    name: name.clone(),
+                    ty,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn validate_runtime_type_ref(&mut self, reference: &TypeRef, ty: &Ty, construct: &str) {
+        match reference {
+            TypeRef::Named { args, span, .. } if !args.is_empty() => {
+                self.add_error(
+                    "erased_runtime_type_arguments",
+                    format!(
+                        "{construct} cannot specify generic arguments; use the erased outer type"
+                    ),
+                    *span,
+                );
+            }
+            TypeRef::Named { args, .. } => {
+                for arg in args {
+                    let arg_ty = self.ty_from_type_ref(arg);
+                    self.validate_runtime_type_ref(arg, &arg_ty, construct);
+                }
+            }
+            TypeRef::Tuple { fields, .. } => {
+                for field in fields {
+                    let field_ty = self.ty_from_type_ref(&field.ty);
+                    self.validate_runtime_type_ref(&field.ty, &field_ty, construct);
+                }
+            }
+            TypeRef::Record { fields, .. } => {
+                for field in fields {
+                    let field_ty = self.ty_from_type_ref(&field.ty);
+                    self.validate_runtime_type_ref(&field.ty, &field_ty, construct);
+                }
+            }
+            TypeRef::Function { params, ret, .. } => {
+                for param in params {
+                    let param_ty = self.ty_from_type_ref(param);
+                    self.validate_runtime_type_ref(param, &param_ty, construct);
+                }
+                let ret_ty = self.ty_from_type_ref(ret);
+                self.validate_runtime_type_ref(ret, &ret_ty, construct);
+            }
+            TypeRef::Wildcard { .. } => {}
+        }
+
+        if let Ty::TypeParam(name) = ty {
+            self.add_error(
+                "unavailable_runtime_type_parameter",
+                format!(
+                    "generic type '{}' is not available to {construct}; use a concrete erased outer type",
+                    name
+                ),
+                reference.span(),
+            );
+        }
+    }
+
     fn bind_pattern(&mut self, pattern: &Pattern, scrutinee: &Ty) {
         match pattern {
             Pattern::Wildcard { .. } => {}
@@ -6465,6 +6662,7 @@ impl<'a> Checker<'a> {
             Pattern::Binding { name, .. } => self.define_local(name, scrutinee.clone(), false),
             Pattern::Type { name, target, .. } => {
                 let target_ty = self.ty_from_type_ref(target);
+                self.validate_runtime_type_ref(target, &target_ty, "runtime type patterns");
                 if let Some(name) = name {
                     self.define_local(name, target_ty, false);
                 }
@@ -8274,7 +8472,20 @@ impl<'a> Checker<'a> {
             self.push_scope();
         }
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), ValueInfo { ty, mutable });
+            scope.insert(
+                name.to_string(),
+                ValueInfo {
+                    ty,
+                    mutable,
+                    stable: !mutable,
+                },
+            );
+        }
+    }
+
+    fn mark_current_local_unstable(&mut self, name: &str) {
+        if let Some(value) = self.scopes.last_mut().and_then(|scope| scope.get_mut(name)) {
+            value.stable = false;
         }
     }
 
@@ -10475,6 +10686,22 @@ fn join_many_types(items: &[Ty]) -> Ty {
         out = join_types(&out, item);
     }
     out
+}
+
+fn runtime_type_ref_has_arguments(reference: &TypeRef) -> bool {
+    match reference {
+        TypeRef::Named { args, .. } => !args.is_empty(),
+        TypeRef::Tuple { fields, .. } => fields
+            .iter()
+            .any(|field| runtime_type_ref_has_arguments(&field.ty)),
+        TypeRef::Record { fields, .. } => fields
+            .iter()
+            .any(|field| runtime_type_ref_has_arguments(&field.ty)),
+        TypeRef::Function { params, ret, .. } => {
+            params.iter().any(runtime_type_ref_has_arguments) || runtime_type_ref_has_arguments(ret)
+        }
+        TypeRef::Wildcard { .. } => false,
+    }
 }
 
 fn module_alias_and_member(expr: &Expr) -> Option<(String, String)> {
@@ -13666,6 +13893,70 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn narrows_stable_identifier_inside_successful_is_branch() {
+        let program = parse_inline(
+            r#"
+def textSize(value Any) Int {
+    if value is Str {
+        return value.size()
+    }
+    0
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn preserves_positive_is_narrowing_after_early_exit() {
+        let program = parse_inline(
+            r#"
+def textSize(value Any) Int {
+    if !(value is Str) {
+        return 0
+    }
+    value.size()
+}
+
+def textSizeWithElse(value Any) Int {
+    if value is Str {
+    } else {
+        return 0
+    }
+    value.size()
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn does_not_narrow_mutable_identifiers() {
+        let program = parse_inline(
+            r#"
+def textSize(source Any) Int {
+    var value Any = source
+    if value is Str {
+        return value.size()
+    }
+    0
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "unknown_member"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

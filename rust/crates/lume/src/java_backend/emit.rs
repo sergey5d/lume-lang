@@ -2558,7 +2558,9 @@ impl<'a> FunctionEmitter<'a> {
                 }
             }
             ir::RValue::TypeOf { ty } => Some(type_value_expr(ty, self.names)),
-            ir::RValue::Cast { operand, .. } => self.emit_operand(operand),
+            ir::RValue::Cast { operand, ty } => self
+                .emit_operand(operand)
+                .map(|expr| self.unchecked_reference_cast(expr, ty)),
             ir::RValue::NamedValue { path } => self.emit_named_runtime_value(path),
             ir::RValue::Record(fields) => self.unsupported(&format!(
                 "anonymous shape literal {{{}}}",
@@ -2571,7 +2573,7 @@ impl<'a> FunctionEmitter<'a> {
             ir::RValue::RecordSpread(_) => self.unsupported("anonymous shape spread"),
             ir::RValue::RecordUpdate { .. } => self.unsupported("shape update"),
             ir::RValue::Index { base, index } => self.emit_index(base, index),
-            ir::RValue::TypeTest { .. } => self.unsupported("type test"),
+            ir::RValue::TypeTest { operand, ty } => self.emit_type_test(operand, ty),
             ir::RValue::Closure { function, captures } => {
                 self.emit_closure(*function, captures, None)
             }
@@ -2612,6 +2614,35 @@ impl<'a> FunctionEmitter<'a> {
                 }
                 _ => None,
             })
+    }
+
+    fn emit_type_test(&self, operand: &ir::Operand, ty: &ir::Type) -> Option<String> {
+        let value = self.emit_operand(operand)?;
+        if matches!(ty, ir::Type::Never) {
+            return Some("false".to_string());
+        }
+        if matches!(ty, ir::Type::Unknown) || is_named_builtin(ty, "Any") {
+            return Some(format!("{value} != null"));
+        }
+        if matches!(ty, ir::Type::Record(_)) {
+            return self.unsupported("anonymous shape type test");
+        }
+
+        let erased = match ty {
+            ir::Type::Named { name, .. } => ir::Type::Named {
+                name: name.clone(),
+                args: Vec::new(),
+            },
+            ir::Type::Tuple(items) => ir::Type::Tuple(vec![ir::Type::Unknown; items.len()]),
+            ir::Type::Function { params, .. } => ir::Type::Function {
+                params: vec![ir::Type::Unknown; params.len()],
+                ret: Box::new(ir::Type::Unknown),
+            },
+            other => other.clone(),
+        };
+        let java_type = self.names.value_type(&erased);
+        let raw_java_type = java_type.split('<').next().unwrap_or(&java_type);
+        Some(format!("{value} instanceof {raw_java_type}"))
     }
 
     fn emit_index(&self, base: &ir::Operand, index: &ir::Operand) -> Option<String> {
@@ -4442,6 +4473,7 @@ impl<'a> FunctionEmitter<'a> {
                 self.index_result_type(&base_ty)
             }
             ir::RValue::TypeOf { ty } => Some(runtime_ir_type(ty.clone())),
+            ir::RValue::TypeTest { .. } => Some(ir::Type::Bool),
             _ => None,
         }
     }

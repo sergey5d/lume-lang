@@ -866,9 +866,9 @@ shape {}                         # explicit empty anonymous shape literal
 { expr }                         # block expression
 Type { field: value }            # brace field construction or enum field payload
 call { x => ... }                # trailing lambda
-Interface with Other { def method(...) ... } # anonymous interface implementation
+Interface with Other, Third { def method(...) ... } # anonymous interface implementation
 object { field Type = value; def method() Type = value } # anonymous object
-object with Interface { def method() Type = value } # explicit anonymous interface implementation
+object with Interface, Other { def method() Type = value } # explicit anonymous interface implementation
 new(field Type)                  # constructor declaration
 shape(value, other)              # contextual anonymous-shape positional construction
 ```
@@ -1620,6 +1620,30 @@ interface Named {
 }
 ```
 
+Interface implementation and inheritance lists use one `with`, followed by
+comma-separated interface types:
+
+```txt
+class Service with Readable, Writable {
+}
+
+value = object with Readable, Writable {
+    def read() Str = "value"
+    def write(value Str) Unit = ()
+}
+
+other = Readable with Writable, Closeable {
+    def read() Str = "value"
+    def write(value Str) Unit = ()
+    def close() Unit = ()
+}
+```
+
+The interface-led form includes the type before `with`, so
+`Readable with Writable, Closeable` implements all three interfaces. Repeating
+the keyword, such as `object with Readable with Writable`, is invalid; write
+`object with Readable, Writable` instead.
+
 Interfaces may also provide default methods by attaching a body:
 
 ```txt
@@ -1989,6 +2013,49 @@ if let _ Worker = value {
     println("value is a Worker")
 }
 ```
+
+Runtime type tests use `is`:
+
+```txt
+if value is Str {
+    println(value.size())
+}
+```
+
+`is` is non-associative. A type test has the grammar
+`comparison ["is" type]`, so chained tests are rejected:
+
+```txt
+value is Str                 # valid
+value is Str is Any          # invalid
+(value is Str) && otherCheck # valid
+```
+
+Inside the successful branch, an immutable local binding or parameter tested
+directly by name is narrowed to the tested type. Parentheses and a leading `!`
+are recognized. When the opposite branch exits, the positive narrowing remains
+available afterward:
+
+```txt
+def size(value Any) Int {
+    if !(value is Str) {
+        return 0
+    }
+
+    value.size()
+}
+```
+
+This narrowing is intentionally local and conservative:
+
+- mutable bindings are not narrowed, because another read may observe a different value
+- by-name parameters, member reads, indexes, and arbitrary expressions are not narrowed
+- `&&` / `||` conditions do not currently combine narrowing facts
+- the checker does not currently infer negative types or report unreachable type-test branches
+
+Runtime type arguments are erased. Generic runtime tests and type patterns must
+name only the outer type: `value is Box` and `_ Box` are valid, while
+`value is Box[Int]` and `_ Box[Int]` are rejected.
 
 `if let` is intended for refutable matches. If the compiler can prove the
 pattern always succeeds for the scrutinee type, it rejects the construct and

@@ -172,6 +172,19 @@ impl<'a> Parser<'a> {
         Some(refs)
     }
 
+    pub(super) fn parse_interface_ref_list_after_with(&mut self) -> Option<Vec<TypeRef>> {
+        let mut refs = self.parse_type_ref_list()?;
+        while self.match_keyword(Keyword::With) {
+            self.diagnostics.push(Diagnostic::error(
+                "repeated_interface_with",
+                "interface lists use one 'with' followed by comma-separated types",
+                self.previous_span(),
+            ));
+            refs.extend(self.parse_type_ref_list()?);
+        }
+        Some(refs)
+    }
+
     pub(super) fn parse_type_ref(&mut self) -> Option<TypeRef> {
         self.skip_newlines();
         if self.at_keyword(Keyword::Fn) {

@@ -1117,6 +1117,119 @@ greeter Greeter = object with Greeter {
 }
 
 #[test]
+fn parses_comma_separated_anonymous_interface_lists() {
+    let result = parse(
+        r#"
+interface First {
+    def first() Str
+}
+
+interface Second {
+    def second() Str
+}
+
+interface Third {
+    def third() Str
+}
+
+class Combined with First, Second {
+}
+
+objectValue = object with First, Second {
+    def first() Str = "first"
+    def second() Str = "second"
+}
+
+interfaceValue = First with Second, Third {
+    def first() Str = "first"
+    def second() Str = "second"
+    def third() Str = "third"
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+
+    let Item::Statement(Stmt::Binding(object_binding)) = &program.items[4] else {
+        panic!("expected object binding");
+    };
+    assert!(matches!(
+        &object_binding.values[0],
+        Expr::AnonymousInterface { interfaces, .. } if interfaces.len() == 2
+    ));
+
+    let Item::Statement(Stmt::Binding(interface_binding)) = &program.items[5] else {
+        panic!("expected interface-led binding");
+    };
+    assert!(matches!(
+        &interface_binding.values[0],
+        Expr::AnonymousInterface { interfaces, .. } if interfaces.len() == 3
+    ));
+}
+
+#[test]
+fn rejects_repeated_with_in_interface_lists() {
+    let result = parse(
+        r#"
+interface First {
+    def first() Str
+}
+
+interface Second {
+    def second() Str
+}
+
+class Combined with First with Second {
+}
+
+objectValue = object with First with Second {
+    def first() Str = "first"
+    def second() Str = "second"
+}
+
+interfaceValue = First with Second with First {
+    def first() Str = "first"
+    def second() Str = "second"
+}
+"#,
+    );
+    assert_eq!(
+        result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "repeated_interface_with")
+            .count(),
+        3,
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn parses_comma_separated_interface_list_inside_equals_block_body() {
+    let result = parse(
+        r#"
+interface First {
+    def first() Str
+}
+
+interface Second {
+    def second() Str
+}
+
+def main() Unit = {
+    value First = object with First, Second {
+        def first() Str = "first"
+        def second() Str = "second"
+    }
+    println(value.first())
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
 fn rejects_keyword_free_local_function_declarations() {
     let result = parse(
         r#"
@@ -3742,6 +3855,25 @@ fn rejects_repeated_when_in_generic_clause() {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "duplicate_when_clause"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn parses_single_runtime_type_test() {
+    let expr = parse_expr_only("value is Str");
+    assert!(matches!(expr, Expr::Is { .. }));
+}
+
+#[test]
+fn rejects_chained_runtime_type_tests() {
+    let result = parse("def test(value Any) Bool = value is Str is Any");
+    assert!(
+        result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "non_associative_type_test"
+                && diagnostic.message.contains("'is' is non-associative")
+        }),
         "{:#?}",
         result.diagnostics
     );

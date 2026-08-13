@@ -1,15 +1,30 @@
 # EXPECT:
 # is worker
+# Ada
 
 class Worker {
+    name Str
+
+    def label() Str = this.name
+}
+
+def workerLabel(value Any) Str {
+    if !(value is Worker) {
+        return "not a worker"
+    }
+
+    # The early exit preserves the successful Worker narrowing here.
+    value.label()
 }
 
 def main() Unit {
-    value Any = Worker {}
+    value Any = Worker("Ada")
 
     if value is Worker {
         println("is worker")
     } else {
         println("is other")
     }
+
+    println(workerLabel(value))
 }

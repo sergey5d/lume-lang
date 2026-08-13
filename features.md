@@ -169,42 +169,15 @@ Clarification on "failure conversion":
   - enclosing function returns `Result[Int, AppError]`
   - failure conversion would mean allowing `IoError` to be turned into something like `AppError.Io(...)` during propagation
 
-### 11. Smarter Type Narrowing
+### 11. Advanced Flow Analysis
 
-Later improvements could include:
-- better narrowing after `is`
-- exhaustiveness analysis
-- unreachable branch detection
+The settled conservative `is` narrowing rules live in `syntax.md`. Possible
+later flow-analysis work is limited to broader deductions:
 
-Concrete example of the kind of narrowing worth considering:
-
-```txt
-if x is Str {
-    println(x.size())
-}
-```
-
-Meaning:
-- after the `is Str` check succeeds, `x` would be treated as `Str` inside the `if` body
-- the programmer would not need to write an explicit cast before using string-specific members
-
-Possible follow-up extensions if this direction is adopted:
-- narrowing in the `else` branch to mean "not that type"
-- preserving narrowing after early exits, for example:
-
-```txt
-if !(x is Str) {
-    return
-}
-
-println(x.size())
-```
-
-- combining narrowing with boolean conditions when the flow stays obvious
-
-Main design question:
-- whether this should stay very local and conservative
-- or whether the checker should learn more control-flow-sensitive narrowing over time
+- combining narrowing facts through `&&` and carefully selected `||` forms
+- representing negative narrowing once the type system has useful union/subtraction semantics
+- detecting unreachable type-test branches and match cases
+- deciding whether stable field paths deserve narrowing, rather than only immutable identifiers
 
 ### 12. Reified Generic Follow-Ups
 

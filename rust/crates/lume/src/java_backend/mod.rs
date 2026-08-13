@@ -3654,6 +3654,82 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_runs_runtime_type_narrowing() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java type-narrowing test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-type-narrowing");
+        let source = temp.join("type_narrowing.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/typenarrowing
+
+class Worker {
+    name Str
+
+    def label() Str = this.name
+}
+
+def workerLabel(value Any) Str {
+    if !(value is Worker) {
+        return "other"
+    }
+    value.label()
+}
+
+def directWorkerLabel(value Any) Str {
+    if value is Worker {
+        return value.label()
+    }
+    "other"
+}
+
+def main() Unit {
+    println(workerLabel(Worker("Ada")))
+    println(workerLabel("text"))
+    println(directWorkerLabel(Worker("Bob")))
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/typenarrowing/TypenarrowingModule.java"))
+            .expect("read module");
+        assert!(module.contains("instanceof Worker"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.typenarrowing.TypenarrowingMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "Ada\nother\nBob\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_executable_runs_array_of_rune() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java executable test because javac/java is not available");

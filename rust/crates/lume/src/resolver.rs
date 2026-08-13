@@ -2043,7 +2043,7 @@ impl<'a> Resolver<'a> {
             }
             Expr::Is { left, target, .. } => {
                 self.resolve_expr(left);
-                self.resolve_type_ref(Some(target));
+                self.resolve_runtime_type_ref(target, "type tests", "invalid_type_test");
             }
             Expr::TypeOf { ty, .. } => {
                 self.resolve_type_ref(Some(ty));
@@ -2327,6 +2327,15 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_type_pattern_ref(&mut self, reference: &TypeRef) {
+        self.resolve_runtime_type_ref(reference, "runtime type patterns", "invalid_match_pattern");
+    }
+
+    fn resolve_runtime_type_ref(
+        &mut self,
+        reference: &TypeRef,
+        construct: &str,
+        diagnostic_code: &'static str,
+    ) {
         match reference {
             TypeRef::Wildcard { .. } => {
                 self.resolve_type_ref(Some(reference));
@@ -2341,8 +2350,10 @@ impl<'a> Resolver<'a> {
                 if self.type_pattern_uses_erased_generic(name) {
                     if !args.is_empty() {
                         self.add_error(
-                            "invalid_match_pattern",
-                            "runtime type patterns cannot specify generic arguments; use the erased outer type",
+                            diagnostic_code,
+                            format!(
+                                "{construct} cannot specify generic arguments; use the erased outer type"
+                            ),
                             *span,
                         );
                     }

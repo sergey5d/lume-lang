@@ -3,6 +3,7 @@
 # hello 4
 # 8
 # welcome
+# again
 
 object Settings {
     name Str = "settings"
@@ -12,6 +13,10 @@ object Settings {
 
 interface Greeter {
     def greet() Str
+}
+
+interface Described {
+    def name() Str
 }
 
 def main() Unit = {
@@ -28,8 +33,15 @@ def main() Unit = {
     println(value.describe())
     println(value.doubled())
 
-    greeter Greeter = object with Greeter {
+    greeter Greeter = object with Greeter, Described {
         def greet() Str = "welcome"
+        def name() Str = "example"
     }
     println(greeter.greet())
+
+    other Greeter = Greeter with Described {
+        def greet() Str = "again"
+        def name() Str = "other"
+    }
+    println(other.greet())
 }

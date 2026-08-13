@@ -346,7 +346,7 @@ impl<'a> Parser<'a> {
         let (name, _) = self.expect_identifier("expected type name")?;
         let generic_clause = self.parse_generic_clause()?;
         let with_bounds = if self.match_keyword(Keyword::With) {
-            self.parse_type_ref_list()?
+            self.parse_interface_ref_list_after_with()?
         } else {
             Vec::new()
         };
@@ -588,7 +588,7 @@ impl<'a> Parser<'a> {
         case_name: &str,
     ) -> Option<Span> {
         let with_span = self.previous_span();
-        let bounds = self.parse_type_ref_list()?;
+        let bounds = self.parse_interface_ref_list_after_with()?;
         let end = bounds.last().map(TypeRef::span).unwrap_or(with_span);
         self.diagnostics.push(Diagnostic::error(
             "invalid_enum_case_interface",

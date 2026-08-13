@@ -654,10 +654,10 @@ impl<'a> Parser<'a> {
         let Some(_) = parser.parse_type_ref() else {
             return false;
         };
-        while parser.match_keyword(Keyword::With) {
-            if parser.parse_type_ref().is_none() {
-                return false;
-            }
+        if parser.match_keyword(Keyword::With)
+            && parser.parse_interface_ref_list_after_with().is_none()
+        {
+            return false;
         }
         if !parser.at(TokenKind::LBrace) {
             return false;
@@ -689,8 +689,8 @@ impl<'a> Parser<'a> {
         let first = self.parse_type_ref()?;
         let start = first.span();
         let mut interfaces = vec![first];
-        while self.match_keyword(Keyword::With) {
-            interfaces.push(self.parse_type_ref()?);
+        if self.match_keyword(Keyword::With) {
+            interfaces.extend(self.parse_interface_ref_list_after_with()?);
         }
         self.parse_anonymous_interface_body(start, interfaces)
     }
@@ -730,10 +730,7 @@ impl<'a> Parser<'a> {
     fn parse_object_expr(&mut self) -> Option<Expr> {
         let start = self.consume_keyword(Keyword::Object, "expected 'object'")?;
         if self.match_keyword(Keyword::With) {
-            let mut interfaces = vec![self.parse_type_ref()?];
-            while self.match_keyword(Keyword::With) {
-                interfaces.push(self.parse_type_ref()?);
-            }
+            let interfaces = self.parse_interface_ref_list_after_with()?;
             return self.parse_anonymous_interface_body(start, interfaces);
         }
 
@@ -952,11 +949,11 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_equality_expr(&mut self) -> Option<Expr> {
-        let mut expr = self.parse_comparison_expr()?;
+        let mut expr = self.parse_type_test_expr()?;
         loop {
             if self.match_token(TokenKind::EqEq) {
                 self.skip_newlines();
-                let right = self.parse_comparison_expr()?;
+                let right = self.parse_type_test_expr()?;
                 let span = expr.span().cover(right.span());
                 expr = Expr::Binary {
                     left: Box::new(expr),
@@ -968,7 +965,7 @@ impl<'a> Parser<'a> {
             }
             if self.match_token(TokenKind::NotEq) {
                 self.skip_newlines();
-                let right = self.parse_comparison_expr()?;
+                let right = self.parse_type_test_expr()?;
                 let span = expr.span().cover(right.span());
                 expr = Expr::Binary {
                     left: Box::new(expr),
@@ -978,19 +975,37 @@ impl<'a> Parser<'a> {
                 };
                 continue;
             }
-            if self.match_keyword(Keyword::Is) {
-                self.skip_newlines();
-                let target = self.parse_type_ref()?;
-                let span = expr.span().cover(target.span());
-                expr = Expr::Is {
-                    left: Box::new(expr),
-                    target,
-                    span,
-                };
-                continue;
-            }
             break;
         }
+        Some(expr)
+    }
+
+    pub(super) fn parse_type_test_expr(&mut self) -> Option<Expr> {
+        let left = self.parse_comparison_expr()?;
+        if !self.match_keyword(Keyword::Is) {
+            return Some(left);
+        }
+
+        self.skip_newlines();
+        let target = self.parse_type_ref()?;
+        let span = left.span().cover(target.span());
+        let expr = Expr::Is {
+            left: Box::new(left),
+            target,
+            span,
+        };
+
+        while self.match_keyword(Keyword::Is) {
+            let operator_span = self.previous_span();
+            self.diagnostics.push(Diagnostic::error(
+                "non_associative_type_test",
+                "operator 'is' is non-associative; combine separate type tests with '&&' or '||'",
+                operator_span,
+            ));
+            self.skip_newlines();
+            self.parse_type_ref()?;
+        }
+
         Some(expr)
     }
 
@@ -1772,9 +1787,16 @@ impl<'a> Parser<'a> {
         let mut depth = 1usize;
         let mut nested_parens = 0usize;
         let mut nested_brackets = 0usize;
+        let mut inside_with_header = false;
         while let Some(token) = self.tokens.get(lookahead) {
             match token.kind {
-                TokenKind::LBrace => depth += 1,
+                TokenKind::Keyword(Keyword::With) if depth == 1 => {
+                    inside_with_header = true;
+                }
+                TokenKind::LBrace => {
+                    depth += 1;
+                    inside_with_header = false;
+                }
                 TokenKind::RBrace => {
                     depth = depth.saturating_sub(1);
                     if depth == 0 {
@@ -1785,7 +1807,12 @@ impl<'a> Parser<'a> {
                 TokenKind::RParen => nested_parens = nested_parens.saturating_sub(1),
                 TokenKind::LBracket => nested_brackets += 1,
                 TokenKind::RBracket => nested_brackets = nested_brackets.saturating_sub(1),
-                TokenKind::Comma if depth == 1 && nested_parens == 0 && nested_brackets == 0 => {
+                TokenKind::Comma
+                    if depth == 1
+                        && nested_parens == 0
+                        && nested_brackets == 0
+                        && !inside_with_header =>
+                {
                     return true;
                 }
                 TokenKind::Colon if depth == 1 && nested_parens == 0 && nested_brackets == 0 => {

@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# invalid_type_test at .*: type tests cannot specify generic arguments; use the erased outer type
+
+class Box[T] {
+    value T
+}
+
+def main(value Any) Bool = value is Box[Int]

@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*operator 'is' is non-associative; combine separate type tests with '&&' or '\|\|'.*
+
+def main(value Any) Bool = value is Str is Any

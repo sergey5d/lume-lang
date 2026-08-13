@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*interface lists use one 'with' followed by comma-separated types.*
+
+interface First {
+    def first() Str
+}
+
+interface Second {
+    def second() Str
+}
+
+class Combined with First with Second {
+}

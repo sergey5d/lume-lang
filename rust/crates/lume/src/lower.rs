@@ -665,6 +665,13 @@ struct CaptureSource {
 }
 
 #[derive(Debug, Clone)]
+struct IrTypeNarrowing {
+    name: String,
+    ty: ir::Type,
+    span: Span,
+}
+
+#[derive(Debug, Clone)]
 struct ExpectedArgSpec {
     ty: ir::Type,
     lazy: bool,
@@ -1648,6 +1655,8 @@ impl<'a> FunctionLowerer<'a> {
             );
             return;
         };
+        let then_narrowing = self.type_narrowing_for_condition(condition, true);
+        let else_narrowing = self.type_narrowing_for_condition(condition, false);
         let then_block = self.add_block();
         let else_block = self.add_block();
         let join_block = self.add_block();
@@ -1662,21 +1671,36 @@ impl<'a> FunctionLowerer<'a> {
         });
 
         self.current_block = Some(then_block);
+        self.push_scope();
+        self.apply_type_narrowing(then_narrowing.as_ref());
         self.lower_block_statements(&stmt.then_block);
+        self.pop_scope();
+        let then_exits = self.current_block.is_none();
         if self.current_block.is_some() {
             self.terminate(ir::Terminator::goto(join_block));
         }
 
         self.current_block = Some(else_block);
+        self.push_scope();
+        self.apply_type_narrowing(else_narrowing.as_ref());
         if let Some(branch) = &stmt.else_branch {
             self.lower_else_branch(branch);
         }
+        self.pop_scope();
+        let else_exits = self.current_block.is_none();
         if self.current_block.is_some() {
             self.terminate(ir::Terminator::goto(join_block));
         }
 
         let join_used = self.block_has_predecessor(join_block);
         self.current_block = if join_used { Some(join_block) } else { None };
+        if self.current_block.is_some() {
+            if then_exits && !else_exits {
+                self.apply_type_narrowing(else_narrowing.as_ref());
+            } else if else_exits && !then_exits {
+                self.apply_type_narrowing(then_narrowing.as_ref());
+            }
+        }
     }
 
     fn lower_if_condition_clauses(
@@ -2024,6 +2048,14 @@ impl<'a> FunctionLowerer<'a> {
         let else_block = self.add_block();
         let join_block = self.add_block();
         let mut then_scope_pushed = false;
+        let then_narrowing = stmt
+            .condition
+            .as_ref()
+            .and_then(|condition| self.type_narrowing_for_condition(condition, true));
+        let else_narrowing = stmt
+            .condition
+            .as_ref()
+            .and_then(|condition| self.type_narrowing_for_condition(condition, false));
 
         if !stmt.condition_clauses.is_empty() {
             self.push_scope();
@@ -2102,6 +2134,11 @@ impl<'a> FunctionLowerer<'a> {
                 },
             });
             self.current_block = Some(then_block);
+            if then_narrowing.is_some() {
+                self.push_scope();
+                then_scope_pushed = true;
+                self.apply_type_narrowing(then_narrowing.as_ref());
+            }
         } else {
             return None;
         }
@@ -2117,10 +2154,18 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         self.current_block = Some(else_block);
+        let else_scope_pushed = else_narrowing.is_some();
+        if else_scope_pushed {
+            self.push_scope();
+            self.apply_type_narrowing(else_narrowing.as_ref());
+        }
         let else_value = match else_branch {
             ElseBranch::If(stmt) => self.lower_if_stmt_tail_value(stmt, expected),
             ElseBranch::Block(block) => self.lower_block_value_with_expected(block, expected),
         };
+        if else_scope_pushed {
+            self.pop_scope();
+        }
         if let Some(value) = else_value {
             self.assign_if_result(result, value, stmt.span);
         }
@@ -4480,6 +4525,73 @@ impl<'a> FunctionLowerer<'a> {
         })
     }
 
+    fn type_narrowing_for_condition(
+        &self,
+        condition: &Expr,
+        condition_is_true: bool,
+    ) -> Option<IrTypeNarrowing> {
+        match condition {
+            Expr::Unary {
+                op: ast::UnaryOp::Not,
+                expr,
+                ..
+            } => self.type_narrowing_for_condition(expr, !condition_is_true),
+            Expr::Is { left, target, span } if condition_is_true => {
+                let Expr::Identifier { name, .. } = left.as_ref() else {
+                    return None;
+                };
+                if self.lazy_values.contains_key(name)
+                    || lower_runtime_type_ref_has_arguments(target)
+                {
+                    return None;
+                }
+                let local = self.lookup_scoped_local(name)?;
+                let local_info = self.function().locals.get(local.0)?;
+                if local_info.mutable {
+                    return None;
+                }
+                let ty = lower_type_ref(target);
+                if matches!(ty, ir::Type::Unknown | ir::Type::TypeParam(_)) {
+                    return None;
+                }
+                Some(IrTypeNarrowing {
+                    name: name.clone(),
+                    ty,
+                    span: *span,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn apply_type_narrowing(&mut self, narrowing: Option<&IrTypeNarrowing>) {
+        let Some(narrowing) = narrowing else {
+            return;
+        };
+        let Some(source) = self.lookup_scoped_or_captured_value(&narrowing.name) else {
+            return;
+        };
+        let local = self.add_temp(narrowing.ty.clone());
+        self.push_statement(ir::Statement {
+            span: Some(narrowing.span),
+            kind: ir::StatementKind::Assign {
+                target: ir::Place::Local(local),
+                value: ir::RValue::Cast {
+                    operand: source,
+                    ty: narrowing.ty.clone(),
+                },
+            },
+        });
+        self.bind_existing(&narrowing.name, local);
+    }
+
+    fn lookup_scoped_local(&self, name: &str) -> Option<ir::LocalId> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+    }
+
     fn operand_type(&self, operand: &ir::Operand) -> Option<ir::Type> {
         match operand {
             ir::Operand::Copy(place) | ir::Operand::Move(place) => self.place_type(place),
@@ -5003,6 +5115,8 @@ impl<'a> FunctionLowerer<'a> {
         else_branch: &ElseExprBranch,
         span: Span,
     ) -> ir::Operand {
+        let then_narrowing = self.type_narrowing_for_condition(condition, true);
+        let else_narrowing = self.type_narrowing_for_condition(condition, false);
         let temp = self.add_temp(ir::Type::Unknown);
         let then_id = self.add_block();
         let else_id = self.add_block();
@@ -5019,6 +5133,8 @@ impl<'a> FunctionLowerer<'a> {
         });
 
         self.current_block = Some(then_id);
+        self.push_scope();
+        self.apply_type_narrowing(then_narrowing.as_ref());
         if let Some(value) = self.lower_block_value(then_block) {
             self.push_statement(ir::Statement {
                 span: Some(then_block.span),
@@ -5028,11 +5144,14 @@ impl<'a> FunctionLowerer<'a> {
                 },
             });
         }
+        self.pop_scope();
         if self.current_block.is_some() {
             self.terminate(ir::Terminator::goto(join_id));
         }
 
         self.current_block = Some(else_id);
+        self.push_scope();
+        self.apply_type_narrowing(else_narrowing.as_ref());
         let else_value = match else_branch {
             ElseExprBranch::If(expr) => Some(self.lower_expr(expr)),
             ElseExprBranch::Block(block) => self.lower_block_value(block),
@@ -5046,6 +5165,7 @@ impl<'a> FunctionLowerer<'a> {
                 },
             });
         }
+        self.pop_scope();
         if self.current_block.is_some() {
             self.terminate(ir::Terminator::goto(join_id));
         }
@@ -6568,6 +6688,23 @@ fn lower_type_ref(reference: &TypeRef) -> ir::Type {
             params: params.iter().map(lower_type_ref).collect(),
             ret: Box::new(lower_type_ref(ret)),
         },
+    }
+}
+
+fn lower_runtime_type_ref_has_arguments(reference: &TypeRef) -> bool {
+    match reference {
+        TypeRef::Named { args, .. } => !args.is_empty(),
+        TypeRef::Tuple { fields, .. } => fields
+            .iter()
+            .any(|field| lower_runtime_type_ref_has_arguments(&field.ty)),
+        TypeRef::Record { fields, .. } => fields
+            .iter()
+            .any(|field| lower_runtime_type_ref_has_arguments(&field.ty)),
+        TypeRef::Function { params, ret, .. } => {
+            params.iter().any(lower_runtime_type_ref_has_arguments)
+                || lower_runtime_type_ref_has_arguments(ret)
+        }
+        TypeRef::Wildcard { .. } => false,
     }
 }
 
