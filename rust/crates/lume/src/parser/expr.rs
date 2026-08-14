@@ -640,7 +640,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub(super) fn is_anonymous_interface_expr_start(&self) -> bool {
+    pub(super) fn is_removed_interface_led_expr_start(&self) -> bool {
         if !self.can_start_type_ref() {
             return false;
         }
@@ -654,13 +654,15 @@ impl<'a> Parser<'a> {
         let Some(_) = parser.parse_type_ref() else {
             return false;
         };
-        if parser.match_keyword(Keyword::With)
-            && parser.parse_interface_ref_list_after_with().is_none()
-        {
+        let has_with = parser.match_keyword(Keyword::With);
+        if has_with && parser.parse_interface_ref_list_after_with().is_none() {
             return false;
         }
         if !parser.at(TokenKind::LBrace) {
             return false;
+        }
+        if has_with {
+            return true;
         }
         if parser
             .tokens
@@ -685,13 +687,18 @@ impl<'a> Parser<'a> {
         ) || self.starts_local_callable_decl_at(lookahead)
     }
 
-    pub(super) fn parse_anonymous_interface_expr(&mut self) -> Option<Expr> {
+    pub(super) fn parse_removed_interface_led_expr(&mut self) -> Option<Expr> {
         let first = self.parse_type_ref()?;
         let start = first.span();
         let mut interfaces = vec![first];
         if self.match_keyword(Keyword::With) {
             interfaces.extend(self.parse_interface_ref_list_after_with()?);
         }
+        self.diagnostics.push(Diagnostic::error(
+            "removed_interface_led_construction",
+            "anonymous interface implementations start with 'object with'; write 'object with Interface { ... }' or 'object with Interface, Other { ... }'",
+            start.cover(self.current_span()),
+        ));
         self.parse_anonymous_interface_body(start, interfaces)
     }
 
@@ -1613,8 +1620,8 @@ impl<'a> Parser<'a> {
         if self.at_keyword(Keyword::Object) {
             return self.parse_object_expr();
         }
-        if self.can_start_type_ref() && self.is_anonymous_interface_expr_start() {
-            return self.parse_anonymous_interface_expr();
+        if self.can_start_type_ref() && self.is_removed_interface_led_expr_start() {
+            return self.parse_removed_interface_led_expr();
         }
         match self.current_kind() {
             TokenKind::Identifier => {

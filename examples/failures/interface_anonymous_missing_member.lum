@@ -7,7 +7,7 @@ interface Reader {
 }
 
 def main() Unit {
-    handler Reader = Reader {
+    handler Reader = object with Reader {
         def read() Str = "open"
     }
 }

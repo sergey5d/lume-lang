@@ -1117,7 +1117,29 @@ greeter Greeter = object with Greeter {
 }
 
 #[test]
-fn parses_comma_separated_anonymous_interface_lists() {
+fn parses_object_with_empty_marker_interface() {
+    let result = parse(
+        r#"
+interface Marker {
+}
+
+marker Marker = object with Marker {}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Statement(Stmt::Binding(binding)) = &program.items[1] else {
+        panic!("expected marker binding");
+    };
+    assert!(matches!(
+        &binding.values[0],
+        Expr::AnonymousInterface { interfaces, methods, .. }
+            if interfaces.len() == 1 && methods.is_empty()
+    ));
+}
+
+#[test]
+fn parses_comma_separated_interface_lists() {
     let result = parse(
         r#"
 interface First {
@@ -1128,10 +1150,6 @@ interface Second {
     def second() Str
 }
 
-interface Third {
-    def third() Str
-}
-
 class Combined with First, Second {
 }
 
@@ -1140,30 +1158,17 @@ objectValue = object with First, Second {
     def second() Str = "second"
 }
 
-interfaceValue = First with Second, Third {
-    def first() Str = "first"
-    def second() Str = "second"
-    def third() Str = "third"
-}
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
 
-    let Item::Statement(Stmt::Binding(object_binding)) = &program.items[4] else {
+    let Item::Statement(Stmt::Binding(object_binding)) = &program.items[3] else {
         panic!("expected object binding");
     };
     assert!(matches!(
         &object_binding.values[0],
         Expr::AnonymousInterface { interfaces, .. } if interfaces.len() == 2
-    ));
-
-    let Item::Statement(Stmt::Binding(interface_binding)) = &program.items[5] else {
-        panic!("expected interface-led binding");
-    };
-    assert!(matches!(
-        &interface_binding.values[0],
-        Expr::AnonymousInterface { interfaces, .. } if interfaces.len() == 3
     ));
 }
 
@@ -1187,10 +1192,6 @@ objectValue = object with First with Second {
     def second() Str = "second"
 }
 
-interfaceValue = First with Second with First {
-    def first() Str = "first"
-    def second() Str = "second"
-}
 "#,
     );
     assert_eq!(
@@ -1198,6 +1199,42 @@ interfaceValue = First with Second with First {
             .diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.code == "repeated_interface_with")
+            .count(),
+        2,
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_interface_led_anonymous_implementations() {
+    let result = parse(
+        r#"
+interface First {
+    def first() Str
+}
+
+interface Second {
+    def second() Str
+}
+
+value = First {
+    def first() Str = "first"
+}
+
+other = First with Second {
+    def first() Str = "first"
+    def second() Str = "second"
+}
+
+marker = First with Second {}
+"#,
+    );
+    assert_eq!(
+        result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "removed_interface_led_construction")
             .count(),
         3,
         "{:#?}",

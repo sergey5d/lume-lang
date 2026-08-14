@@ -3,7 +3,6 @@
 # hello 4
 # 8
 # welcome
-# again
 
 object Settings {
     name Str = "settings"
@@ -39,9 +38,4 @@ def main() Unit = {
     }
     println(greeter.greet())
 
-    other Greeter = Greeter with Described {
-        def greet() Str = "again"
-        def name() Str = "other"
-    }
-    println(other.greet())
 }

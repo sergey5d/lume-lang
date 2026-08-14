@@ -7552,12 +7552,12 @@ $name
             }
 
             def main() Unit {
-                handler = Reader with Closer {
+                handler = object with Reader, Closer {
                     def read() Str = "x"
                     def close() Unit = OS.println("closed")
                 }
 
-                soloReader = Reader {
+                soloReader = object with Reader {
                     def read() Str = "solo"
                 }
 

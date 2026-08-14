@@ -866,9 +866,8 @@ shape {}                         # explicit empty anonymous shape literal
 { expr }                         # block expression
 Type { field: value }            # brace field construction or enum field payload
 call { x => ... }                # trailing lambda
-Interface with Other, Third { def method(...) ... } # anonymous interface implementation
 object { field Type = value; def method() Type = value } # anonymous object
-object with Interface, Other { def method() Type = value } # explicit anonymous interface implementation
+object with Interface, Other { def method() Type = value } # anonymous interface implementation
 new(field Type)                  # constructor declaration
 shape(value, other)              # contextual anonymous-shape positional construction
 ```
@@ -1589,18 +1588,16 @@ Rules:
 - fields and methods are statically typed and use ordinary member access
 - `this.field` and unqualified `field` are both available inside methods
 
-To explicitly implement an interface, use either the interface-led form or the
-equivalent object-led form:
+To create an anonymous interface implementation, use `object with`:
 
 ```txt
-greeter Greeter = Greeter {
-    def greet() Str = "hello"
-}
-
-other Greeter = object with Greeter {
+greeter Greeter = object with Greeter {
     def greet() Str = "hello"
 }
 ```
+
+An interface name followed directly by braces is not anonymous implementation
+syntax. `Greeter { ... }` is rejected because interfaces cannot be constructed.
 
 Another class example:
 
@@ -1631,17 +1628,10 @@ value = object with Readable, Writable {
     def read() Str = "value"
     def write(value Str) Unit = ()
 }
-
-other = Readable with Writable, Closeable {
-    def read() Str = "value"
-    def write(value Str) Unit = ()
-    def close() Unit = ()
-}
 ```
 
-The interface-led form includes the type before `with`, so
-`Readable with Writable, Closeable` implements all three interfaces. Repeating
-the keyword, such as `object with Readable with Writable`, is invalid; write
+Anonymous implementations always start with `object with`. Repeating the
+keyword, such as `object with Readable with Writable`, is invalid; write
 `object with Readable, Writable` instead.
 
 Interfaces may also provide default methods by attaching a body:
@@ -1668,7 +1658,7 @@ class Box with Named {
 Anonymous interface implementation expressions:
 
 ```txt
-handler = Reader with Closer {
+handler = object with Reader, Closer {
     def read() Str = "x"
     def close() Unit = ()
 }

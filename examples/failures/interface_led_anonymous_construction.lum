@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*anonymous interface implementations start with 'object with'; write 'object with Interface \{ ... \}' or 'object with Interface, Other \{ ... \}'.*
+
+interface Reader {
+    def read() Str
+}
+
+def main() Unit {
+    reader Reader = Reader {
+        def read() Str = "value"
+    }
+}

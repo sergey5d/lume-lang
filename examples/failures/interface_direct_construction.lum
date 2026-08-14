@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*interface 'Reader' cannot be constructed directly; use an anonymous implementation that defines all required members.*
+# .*interface 'Reader' cannot be constructed directly; use 'object with Reader \{ ... \}' and define all required members.*
 
 interface Reader {
     def read() Str

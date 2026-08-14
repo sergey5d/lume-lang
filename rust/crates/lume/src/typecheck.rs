@@ -5733,8 +5733,8 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "invalid_interface_construction",
                 format!(
-                    "interface '{}' cannot be constructed directly; use an anonymous implementation that defines all required members",
-                    sig.name
+                    "interface '{}' cannot be constructed directly; use 'object with {} {{ ... }}' and define all required members",
+                    sig.name, sig.name
                 ),
                 span,
             );
