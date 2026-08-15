@@ -1,0 +1,4 @@
+# EXPECT_ERROR:
+# 'Any' is an explicit widening expression, not a constructor
+
+value = Any { value: 1 }

@@ -1,0 +1,17 @@
+# EXPECT_ERROR:
+# shape equality requires identical fields
+
+shape Point {
+    x Int
+    y Int
+}
+
+shape Point3D {
+    x Int
+    y Int
+    z Int
+}
+
+def main() Unit {
+    same = Point(1, 2) == Point3D(1, 2, 3)
+}

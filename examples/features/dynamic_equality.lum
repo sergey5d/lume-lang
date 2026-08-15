@@ -1,0 +1,24 @@
+# EXPECT:
+# true
+# false
+# false
+
+shape Point {
+    x Int
+    y Int
+}
+
+shape Position {
+    y Int
+    x Int
+}
+
+def main() Unit {
+    first Any = Point(1, 2)
+    same Any = Point(1, 2)
+    structurallyEqualButDifferentType Any = Position(2, 1)
+
+    println(first.sameValue(same))
+    println(first.sameValue(structurallyEqualButDifferentType))
+    println(first.sameValue(1))
+}

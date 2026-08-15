@@ -1,0 +1,4 @@
+# EXPECT_ERROR:
+# 'Any(...)' expects exactly one value, got 2
+
+value = Any(1, 2)

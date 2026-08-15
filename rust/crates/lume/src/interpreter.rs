@@ -4215,6 +4215,15 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Some(Value::Bool(values_equal(&receiver, &args[0]))))
             }
+            "sameValue" => {
+                if args.len() != 1 {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("sameValue expects 1 argument, got {}", args.len()),
+                    ));
+                }
+                Ok(Some(Value::Bool(values_same_value(&receiver, &args[0]))))
+            }
             _ => Ok(None),
         }
     }
@@ -4806,6 +4815,16 @@ impl<'a> Interpreter<'a> {
                 self.ensure_observable_value(&left, span, "equality comparison")?;
                 self.ensure_observable_value(&right, span, "equality comparison")?;
                 Ok(Value::Bool(!values_equal(&left, &right)))
+            }
+            ir::BinaryOp::IdentityEq => {
+                self.ensure_observable_value(&left, span, "identity comparison")?;
+                self.ensure_observable_value(&right, span, "identity comparison")?;
+                Ok(Value::Bool(values_identical(&left, &right)))
+            }
+            ir::BinaryOp::IdentityNotEq => {
+                self.ensure_observable_value(&left, span, "identity comparison")?;
+                self.ensure_observable_value(&right, span, "identity comparison")?;
+                Ok(Value::Bool(!values_identical(&left, &right)))
             }
             ir::BinaryOp::Less => compare_binary(left, right, span, |lhs, rhs| lhs < rhs, self),
             ir::BinaryOp::LessEq => compare_binary(left, right, span, |lhs, rhs| lhs <= rhs, self),
@@ -5543,6 +5562,57 @@ pub(crate) fn values_equal(left: &Value, right: &Value) -> bool {
     }
 }
 
+fn values_same_value(left: &Value, right: &Value) -> bool {
+    values_share_equality_domain(left, right) && values_equal(left, right)
+}
+
+fn values_share_equality_domain(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Unit, Value::Unit)
+        | (Value::Bool(_), Value::Bool(_))
+        | (Value::Int(_), Value::Int(_))
+        | (Value::Float(_), Value::Float(_))
+        | (Value::String(_), Value::String(_))
+        | (Value::Rune(_), Value::Rune(_))
+        | (Value::Tuple(_), Value::Tuple(_))
+        | (Value::List(_), Value::List(_))
+        | (Value::Set(_), Value::Set(_))
+        | (Value::Map(_), Value::Map(_))
+        | (Value::Iterator(_), Value::Iterator(_))
+        | (Value::Closure(_), Value::Closure(_))
+        | (Value::RuntimeType(_), Value::RuntimeType(_))
+        | (Value::RuntimeField { .. }, Value::RuntimeField { .. })
+        | (Value::RuntimeMethod { .. }, Value::RuntimeMethod { .. })
+        | (Value::RuntimeParam { .. }, Value::RuntimeParam { .. })
+        | (Value::RuntimeEnumCase { .. }, Value::RuntimeEnumCase { .. }) => true,
+        (Value::Record(left), Value::Record(right)) => {
+            let left = left.borrow();
+            let right = right.borrow();
+            left.len() == right.len()
+                && left.iter().zip(right.iter()).all(
+                    |((left_name, left_value), (right_name, right_value))| {
+                        left_name == right_name
+                            && values_share_equality_domain(left_value, right_value)
+                    },
+                )
+        }
+        (Value::Aggregate(left), Value::Aggregate(right)) => {
+            left.borrow().type_name == right.borrow().type_name
+        }
+        _ => false,
+    }
+}
+
+fn values_identical(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::List(lhs), Value::List(rhs)) => Rc::ptr_eq(lhs, rhs),
+        (Value::Set(lhs), Value::Set(rhs)) => Rc::ptr_eq(lhs, rhs),
+        (Value::Map(lhs), Value::Map(rhs)) => Rc::ptr_eq(lhs, rhs),
+        (Value::Aggregate(lhs), Value::Aggregate(rhs)) => Rc::ptr_eq(lhs, rhs),
+        _ => false,
+    }
+}
+
 fn numeric_binary_or_method(
     left: Value,
     right: Value,
@@ -6247,6 +6317,140 @@ mod tests {
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.return_value.as_deref(), Some("3"));
         assert!(run.output.is_empty());
+    }
+
+    #[test]
+    fn runs_reference_identity_operators() {
+        let program = lower_inline(
+            r#"
+            class Box {
+                value Int
+            }
+
+            def main() Unit {
+                first = Box(1)
+                alias = first
+                separate = Box(1)
+                values = [1, 2]
+                valuesAlias = values
+                valuesCopy = [1, 2]
+
+                OS.println(first === alias)
+                OS.println(first === separate)
+                OS.println(first !== separate)
+                OS.println(values === valuesAlias)
+                OS.println(values === valuesCopy)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "true\nfalse\ntrue\ntrue\nfalse\n");
+    }
+
+    #[test]
+    fn runs_structural_equality_between_distinct_shapes() {
+        let program = lower_inline(
+            r#"
+            shape Point {
+                x Int
+                label Str
+            }
+
+            shape ReorderedPoint {
+                label Str
+                x Int
+            }
+
+            def main() Unit {
+                point = Point(1, "one")
+                same = ReorderedPoint("one", 1)
+                different = ReorderedPoint("two", 2)
+
+                println(point == same)
+                println(point != same)
+                println(point == different)
+                println(same == point)
+                println(point.equals(same))
+
+                leftAnonymous { x Int, label Str } = { x: 1, label: "one" }
+                rightAnonymous { label Str, x Int } = { label: "one", x: 1 }
+                println(leftAnonymous == rightAnonymous)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "true\nfalse\nfalse\ntrue\ntrue\ntrue\n");
+    }
+
+    #[test]
+    fn runs_declared_class_and_dynamic_equality() {
+        let program = lower_inline(
+            r#"
+            class Account with Eq[Account] {
+                id Int
+
+                def equals(other Account) Bool = this.id == other.id
+            }
+
+            interface Identified with Eq[Identified] {
+                def code() Int
+            }
+
+            class Entry with Identified {
+                value Int
+
+                def code() Int = this.value
+                def equals(other Identified) Bool = this.value == other.code()
+            }
+
+            class AlternateEntry with Identified {
+                value Int
+
+                def code() Int = this.value
+                def equals(other Identified) Bool = this.value == other.code()
+            }
+
+            shape Point {
+                x Int
+                y Int
+            }
+
+            shape Position {
+                y Int
+                x Int
+            }
+
+            def main() Unit {
+                println(Account(1) == Account(1))
+                println(Account(1) != Account(2))
+                left Identified = Entry(1)
+                right Identified = AlternateEntry(1)
+                println(left == right)
+
+                first Any = Any(Point(1, 2))
+                same Any = Any(Point(1, 2))
+                sameAgain Any = Any(first)
+                otherShape Any = Position(2, 1)
+                println(first.sameValue(same))
+                println(first.sameValue(sameAgain))
+                println(first.sameValue(otherShape))
+
+                account = Account(3)
+                widenedAccount Any = Any(account)
+                if let recovered Account = widenedAccount {
+                    println(recovered === account)
+                }
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "true\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\n");
     }
 
     #[test]
@@ -7057,7 +7261,7 @@ $name
                     value T
                 }
 
-                def isDefined() Bool = this != None
+                def isDefined() Bool = this != OptionX.NoneX
             }
 
             def main() Unit {

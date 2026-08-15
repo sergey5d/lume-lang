@@ -1,0 +1,32 @@
+# EXPECT:
+# alias true
+# separate false
+# distinct true
+# vector alias true
+# vector copy false
+# object true
+
+class Box {
+    value Int
+}
+
+object Shared {
+}
+
+def main() Unit {
+    first = Box(1)
+    alias = first
+    separate = Box(1)
+
+    println("alias", first === alias)
+    println("separate", first === separate)
+    println("distinct", first !== separate)
+
+    values = [1, 2]
+    valuesAlias = values
+    valuesCopy = [1, 2]
+    println("vector alias", values === valuesAlias)
+    println("vector copy", values === valuesCopy)
+
+    println("object", Shared === Shared)
+}

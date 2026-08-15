@@ -1,0 +1,11 @@
+# EXPECT_ERROR:
+# constructor argument has type 'Any' but constructor parameter expects 'Str'
+
+class User {
+    name Str
+}
+
+def main() Unit {
+    unknown Any = User("Ada")
+    user = User(unknown)
+}

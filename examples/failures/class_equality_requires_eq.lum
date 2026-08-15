@@ -1,0 +1,10 @@
+# EXPECT_ERROR:
+# has no equality contract
+
+class Account {
+    id Int
+}
+
+def main() Unit {
+    equal = Account(1) == Account(1)
+}

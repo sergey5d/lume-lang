@@ -293,7 +293,7 @@
         },
         {
           "name": "keyword.operator.comparison.lume",
-          "match": "==|!=|<=|>=|<|>"
+          "match": "===|!==|==|!=|<=|>=|<|>"
         },
         {
           "name": "keyword.operator.logical.lume",

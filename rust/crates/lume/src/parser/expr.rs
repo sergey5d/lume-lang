@@ -982,6 +982,30 @@ impl<'a> Parser<'a> {
                 };
                 continue;
             }
+            if self.match_token(TokenKind::IdentityEq) {
+                self.skip_newlines();
+                let right = self.parse_type_test_expr()?;
+                let span = expr.span().cover(right.span());
+                expr = Expr::Binary {
+                    left: Box::new(expr),
+                    op: BinaryOp::IdentityEq,
+                    right: Box::new(right),
+                    span,
+                };
+                continue;
+            }
+            if self.match_token(TokenKind::IdentityNotEq) {
+                self.skip_newlines();
+                let right = self.parse_type_test_expr()?;
+                let span = expr.span().cover(right.span());
+                expr = Expr::Binary {
+                    left: Box::new(expr),
+                    op: BinaryOp::IdentityNotEq,
+                    right: Box::new(right),
+                    span,
+                };
+                continue;
+            }
             break;
         }
         Some(expr)

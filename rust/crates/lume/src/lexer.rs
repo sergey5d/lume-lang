@@ -79,6 +79,8 @@ pub enum TokenKind {
     ColonAssign,
     EqEq,
     NotEq,
+    IdentityEq,
+    IdentityNotEq,
     LessEq,
     GreaterEq,
     PlusEq,
@@ -395,10 +397,22 @@ impl<'a> Lexer<'a> {
             '?' if self.take('?') => Some(TokenKind::QuestionQuestion),
             '?' => return self.unsupported_operator(start, "?"),
             '=' if self.take('>') => Some(TokenKind::FatArrow),
-            '=' if self.take('=') => Some(TokenKind::EqEq),
+            '=' if self.take('=') => {
+                if self.take('=') {
+                    Some(TokenKind::IdentityEq)
+                } else {
+                    Some(TokenKind::EqEq)
+                }
+            }
             '=' => Some(TokenKind::Eq),
             '!' if self.take('!') => Some(TokenKind::BangBang),
-            '!' if self.take('=') => Some(TokenKind::NotEq),
+            '!' if self.take('=') => {
+                if self.take('=') {
+                    Some(TokenKind::IdentityNotEq)
+                } else {
+                    Some(TokenKind::NotEq)
+                }
+            }
             '!' => Some(TokenKind::Bang),
             '<' if self.take('-') => Some(TokenKind::LeftArrow),
             '<' if self.take('=') => Some(TokenKind::LessEq),
@@ -641,6 +655,21 @@ mod tests {
             "{:#?}",
             result.tokens
         );
+    }
+
+    #[test]
+    fn lexes_identity_operators_as_atomic_tokens() {
+        let result = lex(&source(
+            "same = left === right\ndifferent = left !== other\n",
+        ));
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let kinds = result
+            .tokens
+            .iter()
+            .map(|token| token.kind)
+            .collect::<Vec<_>>();
+        assert!(kinds.contains(&TokenKind::IdentityEq));
+        assert!(kinds.contains(&TokenKind::IdentityNotEq));
     }
 
     #[test]

@@ -1,0 +1,40 @@
+# EXPECT:
+# true
+# false
+# true
+# true
+
+shape Point {
+    x Int
+    y Int
+}
+
+shape Position {
+    y Int
+    x Int
+}
+
+shape Point3D {
+    x Int
+    y Int
+    z Int
+}
+
+def requireEq[T with Eq[T]](value T) Unit = ()
+def requireHash[T with Hashed](value T) Unit = ()
+
+def main() Unit {
+    point = Point(1, 2)
+    same = Position(2, 1)
+    different = Position(1, 2)
+    point3d = Point3D(1, 2, 3)
+    point2d Point = point3d
+
+    println(point == same)
+    println(point == different)
+    println(same == point)
+    println(point2d == point)
+
+    requireEq(point)
+    requireHash(point)
+}

@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*identity comparison requires compatible reference types; 'FirstBox' and 'SecondBox' cannot reference the same instance.*
+
+class FirstBox {
+}
+
+class SecondBox {
+}
+
+def main() Unit {
+    same = FirstBox {} === SecondBox {}
+}

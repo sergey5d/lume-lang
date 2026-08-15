@@ -88,6 +88,7 @@ impl<'a> Lowerer<'a> {
     fn lower(&mut self) -> ir::Program {
         self.declare_top_level_items();
         self.define_items();
+        self.derive_shape_value_bounds();
         self.lower_top_level_functions();
         self.lower_methods();
         self.lower_field_initializers();
@@ -96,6 +97,55 @@ impl<'a> Lowerer<'a> {
             self.program.set_entry(main);
         }
         std::mem::take(&mut self.program)
+    }
+
+    fn derive_shape_value_bounds(&mut self) {
+        let types = self.program.types.clone();
+        let derived = types
+            .iter()
+            .map(|ty| {
+                if ty.kind != ast::TypeKind::Record {
+                    return None;
+                }
+                let self_ty = ir::Type::Named {
+                    name: ty.name.clone(),
+                    args: ty
+                        .type_params
+                        .iter()
+                        .cloned()
+                        .map(ir::Type::TypeParam)
+                        .collect(),
+                };
+                let hashed = ty
+                    .fields
+                    .iter()
+                    .all(|field| ir_type_is_hashable(&field.ty, ty, &types, &mut HashSet::new()));
+                Some((
+                    ir::Type::Named {
+                        name: "Eq".to_string(),
+                        args: vec![self_ty],
+                    },
+                    hashed.then(|| ir::Type::Named {
+                        name: "Hashed".to_string(),
+                        args: Vec::new(),
+                    }),
+                ))
+            })
+            .collect::<Vec<_>>();
+
+        for (ty, bounds) in self.program.types.iter_mut().zip(derived) {
+            let Some((eq, hashed)) = bounds else {
+                continue;
+            };
+            if !ty.with_bounds.contains(&eq) {
+                ty.with_bounds.push(eq);
+            }
+            if let Some(hashed) = hashed
+                && !ty.with_bounds.contains(&hashed)
+            {
+                ty.with_bounds.push(hashed);
+            }
+        }
     }
 
     fn declare_top_level_items(&mut self) {
@@ -3595,6 +3645,9 @@ impl<'a> FunctionLowerer<'a> {
         expr: &Expr,
         expected: Option<&ir::Type>,
     ) -> ir::Operand {
+        if let Some(value) = explicit_any_widening_value(expr) {
+            return self.lower_expr(value);
+        }
         let Some(expected) = expected else {
             return self.lower_expr(expr);
         };
@@ -3664,6 +3717,9 @@ impl<'a> FunctionLowerer<'a> {
     fn lower_expr(&mut self, expr: &Expr) -> ir::Operand {
         if self.current_block.is_none() {
             return ir::Operand::Const(ir::Constant::Unit);
+        }
+        if let Some(value) = explicit_any_widening_value(expr) {
+            return self.lower_expr(value);
         }
         if let Some(reference_ty) = self.callable_reference_type(expr) {
             return self.lower_expr_from_rvalue_with_expected(expr, Some(&reference_ty));
@@ -4244,6 +4300,9 @@ impl<'a> FunctionLowerer<'a> {
         style: core::CallStyle,
         overrides: &[(String, ir::Type)],
     ) -> ir::Type {
+        if matches!(callee, Expr::Identifier { name, .. } if name == "Any") {
+            return ir::Type::named("Any");
+        }
         let normalized_args = self.normalize_trailing_brace_call_args(callee, args, style);
         if let Some(ty) = self.infer_builtin_case_call_type(callee, &normalized_args, overrides) {
             return ty;
@@ -5288,6 +5347,22 @@ impl<'a> FunctionLowerer<'a> {
                 style,
                 ..
             } => {
+                if let Expr::Member { receiver, name, .. } = callee.as_ref()
+                    && name == "equals"
+                    && args.len() == 1
+                    && self
+                        .shape_equality_fields(&self.infer_expr_type(receiver))
+                        .is_some()
+                    && self
+                        .shape_equality_fields(&self.infer_expr_type(&args[0].value))
+                        .is_some()
+                {
+                    return Some(self.lower_shape_equality_rvalue(
+                        receiver,
+                        AstBinaryOp::Eq,
+                        &args[0].value,
+                    ));
+                }
                 let (candidate_callee, candidate_type_args) =
                     self.split_generic_call_callee(callee);
                 let candidate_normalized_args =
@@ -5922,12 +5997,154 @@ impl<'a> FunctionLowerer<'a> {
             AstBinaryOp::Colon => {
                 ir::RValue::Tuple(vec![self.lower_expr(left), self.lower_expr(right)])
             }
+            AstBinaryOp::Eq | AstBinaryOp::NotEq => {
+                let left_ty = self.infer_expr_type(left);
+                if self.type_uses_declared_equality(&left_ty) {
+                    let call = ir::RValue::Call {
+                        callee: ir::Callee::Method {
+                            receiver: self.lower_expr(left),
+                            method: "equals".to_string(),
+                        },
+                        args: vec![self.lower_expr(right)],
+                        structural: false,
+                    };
+                    if op == AstBinaryOp::NotEq {
+                        ir::RValue::Unary {
+                            op: ir::UnaryOp::Not,
+                            operand: self.emit_temp_from_rvalue(
+                                call,
+                                ir::Type::Bool,
+                                Some(left.span()),
+                            ),
+                        }
+                    } else {
+                        call
+                    }
+                } else {
+                    self.lower_shape_equality_rvalue(left, op, right)
+                }
+            }
             _ => ir::RValue::Binary {
                 op: map_binary_op(op).expect("non-special binary operator should map to IR"),
                 left: self.lower_expr(left),
                 right: self.lower_expr(right),
             },
         }
+    }
+
+    fn type_uses_declared_equality(&self, ty: &ir::Type) -> bool {
+        match ty {
+            ir::Type::Named { name, .. } => self.program.types.iter().any(|candidate| {
+                candidate.name == *name
+                    && matches!(
+                        candidate.kind,
+                        ast::TypeKind::Class | ast::TypeKind::Interface
+                    )
+            }),
+            ir::Type::TypeParam(name) => {
+                self.function().generic_conditions.iter().any(|condition| {
+                    matches!(
+                        condition,
+                        ir::GenericCondition::Bound {
+                            subject: ir::Type::TypeParam(subject),
+                            bound: ir::Type::Named { name: bound, .. }
+                        } if subject.as_str() == name.as_str() && bound == "Eq"
+                    )
+                })
+            }
+            _ => false,
+        }
+    }
+
+    fn lower_shape_equality_rvalue(
+        &mut self,
+        left: &Expr,
+        op: AstBinaryOp,
+        right: &Expr,
+    ) -> ir::RValue {
+        let left_ty = self.infer_expr_type(left);
+        let right_ty = self.infer_expr_type(right);
+        let left_operand = self.lower_expr(left);
+        let right_operand = self.lower_expr(right);
+        let right_operand = if left_ty != right_ty
+            && self.shape_equality_fields(&left_ty).is_some()
+            && self.shape_equality_fields(&right_ty).is_some()
+        {
+            self.coerce_shape_equality_operand(right_operand, &left_ty, right.span())
+        } else {
+            right_operand
+        };
+        ir::RValue::Binary {
+            op: map_binary_op(op).expect("equality operator should map to IR"),
+            left: left_operand,
+            right: right_operand,
+        }
+    }
+
+    fn shape_equality_fields(&self, ty: &ir::Type) -> Option<Vec<ir::NamedType>> {
+        match ty {
+            ir::Type::Record(fields) => Some(fields.clone()),
+            ir::Type::Named { name, args } => {
+                let shape = self
+                    .program
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == *name && ty.kind == ast::TypeKind::Record)?;
+                let subst = shape
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                Some(
+                    shape
+                        .fields
+                        .iter()
+                        .filter(|field| field.visibility != ast::Visibility::Hidden)
+                        .map(|field| ir::NamedType {
+                            name: field.name.clone(),
+                            ty: substitute_ir_type(&field.ty, &subst),
+                        })
+                        .collect(),
+                )
+            }
+            _ => None,
+        }
+    }
+
+    fn coerce_shape_equality_operand(
+        &mut self,
+        source: ir::Operand,
+        target: &ir::Type,
+        span: Span,
+    ) -> ir::Operand {
+        let Some(target_fields) = self.shape_equality_fields(target) else {
+            return source;
+        };
+        let mut fields = Vec::with_capacity(target_fields.len());
+        for field in target_fields {
+            let value = self.emit_temp_from_rvalue(
+                ir::RValue::Field {
+                    base: source.clone(),
+                    name: field.name.clone(),
+                },
+                field.ty,
+                Some(span),
+            );
+            fields.push(ir::NamedOperand {
+                name: field.name,
+                value,
+            });
+        }
+        let value = match target {
+            ir::Type::Named { .. } => ir::RValue::Construct {
+                ty: target.clone(),
+                fields,
+            },
+            ir::Type::Record(_) => ir::RValue::Record(fields),
+            _ => return source,
+        };
+        self.emit_temp_from_rvalue(value, target.clone(), Some(span))
     }
 
     fn lower_callee(&mut self, callee: &Expr) -> ir::Callee {
@@ -6648,6 +6865,8 @@ fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
         AstBinaryOp::And => Some(ir::BinaryOp::And),
         AstBinaryOp::Eq => Some(ir::BinaryOp::Eq),
         AstBinaryOp::NotEq => Some(ir::BinaryOp::NotEq),
+        AstBinaryOp::IdentityEq => Some(ir::BinaryOp::IdentityEq),
+        AstBinaryOp::IdentityNotEq => Some(ir::BinaryOp::IdentityNotEq),
         AstBinaryOp::Less => Some(ir::BinaryOp::Less),
         AstBinaryOp::LessEq => Some(ir::BinaryOp::LessEq),
         AstBinaryOp::Greater => Some(ir::BinaryOp::Greater),
@@ -7809,6 +8028,10 @@ fn universal_member_type(name: &str) -> Option<ir::Type> {
             params: vec![ir::Type::named("Any")],
             ret: Box::new(ir::Type::Bool),
         }),
+        "sameValue" => Some(ir::Type::Function {
+            params: vec![ir::Type::named("Any")],
+            ret: Box::new(ir::Type::Bool),
+        }),
         _ => None,
     }
 }
@@ -7970,6 +8193,93 @@ fn substitute_ir_type(ty: &ir::Type, subst: &HashMap<String, ir::Type>) -> ir::T
         | ir::Type::Float
         | ir::Type::Str => ty.clone(),
     }
+}
+
+fn ir_type_is_hashable(
+    ty: &ir::Type,
+    owner: &ir::TypeDef,
+    types: &[ir::TypeDef],
+    seen: &mut HashSet<String>,
+) -> bool {
+    match ty {
+        ir::Type::Unit | ir::Type::Bool | ir::Type::Int | ir::Type::Float | ir::Type::Str => true,
+        ir::Type::Named { name, args }
+            if args.is_empty()
+                && matches!(
+                    name.as_str(),
+                    "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
+                ) =>
+        {
+            true
+        }
+        ir::Type::TypeParam(name) => owner.generic_conditions.iter().any(|condition| {
+            matches!(
+                condition,
+                ir::GenericCondition::Bound {
+                    subject: ir::Type::TypeParam(subject),
+                    bound: ir::Type::Named { name: bound, args }
+                } if subject == name && bound == "Hashed" && args.is_empty()
+            )
+        }),
+        ir::Type::Record(fields) => fields
+            .iter()
+            .all(|field| ir_type_is_hashable(&field.ty, owner, types, seen)),
+        ir::Type::Named { name, args } => {
+            let Some(definition) = types.iter().find(|candidate| candidate.name == *name) else {
+                return false;
+            };
+            match definition.kind {
+                ast::TypeKind::Enum | ast::TypeKind::Object => true,
+                ast::TypeKind::Record => {
+                    let key = format!("{}<{args:?}>", definition.name);
+                    if !seen.insert(key.clone()) {
+                        return true;
+                    }
+                    let subst = definition
+                        .type_params
+                        .iter()
+                        .cloned()
+                        .zip(args.iter().cloned())
+                        .collect::<HashMap<_, _>>();
+                    let hashable = definition.fields.iter().all(|field| {
+                        let field_ty = substitute_ir_type(&field.ty, &subst);
+                        ir_type_is_hashable(&field_ty, definition, types, seen)
+                    });
+                    seen.remove(&key);
+                    hashable
+                }
+                ast::TypeKind::Class => ir_type_has_named_bound(definition, "Hashed", types, seen),
+                ast::TypeKind::Annotation | ast::TypeKind::Interface => false,
+            }
+        }
+        ir::Type::Unknown | ir::Type::Never | ir::Type::Tuple(_) | ir::Type::Function { .. } => {
+            false
+        }
+    }
+}
+
+fn ir_type_has_named_bound(
+    ty: &ir::TypeDef,
+    expected: &str,
+    types: &[ir::TypeDef],
+    seen: &mut HashSet<String>,
+) -> bool {
+    let key = format!("bound:{}", ty.name);
+    if !seen.insert(key.clone()) {
+        return false;
+    }
+    let found = ty.with_bounds.iter().any(|bound| {
+        let ir::Type::Named { name, .. } = bound else {
+            return false;
+        };
+        name == expected
+            || types
+                .iter()
+                .find(|candidate| candidate.name == *name)
+                .is_some_and(|parent| ir_type_has_named_bound(parent, expected, types, seen))
+    });
+    seen.remove(&key);
+    found
 }
 
 fn infer_ir_type_subst(
@@ -8232,6 +8542,26 @@ fn callable_reference_call_expr(reference: &Expr, param_names: &[String], span: 
 
 fn list_literal_has_spread(items: &[Expr]) -> bool {
     items.iter().any(|item| matches!(item, Expr::Spread { .. }))
+}
+
+fn explicit_any_widening_value(expr: &Expr) -> Option<&Expr> {
+    let Expr::Call {
+        callee,
+        args,
+        style: core::CallStyle::Paren,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if !matches!(callee.as_ref(), Expr::Identifier { name, .. } if name == "Any")
+        || args.len() != 1
+        || args[0].name.is_some()
+        || args[0].ty.is_some()
+    {
+        return None;
+    }
+    Some(&args[0].value)
 }
 
 fn is_named_runtime_value_path(program: &ir::Program, path: &[String]) -> bool {

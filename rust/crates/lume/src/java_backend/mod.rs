@@ -3730,6 +3730,247 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_runs_reference_identity_operators() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java identity test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-reference-identity");
+        let source = temp.join("identity.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/identity
+
+class Box {
+    value Int
+}
+
+def main() Unit {
+    first = Box(1)
+    alias = first
+    separate = Box(1)
+
+    println(first === alias)
+    println(first === separate)
+    println(first !== separate)
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let module =
+            fs::read_to_string(out.join("demo/identity/IdentityModule.java")).expect("read module");
+        assert!(module.contains(" == "));
+        assert!(module.contains(" != "));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.identity.IdentityMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "true\nfalse\ntrue\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_shapes_define_structural_equals_and_hash_code() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java shape equality test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-shape-value-methods");
+        let source = temp.join("shape_value_methods.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/shapevalue
+
+shape Point {
+    x Int
+    label Str
+}
+
+shape ReorderedPoint {
+    label Str
+    x Int
+}
+
+class StableReference with Hashed {
+    value Int
+}
+
+class Account with Eq[Account] {
+    id Int
+
+    def equals(other Account) Bool = this.id == other.id
+}
+
+interface Identified with Eq[Identified] {
+    def code() Int
+}
+
+class Entry with Identified {
+    value Int
+
+    def code() Int = this.value
+    def equals(other Identified) Bool = this.value == other.code()
+}
+
+class AlternateEntry with Identified {
+    value Int
+
+    def code() Int = this.value
+    def equals(other Identified) Bool = this.value == other.code()
+}
+
+shape Box[T] {
+    value T
+}
+
+shape Marker {
+}
+
+def main() Unit {
+    first = Point(1, "one")
+    same = Point(1, "one")
+    different = Point(2, "two")
+
+    println(first == same)
+    println(first == different)
+
+    points [Point: Str] = [first: "found"]
+    println(points[same] !!)
+
+    reordered = ReorderedPoint("one", 1)
+    println(first == reordered)
+    println(reordered == first)
+    println(first.equals(reordered))
+
+    println(Marker {} == Marker {})
+
+    println(Account(1) == Account(1))
+    println(Account(1) != Account(2))
+    left Identified = Entry(1)
+    right Identified = AlternateEntry(1)
+    println(left == right)
+
+    dynamicFirst Any = Any(first)
+    dynamicSame Any = Any(same)
+    dynamicAgain Any = Any(dynamicFirst)
+    dynamicOtherShape Any = reordered
+    println(dynamicFirst.sameValue(dynamicSame))
+    println(dynamicFirst.sameValue(dynamicAgain))
+    println(dynamicFirst.sameValue(dynamicOtherShape))
+
+    account = Account(3)
+    widenedAccount Any = Any(account)
+    if let recovered Account = widenedAccount {
+        println(recovered === account)
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let point = fs::read_to_string(out.join("demo/shapevalue/Point.java"))
+            .expect("read generated Point");
+        assert!(point.contains("public boolean equals(Object other)"));
+        assert!(point.contains("other instanceof Point that"));
+        assert!(point.contains("java.util.Objects.equals(this.x, that.x)"));
+        assert!(point.contains("java.util.Objects.equals(this.label, that.label)"));
+        assert!(point.contains("public int hashCode()"));
+        assert!(point.contains("java.util.Objects.hash(this.label, this.x)"));
+        assert!(
+            point.contains("implements lume.core.Eq<Point>, lume.core.Hashed, lume.core.LumeTyped")
+        );
+
+        let generic =
+            fs::read_to_string(out.join("demo/shapevalue/Box.java")).expect("read generated Box");
+        assert!(generic.contains("other instanceof Box<?> that"));
+        assert!(generic.contains("implements lume.core.Eq<Box<T>>, lume.core.LumeTyped"));
+        assert!(!generic.contains("lume.core.Hashed"));
+
+        let reordered = fs::read_to_string(out.join("demo/shapevalue/ReorderedPoint.java"))
+            .expect("read generated ReorderedPoint");
+        assert!(reordered.contains("java.util.Objects.hash(this.label, this.x)"));
+
+        let stable = fs::read_to_string(out.join("demo/shapevalue/StableReference.java"))
+            .expect("read generated StableReference");
+        assert!(stable.contains("implements lume.core.Hashed"));
+
+        let account = fs::read_to_string(out.join("demo/shapevalue/Account.java"))
+            .expect("read generated Account");
+        assert!(account.contains("implements lume.core.Eq<Account>, lume.core.LumeTyped"));
+        assert!(account.contains("public Boolean equals(Account "));
+        assert!(account.contains("public boolean equals(Object other)"));
+
+        let entry = fs::read_to_string(out.join("demo/shapevalue/Entry.java"))
+            .expect("read generated Entry");
+        assert!(entry.contains("public boolean equals(Object other)"));
+
+        let module = fs::read_to_string(out.join("demo/shapevalue/ShapevalueModule.java"))
+            .expect("read generated module");
+        assert!(module.contains("new Point("));
+        assert!(module.contains("new ReorderedPoint("));
+        assert!(!module.contains("Any("));
+
+        let marker = fs::read_to_string(out.join("demo/shapevalue/Marker.java"))
+            .expect("read generated Marker");
+        assert!(marker.contains("return java.util.Objects.hash();"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.shapevalue.ShapevalueMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "true\nfalse\nfound\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_executable_runs_array_of_rune() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java executable test because javac/java is not available");

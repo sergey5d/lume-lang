@@ -49,10 +49,86 @@ Common stdlib/prelude types:
 `Any` is the top value type: any value can be assigned to `Any`, but `Any` is
 not assignable back to a narrower type without an explicit safe form.
 
+`Any(value)` is the explicit expression form of that widening:
+
+```txt
+number = Any(42)
+text = Any("hello")
+point = Any(Point(1, 2))
+```
+
+It accepts exactly one positional value and produces `Any`. It preserves the
+operand's current static view and equality witness; it does not clone, convert,
+or downcast the underlying value. A backend may box the value when its runtime
+representation requires it. Applying it to a value that is already `Any` is
+idempotent. Its lowering is identical to implicit assignment to `Any`.
+
+These forms are invalid:
+
+```txt
+Any()                 # error: one value is required
+Any(1, 2)             # error: only one value is accepted
+Any { value: 1 }      # error: Any is not constructed with fields
+```
+
+Implicit widening remains the normal convenient form:
+
+```txt
+def printAnything(value Any) Unit = ...
+
+value Any = "hello"
+printAnything("hello")
+printAnything(Any("hello")) # valid, but usually unnecessary
+```
+
+`Any(value)` is not a general cast. Constructing a narrower type from an `Any`
+value does not downcast it:
+
+```txt
+user = User(anyValue) # constructor call, not a downcast
+
+if let user User = anyValue {
+    println(user.name)
+}
+
+user = match anyValue {
+    case value User => value
+    case _ => return Err(NotAUser)
+}
+```
+
 Universal value operations:
 
 - `value.toStr()` returns a `Str` rendering of the value
-- `value.equals(other)` returns `Bool` and has the same equality semantics as `value == other`
+- `value.equals(other)` returns `Bool` and has the same statically typed equality semantics as `value == other`
+- `value.sameValue(other)` performs strict dynamic equality by comparing runtime type witnesses before value equality
+
+`Any` does not support ordinary equality because it erases the static equality
+domain. Narrow it before using `==`, or deliberately use `sameValue`:
+
+```txt
+unknown Any = Point(1, 2)
+point = Point(1, 2)
+
+unknown == point          # error
+unknown.sameValue(point)  # true: same runtime type and equal value
+```
+
+Reference identity is separate from value equality:
+
+```txt
+alias = value
+copy = Box(value.field)
+
+value === alias # true: both names reference the same instance
+value === copy  # false: copy is a different instance
+value !== copy  # true
+```
+
+`===` and `!==` do not call `equals`. They accept compatible class, object, or
+concrete collection reference types. Primitives, shapes, enums, interfaces,
+`Any`, and lifted wrappers such as `Option[T]` are not identity operands; unwrap
+or narrow to a concrete reference type first.
 
 ## Wildcard Capture
 
@@ -894,6 +970,83 @@ Shape conversion rules:
 - construction fields inside braces use `field: value`
 - construction fields may carry an explicit initializer type as `field Type: value`
 - single-expression braces like `{ value }` are still block expressions, not anonymous shapes
+
+Shape equality is structural across shape declarations:
+
+- comparing two shapes with `==`, `!=`, or `equals(...)` requires the same complete set of field names and normalized field types
+- field declaration order may differ
+- the right operand is converted to the left operand's shape by field name, then ordinary value equality is applied
+- unlike shape assignment, equality does not ignore extra fields
+- width-compatible shapes must first be explicitly projected through shape assignment
+- generated Java shape records define field-based `equals` and matching `hashCode` methods; hash inputs are ordered by field name so declaration order does not change the hash
+
+```txt
+shape Point { x Int, y Int }
+shape Position { y Int, x Int }
+shape Point3D { x Int, y Int, z Int }
+
+Point(1, 2) == Position(2, 1) # true: fields match by name
+Point(1, 2) == Point3D(1, 2, 3) # error: schemas differ
+
+point2d Point = Point3D(1, 2, 3)
+point2d == Point(1, 2) # true after explicit projection
+```
+
+Other equality domains are nominal. The operands must have the same normalized
+type. Classes may use equality only when they explicitly implement
+`Eq[ClassName]`; interface values require a compatible explicit `Eq` contract.
+Different classes are not directly comparable. `sameValue` returns `false`
+instead of producing a static error when its runtime equality domains differ.
+
+| Operands | `==` / `!=` | `sameValue` |
+| --- | --- | --- |
+| same shape schema | field equality | descriptor match, then field equality |
+| different shape names, same schema | field equality by name | `false`; named descriptors differ |
+| width-compatible shape schemas | error; project explicitly first | `false` |
+| class and shape | error; project explicitly before erasure | `false` |
+| same class with `Eq[Class]` | declared class equality | concrete descriptor, then class equality |
+| different classes | error | `false` |
+| `Any` and a typed value | error | descriptor comparison |
+| `Any` and `Any` | error | descriptor comparison |
+| interface values | requires an explicit compatible `Eq` domain | concrete descriptor comparison |
+
+Every shape derives `Eq` structurally. `Hashed` is derived only when every field
+type is hashable:
+
+- primitives, enums, and object values are intrinsically hashable
+- nested shapes are hashable when their own fields are recursively hashable
+- a class is hashable only when it explicitly declares `with Hashed`
+- a type parameter is hashable only when it has a `Hashed` bound
+- interfaces, functions, tuples, `Any`, and arbitrary classes do not implicitly satisfy `Hashed`
+
+```txt
+class StableId with Hashed {
+    value Int
+}
+
+shape CacheKey {
+    id StableId
+    version Int
+}
+
+def cache[T with Hashed](key T) Unit = ()
+
+cache(CacheKey(StableId(1), 2))
+```
+
+```txt
+shape Point {
+    x Int
+    label Str
+}
+
+shape ReorderedPoint {
+    label Str
+    x Int
+}
+
+same = Point(1, "one") == ReorderedPoint("one", 1) # true
+```
 
 Examples:
 
@@ -2826,6 +2979,8 @@ Comparison:
 
 - `==`
 - `!=`
+- `===` (reference identity)
+- `!==` (reference non-identity)
 - `<`
 - `<=`
 - `>`
@@ -2894,10 +3049,10 @@ Current operator overloading constraints:
   - indexing: `[]`
 - Not allowed to overload:
   - logical operators: `&&`, `||`, `!`
-  - equality operators: `==`, `!=`
+  - equality operators: `==`, `!=`, `===`, `!==`
   - symbolic collection/custom forms: `:+`, `:-`, `++`, `--`, `::`
 - Comparison operators are intended to work through `Ordering[T]` rather than custom operator declarations.
-- Equality is intended to work through `Eq[T]` rather than custom operator declarations.
+- Value equality is intended to work through `Eq[T]`; reference identity is intrinsic and cannot be overloaded.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
 - `:` is brace-entry syntax only, not an overloadable operator.
 - The spellings `:+`, `:-`, `++`, `--`, and `::` are removed from the language surface and currently produce `unsupported_operator` lexer diagnostics.
@@ -2907,7 +3062,7 @@ Newline continuation:
 - Ordinary expressions are no longer broadly newline-insensitive.
 - A newline continues the current expression only when the previous line clearly ends in a continuation form, except postfix chains may continue when the next line starts with `.`.
 - Continuation tokens:
-  - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
+  - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `===`, `!==`, `<`, `<=`, `>`, `>=`
   - extraction/fallback operators: `??`
   - exact shape update introducer: `with`
   - unary prefixes: unary `-`, `!`, `try`

@@ -5,8 +5,10 @@
 # object true Marker{label=marker}
 # any true 42
 
-class Person {
+class Person with Eq[Person] {
     name Str
+
+    def equals(other Person) Bool = this.name == other.name
 }
 
 enum Light {
@@ -31,8 +33,8 @@ def main() Unit {
     println("enum", light.equals(Green), light.toStr())
 
     marker Any = Marker
-    println("object", marker.equals(Marker), marker.toStr())
+    println("object", marker.sameValue(Marker), marker.toStr())
 
     value Any = 42
-    println("any", value.equals(42), value.toStr())
+    println("any", value.sameValue(42), value.toStr())
 }

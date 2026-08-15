@@ -3904,6 +3904,27 @@ fn parses_single_runtime_type_test() {
 }
 
 #[test]
+fn parses_reference_identity_operators() {
+    let equal = parse_expr_only("left === right");
+    assert!(matches!(
+        equal,
+        Expr::Binary {
+            op: BinaryOp::IdentityEq,
+            ..
+        }
+    ));
+
+    let not_equal = parse_expr_only("left !== right");
+    assert!(matches!(
+        not_equal,
+        Expr::Binary {
+            op: BinaryOp::IdentityNotEq,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn rejects_chained_runtime_type_tests() {
     let result = parse("def test(value Any) Bool = value is Str is Any");
     assert!(

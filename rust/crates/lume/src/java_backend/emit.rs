@@ -214,8 +214,97 @@ fn render_class(
     push_class_field_initializer(&mut out, bundle, ty, names);
     push_class_constructors(&mut out, bundle, ty, names);
     push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
+    push_class_equality_bridge(&mut out, bundle, ty, names);
     out.push_str("}\n");
     out
+}
+
+fn push_class_equality_bridge(
+    out: &mut String,
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    names: &JavaNames,
+) {
+    let equality_param = ty.methods.iter().find_map(|method| {
+        let Some(function) = bundle.ir.function(*method) else {
+            return None;
+        };
+        if function.name != "equals" || function.params.len() != 1 {
+            return None;
+        }
+        let Some(param) = function
+            .params
+            .first()
+            .and_then(|param| function.locals.get(param.0))
+        else {
+            return None;
+        };
+        match &param.ty {
+            ir::Type::Named { name, .. } => (name == &ty.name
+                || java_type_has_bound(bundle, ty, name, &mut HashSet::new()))
+            .then_some(param.ty.clone()),
+            _ => None,
+        }
+    });
+    let Some(ir::Type::Named {
+        name: domain_name,
+        args: domain_args,
+    }) = equality_param
+    else {
+        return;
+    };
+
+    let domain_name = names.named_type(&domain_name);
+    let pattern_type = if domain_args.is_empty() {
+        domain_name.clone()
+    } else {
+        format!(
+            "{}<{}>",
+            domain_name,
+            std::iter::repeat_n("?", domain_args.len())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let argument = if domain_args.is_empty() {
+        "that".to_string()
+    } else {
+        format!("({domain_name}) that")
+    };
+
+    out.push_str("\n    @Override\n");
+    out.push_str("    public boolean equals(Object other) {\n");
+    out.push_str("        if (this == other) return true;\n");
+    out.push_str(&format!(
+        "        if (!(other instanceof {pattern_type} that)) return false;\n"
+    ));
+    out.push_str(&format!(
+        "        return Boolean.TRUE.equals(this.equals({argument}));\n"
+    ));
+    out.push_str("    }\n");
+}
+
+fn java_type_has_bound(
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    expected: &str,
+    seen: &mut HashSet<ir::TypeId>,
+) -> bool {
+    if !seen.insert(ty.id) {
+        return false;
+    }
+    ty.with_bounds.iter().any(|bound| {
+        let ir::Type::Named { name, .. } = bound else {
+            return false;
+        };
+        name == expected
+            || bundle
+                .ir
+                .types
+                .iter()
+                .find(|candidate| candidate.name == *name)
+                .is_some_and(|parent| java_type_has_bound(bundle, parent, expected, seen))
+    })
 }
 
 fn render_shape(
@@ -244,9 +333,63 @@ fn render_shape(
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, false);
+    push_shape_value_methods(&mut out, ty);
     push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     out.push_str("}\n");
     out
+}
+
+fn push_shape_value_methods(out: &mut String, ty: &ir::TypeDef) {
+    let shape_name = java_type_name(&ty.name);
+    let pattern_type = if ty.type_params.is_empty() {
+        shape_name.clone()
+    } else {
+        format!(
+            "{}<{}>",
+            shape_name,
+            std::iter::repeat_n("?", ty.type_params.len())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    out.push_str("\n    @Override\n");
+    out.push_str("    public boolean equals(Object other) {\n");
+    out.push_str("        if (this == other) return true;\n");
+    out.push_str(&format!(
+        "        if (!(other instanceof {pattern_type} that)) return false;\n"
+    ));
+    if ty.fields.is_empty() {
+        out.push_str("        return true;\n");
+    } else {
+        out.push_str("        return ");
+        for (index, field) in ty.fields.iter().enumerate() {
+            if index > 0 {
+                out.push_str("\n            && ");
+            }
+            let field_name = java_member_name(&field.name);
+            out.push_str(&format!(
+                "java.util.Objects.equals(this.{field_name}, that.{field_name})"
+            ));
+        }
+        out.push_str(";\n");
+    }
+    out.push_str("    }\n");
+
+    out.push_str("\n    @Override\n");
+    out.push_str("    public int hashCode() {\n");
+    out.push_str("        return java.util.Objects.hash(");
+    let mut hash_fields = ty.fields.iter().collect::<Vec<_>>();
+    hash_fields.sort_by(|left, right| left.name.cmp(&right.name));
+    out.push_str(
+        &hash_fields
+            .iter()
+            .map(|field| format!("this.{}", java_member_name(&field.name)))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    out.push_str(");\n");
+    out.push_str("    }\n");
 }
 
 fn render_single(
@@ -417,11 +560,15 @@ fn java_extends_clause(ty: &ir::TypeDef, names: &JavaNames) -> String {
 }
 
 fn java_bound_clause(prefix: &str, ty: &ir::TypeDef, names: &JavaNames) -> String {
-    let bounds = ty
+    let mut bounds = ty
         .with_bounds
         .iter()
         .filter_map(|bound| java_bound_type(bound, names))
         .collect::<Vec<_>>();
+    if ty.kind != TypeKind::Annotation && !bounds.iter().any(|bound| bound == "lume.core.LumeTyped")
+    {
+        bounds.push("lume.core.LumeTyped".to_string());
+    }
     if bounds.is_empty() {
         String::new()
     } else {
@@ -2698,6 +2845,8 @@ impl<'a> FunctionEmitter<'a> {
         match op {
             ir::BinaryOp::Eq => Some(format!("java.util.Objects.equals({left}, {right})")),
             ir::BinaryOp::NotEq => Some(format!("!java.util.Objects.equals({left}, {right})")),
+            ir::BinaryOp::IdentityEq => Some(format!("({left} == {right})")),
+            ir::BinaryOp::IdentityNotEq => Some(format!("({left} != {right})")),
             _ => {
                 let op = match op {
                     ir::BinaryOp::Add => "+",
@@ -2711,7 +2860,10 @@ impl<'a> FunctionEmitter<'a> {
                     ir::BinaryOp::GreaterEq => ">=",
                     ir::BinaryOp::And => "&&",
                     ir::BinaryOp::Or => "||",
-                    ir::BinaryOp::Eq | ir::BinaryOp::NotEq => unreachable!(),
+                    ir::BinaryOp::Eq
+                    | ir::BinaryOp::NotEq
+                    | ir::BinaryOp::IdentityEq
+                    | ir::BinaryOp::IdentityNotEq => unreachable!(),
                 };
                 Some(format!("({left} {op} {right})"))
             }
@@ -2766,6 +2918,14 @@ impl<'a> FunctionEmitter<'a> {
                     let other = args.first()?;
                     let receiver = self.emit_operand(receiver)?;
                     Some(format!("java.util.Objects.equals({receiver}, {other})"))
+                }
+                "sameValue" if args.len() == 1 => {
+                    let args = self.emit_operands(args)?;
+                    let other = args.first()?;
+                    let receiver = self.emit_operand(receiver)?;
+                    Some(format!(
+                        "lume.core.LumeRuntime.sameValue({receiver}, {other})"
+                    ))
                 }
                 "isSuccess" | "isSet" | "isDefined" if args.is_empty() => {
                     let receiver = self.emit_operand(receiver)?;
@@ -4505,6 +4665,8 @@ impl<'a> FunctionEmitter<'a> {
         match op {
             ir::BinaryOp::Eq
             | ir::BinaryOp::NotEq
+            | ir::BinaryOp::IdentityEq
+            | ir::BinaryOp::IdentityNotEq
             | ir::BinaryOp::Less
             | ir::BinaryOp::LessEq
             | ir::BinaryOp::Greater
@@ -4864,6 +5026,13 @@ impl JavaNames {
             ir::Type::Named { name, args } if args.is_empty() => java_named_builtin_value(name)
                 .or_else(|| self.java_types.get(name).cloned())
                 .unwrap_or_else(|| java_type_name(name)),
+            ir::Type::Named { name, args } if name == "Eq" => format!(
+                "lume.core.Eq<{}>",
+                args.iter()
+                    .map(|arg| self.value_type(arg))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             ir::Type::Named { name, args } if is_builtin_container(name) => {
                 self.builtin_container(name, args)
             }
@@ -5037,6 +5206,8 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Float" => Some("Double".to_string()),
         "Str" => Some("String".to_string()),
         "Rune" => Some("Integer".to_string()),
+        "Eq" => Some("lume.core.Eq".to_string()),
+        "Hashed" => Some("lume.core.Hashed".to_string()),
         "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
         | "AnnotationType" => Some("lume.core.LumeType".to_string()),
         "TypeKind" => Some("lume.core.LumeTypeKind".to_string()),

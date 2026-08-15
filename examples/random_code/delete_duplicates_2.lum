@@ -1,0 +1,86 @@
+# EXPECT:
+# 1 -> 2 -> 5
+# 2 -> 3
+# empty
+# 1 -> 2 -> 3
+# empty
+
+# Remove every value that occurs more than once in a sorted linked list.
+# The surviving nodes are relinked in place rather than copied.
+class ListNode {
+    value Int
+    var next Option[ListNode] = None
+}
+
+def deleteDuplicates2(head Option[ListNode]) Option[ListNode] {
+    if head.isEmpty() {
+        return None
+    }
+
+    dummy = ListNode(0)
+    var tail = dummy
+    var next = head
+
+    while !next.isEmpty() {
+        first = next !!
+        var last = first
+
+        while !last.next.isEmpty() {
+            candidate = last.next !!
+            if candidate.value != first.value {
+                break
+            }
+
+            last := candidate
+        }
+
+        if last === first {
+            tail.next := Some(first)
+            tail := first
+        }
+
+        next := last.next
+    }
+
+    tail.next := None
+    dummy.next
+}
+
+def linked(values [Int]) Option[ListNode] {
+    dummy = ListNode(0)
+    var tail = dummy
+
+    for value <- values {
+        node = ListNode(value)
+        tail.next := Some(node)
+        tail := node
+    }
+
+    dummy.next
+}
+
+def render(head Option[ListNode]) Str {
+    var text = ""
+    var first = true
+    var next = head
+
+    while !next.isEmpty() {
+        node = next !!
+        if !first {
+            text += " -> "
+        }
+        text += node.value.toStr()
+        first := false
+        next := node.next
+    }
+
+    if text == "" { "empty" } else { text }
+}
+
+def main() Unit {
+    println(render(deleteDuplicates2(linked([1, 2, 3, 3, 4, 4, 5]))))
+    println(render(deleteDuplicates2(linked([1, 1, 1, 2, 3]))))
+    println(render(deleteDuplicates2(linked([1, 1]))))
+    println(render(deleteDuplicates2(linked([1, 2, 3]))))
+    println(render(deleteDuplicates2(linked([]))))
+}

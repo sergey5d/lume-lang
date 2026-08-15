@@ -356,6 +356,21 @@ fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
             visibility: Visibility::Default,
             has_body: true,
         },
+        "sameValue" => FunctionSig {
+            type_params: Vec::new(),
+            reified_type_params: Vec::new(),
+            generic_conditions: Vec::new(),
+            params: vec![ParamSig {
+                name: "other".to_string(),
+                ty: Ty::any(),
+                variadic: false,
+                lazy: false,
+                has_initializer: false,
+            }],
+            ret: Ty::bool(),
+            visibility: Visibility::Default,
+            has_body: true,
+        },
         _ => return None,
     };
     Some(vec![sig])
@@ -4460,6 +4475,9 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
         expected: &Ty,
     ) -> Ty {
+        if matches!(callee, Expr::Identifier { name, .. } if name == "Any") {
+            return self.check_explicit_any_widening(args, uses_brace_syntax, span);
+        }
         if uses_brace_syntax
             && matches!(
                 callee,
@@ -4493,6 +4511,17 @@ impl<'a> Checker<'a> {
 
         let normalized_args =
             self.normalize_trailing_brace_call_args(callee, args, uses_brace_syntax);
+        if let Expr::Member { receiver, name, .. } = callee
+            && normalized_args.len() == 1
+            && matches!(name.as_str(), "equals" | "sameValue")
+        {
+            let left = self.check_expr(receiver);
+            let right = self.check_expr(&normalized_args[0].value);
+            if name == "equals" {
+                self.check_equality_operands(&left, &right, span);
+            }
+            return Ty::bool();
+        }
         if self.is_builtin_panic_call(callee) {
             for arg in &normalized_args {
                 self.check_expr(&arg.value);
@@ -4564,6 +4593,47 @@ impl<'a> Checker<'a> {
                 Ty::Unknown
             }
         }
+    }
+
+    fn check_explicit_any_widening(
+        &mut self,
+        args: &[crate::ast::CallArg],
+        uses_brace_syntax: bool,
+        span: crate::source::Span,
+    ) -> Ty {
+        for arg in args {
+            self.check_expr(&arg.value);
+        }
+
+        if uses_brace_syntax {
+            self.add_error(
+                "invalid_any_widening_syntax",
+                "'Any' is an explicit widening expression, not a constructor; use 'Any(value)'",
+                span,
+            );
+            return Ty::any();
+        }
+
+        if args.len() != 1 {
+            self.add_error(
+                "invalid_any_widening_arity",
+                format!("'Any(...)' expects exactly one value, got {}", args.len()),
+                span,
+            );
+        }
+
+        if args
+            .iter()
+            .any(|arg| arg.name.is_some() || arg.ty.is_some())
+        {
+            self.add_error(
+                "invalid_any_widening_argument",
+                "'Any(...)' accepts one positional value; named or typed arguments are not allowed",
+                span,
+            );
+        }
+
+        Ty::any()
     }
 
     fn check_anonymous_interface_expr(
@@ -6519,9 +6589,11 @@ impl<'a> Checker<'a> {
                     Ty::int()
                 }
             }
-            BinaryOp::Eq
-            | BinaryOp::NotEq
-            | BinaryOp::Less
+            BinaryOp::Eq | BinaryOp::NotEq => {
+                self.check_equality_operands(left, right, span);
+                Ty::bool()
+            }
+            BinaryOp::Less
             | BinaryOp::LessEq
             | BinaryOp::Greater
             | BinaryOp::GreaterEq
@@ -6533,6 +6605,39 @@ impl<'a> Checker<'a> {
                 }
                 Ty::bool()
             }
+            BinaryOp::IdentityEq | BinaryOp::IdentityNotEq => {
+                let left_is_reference = self.is_identity_reference_type(left);
+                let right_is_reference = self.is_identity_reference_type(right);
+                let unknown = matches!(left, Ty::Unknown) || matches!(right, Ty::Unknown);
+
+                if !unknown && (!left_is_reference || !right_is_reference) {
+                    self.add_error(
+                        "invalid_identity_operand",
+                        format!(
+                            "identity operators require class, object, or concrete collection references; got '{}' and '{}'",
+                            left.describe(),
+                            right.describe()
+                        ),
+                        span,
+                    );
+                } else if left_is_reference
+                    && right_is_reference
+                    && !self.is_assignable(left, right)
+                    && !self.is_assignable(right, left)
+                {
+                    self.add_error(
+                        "incompatible_identity_operands",
+                        format!(
+                            "identity comparison requires compatible reference types; '{}' and '{}' cannot reference the same instance",
+                            left.describe(),
+                            right.describe()
+                        ),
+                        span,
+                    );
+                }
+
+                Ty::bool()
+            }
             BinaryOp::Colon => {
                 self.add_error(
                     "removed_pair_expression",
@@ -6542,6 +6647,167 @@ impl<'a> Checker<'a> {
                 Ty::Unknown
             }
         }
+    }
+
+    fn check_equality_operands(&mut self, left: &Ty, right: &Ty, span: crate::source::Span) {
+        if matches!(left, Ty::Unknown) || matches!(right, Ty::Unknown) {
+            return;
+        }
+        if left.is_any() || right.is_any() {
+            self.add_error(
+                "dynamic_equality_requires_same_value",
+                format!(
+                    "'==' and '!=' do not compare Any values; use 'sameValue(...)' for strict dynamic equality or narrow the value before comparing it (got '{}' and '{}')",
+                    left.describe(),
+                    right.describe()
+                ),
+                span,
+            );
+            return;
+        }
+
+        let left_is_shape = self.shape_target_fields(left).is_some();
+        let right_is_shape = self.shape_target_fields(right).is_some();
+        if left_is_shape || right_is_shape {
+            self.check_shape_equality_operands(left, right, span);
+            return;
+        }
+
+        let same_domain = left == right
+            || matches!((left, right), (Ty::TypeParam(a), Ty::TypeParam(b)) if self.type_params_are_equal(a, b));
+        if !same_domain {
+            self.add_error(
+                "incompatible_equality_operands",
+                format!(
+                    "equality requires the same static equality domain; '{}' and '{}' are different types",
+                    left.describe(),
+                    right.describe()
+                ),
+                span,
+            );
+            return;
+        }
+
+        let intrinsic_domain = matches!(
+            left,
+            Ty::Named(name, args)
+                if args.is_empty()
+                    && matches!(
+                        name.as_str(),
+                        "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
+                    )
+        );
+        let requires_contract = !intrinsic_domain
+            && match left {
+                Ty::Named(name, _) => self
+                    .lookup_any_type(name)
+                    .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Interface)),
+                Ty::TypeParam(_) => true,
+                _ => false,
+            };
+        if requires_contract {
+            let equality_contract = Ty::Named("Eq".to_string(), vec![left.clone()]);
+            if !self.is_assignable(left, &equality_contract) {
+                self.add_error(
+                    "missing_equality_contract",
+                    format!(
+                        "type '{}' has no equality contract; declare 'with Eq[{}]' before using '==' or '!='",
+                        left.describe(),
+                        left.describe()
+                    ),
+                    span,
+                );
+            }
+        }
+    }
+
+    fn check_shape_equality_operands(&mut self, left: &Ty, right: &Ty, span: crate::source::Span) {
+        let left_fields = self.shape_target_fields(left);
+        let right_fields = self.shape_target_fields(right);
+        let unknown = matches!(left, Ty::Unknown) || matches!(right, Ty::Unknown);
+
+        let (Some(left_fields), Some(right_fields)) = (left_fields, right_fields) else {
+            if !unknown
+                && (self.shape_target_fields(left).is_some()
+                    || self.shape_target_fields(right).is_some())
+            {
+                self.add_error(
+                    "incompatible_shape_equality",
+                    format!(
+                        "shape equality requires matching shape operands; got '{}' and '{}'",
+                        left.describe(),
+                        right.describe()
+                    ),
+                    span,
+                );
+            }
+            return;
+        };
+
+        if left_fields.len() != right_fields.len() {
+            self.add_error(
+                "incompatible_shape_equality",
+                format!(
+                    "shape equality requires identical fields; '{}' has {} field(s) but '{}' has {}",
+                    left.describe(),
+                    left_fields.len(),
+                    right.describe(),
+                    right_fields.len()
+                ),
+                span,
+            );
+            return;
+        }
+
+        for left_field in &left_fields {
+            let Some(right_field) = right_fields
+                .iter()
+                .find(|right_field| right_field.name == left_field.name)
+            else {
+                self.add_error(
+                    "incompatible_shape_equality",
+                    format!(
+                        "shape equality requires identical fields; '{}' has no field '{}' required by '{}'",
+                        right.describe(),
+                        left_field.name,
+                        left.describe()
+                    ),
+                    span,
+                );
+                return;
+            };
+            if !self.is_assignable(&right_field.ty, &left_field.ty)
+                || !self.is_assignable(&left_field.ty, &right_field.ty)
+            {
+                self.add_error(
+                    "incompatible_shape_equality",
+                    format!(
+                        "shape equality field '{}' has different types: '{}' in '{}' and '{}' in '{}'",
+                        left_field.name,
+                        left_field.ty.describe(),
+                        left.describe(),
+                        right_field.ty.describe(),
+                        right.describe()
+                    ),
+                    span,
+                );
+                return;
+            }
+        }
+    }
+
+    fn is_identity_reference_type(&self, ty: &Ty) -> bool {
+        let Ty::Named(name, _) = ty else {
+            return false;
+        };
+        if matches!(
+            name.as_str(),
+            "Any" | "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
+        ) {
+            return false;
+        }
+        self.lookup_any_type(name)
+            .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Object))
     }
 
     fn check_else_expr_branch(&mut self, branch: &ElseExprBranch) -> Ty {
@@ -8835,6 +9101,110 @@ impl<'a> Checker<'a> {
         })
     }
 
+    fn shape_fields_match_exactly(&self, left: &Ty, right: &Ty) -> bool {
+        let Some(left_fields) = self.shape_target_fields(left) else {
+            return false;
+        };
+        let Some(right_fields) = self.shape_target_fields(right) else {
+            return false;
+        };
+        left_fields.len() == right_fields.len()
+            && left_fields.iter().all(|left_field| {
+                right_fields
+                    .iter()
+                    .find(|right_field| right_field.name == left_field.name)
+                    .is_some_and(|right_field| {
+                        self.is_assignable(&left_field.ty, &right_field.ty)
+                            && self.is_assignable(&right_field.ty, &left_field.ty)
+                    })
+            })
+    }
+
+    fn implicitly_satisfies_value_bound(&self, actual: &Ty, expected: &Ty) -> bool {
+        match expected {
+            Ty::Named(name, args) if name == "Eq" && args.len() == 1 => {
+                self.shape_fields_match_exactly(actual, &args[0])
+            }
+            Ty::Named(name, args) if name == "Hashed" && args.is_empty() => {
+                self.is_hashable_type(actual, &mut HashSet::new())
+            }
+            _ => false,
+        }
+    }
+
+    fn is_hashable_type(&self, ty: &Ty, seen: &mut HashSet<String>) -> bool {
+        match ty {
+            Ty::Named(name, args)
+                if args.is_empty()
+                    && matches!(
+                        name.as_str(),
+                        "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
+                    ) =>
+            {
+                true
+            }
+            Ty::Record(fields) => fields
+                .iter()
+                .all(|(_, field_ty)| self.is_hashable_type(field_ty, seen)),
+            Ty::Named(name, args) => {
+                let Some(sig) = self.lookup_any_type(name) else {
+                    return false;
+                };
+                match sig.kind {
+                    TypeKind::Enum | TypeKind::Object => true,
+                    TypeKind::Record => {
+                        let key = ty.describe();
+                        if !seen.insert(key.clone()) {
+                            return true;
+                        }
+                        let subst = sig
+                            .type_params
+                            .iter()
+                            .cloned()
+                            .zip(args.iter().cloned())
+                            .collect::<HashMap<_, _>>();
+                        let hashable = sig.fields.iter().all(|field| {
+                            self.is_hashable_type(&substitute_type(&field.ty, &subst), seen)
+                        });
+                        seen.remove(&key);
+                        hashable
+                    }
+                    TypeKind::Class => self.type_sig_has_named_bound(&sig, "Hashed", seen),
+                    TypeKind::Annotation | TypeKind::Interface => false,
+                }
+            }
+            Ty::TypeParam(name) => self.type_param_bounds(name).iter().any(|bound| {
+                matches!(bound, Ty::Named(bound_name, args) if bound_name == "Hashed" && args.is_empty())
+            }),
+            Ty::Unknown
+            | Ty::Wildcard
+            | Ty::Capture(_)
+            | Ty::Never
+            | Ty::Tuple(_)
+            | Ty::Function(_, _) => false,
+        }
+    }
+
+    fn type_sig_has_named_bound(
+        &self,
+        sig: &TypeSig,
+        expected: &str,
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        if !seen.insert(format!("bound:{}", sig.name)) {
+            return false;
+        }
+        sig.with_bounds.iter().any(|bound| {
+            let Ty::Named(name, _) = bound else {
+                return false;
+            };
+            name == expected
+                || self.lookup_any_type(name).is_some_and(|bound_sig| {
+                    self.type_sig_has_named_bound(&bound_sig, expected, seen)
+                })
+        })
+    }
+
     fn is_assignable_inner(
         &self,
         actual: &Ty,
@@ -8857,6 +9227,9 @@ impl<'a> Checker<'a> {
             {
                 return true;
             }
+        }
+        if self.implicitly_satisfies_value_bound(actual, expected) {
+            return true;
         }
         if self.structurally_assignable_to_shape(actual, expected) {
             return true;
@@ -10751,6 +11124,392 @@ def main() Int {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_identity_comparison_for_reference_types() {
+        let program = parse_inline(
+            r#"
+class Box {
+    value Int
+}
+
+object Shared {
+}
+
+def main() Unit {
+    first = Box(1)
+    alias = first
+    same = first === alias
+    different = first !== Box(1)
+
+    values = [1, 2]
+    valuesAlias = values
+    sameVector = values === valuesAlias
+    sameObject = Shared === Shared
+
+    anonymous = object { label Str = "value" }
+    anonymousAlias = anonymous
+    sameAnonymous = anonymous === anonymousAlias
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_identity_comparison_for_value_and_interface_types() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+}
+
+interface Named {
+    def name() Str
+}
+
+class Person with Named {
+    label Str
+    def name() Str = this.label
+}
+
+def main() Unit {
+    intIdentity = 1 === 1
+    shapeIdentity = Point { x: 1 } === Point { x: 1 }
+    option Option[Person] = Some(Person("Ada"))
+    optionIdentity = option === option
+    left Named = Person("Ada")
+    right Named = left
+    interfaceIdentity = left === right
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "invalid_identity_operand")
+                .count(),
+            4,
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_identity_comparison_between_unrelated_classes() {
+        let program = parse_inline(
+            r#"
+class FirstBox {
+}
+
+class SecondBox {
+}
+
+def main() Unit {
+    same = FirstBox {} === SecondBox {}
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "incompatible_identity_operands"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_structural_equality_between_distinct_matching_shapes() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Str
+}
+
+shape ReorderedPoint {
+    y Str
+    x Int
+}
+
+def main() Unit {
+    left = Point(1, "one")
+    right = ReorderedPoint("one", 1)
+    same = left == right
+    different = left != right
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_shape_equality_with_different_fields_or_types() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Str
+}
+
+shape MissingField {
+    x Int
+}
+
+shape DifferentType {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    missing = Point(1, "one") == MissingField(1)
+    wrongType = Point(1, "one") == DifferentType(1, 1)
+    nonShape = Point(1, "one") == 1
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "incompatible_shape_equality")
+                .count(),
+            3,
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_any_and_uncontracted_class_equality() {
+        let program = parse_inline(
+            r#"
+class Account {
+    id Int
+}
+
+def main() Unit {
+    unknown Any = 1
+    dynamic = unknown == 1
+    classValue = Account(1) == Account(1)
+    explicitDynamic = unknown.sameValue(1)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "dynamic_equality_requires_same_value"),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "missing_equality_contract"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn accepts_explicit_and_implicit_widening_to_any() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Int
+}
+
+def consume(value Any) Unit = ()
+
+def main() Unit {
+    number Any = Any(42)
+    text Any = Any("hello")
+    point Any = Any(Point(1, 2))
+    again Any = Any(point)
+    implicit Any = "hello"
+    consume("implicit")
+    consume(Any("explicit"))
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_invalid_explicit_any_widening_forms() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    missing = Any()
+    multiple = Any(1, 2)
+    braced = Any { value: 1 }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_any_widening_arity"
+                    && diagnostic.message.contains("got 0")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_any_widening_arity"
+                    && diagnostic.message.contains("got 2")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "invalid_any_widening_syntax"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn accepts_class_equality_with_explicit_eq_contract() {
+        let program = parse_inline(
+            r#"
+class Account with Eq[Account] {
+    id Int
+
+    def equals(other Account) Bool = this.id == other.id
+}
+
+interface Identified with Eq[Identified] {
+    def code() Int
+}
+
+class Entry with Identified {
+    value Int
+
+    def code() Int = this.value
+    def equals(other Identified) Bool = this.value == other.code()
+}
+
+class AlternateEntry with Identified {
+    value Int
+
+    def code() Int = this.value
+    def equals(other Identified) Bool = this.value == other.code()
+}
+
+def main() Unit {
+    same = Account(1) == Account(1)
+    different = Account(1) != Account(2)
+    left Identified = Entry(1)
+    right Identified = AlternateEntry(1)
+    interfaceEqual = left == right
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn derives_eq_and_hashed_bounds_for_eligible_shapes() {
+        let program = parse_inline(
+            r#"
+enum State {
+    case Ready
+}
+
+object Marker {
+}
+
+class StableReference with Hashed {
+    id Int
+}
+
+shape Coordinate {
+    x Int
+    y Int
+}
+
+shape CacheKey {
+    coordinate Coordinate
+    state State
+    marker Marker
+    reference StableReference
+}
+
+def requireEq[T with Eq[T]](value T) Unit = ()
+def requireHash[T with Hashed](value T) Unit = ()
+
+def main() Unit {
+    key = CacheKey(Coordinate(1, 2), State.Ready, Marker, StableReference(3))
+    requireEq(key)
+    requireHash(key)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_hashed_bound_for_shape_with_non_hashed_class_field() {
+        let program = parse_inline(
+            r#"
+class MutableReference {
+    id Int
+}
+
+shape Snapshot {
+    reference MutableReference
+}
+
+def requireEq[T with Eq[T]](value T) Unit = ()
+def requireHash[T with Hashed](value T) Unit = ()
+
+def main() Unit {
+    snapshot = Snapshot(MutableReference(1))
+    requireEq(snapshot)
+    requireHash(snapshot)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| diagnostic.code
+                == "generic_bound_not_satisfied"
+                && diagnostic.message.contains("Hashed")),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "generic_bound_not_satisfied")
+                .count(),
+            1,
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

@@ -1,0 +1,16 @@
+# EXPECT_ERROR:
+# does not satisfy generic bound 'Hashed'
+
+class MutableReference {
+    value Int
+}
+
+shape Snapshot {
+    reference MutableReference
+}
+
+def requireHash[T with Hashed](value T) Unit = ()
+
+def main() Unit {
+    requireHash(Snapshot(MutableReference(1)))
+}

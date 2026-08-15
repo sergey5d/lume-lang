@@ -5,3 +5,7 @@
 interface Eq[T] {
     def equals(other T) Bool
 }
+
+# Marker for values whose equality is compatible with stable hashing.
+interface Hashed {
+}

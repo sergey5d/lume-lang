@@ -2,6 +2,7 @@ package lume.core;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -115,17 +116,8 @@ public final class LumeRuntime {
             return LumeType.primitive("Unit");
         }
 
-        try {
-            var method = value.getClass().getDeclaredMethod("runtimeType");
-            method.setAccessible(true);
-            Object result = method.invoke(value);
-            if (result instanceof LumeType type) {
-                return type;
-            }
-        } catch (NoSuchMethodException ignored) {
-            // Plain Java objects may not carry Lume descriptors.
-        } catch (IllegalAccessException | InvocationTargetException err) {
-            throw new LumePanic("failed to read runtimeType: " + err.getMessage());
+        if (value instanceof LumeTyped typed) {
+            return typed.runtimeType();
         }
 
         return LumeType.classType(
@@ -133,6 +125,47 @@ public final class LumeRuntime {
                 value.getClass().getName(),
                 new LumeField[] {},
                 new LumeMethod[] {});
+    }
+
+    public static Boolean sameValue(Object left, Object right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null || !sameEqualityDomain(left, right)) {
+            return false;
+        }
+        return Objects.equals(left, right);
+    }
+
+    private static boolean sameEqualityDomain(Object left, Object right) {
+        String leftPrimitive = primitiveEqualityDomain(left);
+        String rightPrimitive = primitiveEqualityDomain(right);
+        if (leftPrimitive != null || rightPrimitive != null) {
+            return Objects.equals(leftPrimitive, rightPrimitive);
+        }
+        if (left instanceof LumeTyped leftTyped && right instanceof LumeTyped rightTyped) {
+            return leftTyped.runtimeType() == rightTyped.runtimeType();
+        }
+        return left.getClass() == right.getClass();
+    }
+
+    private static String primitiveEqualityDomain(Object value) {
+        if (value instanceof String) {
+            return "Str";
+        }
+        if (value instanceof Boolean) {
+            return "Bool";
+        }
+        if (value instanceof Long || value instanceof Integer || value instanceof Short || value instanceof Byte) {
+            return "Int";
+        }
+        if (value instanceof Double || value instanceof Float) {
+            return "Float";
+        }
+        if (value instanceof LumeUnit) {
+            return "Unit";
+        }
+        return null;
     }
 
     public static Object probeSuccessValue(Object value) {

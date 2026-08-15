@@ -30,7 +30,7 @@ enum OptionX[T] {
         value T
     }
 
-    def isDefined() Bool = this != None
+    def isDefined() Bool = this != OptionX.NoneX
 }
 
 black = Color.Black

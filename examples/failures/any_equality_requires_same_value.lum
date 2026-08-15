@@ -1,0 +1,7 @@
+# EXPECT_ERROR:
+# use 'sameValue(...)' for strict dynamic equality
+
+def main() Unit {
+    unknown Any = 5
+    equal = unknown == 5
+}

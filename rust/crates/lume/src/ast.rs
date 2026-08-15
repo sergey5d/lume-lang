@@ -813,6 +813,8 @@ pub enum BinaryOp {
     And,
     Eq,
     NotEq,
+    IdentityEq,
+    IdentityNotEq,
     Less,
     LessEq,
     Greater,

@@ -1920,7 +1920,9 @@ impl<'a> Resolver<'a> {
                     callee.as_ref(),
                     Expr::Identifier { name, .. } if self.current_constructor && name == "new"
                 );
-                if !skip_init && !self.is_implicit_method_call(callee) {
+                let skip_any_widening =
+                    matches!(callee.as_ref(), Expr::Identifier { name, .. } if name == "Any");
+                if !skip_init && !skip_any_widening && !self.is_implicit_method_call(callee) {
                     self.resolve_expr(callee);
                 }
                 for arg in args {

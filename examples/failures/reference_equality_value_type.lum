@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*identity operators require class, object, or concrete collection references; got 'Point' and 'Point'.*
+
+shape Point {
+    x Int
+}
+
+def main() Unit {
+    left = Point { x: 1 }
+    right = Point { x: 1 }
+    same = left === right
+}

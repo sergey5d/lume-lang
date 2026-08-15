@@ -1,0 +1,28 @@
+# EXPECT:
+# true
+# true
+# true
+# hello
+# implicit widening also works
+
+shape Point {
+    x Int
+    y Int
+}
+
+def printAnything(value Any) Unit = println(value.toStr())
+
+def main() Unit {
+    number = Any(42)
+    text = Any("hello")
+    point = Point(1, 2)
+    widenedPoint = Any(point)
+    widenedAgain = Any(widenedPoint)
+
+    println(number.sameValue(42))
+    println(widenedPoint.sameValue(point))
+    println(widenedAgain.sameValue(point))
+
+    printAnything(text)
+    printAnything("implicit widening also works")
+}

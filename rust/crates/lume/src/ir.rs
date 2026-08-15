@@ -682,6 +682,8 @@ pub enum BinaryOp {
     Mod,
     Eq,
     NotEq,
+    IdentityEq,
+    IdentityNotEq,
     Less,
     LessEq,
     Greater,
