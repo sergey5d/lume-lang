@@ -1,7 +1,8 @@
 use std::{
     cell::RefCell,
-    collections::HashSet,
+    collections::{HashSet, hash_map::DefaultHasher},
     fmt,
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -4200,7 +4201,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn try_invoke_universal_method(
-        &self,
+        &mut self,
         receiver: Value,
         method: &str,
         args: &[Value],
@@ -4234,8 +4235,110 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Some(Value::Bool(values_same_value(&receiver, &args[0]))))
             }
+            "hash" => {
+                if !args.is_empty() {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("hash expects 0 arguments, got {}", args.len()),
+                    ));
+                }
+                Ok(Some(Value::Int(self.hash_value(&receiver, span)?)))
+            }
             _ => Ok(None),
         }
+    }
+
+    fn hash_value(&mut self, value: &Value, span: Option<Span>) -> Result<i64, Diagnostic> {
+        let mut hasher = DefaultHasher::new();
+        match value {
+            Value::Unit => "Unit".hash(&mut hasher),
+            Value::Bool(value) => {
+                "Bool".hash(&mut hasher);
+                value.hash(&mut hasher);
+            }
+            Value::Int(value) => {
+                "Int".hash(&mut hasher);
+                value.hash(&mut hasher);
+            }
+            Value::Float(value) => {
+                "Float".hash(&mut hasher);
+                let normalized = if *value == 0.0 { 0.0 } else { *value };
+                normalized.to_bits().hash(&mut hasher);
+            }
+            Value::String(value) => {
+                "Str".hash(&mut hasher);
+                value.hash(&mut hasher);
+            }
+            Value::Rune(value) => {
+                "Rune".hash(&mut hasher);
+                value.hash(&mut hasher);
+            }
+            Value::Record(fields) => {
+                "shape".hash(&mut hasher);
+                let mut fields = fields.borrow().clone();
+                fields.sort_by(|left, right| left.0.cmp(&right.0));
+                for (name, value) in fields {
+                    name.hash(&mut hasher);
+                    self.hash_value(&value, span)?.hash(&mut hasher);
+                }
+            }
+            Value::Aggregate(aggregate) => {
+                let aggregate = aggregate.borrow();
+                let type_name = aggregate.type_name.clone();
+                let kind = aggregate.kind;
+                let case_name = aggregate.case_name.clone();
+                let field_names = aggregate.field_names.clone();
+                let fields = aggregate.fields.clone();
+                drop(aggregate);
+
+                if kind == crate::ast::TypeKind::Class {
+                    let Some(function) =
+                        self.find_method_overload_for_kind(&type_name, kind, "hash", &[])
+                    else {
+                        return Err(self.runtime_error(
+                            span,
+                            format!("class '{type_name}' does not implement hash()"),
+                        ));
+                    };
+                    return match self.call_function(
+                        function,
+                        Some(value.clone()),
+                        None,
+                        Vec::new(),
+                        span,
+                    )? {
+                        Value::Int(hash) => Ok(hash),
+                        other => Err(self.runtime_error(
+                            span,
+                            format!("hash() must return Int, got {}", other.render()),
+                        )),
+                    };
+                }
+
+                if kind == crate::ast::TypeKind::Record {
+                    "shape".hash(&mut hasher);
+                    let mut fields = field_names.into_iter().zip(fields).collect::<Vec<_>>();
+                    fields.sort_by(|left, right| left.0.cmp(&right.0));
+                    for (name, value) in fields {
+                        name.hash(&mut hasher);
+                        self.hash_value(&value, span)?.hash(&mut hasher);
+                    }
+                } else {
+                    format!("{kind:?}").hash(&mut hasher);
+                    type_name.hash(&mut hasher);
+                    case_name.hash(&mut hasher);
+                    for value in fields {
+                        self.hash_value(&value, span)?.hash(&mut hasher);
+                    }
+                }
+            }
+            other => {
+                return Err(
+                    self.runtime_error(span, format!("{} does not satisfy Hashed", other.render()))
+                );
+            }
+        }
+        Ok(hasher.finish() as i64)
     }
 
     fn invoke_user_variant_method(
@@ -5510,6 +5613,20 @@ pub(crate) fn iterable_values(
 }
 
 pub(crate) fn values_equal(left: &Value, right: &Value) -> bool {
+    if let (Some(mut lhs), Some(mut rhs)) = (
+        structural_shape_fields(left),
+        structural_shape_fields(right),
+    ) {
+        lhs.sort_by(|left, right| left.0.cmp(&right.0));
+        rhs.sort_by(|left, right| left.0.cmp(&right.0));
+        return lhs.len() == rhs.len()
+            && lhs.iter().zip(rhs.iter()).all(
+                |((left_name, left_value), (right_name, right_value))| {
+                    left_name == right_name && values_equal(left_value, right_value)
+                },
+            );
+    }
+
     match (left, right) {
         (Value::Unit, Value::Unit) => true,
         (Value::Bool(lhs), Value::Bool(rhs)) => lhs == rhs,
@@ -5547,15 +5664,6 @@ pub(crate) fn values_equal(left: &Value, right: &Value) -> bool {
                     .zip(rhs.iter())
                     .all(|((lk, lv), (rk, rv))| values_equal(lk, rk) && values_equal(lv, rv))
         }
-        (Value::Record(lhs), Value::Record(rhs)) => {
-            let lhs = lhs.borrow();
-            let rhs = rhs.borrow();
-            lhs.len() == rhs.len()
-                && lhs
-                    .iter()
-                    .zip(rhs.iter())
-                    .all(|((ln, lv), (rn, rv))| ln == rn && values_equal(lv, rv))
-        }
         (Value::Aggregate(lhs), Value::Aggregate(rhs)) => {
             let lhs = lhs.borrow();
             let rhs = rhs.borrow();
@@ -5569,6 +5677,24 @@ pub(crate) fn values_equal(left: &Value, right: &Value) -> bool {
                     .all(|(lv, rv)| values_equal(lv, rv))
         }
         _ => false,
+    }
+}
+
+fn structural_shape_fields(value: &Value) -> Option<Vec<(String, Value)>> {
+    match value {
+        Value::Record(fields) => Some(fields.borrow().clone()),
+        Value::Aggregate(aggregate) if aggregate.borrow().kind == ast::TypeKind::Record => {
+            let aggregate = aggregate.borrow();
+            Some(
+                aggregate
+                    .field_names
+                    .iter()
+                    .cloned()
+                    .zip(aggregate.fields.iter().cloned())
+                    .collect(),
+            )
+        }
+        _ => None,
     }
 }
 

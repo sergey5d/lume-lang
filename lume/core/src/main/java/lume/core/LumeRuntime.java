@@ -137,6 +137,13 @@ public final class LumeRuntime {
         return Objects.equals(left, right);
     }
 
+    public static Long hashValue(Object value) {
+        if (value instanceof Hashed<?> hashed) {
+            return hashed.hash();
+        }
+        return (long) Objects.hashCode(value);
+    }
+
     private static boolean sameEqualityDomain(Object left, Object right) {
         String leftPrimitive = primitiveEqualityDomain(left);
         String rightPrimitive = primitiveEqualityDomain(right);

@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*does not implement required method 'hash'.*
+
+class IncompleteKey with Hashed[IncompleteKey] {
+    id Int
+
+    def equals(other IncompleteKey) Bool = this.id == other.id
+}

@@ -3,6 +3,7 @@
 # false
 # true
 # true
+# true
 
 shape Point {
     x Int
@@ -21,7 +22,7 @@ shape Point3D {
 }
 
 def requireEq[T with Eq[T]](value T) Unit = ()
-def requireHash[T with Hashed](value T) Unit = ()
+def requireHash[T with Hashed[T]](value T) Unit = ()
 
 def main() Unit {
     point = Point(1, 2)
@@ -37,4 +38,5 @@ def main() Unit {
 
     requireEq(point)
     requireHash(point)
+    println(point.hash() == same.hash())
 }

@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*map key type 'MutableKey' does not satisfy 'Hashed\[MutableKey\]'.*
+
+class MutableKey {
+    id Int
+}
+
+def main() Unit {
+    values = [MutableKey(1): "one"]
+}

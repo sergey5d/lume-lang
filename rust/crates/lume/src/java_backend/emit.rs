@@ -215,8 +215,29 @@ fn render_class(
     push_class_constructors(&mut out, bundle, ty, names);
     push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     push_class_equality_bridge(&mut out, bundle, ty, names);
+    push_class_hash_bridge(&mut out, bundle, ty);
     out.push_str("}\n");
     out
+}
+
+fn push_class_hash_bridge(out: &mut String, bundle: &BackendBundle, ty: &ir::TypeDef) {
+    if !java_type_has_bound(bundle, ty, "Hashed", &mut HashSet::new()) {
+        return;
+    }
+    let has_hash_method = ty.methods.iter().any(|method| {
+        bundle
+            .ir
+            .function(*method)
+            .is_some_and(|function| function.name == "hash" && function.params.is_empty())
+    });
+    if !has_hash_method {
+        return;
+    }
+
+    out.push_str("\n    @Override\n");
+    out.push_str("    public int hashCode() {\n");
+    out.push_str("        return Long.hashCode(this.hash());\n");
+    out.push_str("    }\n");
 }
 
 fn push_class_equality_bridge(
@@ -2927,6 +2948,10 @@ impl<'a> FunctionEmitter<'a> {
                         "lume.core.LumeRuntime.sameValue({receiver}, {other})"
                     ))
                 }
+                "hash" if args.is_empty() => {
+                    let receiver = self.emit_operand(receiver)?;
+                    Some(format!("lume.core.LumeRuntime.hashValue({receiver})"))
+                }
                 "isSuccess" | "isSet" | "isDefined" if args.is_empty() => {
                     let receiver = self.emit_operand(receiver)?;
                     Some(format!(
@@ -5028,6 +5053,13 @@ impl JavaNames {
                 .unwrap_or_else(|| java_type_name(name)),
             ir::Type::Named { name, args } if name == "Eq" => format!(
                 "lume.core.Eq<{}>",
+                args.iter()
+                    .map(|arg| self.value_type(arg))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            ir::Type::Named { name, args } if name == "Hashed" => format!(
+                "lume.core.Hashed<{}>",
                 args.iter()
                     .map(|arg| self.value_type(arg))
                     .collect::<Vec<_>>()

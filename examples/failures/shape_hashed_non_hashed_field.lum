@@ -9,7 +9,7 @@ shape Snapshot {
     reference MutableReference
 }
 
-def requireHash[T with Hashed](value T) Unit = ()
+def requireHash[T with Hashed[T]](value T) Unit = ()
 
 def main() Unit {
     requireHash(Snapshot(MutableReference(1)))

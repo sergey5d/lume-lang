@@ -330,6 +330,18 @@ fn universal_member_type(name: &str) -> Option<Ty> {
     })
 }
 
+fn hash_method_sig() -> FunctionSig {
+    FunctionSig {
+        type_params: Vec::new(),
+        reified_type_params: Vec::new(),
+        generic_conditions: Vec::new(),
+        params: Vec::new(),
+        ret: Ty::int(),
+        visibility: Visibility::Default,
+        has_body: true,
+    }
+}
+
 fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
     let sig = match name {
         "toStr" => FunctionSig {
@@ -5786,9 +5798,27 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                self.require_hashable_map_key(&key, span);
                 Some(Ty::Named("Map".to_string(), vec![key, value]))
             }
             _ => None,
+        }
+    }
+
+    fn require_hashable_map_key(&mut self, key: &Ty, span: crate::source::Span) {
+        if matches!(key, Ty::Unknown | Ty::Wildcard | Ty::Capture(_)) {
+            return;
+        }
+        if !self.is_hashable_type(key, &mut HashSet::new()) {
+            self.add_error(
+                "map_key_not_hashable",
+                format!(
+                    "map key type '{}' does not satisfy 'Hashed[{}]'; map keys must provide equality-compatible hashing",
+                    key.describe(),
+                    key.describe()
+                ),
+                span,
+            );
         }
     }
 
@@ -7725,6 +7755,9 @@ impl<'a> Checker<'a> {
     }
 
     fn member_type(&self, receiver: &Ty, name: &str) -> Option<Ty> {
+        if name == "hash" && self.is_hashable_type(receiver, &mut HashSet::new()) {
+            return Some(Ty::Function(Vec::new(), Box::new(Ty::int())));
+        }
         match receiver {
             Ty::Named(type_name, args) => {
                 let Some(sig) = self.lookup_any_type(type_name) else {
@@ -7798,6 +7831,9 @@ impl<'a> Checker<'a> {
     }
 
     fn member_method_sigs(&self, receiver: &Ty, name: &str) -> Option<Vec<FunctionSig>> {
+        if name == "hash" && self.is_hashable_type(receiver, &mut HashSet::new()) {
+            return Some(vec![hash_method_sig()]);
+        }
         match receiver {
             Ty::Named(type_name, args) => {
                 let Some(sig) = self.lookup_any_type(type_name) else {
@@ -8905,7 +8941,17 @@ impl<'a> Checker<'a> {
                     .cloned()
                     .zip(args.iter().map(|arg| self.ty_from_type_ref(arg)))
                     .collect::<HashMap<_, _>>();
-                self.check_call_generic_conditions(&sig.generic_conditions, &subst, *span);
+                let concrete_conditions = sig
+                    .generic_conditions
+                    .iter()
+                    .filter(|condition| {
+                        !generic_condition_contains_wildcard(&substitute_generic_condition(
+                            condition, &subst,
+                        ))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                self.check_call_generic_conditions(&concrete_conditions, &subst, *span);
             }
             TypeRef::Tuple { fields, .. } => {
                 for field in fields {
@@ -9173,8 +9219,10 @@ impl<'a> Checker<'a> {
             Ty::Named(name, args) if name == "Eq" && args.len() == 1 => {
                 self.shape_fields_match_exactly(actual, &args[0])
             }
-            Ty::Named(name, args) if name == "Hashed" && args.is_empty() => {
-                self.is_hashable_type(actual, &mut HashSet::new())
+            Ty::Named(name, args) if name == "Hashed" && args.len() == 1 => {
+                (self.generic_types_are_equal(actual, &args[0])
+                    || self.shape_fields_match_exactly(actual, &args[0]))
+                    && self.is_hashable_type(actual, &mut HashSet::new())
             }
             _ => false,
         }
@@ -9217,12 +9265,18 @@ impl<'a> Checker<'a> {
                         seen.remove(&key);
                         hashable
                     }
-                    TypeKind::Class => self.type_sig_has_named_bound(&sig, "Hashed", seen),
+                    TypeKind::Class => self.type_sig_has_hashed_bound(&sig, ty, seen),
                     TypeKind::Annotation | TypeKind::Interface => false,
                 }
             }
             Ty::TypeParam(name) => self.type_param_bounds(name).iter().any(|bound| {
-                matches!(bound, Ty::Named(bound_name, args) if bound_name == "Hashed" && args.is_empty())
+                matches!(
+                    bound,
+                    Ty::Named(bound_name, args)
+                        if bound_name == "Hashed"
+                            && args.len() == 1
+                            && matches!(&args[0], Ty::TypeParam(bound_param) if bound_param == name)
+                )
             }),
             Ty::Unknown
             | Ty::Wildcard
@@ -9233,24 +9287,38 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn type_sig_has_named_bound(
+    fn type_sig_has_hashed_bound(
         &self,
         sig: &TypeSig,
-        expected: &str,
+        actual: &Ty,
         seen: &mut HashSet<String>,
     ) -> bool {
-        if !seen.insert(format!("bound:{}", sig.name)) {
+        let key = format!("hashed:{}:{}", sig.name, actual.describe());
+        if !seen.insert(key.clone()) {
             return false;
         }
-        sig.with_bounds.iter().any(|bound| {
-            let Ty::Named(name, _) = bound else {
+        let subst = match actual {
+            Ty::Named(_, args) => sig
+                .type_params
+                .iter()
+                .cloned()
+                .zip(args.iter().cloned())
+                .collect::<HashMap<_, _>>(),
+            _ => HashMap::new(),
+        };
+        let found = sig.with_bounds.iter().any(|bound| {
+            let bound = substitute_type(bound, &subst);
+            let Ty::Named(name, args) = &bound else {
                 return false;
             };
-            name == expected
-                || self.lookup_any_type(name).is_some_and(|bound_sig| {
-                    self.type_sig_has_named_bound(&bound_sig, expected, seen)
-                })
-        })
+            if name == "Hashed" {
+                return args.len() == 1 && self.generic_types_are_equal(&args[0], actual);
+            }
+            self.lookup_any_type(name)
+                .is_some_and(|parent| self.type_sig_has_hashed_bound(&parent, &bound, seen))
+        });
+        seen.remove(&key);
+        found
     }
 
     fn is_assignable_inner(
@@ -10828,6 +10896,29 @@ fn substitute_generic_condition(
     }
 }
 
+fn generic_condition_contains_wildcard(condition: &GenericConditionSig) -> bool {
+    match condition {
+        GenericConditionSig::Bound { subject, bound } => {
+            type_contains_wildcard(subject) || type_contains_wildcard(bound)
+        }
+        GenericConditionSig::Equal { left, right } => {
+            type_contains_wildcard(left) || type_contains_wildcard(right)
+        }
+    }
+}
+
+fn type_contains_wildcard(ty: &Ty) -> bool {
+    match ty {
+        Ty::Wildcard | Ty::Capture(_) => true,
+        Ty::Named(_, args) | Ty::Tuple(args) => args.iter().any(type_contains_wildcard),
+        Ty::Record(fields) => fields.iter().any(|(_, ty)| type_contains_wildcard(ty)),
+        Ty::Function(params, ret) => {
+            params.iter().any(type_contains_wildcard) || type_contains_wildcard(ret)
+        }
+        Ty::TypeParam(_) | Ty::Never | Ty::Unknown => false,
+    }
+}
+
 fn instantiate_function_sig(method: FunctionSig, subst: &HashMap<String, Ty>) -> FunctionSig {
     FunctionSig {
         type_params: method.type_params,
@@ -11502,8 +11593,11 @@ enum State {
 object Marker {
 }
 
-class StableReference with Hashed {
+class StableReference with Hashed[StableReference] {
     id Int
+
+    def equals(other StableReference) Bool = this.id == other.id
+    def hash() Int = this.id
 }
 
 shape Coordinate {
@@ -11519,7 +11613,7 @@ shape CacheKey {
 }
 
 def requireEq[T with Eq[T]](value T) Unit = ()
-def requireHash[T with Hashed](value T) Unit = ()
+def requireHash[T with Hashed[T]](value T) Unit = ()
 
 def main() Unit {
     key = CacheKey(Coordinate(1, 2), State.Ready, Marker, StableReference(3))
@@ -11545,7 +11639,7 @@ shape Snapshot {
 }
 
 def requireEq[T with Eq[T]](value T) Unit = ()
-def requireHash[T with Hashed](value T) Unit = ()
+def requireHash[T with Hashed[T]](value T) Unit = ()
 
 def main() Unit {
     snapshot = Snapshot(MutableReference(1))
@@ -11569,6 +11663,75 @@ def main() Unit {
                 .filter(|diagnostic| diagnostic.code == "generic_bound_not_satisfied")
                 .count(),
             1,
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_unhashable_map_keys() {
+        let program = parse_inline(
+            r#"
+class MutableKey {
+    id Int
+}
+
+def main() Unit {
+    values = [MutableKey(1): "one"]
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "map_key_not_hashable"
+                    && diagnostic.message.contains("Hashed[MutableKey]")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_unhashable_explicit_map_key_types() {
+        let program = parse_inline(
+            r#"
+class MutableKey {
+    id Int
+}
+
+def main() Unit {
+    values [MutableKey: Str] = []
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "generic_bound_not_satisfied"
+                    && diagnostic.message.contains("Hashed[MutableKey]")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn hashed_classes_must_implement_equality_and_hashing() {
+        let program = parse_inline(
+            r#"
+class IncompleteKey with Hashed[IncompleteKey] {
+    id Int
+
+    def equals(other IncompleteKey) Bool = this.id == other.id
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "missing_interface_member" && diagnostic.message.contains("hash")
+            }),
             "{:#?}",
             result.diagnostics
         );

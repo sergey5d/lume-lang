@@ -47,7 +47,7 @@ Classes should eventually support auto-derived protocols when they stay value-li
 
 Likely targets:
 - `Eq`
-- `Hashed` when all fields are hashable
+- `Hashed[Class]` when all fields are hashable
 - maybe `Show` / `Stringify` later
 
 This reduces boilerplate and helps stdlib types feel native.
@@ -337,5 +337,5 @@ Leaning:
 ## Suggested Priority Order
 
 1. enum + pattern ergonomics
-2. derived `Eq` / `Hashed`
+2. derived `Eq[T]` / `Hashed[T]`
 3. stdlib collection/query growth

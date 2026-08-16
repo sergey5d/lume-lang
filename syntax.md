@@ -1011,18 +1011,36 @@ instead of producing a static error when its runtime equality domains differ.
 | `Any` and `Any` | error | descriptor comparison |
 | interface values | requires an explicit compatible `Eq` domain | concrete descriptor comparison |
 
-Every shape derives `Eq` structurally. `Hashed` is derived only when every field
-type is hashable:
+`Hashed[T]` extends `Eq[T]` and declares `hash() Int`. Equal values must return
+the same hash. Every shape derives `Eq` structurally and derives `Hashed[Shape]`
+only when every field type is hashable:
+
+```txt
+interface Eq[T] {
+    def equals(other T) Bool
+}
+
+interface Hashed[T] with Eq[T] {
+    def hash() Int
+}
+
+class Map[K with Hashed[K], V] {
+    # ...
+}
+```
 
 - primitives, enums, and object values are intrinsically hashable
 - nested shapes are hashable when their own fields are recursively hashable
-- a class is hashable only when it explicitly declares `with Hashed`
-- a type parameter is hashable only when it has a `Hashed` bound
+- a class is hashable only when it explicitly implements `Hashed[ClassName]`, including `equals` and `hash`
+- a type parameter is hashable only when it has a `Hashed[T]` bound
 - interfaces, functions, tuples, `Any`, and arbitrary classes do not implicitly satisfy `Hashed`
 
 ```txt
-class StableId with Hashed {
+class StableId with Hashed[StableId] {
     value Int
+
+    def equals(other StableId) Bool = this.value == other.value
+    def hash() Int = this.value
 }
 
 shape CacheKey {
@@ -1030,10 +1048,15 @@ shape CacheKey {
     version Int
 }
 
-def cache[T with Hashed](key T) Unit = ()
+def cache[T with Hashed[T]](key T) Unit = ()
 
 cache(CacheKey(StableId(1), 2))
 ```
+
+`Map[K, V]` (normally written `[K: V]`) requires `K` to satisfy `Hashed[K]`.
+This makes semantic equality and compatible hashing part of the key type's
+public contract, regardless of the storage strategy used by a particular
+runtime.
 
 ```txt
 shape Point {

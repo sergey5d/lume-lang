@@ -88,7 +88,7 @@ impl<'a> Lowerer<'a> {
     fn lower(&mut self) -> ir::Program {
         self.declare_top_level_items();
         self.define_items();
-        self.derive_shape_value_bounds();
+        self.derive_value_bounds();
         self.lower_top_level_functions();
         self.lower_methods();
         self.lower_field_initializers();
@@ -99,12 +99,15 @@ impl<'a> Lowerer<'a> {
         std::mem::take(&mut self.program)
     }
 
-    fn derive_shape_value_bounds(&mut self) {
+    fn derive_value_bounds(&mut self) {
         let types = self.program.types.clone();
         let derived = types
             .iter()
             .map(|ty| {
-                if ty.kind != ast::TypeKind::Record {
+                if !matches!(
+                    ty.kind,
+                    ast::TypeKind::Record | ast::TypeKind::Enum | ast::TypeKind::Object
+                ) {
                     return None;
                 }
                 let self_ty = ir::Type::Named {
@@ -121,13 +124,13 @@ impl<'a> Lowerer<'a> {
                     .iter()
                     .all(|field| ir_type_is_hashable(&field.ty, ty, &types, &mut HashSet::new()));
                 Some((
-                    ir::Type::Named {
+                    (!hashed).then(|| ir::Type::Named {
                         name: "Eq".to_string(),
-                        args: vec![self_ty],
-                    },
+                        args: vec![self_ty.clone()],
+                    }),
                     hashed.then(|| ir::Type::Named {
                         name: "Hashed".to_string(),
-                        args: Vec::new(),
+                        args: vec![self_ty],
                     }),
                 ))
             })
@@ -137,7 +140,9 @@ impl<'a> Lowerer<'a> {
             let Some((eq, hashed)) = bounds else {
                 continue;
             };
-            if !ty.with_bounds.contains(&eq) {
+            if let Some(eq) = eq
+                && !ty.with_bounds.contains(&eq)
+            {
                 ty.with_bounds.push(eq);
             }
             if let Some(hashed) = hashed
@@ -8070,6 +8075,10 @@ fn universal_member_type(name: &str) -> Option<ir::Type> {
             params: vec![ir::Type::named("Any")],
             ret: Box::new(ir::Type::Bool),
         }),
+        "hash" => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Int),
+        }),
         _ => None,
     }
 }
@@ -8256,7 +8265,10 @@ fn ir_type_is_hashable(
                 ir::GenericCondition::Bound {
                     subject: ir::Type::TypeParam(subject),
                     bound: ir::Type::Named { name: bound, args }
-                } if subject == name && bound == "Hashed" && args.is_empty()
+                } if subject == name
+                    && bound == "Hashed"
+                    && args.len() == 1
+                    && matches!(&args[0], ir::Type::TypeParam(bound_param) if bound_param == name)
             )
         }),
         ir::Type::Record(fields) => fields
@@ -8286,7 +8298,7 @@ fn ir_type_is_hashable(
                     seen.remove(&key);
                     hashable
                 }
-                ast::TypeKind::Class => ir_type_has_named_bound(definition, "Hashed", types, seen),
+                ast::TypeKind::Class => ir_type_has_hashed_bound(definition, ty, types, seen),
                 ast::TypeKind::Annotation | ast::TypeKind::Interface => false,
             }
         }
@@ -8296,25 +8308,37 @@ fn ir_type_is_hashable(
     }
 }
 
-fn ir_type_has_named_bound(
+fn ir_type_has_hashed_bound(
     ty: &ir::TypeDef,
-    expected: &str,
+    actual: &ir::Type,
     types: &[ir::TypeDef],
     seen: &mut HashSet<String>,
 ) -> bool {
-    let key = format!("bound:{}", ty.name);
+    let key = format!("hashed:{}:{actual:?}", ty.name);
     if !seen.insert(key.clone()) {
         return false;
     }
+    let subst = match actual {
+        ir::Type::Named { args, .. } => ty
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>(),
+        _ => HashMap::new(),
+    };
     let found = ty.with_bounds.iter().any(|bound| {
-        let ir::Type::Named { name, .. } = bound else {
+        let bound = substitute_ir_type(bound, &subst);
+        let ir::Type::Named { name, args } = &bound else {
             return false;
         };
-        name == expected
-            || types
-                .iter()
-                .find(|candidate| candidate.name == *name)
-                .is_some_and(|parent| ir_type_has_named_bound(parent, expected, types, seen))
+        if name == "Hashed" {
+            return args.len() == 1 && args.first() == Some(actual);
+        }
+        types
+            .iter()
+            .find(|candidate| candidate.name == *name)
+            .is_some_and(|parent| ir_type_has_hashed_bound(parent, &bound, types, seen))
     });
     seen.remove(&key);
     found

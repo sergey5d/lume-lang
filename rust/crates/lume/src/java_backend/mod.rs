@@ -3821,8 +3821,11 @@ shape ReorderedPoint {
     x Int
 }
 
-class StableReference with Hashed {
+class StableReference with Hashed[StableReference] {
     value Int
+
+    def equals(other StableReference) Bool = this.value == other.value
+    def hash() Int = this.value
 }
 
 class Account with Eq[Account] {
@@ -3909,9 +3912,7 @@ def main() Unit {
         assert!(point.contains("java.util.Objects.equals(this.label, that.label)"));
         assert!(point.contains("public int hashCode()"));
         assert!(point.contains("java.util.Objects.hash(this.label, this.x)"));
-        assert!(
-            point.contains("implements lume.core.Eq<Point>, lume.core.Hashed, lume.core.LumeTyped")
-        );
+        assert!(point.contains("implements lume.core.Hashed<Point>, lume.core.LumeTyped"));
 
         let generic =
             fs::read_to_string(out.join("demo/shapevalue/Box.java")).expect("read generated Box");
@@ -3925,7 +3926,9 @@ def main() Unit {
 
         let stable = fs::read_to_string(out.join("demo/shapevalue/StableReference.java"))
             .expect("read generated StableReference");
-        assert!(stable.contains("implements lume.core.Hashed"));
+        assert!(stable.contains("implements lume.core.Hashed<StableReference>"));
+        assert!(stable.contains("public int hashCode()"));
+        assert!(stable.contains("return Long.hashCode(this.hash())"));
 
         let account = fs::read_to_string(out.join("demo/shapevalue/Account.java"))
             .expect("read generated Account");

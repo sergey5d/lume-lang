@@ -1,4 +1,8 @@
 package lume.core;
 
-/** Marker for Lume values with equality-compatible stable hashing. */
-public interface Hashed {}
+/** Lume values with semantic equality and a compatible stable hash. */
+public interface Hashed<T> extends Eq<T> {
+    default Long hash() {
+        return (long) hashCode();
+    }
+}
