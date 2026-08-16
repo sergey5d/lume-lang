@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) => Str = value => value.toStr()\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();

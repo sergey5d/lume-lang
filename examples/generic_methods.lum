@@ -7,7 +7,7 @@ def id[T](value T) T = value
 
 class Mapper {
 
-    def map[X](value Int, mapper fn(Int) => X) X {
+    def map[X](value Int, mapper fn(Int) X) X {
         mapper(value)
     }
 }

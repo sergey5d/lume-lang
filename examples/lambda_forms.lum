@@ -33,21 +33,21 @@
 
 class LambdaRunner {
 
-    def zero(f fn() => Int) Int = f()
+    def zero(f fn() Int) Int = f()
 
-    def one(f fn(Int) => Int, value Int) Int = f(value)
+    def one(f fn(Int) Int, value Int) Int = f(value)
 
-    def two(f fn(Int, Int) => Int, left Int, right Int) Int = f(left, right)
+    def two(f fn(Int, Int) Int, left Int, right Int) Int = f(left, right)
 
-    def tupleOne(f fn((Int, Int)) => Int, pair (Int, Int)) Int = f(pair)
+    def tupleOne(f fn((Int, Int)) Int, pair (Int, Int)) Int = f(pair)
 
-    def userOne(f fn(User) => Str, user User) Str = f(user)
+    def userOne(f fn(User) Str, user User) Str = f(user)
 
-    def withIndex(f fn((Int, Int), Int) => Str, pair (Int, Int), index Int) Str = f(pair, index)
+    def withIndex(f fn((Int, Int), Int) Str, pair (Int, Int), index Int) Str = f(pair, index)
 
-    def combine(f fn(Str, (Int, Int)) => Str, name Str, pair (Int, Int)) Str = f(name, pair)
+    def combine(f fn(Str, (Int, Int)) Str, name Str, pair (Int, Int)) Str = f(name, pair)
 
-    def twoTuples(f fn((Int, Int), (Int, Int)) => Int, left (Int, Int), right (Int, Int)) Int = f(left, right)
+    def twoTuples(f fn((Int, Int), (Int, Int)) Int, left (Int, Int), right (Int, Int)) Int = f(left, right)
 }
 
 

@@ -190,7 +190,7 @@ fn describe_type(ty: &ir::Type) -> String {
                 .map(describe_type)
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("fn({params}) => {}", describe_type(ret))
+            format!("fn({params}) {}", describe_type(ret))
         }
         ir::Type::TypeParam(name) => name.clone(),
     }

@@ -6,14 +6,14 @@ hidden interface VectorApi[T] with Iterable[T] {
     def append(value T) Vector[T]
     def add(value T) Vector[T]
     def addAll(values Iterable[T]) Vector[T]
-    def map[X](f fn(T) => X) Vector[X]
-    def flatMap[X](f fn(T) => Vector[X]) Vector[X]
-    def filter(f fn(T) => Bool) Vector[T]
-    def fold[X](initial X, f fn(X, T) => X) X
-    def reduce[X](initial X, f fn(X, T) => X) X
-    def reduce(f fn(T, T) => T) Option[T]
-    def exists(f fn(T) => Bool) Bool
-    def forAll(f fn(T) => Bool) Bool
+    def map[X](f fn(T) X) Vector[X]
+    def flatMap[X](f fn(T) Vector[X]) Vector[X]
+    def filter(f fn(T) Bool) Vector[T]
+    def fold[X](initial X, f fn(X, T) X) X
+    def reduce[X](initial X, f fn(X, T) X) X
+    def reduce(f fn(T, T) T) Option[T]
+    def exists(f fn(T) Bool) Bool
+    def forAll(f fn(T) Bool) Bool
     def sort(ordering Ordering[T]) Vector[T]
     def zip[X](other Vector[X]) Vector[(T, X)]
     def zipWithIndex() Vector[(T, Int)]
@@ -28,7 +28,7 @@ hidden interface VectorApi[T] with Iterable[T] {
     def removeFirst() Option[T]
     def removeLast() Option[T]
     def size() Int
-    def forEach(f fn(T) => Unit)
+    def forEach(f fn(T) Unit)
 
     def makeStr(separator Str) Str {
         var result Str = ""

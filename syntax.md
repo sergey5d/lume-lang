@@ -177,14 +177,15 @@ Tuple types:
 
 Function types:
 
-- `fn(Int) => Str`
-- `fn(Int, Bool) => Unit`
-- `fn() => Unit`
+- `fn(Int) Str`
+- `fn(Int, Bool) Unit`
+- `fn() Unit`
 
-Function types use `fn` directly before a parenthesized parameter-type list.
-Write `fn(Int) => Int`, not `(Int) => Int`, `Int => Int`, or `fn (Int) => Int`.
+Function types use `fn` directly before a parenthesized parameter-type list,
+followed by the return type without an arrow. Write `fn(Int) Int`, not
+`fn(Int) => Int`, `(Int) => Int`, `Int => Int`, or `fn (Int) Int`.
 The return type may itself be a function type, as in
-`fn() => fn(Int) => Str`. Lambda expressions remain keyword-free, for example
+`fn() fn(Int) Str`. Lambda expressions remain keyword-free, for example
 `value => value + 1`.
 
 ## Runtime Metadata
@@ -1092,7 +1093,7 @@ def greet(name Str) Str = "hello, " + name
 ```
 
 Function-valued bindings carry the explicit `fn` type marker, as in
-`mapper fn(Int) => Int`.
+`mapper fn(Int) Int`.
 
 Expression-bodied function:
 
@@ -1282,12 +1283,12 @@ Rules:
 - By-name parameters are not memoized; each read evaluates the captured expression again.
 - By-name parameters cannot be `vararg`.
 - By-name argument expressions cannot contain non-local `return`, `break`, `continue`, or `try`.
-- Use an explicit `fn() => T` parameter when the caller should pass, store, or return the thunk itself.
+- Use an explicit `fn() T` parameter when the caller should pass, store, or return the thunk itself.
 
 Style:
 
 - Use by-name parameters only for conditional-value APIs such as `assert`, `debug`, `getOr`, and `orElse`.
-- Use `fn() => T` for callbacks, schedulers, retry operations, event handlers, and stored work.
+- Use `fn() T` for callbacks, schedulers, retry operations, event handlers, and stored work.
 
 Forwarding rules:
 
@@ -3034,7 +3035,7 @@ Other operators / constructs:
 - `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
 - `??` for extract-or-fallback through `Option`, `Result`, and `Either`
 - `!!` for unsafe extraction through `Option`, `Result`, and `Either`
-- `fn(...) => T` for function types
+- `fn(...) T` for function types
 - `=>` for lambdas and by-name parameters
 - `=>` for match cases
 - `with` for interface implementation, generic bounds, and exact shape update
@@ -3048,7 +3049,7 @@ Examples:
 counter is Counter
 for item <- items {
 }
-fn(Int) => Str
+fn(Int) Str
 SomeX(x) => x
 class Box[T] with Named
 pair = ("a", 1)

@@ -6,14 +6,14 @@ hidden interface SetApi[T] with Iterable[T] {
     def add(value T) Set[T]
     def addAll(values Iterable[T]) Set[T]
     def iterator() Iterator[T]
-    def map[X](f fn(T) => X) Set[X]
-    def flatMap[X](f fn(T) => Set[X]) Set[X]
-    def filter(f fn(T) => Bool) Set[T]
-    def fold[X](initial X, f fn(X, T) => X) X
-    def reduce(f fn(T, T) => T) Option[T]
-    def exists(f fn(T) => Bool) Bool
-    def forAll(f fn(T) => Bool) Bool
-    def forEach(f fn(T) => Unit)
+    def map[X](f fn(T) X) Set[X]
+    def flatMap[X](f fn(T) Set[X]) Set[X]
+    def filter(f fn(T) Bool) Set[T]
+    def fold[X](initial X, f fn(X, T) X) X
+    def reduce(f fn(T, T) T) Option[T]
+    def exists(f fn(T) Bool) Bool
+    def forAll(f fn(T) Bool) Bool
+    def forEach(f fn(T) Unit)
     def contains(value T) Bool
     def size() Int
 }

@@ -3,7 +3,7 @@
 
 class Runner {
 
-    def zero(f fn() => Int) Int = f()
+    def zero(f fn() Int) Int = f()
 }
 
 

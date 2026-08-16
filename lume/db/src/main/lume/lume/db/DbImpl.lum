@@ -92,7 +92,7 @@ hidden class JdbcQuery with Query {
 
     def all() Result[[Row], DbError] = this.rows()
 
-    def map[T](mapper fn(Row) => T) Result[[T], DbError] {
+    def map[T](mapper fn(Row) T) Result[[T], DbError] {
         rows [Row] = try this.rows()
         out [T] = []
 
@@ -103,7 +103,7 @@ hidden class JdbcQuery with Query {
         Ok(out)
     }
 
-    def flatMap[T](mapper fn(Row) => Result[T, DbError]) Result[[T], DbError] {
+    def flatMap[T](mapper fn(Row) Result[T, DbError]) Result[[T], DbError] {
         rows [Row] = try this.rows()
         out [T] = []
 
@@ -170,7 +170,7 @@ hidden class JdbcRowQuery with RowQuery {
         }
     }
 
-    def map[T](mapper fn(Row) => T) Result[Option[T], DbError] {
+    def map[T](mapper fn(Row) T) Result[Option[T], DbError] {
         maybeRow Option[Row] = try this.row()
 
         match maybeRow {
@@ -179,7 +179,7 @@ hidden class JdbcRowQuery with RowQuery {
         }
     }
 
-    def flatMap[T](mapper fn(Row) => Result[T, DbError]) Result[Option[T], DbError] {
+    def flatMap[T](mapper fn(Row) Result[T, DbError]) Result[Option[T], DbError] {
         maybeRow Option[Row] = try this.row()
 
         match maybeRow {
@@ -290,7 +290,7 @@ hidden class JdbcDatabaseImpl with Database {
 
     def begin() Result[Transaction, DbError] = this.beginTransaction()
 
-    def transactionally[T](work fn(Transaction) => Result[T, DbError]) Result[T, DbError] {
+    def transactionally[T](work fn(Transaction) Result[T, DbError]) Result[T, DbError] {
         tx Transaction = try this.beginTransaction()
 
         worked Result[T, DbError] = work(tx)

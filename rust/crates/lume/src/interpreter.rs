@@ -1052,7 +1052,7 @@ impl RuntimeTypeValue {
                     .join(",")
             ),
             RuntimeTypeValue::Function { params, ret } => format!(
-                "fn({}) => {}",
+                "fn({}) {}",
                 params
                     .iter()
                     .map(render_ir_type)
@@ -6001,7 +6001,7 @@ fn render_ir_type(ty: &ir::Type) -> String {
                 .join(",")
         ),
         ir::Type::Function { params, ret } => format!(
-            "fn({}) => {}",
+            "fn({}) {}",
             params
                 .iter()
                 .map(render_ir_type)
@@ -6492,8 +6492,8 @@ mod tests {
     fn runs_trailing_block_as_explicit_zero_arg_lambda_argument() {
         let program = lower_inline(
             r#"
-            def process(f fn() => Unit) Unit = f()
-            def compute(f fn() => Int) Int = f()
+            def process(f fn() Unit) Unit = f()
+            def compute(f fn() Int) Int = f()
 
             def main() Unit {
                 process { () => println("hehe") }

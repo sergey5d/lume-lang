@@ -19,6 +19,8 @@ def deleteDuplicates2(head Option[ListNode]) Option[ListNode] {
     var current ListNode = try head
     var tail = dummy
 
+    myFn fn(Int, Int) Int = (a Int, b Int) => a + b
+
     while true {
         groupStart = current
 

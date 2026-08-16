@@ -196,14 +196,9 @@ impl<'a> Parser<'a> {
 
         let left = self.parse_primary_type_ref()?;
         if self.at(TokenKind::FatArrow) || self.at(TokenKind::Arrow) {
-            let old_arrow = self.at(TokenKind::Arrow);
             self.error_at_current(
                 "invalid_function_type",
-                if old_arrow {
-                    "function types use 'fn(...) => T'; write 'fn(T) => U'"
-                } else {
-                    "function types use 'fn(...) => T'; write 'fn(T) => U'"
-                },
+                "function types use 'fn(...) T'; write 'fn(T) U'",
             );
             self.advance();
             let ret = self.parse_type_ref()?;
@@ -235,7 +230,7 @@ impl<'a> Parser<'a> {
         if !self.at(TokenKind::LParen) {
             self.error_at_current(
                 "invalid_function_type",
-                "expected '(' immediately after 'fn', as in 'fn(Int) => Str'",
+                "expected '(' immediately after 'fn', as in 'fn(Int) Str'",
             );
             return None;
         }
@@ -268,17 +263,12 @@ impl<'a> Parser<'a> {
         )?;
         self.skip_newlines();
 
-        if self.match_token(TokenKind::Arrow) {
+        if self.match_token(TokenKind::FatArrow) || self.match_token(TokenKind::Arrow) {
             self.diagnostics.push(Diagnostic::error(
                 "invalid_function_type",
-                "function types use '=>'; write 'fn(...) => T'",
+                "function types do not use an arrow; write 'fn(...) T'",
                 self.previous_span(),
             ));
-        } else {
-            self.consume(
-                TokenKind::FatArrow,
-                "expected '=>' after function parameter types",
-            )?;
         }
         let ret = self.parse_type_ref()?;
         let span = start.cover(ret.span());
@@ -308,7 +298,7 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenKind::FatArrow) || self.match_token(TokenKind::Arrow) {
             self.diagnostics.push(Diagnostic::error(
                 "removed_function_type_syntax",
-                "function types use 'fn(...) => T'; replace the parenthesized parameter-type form",
+                "function types use 'fn(...) T'; replace the parenthesized parameter-type form",
                 start.cover(self.previous_span()),
             ));
             let ret = self.parse_type_ref()?;

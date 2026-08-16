@@ -11,13 +11,13 @@ hidden interface ArrayApi[T] with Iterable[T] {
 
     def clone() Array[T]
 
-    def map[X](f fn(T) => X) Array[X]
-    def forEach(f fn(T) => Unit)
+    def map[X](f fn(T) X) Array[X]
+    def forEach(f fn(T) Unit)
 
-    def count(f fn(T) => Bool) Int
+    def count(f fn(T) Bool) Int
 
-    def exists(f fn(T) => Bool) Bool
-    def forAll(f fn(T) => Bool) Bool
+    def exists(f fn(T) Bool) Bool
+    def forAll(f fn(T) Bool) Bool
 
     def contains(e T) Bool
     def find(e T) Option[T]

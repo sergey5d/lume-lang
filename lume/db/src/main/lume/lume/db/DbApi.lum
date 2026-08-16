@@ -24,16 +24,16 @@ interface Query {
     def bind(values [Any] vararg) Query
     def rows() Result[[Row], DbError]
     def all() Result[[Row], DbError]
-    def map[T](mapper fn(Row) => T) Result[[T], DbError]
-    def flatMap[T](mapper fn(Row) => Result[T, DbError]) Result[[T], DbError]
+    def map[T](mapper fn(Row) T) Result[[T], DbError]
+    def flatMap[T](mapper fn(Row) Result[T, DbError]) Result[[T], DbError]
     def decodeAll[reified T]() Result[[T], DbError]
 }
 
 interface RowQuery {
     def bind(values [Any] vararg) RowQuery
     def row() Result[Option[Row], DbError]
-    def map[T](mapper fn(Row) => T) Result[Option[T], DbError]
-    def flatMap[T](mapper fn(Row) => Result[T, DbError]) Result[Option[T], DbError]
+    def map[T](mapper fn(Row) T) Result[Option[T], DbError]
+    def flatMap[T](mapper fn(Row) Result[T, DbError]) Result[Option[T], DbError]
     def decodeOne[reified T]() Result[Option[T], DbError]
 }
 
@@ -64,5 +64,5 @@ interface Database {
     def beginTransaction() Result[Transaction, DbError]
     def close() Result[Unit, DbError]
     def begin() Result[Transaction, DbError]
-    def transactionally[T](work fn(Transaction) => Result[T, DbError]) Result[T, DbError]
+    def transactionally[T](work fn(Transaction) Result[T, DbError]) Result[T, DbError]
 }

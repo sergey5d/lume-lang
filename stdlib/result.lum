@@ -42,17 +42,17 @@ enum Result[T, E] {
         case Err(error) => Left(error)
     }
 
-    def map[X](f fn(T) => X) Result[X, E] = match this {
+    def map[X](f fn(T) X) Result[X, E] = match this {
         case Ok(value) => Ok(f(value))
         case Err(error) => Err(error)
     }
 
-    def mapError[X](f fn(E) => X) Result[T, X] = match this {
+    def mapError[X](f fn(E) X) Result[T, X] = match this {
         case Ok(value) => Ok(value)
         case Err(error) => Err(f(error))
     }
 
-    def flatMap[X](f fn(T) => Result[X, E]) Result[X, E] = match this {
+    def flatMap[X](f fn(T) Result[X, E]) Result[X, E] = match this {
         case Ok(value) => f(value)
         case Err(error) => Err(error)
     }

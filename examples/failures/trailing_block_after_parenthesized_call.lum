@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*trailing block cannot follow an already completed call; pass the callback inside the same argument list.*
 
-def it(title Str, block fn() => Unit) Unit =
+def it(title Str, block fn() Unit) Unit =
     block()
 
 def main() Unit {

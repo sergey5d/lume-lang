@@ -27,12 +27,12 @@ enum Option[T] {
         case None => true
     }
 
-    def map[X](f fn(T) => X) Option[X] = match this {
+    def map[X](f fn(T) X) Option[X] = match this {
         case Some(value) => Some(f(value))
         case None => None
     }
 
-    def flatMap[X](f fn(T) => Option[X]) Option[X] = match this {
+    def flatMap[X](f fn(T) Option[X]) Option[X] = match this {
         case Some(value) => f(value)
         case None => None
     }

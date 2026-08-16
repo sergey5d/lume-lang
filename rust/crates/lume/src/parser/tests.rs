@@ -277,7 +277,7 @@ fn callable_lookahead_does_not_reclassify_tuple_or_function_fields() {
         r#"
 class Holder {
     pair (Int, Int)
-    mapper fn(Int) => Int
+    mapper fn(Int) Int
 }
 "#,
     );
@@ -1344,7 +1344,7 @@ main() Int {
 fn keeps_direct_trailing_lambda_calls_as_expressions() {
     let result = parse(
         r#"
-def run(block fn() => Int) Int = block()
+def run(block fn() Int) Int = block()
 
 def main() Int {
     run() { () => 5 }
@@ -3511,10 +3511,10 @@ fn parses_fn_function_type_refs() {
     let result = parse(
         r#"
 def apply(
-    f fn(Int) => Int,
-    both fn(Int, Str) => Bool,
-    empty fn() => Unit,
-    nested fn() => fn(Int) => Str
+    f fn(Int) Int,
+    both fn(Int, Str) Bool,
+    empty fn() Unit,
+    nested fn() fn(Int) Str
 ) Unit {}
 "#,
     );
@@ -3589,7 +3589,7 @@ def apply(f Int => Int) Unit {}
     );
     assert!(
         result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_function_type" && diag.message.contains("fn(T) => U")
+            diag.code == "invalid_function_type" && diag.message.contains("fn(T) U")
         }),
         "{:#?}",
         result.diagnostics
@@ -3605,7 +3605,7 @@ def apply(f (Int) => Int) Unit {}
     );
     assert!(
         result.diagnostics.iter().any(|diag| {
-            diag.code == "removed_function_type_syntax" && diag.message.contains("fn(...) => T")
+            diag.code == "removed_function_type_syntax" && diag.message.contains("fn(...) T")
         }),
         "{:#?}",
         result.diagnostics
@@ -3616,7 +3616,7 @@ def apply(f (Int) => Int) Unit {}
 fn rejects_space_between_fn_and_parameter_types() {
     let result = parse(
         r#"
-def apply(f fn (Int) => Int) Unit {}
+def apply(f fn (Int) Int) Unit {}
 "#,
     );
     assert!(
@@ -3638,7 +3638,25 @@ def apply(f fn(Int) -> Int) Unit {}
     );
     assert!(
         result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_function_type" && diag.message.contains("function types use '=>'")
+            diag.code == "invalid_function_type"
+                && diag.message.contains("function types do not use an arrow")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_fat_arrow_in_fn_function_type() {
+    let result = parse(
+        r#"
+def apply(f fn(Int) => Int) Unit {}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "invalid_function_type"
+                && diag.message.contains("function types do not use an arrow")
         }),
         "{:#?}",
         result.diagnostics
