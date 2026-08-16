@@ -2245,16 +2245,9 @@ impl<'a> FunctionLowerer<'a> {
 
         self.terminate(ir::Terminator::goto(cond_block));
 
+        self.push_scope();
         self.current_block = Some(cond_block);
-        let cond = self.lower_expr(&stmt.condition);
-        self.terminate(ir::Terminator {
-            span: Some(stmt.span),
-            kind: ir::TerminatorKind::Branch {
-                condition: cond,
-                then_block: body_block,
-                else_block: exit_block,
-            },
-        });
+        self.lower_if_condition_clause_chain(&stmt.condition_clauses, body_block, exit_block);
 
         self.loop_exits.push(exit_block);
         self.loop_continues.push(cond_block);
@@ -2265,6 +2258,7 @@ impl<'a> FunctionLowerer<'a> {
         }
         self.loop_exits.pop();
         self.loop_continues.pop();
+        self.pop_scope();
 
         self.current_block = Some(exit_block);
     }
@@ -3137,6 +3131,31 @@ impl<'a> FunctionLowerer<'a> {
                     ir::Type::Bool,
                     Some(*span),
                 );
+                if let Pattern::Binding { name, .. } = inner.as_ref() {
+                    let bindings = if name == "_" {
+                        Vec::new()
+                    } else {
+                        vec![PendingBinding {
+                            name: name.clone(),
+                            ty: payload_ty,
+                            source: PendingBindingSource::RValue(ir::RValue::Call {
+                                callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue),
+                                args: vec![scrutinee],
+                                structural: false,
+                            }),
+                        }]
+                    };
+                    return PatternPlan {
+                        condition: base_condition,
+                        bindings,
+                    };
+                }
+                if matches!(inner.as_ref(), Pattern::Wildcard { .. }) {
+                    return PatternPlan {
+                        condition: base_condition,
+                        bindings: Vec::new(),
+                    };
+                }
                 let payload = self.emit_temp_from_rvalue(
                     ir::RValue::Call {
                         callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue),
@@ -3353,6 +3372,25 @@ impl<'a> FunctionLowerer<'a> {
                         .unwrap_or_else(|| format!("_{}", index + 1));
                     let field_ty =
                         self.constructor_pattern_field_type(&scrutinee, path, &field_name, index);
+                    if let Pattern::Binding { name, .. } = arg {
+                        if name != "_" {
+                            bindings.push(PendingBinding {
+                                name: name.clone(),
+                                ty: field_ty,
+                                source: PendingBindingSource::RValue(ir::RValue::Call {
+                                    callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantField(
+                                        field_name,
+                                    )),
+                                    args: vec![scrutinee.clone()],
+                                    structural: false,
+                                }),
+                            });
+                        }
+                        continue;
+                    }
+                    if matches!(arg, Pattern::Wildcard { .. }) {
+                        continue;
+                    }
                     let field = self.emit_temp_from_rvalue(
                         ir::RValue::Call {
                             callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantField(field_name)),

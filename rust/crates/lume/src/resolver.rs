@@ -1628,12 +1628,24 @@ impl<'a> Resolver<'a> {
                 }
             }
             Stmt::While(WhileStmt {
-                condition, body, ..
+                condition_clauses,
+                body,
+                ..
             }) => {
-                self.resolve_expr(condition);
+                self.push_scope();
+                for condition in condition_clauses {
+                    match condition {
+                        IfConditionClause::Expr(condition) => self.resolve_expr(condition),
+                        IfConditionClause::Let(clause) => {
+                            self.resolve_expr(&clause.value);
+                            self.resolve_pattern(&clause.pattern);
+                        }
+                    }
+                }
                 self.loop_depth += 1;
                 self.resolve_block(body);
                 self.loop_depth -= 1;
+                self.pop_scope();
             }
             Stmt::For(ForStmt { bindings, body, .. }) => {
                 self.push_scope();

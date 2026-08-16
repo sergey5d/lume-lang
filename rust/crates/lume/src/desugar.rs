@@ -103,7 +103,11 @@ pub fn desugar_stmt(stmt: &ast::Stmt) -> core::Stmt {
             span: stmt.span,
         }),
         ast::Stmt::While(stmt) => core::Stmt::While(core::WhileStmt {
-            condition: desugar_expr(&stmt.condition),
+            condition_clauses: stmt
+                .condition_clauses
+                .iter()
+                .map(desugar_if_condition_clause)
+                .collect(),
             body: desugar_block(&stmt.body),
             span: stmt.span,
         }),

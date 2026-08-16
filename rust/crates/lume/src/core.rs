@@ -210,7 +210,7 @@ pub enum MatchCaseBody {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WhileStmt {
-    pub condition: Expr,
+    pub condition_clauses: Vec<IfConditionClause>,
     pub body: Block,
     pub span: Span,
 }

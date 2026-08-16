@@ -13,33 +13,30 @@ class ListNode {
 }
 
 def deleteDuplicates2(head Option[ListNode]) Option[ListNode] {
-    if head.isEmpty() {
-        return None
-    }
 
     dummy = ListNode(0)
+
+    var current ListNode = try head
     var tail = dummy
-    var next = head
 
-    while !next.isEmpty() {
-        first = next !!
-        var last = first
+    while true {
+        groupStart = current
 
-        while !last.next.isEmpty() {
-            candidate = last.next !!
-            if candidate.value != first.value {
+        while true {
+            candidate = current.next ?? break
+            if candidate.value != groupStart.value {
                 break
             }
-
-            last := candidate
+            current := candidate
         }
 
-        if last === first {
-            tail.next := Some(first)
-            tail := first
+        if current === groupStart {
+            tail.next := Some(current)
+            tail := current
         }
 
-        next := last.next
+        let next <- current.next else break
+        current := next
     }
 
     tail.next := None
@@ -64,8 +61,7 @@ def render(head Option[ListNode]) Str {
     var first = true
     var next = head
 
-    while !next.isEmpty() {
-        node = next !!
+    while let node <- next {
         if !first {
             text += " -> "
         }

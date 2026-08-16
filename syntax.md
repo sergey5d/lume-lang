@@ -2754,6 +2754,42 @@ while current < 10 {
 }
 ```
 
+`while let` repeats while a refutable pattern continues to match. The source is
+evaluated before every iteration, and bindings are visible only in the loop
+body:
+
+```txt
+while let candidate <- current.next {
+    println(candidate.value)
+    current := candidate
+}
+```
+
+Conditions may be chained with `&&`. They are evaluated from left to right,
+short-circuit on the first failure, and later clauses may use bindings created
+by earlier `let` clauses:
+
+```txt
+while let candidate <- current.next && candidate.value == expected {
+    current := candidate
+}
+```
+
+Both refutable pattern forms are supported:
+
+```txt
+while let Some(item) = nextItem() {
+    consume(item)
+}
+
+while let item <- nextItem() {
+    consume(item)
+}
+```
+
+An irrefutable `while let` pattern is rejected; use a Boolean `while` condition
+or bind the value inside the body instead.
+
 Infinite loop:
 
 ```txt

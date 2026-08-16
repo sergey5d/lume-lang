@@ -2058,7 +2058,20 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::While(stmt) => {
-                self.check_field_initializer_expr(&stmt.condition, owner, initialized_fields);
+                for condition in &stmt.condition_clauses {
+                    match condition {
+                        IfConditionClause::Expr(condition) => {
+                            self.check_field_initializer_expr(condition, owner, initialized_fields);
+                        }
+                        IfConditionClause::Let(clause) => {
+                            self.check_field_initializer_expr(
+                                &clause.value,
+                                owner,
+                                initialized_fields,
+                            );
+                        }
+                    }
+                }
                 self.check_field_initializer_block(&stmt.body, owner, initialized_fields);
             }
             Stmt::For(stmt) => {
@@ -2666,15 +2679,32 @@ impl<'a> Checker<'a> {
                 Ty::unit()
             }
             Stmt::While(stmt) => {
-                let condition = self.check_expr(&stmt.condition);
-                self.require_bool(
-                    &condition,
-                    stmt.condition.span(),
-                    "while condition must be Bool",
-                );
+                self.push_scope();
+                for condition in &stmt.condition_clauses {
+                    match condition {
+                        IfConditionClause::Expr(condition) => {
+                            let condition_ty = self.check_expr(condition);
+                            self.require_bool(
+                                &condition_ty,
+                                condition.span(),
+                                "while condition must be Bool",
+                            );
+                        }
+                        IfConditionClause::Let(clause) => {
+                            let value_ty = self.check_expr(&clause.value);
+                            self.require_refutable_while_pattern(
+                                &clause.pattern,
+                                &value_ty,
+                                clause.pattern.span(),
+                            );
+                            self.bind_pattern(&clause.pattern, &value_ty);
+                        }
+                    }
+                }
                 self.loop_depth += 1;
                 self.check_block(&stmt.body);
                 self.loop_depth -= 1;
+                self.pop_scope();
                 Ty::unit()
             }
             Stmt::For(stmt) => {
@@ -2877,6 +2907,24 @@ impl<'a> Checker<'a> {
                 "irrefutable_if_let",
                 format!(
                     "if let pattern is irrefutable for value of type '{}'; use 'let' instead",
+                    scrutinee.describe()
+                ),
+                span,
+            );
+        }
+    }
+
+    fn require_refutable_while_pattern(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee: &Ty,
+        span: crate::source::Span,
+    ) {
+        if self.pattern_is_irrefutable(pattern, scrutinee) {
+            self.add_error(
+                "irrefutable_while_let",
+                format!(
+                    "while let pattern is irrefutable for value of type '{}'; use a Boolean while condition or bind inside the loop body",
                     scrutinee.describe()
                 ),
                 span,
@@ -9452,6 +9500,13 @@ fn loop_control_targeting_current_loop_in_block(block: &Block) -> Option<LoopCon
         .find_map(loop_control_targeting_current_loop_in_stmt)
 }
 
+fn condition_clause_expr(clause: &IfConditionClause) -> &Expr {
+    match clause {
+        IfConditionClause::Let(clause) => &clause.value,
+        IfConditionClause::Expr(expr) => expr,
+    }
+}
+
 fn loop_control_targeting_current_loop_in_stmt(stmt: &Stmt) -> Option<LoopControlSpan> {
     match stmt {
         Stmt::Break(stmt) => Some(LoopControlSpan {
@@ -9502,7 +9557,9 @@ fn loop_control_targeting_current_loop_in_stmt(stmt: &Stmt) -> Option<LoopContro
                 })
             })
         }
-        Stmt::While(stmt) => loop_control_targeting_current_loop_in_expr(&stmt.condition),
+        Stmt::While(stmt) => stmt.condition_clauses.iter().find_map(|condition| {
+            loop_control_targeting_current_loop_in_expr(condition_clause_expr(condition))
+        }),
         Stmt::For(stmt) => stmt.bindings.iter().find_map(|binding| {
             binding
                 .iterable
@@ -9817,7 +9874,12 @@ fn lazy_arg_forbidden_control_flow_span_in_stmt(stmt: &Stmt) -> Option<crate::so
                     })
             })
         }),
-        Stmt::While(stmt) => lazy_arg_forbidden_control_flow_span(&stmt.condition)
+        Stmt::While(stmt) => stmt
+            .condition_clauses
+            .iter()
+            .find_map(|condition| {
+                lazy_arg_forbidden_control_flow_span(condition_clause_expr(condition))
+            })
             .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(&stmt.body)),
         Stmt::For(stmt) => stmt
             .bindings
@@ -13769,6 +13831,47 @@ def main(
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_refutable_while_let_conditions() {
+        let program = parse_inline(
+            r#"
+def sum(start Option[Int]) Int {
+    var current = start
+    var total = 0
+    while let value <- current && value > 0 {
+        total += value
+        current := None
+    }
+    total
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_irrefutable_while_let_conditions() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    while let value = 1 {
+        println(value)
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "irrefutable_while_let"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

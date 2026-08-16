@@ -1,0 +1,8 @@
+# EXPECT_ERROR:
+# while let pattern is irrefutable
+
+def main() Unit {
+    while let value = 1 {
+        println(value)
+    }
+}

@@ -775,10 +775,21 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_while_stmt(&mut self) -> Option<WhileStmt> {
         let start = self.consume_keyword(Keyword::While, "expected 'while'")?;
-        let condition = self.parse_expr_without_trailing_block_call()?;
+        let first_clause = if self.match_keyword(Keyword::Let) {
+            IfConditionClause::Let(self.parse_if_condition_refutable_clause("while let")?)
+        } else if self.pattern_followed_by_refutable_operator(self.index) {
+            self.error_at_current(
+                "unexpected_token",
+                "pattern matches in 'while' require 'let'; use 'while let Pattern = value { ... }' or 'while let Pattern <- value { ... }'",
+            );
+            return None;
+        } else {
+            IfConditionClause::Expr(self.parse_if_condition_expr()?)
+        };
+        let condition_clauses = self.parse_if_condition_clauses(vec![first_clause])?;
         let body = self.parse_block()?;
         Some(WhileStmt {
-            condition,
+            condition_clauses,
             body: body.clone(),
             span: start.cover(body.span),
         })

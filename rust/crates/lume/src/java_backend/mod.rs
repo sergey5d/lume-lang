@@ -4771,6 +4771,18 @@ def main() Int {
         println("smaller")
     }
 
+    var next Option[Int] = Some(2)
+    while let item <- next && item == 2 {
+        println(item)
+        next := None
+    }
+
+    next := Some(3)
+    while let Some(item) = next {
+        println(item)
+        next := None
+    }
+
     0
 }
 "#,

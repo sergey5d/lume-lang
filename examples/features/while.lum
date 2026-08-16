@@ -9,6 +9,10 @@
 # loop 1
 # loop 2
 # after loop
+# let 3
+# let 2
+# let 1
+# case 4
 # 0
 
 def next(label Str, value Int) Int {
@@ -41,6 +45,18 @@ def main() Int {
         break
     }
     println("after loop")
+
+    var nextValue Option[Int] = Some(3)
+    while let value <- nextValue && value > 0 {
+        println("let " + value)
+        nextValue := if value > 1 { Some(value - 1) } else { None }
+    }
+
+    nextValue := Some(4)
+    while let Some(value) = nextValue {
+        println("case " + value)
+        nextValue := None
+    }
 
     0
 }

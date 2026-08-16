@@ -180,6 +180,45 @@ def run(limit Int) Int {
 }
 
 #[test]
+fn parses_while_let_extraction_condition() {
+    let result = parse(
+        r#"
+def consume(start Option[Int]) Unit {
+    var current = start
+    while let value <- current && value > 0 {
+        println(value)
+        current := None
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function declaration");
+    };
+    let CallableBody::Block(block) = &function.body else {
+        panic!("expected block body");
+    };
+    let Stmt::While(stmt) = &block.statements[1] else {
+        panic!("expected while statement");
+    };
+    assert_eq!(stmt.condition_clauses.len(), 2);
+    let IfConditionClause::Let(clause) = &stmt.condition_clauses[0] else {
+        panic!("expected while let condition");
+    };
+    assert!(matches!(
+        &clause.pattern,
+        Pattern::Extract { inner, .. }
+            if matches!(inner.as_ref(), Pattern::Binding { name, .. } if name == "value")
+    ));
+    assert!(matches!(
+        &stmt.condition_clauses[1],
+        IfConditionClause::Expr(Expr::Binary { .. })
+    ));
+}
+
+#[test]
 fn rejects_top_level_function_without_def() {
     let result = parse(
         r#"

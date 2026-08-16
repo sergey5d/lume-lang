@@ -374,7 +374,7 @@ pub enum DeferAction {
     Block(Block),
 }
 
-/// An `if` statement, including `if let` pattern bindings.
+/// A conditional clause used by `if` and `while` statements.
 #[derive(Debug, Clone, PartialEq)]
 pub enum IfConditionClause {
     Let(RefutableClause),
@@ -431,7 +431,7 @@ pub enum MatchCaseBody {
 /// A `while` loop statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WhileStmt {
-    pub condition: Expr,
+    pub condition_clauses: Vec<IfConditionClause>,
     pub body: Block,
     pub span: Span,
 }

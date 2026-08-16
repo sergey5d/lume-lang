@@ -420,7 +420,17 @@ fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: 
             }
         }
         ast::Stmt::While(stmt) => {
-            rewrite_expr_for_runtime(&mut stmt.condition, module, graph);
+            for condition in &mut stmt.condition_clauses {
+                match condition {
+                    ast::IfConditionClause::Expr(condition) => {
+                        rewrite_expr_for_runtime(condition, module, graph);
+                    }
+                    ast::IfConditionClause::Let(clause) => {
+                        rewrite_pattern_for_runtime(&mut clause.pattern, module);
+                        rewrite_expr_for_runtime(&mut clause.value, module, graph);
+                    }
+                }
+            }
             rewrite_block_for_runtime(&mut stmt.body, module, graph);
         }
         ast::Stmt::For(stmt) => {

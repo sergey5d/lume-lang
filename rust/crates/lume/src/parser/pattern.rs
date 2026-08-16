@@ -37,6 +37,7 @@ impl<'a> Parser<'a> {
 
         let message = match owner {
             "if let" => "expected '=' or '<-' after if pattern",
+            "while let" => "expected '=' or '<-' after while pattern",
             "let" => "expected '=' or '<-' after let pattern",
             _ => "expected '=' or '<-' after pattern",
         };
