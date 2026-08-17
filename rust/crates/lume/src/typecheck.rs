@@ -14904,9 +14904,12 @@ shape User {
     name Str
 }
 
-def fromOption(value Option[User]) Str = (value !!).name
+def fromOption(value Option[User]) Str = value!!.name
 def fromResult(value Result[Int, Str]) Int = value !!
 def fromEither(value Either[Str, Int]) Int = value !!
+def invoke(value Option[fn() Str]) Str = value!!()
+def indexed(value Option[[Str: Int]]) Int = value!!["first"]!!
+def nested(value Option[Option[Int]]) Int = value!!!!
 
 def main() Unit {
     values LinkedList[Int] = LinkedList()

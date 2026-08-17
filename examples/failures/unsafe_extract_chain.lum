@@ -1,8 +1,0 @@
-# FAIL_REGEX:
-# .*unsafe extraction '!!' ends the postfix chain; group it before further access.*
-
-shape User {
-    name Str
-}
-
-def main(value Option[User]) Str = value !!.name

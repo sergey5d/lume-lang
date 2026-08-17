@@ -4530,9 +4530,9 @@ def main() Unit {
     users LinkedList[User] = LinkedList {}
     users.add(User { name: "Ada", cost: 3 })
     inserted Unit = users.insertAt(0, User { name: "Bob", cost: 2 }) !!
-    println((users.at(0) !!).name)
-    println((users.setAt(0, User { name: "Cara", cost: 4 }) !!).name)
-    println((users.removeAt(1) !!).name)
+    println(users.at(0)!!.name)
+    println(users.setAt(0, User { name: "Cara", cost: 4 })!!.name)
+    println(users.removeAt(1)!!.name)
     println(users.fold(0, (cost, user) => cost + user.cost))
 
     values [Int] = [1, 2]

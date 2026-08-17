@@ -2903,7 +2903,7 @@ def run(flag Bool) Int {
 }
 
 #[test]
-fn parses_unsafe_extract_and_grouped_followup_access() {
+fn parses_unsafe_extract_as_a_composable_postfix_operator() {
     let result = parse(
         r#"
 shape User {
@@ -2911,31 +2911,16 @@ shape User {
 }
 
 def extract(value Option[Int]) Int = value !!
-def name(value Option[User]) Str = (value !!).name
+def compactName(value Option[User]) Str = value!!.name
+def spacedName(value Option[User]) Str = value !!.name
+def invoke(value Option[fn() Str]) Str = value!!()
+def indexed(value Option[[Int]]) Int = value!![0]!!
+def compactIndex(value [Str: Int]) Int = value["first"]!!
+def spacedIndex(value [Str: Int]) Int = value["first"] !!
+def nested(value Option[Option[Int]]) Int = value!!!!
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-}
-
-#[test]
-fn rejects_postfix_access_after_ungrouped_unsafe_extract() {
-    let result = parse(
-        r#"
-shape User {
-    name Str
-}
-
-def name(value Option[User]) Str = value !!.name
-"#,
-    );
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "unsafe_extract_requires_grouping"),
-        "{:#?}",
-        result.diagnostics
-    );
 }
 
 #[test]

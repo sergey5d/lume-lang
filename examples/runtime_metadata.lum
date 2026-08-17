@@ -49,5 +49,5 @@ def main() Unit {
     enumType EnumType[Status] = typeOf[Status].asEnum() !!
     println(enumType.name() !!)
     println(enumType.kind())
-    println((enumType.case("Pending") !!).name())
+    println(enumType.case("Pending")!!.name())
 }

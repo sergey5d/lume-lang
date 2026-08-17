@@ -1,5 +1,6 @@
 # EXPECT:
 # Ada
+# hello
 # 7
 # 9
 # 13
@@ -10,7 +11,10 @@ shape User {
 
 def main() Unit {
     maybeUser Option[User] = Some(User { name: "Ada" })
-    println((maybeUser !!).name)
+    println(maybeUser!!.name)
+
+    greeting Option[fn() Str] = Some(() => "hello")
+    println(greeting!!())
 
     result Result[Int, Str] = Ok(7)
     either Either[Str, Int] = Right(9)

@@ -2501,12 +2501,17 @@ It extracts the success value from `Option[T]`, `Result[T, E]`, or
 when failure is a programming error; prefer `try`, `??`, or `let ... else` for
 recoverable control flow.
 
-`!!` ends its postfix chain. Further calls, indexing, or member access require
-an explicit group:
+`!!` is a normal postfix operator. Whitespace before it is optional, and calls,
+indexing, member access, and further extraction may follow it directly:
 
 ```txt
-name = wrapped !!.name       # invalid
-name = (wrapped !!).name     # valid
+item = values[index]!!
+item = values[index] !!
+name = wrapped!!.name
+result = callback!!()
+first = wrappedVector!!.at(0)!!
+entry = wrappedMap!!["key"]!!
+nestedValue = nested!!!!
 ```
 
 Multiple dependent unwraps can be written as sequential `let ... else` / `try`
