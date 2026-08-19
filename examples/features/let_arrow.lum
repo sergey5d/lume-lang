@@ -14,7 +14,7 @@
 # ifLet 89
 # visibleExtractWithFallback 124
 
-def letElseOption(value Option[Int]) Int {
+def letElseOption(value Int?) Int {
     let item <- value else return 0
     item + 10
 }
@@ -29,7 +29,7 @@ def letElseEither(value Either[Str, Int]) Int {
     item + 30
 }
 
-def letElseGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
+def letElseGroup(left Int?, middle Result[Int, Str], right Either[Str, Int]) Int {
     let {
         a <- left
         b <- middle
@@ -38,7 +38,7 @@ def letElseGroup(left Option[Int], middle Result[Int, Str], right Either[Str, In
     a + b + c
 }
 
-def panicOption(value Option[Int]) Int {
+def panicOption(value Int?) Int {
     let item <- value else panic("expected option")
     item
 }
@@ -53,7 +53,7 @@ def panicEither(value Either[Str, Int]) Int {
     item
 }
 
-def panicGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]) Int {
+def panicGroup(left Int?, middle Result[Int, Str], right Either[Str, Int]) Int {
     let {
         a <- left
         b <- middle
@@ -62,7 +62,7 @@ def panicGroup(left Option[Int], middle Result[Int, Str], right Either[Str, Int]
     a + b + c
 }
 
-def ifLetValue(value Option[Int]) Int {
+def ifLetValue(value Int?) Int {
     if let item <- value {
         return item
     }

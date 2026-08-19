@@ -2,7 +2,7 @@
 # .*let '<-' extraction requires an 'else' fallback; write 'let name <- value else \.\.\.'.*
 
 def main() Int {
-    value Option[Int] = Some(5)
+    value Int? = Some(5)
     let item <- value
     item
 }

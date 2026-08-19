@@ -32,7 +32,7 @@ def loadByIdAndName(db Database, id Int, name Str) Result[[Row], DbError] {
         .rows()
 }
 
-def loadOneUser(db Database, id Int) Result[Option[User], DbError] {
+def loadOneUser(db Database, id Int) Result[User?, DbError] {
     db.queryRow("select id, name, active from users where id = ?")
         .bind(id)
         .decodeOne[User]()

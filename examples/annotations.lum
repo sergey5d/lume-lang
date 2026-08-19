@@ -74,6 +74,6 @@ class Service {
 def main() Unit {
     serviceType Type[Service] = typeOf[Service]
     hasMetadata Bool = serviceType.hasAnnotation[Metadata]()
-    metadata Option[AnnotationValue] = serviceType.annotation[Metadata]()
+    metadata AnnotationValue? = serviceType.annotation[Metadata]()
     println(Service {}.health())
 }

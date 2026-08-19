@@ -10,10 +10,10 @@ shape User {
 }
 
 def main() Unit {
-    maybeUser Option[User] = Some(User { name: "Ada" })
+    maybeUser User? = Some(User { name: "Ada" })
     println(maybeUser!!.name)
 
-    greeting Option[fn() Str] = Some(() => "hello")
+    greeting (fn() Str)? = Some(() => "hello")
     println(greeting!!())
 
     result Result[Int, Str] = Ok(7)

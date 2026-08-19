@@ -6,7 +6,7 @@
 # either ok 7
 # either mapped left: nope
 
-def findUser(found Bool) Option[Str] =
+def findUser(found Bool) Str? =
     if found { Some("Ada") } else { None }
 
 def queryRow(ok Bool) Result[Str, Str] =

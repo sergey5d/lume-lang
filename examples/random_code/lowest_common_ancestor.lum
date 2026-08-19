@@ -6,20 +6,20 @@
 
 class TreeNode {
     val Int
-    left Option[TreeNode]
-    right Option[TreeNode]
+    left TreeNode?
+    right TreeNode?
 }
 
-def chooseNode(left Option[TreeNode], right Option[TreeNode]) Option[TreeNode] =
+def chooseNode(left TreeNode?, right TreeNode?) TreeNode? =
     if !left.isEmpty() { left } else { right }
 
 def find(
-    node Option[TreeNode],
+    node TreeNode?,
     valP Int,
     valQ Int,
-    foundPNode Option[TreeNode],
-    foundQNode Option[TreeNode]
-) { foundP Option[TreeNode], foundQ Option[TreeNode], ancestor Option[TreeNode] } {
+    foundPNode TreeNode?,
+    foundQNode TreeNode?
+) { foundP TreeNode?, foundQ TreeNode?, ancestor TreeNode? } {
 
     let Some(current) = node else {
         return { foundP: foundPNode, foundQ: foundQNode, ancestor: None }
@@ -57,7 +57,7 @@ def find(
     shape(currentFoundP, currentFoundQ, None)
 }
 
-def lowestCommonAncestor(root TreeNode, valP Int, valQ Int) Option[TreeNode] =
+def lowestCommonAncestor(root TreeNode, valP Int, valQ Int) TreeNode? =
     find(Some(root), valP, valQ, None, None).ancestor
 
 def main() Unit {

@@ -2,6 +2,6 @@
 # .*break used outside of a loop.*
 
 def main() Int {
-    maybe Option[Int] = None
+    maybe Int? = None
     maybe ?? break
 }

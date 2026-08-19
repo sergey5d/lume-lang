@@ -12,7 +12,7 @@ class ListNode {
     var next ListNode? = None
 }
 
-def deleteDuplicates2(head ListNode?] ListNode? {
+def deleteDuplicates2(head ListNode?) ListNode? {
 
     dummy = ListNode(0)
 
@@ -51,7 +51,7 @@ def linked(values [Int]) ListNode? {
 
     for value <- values {
         node = ListNode(value)
-        tail.next := ?(node)
+        tail.next := Some(node)
         tail := node
     }
 

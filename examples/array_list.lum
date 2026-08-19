@@ -38,7 +38,7 @@ class ArrayList[T] with Iterable[T] {
         this.count := this.count + 1
     }
 
-    def get(index Int) Option[T] =
+    def get(index Int) T? =
         if index < 0 || index >= this.count {
             None
         } else {

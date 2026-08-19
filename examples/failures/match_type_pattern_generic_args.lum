@@ -5,7 +5,7 @@ class Box[T] {
     value T
 }
 
-def main() Option[Int] =
+def main() Int? =
     partial match Box(7) {
         case _ Box[Int] => 1
     }

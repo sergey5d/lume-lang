@@ -20,12 +20,12 @@ def fallback(label Str, value Int) Int {
     value
 }
 
-def early(value Option[Int]) Str {
+def early(value Int?) Str {
     item = value ?? return "early missing"
     "early found " + item.toStr()
 }
 
-def continueSum(values [Option[Int]]) Int {
+def continueSum(values [Int?]) Int {
     var total Int = 0
     for maybe <- values {
         item = maybe ?? continue
@@ -45,15 +45,15 @@ def breakSum(values [Int]) Int {
     total
 }
 
-def blockFallback(value Option[Int]) Int =
+def blockFallback(value Int?) Int =
     value ?? {
         println("block fallback")
         42
     }
 
 def main() Unit {
-    some Option[Int] = Some(5)
-    none Option[Int] = None
+    some Int? = Some(5)
+    none Int? = None
     ok Result[Int, Str] = Ok(7)
     err Result[Int, Str] = Err("bad")
     right Either[Str, Int] = Right(9)

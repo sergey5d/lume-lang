@@ -10,7 +10,7 @@ enum MaybeInt {
     }
 }
 
-def partialValue(value MaybeInt) Option[Int] =
+def partialValue(value MaybeInt) Int? =
     partial match value {
         case SomeX(item) => item
     }

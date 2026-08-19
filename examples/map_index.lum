@@ -6,7 +6,7 @@
 # inferred 3
 # pure -1
 
-def plusOne(entries [Str: Int], key Str) Option[Int] {
+def plusOne(entries [Str: Int], key Str) Int? {
     value = try entries[key]
     Some(value + 1)
 }

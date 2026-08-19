@@ -14,7 +14,7 @@ class OrderManager {
     hidden var currentTick Int = 0
     hidden queue [Order] = []
 
-    def parseOrder(str Str) Option[Order] {
+    def parseOrder(str Str) Order? {
 
         arr = str.split("\s*,\s*")
 

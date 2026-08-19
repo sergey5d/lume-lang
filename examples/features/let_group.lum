@@ -4,7 +4,7 @@
 # grouped if 15
 # chained if let 8
 
-def groupedLetElse(value Option[Int]) Int {
+def groupedLetElse(value Int?) Int {
     let {
         Some(a) = value
         Some(b) = Some(a + 4)
@@ -14,7 +14,7 @@ def groupedLetElse(value Option[Int]) Int {
     return a + b
 }
 
-def groupedIf(value Option[Int]) Int {
+def groupedIf(value Int?) Int {
     if let {
         Some(a) = value
         Some(b) = Some(a + 7)

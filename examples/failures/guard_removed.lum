@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*guard binding syntax was removed; use 'let PATTERN = value else \.\.\.' for recoverable refutable bindings.*
 
-def main(value Option[Int]) Int {
+def main(value Int?) Int {
     guard Some(item) = value else return 0
     item
 }

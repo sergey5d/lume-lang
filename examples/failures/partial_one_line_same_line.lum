@@ -1,5 +1,5 @@
 # FAIL_REGEX:
 # expected end of expression, got CASE\("case" @ .*?\)
 
-def main() Option[Int] =
+def main() Int? =
     partial match Some(1) case Some(x) => x

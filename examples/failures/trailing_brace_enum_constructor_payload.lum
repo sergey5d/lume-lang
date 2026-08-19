@@ -5,7 +5,7 @@ class Order {
     id Int
 }
 
-def main() Option[Order] {
+def main() Order? {
     Some {
         Order {
             id: 7

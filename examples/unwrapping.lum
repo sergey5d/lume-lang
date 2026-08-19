@@ -8,7 +8,7 @@
 # either combo 11
 # either combo left size bad
 
-def plusOneOption(value Option[Int]) Option[Int] {
+def plusOneOption(value Int?) Int? {
     item = try value
     return Some(item + 1)
 }

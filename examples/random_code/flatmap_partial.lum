@@ -15,7 +15,7 @@ def expandPage(page [MaybeInt]) [Int] {
     extracted [Int] = []
 
     page.forEach { maybeValue =>
-        parsed Option[Int] = partial match maybeValue {
+        parsed Int? = partial match maybeValue {
            case SomeX(x) if x > 0 => {
                 x * 10
             }

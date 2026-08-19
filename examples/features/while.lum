@@ -46,7 +46,7 @@ def main() Int {
     }
     println("after loop")
 
-    var nextValue Option[Int] = Some(3)
+    var nextValue Int? = Some(3)
     while let value <- nextValue && value > 0 {
         println("let " + value)
         nextValue := if value > 1 { Some(value - 1) } else { None }

@@ -7,7 +7,7 @@ def firstLetter(word Str) Rune = word.expectRuneAt(0)
 
 def lastLetter(word Str) Rune = word.expectRuneAt(word.size() - 1)
 
-def matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], path [Str]) Option[[Str]] {
+def matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], path [Str]) [Str]? {
     for word <- allWords {
         if pickedWords.contains(word) {
             continue
@@ -35,7 +35,7 @@ def matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], p
     None
 }
 
-def firstPath(startWord Str, endWord Str, allWords [Str]) Option[[Str]] {
+def firstPath(startWord Str, endWord Str, allWords [Str]) [Str]? {
     if startWord == endWord {
         return Some([startWord])
     }

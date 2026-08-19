@@ -18,7 +18,7 @@ def main() Int {
     expanded [Int] = items.flatMap((item Int) => [item, item + 10])
     filtered [Int] = items.filter((item Int) => item > 1)
     total Int = items.fold(0, (acc Int, item Int) => acc + item)
-    reduced Option[Int] = items.reduce((left Int, right Int) => left + right)
+    reduced Int? = items.reduce((left Int, right Int) => left + right)
     hasBig Bool = items.exists((item Int) => item > 2)
     allPositive Bool = items.forAll((item Int) => item > 0)
 

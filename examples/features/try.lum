@@ -1,7 +1,7 @@
 # EXPECT:
 # try 3
 
-def increment(value Option[Int]) Option[Int] {
+def increment(value Int?) Int? {
     item = try value
     Some(item + 1)
 }

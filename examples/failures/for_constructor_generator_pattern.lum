@@ -2,7 +2,7 @@
 # .*for generator must bind a plain identifier or '_' before '<-'.*
 
 def main() Unit {
-    values [Option[Int]] = [Some(1)]
+    values [Int?] = [Some(1)]
 
     for Some(value) <- values {
         println(value)

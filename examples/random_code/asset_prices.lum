@@ -63,7 +63,7 @@ class AssetPrices {
         strings.makeStr(",")
     }
 
-    def findPrice(currAsset Str, endAsset Str, visited Set[Str], prices [((Str, Str), Float)]) Option[[Str]] {
+    def findPrice(currAsset Str, endAsset Str, visited Set[Str], prices [((Str, Str), Float)]) [Str]? {
 
         permutations = try this.asset2PriceMap.get(currAsset)
 
@@ -101,7 +101,7 @@ class AssetPrices {
 
 def main() {
 
-    def printResults(results Option[[Str]]) = match results {
+    def printResults(results [Str]?) = match results {
         case Some(list) => list.forEach { elem =>
             println("result: " + elem)
         }
