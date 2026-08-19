@@ -7,13 +7,13 @@
     <meta name="description" content="Tour the Lume programming language: immutable bindings, classes, structural shapes, enums, interfaces, pattern matching, Option, Result, Either, collections, and Java generation.">
     <meta name="author" content="Sergey Denisov">
     <meta name="robots" content="index, follow">
-    <link rel="canonical" href="https://sergey5d.github.io/a-lang/language-tour.html">
+    <link rel="canonical" href="https://sergey5d.github.io/lume-lang/language-tour.html">
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles.css?v=20260803-dark">
     <meta property="og:type" content="article">
     <meta property="og:title" content="Lume Programming Language Tour">
     <meta property="og:description" content="Classes, structural shapes, exhaustive matching, typed failure, collections, and Java interoperability in Lume.">
-    <meta property="og:url" content="https://sergey5d.github.io/a-lang/language-tour.html">
+    <meta property="og:url" content="https://sergey5d.github.io/lume-lang/language-tour.html">
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -21,7 +21,7 @@
         "headline": "Lume Programming Language Tour",
         "description": "A tour of the Lume type system, data model, control flow, and Java backend.",
         "author": {"@type": "Person", "name": "Sergey Denisov"},
-        "mainEntityOfPage": "https://sergey5d.github.io/a-lang/language-tour.html"
+        "mainEntityOfPage": "https://sergey5d.github.io/lume-lang/language-tour.html"
       }
     </script>
   </head>
@@ -33,7 +33,7 @@
           <a href="index.html">Overview</a>
           <a href="getting-started.html">Get started</a>
           <a href="language-tour.html" aria-current="page">Language tour</a>
-          <a href="https://github.com/sergey5d/a-lang">GitHub</a>
+          <a href="https://github.com/sergey5d/lume-lang">GitHub</a>
         </nav>
       </div>
     </header>
@@ -81,8 +81,8 @@ class User {
 }
 
 enum Access {
-    Admin
-    Member { organization Str }
+    case Admin
+    case Member { organization Str }
 }
 
 object Defaults {
@@ -106,17 +106,17 @@ object Defaults {
         <p><code>let</code> supports irrefutable destructuring directly. Refutable bindings require an <code>else</code> path. <code>if let</code> branches on a pattern, and <code>match</code> handles alternatives exhaustively.</p>
         <pre><code>let { name, location } = ada
 
-let Some(first) = users.get(0) else return
+let Some(first) = users.at(0) else return
 
 label = match access {
     case Admin => "administrator"
-    case Member { organization } => organization
+    case Member(organization) => organization
 }</code></pre>
         <p>Tuple, vector, shape, class, and enum patterns are name-aware where the source data is named. Vector patterns may capture a remainder with spread syntax.</p>
 
         <h2 id="failure">Option, Result, Either, and try</h2>
         <p>Lume represents optional values and recoverable failure explicitly. <code>try</code> unwraps the success side and propagates the container's failure. Use <code>mapError</code> or <code>mapLeft</code> before <code>try</code> when the enclosing function uses a different error type.</p>
-        <pre><code>load(id Int) Result[User, AppError] = {
+        <pre><code>def load(id Int) Result[User, AppError] = {
     row = try Db.queryRow("select ...", id)
         .mapError(error => AppError.Db(error))
 
@@ -124,8 +124,8 @@ label = match access {
 }</code></pre>
         <p>Use explicit <code>map</code> and <code>flatMap</code> calls when transforming values inside <code>Option</code>, <code>Result</code>, or <code>Either</code>.</p>
 
-        <h2 id="collections">Lists and maps</h2>
-        <p>Collection types and literals use parallel bracket syntax. Empty collections stay self-describing.</p>
+        <h2 id="collections">Vectors and maps</h2>
+        <p>Collection types and literals use parallel bracket syntax. An empty <code>[]</code> uses its expected vector or map type.</p>
         <pre><code>names [Str] = ["Ada", "Grace"]
 scores [Str : Int] = ["Ada": 10, "Grace": 12]
 
@@ -144,7 +144,7 @@ labels = names.map(name => {
     gen app/main.lum --out build/generated/lume</code></pre>
         <p>Lume libraries can wrap Java dependencies behind Lume interfaces. The repository includes database, JSON, HTTP, Gradle, and Java compatibility examples.</p>
 
-        <div class="callout"><p>This page is an introduction, not a complete grammar. Continue with the <a href="https://github.com/sergey5d/a-lang/blob/main/syntax.md">current syntax reference</a> for visibility, constructors, annotations, generics, comprehensions, operators, and exact diagnostics.</p></div>
+        <div class="callout"><p>This page is an introduction, not a complete grammar. Continue with the <a href="https://github.com/sergey5d/lume-lang/blob/main/syntax.md">current syntax reference</a> for visibility, constructors, annotations, generics, comprehensions, operators, and exact diagnostics.</p></div>
       </article>
     </main>
 

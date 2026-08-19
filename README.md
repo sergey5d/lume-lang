@@ -7,7 +7,7 @@ checked examples, a small stdlib, and VS Code syntax support.
 The language aims to stay direct and readable. It is designed around a few
 separate ideas rather than one large object model trying to do everything.
 
-Start with the [Lume documentation](https://sergey5d.github.io/a-lang/) for an
+Start with the [Lume documentation](https://sergey5d.github.io/lume-lang/) for an
 overview and guided introduction. The complete language reference lives in
 [syntax.md](syntax.md). For implementation details, see
 [ARCHITECTURE.md](ARCHITECTURE.md) and [rust/README.md](rust/README.md).

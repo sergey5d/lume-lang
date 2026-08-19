@@ -7,13 +7,13 @@
     <meta name="description" content="Install the Lume programming language compiler, run a Lume program, type-check source files, execute examples, and install the VS Code extension.">
     <meta name="author" content="Sergey Denisov">
     <meta name="robots" content="index, follow">
-    <link rel="canonical" href="https://sergey5d.github.io/a-lang/getting-started.html">
+    <link rel="canonical" href="https://sergey5d.github.io/lume-lang/getting-started.html">
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles.css?v=20260803-dark">
     <meta property="og:type" content="article">
     <meta property="og:title" content="Getting Started with the Lume Programming Language">
     <meta property="og:description" content="Build the compiler, run a program, check source, and install editor support.">
-    <meta property="og:url" content="https://sergey5d.github.io/a-lang/getting-started.html">
+    <meta property="og:url" content="https://sergey5d.github.io/lume-lang/getting-started.html">
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -21,7 +21,7 @@
         "headline": "Getting Started with the Lume Programming Language",
         "description": "How to build the Lume compiler, run a program, and use the development tools.",
         "author": {"@type": "Person", "name": "Sergey Denisov"},
-        "mainEntityOfPage": "https://sergey5d.github.io/a-lang/getting-started.html"
+        "mainEntityOfPage": "https://sergey5d.github.io/lume-lang/getting-started.html"
       }
     </script>
   </head>
@@ -33,7 +33,7 @@
           <a href="index.html">Overview</a>
           <a href="getting-started.html" aria-current="page">Get started</a>
           <a href="language-tour.html">Language tour</a>
-          <a href="https://github.com/sergey5d/a-lang">GitHub</a>
+          <a href="https://github.com/sergey5d/lume-lang">GitHub</a>
         </nav>
       </div>
     </header>
@@ -59,20 +59,20 @@
 
         <h2 id="build">Build Lume</h2>
         <p>Clone the public repository and build the <code>lume</code> package from its Rust workspace:</p>
-        <pre><code>git clone https://github.com/sergey5d/a-lang.git
-cd a-lang
+        <pre><code>git clone https://github.com/sergey5d/lume-lang.git
+cd lume-lang
 cargo build --manifest-path rust/Cargo.toml -p lume</code></pre>
         <p>During development, the examples use <code>cargo run</code> so the local compiler is rebuilt when necessary.</p>
 
         <h2 id="first-program">Run your first program</h2>
         <p>Create <code>hello.lum</code>:</p>
-        <pre><code>main() Unit = {
+        <pre><code>def main() Unit = {
     language = "Lume"
     println("Hello, $language")
 }</code></pre>
         <p>Type-check it first, then run it:</p>
-        <pre><code>cargo run --manifest-path rust/Cargo.toml -p lume -- check hello.lum
-cargo run --manifest-path rust/Cargo.toml -p lume -- run hello.lum</code></pre>
+        <pre><code>cargo run --manifest-path rust/Cargo.toml -p lume -- check ./hello.lum
+cargo run --manifest-path rust/Cargo.toml -p lume -- run ./hello.lum</code></pre>
 
         <h2 id="commands">Understand the CLI</h2>
         <table>
@@ -93,13 +93,13 @@ cargo run --manifest-path rust/Cargo.toml -p lume -- run hello.lum</code></pre>
         <p>The <code>examples/</code> directory is both a tour of the language and a regression suite. Successful examples contain expected output; failure examples lock targeted diagnostics.</p>
         <pre><code>./run_samples.sh
 cargo test --manifest-path rust/Cargo.toml -p lume</code></pre>
-        <p>Good starting points include <a href="https://github.com/sergey5d/a-lang/blob/main/examples/classes.lum">classes</a>, <a href="https://github.com/sergey5d/a-lang/blob/main/examples/shape.lum">shapes</a>, <a href="https://github.com/sergey5d/a-lang/blob/main/examples/enums.lum">enums</a>, and <a href="https://github.com/sergey5d/a-lang/blob/main/examples/unwrapping.lum">failure handling</a>.</p>
+        <p>Good starting points include <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/classes.lum">classes</a>, <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/shape.lum">shapes</a>, <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/enums.lum">enums</a>, and <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/unwrapping.lum">failure handling</a>.</p>
 
         <h2 id="editor">Install VS Code support</h2>
         <p>The repository includes syntax highlighting and language configuration for VS Code. Run the installer from the extension directory:</p>
         <pre><code>cd vscode-extension
 ./install.sh</code></pre>
-        <p>Restart VS Code after installation, then open a <code>.lum</code> file. See the <a href="https://github.com/sergey5d/a-lang/tree/main/vscode-extension">extension README</a> for manual installation details.</p>
+        <p>Restart VS Code after installation, then open a <code>.lum</code> file. See the <a href="https://github.com/sergey5d/lume-lang/tree/main/vscode-extension">extension README</a> for manual installation details.</p>
       </article>
     </main>
 

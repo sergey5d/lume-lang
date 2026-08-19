@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://sergey5d.github.io/a-lang/sitemap.xml
+Sitemap: https://sergey5d.github.io/lume-lang/sitemap.xml

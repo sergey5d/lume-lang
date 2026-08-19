@@ -1,4 +1,3 @@
-use super::support::spans_touch;
 use super::*;
 
 impl<'a> Parser<'a> {
@@ -259,15 +258,9 @@ impl<'a> Parser<'a> {
         if !self.at(TokenKind::LParen) {
             self.error_at_current(
                 "invalid_function_type",
-                "expected '(' immediately after 'fn', as in 'fn(Int) Str'",
+                "expected '(' after 'fn', as in 'fn(Int) Str'",
             );
             return None;
-        }
-        if !spans_touch(start, self.current_span()) {
-            self.error_at_current(
-                "invalid_function_type",
-                "function type marker and parameter list must touch; write 'fn(...)', not 'fn (...)'",
-            );
         }
         self.advance();
         self.skip_newlines();

@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*top-level statements are not allowed.*
+# .*top-level statements are not allowed.*def main\(\) Unit.*
 
 if true {
     println("nope")

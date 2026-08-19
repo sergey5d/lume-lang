@@ -122,10 +122,10 @@ if true {
 "#,
     );
     assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "unexpected_top_level_statement"),
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "unexpected_top_level_statement"
+                && diag.message.contains("def main() Unit { ... }")
+        }),
         "{:#?}",
         result.diagnostics
     );
@@ -3676,20 +3676,31 @@ def apply(f (Int) => Int) Unit {}
 }
 
 #[test]
-fn rejects_space_between_fn_and_parameter_types() {
+fn parses_space_between_fn_and_parameter_types() {
     let result = parse(
         r#"
-def apply(f fn (Int) Int) Unit {}
+def apply(f fn (Int) Int, empty fn () Unit) Unit {}
 "#,
     );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_function_type"
-                && diag.message.contains("write 'fn(...)', not 'fn (...)'")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function declaration");
+    };
+    assert!(matches!(
+        function.params[0].ty.as_ref().expect("spaced function type"),
+        TypeRef::Function { params, ret, .. }
+            if params.len() == 1
+                && matches!(&params[0], TypeRef::Named { name, .. } if name == "Int")
+                && matches!(ret.as_ref(), TypeRef::Named { name, .. } if name == "Int")
+    ));
+    assert!(matches!(
+        function.params[1].ty.as_ref().expect("spaced empty function type"),
+        TypeRef::Function { params, ret, .. }
+            if params.is_empty()
+                && matches!(ret.as_ref(), TypeRef::Named { name, .. } if name == "Unit")
+    ));
 }
 
 #[test]

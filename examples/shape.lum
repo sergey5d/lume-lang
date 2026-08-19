@@ -3,6 +3,7 @@
 # named 5 6 11
 # positional 8 9 17
 # fromClass 10 11 21
+# profile Ada 37
 # narrowed 5
 # moved 7 9 16
 
@@ -27,6 +28,11 @@ shape HorizontalPoint {
     x Int
 }
 
+shape Profile {
+    name Str
+    age Int
+}
+
 
 def horizontal(point HorizontalPoint) Int = point.x
 
@@ -36,12 +42,17 @@ def main() Unit {
     positional Point = Point(8, 9)
     pixel = Pixel(10, 11)
     fromClass Point = pixel
+    profile Profile = {
+        name: "Ada"
+        age: 37
+    }
     moved = origin.move(4, 5)
 
     println("origin", origin.x, origin.y, origin.sum())
     println("named", named.x, named.y, named.sum())
     println("positional", positional.x, positional.y, positional.sum())
     println("fromClass", fromClass.x, fromClass.y, fromClass.sum())
+    println("profile", profile.name, profile.age)
     println("narrowed", horizontal(named))
     println("moved", moved.x, moved.y, moved.sum())
 }

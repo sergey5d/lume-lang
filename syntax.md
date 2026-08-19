@@ -549,7 +549,7 @@ enum OptionX[T] {
 }
 ```
 
-Arbitrary statements such as `if`, `for`, `match`, `defer`, or expression statements are not valid at top level. Put executable code inside a function such as `main() { ... }`.
+Arbitrary statements such as `if`, `for`, `match`, `defer`, or expression statements are not valid at top level. Put executable code inside a function such as `def main() Unit { ... }`.
 
 ## Variable Declarations
 
@@ -1129,7 +1129,9 @@ def greet(name Str) Str = "hello, " + name
 ```
 
 Function-valued bindings carry the explicit `fn` type marker, as in
-`mapper fn(Int) Int`.
+`mapper fn(Int) Int`. Whitespace between `fn` and the parameter list is
+insignificant, so `fn (Int) Int` is equivalent; `fn(Int) Int` is the canonical
+spelling.
 
 Expression-bodied function:
 
@@ -1721,7 +1723,7 @@ Rules:
 
 - braced blocks may appear as standalone statements or as expressions
 - block expressions evaluate to the value of their last statement
-- callable block bodies may be written as `name(...) { ... }` or `name(...) = { ... }`
+- named function and method block bodies may be written as `def name(...) { ... }` or `def name(...) = { ... }`
 - if you want a block value, the last statement must be value-producing
 - value-producing tail forms include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
@@ -3148,12 +3150,12 @@ Newline continuation:
   - match arrow: `=>`
   - separators / chaining markers: `,`, `.`
 - Delimited forms allow layout after opening delimiters and after commas, but they do not make leading binary/update operators valid by themselves.
-- Binding/callable `=` may start its expression on the same line or the next indented line.
-- Callable bodies have three accepted forms:
-  - `name(...) { ... }` for block bodies
-  - `name(...) = { ... }` for block bodies
-  - `name(...) = expr` for expression bodies
-  - `def name(...) ...` remains accepted as the explicit keyword form
+- Binding/function/method `=` may start its expression on the same line or the next indented line.
+- Named function and method declarations require `def` and have three accepted body forms:
+  - `def name(...) { ... }` for block bodies
+  - `def name(...) = { ... }` for block bodies
+  - `def name(...) = expr` for expression bodies
+- Constructors are the only callable declarations without `def`; they begin with `new` and use the constructor body forms documented above.
 - Inline-body introducers such as `else` and `yield` may take a same-line body without braces; if that body moves to the next line, a `{ ... }` block is required.
 - So this is valid:
 

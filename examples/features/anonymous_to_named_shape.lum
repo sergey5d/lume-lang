@@ -1,0 +1,28 @@
+# EXPECT:
+# Ada 37
+# Ben 41
+
+shape Profile {
+    name Str
+    age Int
+
+    def label() Str = this.name + " " + this.age.toStr()
+}
+
+def main() Unit {
+    anonymous = {
+        name: "Ada"
+        age: 37
+    }
+    profile Profile = anonymous
+
+    widerAnonymous = {
+        name: "Ben"
+        age: 41
+        city: "Tampa"
+    }
+    narrowed Profile = widerAnonymous
+
+    println(profile.label())
+    println(narrowed.label())
+}

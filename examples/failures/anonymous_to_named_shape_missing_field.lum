@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*cannot assign value of type .* to binding 'profile' of type 'Profile'.*
+
+shape Profile {
+    name Str
+    age Int
+}
+
+def main() Unit {
+    anonymous = {
+        name: "Ada"
+    }
+    profile Profile = anonymous
+    println(profile.name)
+}

@@ -33,8 +33,9 @@ value => value.toStr()          # anonymous function expression
 ## Syntax
 
 Use `fn(...) T` as the canonical function-type syntax in every type position.
-Write `fn` directly before the parameter list, without a space, and write the
-return type after the parameter list without an arrow.
+Whitespace between `fn` and the parameter list is insignificant, so
+`fn (Int) Str` is equivalent to `fn(Int) Str`. Write the return type after the
+parameter list without an arrow.
 
 ```txt
 def run(operation fn() Unit) Unit =
@@ -45,6 +46,14 @@ def mapValue(value Int, mapper fn(Int) Str) Str =
 
 handlers [Str : fn(Request) Response]
 callbacks [fn(Event) Unit]
+```
+
+The canonical compact spelling is preferred in formatted code, but both forms
+are valid:
+
+```txt
+mapper fn(Int) Str
+mapper fn (Int) Str
 ```
 
 The marker describes a function value, not how it was created. A value of a
