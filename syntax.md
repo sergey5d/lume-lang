@@ -28,12 +28,25 @@ Vector and map shorthand can be nested, for example:
 - `[Str : [Int]]`
 - `[Str : [Int : Bool]]`
 
+`T?` is shorthand for `Option[T]` in every type position:
+
+```txt
+count Int? = Some(5)
+def find(id Int) User? = ...
+values [Str?] = [Some("one"), None]
+```
+
+The shorthand may not be repeated. `Int??` is rejected because `??` is the
+extract-or-fallback expression operator. Write `Option[Int?]` when a nested
+optional type is intentional.
+
 Common stdlib/prelude types:
 
 - `Array[T]`
 - `Set[T]`
 - `LinkedList[T]`
 - `Option[T]`
+- `T?` (shorthand for `Option[T]`)
 - `Result[T, E]`
 - `Either[L, R]`
 - `Iterable[T]`

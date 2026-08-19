@@ -75,6 +75,7 @@ pub enum TokenKind {
     Arrow,
     FatArrow,
     LeftArrow,
+    Question,
     QuestionQuestion,
     ColonAssign,
     EqEq,
@@ -395,7 +396,7 @@ impl<'a> Lexer<'a> {
             '%' if self.take('=') => Some(TokenKind::PercentEq),
             '%' => Some(TokenKind::Percent),
             '?' if self.take('?') => Some(TokenKind::QuestionQuestion),
-            '?' => return self.unsupported_operator(start, "?"),
+            '?' => Some(TokenKind::Question),
             '=' if self.take('>') => Some(TokenKind::FatArrow),
             '=' if self.take('=') => {
                 if self.take('=') {
@@ -601,7 +602,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -613,6 +614,7 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Vararg)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Override)));
+        assert!(kinds.contains(&TokenKind::Question));
         assert!(kinds.contains(&TokenKind::QuestionQuestion));
         assert!(kinds.contains(&TokenKind::PercentEq));
         assert!(kinds.contains(&TokenKind::Pipe));

@@ -1370,19 +1370,20 @@ fn rejects_removed_single_declaration_keyword() {
 
 #[test]
 fn rejects_question_field_placeholder() {
-    let file = SourceFile::new(
-        "test.lum",
+    let result = parse(
         r#"
 class Box {
     hidden label Str = ?
 }
 "#,
     );
-    let lexed = lex(&file);
     assert!(
-        !lexed.diagnostics.is_empty(),
-        "expected lexer rejection for '?', got {:#?}",
-        lexed.diagnostics
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "expected_expression"),
+        "expected parser rejection for '?' as a value, got {:#?}",
+        result.diagnostics
     );
 }
 
@@ -3465,6 +3466,83 @@ def lookup(values [Str : Int], key Str) Option[Int] = values[key]
         function.params[0].ty.as_ref(),
         Some(TypeRef::Named { name, args, .. }) if name == "Map" && args.len() == 2
     ));
+}
+
+#[test]
+fn parses_optional_type_ref_shorthand() {
+    let result = parse(
+        r#"
+def convert(value Int?, labels [Str?], lookup [Str: Int?]) Str? = None
+def nested(value Option[Int?]) Option[Int?] = value
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    assert!(matches!(
+        function.params[0].ty.as_ref(),
+        Some(TypeRef::Named { name, args, .. })
+            if name == "Option"
+                && matches!(&args[0], TypeRef::Named { name, .. } if name == "Int")
+    ));
+    assert!(matches!(
+        function.params[1].ty.as_ref(),
+        Some(TypeRef::Named { name, args, .. })
+            if name == "Vector"
+                && matches!(&args[0], TypeRef::Named { name, args, .. }
+                    if name == "Option"
+                        && matches!(&args[0], TypeRef::Named { name, .. } if name == "Str"))
+    ));
+    assert!(matches!(
+        function.params[2].ty.as_ref(),
+        Some(TypeRef::Named { name, args, .. })
+            if name == "Map"
+                && matches!(&args[0], TypeRef::Named { name, .. } if name == "Str")
+                && matches!(&args[1], TypeRef::Named { name, args, .. }
+                    if name == "Option"
+                        && matches!(&args[0], TypeRef::Named { name, .. } if name == "Int"))
+    ));
+    assert!(matches!(
+        function.return_type.as_ref(),
+        Some(TypeRef::Named { name, args, .. })
+            if name == "Option"
+                && matches!(&args[0], TypeRef::Named { name, .. } if name == "Str")
+    ));
+
+    let nested = match &program.items[1] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    assert!(matches!(
+        nested.params[0].ty.as_ref(),
+        Some(TypeRef::Named { name, args, .. })
+            if name == "Option"
+                && matches!(&args[0], TypeRef::Named { name, args, .. }
+                    if name == "Option"
+                        && matches!(&args[0], TypeRef::Named { name, .. } if name == "Int"))
+    ));
+}
+
+#[test]
+fn rejects_repeated_optional_type_shorthand() {
+    let result = parse(
+        r#"
+def invalid(value Int??) Unit = ()
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "double_optional_type"
+                && diagnostic.message.contains("Option[Int?]")),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]

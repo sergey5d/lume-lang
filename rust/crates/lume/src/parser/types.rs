@@ -187,14 +187,14 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_type_ref(&mut self) -> Option<TypeRef> {
         self.skip_newlines();
-        if self.at_keyword(Keyword::Fn) {
-            return self.parse_function_type_ref();
-        }
-        if self.at(TokenKind::LParen) {
-            return self.parse_parenthesized_or_function_type_ref();
-        }
-
-        let left = self.parse_primary_type_ref()?;
+        let left = if self.at_keyword(Keyword::Fn) {
+            self.parse_function_type_ref()?
+        } else if self.at(TokenKind::LParen) {
+            self.parse_parenthesized_or_function_type_ref()?
+        } else {
+            self.parse_primary_type_ref()?
+        };
+        let left = self.parse_optional_type_suffix(left);
         if self.at(TokenKind::FatArrow) || self.at(TokenKind::Arrow) {
             self.error_at_current(
                 "invalid_function_type",
@@ -214,14 +214,43 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_pattern_type_ref(&mut self) -> Option<TypeRef> {
         self.skip_newlines();
-        if self.at_keyword(Keyword::Fn) {
-            return self.parse_function_type_ref();
+        let ty = if self.at_keyword(Keyword::Fn) {
+            self.parse_function_type_ref()?
+        } else if self.at(TokenKind::LParen) {
+            self.parse_parenthesized_or_function_type_ref()?
+        } else {
+            self.parse_primary_type_ref()?
+        };
+        Some(self.parse_optional_type_suffix(ty))
+    }
+
+    fn parse_optional_type_suffix(&mut self, ty: TypeRef) -> TypeRef {
+        if self.match_token(TokenKind::QuestionQuestion) {
+            self.diagnostics.push(Diagnostic::error(
+                "double_optional_type",
+                "'??' is the extract-or-fallback operator and cannot form an optional type; write 'Option[Int?]' for a nested optional type",
+                ty.span().cover(self.previous_span()),
+            ));
+            return ty;
         }
-        if self.at(TokenKind::LParen) {
-            return self.parse_parenthesized_or_function_type_ref();
+        if !self.match_token(TokenKind::Question) {
+            return ty;
         }
 
-        self.parse_primary_type_ref()
+        let span = ty.span().cover(self.previous_span());
+        let optional = TypeRef::Named {
+            name: "Option".to_string(),
+            args: vec![ty],
+            span,
+        };
+        if self.match_token(TokenKind::Question) || self.match_token(TokenKind::QuestionQuestion) {
+            self.diagnostics.push(Diagnostic::error(
+                "double_optional_type",
+                "optional shorthand may be used only once; write 'Option[Int?]' for a nested optional type",
+                span.cover(self.previous_span()),
+            ));
+        }
+        optional
     }
 
     fn parse_function_type_ref(&mut self) -> Option<TypeRef> {

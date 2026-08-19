@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*'\?\?' is the extract-or-fallback operator.*write 'Option\[Int\?\]'.*
+
+def invalid(value Int??) Unit = ()

@@ -284,6 +284,10 @@
           "match": "\\?\\?"
         },
         {
+          "name": "storage.modifier.optional.lume",
+          "match": "(?<!\\?)\\?(?!\\?)"
+        },
+        {
           "name": "keyword.operator.unsafe-extract.lume",
           "match": "!!"
         },

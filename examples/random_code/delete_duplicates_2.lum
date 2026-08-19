@@ -9,10 +9,10 @@
 # The surviving nodes are relinked in place rather than copied.
 class ListNode {
     value Int
-    var next Option[ListNode] = None
+    var next ListNode? = None
 }
 
-def deleteDuplicates2(head Option[ListNode]) Option[ListNode] {
+def deleteDuplicates2(head ListNode?] ListNode? {
 
     dummy = ListNode(0)
 
@@ -45,20 +45,20 @@ def deleteDuplicates2(head Option[ListNode]) Option[ListNode] {
     dummy.next
 }
 
-def linked(values [Int]) Option[ListNode] {
+def linked(values [Int]) ListNode? {
     dummy = ListNode(0)
     var tail = dummy
 
     for value <- values {
         node = ListNode(value)
-        tail.next := Some(node)
+        tail.next := ?(node)
         tail := node
     }
 
     dummy.next
 }
 
-def render(head Option[ListNode]) Str {
+def render(head ListNode?) Str {
     var text = ""
     var first = true
     var next = head
