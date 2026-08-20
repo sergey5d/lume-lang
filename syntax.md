@@ -188,6 +188,9 @@ Tuple types:
 
 - `(Int, Str)`
 
+Singleton tuple types are not supported. `(Int,)` is invalid; use `Int`
+directly.
+
 Function types:
 
 - `fn(Int) Str`
@@ -318,6 +321,9 @@ raw"""$name
 
 Multiline strings use triple quotes and preserve their line breaks. Use
 `raw"""..."""` when `$` and `\` should remain literal.
+Ordinary `"..."` and `raw"..."` strings cannot cross a physical newline; use
+the `\n` escape for a line break inside an ordinary string or triple quotes for
+multiline source text.
 
 ## OS / Printing
 
@@ -2090,6 +2096,16 @@ Tuple literal:
 pair (Str, Int) = ("a", 1)
 ```
 
+Tuples always contain at least two elements. Singleton tuple values, types, and
+patterns are all invalid:
+
+```txt
+value = (1,)                 # invalid; use 1
+value (Int,) = ...           # invalid; use Int
+let (value,) = tuple         # invalid
+let (value, _, _) = tuple3   # valid full-arity extraction
+```
+
 `:` is not a general expression operator. It appears in map types, map
 literals, and construction field lists:
 
@@ -2989,7 +3005,11 @@ Tuple destructuring:
 
 ```txt
 let (left Int, right Str) = (5, "hello")
+let (first, _, _) = tuple3
 ```
+
+Tuple patterns must match the tuple's full arity. Use `_` for positions that
+should be ignored; singleton tuple patterns such as `(first,)` are invalid.
 
 Anonymous-shape and class destructuring use braces:
 

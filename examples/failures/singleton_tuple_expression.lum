@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*singleton tuple values are not supported.*
+
+def main() Unit {
+    value = (1,)
+}

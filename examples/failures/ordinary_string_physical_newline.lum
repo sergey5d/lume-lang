@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*ordinary string literals cannot span physical lines; use triple quotes for multiline text.*
+
+def main() Unit {
+    text = "first
+second"
+}

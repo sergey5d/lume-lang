@@ -271,6 +271,17 @@ impl<'a> Parser<'a> {
                     self.consume(TokenKind::RParen, "expected ')' after pattern")?;
                     return Some(first);
                 }
+                let comma = self.previous_span();
+                self.skip_newlines();
+                if self.at(TokenKind::RParen) {
+                    self.diagnostics.push(Diagnostic::error(
+                        "singleton_tuple",
+                        "singleton tuple patterns are not supported; remove the trailing comma or destructure the full tuple arity, for example 'let (x, _, _) = tuple3'",
+                        comma,
+                    ));
+                    self.consume(TokenKind::RParen, "expected ')' after tuple pattern")?;
+                    return Some(first);
+                }
                 let mut elements = vec![first];
                 loop {
                     elements.push(self.parse_pattern_at_depth(depth + 1)?);

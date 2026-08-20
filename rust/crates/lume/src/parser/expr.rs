@@ -82,7 +82,7 @@ impl<'a> Parser<'a> {
         index: usize,
     ) -> Option<LambdaParam> {
         let (kind, bindings, end) = if self.match_token(TokenKind::LParen) {
-            let bindings = self.parse_binding_list(false)?;
+            let bindings = self.parse_tuple_binding_list(false)?;
             let end = self.consume(
                 TokenKind::RParen,
                 "expected ')' after lambda tuple destructuring parameter",
@@ -323,7 +323,7 @@ impl<'a> Parser<'a> {
 
         if self.match_token(TokenKind::LParen) {
             let start = self.previous_span();
-            let bindings = self.parse_binding_list(false)?;
+            let bindings = self.parse_tuple_binding_list(false)?;
             self.consume(
                 TokenKind::RParen,
                 "expected ')' after destructuring bindings",
@@ -2037,17 +2037,28 @@ impl<'a> Parser<'a> {
         let first = self.parse_expr()?;
         self.skip_newlines();
         if self.match_token(TokenKind::Comma) {
+            let comma = self.previous_span();
             let mut items = vec![first];
             self.skip_newlines();
-            if !self.at(TokenKind::RParen) {
-                items.push(self.parse_expr()?);
-                while self.match_token(TokenKind::Comma) {
-                    self.skip_newlines();
-                    if self.at(TokenKind::RParen) {
-                        break;
-                    }
-                    items.push(self.parse_expr()?);
+            if self.at(TokenKind::RParen) {
+                self.diagnostics.push(Diagnostic::error(
+                    "singleton_tuple",
+                    "singleton tuple values are not supported; remove the trailing comma to use the value directly",
+                    comma,
+                ));
+                let end = self.consume(TokenKind::RParen, "expected ')' after tuple literal")?;
+                return Some(Expr::Group {
+                    inner: Box::new(items.pop()?),
+                    span: start.cover(end),
+                });
+            }
+            items.push(self.parse_expr()?);
+            while self.match_token(TokenKind::Comma) {
+                self.skip_newlines();
+                if self.at(TokenKind::RParen) {
+                    break;
                 }
+                items.push(self.parse_expr()?);
             }
             let end = self.consume(TokenKind::RParen, "expected ')' after tuple literal")?;
             return Some(Expr::TupleLiteral {

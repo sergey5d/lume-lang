@@ -224,7 +224,7 @@ impl<'a> Parser<'a> {
         }
 
         if self.match_token(TokenKind::LParen) {
-            let bindings = self.parse_binding_list(false)?;
+            let bindings = self.parse_tuple_binding_list(false)?;
             self.consume(
                 TokenKind::RParen,
                 "expected ')' after destructuring bindings",
@@ -491,6 +491,24 @@ impl<'a> Parser<'a> {
         Some(bindings)
     }
 
+    pub(super) fn parse_tuple_binding_list(&mut self, mutable: bool) -> Option<Vec<Binding>> {
+        let mut bindings = vec![self.parse_binding(mutable)?];
+        while self.match_token(TokenKind::Comma) {
+            let comma = self.previous_span();
+            self.skip_newlines();
+            if bindings.len() == 1 && self.at(TokenKind::RParen) {
+                self.diagnostics.push(Diagnostic::error(
+                    "singleton_tuple",
+                    "singleton tuple patterns are not supported; remove the trailing comma or destructure the full tuple arity, for example 'let (x, _, _) = tuple3'",
+                    comma,
+                ));
+                break;
+            }
+            bindings.push(self.parse_binding(mutable)?);
+        }
+        Some(bindings)
+    }
+
     pub(super) fn parse_plain_for_generator_binding(&mut self) -> Option<Binding> {
         const MESSAGE: &str = "for generator must bind a plain identifier or '_' before '<-'; use 'for let (...) <-' or 'for let { ... } <-' for irrefutable destructuring";
         if !self.at(TokenKind::Identifier) {
@@ -577,7 +595,7 @@ impl<'a> Parser<'a> {
 
         if self.match_token(TokenKind::LParen) {
             let start = self.previous_span();
-            let bindings = self.parse_binding_list(false)?;
+            let bindings = self.parse_tuple_binding_list(false)?;
             self.consume(
                 TokenKind::RParen,
                 "expected ')' after destructuring bindings",

@@ -1595,6 +1595,25 @@ fn parses_bracket_map_literal_as_map_construction() {
 }
 
 #[test]
+fn rejects_singleton_tuples_in_values_types_and_patterns() {
+    for source in [
+        "def main() Unit { value = (1,) }",
+        "def main() Unit { value (Int,) = 1 }",
+        "def main() Unit { let (value,) = (1, 2) }",
+    ] {
+        let result = parse(source);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "singleton_tuple"),
+            "expected singleton tuple diagnostic for {source:?}, got {:#?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
 fn parses_map_literal_with_interleaved_spreads() {
     match parse_expr_only(r#"[...defaults, "fixed": 1, ...overrides]"#) {
         Expr::Call {

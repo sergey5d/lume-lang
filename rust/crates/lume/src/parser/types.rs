@@ -305,11 +305,16 @@ impl<'a> Parser<'a> {
         let start = self.consume(TokenKind::LParen, "expected '('")?;
         self.skip_newlines();
         let mut fields = Vec::new();
+        let mut singleton_comma = None;
         if !self.at(TokenKind::RParen) {
             fields.push(self.parse_tuple_type_field()?);
             while self.match_token(TokenKind::Comma) {
+                let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RParen) {
+                    if fields.len() == 1 {
+                        singleton_comma = Some(comma);
+                    }
                     break;
                 }
                 fields.push(self.parse_tuple_type_field()?);
@@ -332,6 +337,13 @@ impl<'a> Parser<'a> {
         }
 
         if fields.len() == 1 {
+            if let Some(comma) = singleton_comma {
+                self.diagnostics.push(Diagnostic::error(
+                    "singleton_tuple",
+                    "singleton tuple types are not supported; remove the trailing comma to use the element type directly",
+                    comma,
+                ));
+            }
             return Some(fields.into_iter().next()?.ty);
         }
         Some(TypeRef::Tuple {

@@ -232,7 +232,22 @@ impl<'a> Lexer<'a> {
         self.bump();
 
         let mut escaped = false;
+        let mut crossed_newline = false;
         while let Some(ch) = self.peek() {
+            if ch == '\n' {
+                if !crossed_newline {
+                    self.error(
+                        "newline_in_string",
+                        "ordinary string literals cannot span physical lines; use triple quotes for multiline text",
+                        start,
+                        self.mark(),
+                    );
+                    crossed_newline = true;
+                }
+                self.bump();
+                escaped = false;
+                continue;
+            }
             self.bump();
             if escaped {
                 escaped = false;
@@ -241,19 +256,23 @@ impl<'a> Lexer<'a> {
             match ch {
                 '\\' => escaped = true,
                 '"' => {
-                    self.push_token(TokenKind::String, start, self.mark());
+                    if !crossed_newline {
+                        self.push_token(TokenKind::String, start, self.mark());
+                    }
                     return;
                 }
                 _ => {}
             }
         }
 
-        self.error(
-            "unterminated_string",
-            "unterminated string literal",
-            start,
-            self.mark(),
-        );
+        if !crossed_newline {
+            self.error(
+                "unterminated_string",
+                "unterminated string literal",
+                start,
+                self.mark(),
+            );
+        }
     }
 
     #[inline]
@@ -575,9 +594,43 @@ mod tests {
 
     #[test]
     fn reports_unterminated_string() {
-        let result = lex(&source("value = \"oops\n"));
+        let result = lex(&source("value = \"oops"));
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(result.diagnostics[0].code, "unterminated_string");
+    }
+
+    #[test]
+    fn rejects_physical_newlines_in_ordinary_strings() {
+        for text in [
+            "value = \"first\nsecond\"\n",
+            "value = raw\"first\nsecond\"\n",
+            "value = \"first\\\nsecond\"\n",
+        ] {
+            let result = lex(&source(text));
+            assert_eq!(result.diagnostics.len(), 1, "{:#?}", result.diagnostics);
+            assert_eq!(result.diagnostics[0].code, "newline_in_string");
+            assert!(result.diagnostics[0].message.contains("use triple quotes"));
+        }
+    }
+
+    #[test]
+    fn keeps_escaped_newline_sequences_and_triple_quoted_strings_valid() {
+        for text in [
+            "value = \"first\\nsecond\"\n",
+            "value = \"\"\"first\nsecond\"\"\"\n",
+            "value = raw\"\"\"first\nsecond\"\"\"\n",
+        ] {
+            let result = lex(&source(text));
+            assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+            assert_eq!(
+                result
+                    .tokens
+                    .iter()
+                    .filter(|token| token.kind == TokenKind::String)
+                    .count(),
+                1
+            );
+        }
     }
 
     #[test]
