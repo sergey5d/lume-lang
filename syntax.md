@@ -3086,6 +3086,34 @@ Other operators / constructs:
 - `when` for generic bound and equality conditions
 - `:` inside map types, map literals, and construction field lists
 
+Expression precedence, from highest to lowest:
+
+| Level | Forms | Associativity |
+| --- | --- | --- |
+| Postfix | calls, member access, indexing, `!!` | left |
+| Unary | `-`, `!`, `try` | right |
+| Multiplicative | `*`, `/`, `%` | left |
+| Additive | `+`, `-` | left |
+| Shape update | `with` | left |
+| Comparison | `<`, `<=`, `>`, `>=` | left |
+| Type test | `is` | non-associative |
+| Equality | `==`, `!=`, `===`, `!==` | left |
+| Boolean AND | `&&` | left |
+| Boolean OR | `||` | left |
+| Extract or fallback | `??` | right |
+
+The shape-update level means:
+
+```txt
+a + b with p       # (a + b) with p
+a with p + q       # a with (p + q)
+a with p == q      # (a with p) == q
+a with b with c    # (a with b) with c
+```
+
+Use parentheses to override these groupings, including when a patch is another
+shape-update expression: `a with (b with c)`.
+
 Examples:
 
 ```txt

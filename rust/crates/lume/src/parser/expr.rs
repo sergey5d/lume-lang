@@ -649,7 +649,6 @@ impl<'a> Parser<'a> {
             index: self.index,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
-            allow_shape_update: self.allow_shape_update,
         };
         let Some(_) = parser.parse_type_ref() else {
             return false;
@@ -1042,7 +1041,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_comparison_expr(&mut self) -> Option<Expr> {
         self.parse_left_assoc(
-            |parser| parser.parse_term_expr(),
+            |parser| parser.parse_shape_update_expr(),
             &[
                 (TokenKind::Less, BinaryOp::Less),
                 (TokenKind::LessEq, BinaryOp::LessEq),
@@ -1050,6 +1049,21 @@ impl<'a> Parser<'a> {
                 (TokenKind::GreaterEq, BinaryOp::GreaterEq),
             ],
         )
+    }
+
+    pub(super) fn parse_shape_update_expr(&mut self) -> Option<Expr> {
+        let mut expr = self.parse_term_expr()?;
+        while self.match_keyword(Keyword::With) {
+            self.skip_newlines();
+            let patch = self.parse_term_expr()?;
+            let span = expr.span().cover(patch.span());
+            expr = Expr::RecordUpdate {
+                receiver: Box::new(expr),
+                patch: Box::new(patch),
+                span,
+            };
+        }
+        Some(expr)
     }
 
     pub(super) fn parse_term_expr(&mut self) -> Option<Expr> {
@@ -1261,22 +1275,6 @@ impl<'a> Parser<'a> {
                 };
                 continue;
             }
-            if self.allow_shape_update && self.match_keyword(Keyword::With) {
-                let start = expr.span();
-                self.skip_newlines();
-                let previous = self.allow_shape_update;
-                self.allow_shape_update = false;
-                let patch = self.parse_expr();
-                self.allow_shape_update = previous;
-                let patch = patch?;
-                let end = patch.span();
-                expr = Expr::RecordUpdate {
-                    receiver: Box::new(expr),
-                    patch: Box::new(patch),
-                    span: start.cover(end),
-                };
-                continue;
-            }
             if self.at_keyword(Keyword::Match) {
                 self.error_at_current(
                     "postfix_match_not_supported",
@@ -1385,7 +1383,6 @@ impl<'a> Parser<'a> {
             index: self.index,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
-            allow_shape_update: self.allow_shape_update,
         };
         let open = parser.current_span();
         parser.advance();
@@ -1787,7 +1784,6 @@ impl<'a> Parser<'a> {
                 index: lookahead + 1,
                 diagnostics: Vec::new(),
                 allow_trailing_block_call: self.allow_trailing_block_call,
-                allow_shape_update: self.allow_shape_update,
             };
             if parser.parse_type_ref().is_some() && parser.at(TokenKind::Colon) {
                 return true;

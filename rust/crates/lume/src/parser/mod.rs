@@ -30,7 +30,6 @@ struct Parser<'a> {
     index: usize,
     diagnostics: Vec<Diagnostic>,
     allow_trailing_block_call: bool,
-    allow_shape_update: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -38,7 +37,6 @@ struct Checkpoint {
     index: usize,
     diagnostics_len: usize,
     allow_trailing_block_call: bool,
-    allow_shape_update: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -48,7 +46,6 @@ impl<'a> Parser<'a> {
             index: 0,
             diagnostics: Vec::new(),
             allow_trailing_block_call: true,
-            allow_shape_update: true,
         }
     }
 

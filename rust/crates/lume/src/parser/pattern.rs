@@ -172,7 +172,6 @@ impl<'a> Parser<'a> {
             index: 0,
             diagnostics: Vec::new(),
             allow_trailing_block_call: false,
-            allow_shape_update: true,
         };
         let expr = parser.parse_expr()?;
         if !parser.at(TokenKind::Eof) {

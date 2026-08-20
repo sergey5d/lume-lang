@@ -1736,6 +1736,37 @@ fn parses_with_shape_update_fields() {
 }
 
 #[test]
+fn parses_with_at_shape_update_precedence() {
+    assert!(matches!(
+        parse_expr_only("a + b with p"),
+        Expr::RecordUpdate { receiver, patch, .. }
+            if matches!(*receiver, Expr::Binary { op: BinaryOp::Add, .. })
+                && matches!(*patch, Expr::Identifier { ref name, .. } if name == "p")
+    ));
+
+    assert!(matches!(
+        parse_expr_only("a with p + q"),
+        Expr::RecordUpdate { receiver, patch, .. }
+            if matches!(*receiver, Expr::Identifier { ref name, .. } if name == "a")
+                && matches!(*patch, Expr::Binary { op: BinaryOp::Add, .. })
+    ));
+
+    assert!(matches!(
+        parse_expr_only("a with p == q"),
+        Expr::Binary { left, op: BinaryOp::Eq, right, .. }
+            if matches!(*left, Expr::RecordUpdate { .. })
+                && matches!(*right, Expr::Identifier { ref name, .. } if name == "q")
+    ));
+
+    assert!(matches!(
+        parse_expr_only("a with b with c"),
+        Expr::RecordUpdate { receiver, patch, .. }
+            if matches!(*receiver, Expr::RecordUpdate { .. })
+                && matches!(*patch, Expr::Identifier { ref name, .. } if name == "c")
+    ));
+}
+
+#[test]
 fn parses_newline_separated_shape_update_fields() {
     match parse_expr_only(
         r#"

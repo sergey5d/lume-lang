@@ -2,10 +2,18 @@
 # original 10 x
 # updated 42 y
 # updated2 43 z
+# chained Ada 42
+# equal true
+# not equal true
 
 class Amount {
     amount Int
     description Str
+}
+
+shape Profile {
+    name Str
+    age Int
 }
 
 def main() Unit {
@@ -20,7 +28,20 @@ def main() Unit {
     }
     updated2 = value with patch
 
+    profile = Profile("Sergey", 37)
+    namePatch = { name: "Ada" }
+    agePatch = { age: 42 }
+    expected = Profile("Ada", 42)
+    different = Profile("Ada", 41)
+
+    chained = profile with namePatch with agePatch
+    equal = profile with namePatch with agePatch == expected
+    notEqual = profile with namePatch with agePatch != different
+
     println("original " + value.amount + " " + value.description)
     println("updated " + updated.amount + " " + updated.description)
     println("updated2 " + updated2.amount + " " + updated2.description)
+    println("chained " + chained.name + " " + chained.age)
+    println("equal " + equal)
+    println("not equal " + notEqual)
 }
