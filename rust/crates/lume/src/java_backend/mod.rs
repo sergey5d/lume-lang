@@ -2615,13 +2615,13 @@ def main() Unit {
     parsed Result[Int, Str] = Int.parse("7").toResult(fail())
 
     match result {
-        case Ok(value) => println("ok")
-        case Err(error) => println(error)
+        case Ok { value } => println("ok")
+        case Err { error } => println(error)
     }
 
     match parsed {
-        case Ok(value) => println("parsed")
-        case Err(error) => println(error)
+        case Ok { value } => println("parsed")
+        case Err { error } => println(error)
     }
 }
 "#,
@@ -2947,12 +2947,12 @@ enum Maybe[T] {
     }
 
     def isDefined() Bool = match this {
-        case Some(_) => true
+        case Some { value: _ } => true
         case None => false
     }
 
     def unsafeValue() T = match this {
-        case Some(value) => value
+        case Some { value } => value
         case None => panic("expected Maybe.Some")
     }
 }
@@ -2988,12 +2988,12 @@ enum Maybe[T] {
 module demo/extract
 
 def length(maybe Option[Str]) Int {
-    let Some(text) = maybe else return 0
+    let Some { value as text } = maybe else return 0
     text.size()
 }
 
 def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
-    let Ok(value) = result else return result
+    let Ok { value } = result else return result
     Ok(value)
 }
 "#,
@@ -3730,6 +3730,81 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_runs_named_record_patterns() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java record-pattern test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-record-patterns");
+        let source = temp.join("record_patterns.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/recordpatterns
+
+shape Location {
+    city Str
+}
+
+class User {
+    name Str
+    location Location
+    age Int
+}
+
+def describe(value Any) Str = match value {
+    case User {
+        location as home
+        age: 18
+        name
+    } => name + " " + home.city
+    case _ => "other"
+}
+
+def main() Unit {
+    println(describe(User { name: "Ada", location: Location { city: "Tampa" }, age: 18 }))
+    println(describe(User { name: "Bob", location: Location { city: "Miami" }, age: 19 }))
+    println(describe("not a user"))
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/recordpatterns/RecordpatternsModule.java"))
+            .expect("read module");
+        assert!(module.contains("LumeRuntime.patternField"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.recordpatterns.RecordpatternsMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "Ada Tampa\nother\nother\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_runs_reference_identity_operators() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java identity test because javac/java is not available");
@@ -4271,8 +4346,8 @@ class Runner {
     def call(value Int, mapper fn(Int) Result[Int, Str]) Result[Int, Str] {
         mapped Result[Int, Str] = mapper(value)
         match mapped {
-            case Ok(item) => Ok(item)
-            case Err(error) => Err(error)
+            case Ok { value as item } => Ok(item)
+            case Err { error } => Err(error)
         }
     }
 
@@ -4541,11 +4616,11 @@ def main() Unit {
     println(values.removeAt(2) !!)
     println(values[0])
     match values.removeAt(9) {
-        case Err(error) => {
+        case Err { error } => {
             println(error.index)
             println(error.size)
         }
-        case Ok(_) => ()
+        case Ok { value: _ } => ()
     }
 
     array Array[Int] = Array.fill(2, 5)
@@ -4781,7 +4856,7 @@ def main() Int {
     }
 
     next := Some(3)
-    while let Some(item) = next {
+    while let Some { value as item } = next {
         println(item)
         next := None
     }

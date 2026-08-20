@@ -15,6 +15,9 @@ impl<'a> Parser<'a> {
             Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
                 elements.iter().any(Self::pattern_contains_extract)
             }
+            Pattern::Record { fields, .. } => fields
+                .iter()
+                .any(|field| Self::pattern_contains_extract(&field.pattern)),
             Pattern::Constructor { args, .. } => args.iter().any(Self::pattern_contains_extract),
             Pattern::Wildcard { .. }
             | Pattern::Binding { .. }
@@ -296,9 +299,14 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenKind::LBracket => self.parse_list_pattern(depth),
+            TokenKind::LBrace => {
+                let start = self.current_span();
+                self.parse_record_pattern(Vec::new(), start, depth)
+            }
             TokenKind::Identifier => {
                 let (name, start) = self.expect_identifier("expected match pattern")?;
                 if depth == 0
+                    && !looks_like_constructor_pattern(&name)
                     && self.binding_type_starts_on_same_line(start)
                     && matches!(
                         self.current_kind(),
@@ -320,6 +328,9 @@ impl<'a> Parser<'a> {
                     path.push(segment);
                     end = end.cover(segment_span);
                 }
+                if self.at(TokenKind::LBrace) {
+                    return self.parse_record_pattern(path, start, depth);
+                }
                 if self.match_token(TokenKind::LParen) {
                     let mut args = Vec::new();
                     if !self.at(TokenKind::RParen) {
@@ -332,6 +343,17 @@ impl<'a> Parser<'a> {
                     }
                     let close =
                         self.consume(TokenKind::RParen, "expected ')' after constructor pattern")?;
+                    if args.is_empty() {
+                        self.diagnostics.push(Diagnostic::error(
+                            "positional_record_pattern",
+                            format!(
+                                "parenthesized named-data patterns are not supported; write '{} {{ ... }}' for named fields or bare '{}' for a zero-payload enum case",
+                                path.join("."),
+                                path.join(".")
+                            ),
+                            start.cover(close),
+                        ));
+                    }
                     return Some(Pattern::Constructor {
                         path,
                         args,
@@ -353,6 +375,78 @@ impl<'a> Parser<'a> {
                 None
             }
         }
+    }
+
+    fn parse_record_pattern(
+        &mut self,
+        path: Vec<String>,
+        start: Span,
+        depth: usize,
+    ) -> Option<Pattern> {
+        self.consume(TokenKind::LBrace, "expected '{' after record pattern type")?;
+        self.skip_newlines();
+        let mut fields = Vec::new();
+        let mut names = std::collections::HashSet::new();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            let (name, name_span) =
+                self.expect_identifier("expected field name in record pattern")?;
+            let pattern = if self.match_keyword(Keyword::As) {
+                let (binding, binding_span) =
+                    self.expect_binding_name("expected binding name after 'as'")?;
+                Pattern::Binding {
+                    name: binding,
+                    span: binding_span,
+                }
+            } else if self.match_token(TokenKind::Colon) {
+                self.parse_pattern_at_depth(depth + 1)?
+            } else {
+                Pattern::Binding {
+                    name: name.clone(),
+                    span: name_span,
+                }
+            };
+            let field_span = name_span.cover(pattern.span());
+            if !names.insert(name.clone()) {
+                self.diagnostics.push(Diagnostic::error(
+                    "duplicate_pattern_field",
+                    format!("record pattern field '{name}' is listed more than once"),
+                    name_span,
+                ));
+            }
+            fields.push(RecordPatternField {
+                name,
+                pattern,
+                span: field_span,
+            });
+
+            let separated_by_comma = self.match_token(TokenKind::Comma);
+            let separated_by_newline = if !separated_by_comma {
+                self.match_token(TokenKind::Newline)
+            } else {
+                false
+            };
+            self.skip_newlines();
+            if separated_by_newline {
+                self.match_token(TokenKind::Comma);
+                self.skip_newlines();
+            }
+            if self.at(TokenKind::RBrace) || self.at(TokenKind::Eof) {
+                break;
+            }
+            if !separated_by_comma && !separated_by_newline {
+                self.error_at_current(
+                    "unexpected_token",
+                    "expected ',' or newline between record pattern fields",
+                );
+                return None;
+            }
+        }
+        let end = self.consume(TokenKind::RBrace, "expected '}' after record pattern")?;
+        Some(Pattern::Record {
+            path,
+            fields,
+            span: start.cover(end),
+        })
     }
 
     fn parse_list_pattern(&mut self, depth: usize) -> Option<Pattern> {

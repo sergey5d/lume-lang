@@ -90,21 +90,21 @@ def main() Unit {
     apple11 = Apple(11)
     appleBox = AppleBox { apple: apple11 }
     classInClass = match appleBox {
-        case AppleBox(Apple(size)) => "class in class " + size
+        case AppleBox { apple: Apple { size } } => "class in class " + size
     }
     println(classInClass)
 
     amount3 = Amount(3, "usd")
     amountBox = AmountBox { amount: amount3 }
     shapeInClass = match amountBox {
-        case AmountBox(Amount(count, label)) => "shape in class " + count + " " + label
+        case AmountBox { amount: Amount { count, label } } => "shape in class " + count + " " + label
     }
     println(shapeInClass)
 
     apple7 = Apple(7)
     appleShape = AppleShape { apple: apple7 }
     classInShape = match appleShape {
-        case AppleShape(Apple(size)) => "class in shape " + size
+        case AppleShape { apple: Apple { size } } => "class in shape " + size
     }
     println(classInShape)
 
@@ -120,66 +120,66 @@ def main() Unit {
 
     pairHolder = PairHolder { pair: (4, 5) }
     tupleInClass = match pairHolder {
-        case PairHolder((left, right)) => "tuple in class " + left + " " + right
+        case PairHolder { pair: (left, right) } => "tuple in class " + left + " " + right
     }
     println(tupleInClass)
 
     apple6 = Apple(6)
     classInTuple = match (apple6, 9) {
-        case (Apple(size), tail) => "class in tuple " + size + " " + tail
+        case (Apple { size }, tail) => "class in tuple " + size + " " + tail
     }
     println(classInTuple)
 
     amount8 = Amount(8, "eur")
     shapeInTuple = match (amount8, 0) {
-        case (Amount(count, label), _) => "shape in tuple " + count + " " + label
+        case (Amount { count, label }, _) => "shape in tuple " + count + " " + label
     }
     println(shapeInTuple)
 
     pairShape = PairShape { pair: (10, 11) }
     tupleInShape = match pairShape {
-        case PairShape((left, right)) => "tuple in shape " + left + " " + right
+        case PairShape { pair: (left, right) } => "tuple in shape " + left + " " + right
     }
     println(tupleInShape)
 
     enumInEnum = match OuterFlag.Wrap(InnerFlag.On) {
-        case Wrap(InnerFlag.On) => "enum in enum on"
-        case Wrap(InnerFlag.Off) => "enum in enum off"
+        case Wrap { value: InnerFlag.On } => "enum in enum on"
+        case Wrap { value: InnerFlag.Off } => "enum in enum off"
         case OuterFlag.Empty => "enum in enum empty"
     }
     println(enumInEnum)
 
     apple12 = Apple(12)
     classInEnum = match MaybeApple.SomeX(apple12) {
-        case SomeX(Apple(size)) => "class in enum " + size
+        case SomeX { value: Apple { size } } => "class in enum " + size
         case MaybeApple.NoneX => "class in enum none"
     }
     println(classInEnum)
 
     amount13 = Amount(13, "cad")
     shapeInEnum = match MaybeAmount.SomeX(amount13) {
-        case SomeX(Amount(count, label)) => "shape in enum " + count + " " + label
+        case SomeX { value: Amount { count, label } } => "shape in enum " + count + " " + label
         case MaybeAmount.NoneX => "shape in enum none"
     }
     println(shapeInEnum)
 
     tupleInEnum = match MaybePair.SomeX((14, 15)) {
-        case SomeX((left, right)) => "tuple in enum " + left + " " + right
+        case SomeX { value: (left, right) } => "tuple in enum " + left + " " + right
         case MaybePair.NoneX => "tuple in enum none"
     }
     println(tupleInEnum)
 
     flagBox = FlagBox { value: InnerFlag.Off }
     enumInClass = match flagBox {
-        case FlagBox(InnerFlag.On) => "enum in class on"
-        case FlagBox(InnerFlag.Off) => "enum in class off"
+        case FlagBox { value: InnerFlag.On } => "enum in class on"
+        case FlagBox { value: InnerFlag.Off } => "enum in class off"
     }
     println(enumInClass)
 
     flagShape = FlagShape { value: InnerFlag.On }
     enumInShape = match flagShape {
-        case FlagShape(InnerFlag.On) => "enum in shape on"
-        case FlagShape(InnerFlag.Off) => "enum in shape off"
+        case FlagShape { value: InnerFlag.On } => "enum in shape on"
+        case FlagShape { value: InnerFlag.Off } => "enum in shape off"
     }
     println(enumInShape)
 

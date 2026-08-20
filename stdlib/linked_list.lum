@@ -35,7 +35,7 @@ hidden interface LinkedListApi[T] with Iterable[T] {
     def makeStr(separator Str) Str {
         var result Str = ""
         for idx <- Range(0, this.size()) {
-            if let Some(item) = this.at(idx) {
+            if let Some { value as item } = this.at(idx) {
                 if idx > 0 {
                     result := result + separator
                 }

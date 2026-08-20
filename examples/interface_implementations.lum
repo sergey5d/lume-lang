@@ -33,7 +33,7 @@ enum Status with Labeled {
 
     def label() Str = match this {
         case Ready => "ready"
-        case Failed(reason) => reason
+        case Failed { reason } => reason
     }
 }
 

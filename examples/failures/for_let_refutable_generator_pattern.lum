@@ -4,7 +4,7 @@
 def main() Unit {
     values [Int?] = [Some(1), None]
 
-    for let Some(value) <- values {
+    for let Some { value } <- values {
         println(value)
     }
 }

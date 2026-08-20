@@ -11,7 +11,7 @@ unreachable later cases.
 Examples:
 
 - `_` first, then more specific cases after it
-- `SomeX(_)` before `SomeX(x) if ...`
+- `SomeX { value: _ }` before `SomeX { value as x } if ...`
 - duplicate case coverage that makes later branches impossible
 
 This would make diagnostics much better and help `match` feel more complete.
@@ -47,7 +47,7 @@ Core `match` works inside explicit lambdas:
 
 ```txt
 list.map(value -> match value {
-    case SomeX(x) => x + 1
+    case SomeX { value as x } => x + 1
     case NoneX => 0
 })
 ```
@@ -56,7 +56,7 @@ Possible later shorthand, if we ever want contextual lambda sugar:
 
 ```txt
 list.map(match {
-    case SomeX(x) => x + 1
+    case SomeX { value as x } => x + 1
     case NoneX => 0
 })
 ```
@@ -70,5 +70,6 @@ The main user-facing match story is now:
 - `match` is exhaustive / total
 - `partial` is the partial form and returns `Option[...]`
 - guards are supported on top-level cases
-- nested enum, tuple, and class extractor patterns are supported
+- nested enum, tuple, class, and shape patterns are supported
+- named payloads use name-based record patterns; only tuples are positional
 - plain `match` should not fall back to runtime "no match" behavior

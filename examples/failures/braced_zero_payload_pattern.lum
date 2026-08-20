@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*zero-payload enum case 'None' is a bare pattern; write 'None' without braces.*
+
+def main(maybe Option[Int]) Int = match maybe {
+    case Some { value } => value
+    case None {} => 0
+}

@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*record pattern field 'name' is listed more than once.*
+
+class User {
+    name Str
+}
+
+def main() Unit {
+    user = User { name: "Ada" }
+    match user {
+        case User { name, name } => println(name)
+    }
+}

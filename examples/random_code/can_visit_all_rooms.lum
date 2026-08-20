@@ -5,7 +5,7 @@
 
 def canVisitAllRooms(rooms [[Int]]) Bool {
 
-    let Some(startKeys) = rooms.at(0) else return true
+    let Some { value as startKeys } = rooms.at(0) else return true
 
     seen = Set(0)
     keys [Int] = []
@@ -19,7 +19,7 @@ def canVisitAllRooms(rooms [[Int]]) Bool {
         key = keys.removeAt(0).getOr(-1)
 
         if !seen.contains(key) {
-            let Some(roomKeys) = rooms.at(key) else return false
+            let Some { value as roomKeys } = rooms.at(key) else return false
 
             for roomKey <- roomKeys {
                 keys.append(roomKey)

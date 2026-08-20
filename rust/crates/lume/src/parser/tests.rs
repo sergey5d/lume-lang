@@ -36,6 +36,21 @@ fn parse_expr_only(src: &str) -> Expr {
     expr
 }
 
+fn parse_pattern_only(src: &str) -> (Pattern, Vec<Diagnostic>) {
+    let file = SourceFile::new("test.lum", src);
+    let lexed = lex(&file);
+    assert!(
+        lexed.diagnostics.is_empty(),
+        "lexer diagnostics: {:#?}",
+        lexed.diagnostics
+    );
+    let mut parser = Parser::new(&lexed.tokens);
+    let pattern = parser.parse_pattern().expect("pattern");
+    parser.skip_newlines();
+    assert!(parser.at(TokenKind::Eof), "unexpected trailing tokens");
+    (pattern, parser.diagnostics)
+}
+
 fn assert_lexes_unsupported_operator(src: &str, operator: &str) {
     let file = SourceFile::new("test.lum", src);
     let lexed = lex(&file);
@@ -2435,6 +2450,51 @@ def run(value Option[Int]) Int {
         },
         other => panic!("expected block body, got {other:#?}"),
     }
+}
+
+#[test]
+fn parses_named_record_patterns_with_aliases_literals_and_nesting() {
+    let (pattern, diagnostics) = parse_pattern_only(
+        r#"User {
+            name
+            location as home
+            age: 18
+            address: Location { city: "Tampa", country }
+        }"#,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let Pattern::Record { path, fields, .. } = pattern else {
+        panic!("expected record pattern");
+    };
+    assert_eq!(path, vec!["User"]);
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["name", "location", "age", "address"]
+    );
+    assert!(matches!(
+        &fields[0].pattern,
+        Pattern::Binding { name, .. } if name == "name"
+    ));
+    assert!(matches!(
+        &fields[1].pattern,
+        Pattern::Binding { name, .. } if name == "home"
+    ));
+    assert!(matches!(&fields[2].pattern, Pattern::Literal { .. }));
+    assert!(matches!(
+        &fields[3].pattern,
+        Pattern::Record { path, fields, .. }
+            if path == &vec!["Location".to_string()] && fields.len() == 2
+    ));
+
+    let (_, duplicate_diagnostics) = parse_pattern_only("User { name, name }");
+    assert!(
+        duplicate_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "duplicate_pattern_field")
+    );
 }
 
 #[test]

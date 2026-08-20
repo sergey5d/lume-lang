@@ -10,7 +10,7 @@ class Amount {
 def main() Int {
     amount Amount = Amount(42, "hello")
     println(match amount {
-        case Amount(count, label) => count + "-" + label
+        case Amount { count, label } => count + "-" + label
     })
     0
 }

@@ -47,11 +47,11 @@ def main() Int {
     pair PairBox = PairBox(5, 9)
 
     match pair {
-        case PairBox(left, right) => println("pair " + left + "-" + right)
+        case PairBox { left, right } => println("pair " + left + "-" + right)
     }
 
     picked = match pair {
-        case PairBox(left, right) => left + right
+        case PairBox { left, right } => left + right
     }
     println(picked)
 

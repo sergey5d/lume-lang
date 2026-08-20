@@ -10,67 +10,67 @@ enum Either[L, R] {
     }
 
     def isLeft() Bool = match this {
-        case Left(_) => true
-        case Right(_) => false
+        case Left { value: _ } => true
+        case Right { value: _ } => false
     }
 
     def isRight() Bool = match this {
-        case Left(_) => false
-        case Right(_) => true
+        case Left { value: _ } => false
+        case Right { value: _ } => true
     }
 
     def isSuccess() Bool = match this {
-        case Left(_) => false
-        case Right(_) => true
+        case Left { value: _ } => false
+        case Right { value: _ } => true
     }
 
     def map[X](f fn(R) X) Either[L, X] = match this {
-        case Left(value) => Left(value)
-        case Right(value) => Right(f(value))
+        case Left { value } => Left(value)
+        case Right { value } => Right(f(value))
     }
 
     def mapLeft[X](f fn(L) X) Either[X, R] = match this {
-        case Left(value) => Left(f(value))
-        case Right(value) => Right(value)
+        case Left { value } => Left(f(value))
+        case Right { value } => Right(value)
     }
 
     def flatMap[X](f fn(R) Either[L, X]) Either[L, X] = match this {
-        case Left(value) => Left(value)
-        case Right(value) => f(value)
+        case Left { value } => Left(value)
+        case Right { value } => f(value)
     }
 
     def merge[when L = R]() L = match this {
-        case Left(value) => value
-        case Right(value) => value
+        case Left { value } => value
+        case Right { value } => value
     }
 
     def getOr(fallback => R) R = match this {
-        case Left(_) => fallback
-        case Right(value) => value
+        case Left { value: _ } => fallback
+        case Right { value } => value
     }
 
     def orElse(fallback => Either[L, R]) Either[L, R] = match this {
-        case Left(_) => fallback
-        case Right(value) => Right(value)
+        case Left { value: _ } => fallback
+        case Right { value } => Right(value)
     }
 
     def toOption() Option[R] = match this {
-        case Left(_) => None
-        case Right(value) => Some(value)
+        case Left { value: _ } => None
+        case Right { value } => Some(value)
     }
 
     def toResult() Result[R, L] = match this {
-        case Left(value) => Err(value)
-        case Right(value) => Ok(value)
+        case Left { value } => Err(value)
+        case Right { value } => Ok(value)
     }
 
     def expectLeft() L = match this {
-        case Left(value) => value
-        case Right(_) => panic("expected Either.Left")
+        case Left { value } => value
+        case Right { value: _ } => panic("expected Either.Left")
     }
 
     def expectRight() R = match this {
-        case Left(_) => panic("expected Either.Right")
-        case Right(value) => value
+        case Left { value: _ } => panic("expected Either.Right")
+        case Right { value } => value
     }
 }

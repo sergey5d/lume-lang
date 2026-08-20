@@ -7,28 +7,24 @@ guards, nested patterns, and `partial` landed.
 
 The current supported surface includes:
 
-- enum constructor patterns
-- tuple patterns
-- class extractor patterns
-- nested enum constructor patterns
-- nested tuple patterns
-- nested class extractor patterns
-- allow `_` in any nested position to omit fields
+- name-based record patterns for enum cases, classes, named shapes, and anonymous shapes
+- tuple and list patterns
+- nested record, tuple, and list patterns
+- `_` in any nested position to ignore a value
 - guards attached to top-level cases
 - type-pattern reasoning/checking stays top-level only
 - do not support destructuring classes into tuples
-- do not support destructuring classes into anonymous-shape patterns yet
 - guards do not contribute coverage
-- nested singleton enum cases stay qualified, for example `Wrap(InnerFlag.On)`
+- nested singleton enum cases stay qualified when needed, for example `Wrap { value: InnerFlag.On }`
 
 Examples of supported shapes:
 
 ```txt
 match value {
-    case Some((x, y)) => ...
-    case Box(Apple(a)) => ...
-    case Pair(_, y) => ...
-    case Some(x) if x > 10 => ...
+    case Some { value: (x, y) } => ...
+    case Box { apple: Apple { value as a } } => ...
+    case Pair { left: _, right as y } => ...
+    case Some { value as x } if x > 10 => ...
 }
 ```
 
@@ -36,17 +32,11 @@ Examples that are intentionally out of scope for now:
 
 ```txt
 match value {
-    case Some(x if x > 0) => ...        # nested guard
-    case Person(name, age) as (x, y) => ...
-    case Person({ name: x, age: y }) => ...
+    case Some { value: x if x > 0 } => ... # nested guard
+    case Person(name, age) => ...           # positional named-data pattern
+    case Box[Int] { value } => ...          # erased generic runtime argument
 }
 ```
-
-Future feature to discuss later:
-
-- allow anonymous shapes to participate in destructuring patterns
-  - for example matching a class against an anonymous-shape pattern
-  - this is explicitly not part of the first nested-pattern implementation
 
 Clarification:
 
@@ -103,7 +93,7 @@ Current explicit style:
 
 ```txt
 list.map(value -> match value {
-    case Some(x) => x + 1
+    case Some { value as x } => x + 1
     case None => 0
 })
 ```
@@ -112,7 +102,7 @@ Possible later shorthand:
 
 ```txt
 list.map(match {
-    case Some(x) => x + 1
+    case Some { value as x } => x + 1
     case None => 0
 })
 ```

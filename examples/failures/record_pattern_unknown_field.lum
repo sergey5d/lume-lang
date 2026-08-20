@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*record pattern 'User' has no visible field 'location'.*
+
+class User {
+    name Str
+}
+
+def main() Unit {
+    user = User { name: "Ada" }
+    match user {
+        case User { location } => println(location)
+    }
+}

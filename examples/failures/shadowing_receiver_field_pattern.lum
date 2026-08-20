@@ -5,7 +5,7 @@ class Counter {
     count Int
 
     def bad() Int {
-        let Some(count) = Some(1) else return this.count
+        let Some { value as count } = Some(1) else return this.count
         this.count
     }
 }

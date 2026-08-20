@@ -2,4 +2,4 @@
 # expected end of expression, got CASE\("case" @ .*?\)
 
 def main() Int? =
-    partial match Some(1) case Some(x) => x
+    partial match Some(1) case Some { value as x } => x

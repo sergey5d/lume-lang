@@ -20,14 +20,14 @@ def main() Unit {
     println("vector previous " + (vector.setAt(0, 2) !!))
     inserted Unit = vector.insertAt(1, 5) !!
     println("vector removed " + (vector.removeAt(2) !!))
-    let Err(vectorError) = vector.removeAt(9) else return ()
+    let Err { error as vectorError } = vector.removeAt(9) else return ()
     println("vector error " + vectorError.index + " " + vectorError.size)
     println("vector unsafe " + vector[0])
 
     array Array[Int] = Array(4, 5)
     println("array at " + (array.at(1) !!))
     println("array previous " + (array.setAt(1, 6) !!))
-    let Err(arrayError) = array.setAt(-1, 0) else return ()
+    let Err { error as arrayError } = array.setAt(-1, 0) else return ()
     println("array error " + arrayError.index + " " + arrayError.size)
     println("array unsafe " + array[1])
 
@@ -36,7 +36,7 @@ def main() Unit {
     println("linked previous " + (linked.setAt(0, 8) !!))
     linkedInserted Unit = linked.insertAt(1, 10) !!
     println("linked removed " + (linked.removeAt(2) !!))
-    let Err(linkedError) = linked.removeAt(3) else return ()
+    let Err { error as linkedError } = linked.removeAt(3) else return ()
     println("linked error " + linkedError.index + " " + linkedError.size)
     println("linked first " + (linked.at(0) !!))
 }

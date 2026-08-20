@@ -557,6 +557,12 @@ fn rewrite_pattern_for_runtime(pattern: &mut ast::Pattern, module: &LoadedModule
                 rewrite_pattern_for_runtime(element, module);
             }
         }
+        ast::Pattern::Record { path, fields, .. } => {
+            rewrite_pattern_path_for_runtime(path, module);
+            for field in fields {
+                rewrite_pattern_for_runtime(&mut field.pattern, module);
+            }
+        }
         ast::Pattern::Constructor { path, args, .. } => {
             rewrite_pattern_path_for_runtime(path, module);
             for arg in args {
@@ -3947,6 +3953,12 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(pattern_field_value(&args[0], field_name).unwrap_or(Value::Unit))
             }
+            ir::Intrinsic::PatternField(field_name) => {
+                if args.len() != 1 {
+                    return Err(self.runtime_error(span, "PatternField expects 1 argument"));
+                }
+                Ok(pattern_field_value(&args[0], field_name).unwrap_or(Value::Unit))
+            }
         }
     }
 
@@ -6858,7 +6870,7 @@ mod tests {
                         quantity: 7
                     }
                 )
-                let Some(order) = maybeOrder else panic("expected order")
+                let Some { value as order } = maybeOrder else panic("expected order")
                 return order.quantity
             }
             "#,
@@ -7484,8 +7496,8 @@ $name
             r#"
             def main() Unit {
                 values = ["btc", "usd"]
-                let Some(parsedFloat) = Float.parse("1.2") else panic("expected float")
-                let Some(parsedInt) = Int.parse("7") else panic("expected int")
+                let Some { value as parsedFloat } = Float.parse("1.2") else panic("expected float")
+                let Some { value as parsedInt } = Int.parse("7") else panic("expected int")
                 OS.println(parsedFloat + 0.8)
                 OS.println(parsedInt + 1)
                 OS.println(Float.parse("oops").isEmpty())
@@ -7545,17 +7557,17 @@ $name
                 pair PairBox = PairBox(5, 9)
                 values [MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3)]
                 partialMapped Vector[Option[Int]] = values.map(value => partial match value {
-                    case SomeX(x) => x + 1
+                    case SomeX { value as x } => x + 1
                 })
 
                 OS.println(match amount {
-                    case Amount(count, label) => count + "-" + label
+                    case Amount { count, label } => count + "-" + label
                 })
                 OS.println(match pair {
-                    case PairBox(left, right) => left + right
+                    case PairBox { left, right } => left + right
                 })
-                let Some(first) = partialMapped.at(0) else return ()
-                let Some(second) = partialMapped.at(1) else return ()
+                let Some { value as first } = partialMapped.at(0) else return ()
+                let Some { value as second } = partialMapped.at(1) else return ()
                 OS.println(first.getOr(0))
                 OS.println(second.isEmpty())
             }
@@ -7690,12 +7702,12 @@ $name
             def main() Unit {
                 apple = Apple(12)
                 OS.println(match MaybeApple.SomeX(apple) {
-                    case SomeX(Apple(size)) => "apple " + size
+                    case SomeX { value: Apple { size } } => "apple " + size
                     case MaybeApple.NoneX => "apple none"
                 })
                 amount = Amount(13, "cad")
                 OS.println(match MaybeAmount.SomeX(amount) {
-                    case SomeX(Amount(count, label)) => "amount " + count + " " + label
+                    case SomeX { value: Amount { count, label } } => "amount " + count + " " + label
                     case MaybeAmount.NoneX => "amount none"
                 })
             }
@@ -7713,7 +7725,7 @@ $name
             r#"
             def main() Int {
                 values = [7]
-                if let Some(value) = values.at(0) {
+                if let Some { value } = values.at(0) {
                     OS.println("binding " + value)
                 } else {
                     OS.println("binding none")
@@ -7740,17 +7752,17 @@ $name
 
             def main() Unit {
                 pair Pair = Pair(5, 9)
-                let Pair(item, other) = pair
+                let Pair { left as item, right as other } = pair
                 OS.println("let", item + other)
 
                 allSome = [Some(5), Some(6)]
                 for maybeItem <- allSome {
-                    let Some(loopItem) = maybeItem else panic("expected loop item")
+                    let Some { value as loopItem } = maybeItem else panic("expected loop item")
                     OS.println("known", loopItem)
                 }
 
                 knownMapped = for maybeItem <- allSome yield {
-                    let Some(mappedItem) = maybeItem else panic("expected mapped item")
+                    let Some { value as mappedItem } = maybeItem else panic("expected mapped item")
                     mappedItem + 1
                 }
 
@@ -7761,12 +7773,12 @@ $name
                 pairs = Vector(Pair(1, 10), Pair(2, 20), Pair(3, 30))
 
                 for pairItem <- pairs {
-                    let Pair(left, right) = pairItem
+                    let Pair { left, right } = pairItem
                     OS.println("for", left, right)
                 }
 
                 mapped = for pairItem <- pairs yield {
-                    let Pair(left, right) = pairItem
+                    let Pair { left, right } = pairItem
                     left + right
                 }
 
@@ -7791,7 +7803,7 @@ $name
             r#"
             def main() Unit {
                 first Option[Int] = Some(5)
-                let Some(value) = first else panic("expected first value")
+                let Some { value } = first else panic("expected first value")
                 OS.println("let-panic", value)
             }
             "#,

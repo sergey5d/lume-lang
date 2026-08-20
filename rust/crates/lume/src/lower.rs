@@ -3332,6 +3332,85 @@ impl<'a> FunctionLowerer<'a> {
                     bindings,
                 }
             }
+            Pattern::Record { path, fields, span } => {
+                let base_condition = if path.is_empty() {
+                    self.bool_const(true)
+                } else {
+                    let Some(kind) = self.lookup_record_pattern_kind(path) else {
+                        self.add_error(
+                            "lower_invariant",
+                            "record pattern should be resolved before lowering",
+                            *span,
+                        );
+                        return PatternPlan::always_false();
+                    };
+                    match &kind {
+                        ConstructorPatternKind::EnumCase { case_name, .. } => self
+                            .emit_temp_from_rvalue(
+                                ir::RValue::Call {
+                                    callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantIs(
+                                        case_name.clone(),
+                                    )),
+                                    args: vec![scrutinee.clone()],
+                                    structural: false,
+                                },
+                                ir::Type::Bool,
+                                Some(*span),
+                            ),
+                        ConstructorPatternKind::TypeDestructure { ty, .. } => self
+                            .emit_temp_from_rvalue(
+                                ir::RValue::TypeTest {
+                                    operand: scrutinee.clone(),
+                                    ty: ty.clone(),
+                                },
+                                ir::Type::Bool,
+                                Some(*span),
+                            ),
+                    }
+                };
+                let mut conditions = vec![base_condition];
+                let mut bindings = Vec::new();
+                for field in fields {
+                    let field_ty = self.record_pattern_field_type(&scrutinee, path, &field.name);
+                    if let Pattern::Binding { name, .. } = &field.pattern {
+                        if name != "_" {
+                            bindings.push(PendingBinding {
+                                name: name.clone(),
+                                ty: field_ty,
+                                source: PendingBindingSource::RValue(ir::RValue::Call {
+                                    callee: ir::Callee::Intrinsic(ir::Intrinsic::PatternField(
+                                        field.name.clone(),
+                                    )),
+                                    args: vec![scrutinee.clone()],
+                                    structural: false,
+                                }),
+                            });
+                        }
+                        continue;
+                    }
+                    if matches!(field.pattern, Pattern::Wildcard { .. }) {
+                        continue;
+                    }
+                    let value = self.emit_temp_from_rvalue(
+                        ir::RValue::Call {
+                            callee: ir::Callee::Intrinsic(ir::Intrinsic::PatternField(
+                                field.name.clone(),
+                            )),
+                            args: vec![scrutinee.clone()],
+                            structural: false,
+                        },
+                        field_ty,
+                        Some(field.pattern.span()),
+                    );
+                    let plan = self.lower_pattern_plan(value, &field.pattern);
+                    conditions.push(plan.condition);
+                    bindings.extend(plan.bindings);
+                }
+                PatternPlan {
+                    condition: self.combine_conditions(conditions, *span),
+                    bindings,
+                }
+            }
             Pattern::Constructor { path, args, span } => {
                 let Some(kind) = self.lookup_constructor_pattern_kind(path, args.len()) else {
                     self.add_error(
@@ -3427,7 +3506,70 @@ impl<'a> FunctionLowerer<'a> {
         let Some(scrutinee_ty) = self.operand_type(scrutinee) else {
             return ir::Type::Unknown;
         };
+        if path.is_empty() {
+            return match &scrutinee_ty {
+                ir::Type::Record(fields) => fields
+                    .iter()
+                    .find(|field| field.name == field_name)
+                    .map(|field| field.ty.clone())
+                    .unwrap_or(ir::Type::Unknown),
+                ir::Type::Named { name, .. } => self
+                    .program
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == *name)
+                    .and_then(|ty| ty.fields.iter().find(|field| field.name == field_name))
+                    .map(|field| field.ty.clone())
+                    .unwrap_or(ir::Type::Unknown),
+                _ => ir::Type::Unknown,
+            };
+        }
         self.enum_case_field_type(&scrutinee_ty, path, field_name, index)
+            .unwrap_or(ir::Type::Unknown)
+    }
+
+    fn record_pattern_field_type(
+        &self,
+        scrutinee: &ir::Operand,
+        path: &[String],
+        field_name: &str,
+    ) -> ir::Type {
+        let Some(scrutinee_ty) = self.operand_type(scrutinee) else {
+            return ir::Type::Unknown;
+        };
+        if path.is_empty() {
+            return match &scrutinee_ty {
+                ir::Type::Record(fields) => fields
+                    .iter()
+                    .find(|field| field.name == field_name)
+                    .map(|field| field.ty.clone())
+                    .unwrap_or(ir::Type::Unknown),
+                ir::Type::Named { name, .. } => self
+                    .program
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == *name)
+                    .and_then(|ty| ty.fields.iter().find(|field| field.name == field_name))
+                    .map(|field| field.ty.clone())
+                    .unwrap_or(ir::Type::Unknown),
+                _ => ir::Type::Unknown,
+            };
+        }
+        if let Some(ty) = self.enum_case_field_type(&scrutinee_ty, path, field_name, 0) {
+            return ty;
+        }
+        let Some(type_name) = path.last() else {
+            return ir::Type::Unknown;
+        };
+        let Some(ty) = self.program.types.iter().find(|ty| {
+            ty.name == *type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+        }) else {
+            return ir::Type::Unknown;
+        };
+        ty.fields
+            .iter()
+            .find(|field| field.name == field_name)
+            .map(|field| field.ty.clone())
             .unwrap_or(ir::Type::Unknown)
     }
 
@@ -3495,6 +3637,77 @@ impl<'a> FunctionLowerer<'a> {
             return Some(ConstructorPatternKind::TypeDestructure { ty, field_names });
         }
         None
+    }
+
+    fn lookup_record_pattern_kind(&self, path: &[String]) -> Option<ConstructorPatternKind> {
+        if let Some(field_names) = self.lookup_case_all_fields(path) {
+            return Some(ConstructorPatternKind::EnumCase {
+                case_name: path.last().cloned().unwrap_or_default(),
+                field_names,
+            });
+        }
+        self.lookup_destructured_type_all_fields(path)
+            .map(|(ty, field_names)| ConstructorPatternKind::TypeDestructure { ty, field_names })
+    }
+
+    fn lookup_case_all_fields(&self, path: &[String]) -> Option<Vec<String>> {
+        let case_name = path.last()?;
+        if path.len() >= 2 {
+            let type_name = &path[path.len() - 2];
+            if let Some(case) = self
+                .program
+                .types
+                .iter()
+                .filter(|ty| ty.kind == ast::TypeKind::Enum && ty.name == *type_name)
+                .flat_map(|ty| ty.enum_cases.iter())
+                .find(|case| case.name == *case_name)
+            {
+                return Some(case.fields.iter().map(|field| field.name.clone()).collect());
+            }
+        }
+        match case_name.as_str() {
+            "Some" | "Ok" | "Left" | "Right" => return Some(vec!["value".to_string()]),
+            "Err" => return Some(vec!["error".to_string()]),
+            "None" => return Some(Vec::new()),
+            _ => {}
+        }
+        let ast_matches = self
+            .program
+            .types
+            .iter()
+            .filter(|ty| ty.kind == ast::TypeKind::Enum)
+            .flat_map(|ty| ty.enum_cases.iter())
+            .filter(|case| case.name == *case_name)
+            .map(|case| {
+                case.fields
+                    .iter()
+                    .map(|field| field.name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        if ast_matches.len() == 1 {
+            return ast_matches.into_iter().next();
+        }
+        if let Some(first) = ast_matches.first() {
+            if ast_matches.iter().all(|fields| fields == first) {
+                return Some(first.clone());
+            }
+        }
+        let matches = self
+            .case_fields
+            .iter()
+            .filter_map(|(key, fields)| {
+                key.ends_with(&format!(".{case_name}"))
+                    .then_some(fields.clone())
+            })
+            .collect::<Vec<_>>();
+        if matches.len() == 1 {
+            return matches.into_iter().next();
+        }
+        matches
+            .first()
+            .filter(|first| matches.iter().all(|fields| fields == *first))
+            .cloned()
     }
 
     fn lookup_case_fields(&self, path: &[String], arity: usize) -> Option<Vec<String>> {
@@ -3599,6 +3812,28 @@ impl<'a> FunctionLowerer<'a> {
             ir::Type::named(type_name.clone()),
             visible_fields
                 .iter()
+                .map(|field| field.name.clone())
+                .collect(),
+        ))
+    }
+
+    fn lookup_destructured_type_all_fields(
+        &self,
+        path: &[String],
+    ) -> Option<(ir::Type, Vec<String>)> {
+        let type_name = match path {
+            [name] => name,
+            [_, name] => name,
+            _ => return None,
+        };
+        let ty = self.program.types.iter().find(|ty| {
+            ty.name == *type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+        })?;
+        Some((
+            ir::Type::named(type_name.clone()),
+            ty.fields
+                .iter()
+                .filter(|field| field.visibility != ast::Visibility::Hidden)
                 .map(|field| field.name.clone())
                 .collect(),
         ))

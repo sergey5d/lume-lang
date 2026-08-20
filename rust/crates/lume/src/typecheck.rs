@@ -2976,6 +2976,23 @@ impl<'a> Checker<'a> {
             Pattern::List { elements, rest, .. } => {
                 elements.is_empty() && rest.is_some() && self.list_element_type(scrutinee).is_some()
             }
+            Pattern::Record { path, fields, .. } => {
+                let Some((is_enum_case, target_ty, target_fields)) =
+                    self.lookup_record_pattern_target(path, scrutinee)
+                else {
+                    return false;
+                };
+                !is_enum_case
+                    && self.is_assignable(scrutinee, &target_ty)
+                    && fields.iter().all(|field| {
+                        target_fields
+                            .iter()
+                            .find(|(name, _)| name == &field.name)
+                            .is_some_and(|(_, ty)| {
+                                self.for_pattern_is_irrefutable(&field.pattern, ty)
+                            })
+                    })
+            }
             Pattern::Constructor { path, args, .. } => {
                 if self.lookup_case_by_pattern(path, scrutinee).is_some() {
                     return false;
@@ -3046,6 +3063,7 @@ impl<'a> Checker<'a> {
                         .zip(items.iter())
                         .all(|(pattern, item)| self.source_expr_proves_pattern_match(pattern, item))
             }
+            (Pattern::Record { .. }, _) => false,
             (Pattern::Constructor { path, args, .. }, source) => {
                 let Some((source_path, source_args)) = self.constructor_expr_parts(source) else {
                     return false;
@@ -7012,7 +7030,18 @@ impl<'a> Checker<'a> {
                 }
             }
             Pattern::Literal { value, .. } => {
-                self.check_expr(value);
+                let literal_ty = self.check_expr(value);
+                if !self.is_assignable(&literal_ty, scrutinee) {
+                    self.add_error(
+                        "pattern_type_mismatch",
+                        format!(
+                            "pattern value has type '{}', but the matched field has type '{}'",
+                            literal_ty.describe(),
+                            scrutinee.describe()
+                        ),
+                        pattern.span(),
+                    );
+                }
             }
             Pattern::Tuple { elements, .. } => {
                 if let Ty::Tuple(items) = scrutinee {
@@ -7064,9 +7093,69 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            Pattern::Record { path, fields, .. } => {
+                let Some((is_enum_case, _, target_fields)) =
+                    self.lookup_record_pattern_target(path, scrutinee)
+                else {
+                    for field in fields {
+                        self.bind_pattern(&field.pattern, &Ty::Unknown);
+                    }
+                    self.add_error(
+                        "unknown_match_case",
+                        format!("unknown record pattern '{}'", path.join(".")),
+                        pattern.span(),
+                    );
+                    return;
+                };
+                if is_enum_case && target_fields.is_empty() {
+                    let case_name = path.last().map(String::as_str).unwrap_or("case");
+                    self.add_error(
+                        "zero_payload_record_pattern",
+                        format!(
+                            "zero-payload enum case '{case_name}' is a bare pattern; write '{case_name}' without braces"
+                        ),
+                        pattern.span(),
+                    );
+                }
+                for field in fields {
+                    if let Some((_, field_ty)) =
+                        target_fields.iter().find(|(name, _)| name == &field.name)
+                    {
+                        self.bind_pattern(&field.pattern, field_ty);
+                    } else {
+                        self.bind_pattern(&field.pattern, &Ty::Unknown);
+                        self.add_error(
+                            "unknown_pattern_field",
+                            format!(
+                                "record pattern '{}' has no visible field '{}'",
+                                path.join("."),
+                                field.name
+                            ),
+                            field.span,
+                        );
+                    }
+                }
+            }
             Pattern::Constructor { path, args, .. } => {
                 let case_name = path.last().cloned().unwrap_or_default();
                 if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
+                    if !args.is_empty() {
+                        let fields = case
+                            .params
+                            .iter()
+                            .take(args.len())
+                            .map(|field| field.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        self.add_error(
+                            "positional_record_pattern",
+                            format!(
+                                "positional enum payload patterns are not supported; write '{} {{ {} }}' with named fields",
+                                case_name, fields
+                            ),
+                            pattern.span(),
+                        );
+                    }
                     if !enum_case_pattern_accepts_arity(&case.params, args.len()) {
                         self.add_error(
                             "invalid_destructure",
@@ -7088,6 +7177,14 @@ impl<'a> Checker<'a> {
                         );
                     }
                 } else if let Some(fields) = self.lookup_destructured_type_fields(path) {
+                    self.add_error(
+                        "positional_record_pattern",
+                        format!(
+                            "positional class and shape patterns are not supported; write '{} {{ field }}' with named fields",
+                            case_name
+                        ),
+                        pattern.span(),
+                    );
                     if args.len() != fields.len() {
                         self.add_error(
                             "invalid_destructure",
@@ -7138,6 +7235,21 @@ impl<'a> Checker<'a> {
             Pattern::List { elements, rest, .. } => {
                 elements.is_empty() && rest.is_some() && self.list_element_type(scrutinee).is_some()
             }
+            Pattern::Record { path, fields, .. } => {
+                let Some((is_enum_case, target_ty, target_fields)) =
+                    self.lookup_record_pattern_target(path, scrutinee)
+                else {
+                    return false;
+                };
+                !is_enum_case
+                    && self.is_assignable(scrutinee, &target_ty)
+                    && fields.iter().all(|field| {
+                        target_fields
+                            .iter()
+                            .find(|(name, _)| name == &field.name)
+                            .is_some_and(|(_, ty)| self.pattern_is_irrefutable(&field.pattern, ty))
+                    })
+            }
             Pattern::Constructor { path, args, .. } => {
                 if self.lookup_case_by_pattern(path, scrutinee).is_some() {
                     return false;
@@ -7185,6 +7297,11 @@ impl<'a> Checker<'a> {
                     break;
                 }
                 Pattern::Constructor { path, .. } => {
+                    if let Some(case_name) = self.match_case_name_for_enum(path, &sig.name) {
+                        covered.insert(case_name);
+                    }
+                }
+                Pattern::Record { path, .. } => {
                     if let Some(case_name) = self.match_case_name_for_enum(path, &sig.name) {
                         covered.insert(case_name);
                     }
@@ -7297,6 +7414,102 @@ impl<'a> Checker<'a> {
     fn lookup_destructured_type_fields(&self, path: &[String]) -> Option<Vec<Ty>> {
         self.lookup_destructured_type_pattern(path)
             .map(|(_, fields)| fields)
+    }
+
+    fn lookup_record_pattern_target(
+        &self,
+        path: &[String],
+        scrutinee: &Ty,
+    ) -> Option<(bool, Ty, Vec<(String, Ty)>)> {
+        if path.is_empty() {
+            return match scrutinee {
+                Ty::Record(fields) => Some((false, scrutinee.clone(), fields.clone())),
+                Ty::Named(name, args) => {
+                    let sig = self.lookup_any_type(name)?;
+                    if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
+                        return None;
+                    }
+                    let subst = sig
+                        .type_params
+                        .iter()
+                        .cloned()
+                        .zip(args.iter().cloned())
+                        .collect::<HashMap<_, _>>();
+                    Some((
+                        false,
+                        scrutinee.clone(),
+                        sig.fields
+                            .iter()
+                            .filter(|field| !field.hidden)
+                            .map(|field| {
+                                (
+                                    field.name.clone(),
+                                    materialize_type(&substitute_type(&field.ty, &subst)),
+                                )
+                            })
+                            .collect(),
+                    ))
+                }
+                _ => None,
+            };
+        }
+        if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
+            let mut subst = HashMap::new();
+            infer_type_subst(&case.result, scrutinee, &mut subst);
+            let fields = case
+                .params
+                .iter()
+                .filter(|field| !field.hidden)
+                .map(|field| {
+                    (
+                        field.name.clone(),
+                        materialize_type(&substitute_type(&field.ty, &subst)),
+                    )
+                })
+                .collect();
+            return Some((true, case.result, fields));
+        }
+
+        let sig = match path {
+            [name] => self.lookup_any_type(name),
+            [module_alias, name] => self
+                .world
+                .lookup_module_alias(self.module, module_alias)
+                .and_then(|module| {
+                    module
+                        .types
+                        .get(name)
+                        .cloned()
+                        .or_else(|| module.objects.get(name).cloned())
+                }),
+            _ => None,
+        }?;
+        if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
+            return None;
+        }
+        let args = match scrutinee {
+            Ty::Named(name, args) if name == &sig.name => args.clone(),
+            _ => sig.type_params.iter().map(|_| Ty::Unknown).collect(),
+        };
+        let subst = sig
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        let target = Ty::Named(sig.name.clone(), args);
+        let fields = sig
+            .fields
+            .iter()
+            .filter(|field| !field.hidden)
+            .map(|field| {
+                (
+                    field.name.clone(),
+                    materialize_type(&substitute_type(&field.ty, &subst)),
+                )
+            })
+            .collect();
+        Some((false, target, fields))
     }
 
     fn unwrap_inner_type(&self, ty: &Ty) -> Ty {
@@ -13753,7 +13966,7 @@ def main() Unit {
             r#"
 def main() Unit {
     value Option[Int] = Some(1)
-    let Some(item) = value else {
+    let Some { value as item } = value else {
         ()
     }
     OS.println(item)
@@ -13935,7 +14148,7 @@ enum MaybeInt {
 def main() Unit {
     values Vector[MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX]
     for value <- values {
-        let SomeX(item) = value else continue
+        let SomeX { value as item } = value else continue
         OS.println(item)
     }
 }
@@ -13959,7 +14172,7 @@ enum MaybeInt {
 def fail() Never = panic("boom")
 
 def main(value MaybeInt) Unit {
-    let SomeX(item) = value else fail()
+    let SomeX { value as item } = value else fail()
     OS.println(item)
 }
 "#,
@@ -14065,7 +14278,7 @@ def main() Unit {
             r#"
 def mapOption[X](value Option[Int], f fn(Int) X) Option[X] {
     match value {
-        case Some(item) => Some(f(item))
+        case Some { value as item } => Some(f(item))
         case None => None
     }
 }
@@ -14185,9 +14398,9 @@ def main() Int {
             r#"
 def main(optionValue Option[Int]) Int {
     knownOption = Some(4)
-    let Some(optionItem) = optionValue
+    let Some { value as optionItem } = optionValue
     let {
-        Some(knownItem) = knownOption
+        Some { value as knownItem } = knownOption
     }
     return 0
 }
@@ -14234,7 +14447,7 @@ def main(value) Int {
 	    values Vector[Option[Int]] = [Some(1), None]
 	    mapped = for {
 	        maybe <- values
-	        let Some(value) = maybe
+	        let Some { value } = maybe
 	    } yield value
 	    OS.println(mapped.size())
 	}

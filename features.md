@@ -266,9 +266,7 @@ Open question:
 
 ### Irrefutable and Refutable Binding
 
-Open follow-ups:
-- consider direct nested payload destructuring inside `if let`, for example `if let Some((_, initialY, _)) = rows.at(0) { ... }`
-- for now, prefer `if let Some(row) = rows.at(0) { ... }` and destructure `row` on the next line inside the branch
+Open follow-up:
 - keep `if let` chaining limited to `&&` joins; if we ever extend it, do that deliberately rather than broadening it implicitly through general boolean syntax
 
 ### Lambda Surface

@@ -13,7 +13,7 @@ def main() Int {
     value = 3
     maybe = MaybeInt.SomeX(1)
     match maybe {
-        case SomeX(value) => value
+        case SomeX { value } => value
         case NoneX => value
     }
 }

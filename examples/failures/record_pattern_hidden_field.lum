@@ -1,0 +1,19 @@
+# FAIL_REGEX:
+# .*record pattern 'User' has no visible field 'password'.*
+
+class User {
+    name Str
+    hidden password Str
+
+    new(name Str, password Str) {
+        this.name = name
+        this.password = password
+    }
+}
+
+def main() Unit {
+    user = User("Ada", "secret")
+    match user {
+        case User { password } => println(password)
+    }
+}

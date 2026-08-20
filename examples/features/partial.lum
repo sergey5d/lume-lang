@@ -12,7 +12,7 @@ enum MaybeInt {
 
 def partialValue(value MaybeInt) Int? =
     partial match value {
-        case SomeX(item) => item
+        case SomeX { value as item } => item
     }
 
 def main() Unit {
@@ -25,10 +25,10 @@ def main() Unit {
 
     var partialStmt = 0
     partial match MaybeInt.SomeX(4) {
-        case SomeX(next) => partialStmt += next
+        case SomeX { value as next } => partialStmt += next
     }
     partial match MaybeInt.NoneX {
-        case SomeX(next) => partialStmt += next
+        case SomeX { value as next } => partialStmt += next
     }
     println("partial statement", partialStmt)
 }

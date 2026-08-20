@@ -3,5 +3,5 @@
 
 def main() Int? =
     partial Some(1) {
-        case Some(x) => x
+        case Some { value as x } => x
     }

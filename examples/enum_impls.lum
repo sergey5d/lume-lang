@@ -18,8 +18,8 @@ enum Outcome {
     }
 
     def describe() Str = match this {
-        case Left(value) => "left: " + value
-        case Right(value) => "right: num " + value
+        case Left { value } => "left: " + value
+        case Right { value } => "right: num " + value
     }
 }
 

@@ -2206,6 +2206,12 @@ impl<'a> Resolver<'a> {
                     }
                 }
             }
+            Pattern::Record { path, fields, span } => {
+                self.resolve_pattern_path(path, *span);
+                for field in fields {
+                    self.resolve_pattern(&field.pattern);
+                }
+            }
             Pattern::Constructor { path, args, span } => {
                 self.resolve_pattern_path(path, *span);
                 for arg in args {

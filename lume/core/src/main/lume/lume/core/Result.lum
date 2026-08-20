@@ -10,57 +10,57 @@ enum Result[T, E] {
     }
 
     def isOk() Bool = match this {
-        case Ok(_) => true
-        case Err(_) => false
+        case Ok { value: _ } => true
+        case Err { error: _ } => false
     }
 
     def isSuccess() Bool = match this {
-        case Ok(_) => true
-        case Err(_) => false
+        case Ok { value: _ } => true
+        case Err { error: _ } => false
     }
 
     def isErr() Bool = match this {
-        case Ok(_) => false
-        case Err(_) => true
+        case Ok { value: _ } => false
+        case Err { error: _ } => true
     }
 
     def map[X](f fn(T) X) Result[X, E] = match this {
-        case Ok(value) => Ok(f(value))
-        case Err(error) => Err(error)
+        case Ok { value } => Ok(f(value))
+        case Err { error } => Err(error)
     }
 
     def mapError[X](f fn(E) X) Result[T, X] = match this {
-        case Ok(value) => Ok(value)
-        case Err(error) => Err(f(error))
+        case Ok { value } => Ok(value)
+        case Err { error } => Err(f(error))
     }
 
     def flatMap[X](f fn(T) Result[X, E]) Result[X, E] = match this {
-        case Ok(value) => f(value)
-        case Err(error) => Err(error)
+        case Ok { value } => f(value)
+        case Err { error } => Err(error)
     }
 
     def getOr(fallback => T) T = match this {
-        case Ok(value) => value
-        case Err(_) => fallback
+        case Ok { value } => value
+        case Err { error: _ } => fallback
     }
 
     def orElse(fallback => Result[T, E]) Result[T, E] = match this {
-        case Ok(value) => Ok(value)
-        case Err(_) => fallback
+        case Ok { value } => Ok(value)
+        case Err { error: _ } => fallback
     }
 
     def toOption() Option[T] = match this {
-        case Ok(value) => Some(value)
-        case Err(_) => None
+        case Ok { value } => Some(value)
+        case Err { error: _ } => None
     }
 
     def toEither() Either[E, T] = match this {
-        case Ok(value) => Right(value)
-        case Err(error) => Left(error)
+        case Ok { value } => Right(value)
+        case Err { error } => Left(error)
     }
 
     def getError() E = match this {
-        case Ok(_) => panic("Result has no error value")
-        case Err(error) => error
+        case Ok { value: _ } => panic("Result has no error value")
+        case Err { error } => error
     }
 }

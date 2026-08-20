@@ -536,11 +536,24 @@ pub enum Pattern {
         rest: Option<ListPatternRest>,
         span: Span,
     },
+    Record {
+        path: Vec<String>,
+        fields: Vec<RecordPatternField>,
+        span: Span,
+    },
     Constructor {
         path: Vec<String>,
         args: Vec<Pattern>,
         span: Span,
     },
+}
+
+/// One named field matched inside a class, shape, or enum-case record pattern.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordPatternField {
+    pub name: String,
+    pub pattern: Pattern,
+    pub span: Span,
 }
 
 /// The `...rest` tail in a list pattern.
@@ -560,6 +573,7 @@ impl Pattern {
             | Pattern::Literal { span, .. }
             | Pattern::Tuple { span, .. }
             | Pattern::List { span, .. }
+            | Pattern::Record { span, .. }
             | Pattern::Constructor { span, .. } => *span,
         }
     }

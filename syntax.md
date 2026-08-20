@@ -243,12 +243,12 @@ println(typeOf[User].kind())
 
 classType ClassType[User] = typeOf[User].asClass() !!
 fields = classType.fields()
-let Some(nameField) = classType.field("name") else panic("expected name field")
+let Some { value as nameField } = classType.field("name") else panic("expected name field")
 println(nameField.fieldType().name() !!)
 println(nameField.isHidden())
 
 enumType EnumType[Status] = typeOf[Status].asEnum() !!
-let Some(pendingCase) = enumType.case("Pending") else panic("expected Pending case")
+let Some { value as pendingCase } = enumType.case("Pending") else panic("expected Pending case")
 println(pendingCase.name())
 constructedCase Result[Any, ReflectionError] = pendingCase.construct()
 ```
@@ -261,7 +261,7 @@ constructed Result[User, ReflectionError] = classType.construct("Ada", 42)
 user User = constructed !!
 nameValue Result[Any, ReflectionError] = nameField.get(user)
 
-let Some(greetMethod) = classType.method("greet") else panic("expected greet method")
+let Some { value as greetMethod } = classType.method("greet") else panic("expected greet method")
 greeting Result[Any, ReflectionError] = greetMethod.call(user)
 ```
 
@@ -1697,7 +1697,7 @@ Use an explicit lambda when mapping with a `match`:
 
 ```txt
 options.map(value => match value {
-    case SomeX(x) => x + 1
+    case SomeX { value as x } => x + 1
     case NoneX => 0
 })
 ```
@@ -1706,7 +1706,7 @@ The same idea applies to `partial match`:
 
 ```txt
 options.map(value => partial match value {
-    case SomeX(x) => x + 1
+    case SomeX { value as x } => x + 1
 })
 ```
 
@@ -2187,7 +2187,7 @@ if value > 0 {
 Pattern-test form:
 
 ```txt
-if let Some(item) = maybeValue {
+if let Some { value as item } = maybeValue {
     println(item)
 }
 ```
@@ -2262,7 +2262,7 @@ asks you to use plain `let` instead.
 When the payload needs more destructuring, prefer doing that on the next line inside the branch:
 
 ```txt
-if let Some(pair) = maybePair {
+if let Some { value as pair } = maybePair {
     let (x, y) = pair
     println(x)
     println(y)
@@ -2314,7 +2314,7 @@ fallback for recoverable refutable binding.
 `let ... else` is the refutable binding form with an explicit fallback path:
 
 ```txt
-let Some(item) = maybeValue else {
+let Some { value as item } = maybeValue else {
     return Err("missing")
 }
 ```
@@ -2328,9 +2328,9 @@ let item <- maybeValue else {
 ```
 
 This is equivalent to:
-- `let Some(item) = maybeValue else { ... }` for `Option[T]`
-- `let Ok(item) = maybeResult else { ... }` for `Result[T, E]`
-- `let Right(item) = maybeEither else { ... }` for `Either[L, R]`
+- `let Some { value as item } = maybeValue else { ... }` for `Option[T]`
+- `let Ok { value as item } = maybeResult else { ... }` for `Result[T, E]`
+- `let Right { value as item } = maybeEither else { ... }` for `Either[L, R]`
 
 The shorthand requires the source type to be statically known as one of these
 forms. If the source type is unknown, use an explicit pattern instead.
@@ -2379,8 +2379,8 @@ Grouped refutable bindings share one fallback:
 
 ```txt
 let {
-    Some(left) = maybeLeft
-    Some(right) = maybeRight
+    Some { value as left } = maybeLeft
+    Some { value as right } = maybeRight
 } else {
     return Err("missing")
 }
@@ -2405,7 +2405,7 @@ let item <- maybe          # error: '<-' extraction requires else
 For assertive extraction, write an explicit `panic(...)` fallback:
 
 ```txt
-let Some(item) = maybeValue else panic("expected Some")
+let Some { value as item } = maybeValue else panic("expected Some")
 let item <- maybeValue else panic("expected value")
 ```
 
@@ -2413,8 +2413,8 @@ Grouped assertive extraction uses the same `let { ... } else` form:
 
 ```txt
 let {
-    Some(left) = maybeLeft
-    Some(right) = maybeRight
+    Some { value as left } = maybeLeft
+    Some { value as right } = maybeRight
 } else panic("expected both values")
 ```
 
@@ -2551,13 +2551,13 @@ statements or as a grouped `let` block with `else`:
 ```txt
 left = try maybeLeft
 
-let Some(right) = maybeRight else {
+let Some { value as right } = maybeRight else {
     return Err("missing")
 }
 
 let {
-    Some(left) = maybeLeft
-    Some(right) = maybeRight
+    Some { value as left } = maybeLeft
+    Some { value as right } = maybeRight
 } else {
     return Err("missing")
 }
@@ -2567,8 +2567,8 @@ let {
 
 ```txt
 if let {
-    Some(left) = maybeLeft
-    Some(right) = maybeRight
+    Some { value as left } = maybeLeft
+    Some { value as right } = maybeRight
 } {
     println(left + right)
 }
@@ -2589,7 +2589,7 @@ And `if let` conditions can be chained with `&&` so later clauses can use
 earlier bindings:
 
 ```txt
-if let Some(left) = maybeLeft && let Ok(right) = compute() && right > left {
+if let Some { value as left } = maybeLeft && let Ok { value as right } = compute() && right > left {
     println(left + right)
 }
 ```
@@ -2655,7 +2655,7 @@ Refutable logic goes in the loop body:
 
 ```txt
 for maybeItem <- items {
-    let Some(item) = maybeItem else {
+    let Some { value as item } = maybeItem else {
         continue
     }
     println(item)
@@ -2667,8 +2667,8 @@ These generator heads are invalid:
 ```txt
 for (x, y) <- pairs { ... }
 for { name, age } <- users { ... }
-for Some(item) <- values { ... }
-for let Some(item) <- values { ... }
+for Some { value as item } <- values { ... }
+for let Some { value as item } <- values { ... }
 for let worker Worker <- values { ... }
 for item Int <- items { ... }
 ```
@@ -2758,7 +2758,7 @@ not clause forms. Put that logic in the body or use helpers such as `filterMap`:
 
 ```txt
 result = items.filterMap(item => partial match item {
-    case Some(value) => value
+    case Some { value } => value
 })
 ```
 
@@ -2838,7 +2838,7 @@ while let candidate <- current.next && candidate.value == expected {
 Both refutable pattern forms are supported:
 
 ```txt
-while let Some(item) = nextItem() {
+while let Some { value as item } = nextItem() {
     consume(item)
 }
 
@@ -2877,7 +2877,7 @@ Statement form:
 
 ```txt
 match value {
-    case SomeX(x) => {
+    case SomeX { value as x } => {
         println(x)
     }
     case OptionX.NoneX => {
@@ -2890,7 +2890,7 @@ Expression form:
 
 ```txt
 result = match value {
-    case SomeX(x) => x
+    case SomeX { value as x } => x
     case OptionX.NoneX => 0
 }
 ```
@@ -2899,8 +2899,8 @@ Guards are supported on cases with `if ... =>`:
 
 ```txt
 result = match value {
-    case SomeX(x) if x > 10 => x
-    case SomeX(_) => 10
+    case SomeX { value as x } if x > 10 => x
+    case SomeX { value: _ } => 10
     case OptionX.NoneX => 0
 }
 ```
@@ -2929,7 +2929,7 @@ Partial match expression form:
 
 ```txt
 result Option[Int] = partial match value {
-    case SomeX(x) => x
+    case SomeX { value as x } => x
 }
 ```
 
@@ -2938,7 +2938,7 @@ nothing when no case matches:
 
 ```txt
 partial match value {
-    case SomeX(x) => println(x)
+    case SomeX { value as x } => println(x)
 }
 ```
 
@@ -2946,7 +2946,7 @@ Partial mapped through an explicit lambda:
 
 ```txt
 values.map(value => partial match value {
-    case SomeX(x) => x + 1
+    case SomeX { value as x } => x + 1
 })
 ```
 
@@ -2961,10 +2961,10 @@ Every case must have an explicit body after `=>`: an expression, `()` for Unit, 
 match value {
     case Skip => ()
     case Empty => {}
-    case Log(message) => {
+    case Log { message } => {
         println(message)
     }
-    case Other(message) => println(message)
+    case Other { message } => println(message)
 }
 ```
 
@@ -2977,8 +2977,8 @@ Supported pattern families:
 - literal/value patterns: `1`, `"hello"`, `true`
 - case alternatives: `case A | B => ...`
 - tuple patterns: `(x, y)`
-- enum constructor patterns: `SomeX(x)`
-- class extractor patterns: `PairBox(left, right)`
+- named-field record patterns: `User { name }`, `Some { value }`
+- unheaded record patterns for statically known values: `{ name, age }`
 - type patterns: `item Worker`, `_ Other`
 
 Type patterns use erased outer-type matching at runtime. For generic declared types, match on the outer name only:
@@ -2998,6 +2998,70 @@ Rules:
 - expression `partial match` skips exhaustiveness checking and wraps the result in `Option[...]`
 - statement `partial match` skips exhaustiveness checking and does nothing when no case matches
 - bare zero-payload enum cases should still be written in qualified form when needed, for example `MaybeInt.NoneX`
+
+### Record Patterns
+
+Classes, named shapes, anonymous shapes, and enum cases use the same
+name-based record pattern language:
+
+```txt
+case User { name }                    # bind field 'name' as local 'name'
+case User { location as home }        # bind field 'location' as local 'home'
+case User { age: 18 }                 # apply a literal pattern to field 'age'
+case User { location: Location { city } }
+case Ok { value }
+case Err { error }
+```
+
+The forms compose recursively. `field: pattern` may contain a literal, tuple,
+list, type, enum-case, class, shape, or another record pattern.
+
+Rules:
+
+- fields match by name, never declaration order
+- omitted fields are ignored; record patterns are partial by default
+- only visible fields may be named
+- constructor parameters do not participate in matching
+- `field` binds a local with the same name
+- `field as local` binds the field under another local name
+- `field: pattern` applies a nested pattern to the field value
+- duplicate fields are invalid and field order is irrelevant
+- a record pattern with only binding fields is irrefutable after its type or case test succeeds
+- literals, nested refutable patterns, and runtime type tests make the containing pattern refutable
+- generic runtime patterns use erased outer names; write `Box { value }`, not `Box[Int] { value }`
+
+The same typed pattern is accepted everywhere patterns are used:
+
+```txt
+let User { name, age } = unknown else return Err(NotAUser)
+
+if let User { name } = value {
+    println(name)
+}
+
+for let User { name } <- users {
+    println(name)
+}
+
+match value {
+    case User { name } => println(name)
+}
+```
+
+When the value's type is already known, omit the type/case head:
+
+```txt
+let { name, age } = user
+
+match profile {
+    case { name, age: 18 } => println(name)
+    case _ => ()
+}
+```
+
+Tuples alone use positional parentheses. Named-field class and shape patterns
+use braces rather than `User(name, age)` or `Point(x, y)`. Zero-payload enum
+cases remain bare.
 
 ## Destructuring
 

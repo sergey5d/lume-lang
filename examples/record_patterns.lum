@@ -1,0 +1,114 @@
+# EXPECT:
+# Sergey Tampa
+# free paid order for Sergey
+# ready
+# database failed
+# adult Sergey
+# typed Sergey 37
+# if Sergey
+# loop Sergey
+# match Sergey
+# anonymous Ana
+# 0
+
+shape Location {
+    city Str
+    country Str
+}
+
+class User {
+    name Str
+    location Location
+    age Int
+}
+
+enum OrderStatus {
+    case Paid
+    case Pending
+}
+
+class Order {
+    status OrderStatus
+    customer User
+    amount Int
+}
+
+def describeUser(value Any) Str = match value {
+    case User {
+        name
+        location as home
+    } => name + " " + home.city
+    case _ => "not a user"
+}
+
+def describeOrder(value Order) Str = match value {
+    case Order {
+        status: Paid
+        customer: User { name }
+        amount: 0
+    } => "free paid order for " + name
+    case _ => "other order"
+}
+
+def unwrapResult(result Result[Str, Str]) Str = match result {
+    case Ok { value } => value
+    case Err { error } => error
+}
+
+def describeMaybeUser(maybeUser User?) Str = match maybeUser {
+    case Some {
+        value: User {
+            name
+            age: 18
+        }
+    } => "adult " + name
+    case _ => "other"
+}
+
+def typedLet(value Any) Str {
+    let User { name, age } = value else {
+        return "not a user"
+    }
+    name + " " + age
+}
+
+def main() Int {
+    location = Location { city: "Tampa", country: "US" }
+    user = User { name: "Sergey", location: location, age: 37 }
+    adult = User { name: "Sergey", location: location, age: 18 }
+    order = Order { status: OrderStatus.Paid, customer: user, amount: 0 }
+
+    println(describeUser(user))
+    println(describeOrder(order))
+    println(unwrapResult(Ok("ready")))
+    println(unwrapResult(Err("database failed")))
+    println(describeMaybeUser(Some(adult)))
+    println("typed " + typedLet(user))
+
+    unknown Any = user
+    if let User { name } = unknown {
+        println("if " + name)
+    }
+
+    users = [user]
+    for let User { name } <- users {
+        println("loop " + name)
+    }
+
+    match user {
+        case User { name } => println("match " + name)
+    }
+
+    anonymous { name Str, age Int } = { name: "Ana", age: 18 }
+    match anonymous {
+        case { name, age: 18 } => println("anonymous " + name)
+        case _ => ()
+    }
+
+    let { name, age } = user
+    if name != "Sergey" || age != 37 {
+        return 1
+    }
+
+    0
+}

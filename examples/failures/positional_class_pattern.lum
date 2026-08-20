@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*positional class and shape patterns are not supported; write 'User \{ field \}' with named fields.*
+
+class User {
+    name Str
+}
+
+def main() Unit {
+    user = User { name: "Ada" }
+    match user {
+        case User(name) => println(name)
+    }
+}

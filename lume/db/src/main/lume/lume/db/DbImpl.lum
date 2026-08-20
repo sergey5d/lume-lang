@@ -9,7 +9,7 @@ hidden object JdbcRowDecoderCache {
     def decoder(targetType Type[_]) Result[JdbcRowDecoder, DbError] {
         key Str = this.key(targetType)
 
-        if let Some(decoder) = this.decoders.get(key) {
+        if let Some { value as decoder } = this.decoders.get(key) {
             return Ok(decoder)
         }
 
@@ -110,10 +110,10 @@ hidden class JdbcQuery with Query {
         for row <- rows {
             mapped Result[T, DbError] = mapper(row)
             match mapped {
-                case Ok(value) => {
+                case Ok { value } => {
                     out.add(value)
                 }
-                case Err(error) => {
+                case Err { error } => {
                     return Err(error)
                 }
             }
@@ -130,10 +130,10 @@ hidden class JdbcQuery with Query {
         for jdbcRow <- jdbcRows {
             decoded Result[T, DbError] = decoder.decode(jdbcRow)
             match decoded {
-                case Ok(value) => {
+                case Ok { value } => {
                     out.add(value)
                 }
-                case Err(error) => {
+                case Err { error } => {
                     return Err(error)
                 }
             }
@@ -174,7 +174,7 @@ hidden class JdbcRowQuery with RowQuery {
         maybeRow Option[Row] = try this.row()
 
         match maybeRow {
-            case Some(row) => Ok(Some(mapper(row)))
+            case Some { value as row } => Ok(Some(mapper(row)))
             case None => Ok(None)
         }
     }
@@ -183,11 +183,11 @@ hidden class JdbcRowQuery with RowQuery {
         maybeRow Option[Row] = try this.row()
 
         match maybeRow {
-            case Some(row) => {
+            case Some { value as row } => {
                 mapped Result[T, DbError] = mapper(row)
                 match mapped {
-                    case Ok(value) => Ok(Some(value))
-                    case Err(error) => Err(error)
+                    case Ok { value } => Ok(Some(value))
+                    case Err { error } => Err(error)
                 }
             }
             case None => Ok(None)
@@ -203,12 +203,12 @@ hidden class JdbcRowQuery with RowQuery {
         } else if count > 1 {
             Err(DbError("queryRow expected at most one row, got " + count))
         } else {
-            let Some(jdbcRow) = jdbcRows.at(0) else return Err(DbError("queryRow returned one row but row access failed"))
+            let Some { value as jdbcRow } = jdbcRows.at(0) else return Err(DbError("queryRow returned one row but row access failed"))
             decoder JdbcRowDecoder = try JdbcRowDecoderCache.decoder(typeOf[T])
             decoded Result[T, DbError] = decoder.decode(jdbcRow)
             match decoded {
-                case Ok(value) => Ok(Some(value))
-                case Err(error) => Err(error)
+                case Ok { value } => Ok(Some(value))
+                case Err { error } => Err(error)
             }
         }
     }
@@ -295,17 +295,17 @@ hidden class JdbcDatabaseImpl with Database {
 
         worked Result[T, DbError] = work(tx)
         match worked {
-            case Ok(value) => {
+            case Ok { value } => {
                 committed Result[Unit, DbError] = tx.commit()
                 match committed {
-                    case Ok(_) => Ok(value)
-                    case Err(error) => {
+                    case Ok { value: _ } => Ok(value)
+                    case Err { error } => {
                         tx.rollback()
                         Err(error)
                     }
                 }
             }
-            case Err(error) => {
+            case Err { error } => {
                 tx.rollback()
                 Err(error)
             }

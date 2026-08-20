@@ -13,12 +13,12 @@ class Box[T] {
 }
 
 def unwrapSome(value OptionX[Int]) Int = match value {
-    case SomeX(x) => x + 1
+    case SomeX { value as x } => x + 1
     case OptionX.NoneX => 0
 }
 
 def unwrapBox(value Box[Int]) Int = match value {
-    case Box(x) => x + 2
+    case Box { value as x } => x + 2
 }
 
 def main() Int {

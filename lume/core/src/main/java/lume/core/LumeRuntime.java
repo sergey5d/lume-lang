@@ -96,6 +96,31 @@ public final class LumeRuntime {
         }
     }
 
+    public static Object patternField(Object value, String fieldName) {
+        if (value == null) {
+            return null;
+        }
+
+        try {
+            var method = value.getClass().getMethod(fieldName);
+            return method.invoke(value);
+        } catch (NoSuchMethodException err) {
+            try {
+                var field = value.getClass().getDeclaredField(fieldName);
+                field.setAccessible(true);
+                return field.get(value);
+            } catch (NoSuchFieldException missingField) {
+                // A failed outer type/case test makes this field irrelevant to the pattern.
+                return null;
+            } catch (IllegalAccessException fieldAccess) {
+                throw new LumePanic(
+                        "failed to read pattern field '" + fieldName + "': " + fieldAccess.getMessage());
+            }
+        } catch (IllegalAccessException | InvocationTargetException err) {
+            throw new LumePanic("failed to read pattern field '" + fieldName + "': " + err.getMessage());
+        }
+    }
+
     public static LumeType runtimeTypeOf(Object value) {
         if (value == null) {
             return LumeType.primitive("Null");

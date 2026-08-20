@@ -10,6 +10,6 @@ enum MaybeInt {
 
 def main() Unit {
     value MaybeInt = MaybeInt.NoneX
-    let SomeX(item) = value else ()
+    let SomeX { value as item } = value else ()
     println(item)
 }

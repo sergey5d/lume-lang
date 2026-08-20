@@ -12,8 +12,8 @@ enum MaybeInt {
 
 def describe(value MaybeInt) Int =
     match value {
-        case SomeX(x) if x > 10 => x
-        case SomeX(_) => 10
+        case SomeX { value as x } if x > 10 => x
+        case SomeX { value: _ } => 10
         case MaybeInt.NoneX => 0
     }
 

@@ -1685,6 +1685,17 @@ impl<'a> SourceBodyEmitter<'a> {
         parent_binding_types: &HashMap<String, ir::Type>,
     ) -> Option<MatchedCase> {
         match pattern {
+            ast::Pattern::Record { path, fields, .. } => {
+                let case_name = path.last()?;
+                self.enum_record_case_match(
+                    case_name,
+                    fields,
+                    value,
+                    index,
+                    parent_bindings,
+                    parent_binding_types,
+                )
+            }
             ast::Pattern::Constructor { path, args, .. } => {
                 let case_name = path.last()?;
                 self.enum_case_match(
@@ -1708,6 +1719,65 @@ impl<'a> SourceBodyEmitter<'a> {
             ast::Pattern::List { .. } => None,
             _ => None,
         }
+    }
+
+    fn enum_record_case_match(
+        &self,
+        case_name: &str,
+        fields: &[ast::RecordPatternField],
+        value: &str,
+        index: usize,
+        parent_bindings: &HashMap<String, String>,
+        parent_binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<MatchedCase> {
+        let enum_case = self.enum_case(case_name)?;
+        let java_case = java_type_name(case_name);
+        let case_local = format!("__case{index}");
+        let case_type = format!(
+            "{java_case}{}",
+            java_wildcard_type_args(self.owner.type_params.len())
+        );
+        let needs_case_local = fields
+            .iter()
+            .any(|field| matches!(field.pattern, ast::Pattern::Binding { .. }));
+        let condition = if needs_case_local {
+            format!("{value} instanceof {case_type} {case_local}")
+        } else {
+            format!("{value} instanceof {case_type}")
+        };
+        let mut bindings = parent_bindings.clone();
+        let mut binding_types = parent_binding_types.clone();
+        for field_pattern in fields {
+            let field = enum_case
+                .fields
+                .iter()
+                .find(|field| field.name == field_pattern.name)?;
+            match &field_pattern.pattern {
+                ast::Pattern::Wildcard { .. } => {}
+                ast::Pattern::Binding { name, .. } => {
+                    if name == "_" {
+                        continue;
+                    }
+                    bindings.insert(
+                        name.clone(),
+                        format!(
+                            "(({}) {}.{}())",
+                            self.names.value_type(&field.ty),
+                            case_local,
+                            java_member_name(&field.name)
+                        ),
+                    );
+                    binding_types.insert(name.clone(), field.ty.clone());
+                }
+                _ => return None,
+            }
+        }
+
+        Some(MatchedCase {
+            condition,
+            bindings,
+            binding_types,
+        })
     }
 
     fn enum_case_match(
@@ -3375,6 +3445,16 @@ impl<'a> FunctionEmitter<'a> {
                     java_string_literal(field_name)
                 ))
             }
+            ir::Intrinsic::PatternField(field_name) => {
+                if args.len() != 1 {
+                    return None;
+                }
+                Some(format!(
+                    "lume.core.LumeRuntime.patternField({}, {})",
+                    args[0],
+                    java_string_literal(field_name)
+                ))
+            }
         }
     }
 
@@ -4609,7 +4689,8 @@ impl<'a> FunctionEmitter<'a> {
                     .and_then(|ty| iterable_item_type(&ty)),
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessValue)
                 | ir::Callee::Intrinsic(ir::Intrinsic::UnsafeExtractSuccessValue)
-                | ir::Callee::Intrinsic(ir::Intrinsic::VariantField(_)) => Some(ir::Type::Unknown),
+                | ir::Callee::Intrinsic(ir::Intrinsic::VariantField(_))
+                | ir::Callee::Intrinsic(ir::Intrinsic::PatternField(_)) => Some(ir::Type::Unknown),
                 ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet)
                 | ir::Callee::Intrinsic(ir::Intrinsic::VariantIs(_))
                 | ir::Callee::Intrinsic(ir::Intrinsic::IterHasNext) => Some(ir::Type::Bool),

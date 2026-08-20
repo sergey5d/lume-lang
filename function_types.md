@@ -158,7 +158,7 @@ mapper fn(Int) Str =
     value => value.toStr()
 
 result = match option {
-    case Some(value) => value.toStr()
+    case Some { value } => value.toStr()
     case None => "missing"
 }
 ```

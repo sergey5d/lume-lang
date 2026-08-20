@@ -36,7 +36,7 @@ class AssetPrices {
 
             fromAsset = split[0]
             toAsset = split[1]
-            let Some(price) = Float.parse(split[2]) else panic("expected price")
+            let Some { value as price } = Float.parse(split[2]) else panic("expected price")
 
             if !result.contains(fromAsset) {
                 result.put(fromAsset, [])
@@ -89,7 +89,7 @@ class AssetPrices {
 
             priceResult = this.findPrice(toAsset, endAsset, newVisited, newPrices)
 
-            if let Some(foundPrices) = priceResult {
+            if let Some { value as foundPrices } = priceResult {
                 results.addAll(foundPrices)
             }
         }
@@ -102,7 +102,7 @@ class AssetPrices {
 def main() {
 
     def printResults(results [Str]?) = match results {
-        case Some(list) => list.forEach { elem =>
+        case Some { value as list } => list.forEach { elem =>
             println("result: " + elem)
         }
         case None => ()

@@ -19,14 +19,14 @@ enum PairBox {
 
 def describeFlag(value BoolBox) Int =
     match value {
-        case Wrap(true) => 1
-        case Wrap(false) => 2
+        case Wrap { value: true } => 1
+        case Wrap { value: false } => 2
         case BoolBox.Empty => 0
     }
 
 def describePair(value PairBox) Int =
     match value {
-        case Full((left, right)) => left + right
+        case Full { value: (left, right) } => left + right
         case PairBox.NoneX => 0
     }
 

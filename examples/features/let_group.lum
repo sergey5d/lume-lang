@@ -6,8 +6,8 @@
 
 def groupedLetElse(value Int?) Int {
     let {
-        Some(a) = value
-        Some(b) = Some(a + 4)
+        Some { value as a } = value
+        Some { value as b } = Some(a + 4)
     } else {
         return 9
     }
@@ -16,8 +16,8 @@ def groupedLetElse(value Int?) Int {
 
 def groupedIf(value Int?) Int {
     if let {
-        Some(a) = value
-        Some(b) = Some(a + 7)
+        Some { value as a } = value
+        Some { value as b } = Some(a + 7)
     } {
         return a + b
     }
@@ -28,7 +28,7 @@ def main() Unit {
     println("grouped let else ${groupedLetElse(Some(2))}")
     println("grouped let else fail ${groupedLetElse(None)}")
     println("grouped if ${groupedIf(Some(4))}")
-    if let Some(a) = Some(3) && let Ok(b) = Ok(5) && b == 5 {
+    if let Some { value as a } = Some(3) && let Ok { value as b } = Ok(5) && b == 5 {
         println("chained if let ${a + b}")
     }
 }

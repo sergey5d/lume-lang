@@ -25,18 +25,18 @@ def eitherAdd(left Either[Str, Int], right Either[Str, Int]) Either[Str, Int] =
 
 def main() Int {
     optionValue Int? = optionAdd(Some(2), Some(5))
-    let Some(optionNumber) = optionValue else return 1
+    let Some { value as optionNumber } = optionValue else return 1
     println("option " + optionNumber)
 
     optionNone Int? = optionAdd(Some(2), None)
     println("option none " + optionNone.isEmpty())
 
     resultValue Result[Int, Str] = resultAdd(Ok(2), Ok(5))
-    let Ok(resultNumber) = resultValue else return 1
+    let Ok { value as resultNumber } = resultValue else return 1
     println("result " + resultNumber)
 
     eitherValue Either[Str, Int] = eitherAdd(Right(2), Right(5))
-    let Right(eitherNumber) = eitherValue else return 1
+    let Right { value as eitherNumber } = eitherValue else return 1
     println("either " + eitherNumber)
 
     0

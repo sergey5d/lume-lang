@@ -10,5 +10,5 @@ enum MaybeInt {
 
 def main() Int =
     match MaybeInt.SomeX(5) {
-        case SomeX(x) => x
+        case SomeX { value as x } => x
     }

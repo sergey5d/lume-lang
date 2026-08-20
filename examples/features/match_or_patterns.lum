@@ -16,7 +16,7 @@ enum Token {
 def describe(token Token) Str = {
     match token {
         case Token.Start | Token.Stop => "edge"
-        case Word(value) | Number(value) => "number " + value
+        case Word { value } | Number { value } => "number " + value
     }
 }
 

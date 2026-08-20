@@ -8,39 +8,39 @@ enum Option[T] {
     }
 
     def isSet() Bool = match this {
-        case Some(_) => true
+        case Some { value: _ } => true
         case Option.None => false
     }
 
     def isEmpty() Bool = !this.isSet()
 
     def getOr(defaultValue => T) T = match this {
-        case Some(value) => value
+        case Some { value } => value
         case Option.None => defaultValue
     }
 
     def orElse(fallback => Option[T]) Option[T] = match this {
-        case Some(value) => Some(value)
+        case Some { value } => Some(value)
         case Option.None => fallback
     }
 
     def toResult[E](error => E) Result[T, E] = match this {
-        case Some(value) => Ok(value)
+        case Some { value } => Ok(value)
         case Option.None => Err(error)
     }
 
     def toEither[L](left => L) Either[L, T] = match this {
-        case Some(value) => Right(value)
+        case Some { value } => Right(value)
         case Option.None => Left(left)
     }
 
     def map[X](f fn(T) X) Option[X] = match this {
-        case Some(value) => Some(f(value))
+        case Some { value } => Some(f(value))
         case Option.None => None()
     }
 
     def flatMap[X](f fn(T) Option[X]) Option[X] = match this {
-        case Some(value) => f(value)
+        case Some { value } => f(value)
         case Option.None => None()
     }
 }

@@ -566,6 +566,7 @@ pub enum Intrinsic {
     UnsafeExtractSuccessValue,
     VariantIs(String),
     VariantField(String),
+    PatternField(String),
 }
 
 /// A value-producing lowered operation.

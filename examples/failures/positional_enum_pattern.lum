@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*positional enum payload patterns are not supported; write 'Some \{ value \}' with named fields.*
+
+def main() Unit {
+    maybe = Some(5)
+    match maybe {
+        case Some(value) => println(value)
+        case None => ()
+    }
+}
