@@ -12,6 +12,10 @@
 # known class Sergey
 # known shape Tampa
 # known enum approved
+# let class Sergey 37
+# let shape Tampa
+# let enum approved
+# let refutable Sergey
 # 0
 
 shape Location {
@@ -133,10 +137,19 @@ def main() Int {
         case { label } => println("known enum " + label)
     }
 
-    let { name, age } = user
-    if name != "Sergey" || age != 37 {
+    let { name as className, age as classAge } = user
+    println("let class " + className + " " + classAge)
+
+    let { city as shapeCity } = location
+    println("let shape " + shapeCity)
+
+    let { label as enumLabel } = review
+    println("let enum " + enumLabel)
+
+    let { name as adultName, age: 37 } = user else {
         return 1
     }
+    println("let refutable " + adultName)
 
     0
 }

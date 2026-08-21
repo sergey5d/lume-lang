@@ -1,10 +1,16 @@
 # FAIL_REGEX:
-# .*positional enum payload patterns are not supported; write 'Some \{ value \}' with named fields.*
+# .*unary pattern 'Values\(\.\.\.\)' requires exactly one extractable field and one pattern; 'Values' has 2 extractable fields and the pattern contains 2.*
+
+enum Pair {
+    case Values {
+        left Int
+        right Int
+    }
+}
 
 def main() Unit {
-    maybe = Some(5)
-    match maybe {
-        case Some(value) => println(value)
-        case None => ()
+    pair Pair = Pair.Values(1, 2)
+    match pair {
+        case Pair.Values(left, right) => println(left, right)
     }
 }

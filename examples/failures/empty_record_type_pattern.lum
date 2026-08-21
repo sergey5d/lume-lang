@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*empty field pattern 'User \{\}' is redundant; use '_ User' to ignore the matched value or 'value User' to bind it.*
+
+class User {
+    name Str
+}
+
+def main(user User) Unit {
+    match user {
+        case User {} => ()
+    }
+}

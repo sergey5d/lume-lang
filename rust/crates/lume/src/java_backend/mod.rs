@@ -3756,6 +3756,8 @@ class User {
     age Int
 }
 
+object Ready {}
+
 enum ReviewState {
     label Str
 
@@ -3773,8 +3775,13 @@ def describe(value Any) Str = match value {
         location as home
         age: 18
         name
-    } => name + " " + home.city
+    } as user => name + " " + home.city + " " + user.name
     case _ => "other"
+}
+
+def describeSingleton(value Any) Str = match value {
+    case Ready => "ready"
+    case _ as other => "other " + other.toStr()
 }
 
 def describeReview(value ReviewState) Str = match value {
@@ -3786,6 +3793,7 @@ def main() Unit {
     println(describe(User { name: "Bob", location: Location { city: "Miami" }, age: 19 }))
     println(describe("not a user"))
     println(describeReview(ReviewState.Approved { label: "approved" }))
+    println(describeSingleton(Ready))
 }
 "#,
         )
@@ -3815,7 +3823,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Ada Tampa\nother\nother\napproved\n"
+            "Ada Tampa Ada\nother\nother\napproved\nready\n"
         );
 
         let _ = fs::remove_dir_all(temp);

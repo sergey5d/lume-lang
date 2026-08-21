@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*unary pattern 'Box\(\.\.\.\)' requires exactly one extractable field and one pattern; 'Box' has 2 extractable fields and the pattern contains 1.*
+
+class Box {
+    value Int
+    label Str
+}
+
+def main() Unit {
+    box = Box(1, "one")
+    match box {
+        case Box(value) => println(value)
+    }
+}

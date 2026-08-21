@@ -12,7 +12,7 @@ The current supported surface includes:
 - nested record, tuple, and list patterns
 - `_` in any nested position to ignore a value
 - guards attached to top-level cases
-- type-pattern reasoning/checking stays top-level only
+- type patterns may be nested inside unary and record patterns
 - do not support destructuring classes into tuples
 - guards do not contribute coverage
 - nested singleton enum cases stay qualified when needed, for example `Wrap { value: InnerFlag.On }`
@@ -25,6 +25,12 @@ match value {
     case Box { apple: Apple { value as a } } => ...
     case Pair { left: _, right as y } => ...
     case Some { value as x } if x > 10 => ...
+    case Some(x) => ...
+    case Box(Some(x)) => ...
+    case Pending => ...
+    case _ User => ...
+    case User { name } as user => ...
+    case _ as other => ...
 }
 ```
 
@@ -33,7 +39,7 @@ Examples that are intentionally out of scope for now:
 ```txt
 match value {
     case Some { value: x if x > 0 } => ... # nested guard
-    case Person(name, age) => ...           # positional named-data pattern
+    case Person(name, age) => ...           # multi-field named data uses braces
     case Box[Int] { value } => ...          # erased generic runtime argument
 }
 ```

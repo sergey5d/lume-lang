@@ -46,7 +46,7 @@ deliberate rather than incidental.
 Core `match` works inside explicit lambdas:
 
 ```txt
-list.map(value -> match value {
+list.map(value => match value {
     case SomeX { value as x } => x + 1
     case NoneX => 0
 })
@@ -71,5 +71,10 @@ The main user-facing match story is now:
 - `partial` is the partial form and returns `Option[...]`
 - guards are supported on top-level cases
 - nested enum, tuple, class, and shape patterns are supported
-- named payloads use name-based record patterns; only tuples are positional
+- unary named data may use `Type(pattern)`; multi-field named data uses braces
+- zero-payload cases and singleton objects use bare names
+- `_ Type` and `value Type` provide type-only matching
+- `Type { fields } as value` binds selected fields and the complete value
+- empty `Type()` and `Type {}` patterns are rejected
+- tuples remain positional
 - plain `match` should not fall back to runtime "no match" behavior

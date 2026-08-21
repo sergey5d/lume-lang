@@ -1,0 +1,9 @@
+# FAIL_REGEX:
+# .*bare case pattern 'Some' has a payload; use 'Some\(_\)' to ignore it or 'Some\(pattern\)' to match it.*
+
+def main(value Option[Int]) Unit {
+    match value {
+        case Some => ()
+        case None => ()
+    }
+}

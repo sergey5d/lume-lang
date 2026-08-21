@@ -542,6 +542,7 @@ fn rewrite_pattern_for_runtime(pattern: &mut ast::Pattern, module: &LoadedModule
     match pattern {
         ast::Pattern::Wildcard { .. } | ast::Pattern::Binding { .. } => {}
         ast::Pattern::Extract { inner, .. } => rewrite_pattern_for_runtime(inner, module),
+        ast::Pattern::Alias { inner, .. } => rewrite_pattern_for_runtime(inner, module),
         ast::Pattern::Type { target, .. } => rewrite_type_ref_for_runtime(target, module),
         ast::Pattern::Literal { value, .. } => {
             // handled by parent expr rewrite when embedded in match cases

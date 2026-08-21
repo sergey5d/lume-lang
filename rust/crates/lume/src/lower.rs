@@ -769,6 +769,9 @@ enum ConstructorPatternKind {
         ty: ir::Type,
         field_names: Vec<String>,
     },
+    ObjectSingleton {
+        ty: ir::Type,
+    },
 }
 
 impl PatternPlan {
@@ -3177,6 +3180,27 @@ impl<'a> FunctionLowerer<'a> {
                     bindings: inner_plan.bindings,
                 }
             }
+            Pattern::Alias { inner, name, .. } => {
+                let mut plan = self.lower_pattern_plan(scrutinee.clone(), inner);
+                if name != "_" {
+                    let source_ty = self.operand_type(&scrutinee).unwrap_or(ir::Type::Unknown);
+                    let target_ty = self.whole_pattern_binding_type(inner, &scrutinee);
+                    let source = if target_ty != ir::Type::Unknown && target_ty != source_ty {
+                        PendingBindingSource::RValue(ir::RValue::Cast {
+                            operand: scrutinee,
+                            ty: target_ty.clone(),
+                        })
+                    } else {
+                        PendingBindingSource::Operand(scrutinee)
+                    };
+                    plan.bindings.push(PendingBinding {
+                        name: name.clone(),
+                        ty: target_ty,
+                        source,
+                    });
+                }
+                plan
+            }
             Pattern::Binding { name, .. } => {
                 if name == "_" {
                     PatternPlan::always_true()
@@ -3366,6 +3390,15 @@ impl<'a> FunctionLowerer<'a> {
                                 ir::Type::Bool,
                                 Some(*span),
                             ),
+                        ConstructorPatternKind::ObjectSingleton { ty } => self
+                            .emit_temp_from_rvalue(
+                                ir::RValue::TypeTest {
+                                    operand: scrutinee.clone(),
+                                    ty: ty.clone(),
+                                },
+                                ir::Type::Bool,
+                                Some(*span),
+                            ),
                     }
                 };
                 let mut conditions = vec![base_condition];
@@ -3411,7 +3444,9 @@ impl<'a> FunctionLowerer<'a> {
                     bindings,
                 }
             }
-            Pattern::Constructor { path, args, span } => {
+            Pattern::Constructor {
+                path, args, span, ..
+            } => {
                 let Some(kind) = self.lookup_constructor_pattern_kind(path, args.len()) else {
                     self.add_error(
                         "lower_invariant",
@@ -3442,12 +3477,23 @@ impl<'a> FunctionLowerer<'a> {
                             ir::Type::Bool,
                             Some(*span),
                         ),
+                    ConstructorPatternKind::ObjectSingleton { ty } => self.emit_temp_from_rvalue(
+                        ir::RValue::TypeTest {
+                            operand: scrutinee.clone(),
+                            ty: ty.clone(),
+                        },
+                        ir::Type::Bool,
+                        Some(*span),
+                    ),
                 };
                 let mut conditions = vec![base_condition];
                 let mut bindings = Vec::new();
-                let field_names = match kind {
-                    ConstructorPatternKind::EnumCase { field_names, .. }
-                    | ConstructorPatternKind::TypeDestructure { field_names, .. } => field_names,
+                let (field_names, is_enum_case) = match kind {
+                    ConstructorPatternKind::EnumCase { field_names, .. } => (field_names, true),
+                    ConstructorPatternKind::TypeDestructure { field_names, .. } => {
+                        (field_names, false)
+                    }
+                    ConstructorPatternKind::ObjectSingleton { .. } => (Vec::new(), false),
                 };
                 for (index, arg) in args.iter().enumerate() {
                     let field_name = field_names
@@ -3462,9 +3508,11 @@ impl<'a> FunctionLowerer<'a> {
                                 name: name.clone(),
                                 ty: field_ty,
                                 source: PendingBindingSource::RValue(ir::RValue::Call {
-                                    callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantField(
-                                        field_name,
-                                    )),
+                                    callee: ir::Callee::Intrinsic(if is_enum_case {
+                                        ir::Intrinsic::VariantField(field_name)
+                                    } else {
+                                        ir::Intrinsic::PatternField(field_name)
+                                    }),
                                     args: vec![scrutinee.clone()],
                                     structural: false,
                                 }),
@@ -3477,7 +3525,11 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     let field = self.emit_temp_from_rvalue(
                         ir::RValue::Call {
-                            callee: ir::Callee::Intrinsic(ir::Intrinsic::VariantField(field_name)),
+                            callee: ir::Callee::Intrinsic(if is_enum_case {
+                                ir::Intrinsic::VariantField(field_name)
+                            } else {
+                                ir::Intrinsic::PatternField(field_name)
+                            }),
                             args: vec![scrutinee.clone()],
                             structural: false,
                         },
@@ -3493,6 +3545,27 @@ impl<'a> FunctionLowerer<'a> {
                     bindings,
                 }
             }
+        }
+    }
+
+    fn whole_pattern_binding_type(&self, pattern: &Pattern, scrutinee: &ir::Operand) -> ir::Type {
+        match pattern {
+            Pattern::Alias { inner, .. } => self.whole_pattern_binding_type(inner, scrutinee),
+            Pattern::Type { target, .. } => lower_type_ref(target),
+            Pattern::Record { path, .. } if !path.is_empty() => {
+                match self.lookup_record_pattern_kind(path) {
+                    Some(ConstructorPatternKind::TypeDestructure { ty, .. }) => ty,
+                    _ => self.operand_type(scrutinee).unwrap_or(ir::Type::Unknown),
+                }
+            }
+            Pattern::Constructor { path, args, .. } => {
+                match self.lookup_constructor_pattern_kind(path, args.len()) {
+                    Some(ConstructorPatternKind::TypeDestructure { ty, .. })
+                    | Some(ConstructorPatternKind::ObjectSingleton { ty }) => ty,
+                    _ => self.operand_type(scrutinee).unwrap_or(ir::Type::Unknown),
+                }
+            }
+            _ => self.operand_type(scrutinee).unwrap_or(ir::Type::Unknown),
         }
     }
 
@@ -3524,7 +3597,25 @@ impl<'a> FunctionLowerer<'a> {
                 _ => ir::Type::Unknown,
             };
         }
-        self.enum_case_field_type(&scrutinee_ty, path, field_name, index)
+        if let Some(ty) = self.enum_case_field_type(&scrutinee_ty, path, field_name, index) {
+            return ty;
+        }
+        let Some(type_name) = path.last() else {
+            return ir::Type::Unknown;
+        };
+        let Some(ty) = self.program.types.iter().find(|ty| {
+            ty.name == *type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+        }) else {
+            return ir::Type::Unknown;
+        };
+        let subst = match &scrutinee_ty {
+            ir::Type::Named { name, args } if name == &ty.name => ir_type_subst(ty, args),
+            _ => HashMap::new(),
+        };
+        ty.fields
+            .iter()
+            .find(|field| field.visibility != ast::Visibility::Hidden && field.name == field_name)
+            .map(|field| substitute_ir_type(&field.ty, &subst))
             .unwrap_or(ir::Type::Unknown)
     }
 
@@ -3636,7 +3727,24 @@ impl<'a> FunctionLowerer<'a> {
         if let Some((ty, field_names)) = self.lookup_destructured_type_fields(path, arity) {
             return Some(ConstructorPatternKind::TypeDestructure { ty, field_names });
         }
+        if arity == 0 {
+            if let Some(ty) = self.lookup_object_pattern_type(path) {
+                return Some(ConstructorPatternKind::ObjectSingleton { ty });
+            }
+        }
         None
+    }
+
+    fn lookup_object_pattern_type(&self, path: &[String]) -> Option<ir::Type> {
+        let type_name = match path {
+            [name] | [_, name] => name,
+            _ => return None,
+        };
+        self.program
+            .types
+            .iter()
+            .any(|ty| ty.kind == ast::TypeKind::Object && ty.name == *type_name)
+            .then(|| ir::Type::named(type_name.clone()))
     }
 
     fn lookup_record_pattern_kind(&self, path: &[String]) -> Option<ConstructorPatternKind> {
@@ -3714,15 +3822,19 @@ impl<'a> FunctionLowerer<'a> {
         let case_name = path.last()?;
         if path.len() >= 2 {
             let type_name = &path[path.len() - 2];
-            if let Some(case) = self
+            if let Some((ty, case)) = self
                 .program
                 .types
                 .iter()
                 .filter(|ty| ty.kind == ast::TypeKind::Enum && ty.name == *type_name)
-                .flat_map(|ty| ty.enum_cases.iter())
-                .find(|case| case.name == *case_name)
+                .find_map(|ty| {
+                    ty.enum_cases
+                        .iter()
+                        .find(|case| case.name == *case_name)
+                        .map(|case| (ty, case))
+                })
             {
-                if let Some(fields) = enum_case_pattern_fields(case, arity) {
+                if let Some(fields) = enum_case_pattern_fields(ty, case, arity) {
                     return Some(fields);
                 }
             }
@@ -3743,9 +3855,12 @@ impl<'a> FunctionLowerer<'a> {
             .types
             .iter()
             .filter(|ty| ty.kind == ast::TypeKind::Enum)
-            .flat_map(|ty| ty.enum_cases.iter())
-            .filter(|case| case.name == *case_name)
-            .filter_map(|case| enum_case_pattern_fields(case, arity))
+            .filter_map(|ty| {
+                ty.enum_cases
+                    .iter()
+                    .find(|case| case.name == *case_name)
+                    .and_then(|case| enum_case_pattern_fields(ty, case, arity))
+            })
             .collect::<Vec<_>>();
         if ast_matches.len() == 1 {
             return ast_matches.into_iter().next();
@@ -8986,22 +9101,26 @@ fn enum_case_is_value(case: &ir::EnumCase) -> bool {
     case.fields.is_empty() || case.fields.iter().all(|field| field.initializer.is_some())
 }
 
-fn enum_case_pattern_fields(case: &ir::EnumCase, arity: usize) -> Option<Vec<String>> {
-    if arity > case.fields.len() {
-        return None;
-    }
-    if case.fields[arity..]
+fn enum_case_pattern_fields(
+    owner: &ir::TypeDef,
+    case: &ir::EnumCase,
+    arity: usize,
+) -> Option<Vec<String>> {
+    let shared_fields = owner
+        .fields
         .iter()
-        .any(|field| field.initializer.is_none())
-    {
-        return None;
+        .map(|field| field.name.as_str())
+        .collect::<HashSet<_>>();
+    let extractable = case
+        .fields
+        .iter()
+        .filter(|field| !shared_fields.contains(field.name.as_str()))
+        .collect::<Vec<_>>();
+    match (arity, extractable.as_slice()) {
+        (0, []) => Some(Vec::new()),
+        (1, [field]) => Some(vec![field.name.clone()]),
+        _ => None,
     }
-    Some(
-        case.fields[..arity]
-            .iter()
-            .map(|field| field.name.clone())
-            .collect(),
-    )
 }
 
 fn arrange_named_call_args<'a>(

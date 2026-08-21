@@ -12,6 +12,7 @@ impl<'a> Parser<'a> {
     pub(super) fn pattern_contains_extract(pattern: &Pattern) -> bool {
         match pattern {
             Pattern::Extract { .. } => true,
+            Pattern::Alias { inner, .. } => Self::pattern_contains_extract(inner),
             Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
                 elements.iter().any(Self::pattern_contains_extract)
             }
@@ -195,7 +196,34 @@ impl<'a> Parser<'a> {
         self.parse_pattern_at_depth(0)
     }
 
+    pub(super) fn parse_match_pattern(&mut self) -> Option<Pattern> {
+        let pattern = self.parse_pattern()?;
+        Some(match pattern {
+            Pattern::Binding { name, span } => Pattern::Constructor {
+                path: vec![name],
+                args: Vec::new(),
+                parenthesized: false,
+                span,
+            },
+            other => other,
+        })
+    }
+
     pub(super) fn parse_pattern_at_depth(&mut self, depth: usize) -> Option<Pattern> {
+        let pattern = self.parse_pattern_primary_at_depth(depth)?;
+        if self.match_keyword(Keyword::As) {
+            let (name, end) = self.expect_binding_name("expected binding name after 'as'")?;
+            let span = pattern.span().cover(end);
+            return Some(Pattern::Alias {
+                inner: Box::new(pattern),
+                name,
+                span,
+            });
+        }
+        Some(pattern)
+    }
+
+    fn parse_pattern_primary_at_depth(&mut self, depth: usize) -> Option<Pattern> {
         self.skip_newlines();
         match self.current_kind() {
             TokenKind::Identifier if self.is_placeholder_identifier() => {
@@ -305,8 +333,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Identifier => {
                 let (name, start) = self.expect_identifier("expected match pattern")?;
-                if depth == 0
-                    && !looks_like_constructor_pattern(&name)
+                if !looks_like_constructor_pattern(&name)
                     && self.binding_type_starts_on_same_line(start)
                     && matches!(
                         self.current_kind(),
@@ -345,9 +372,10 @@ impl<'a> Parser<'a> {
                         self.consume(TokenKind::RParen, "expected ')' after constructor pattern")?;
                     if args.is_empty() {
                         self.diagnostics.push(Diagnostic::error(
-                            "positional_record_pattern",
+                            "empty_parenthesized_pattern",
                             format!(
-                                "parenthesized named-data patterns are not supported; write '{} {{ ... }}' for named fields or bare '{}' for a zero-payload enum case",
+                                "empty parenthesized pattern '{}()' is not supported; use the bare case name for a zero-payload enum case, '_ {}' to ignore a value of that type, or 'value {}' to bind it",
+                                path.join("."),
                                 path.join("."),
                                 path.join(".")
                             ),
@@ -357,6 +385,7 @@ impl<'a> Parser<'a> {
                     return Some(Pattern::Constructor {
                         path,
                         args,
+                        parenthesized: true,
                         span: start.cover(close),
                     });
                 }
@@ -366,6 +395,7 @@ impl<'a> Parser<'a> {
                     Some(Pattern::Constructor {
                         path,
                         args: Vec::new(),
+                        parenthesized: false,
                         span: start.cover(end),
                     })
                 }

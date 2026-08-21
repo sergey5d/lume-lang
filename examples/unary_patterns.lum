@@ -1,0 +1,228 @@
+# EXPECT:
+# some 5
+# ok ready
+# err failed
+# box 7
+# shape label
+# user id 12
+# zero
+# wildcard
+# nested Ada
+# box some 8
+# worker Wren
+# brace 9
+# hidden 11
+# tagged 13
+# marker ignored
+# marker bound
+# type user
+# ignored some
+# none
+# pending
+# complete
+# record alias Ada Ada
+# wildcard alias 17
+# singleton
+# let 14
+# if let 15
+# for let 16
+# 0
+
+class Box[T] {
+    value T
+}
+
+shape Label {
+    value Str
+}
+
+class UserId {
+    value Int
+
+    new(text Str, radix Int) {
+        this.value = radix + 2
+    }
+}
+
+class User {
+    name Str
+}
+
+class Worker {
+    name Str
+}
+
+class SecretBox {
+    value Int
+    hidden secret Str
+
+    new(value Int, secret Str) {
+        this.value = value
+        this.secret = secret
+    }
+}
+
+class Marker {}
+
+object Ready {}
+
+enum Status {
+    case Pending
+    case Complete
+}
+
+enum Tagged {
+    tag Str
+
+    case Named {
+        tag = "named"
+        value Int
+    }
+}
+
+def showSome(value Int?) Unit {
+    match value {
+        case Some(item) => println("some", item)
+        case None => ()
+    }
+}
+
+def showResult(ok Result[Str, Str], err Result[Str, Str]) Unit {
+    match ok {
+        case Ok(value) => println("ok", value)
+        case Err(_) => ()
+    }
+    match err {
+        case Ok(_) => ()
+        case Err(error) => println("err", error)
+    }
+}
+
+def main() Int {
+    showSome(Some(5))
+    showResult(Ok("ready"), Err("failed"))
+
+    match Box(7) {
+        case Box(item) => println("box", item)
+    }
+
+    match Label("label") {
+        case Label(value) => println("shape", value)
+    }
+
+    match UserId("42", 10) {
+        case UserId(id) => println("user id", id)
+    }
+
+    match Some(0) {
+        case Some(0) => println("zero")
+        case Some(_) => ()
+        case None => ()
+    }
+
+    match Some(1) {
+        case Some(_) => println("wildcard")
+        case None => ()
+    }
+
+    maybeUser User? = Some(User { name: "Ada" })
+    match maybeUser {
+        case Some(User { name }) => println("nested", name)
+        case None => ()
+    }
+
+    boxedMaybe Box[Int?] = Box(Some(8))
+    match boxedMaybe {
+        case Box(Some(item)) => println("box some", item)
+        case _ => ()
+    }
+
+    workerResult Result[Any, Str] = Ok(Worker { name: "Wren" })
+    match workerResult {
+        case Ok(value Worker) => println("worker", value.name)
+        case _ => ()
+    }
+
+    match Some(9) {
+        case Some { value as item } => println("brace", item)
+        case None => ()
+    }
+
+    match SecretBox(11, "secret") {
+        case SecretBox(value) => println("hidden", value)
+    }
+
+    tagged Tagged = Tagged.Named("named", 13)
+    match tagged {
+        case Tagged.Named(value) => println("tagged", value)
+    }
+
+    marker = Marker {}
+    unknownMarker Any = marker
+    match unknownMarker {
+        case _ Marker => println("marker ignored")
+        case _ => ()
+    }
+
+    match unknownMarker {
+        case matched Marker => println("marker bound")
+        case _ => ()
+    }
+    let boundMarker Marker = marker
+
+    openUser Any = User { name: "ignored" }
+    match openUser {
+        case _ User => println("type user")
+        case _ => ()
+    }
+
+    match Some(100) {
+        case Some(_) => println("ignored some")
+        case None => ()
+    }
+
+    exactNone Int? = None
+    match exactNone {
+        case Some(_) => ()
+        case None => println("none")
+    }
+
+    pending Status = Status.Pending
+    match pending {
+        case Status.Pending => println("pending")
+        case Status.Complete => ()
+    }
+
+    complete Status = Status.Complete
+    match complete {
+        case Status.Pending => ()
+        case Status.Complete => println("complete")
+    }
+
+    aliased = User { name: "Ada" }
+    match aliased {
+        case User { name } as user => println("record alias", name, user.name)
+    }
+
+    match 17 {
+        case _ as other => println("wildcard alias", other)
+    }
+
+    match Ready {
+        case Ready => println("singleton")
+    }
+
+    let Box(letValue) = Box(14)
+    println("let", letValue)
+
+    if let Some(ifValue) = Some(15) {
+        println("if let", ifValue)
+    }
+
+    boxes = [Box(16)]
+    for let Box(loopValue) <- boxes {
+        println("for let", loopValue)
+    }
+
+    0
+}

@@ -1895,7 +1895,6 @@ Enum cases are data-only:
 - payload cases use positional constructor syntax, for example `Some(value)`
 - payload cases may also use construction fields in braces, for example `Some { value: value }`
 - payload and shared fields with defaults may be omitted from enum case constructors
-- `None()`-style calls for zero-payload cases are invalid
 
 Behavior for enums belongs directly in the enum declaration body. Case-specific
 behavior should be expressed with `match`.
@@ -2973,10 +2972,12 @@ If no case matches, `partial match` returns `None`.
 Supported pattern families:
 
 - wildcard: `_`
-- binding pattern: `x`
+- whole-value alias: `_ as x`, `User { name } as user`
 - literal/value patterns: `1`, `"hello"`, `true`
 - case alternatives: `case A | B => ...`
 - tuple patterns: `(x, y)`
+- zero-payload cases and singletons: `None`, `Pending`, `Ready`
+- unary named-data patterns: `Some(x)`, `Box(item)`
 - named-field record patterns: `User { name }`, `Some { value }`
 - unheaded record patterns for statically known values: `{ name, age }`
 - type patterns: `item Worker`, `_ Other`
@@ -2985,8 +2986,8 @@ Type patterns use erased outer-type matching at runtime. For generic declared ty
 
 ```txt
 match value {
-    _ Box => ...
-    _ Bag => ...
+    case _ Box => ...
+    case _ Bag => ...
 }
 ```
 
@@ -2997,7 +2998,11 @@ Rules:
 - enum exhaustiveness is checked
 - expression `partial match` skips exhaustiveness checking and wraps the result in `Option[...]`
 - statement `partial match` skips exhaustiveness checking and does nothing when no case matches
-- bare zero-payload enum cases should still be written in qualified form when needed, for example `MaybeInt.NoneX`
+- a bare case-head identifier is a named zero-payload case or singleton, never
+  a new local binding; use `_ as value` to bind an otherwise unrestricted value
+- zero-payload enum cases use their bare name; `Case()` is invalid
+- class, shape, primitive, and interface type tests use `_ Type` or `value Type`
+- named-field patterns must select at least one field; `Type {}` is invalid
 
 ### Record Patterns
 
@@ -3020,11 +3025,13 @@ Rules:
 
 - fields match by name, never declaration order
 - omitted fields are ignored; record patterns are partial by default
+- at least one field must be selected
 - only visible fields may be named
 - constructor parameters do not participate in matching
 - `field` binds a local with the same name
 - `field as local` binds the field under another local name
 - `field: pattern` applies a nested pattern to the field value
+- `Type { fields } as value` also binds the complete matched value
 - duplicate fields are invalid and field order is irrelevant
 - a record pattern with only binding fields is irrefutable after its type or case test succeeds
 - literals, nested refutable patterns, and runtime type tests make the containing pattern refutable
@@ -3053,6 +3060,12 @@ already known, omit the type head:
 
 ```txt
 let { name, age } = user
+let { city } = location
+let { tag } = outcome
+
+let { name, age: 18 } = user else {
+    return Err("expected an 18-year-old user")
+}
 
 match profile {
     case { name, age: 18 } => println(name)
@@ -3070,9 +3083,95 @@ Case-specific payload fields still require the case head, for example
 values do not provide a concrete record layout and therefore require a type or
 case pattern before record fields can be matched.
 
-Tuples alone use positional parentheses. Named-field class and shape patterns
-use braces rather than `User(name, age)` or `Point(x, y)`. Zero-payload enum
-cases remain bare.
+Parentheses provide unary named-data extraction only:
+
+```txt
+case Some(x) => ...
+case Ok(value) => ...
+case Err(error) => ...
+case Box(item) => ...
+case UserId(id) => ...
+```
+
+`Type(pattern)` accepts one complete nested pattern, not merely a binding:
+
+```txt
+case Some(0) => ...
+case Some(_) => ...
+case Some(User { name }) => ...
+case Box(Some(x)) => ...
+case Ok(value Worker) => ...
+```
+
+Conceptually, `Some(x)` is `Some { value as x }`, and `Some(User { name })`
+is `Some { value: User { name } }`. The type or case must have exactly one
+extractable field. Classes and shapes count visible data fields; enum cases
+count payload fields but not shared enum-wide fields; constructor parameters
+never participate in matching.
+
+Named data with multiple fields uses braces and fields are selected by name:
+
+```txt
+case User {
+    name
+    location as home
+} => ...
+
+case HttpError {
+    status
+    message
+} => ...
+
+case User(name, location) => ...       # invalid
+case HttpError(status, message) => ... # invalid
+```
+
+Brace patterns must select at least one field. Omitted fields are ignored, but
+an empty pattern such as `User {}` is redundant and rejected. Use a type
+pattern when no fields are needed:
+
+```txt
+case _ User => ...       # match User and ignore the complete value
+case user User => ...    # match User and bind the complete value
+case User { name } => ...
+case User { name } as user => ...
+```
+
+`User { name }` uses exactly the same runtime type test as `_ User`; braces add
+field matching and do not select a different nominal or structural rule.
+Interfaces and primitives support type patterns but not field patterns:
+
+```txt
+case value Str => ...
+case reader Readable => ...
+case _ Worker => ...
+```
+
+Use `_ as value` to bind a value without restricting its type:
+
+```txt
+case _ => ...
+case _ as other => println(other)
+```
+
+Bare names match zero-payload enum cases or singleton objects:
+
+```txt
+case None => ...
+case Pending => ...
+case Ready => ...
+```
+
+Zero-field classes and shapes use ordinary type patterns rather than empty
+parentheses or braces:
+
+```txt
+case _ Marker => ...
+case marker Marker => ...
+```
+
+`Type()` and `Type {}` are invalid patterns. Tuples remain positional because
+tuples are positional data.
 
 ## Destructuring
 

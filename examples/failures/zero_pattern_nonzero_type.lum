@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*empty parenthesized pattern 'User\(\)' is not supported; use the bare case name for a zero-payload enum case.*
+
+class User {
+    name Str
+}
+
+def main(user User) Unit {
+    match user {
+        case User() => ()
+    }
+}

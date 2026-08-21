@@ -2966,6 +2966,7 @@ impl<'a> Checker<'a> {
         match pattern {
             Pattern::Wildcard { .. } | Pattern::Binding { .. } => true,
             Pattern::Extract { .. } | Pattern::Literal { .. } | Pattern::Type { .. } => false,
+            Pattern::Alias { inner, .. } => self.for_pattern_is_irrefutable(inner, scrutinee),
             Pattern::Tuple { elements, .. } => match scrutinee {
                 Ty::Tuple(items) if items.len() == elements.len() => elements
                     .iter()
@@ -2997,19 +2998,18 @@ impl<'a> Checker<'a> {
                 if self.lookup_case_by_pattern(path, scrutinee).is_some() {
                     return false;
                 }
-                let Some((destructured_ty, field_tys)) =
-                    self.lookup_destructured_type_pattern(path)
+                let Some((false, destructured_ty, fields)) =
+                    self.lookup_record_pattern_target(path, scrutinee)
                 else {
                     return false;
                 };
                 self.is_assignable(scrutinee, &destructured_ty)
-                    && args.len() == field_tys.len()
+                    && fields.len() <= 1
+                    && args.len() == fields.len()
                     && args
                         .iter()
-                        .zip(field_tys.iter())
-                        .all(|(pattern, field_ty)| {
-                            self.for_pattern_is_irrefutable(pattern, field_ty)
-                        })
+                        .zip(fields.iter())
+                        .all(|(pattern, (_, ty))| self.for_pattern_is_irrefutable(pattern, ty))
             }
         }
     }
@@ -3041,6 +3041,9 @@ impl<'a> Checker<'a> {
                 self.source_expr_proves_pattern_match(pattern, inner)
             }
             (Pattern::Wildcard { .. } | Pattern::Binding { .. }, _) => true,
+            (Pattern::Alias { inner, .. }, source) => {
+                self.source_expr_proves_pattern_match(inner, source)
+            }
             // `<-` extraction always needs an explicit fallback. Otherwise a
             // harmless refactor from `Some(5)` to `value Option[Int] = Some(5)`
             // changes whether control flow is required.
@@ -7021,6 +7024,13 @@ impl<'a> Checker<'a> {
                 let inner_ty = self.extract_pattern_inner_type(scrutinee, *span);
                 self.bind_pattern(inner, &inner_ty);
             }
+            Pattern::Alias { inner, name, .. } => {
+                self.bind_pattern(inner, scrutinee);
+                if name != "_" {
+                    let binding_ty = self.whole_pattern_binding_type(inner, scrutinee);
+                    self.define_local(name, binding_ty, false);
+                }
+            }
             Pattern::Binding { name, .. } => self.define_local(name, scrutinee.clone(), false),
             Pattern::Type { name, target, .. } => {
                 let target_ty = self.ty_from_type_ref(target);
@@ -7119,15 +7129,26 @@ impl<'a> Checker<'a> {
                     );
                     return;
                 };
-                if is_enum_case && target_fields.is_empty() {
-                    let case_name = path.last().map(String::as_str).unwrap_or("case");
-                    self.add_error(
-                        "zero_payload_record_pattern",
+                if fields.is_empty() {
+                    let message = if path.is_empty() {
+                        "empty field patterns are redundant; use '_' to ignore the matched value or '_ as value' to bind it".to_string()
+                    } else if is_enum_case && target_fields.is_empty() {
                         format!(
-                            "zero-payload enum case '{case_name}' is a bare pattern; write '{case_name}' without braces"
-                        ),
-                        pattern.span(),
-                    );
+                            "empty field pattern '{} {{}}' is redundant; use the bare zero-payload case '{}'",
+                            target_name, target_name
+                        )
+                    } else if is_enum_case {
+                        format!(
+                            "empty field pattern '{} {{}}' does not select its payload; use '{}(_)' to ignore a unary payload or select fields by name",
+                            target_name, target_name
+                        )
+                    } else {
+                        format!(
+                            "empty field pattern '{} {{}}' is redundant; use '_ {}' to ignore the matched value or 'value {}' to bind it",
+                            target_name, target_name, target_name
+                        )
+                    };
+                    self.add_error("empty_record_pattern", message, pattern.span());
                 }
                 for field in fields {
                     if let Some((_, field_ty)) =
@@ -7147,68 +7168,87 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            Pattern::Constructor { path, args, .. } => {
+            Pattern::Constructor {
+                path,
+                args,
+                parenthesized,
+                ..
+            } => {
                 let case_name = path.last().cloned().unwrap_or_default();
                 if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
-                    if !args.is_empty() {
-                        let fields = case
-                            .params
-                            .iter()
-                            .take(args.len())
-                            .map(|field| field.name.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ");
+                    let extractable = self.enum_case_extractable_params(&case);
+                    if !*parenthesized && !extractable.is_empty() {
                         self.add_error(
-                            "positional_record_pattern",
-                            format!(
-                                "positional enum payload patterns are not supported; write '{} {{ {} }}' with named fields",
-                                case_name, fields
+                            "bare_payload_pattern",
+                            bare_payload_pattern_diagnostic(
+                                &case_name,
+                                &extractable
+                                    .iter()
+                                    .map(|field| field.name.clone())
+                                    .collect::<Vec<_>>(),
                             ),
                             pattern.span(),
                         );
-                    }
-                    if !enum_case_pattern_accepts_arity(&case.params, args.len()) {
+                    } else if *parenthesized
+                        && !args.is_empty()
+                        && (extractable.len() != 1 || args.len() != 1)
+                    {
                         self.add_error(
-                            "invalid_destructure",
-                            format!(
-                                "constructor pattern '{}' expects {} fields, got {}",
-                                case_name,
-                                enum_case_pattern_required_count(&case.params),
-                                args.len()
+                            "invalid_unary_pattern",
+                            unary_pattern_diagnostic(
+                                &case_name,
+                                args.len(),
+                                &extractable
+                                    .iter()
+                                    .map(|field| field.name.clone())
+                                    .collect::<Vec<_>>(),
                             ),
                             pattern.span(),
                         );
                     }
                     let mut subst = HashMap::new();
                     infer_type_subst(&case.result, scrutinee, &mut subst);
-                    for (pattern, param) in args.iter().zip(case.params.iter()) {
+                    for (pattern, param) in args.iter().zip(extractable.iter()) {
                         self.bind_pattern(
                             pattern,
                             &materialize_type(&substitute_type(&param.ty, &subst)),
                         );
                     }
-                } else if let Some(fields) = self.lookup_destructured_type_fields(path) {
-                    self.add_error(
-                        "positional_record_pattern",
-                        format!(
-                            "positional class and shape patterns are not supported; write '{} {{ field }}' with named fields",
-                            case_name
-                        ),
-                        pattern.span(),
-                    );
-                    if args.len() != fields.len() {
+                } else if let Some(object) = self.lookup_object_pattern(path) {
+                    if *parenthesized && !args.is_empty() {
                         self.add_error(
-                            "invalid_destructure",
+                            "invalid_singleton_pattern",
                             format!(
-                                "constructor pattern '{}' expects {} fields, got {}",
-                                case_name,
-                                fields.len(),
-                                args.len()
+                                "singleton object '{}' is matched by its bare name",
+                                object.name
                             ),
                             pattern.span(),
                         );
                     }
-                    for (pattern, field_ty) in args.iter().zip(fields.iter()) {
+                } else if let Some((false, _, fields)) =
+                    self.lookup_record_pattern_target(path, scrutinee)
+                {
+                    if !*parenthesized {
+                        self.add_error(
+                            "bare_type_pattern",
+                            bare_type_pattern_diagnostic(&case_name),
+                            pattern.span(),
+                        );
+                    } else if !args.is_empty() && (fields.len() != 1 || args.len() != 1) {
+                        self.add_error(
+                            "invalid_unary_pattern",
+                            unary_pattern_diagnostic(
+                                &case_name,
+                                args.len(),
+                                &fields
+                                    .iter()
+                                    .map(|(name, _)| name.clone())
+                                    .collect::<Vec<_>>(),
+                            ),
+                            pattern.span(),
+                        );
+                    }
+                    for (pattern, (_, field_ty)) in args.iter().zip(fields.iter()) {
                         self.bind_pattern(pattern, field_ty);
                     }
                 } else {
@@ -7231,6 +7271,7 @@ impl<'a> Checker<'a> {
         match pattern {
             Pattern::Wildcard { .. } | Pattern::Binding { .. } => true,
             Pattern::Extract { .. } => false,
+            Pattern::Alias { inner, .. } => self.pattern_is_irrefutable(inner, scrutinee),
             Pattern::Type { target, .. } => {
                 !matches!(scrutinee, Ty::Unknown)
                     && self.is_assignable(scrutinee, &self.ty_from_type_ref(target))
@@ -7265,17 +7306,18 @@ impl<'a> Checker<'a> {
                 if self.lookup_case_by_pattern(path, scrutinee).is_some() {
                     return false;
                 }
-                let Some((destructured_ty, field_tys)) =
-                    self.lookup_destructured_type_pattern(path)
+                let Some((false, destructured_ty, fields)) =
+                    self.lookup_record_pattern_target(path, scrutinee)
                 else {
                     return false;
                 };
                 self.is_assignable(scrutinee, &destructured_ty)
-                    && args.len() == field_tys.len()
+                    && fields.len() <= 1
+                    && args.len() == fields.len()
                     && args
                         .iter()
-                        .zip(field_tys.iter())
-                        .all(|(pattern, field_ty)| self.pattern_is_irrefutable(pattern, field_ty))
+                        .zip(fields.iter())
+                        .all(|(pattern, (_, ty))| self.pattern_is_irrefutable(pattern, ty))
             }
         }
     }
@@ -7306,7 +7348,7 @@ impl<'a> Checker<'a> {
                 wildcard = true;
                 break;
             }
-            match &case.pattern {
+            match pattern_without_alias(&case.pattern) {
                 Pattern::Wildcard { .. } | Pattern::Binding { .. } => {
                     wildcard = true;
                     break;
@@ -7398,6 +7440,62 @@ impl<'a> Checker<'a> {
         self.lookup_case_by_path(path)
     }
 
+    fn lookup_object_pattern(&self, path: &[String]) -> Option<TypeSig> {
+        match path {
+            [name] => self.lookup_any_object(name),
+            [module_alias, name] => self
+                .world
+                .lookup_module_alias(self.module, module_alias)
+                .and_then(|module| module.objects.get(name).cloned()),
+            _ => None,
+        }
+    }
+
+    fn whole_pattern_binding_type(&self, pattern: &Pattern, scrutinee: &Ty) -> Ty {
+        match pattern {
+            Pattern::Alias { inner, .. } => self.whole_pattern_binding_type(inner, scrutinee),
+            Pattern::Type { target, .. } => self.ty_from_type_ref(target),
+            Pattern::Record { path, .. } if !path.is_empty() => self
+                .lookup_record_pattern_target(path, scrutinee)
+                .map(|(_, target, _)| target)
+                .unwrap_or_else(|| scrutinee.clone()),
+            Pattern::Constructor { path, .. } => {
+                if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
+                    let mut subst = HashMap::new();
+                    infer_type_subst(&case.result, scrutinee, &mut subst);
+                    return materialize_type(&substitute_type(&case.result, &subst));
+                }
+                if let Some(object) = self.lookup_object_pattern(path) {
+                    return Ty::Named(object.name, Vec::new());
+                }
+                self.lookup_record_pattern_target(path, scrutinee)
+                    .map(|(_, target, _)| target)
+                    .unwrap_or_else(|| scrutinee.clone())
+            }
+            _ => scrutinee.clone(),
+        }
+    }
+
+    fn enum_case_extractable_params(&self, case: &EnumCaseSig) -> Vec<FieldSig> {
+        let shared_fields = match &case.result {
+            Ty::Named(enum_name, _) => self
+                .lookup_any_type(enum_name)
+                .map(|sig| {
+                    sig.fields
+                        .iter()
+                        .map(|field| field.name.clone())
+                        .collect::<HashSet<_>>()
+                })
+                .unwrap_or_default(),
+            _ => HashSet::new(),
+        };
+        case.params
+            .iter()
+            .filter(|field| !field.hidden && !shared_fields.contains(&field.name))
+            .cloned()
+            .collect()
+    }
+
     fn lookup_destructured_type_pattern(&self, path: &[String]) -> Option<(Ty, Vec<Ty>)> {
         let sig = match path {
             [name] => self.lookup_any_type(name),
@@ -7413,6 +7511,9 @@ impl<'a> Checker<'a> {
                 }),
             _ => None,
         }?;
+        if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
+            return None;
+        }
         let ty = Ty::Named(
             sig.name.clone(),
             sig.type_params.iter().map(|_| Ty::Unknown).collect(),
@@ -7424,11 +7525,6 @@ impl<'a> Checker<'a> {
             .map(|field| field.ty.clone())
             .collect();
         Some((ty, fields))
-    }
-
-    fn lookup_destructured_type_fields(&self, path: &[String]) -> Option<Vec<Ty>> {
-        self.lookup_destructured_type_pattern(path)
-            .map(|(_, fields)| fields)
     }
 
     fn lookup_record_pattern_target(
@@ -9608,8 +9704,47 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn enum_case_pattern_accepts_arity(params: &[FieldSig], arity: usize) -> bool {
-    arity <= params.len() && params[arity..].iter().all(|param| param.has_initializer)
+fn bare_payload_pattern_diagnostic(case_name: &str, field_names: &[String]) -> String {
+    if field_names.len() == 1 {
+        return format!(
+            "bare case pattern '{case_name}' has a payload; use '{case_name}(_)' to ignore it or '{case_name}(pattern)' to match it"
+        );
+    }
+    format!(
+        "bare case pattern '{case_name}' has {} payload fields; use '{case_name} {{ {} }}' for named field matching",
+        field_names.len(),
+        field_names.join(", ")
+    )
+}
+
+fn bare_type_pattern_diagnostic(type_name: &str) -> String {
+    format!(
+        "bare type pattern '{type_name}' is not supported; use '_ {type_name}' to ignore the matched value, 'value {type_name}' to bind it, or '{type_name} {{ field }}' to extract fields"
+    )
+}
+
+fn unary_pattern_diagnostic(
+    type_name: &str,
+    argument_count: usize,
+    field_names: &[String],
+) -> String {
+    let field_count = field_names.len();
+    if field_count == 0 {
+        return format!(
+            "'{type_name}' has no payload field; match the zero-payload case with its bare name '{type_name}'"
+        );
+    }
+    format!(
+        "unary pattern '{type_name}(...)' requires exactly one extractable field and one pattern; '{type_name}' has {field_count} extractable fields and the pattern contains {argument_count}. Use '{type_name} {{ {} }}' for named field matching",
+        field_names.join(", ")
+    )
+}
+
+fn pattern_without_alias(mut pattern: &Pattern) -> &Pattern {
+    while let Pattern::Alias { inner, .. } = pattern {
+        pattern = inner;
+    }
+    pattern
 }
 
 fn constructor_field_sigs_from_params(params: &[ParamSig]) -> Vec<FieldSig> {
@@ -9663,10 +9798,6 @@ fn positional_constructor_prefix_message(
         required.name,
         defaulted
     ))
-}
-
-fn enum_case_pattern_required_count(params: &[FieldSig]) -> usize {
-    params.iter().filter(|param| !param.has_initializer).count()
 }
 
 fn first_shape_literal_span(expr: &Expr) -> Option<crate::source::Span> {
@@ -14307,7 +14438,7 @@ def mapOption[X](value Option[Int], f fn(Int) X) Option[X] {
     }
 
     #[test]
-    fn rejects_bare_payload_enum_case_patterns() {
+    fn rejects_bare_enum_cases_with_payloads() {
         let program = parse_inline(
             r#"
 def main(value Option[Int]) Int {
@@ -14321,14 +14452,46 @@ def main(value Option[Int]) Int {
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diag| {
-                diag.code == "invalid_destructure"
+                diag.code == "bare_payload_pattern"
                     && diag
                         .message
-                        .contains("constructor pattern 'Some' expects 1 fields, got 0")
+                        .contains("bare case pattern 'Some' has a payload")
             }),
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn allows_bare_zero_cases_singletons_and_whole_pattern_aliases() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+enum Status {
+    case Pending
+}
+
+object Ready {}
+
+def main(value Any, status Status) Unit {
+    match status {
+        case Pending => ()
+    }
+    match value {
+        case User { name } as user => println(name, user.name)
+        case _ as other => println(other)
+    }
+    match Ready {
+        case Ready => ()
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]

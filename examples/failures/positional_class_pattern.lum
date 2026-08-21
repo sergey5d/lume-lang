@@ -1,13 +1,14 @@
 # FAIL_REGEX:
-# .*positional class and shape patterns are not supported; write 'User \{ field \}' with named fields.*
+# .*unary pattern 'User\(\.\.\.\)' requires exactly one extractable field and one pattern; 'User' has 2 extractable fields and the pattern contains 2.*
 
 class User {
     name Str
+    location Str
 }
 
 def main() Unit {
-    user = User { name: "Ada" }
+    user = User { name: "Ada", location: "London" }
     match user {
-        case User(name) => println(name)
+        case User(name, location) => println(name, location)
     }
 }

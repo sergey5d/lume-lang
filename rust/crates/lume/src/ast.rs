@@ -514,6 +514,11 @@ pub enum Pattern {
         inner: Box<Pattern>,
         span: Span,
     },
+    Alias {
+        inner: Box<Pattern>,
+        name: String,
+        span: Span,
+    },
     Binding {
         name: String,
         span: Span,
@@ -544,6 +549,7 @@ pub enum Pattern {
     Constructor {
         path: Vec<String>,
         args: Vec<Pattern>,
+        parenthesized: bool,
         span: Span,
     },
 }
@@ -568,6 +574,7 @@ impl Pattern {
         match self {
             Pattern::Wildcard { span }
             | Pattern::Extract { span, .. }
+            | Pattern::Alias { span, .. }
             | Pattern::Binding { span, .. }
             | Pattern::Type { span, .. }
             | Pattern::Literal { span, .. }

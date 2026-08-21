@@ -2498,6 +2498,80 @@ fn parses_named_record_patterns_with_aliases_literals_and_nesting() {
 }
 
 #[test]
+fn parses_refutable_headless_record_pattern_in_let() {
+    let result = parse(
+        r#"
+def run(user User) Str {
+    let { name as matchedName, age: 18 } = user else return "other"
+    matchedName
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    let CallableBody::Block(block) = &function.body else {
+        panic!("expected block body");
+    };
+    let Stmt::LetElse(stmt) = &block.statements[0] else {
+        panic!("expected let else statement");
+    };
+    assert!(matches!(
+        &stmt.pattern,
+        Pattern::Record { path, fields, .. }
+            if path.is_empty() && fields.len() == 2
+    ));
+}
+
+#[test]
+fn parses_bare_cases_and_whole_pattern_aliases() {
+    let result = parse(
+        r#"
+def run(status Status) Unit {
+    match status {
+        case Pending => ()
+        case User { name } as user => println(name, user)
+        case _ as other => println(other)
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    let CallableBody::Block(block) = &function.body else {
+        panic!("expected block body");
+    };
+    let Stmt::Match(stmt) = &block.statements[0] else {
+        panic!("expected match statement");
+    };
+    assert!(matches!(
+        &stmt.cases[0].pattern,
+        Pattern::Constructor {
+            parenthesized: false,
+            args,
+            ..
+        } if args.is_empty()
+    ));
+    assert!(matches!(
+        &stmt.cases[1].pattern,
+        Pattern::Alias { inner, name, .. }
+            if name == "user" && matches!(inner.as_ref(), Pattern::Record { fields, .. } if fields.len() == 1)
+    ));
+    assert!(matches!(
+        &stmt.cases[2].pattern,
+        Pattern::Alias { inner, name, .. }
+            if name == "other" && matches!(inner.as_ref(), Pattern::Wildcard { .. })
+    ));
+}
+
+#[test]
 fn parses_list_pattern_binding_with_typed_elements_and_rest() {
     let result = parse(
         r#"

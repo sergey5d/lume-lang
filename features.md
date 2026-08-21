@@ -18,7 +18,6 @@ Open checker/runtime work:
 
 Enum follow-ups:
 - better generic type-pattern ergonomics
-- type-aware rejection of obsolete empty-payload calls in patterns, such as `Option.None()` in `match`; bare cases like `None` should be the only valid form
 
 The biggest remaining enum work is more expressive generic type-pattern support.
 

@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*bare type pattern 'User' is not supported; use '_ User' to ignore the matched value, 'value User' to bind it.*
+
+class User {
+    name Str
+}
+
+def main(user User) Unit {
+    match user {
+        case User => ()
+    }
+}

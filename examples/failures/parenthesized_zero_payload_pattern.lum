@@ -1,7 +1,7 @@
 # FAIL_REGEX:
-# .*parenthesized named-data patterns are not supported; write 'None \{ \.\.\. \}' for named fields or bare 'None' for a zero-payload enum case.*
+# .*empty parenthesized pattern 'None\(\)' is not supported; use the bare case name for a zero-payload enum case.*
 
 def main(value Option[Int]) Int = match value {
-    case Some { value } => value
+    case Some(value) => value
     case None() => 0
 }

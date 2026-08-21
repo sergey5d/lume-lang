@@ -192,6 +192,9 @@ impl<'a> Parser<'a> {
                     span: start.cover(end),
                 }));
             }
+            if self.is_headless_record_pattern_assignment_start() {
+                return self.parse_single_let_pattern_stmt(start);
+            }
             let (clauses, clauses_end) = self.parse_refutable_clause_block("let")?;
             if self.match_keyword(Keyword::Else) {
                 let else_block = self.parse_block_or_inline_stmt_body("let else")?;
@@ -294,6 +297,10 @@ impl<'a> Parser<'a> {
         }
         self.restore(checkpoint);
 
+        self.parse_single_let_pattern_stmt(start)
+    }
+
+    fn parse_single_let_pattern_stmt(&mut self, start: Span) -> Option<Stmt> {
         let (pattern, operator) = self.parse_refutable_pattern_head("let")?;
         if operator != "=" && self.at(TokenKind::Newline) {
             self.error_at_current(
@@ -563,6 +570,22 @@ impl<'a> Parser<'a> {
         }
         parser.match_token(TokenKind::RBrace)
             && (parser.at(TokenKind::Eq) || parser.at(TokenKind::LeftArrow))
+    }
+
+    fn is_headless_record_pattern_assignment_start(&self) -> bool {
+        if !self.at(TokenKind::LBrace) {
+            return false;
+        }
+        let mut parser = Parser {
+            tokens: self.tokens,
+            index: self.index,
+            diagnostics: Vec::new(),
+            allow_trailing_block_call: self.allow_trailing_block_call,
+        };
+        matches!(
+            parser.parse_pattern(),
+            Some(Pattern::Record { path, .. }) if path.is_empty()
+        ) && (parser.at(TokenKind::Eq) || parser.at(TokenKind::LeftArrow))
     }
 
     pub(super) fn parse_for_let_generator_head(&mut self) -> Option<ForBinding> {
@@ -900,9 +923,9 @@ impl<'a> Parser<'a> {
                 return None;
             }
             self.consume_keyword(Keyword::Case, "expected 'case' before match pattern")?;
-            let mut patterns = vec![self.parse_pattern()?];
+            let mut patterns = vec![self.parse_match_pattern()?];
             while self.match_token(TokenKind::Pipe) {
-                patterns.push(self.parse_pattern()?);
+                patterns.push(self.parse_match_pattern()?);
             }
             let guard = if self.match_keyword(Keyword::If) {
                 Some(self.parse_expr()?)

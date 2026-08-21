@@ -2153,6 +2153,20 @@ impl<'a> Resolver<'a> {
         match pattern {
             Pattern::Wildcard { .. } => {}
             Pattern::Extract { inner, .. } => self.resolve_pattern(inner),
+            Pattern::Alias { inner, name, span } => {
+                self.resolve_pattern(inner);
+                if name != "_" {
+                    self.define_local_value(
+                        name,
+                        *span,
+                        false,
+                        SymbolKind::Binding,
+                        "duplicate_binding",
+                        format!("duplicate binding '{}'", name),
+                        false,
+                    );
+                }
+            }
             Pattern::Binding { name, span } => {
                 if name != "_" {
                     self.define_local_value(
@@ -2212,7 +2226,9 @@ impl<'a> Resolver<'a> {
                     self.resolve_pattern(&field.pattern);
                 }
             }
-            Pattern::Constructor { path, args, span } => {
+            Pattern::Constructor {
+                path, args, span, ..
+            } => {
                 self.resolve_pattern_path(path, *span);
                 for arg in args {
                     self.resolve_pattern(arg);

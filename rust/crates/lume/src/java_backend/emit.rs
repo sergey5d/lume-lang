@@ -3240,6 +3240,14 @@ impl<'a> FunctionEmitter<'a> {
             [owner, case] if self.enum_case(owner, case).is_some() => {
                 self.emit_enum_case_call(owner, case, &[])
             }
+            _ if path.last().is_some_and(|name| {
+                self.type_def(name)
+                    .is_some_and(|ty| ty.kind == TypeKind::Object)
+            }) =>
+            {
+                let name = path.last()?;
+                Some(format!("{}.INSTANCE", self.names.named_type(name)))
+            }
             _ => self.unsupported("named runtime value"),
         }
     }
