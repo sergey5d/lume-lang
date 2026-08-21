@@ -7094,6 +7094,11 @@ impl<'a> Checker<'a> {
                 }
             }
             Pattern::Record { path, fields, .. } => {
+                let target_name = if path.is_empty() {
+                    scrutinee.describe()
+                } else {
+                    path.join(".")
+                };
                 let Some((is_enum_case, _, target_fields)) =
                     self.lookup_record_pattern_target(path, scrutinee)
                 else {
@@ -7102,7 +7107,14 @@ impl<'a> Checker<'a> {
                     }
                     self.add_error(
                         "unknown_match_case",
-                        format!("unknown record pattern '{}'", path.join(".")),
+                        if path.is_empty() {
+                            format!(
+                                "headless record pattern requires a concrete class, shape, anonymous shape, or enum value; got '{}'",
+                                scrutinee.describe()
+                            )
+                        } else {
+                            format!("unknown record pattern '{target_name}'")
+                        },
                         pattern.span(),
                     );
                     return;
@@ -7128,8 +7140,7 @@ impl<'a> Checker<'a> {
                             "unknown_pattern_field",
                             format!(
                                 "record pattern '{}' has no visible field '{}'",
-                                path.join("."),
-                                field.name
+                                target_name, field.name
                             ),
                             field.span,
                         );
@@ -7291,6 +7302,10 @@ impl<'a> Checker<'a> {
             if case.guard.is_some() {
                 continue;
             }
+            if self.pattern_is_irrefutable(&case.pattern, value_ty) {
+                wildcard = true;
+                break;
+            }
             match &case.pattern {
                 Pattern::Wildcard { .. } | Pattern::Binding { .. } => {
                     wildcard = true;
@@ -7426,7 +7441,10 @@ impl<'a> Checker<'a> {
                 Ty::Record(fields) => Some((false, scrutinee.clone(), fields.clone())),
                 Ty::Named(name, args) => {
                     let sig = self.lookup_any_type(name)?;
-                    if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
+                    if !matches!(
+                        sig.kind,
+                        TypeKind::Class | TypeKind::Record | TypeKind::Enum
+                    ) {
                         return None;
                     }
                     let subst = sig

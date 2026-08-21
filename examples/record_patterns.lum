@@ -9,6 +9,9 @@
 # loop Sergey
 # match Sergey
 # anonymous Ana
+# known class Sergey
+# known shape Tampa
+# known enum approved
 # 0
 
 shape Location {
@@ -25,6 +28,18 @@ class User {
 enum OrderStatus {
     case Paid
     case Pending
+}
+
+enum ReviewState {
+    label Str
+
+    case Approved {
+        label = "approved"
+    }
+
+    case Rejected {
+        label = "rejected"
+    }
 }
 
 class Order {
@@ -103,6 +118,19 @@ def main() Int {
     match anonymous {
         case { name, age: 18 } => println("anonymous " + name)
         case _ => ()
+    }
+
+    match user {
+        case { name } => println("known class " + name)
+    }
+
+    match location {
+        case { city } => println("known shape " + city)
+    }
+
+    review = ReviewState.Approved
+    match review {
+        case { label } => println("known enum " + label)
     }
 
     let { name, age } = user

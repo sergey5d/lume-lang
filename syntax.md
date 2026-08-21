@@ -3048,7 +3048,8 @@ match value {
 }
 ```
 
-When the value's type is already known, omit the type/case head:
+When the value's concrete class, shape, anonymous-shape, or enum type is
+already known, omit the type head:
 
 ```txt
 let { name, age } = user
@@ -3057,7 +3058,17 @@ match profile {
     case { name, age: 18 } => println(name)
     case _ => ()
 }
+
+match outcome {
+    case { tag } => println(tag) # shared enum field
+}
 ```
+
+For enums, a headless record pattern can name only shared enum fields.
+Case-specific payload fields still require the case head, for example
+`Some { value }`, because the payload is not present on every case. Interface
+values do not provide a concrete record layout and therefore require a type or
+case pattern before record fields can be matched.
 
 Tuples alone use positional parentheses. Named-field class and shape patterns
 use braces rather than `User(name, age)` or `Point(x, y)`. Zero-payload enum

@@ -3756,6 +3756,18 @@ class User {
     age Int
 }
 
+enum ReviewState {
+    label Str
+
+    case Approved {
+        label = "approved"
+    }
+
+    case Rejected {
+        label = "rejected"
+    }
+}
+
 def describe(value Any) Str = match value {
     case User {
         location as home
@@ -3765,10 +3777,15 @@ def describe(value Any) Str = match value {
     case _ => "other"
 }
 
+def describeReview(value ReviewState) Str = match value {
+    case { label } => label
+}
+
 def main() Unit {
     println(describe(User { name: "Ada", location: Location { city: "Tampa" }, age: 18 }))
     println(describe(User { name: "Bob", location: Location { city: "Miami" }, age: 19 }))
     println(describe("not a user"))
+    println(describeReview(ReviewState.Approved { label: "approved" }))
 }
 "#,
         )
@@ -3798,7 +3815,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Ada Tampa\nother\nother\n"
+            "Ada Tampa\nother\nother\napproved\n"
         );
 
         let _ = fs::remove_dir_all(temp);
