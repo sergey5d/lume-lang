@@ -3110,7 +3110,8 @@ Aliasing a unary enum-case pattern retains that concrete case view, so the
 complete alias exposes the matched case's fields while the nested pattern
 continues to bind or test its payload.
 
-`as` may alias any complete pattern, including literals and list patterns:
+Inside a `match` case, `as` may alias any complete pattern, including literals
+and list patterns:
 
 ```txt
 case 42 as value => println(value)
@@ -3120,6 +3121,19 @@ case [first, second, ...rest] as list => println(rest.size(), list.size())
 ```
 
 The alias is introduced only when the complete inner pattern succeeds.
+Whole-pattern aliases are deliberately limited to `case` patterns. They are
+not accepted by `let`, `if let`, `while let`, or `for let`:
+
+```txt
+let User { name } as user = value               # invalid
+if let User { name } as user = value { ... }    # invalid
+while let Some(value) as some = current { ... } # invalid
+for let User { name } as user <- users { ... }  # invalid
+```
+
+Use a `match` when both the selected fields and the complete matched value are
+needed. Field aliases remain available in every record destructuring context,
+for example `let { location as home } = user`.
 
 Conceptually, `Some(x)` is `Some { value as x }`, and `Some(User { name })`
 is `Some { value: User { name } }`. The type or case must have exactly one

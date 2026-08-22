@@ -331,7 +331,7 @@ impl<'a> Parser<'a> {
             return self.parse_for_destructure_clause_tail(bindings, DestructureKind::Tuple, start);
         }
 
-        let pattern = self.parse_pattern()?;
+        let pattern = self.parse_non_match_pattern("for-yield let")?;
         if matches!(&pattern, Pattern::Binding { name, .. } if name != "_")
             && self.at(TokenKind::Eq)
         {

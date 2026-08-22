@@ -643,7 +643,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        let pattern = self.parse_pattern()?;
+        let pattern = self.parse_non_match_pattern("for let")?;
         self.consume_for_generator_arrow()?;
         if self.at(TokenKind::Newline) {
             self.error_at_current(

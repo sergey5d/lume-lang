@@ -31,7 +31,7 @@ impl<'a> Parser<'a> {
         &mut self,
         owner: &'static str,
     ) -> Option<(Pattern, &'static str)> {
-        let pattern = self.parse_pattern()?;
+        let pattern = self.parse_non_match_pattern(owner)?;
         if self.match_token(TokenKind::Eq) {
             return Some((pattern, "="));
         }
@@ -194,6 +194,25 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_pattern(&mut self) -> Option<Pattern> {
         self.parse_pattern_at_depth(0)
+    }
+
+    pub(super) fn parse_non_match_pattern(&mut self, owner: &'static str) -> Option<Pattern> {
+        let pattern = self.parse_pattern()?;
+        if let Pattern::Alias { span, .. } = &pattern {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "pattern_alias_match_only",
+                    format!(
+                        "whole-pattern 'as' aliases are only supported in match cases; {owner} cannot alias the complete matched value"
+                    ),
+                    *span,
+                )
+                .with_help(
+                    "use 'case Pattern as value => ...' in a match, or bind and destructure the value separately",
+                ),
+            );
+        }
+        Some(pattern)
     }
 
     pub(super) fn parse_match_pattern(&mut self) -> Option<Pattern> {

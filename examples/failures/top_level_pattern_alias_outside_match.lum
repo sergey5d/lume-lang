@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*whole-pattern 'as' aliases are only supported in match cases.*
+
+class User {
+    name Str
+}
+
+def main(value User) Unit {
+    let User { name } as user = value
+}

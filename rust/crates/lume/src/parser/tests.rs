@@ -2572,6 +2572,76 @@ def run(status Status) Unit {
 }
 
 #[test]
+fn rejects_whole_pattern_aliases_outside_match_cases() {
+    let cases = [
+        r#"
+class User {
+    name Str
+}
+
+def run(value User) Unit {
+    let User { name } as user = value
+}
+"#,
+        r#"
+class User {
+    name Str
+}
+
+def run(value User) Unit {
+    if let User { name } as user = value {
+        println(name)
+    }
+}
+"#,
+        r#"
+class User {
+    name Str
+}
+
+def run(value User) Unit {
+    while let User { name } as user = value {
+        break
+    }
+}
+"#,
+        r#"
+class User {
+    name Str
+}
+
+def run(users [User]) Unit {
+    for let User { name } as user <- users {
+        println(name)
+    }
+}
+"#,
+        r#"
+class User {
+    name Str
+}
+
+def run(users [User]) [Str] =
+    for {
+        let User { name } as user <- users
+    } yield name
+"#,
+    ];
+
+    for source in cases {
+        let result = parse(source);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "pattern_alias_match_only"
+                    && diagnostic.message.contains("only supported in match cases")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
 fn parses_list_pattern_binding_with_typed_elements_and_rest() {
     let result = parse(
         r#"
