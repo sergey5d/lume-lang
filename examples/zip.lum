@@ -17,12 +17,12 @@ def main() Unit {
     vectorPairs = items.zip(["a", "b"])
     vectorIndexed = items.zipWithIndex()
 
-    let Some { value as firstPair } = vectorPairs.at(0) else {
+    let Some(firstPair) = vectorPairs.at(0) else {
         return ()
     }
-    let Some { value as secondPair } = vectorPairs.at(1) else return ()
+    let Some(secondPair) = vectorPairs.at(1) else return ()
 
-    let Some { value as indexedPair } = vectorIndexed.at(2) else return ()
+    let Some(indexedPair) = vectorIndexed.at(2) else return ()
 
     let (firstLeft, firstRight) = firstPair
     let (secondLeft, secondRight) = secondPair
@@ -46,10 +46,10 @@ def main() Unit {
     rangePairs = Range(10, 13).zip(["p", "q"])
     rangeIndexed = Range(7, 9).zipWithIndex()
 
-    let Some { value as rangePair } = rangePairs.at(1) else {
+    let Some(rangePair) = rangePairs.at(1) else {
         return ()
     }
-    let Some { value as rangeIndexedPair } = rangeIndexed.at(1) else {
+    let Some(rangeIndexedPair) = rangeIndexed.at(1) else {
         return ()
     }
     let (rangeLeft, rangeRight) = rangePair

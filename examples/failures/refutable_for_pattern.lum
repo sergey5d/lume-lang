@@ -6,7 +6,7 @@ def main() Unit {
 
     mapped = for {
         maybe <- values
-        let Some { value } = maybe
+        let Some(value) = maybe
     } yield value
 
     println(mapped.size())

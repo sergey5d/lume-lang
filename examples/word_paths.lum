@@ -27,7 +27,7 @@ def matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], p
         nextPicked = Set.from(pickedWords)
         nextPicked.add(word)
 
-        if let Some { value as foundPath } = matches(lastLetter(word), endWord, allWords, nextPicked, nextPath) {
+        if let Some(foundPath) = matches(lastLetter(word), endWord, allWords, nextPicked, nextPath) {
             return Some(foundPath)
         }
     }

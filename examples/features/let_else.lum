@@ -5,14 +5,14 @@
 # let else group missing
 
 def plusOne(value Int?) Result[Int, Str] {
-    let Some { value as item } = value else return Err("missing")
+    let Some(item) = value else return Err("missing")
     Ok(item + 1)
 }
 
 def sumBoth(left Int?, right Int?) Result[Int, Str] {
     let {
-        Some { value as a } = left
-        Some { value as b } = right
+        Some(a) = left
+        Some(b) = right
     } else return Err("missing")
     Ok(a + b)
 }

@@ -3,6 +3,6 @@
 
 def main() Int =
     match Some(1) {
-        Some { value as x } => x
+        Some(x) => x
         case _ => 0
     }

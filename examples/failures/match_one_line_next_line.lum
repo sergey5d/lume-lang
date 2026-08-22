@@ -3,4 +3,4 @@
 
 def main() Int =
     match Some(1)
-        case Some { value as x } => x
+        case Some(x) => x

@@ -9,7 +9,7 @@
 # prefix 6
 
 def plusOne(value Int?) Result[Int, Str] {
-    let Some { value as item } = value else {
+    let Some(item) = value else {
         return Err("missing")
     }
     Ok(item + 1)
@@ -21,16 +21,16 @@ def plusThree(value Int?) Int? {
 }
 
 def pairwise(left Int?, right Str?) { count Int, label Str } {
-    let Some { value as count } = left else {
+    let Some(count) = left else {
         return { count: 0, label: "no-left" }
     }
-    let Some { value as label } = right else {
+    let Some(label) = right else {
         return shape(count, "no-right")
     }
 
     let {
-        Some { value as groupedCount } = left
-        Some { value as groupedLabel } = right
+        Some(groupedCount) = left
+        Some(groupedLabel) = right
     } else {
         return shape(count, label)
     }
@@ -39,15 +39,15 @@ def pairwise(left Int?, right Str?) { count Int, label Str } {
 }
 
 def sumBoth(left Int?, right Int?) Result[Int, Str] {
-    let Some { value as a } = left else return Err("sum-missing")
-    let Some { value as b } = right else return Err("sum-missing")
+    let Some(a) = left else return Err("sum-missing")
+    let Some(b) = right else return Err("sum-missing")
     Ok(a + b)
 }
 
 def sumPrefix(values [Int?]) Int {
     var total Int = 0
     for value <- values {
-        let Some { value as item } = value else break
+        let Some(item) = value else break
         total := total + item
     }
     total

@@ -49,9 +49,9 @@ def main() Unit {
     indexed = items.zipWithIndex()
     tailItems = items.tail()
 
-    let Some { value as zippedPair } = zipped.at(1) else return ()
-    let Some { value as indexedPair } = indexed.at(3) else return ()
-    let Some { value as head } = items.head() else return ()
+    let Some(zippedPair) = zipped.at(1) else return ()
+    let Some(indexedPair) = indexed.at(3) else return ()
+    let Some(head) = items.head() else return ()
     let Ok { value as removed } = items.removeAt(1) else return ()
 
     let (zipValue, zipLabel) = zippedPair

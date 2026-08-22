@@ -28,23 +28,23 @@ def main() Int {
         makeKey(): 4,
     ]
 
-    let Some { value as two } = builtIn["two"] else return 1
+    let Some(two) = builtIn["two"] else return 1
     println("built-in two", two)
-    let Some { value as dynamic } = builtIn[dynamicKey] else return 1
+    let Some(dynamic) = builtIn[dynamicKey] else return 1
     println("built-in dynamic", dynamic)
-    let Some { value as made } = builtIn["made"] else return 1
+    let Some(made) = builtIn["made"] else return 1
     println("built-in made", made)
 
     personKey = PersonKey("Ada", 1)
     personMap [PersonKey : Int] = [personKey: 99]
 
-    let Some { value as shapeValue } = personMap[PersonKey("Ada", 1)] else return 1
+    let Some(shapeValue) = personMap[PersonKey("Ada", 1)] else return 1
     println("shape key", shapeValue)
 
     empty [Str : Int] = []
     println("empty", empty.size())
     empty["ready"] := 5
-    let Some { value as emptyValue } = empty["ready"] else return 1
+    let Some(emptyValue) = empty["ready"] else return 1
     println("empty value", emptyValue)
 
     first = [1, 2]
@@ -56,7 +56,7 @@ def main() Int {
     overrides [Str : Int] = ["shared": 20, "three": 3]
     copied [Str : Int] = [...defaults]
     merged [Str : Int] = [...copied, "two": 2, ...overrides]
-    let Some { value as shared } = merged["shared"] else return 1
+    let Some(shared) = merged["shared"] else return 1
     println("map spread shared", shared)
     println("map spread size", merged.size())
 

@@ -21,7 +21,7 @@ def find(
     foundQNode TreeNode?
 ) { foundP TreeNode?, foundQ TreeNode?, ancestor TreeNode? } {
 
-    let Some { value as current } = node else {
+    let Some(current) = node else {
         return { foundP: foundPNode, foundQ: foundQNode, ancestor: None }
     }
 
@@ -82,9 +82,9 @@ def main() Unit {
     result = find(Some(root), 5, 1, None, None)
     missing = lowestCommonAncestor(root, 10, 42)
 
-    let Some { value as ancestor } = result.ancestor else panic("missing ancestor")
-    let Some { value as foundP } = result.foundP else panic("missing foundP")
-    let Some { value as foundQ } = result.foundQ else panic("missing foundQ")
+    let Some(ancestor) = result.ancestor else panic("missing ancestor")
+    let Some(foundP) = result.foundP else panic("missing foundP")
+    let Some(foundQ) = result.foundQ else panic("missing foundQ")
     println("lca ${ancestor.val}")
     println("found p ${foundP.val}")
     println("found q ${foundQ.val}")

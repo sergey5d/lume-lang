@@ -22,9 +22,9 @@ def main() Unit {
         }
     )
 
-    let Some { value as first } = extracted.at(0) else return ()
-    let Some { value as second } = extracted.at(1) else return ()
-    let Some { value as third } = extracted.at(2) else return ()
+    let Some(first) = extracted.at(0) else return ()
+    let Some(second) = extracted.at(1) else return ()
+    let Some(third) = extracted.at(2) else return ()
 
     println("first " + first.getOr(0))
     println("second " + second.isEmpty())

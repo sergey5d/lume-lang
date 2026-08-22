@@ -37,8 +37,8 @@ def main() Unit {
     fields = classType.fields()
     println(fields.size())
 
-    let Some { value as nameField } = fields.at(0) else panic("expected name field")
-    let Some { value as ageField } = fields.at(1) else panic("expected age field")
+    let Some(nameField) = fields.at(0) else panic("expected name field")
+    let Some(ageField) = fields.at(1) else panic("expected age field")
 
     println(nameField.name())
     println(nameField.fieldType().name() !!)

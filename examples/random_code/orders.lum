@@ -58,7 +58,7 @@ class OrderManager {
 
         checkQueuedOrders()
 
-        let Some { value as parsedOrder } = parseOrder(str) else panic("expected order")
+        let Some(parsedOrder) = parseOrder(str) else panic("expected order")
 
         savedOrder = this.map.get(parsedOrder.id)
 
@@ -123,7 +123,7 @@ def main() {
     }
 
     for id <- [1234, 1254] {
-        let Some { value as order } = manager.map.get(id) else panic("expected saved order")
+        let Some(order) = manager.map.get(id) else panic("expected saved order")
         println("order: " + order)
     }
 
