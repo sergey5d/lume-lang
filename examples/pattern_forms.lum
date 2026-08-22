@@ -1,0 +1,147 @@
+# EXPECT:
+# none
+# none None
+# ready
+# some 5
+# some 5 5
+# ignored user
+# bound user Ada
+# field Ada
+# field and user Ada Ada
+# wildcard
+# int 42
+# wildcard value 43
+# string str
+# string alias str
+# string fallback string
+# float 1.5
+# bool true
+# bool alias false
+# empty list
+# list values
+# list fields 10 20 30
+# list rest 10 20 2 4
+# 0
+
+class User {
+    name Str
+}
+
+object Ready {}
+
+def main() Int {
+    missing Int? = None
+    match missing {
+        case Some(_) => ()
+        case None => println("none")
+    }
+
+    match None {
+        case Some(_) => println("error")
+        case None as none => println("none", none)
+    }
+
+    match Ready {
+        case Ready => println("ready")
+    }
+
+    present Int? = Some(5)
+    match present {
+        case Some(x) => println("some", x)
+        case None => ()
+    }
+
+    match present {
+        case Some(x) as val => println("some", val.value, x)
+        case None => ()
+    }
+
+    unknown Any = User { name: "Ada" }
+    match unknown {
+        case _ User => println("ignored user")
+        case _ => ()
+    }
+
+    match unknown {
+        case user User => println("bound user", user.name)
+        case _ => ()
+    }
+
+    known = User { name: "Ada" }
+    match known {
+        case User { name } => println("field", name)
+    }
+
+    match known {
+        case User { name } as user => println("field and user", name, user.name)
+    }
+
+    match true {
+        case _ => println("wildcard")
+    }
+
+    match 42 {
+        case 42 => println("int", 42)
+        case _ => ()
+    }
+
+    match 43 {
+        case 42 => println("error")
+        case _ as other => println("wildcard value", other)
+    }
+
+    match "str" {
+        case "str" => println("string", "str")
+        case _ => ()
+    }
+
+    match "str" {
+        case "str" as s1 => println("string alias", s1)
+        case _ => ()
+    }
+
+    match "string" {
+        case "str" as s1 => println("error", s1)
+        case _ as other => println("string fallback", other)
+    }
+
+    match 1.5 {
+        case 1.5 as value => println("float", value)
+        case _ => ()
+    }
+
+    match true {
+        case true => println("bool", true)
+        case false => ()
+    }
+
+    match false {
+        case true => ()
+        case false as value => println("bool alias", value)
+    }
+
+    empty [Int] = []
+    match empty {
+        case [] => println("empty list")
+        case _ => ()
+    }
+
+    match [1, 2, 3] {
+        case [1, 2, 3] => println("list values")
+        case _ => ()
+    }
+
+    match [10, 20, 30] {
+        case [first, second, third] => println("list fields", first, second, third)
+        case _ => ()
+    }
+
+    numbers = [10, 20, 30, 40]
+    match numbers {
+        case [first, second, ...rest] as list =>
+            println("list rest", first, second, rest.size(), list.size())
+        case _ => ()
+    }
+
+    0
+}

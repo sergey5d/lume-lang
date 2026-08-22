@@ -2972,7 +2972,9 @@ If no case matches, `partial match` returns `None`.
 Supported pattern families:
 
 - wildcard: `_`
-- whole-value alias: `_ as x`, `User { name } as user`
+- whole-value alias: `_ as x`, `42 as value`, `None as none`,
+  `Some(value) as some`, `[first, ...rest] as list`,
+  `User { name } as user`
 - literal/value patterns: `1`, `"hello"`, `true`
 - case alternatives: `case A | B => ...`
 - tuple patterns: `(x, y)`
@@ -3101,7 +3103,23 @@ case Some(_) => ...
 case Some(User { name }) => ...
 case Box(Some(x)) => ...
 case Ok(value Worker) => ...
+case Some(x) as some => println(x, some.value)
 ```
+
+Aliasing a unary enum-case pattern retains that concrete case view, so the
+complete alias exposes the matched case's fields while the nested pattern
+continues to bind or test its payload.
+
+`as` may alias any complete pattern, including literals and list patterns:
+
+```txt
+case 42 as value => println(value)
+case "str" as text => println(text)
+case [first, second, third] as list => println(first, list.size())
+case [first, second, ...rest] as list => println(rest.size(), list.size())
+```
+
+The alias is introduced only when the complete inner pattern succeeds.
 
 Conceptually, `Some(x)` is `Some { value as x }`, and `Some(User { name })`
 is `Some { value: User { name } }`. The type or case must have exactly one

@@ -3554,12 +3554,22 @@ impl<'a> FunctionLowerer<'a> {
             Pattern::Type { target, .. } => lower_type_ref(target),
             Pattern::Record { path, .. } if !path.is_empty() => {
                 match self.lookup_record_pattern_kind(path) {
+                    Some(ConstructorPatternKind::EnumCase { case_name, .. }) => self
+                        .enum_case_view_type(scrutinee, &case_name)
+                        .unwrap_or_else(|| {
+                            self.operand_type(scrutinee).unwrap_or(ir::Type::Unknown)
+                        }),
                     Some(ConstructorPatternKind::TypeDestructure { ty, .. }) => ty,
                     _ => self.operand_type(scrutinee).unwrap_or(ir::Type::Unknown),
                 }
             }
             Pattern::Constructor { path, args, .. } => {
                 match self.lookup_constructor_pattern_kind(path, args.len()) {
+                    Some(ConstructorPatternKind::EnumCase { case_name, .. }) => self
+                        .enum_case_view_type(scrutinee, &case_name)
+                        .unwrap_or_else(|| {
+                            self.operand_type(scrutinee).unwrap_or(ir::Type::Unknown)
+                        }),
                     Some(ConstructorPatternKind::TypeDestructure { ty, .. })
                     | Some(ConstructorPatternKind::ObjectSingleton { ty }) => ty,
                     _ => self.operand_type(scrutinee).unwrap_or(ir::Type::Unknown),
@@ -3567,6 +3577,16 @@ impl<'a> FunctionLowerer<'a> {
             }
             _ => self.operand_type(scrutinee).unwrap_or(ir::Type::Unknown),
         }
+    }
+
+    fn enum_case_view_type(&self, scrutinee: &ir::Operand, case_name: &str) -> Option<ir::Type> {
+        let ir::Type::Named { name, args } = self.operand_type(scrutinee)? else {
+            return None;
+        };
+        Some(ir::Type::Named {
+            name: enum_case_view_name(&name, case_name),
+            args,
+        })
     }
 
     fn constructor_pattern_field_type(
@@ -5146,6 +5166,34 @@ impl<'a> FunctionLowerer<'a> {
                 name: type_name,
                 args,
             } => {
+                if let Some((owner_name, case_name)) = enum_case_view_parts(type_name) {
+                    if let Some(field_ty) =
+                        builtin_enum_case_view_field_type(owner_name, case_name, name, args)
+                    {
+                        return Some(field_ty);
+                    }
+                    let owner = self
+                        .program
+                        .types
+                        .iter()
+                        .find(|ty| ty.kind == ast::TypeKind::Enum && ty.name == owner_name)?;
+                    let subst = ir_type_subst(owner, args);
+                    if let Some(field) = owner
+                        .enum_cases
+                        .iter()
+                        .find(|case| case.name == case_name)
+                        .and_then(|case| case.fields.iter().find(|field| field.name == name))
+                    {
+                        return Some(substitute_ir_type(&field.ty, &subst));
+                    }
+                    return self.infer_member_type(
+                        &ir::Type::Named {
+                            name: owner_name.to_string(),
+                            args: args.clone(),
+                        },
+                        name,
+                    );
+                }
                 let Some(ty) = self.program.types.iter().find(|ty| ty.name == *type_name) else {
                     return self
                         .extension_member_type(type_name, args, name)
@@ -9123,6 +9171,31 @@ fn enum_case_pattern_fields(
     }
 }
 
+fn enum_case_view_name(owner: &str, case_name: &str) -> String {
+    format!("{owner}::{case_name}")
+}
+
+fn enum_case_view_parts(name: &str) -> Option<(&str, &str)> {
+    let (owner, case_name) = name.split_once("::")?;
+    (!owner.is_empty() && !case_name.is_empty()).then_some((owner, case_name))
+}
+
+fn builtin_enum_case_view_field_type(
+    owner: &str,
+    case_name: &str,
+    field_name: &str,
+    args: &[ir::Type],
+) -> Option<ir::Type> {
+    match (owner, case_name, field_name, args) {
+        ("Option", "Some", "value", [value]) => Some(value.clone()),
+        ("Result", "Ok", "value", [value, _]) => Some(value.clone()),
+        ("Result", "Err", "error", [_, error]) => Some(error.clone()),
+        ("Either", "Left", "value", [left, _]) => Some(left.clone()),
+        ("Either", "Right", "value", [_, right]) => Some(right.clone()),
+        _ => None,
+    }
+}
+
 fn arrange_named_call_args<'a>(
     params: &[String],
     args: &'a [core::CallArg],
@@ -9251,6 +9324,44 @@ mod tests {
         let main = ir.function(ir::FunctionId(1)).expect("main function");
         assert_eq!(main.params.len(), 0);
         assert!(!main.blocks.is_empty());
+    }
+
+    #[test]
+    fn lowers_enum_case_alias_as_case_view() {
+        let program = parse_inline(
+            r#"
+            enum Payload {
+                case Item {
+                    value Int
+                }
+            }
+
+            def read(payload Payload) Int = match payload {
+                case Payload.Item(item) as whole => whole.value + item
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let read = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "read")
+            .unwrap();
+        let whole = read
+            .locals
+            .iter()
+            .find(|local| local.name == "whole")
+            .unwrap();
+        assert_eq!(
+            whole.ty,
+            ir::Type::Named {
+                name: "Payload::Item".to_string(),
+                args: Vec::new(),
+            }
+        );
     }
 
     #[test]

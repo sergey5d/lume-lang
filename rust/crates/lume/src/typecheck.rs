@@ -202,10 +202,14 @@ impl Ty {
             Ty::Wildcard => "_".to_string(),
             Ty::Capture(_) => "_".to_string(),
             Ty::Never => "Never".to_string(),
-            Ty::Named(name, args) if args.is_empty() => name.clone(),
+            Ty::Named(name, args) if args.is_empty() => enum_case_view_parts(name)
+                .map(|(owner, case)| format!("{owner}.{case}"))
+                .unwrap_or_else(|| name.clone()),
             Ty::Named(name, args) => format!(
                 "{}[{}]",
-                name,
+                enum_case_view_parts(name)
+                    .map(|(owner, case)| format!("{owner}.{case}"))
+                    .unwrap_or_else(|| name.clone()),
                 args.iter().map(Ty::describe).collect::<Vec<_>>().join(", ")
             ),
             Ty::Tuple(items) => format!(
@@ -7455,15 +7459,17 @@ impl<'a> Checker<'a> {
         match pattern {
             Pattern::Alias { inner, .. } => self.whole_pattern_binding_type(inner, scrutinee),
             Pattern::Type { target, .. } => self.ty_from_type_ref(target),
-            Pattern::Record { path, .. } if !path.is_empty() => self
-                .lookup_record_pattern_target(path, scrutinee)
-                .map(|(_, target, _)| target)
-                .unwrap_or_else(|| scrutinee.clone()),
+            Pattern::Record { path, .. } if !path.is_empty() => {
+                if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
+                    return self.enum_case_view_type(path, &case, scrutinee);
+                }
+                self.lookup_record_pattern_target(path, scrutinee)
+                    .map(|(_, target, _)| target)
+                    .unwrap_or_else(|| scrutinee.clone())
+            }
             Pattern::Constructor { path, .. } => {
                 if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
-                    let mut subst = HashMap::new();
-                    infer_type_subst(&case.result, scrutinee, &mut subst);
-                    return materialize_type(&substitute_type(&case.result, &subst));
+                    return self.enum_case_view_type(path, &case, scrutinee);
                 }
                 if let Some(object) = self.lookup_object_pattern(path) {
                     return Ty::Named(object.name, Vec::new());
@@ -7474,6 +7480,17 @@ impl<'a> Checker<'a> {
             }
             _ => scrutinee.clone(),
         }
+    }
+
+    fn enum_case_view_type(&self, path: &[String], case: &EnumCaseSig, scrutinee: &Ty) -> Ty {
+        let mut subst = HashMap::new();
+        infer_type_subst(&case.result, scrutinee, &mut subst);
+        let result = materialize_type(&substitute_type(&case.result, &subst));
+        let Ty::Named(owner, args) = result else {
+            return scrutinee.clone();
+        };
+        let case_name = path.last().cloned().unwrap_or_default();
+        Ty::Named(enum_case_view_name(&owner, &case_name), args)
     }
 
     fn enum_case_extractable_params(&self, case: &EnumCaseSig) -> Vec<FieldSig> {
@@ -8087,6 +8104,24 @@ impl<'a> Checker<'a> {
         }
         match receiver {
             Ty::Named(type_name, args) => {
+                if let Some((owner_name, case_name)) = enum_case_view_parts(type_name) {
+                    let owner = self.lookup_any_type(owner_name)?;
+                    let subst = owner
+                        .type_params
+                        .iter()
+                        .cloned()
+                        .zip(args.iter().cloned())
+                        .collect::<HashMap<_, _>>();
+                    if let Some(field) = owner
+                        .enum_cases
+                        .get(case_name)
+                        .and_then(|case| case.params.iter().find(|field| field.name == name))
+                    {
+                        return Some(substitute_type(&field.ty, &subst));
+                    }
+                    return self
+                        .member_type(&Ty::Named(owner_name.to_string(), args.clone()), name);
+                }
                 let Some(sig) = self.lookup_any_type(type_name) else {
                     let extension_methods =
                         self.extension_method_sigs_for_named_type(type_name, args, name);
@@ -11450,9 +11485,14 @@ fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
         (Ty::Capture(left), Ty::Capture(right)) => left == right,
         (Ty::TypeParam(left), Ty::TypeParam(right)) => left == right,
         (Ty::Named(left, left_args), Ty::Named(right, right_args)) => {
-            left == right
+            (left == right
                 && left_args.len() == right_args.len()
-                && type_args_assignable(left, left_args, right_args)
+                && type_args_assignable(left, left_args, right_args))
+                || enum_case_view_parts(left).is_some_and(|(owner, _)| {
+                    owner == right
+                        && left_args.len() == right_args.len()
+                        && type_args_assignable(owner, left_args, right_args)
+                })
         }
         (Ty::Tuple(left), Ty::Tuple(right)) => {
             left.len() == right.len()
@@ -11476,6 +11516,15 @@ fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
         }
         _ => false,
     }
+}
+
+fn enum_case_view_name(owner: &str, case_name: &str) -> String {
+    format!("{owner}::{case_name}")
+}
+
+fn enum_case_view_parts(name: &str) -> Option<(&str, &str)> {
+    let (owner, case_name) = name.split_once("::")?;
+    (!owner.is_empty() && !case_name.is_empty()).then_some((owner, case_name))
 }
 
 fn capture_id(ty: &Ty) -> Option<usize> {
@@ -14474,9 +14523,15 @@ enum Status {
     case Pending
 }
 
+enum Payload {
+    case Item {
+        value Int
+    }
+}
+
 object Ready {}
 
-def main(value Any, status Status) Unit {
+def main(value Any, status Status, maybe Option[Int], payload Payload) Unit {
     match status {
         case Pending => ()
     }
@@ -14486,6 +14541,13 @@ def main(value Any, status Status) Unit {
     }
     match Ready {
         case Ready => ()
+    }
+    match maybe {
+        case Some(item) as some => println(item, some.value)
+        case None => ()
+    }
+    match payload {
+        case Payload.Item(item) as whole => println(item, whole.value)
     }
 }
 "#,

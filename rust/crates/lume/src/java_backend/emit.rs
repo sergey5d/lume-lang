@@ -2782,7 +2782,8 @@ impl<'a> FunctionEmitter<'a> {
                     Some(ir::Type::Named {
                         name: ref type_name,
                         ..
-                    }) if is_core_accessor_backed_type(type_name)
+                    }) if enum_case_view_parts(type_name).is_some()
+                        || is_core_accessor_backed_type(type_name)
                         || self.type_def(type_name).is_some_and(|ty| {
                             ty.kind == TypeKind::Record
                                 || ((ty.kind == TypeKind::Interface
@@ -4672,16 +4673,10 @@ impl<'a> FunctionEmitter<'a> {
                     args.first().and_then(|arg| self.operand_type(arg))
                 }
                 ir::Callee::Intrinsic(ir::Intrinsic::ListLen) => Some(ir::Type::Int),
-                ir::Callee::Intrinsic(ir::Intrinsic::ListGet) => {
-                    args.first().and_then(|arg| match self.operand_type(arg)? {
-                        ir::Type::Named { name, args } if name == "Vector" && args.len() == 1 => {
-                            args.into_iter().next()
-                        }
-                        _ => Some(ir::Type::Unknown),
-                    })
-                }
-                ir::Callee::Intrinsic(ir::Intrinsic::ListSlice) => {
-                    args.first().and_then(|arg| self.operand_type(arg))
+                // These runtime helpers return Object/LumeVector<?> at the Java ABI.
+                // Keep the source unknown so assignment emits the typed IR cast.
+                ir::Callee::Intrinsic(ir::Intrinsic::ListGet | ir::Intrinsic::ListSlice) => {
+                    Some(ir::Type::Unknown)
                 }
                 ir::Callee::Intrinsic(ir::Intrinsic::IterInit) => args
                     .first()
@@ -4918,6 +4913,9 @@ impl<'a> FunctionEmitter<'a> {
         let ir::Type::Named { name, args } = ty else {
             return false;
         };
+        if enum_case_view_parts(name).is_some() {
+            return false;
+        }
         args.is_empty()
             && !self.type_param_is_bound(name)
             && java_named_builtin_value(name).is_none()
@@ -5134,6 +5132,9 @@ impl JavaNames {
             ir::Type::Float => "Double".to_string(),
             ir::Type::Str => "String".to_string(),
             ir::Type::Function { params, ret } => self.function_type(params, ret),
+            ir::Type::Named { name, args } if enum_case_view_parts(name).is_some() => {
+                self.enum_case_view_type(name, args)
+            }
             ir::Type::Named { name, .. } if is_reflection_type(name) => {
                 "lume.core.LumeType".to_string()
             }
@@ -5194,6 +5195,25 @@ impl JavaNames {
             .get(name)
             .cloned()
             .unwrap_or_else(|| java_type_name(name))
+    }
+
+    fn enum_case_view_type(&self, name: &str, args: &[ir::Type]) -> String {
+        let (owner, case_name) = enum_case_view_parts(name)
+            .expect("enum case view type checked before Java type rendering");
+        let owner = match owner {
+            "Option" | "Result" | "Either" => format!("lume.core.{owner}"),
+            _ => self.named_type(owner),
+        };
+        let args = args
+            .iter()
+            .map(|arg| self.value_type(arg))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if args.is_empty() {
+            format!("{owner}.{}", java_type_name(case_name))
+        } else {
+            format!("{owner}.{}<{args}>", java_type_name(case_name))
+        }
     }
 
     fn is_java_type(&self, name: &str) -> bool {
@@ -5546,6 +5566,11 @@ fn java_type_args(params: &[String]) -> String {
 
 fn java_type_name(name: &str) -> String {
     sanitize_identifier(name, IdentifierStyle::Type)
+}
+
+fn enum_case_view_parts(name: &str) -> Option<(&str, &str)> {
+    let (owner, case_name) = name.split_once("::")?;
+    (!owner.is_empty() && !case_name.is_empty()).then_some((owner, case_name))
 }
 
 fn coerce_to_java_primitive(expr: String, coercion: Option<JavaPrimitiveCoercion>) -> String {

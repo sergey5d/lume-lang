@@ -3770,6 +3770,12 @@ enum ReviewState {
     }
 }
 
+enum Payload {
+    case Item {
+        value Int
+    }
+}
+
 def describe(value Any) Str = match value {
     case User {
         location as home
@@ -3788,16 +3794,63 @@ def describeReview(value ReviewState) Str = match value {
     case { label } => label
 }
 
+def describeMaybe(value Option[Int]) Str = match value {
+    case Some(item) as some => some.value.toStr() + " " + item.toStr()
+    case None => "none"
+}
+
+def describeNoneAlias(value Option[Int]) Str = match value {
+    case Some(_) => "error"
+    case None as none => none.toStr()
+}
+
+def describePayload(value Payload) Str = match value {
+    case Payload.Item(item) as whole => whole.value.toStr() + " " + item.toStr()
+}
+
+def describeList(values [Int]) Str = match values {
+    case [first, second, ...rest] as list =>
+        first.toStr() + " " + second.toStr() + " " + rest.size().toStr() + " " + list.size().toStr()
+    case _ => "short"
+}
+
 def main() Unit {
     println(describe(User { name: "Ada", location: Location { city: "Tampa" }, age: 18 }))
     println(describe(User { name: "Bob", location: Location { city: "Miami" }, age: 19 }))
     println(describe("not a user"))
     println(describeReview(ReviewState.Approved { label: "approved" }))
     println(describeSingleton(Ready))
+    println(describeMaybe(Some(5)))
+    println(describeNoneAlias(None))
+    println(describePayload(Payload.Item(7)))
+    println(describeList([10, 20, 30, 40]))
 }
 "#,
         )
         .expect("write source");
+
+        let bundled =
+            build_backend_bundle_with_load_options(&source, &ModuleLoadOptions::default())
+                .expect("build backend bundle");
+        assert!(bundled.diagnostics.is_empty(), "{:#?}", bundled.diagnostics);
+        let ir = &bundled.bundle.expect("backend bundle").ir;
+        let describe_payload = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "describePayload")
+            .expect("describePayload function");
+        let whole = describe_payload
+            .locals
+            .iter()
+            .find(|local| local.name == "whole")
+            .expect("whole alias local");
+        assert_eq!(
+            whole.ty,
+            crate::ir::Type::Named {
+                name: "Payload::Item".to_string(),
+                args: Vec::new(),
+            }
+        );
 
         let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -3823,7 +3876,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Ada Tampa Ada\nother\nother\napproved\nready\n"
+            "Ada Tampa Ada\nother\nother\napproved\nready\n5 5\nNone[]\n7 7\n10 20 2 4\n"
         );
 
         let _ = fs::remove_dir_all(temp);
