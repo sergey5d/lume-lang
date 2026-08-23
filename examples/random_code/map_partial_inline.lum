@@ -18,13 +18,12 @@ def main() Unit {
     ]
 
     extracted [Int?] = values.map(value => partial match value {
-        case SomeX { value as x } => x * 10
-        }
-    )
+        case SomeX(x) => x * 10
+    })
 
-    let Some(first) = extracted.at(0) else return ()
-    let Some(second) = extracted.at(1) else return ()
-    let Some(third) = extracted.at(2) else return ()
+    first = extracted.at(0) ?? return ()
+    second = extracted.at(1) ?? return ()
+    third = extracted.at(2) ?? return ()
 
     println("first " + first.getOr(0))
     println("second " + second.isEmpty())
