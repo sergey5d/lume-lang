@@ -3,6 +3,6 @@
 
 def main() Unit {
     values = [1, 2]
-    entries [Str : Int] = ["one": 1]
+    entries [Str: Int] = ["one": 1]
     mixed = [...values, ...entries]
 }
