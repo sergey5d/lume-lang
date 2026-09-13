@@ -3096,6 +3096,39 @@ def run(size Size) Str = match size {
 }
 
 #[test]
+fn parses_match_guards_without_consuming_the_case_arrow() {
+    let result = parse(
+        r#"
+def run(value Any, ready Bool, values [Int]) Int = match value {
+    case _ if ready => 1
+    case _ if value is Int => 2
+    case _ if values.exists(item => item > 0) => 3
+    case _ if values.exists { item => item > 0 } => 4
+    case _ => 0
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    let CallableBody::Expr(Expr::Match { cases, .. }) = &function.body else {
+        panic!("expected match expression body");
+    };
+
+    assert!(matches!(
+        &cases[0].guard,
+        Some(Expr::Identifier { name, .. }) if name == "ready"
+    ));
+    assert!(matches!(&cases[1].guard, Some(Expr::Is { .. })));
+    assert!(matches!(&cases[2].guard, Some(Expr::Call { .. })));
+    assert!(matches!(&cases[3].guard, Some(Expr::Call { .. })));
+    assert!(cases[4].guard.is_none());
+}
+
+#[test]
 fn rejects_match_without_value() {
     let result = parse(
         r#"

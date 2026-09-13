@@ -2,6 +2,8 @@
 # 12
 # 10
 # 0
+# 1
+# 1
 
 enum MaybeInt {
     case NoneX
@@ -17,6 +19,18 @@ def describe(value MaybeInt) Int =
         case MaybeInt.NoneX => 0
     }
 
+def whenReady(value MaybeInt, ready Bool) Int =
+    match value {
+        case _ if ready => 1
+        case _ => 0
+    }
+
+def whenInt(value Any) Int =
+    match value {
+        case _ if value is Int => 1
+        case _ => 0
+    }
+
 def main() Unit {
     large MaybeInt = MaybeInt.SomeX(12)
     small MaybeInt = MaybeInt.SomeX(3)
@@ -25,4 +39,6 @@ def main() Unit {
     println(describe(large))
     println(describe(small))
     println(describe(empty))
+    println(whenReady(empty, true))
+    println(whenInt(42))
 }

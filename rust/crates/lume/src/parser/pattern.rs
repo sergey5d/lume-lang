@@ -192,6 +192,46 @@ impl<'a> Parser<'a> {
         Some(expr)
     }
 
+    pub(super) fn parse_match_guard_expr(&mut self) -> Option<Expr> {
+        let end = self.scan_match_guard_expr_end(self.index);
+        if end == self.index {
+            self.error_at_current("expected_expression", "expected match guard expression");
+            return None;
+        }
+
+        let mut owned = self.tokens[self.index..end].to_vec();
+        let eof_span = owned
+            .last()
+            .map(|token| token.span)
+            .unwrap_or_else(|| self.current_span());
+        owned.push(Token {
+            kind: TokenKind::Eof,
+            lexeme: String::new(),
+            span: eof_span,
+        });
+
+        let mut parser = Parser {
+            tokens: &owned,
+            index: 0,
+            diagnostics: Vec::new(),
+            allow_trailing_block_call: self.allow_trailing_block_call,
+        };
+        let expr = parser.parse_expr();
+        parser.skip_newlines();
+        if expr.is_some() && !parser.at(TokenKind::Eof) {
+            parser.error_at_current(
+                "unexpected_token",
+                format!(
+                    "expected end of match guard expression, got {}",
+                    parser.current_token_string()
+                ),
+            );
+        }
+        self.diagnostics.extend(parser.diagnostics);
+        self.index = end;
+        expr
+    }
+
     pub(super) fn parse_pattern(&mut self) -> Option<Pattern> {
         self.parse_pattern_at_depth(0)
     }

@@ -197,9 +197,11 @@ Function types:
 - `fn(Int, Bool) Unit`
 - `fn() Unit`
 
-Function types use `fn` directly before a parenthesized parameter-type list,
-followed by the return type without an arrow. Write `fn(Int) Int`, not
-`fn(Int) => Int`, `(Int) => Int`, `Int => Int`, or `fn (Int) Int`.
+Function types use `fn` with a parenthesized parameter-type list, followed by
+the return type without an arrow. Whitespace between `fn` and `(` is
+insignificant; `fn(Int) Int` is the canonical spelling, while `fn (Int) Int`
+is also valid. Arrow forms such as `fn(Int) => Int`, `(Int) => Int`, and
+`Int => Int` are invalid.
 The return type may itself be a function type, as in
 `fn() fn(Int) Str`. Lambda expressions remain keyword-free, for example
 `value => value + 1`.
@@ -2903,6 +2905,10 @@ result = match value {
     case OptionX.NoneX => 0
 }
 ```
+
+The depth-zero `=>` terminates the guard and starts the case body. Arrows inside
+explicitly delimited nested expressions retain their normal meaning, so a guard
+may call a lambda such as `values.exists(value => value > 0)`.
 
 Case alternatives use `|` between patterns. The alternatives share one guard and
 one body:

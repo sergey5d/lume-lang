@@ -320,6 +320,44 @@ impl<'a> Parser<'a> {
         i
     }
 
+    pub(super) fn scan_match_guard_expr_end(&self, start: usize) -> usize {
+        let mut i = start;
+        let mut paren_depth = 0isize;
+        let mut brace_depth = 0isize;
+        let mut bracket_depth = 0isize;
+        while let Some(token) = self.tokens.get(i) {
+            let at_top_level = paren_depth == 0 && brace_depth == 0 && bracket_depth == 0;
+            match token.kind {
+                TokenKind::FatArrow if at_top_level => break,
+                TokenKind::Keyword(Keyword::Case) | TokenKind::Eof if at_top_level => break,
+                TokenKind::LParen => paren_depth += 1,
+                TokenKind::RParen => {
+                    if paren_depth == 0 {
+                        break;
+                    }
+                    paren_depth -= 1;
+                }
+                TokenKind::LBrace => brace_depth += 1,
+                TokenKind::RBrace => {
+                    if brace_depth == 0 {
+                        break;
+                    }
+                    brace_depth -= 1;
+                }
+                TokenKind::LBracket => bracket_depth += 1,
+                TokenKind::RBracket => {
+                    if bracket_depth == 0 {
+                        break;
+                    }
+                    bracket_depth -= 1;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        i
+    }
+
     pub(super) fn is_placeholder_identifier(&self) -> bool {
         self.at(TokenKind::Identifier) && self.current().lexeme == "_"
     }

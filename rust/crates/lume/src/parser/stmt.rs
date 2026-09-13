@@ -928,7 +928,7 @@ impl<'a> Parser<'a> {
                 patterns.push(self.parse_match_pattern()?);
             }
             let guard = if self.match_keyword(Keyword::If) {
-                Some(self.parse_expr()?)
+                Some(self.parse_match_guard_expr()?)
             } else {
                 None
             };
