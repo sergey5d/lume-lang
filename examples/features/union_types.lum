@@ -1,0 +1,43 @@
+# EXPECT:
+# cat Milo
+# bird Pip
+
+class Cat {
+    name Str
+}
+
+class Dog {
+    name Str
+}
+
+class Bird {
+    name Str
+}
+
+type Pet = Cat | Dog
+
+def describe(value Pet) Str = match value {
+    case Cat { name } => "cat " + name
+    case Dog { name } => "dog " + name
+}
+
+def widen(value Pet) Bird | Dog | Cat = value
+
+def main() Unit {
+    pet Pet = Cat("Milo")
+
+    # Union order is irrelevant, and a union widens into a superset.
+    reordered Dog | Cat = pet
+    expanded Bird | Dog | Cat = reordered
+
+    println(describe(reordered))
+
+    another Cat | Bird = Bird("Pip")
+    println(match another {
+        case Cat { name } => "cat " + name
+        case Bird { name } => "bird " + name
+    })
+
+    _ = expanded
+    _ = widen(pet)
+}

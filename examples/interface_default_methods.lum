@@ -7,10 +7,8 @@ interface Greeter {
 }
 
 class OverrideBox with Greeter {
-
     def greet() Str = "class"
 }
-
 
 interface FirstChoice {
     def choose() Str = "first"

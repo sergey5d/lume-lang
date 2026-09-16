@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# unknown_member.*Array.*slice.*
+
+def main() Unit = {
+    values Array[Int] = Array(1, 2, 3)
+    println(values[:2])
+}

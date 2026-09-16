@@ -1,0 +1,21 @@
+# EXPECT:
+# 0,1,2
+# 1,2,3
+# 3,4,5
+# 0,1,2,3,4,5
+# 6
+# 7
+
+def main() Unit = {
+    values = [0, 1, 2, 3, 4, 5]
+
+    println(values[:3].makeStr(","))
+    println(values[1:4].makeStr(","))
+    println(values[3:].makeStr(","))
+
+    copy = values[:]
+    println(copy.makeStr(","))
+    copy.add(6)
+    println(values.size())
+    println(copy.size())
+}

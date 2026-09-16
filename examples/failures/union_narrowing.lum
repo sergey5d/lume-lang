@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*cannot assign value of type 'Cat \| Dog' to binding 'invalid' of type 'Bird \| Dog'.*
+
+class Cat {}
+class Dog {}
+class Bird {}
+
+def main() Unit {
+    source Cat | Dog = Cat {}
+    invalid Bird | Dog = source
+}

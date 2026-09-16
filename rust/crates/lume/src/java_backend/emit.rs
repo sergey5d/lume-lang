@@ -871,7 +871,7 @@ fn method_invoker_expr(owner: &ir::TypeDef, method: &ir::Function, names: &JavaN
 
 fn invoker_erased_value_type(ty: &ir::Type, names: &JavaNames, type_params: &[String]) -> String {
     match ty {
-        ir::Type::TypeParam(_) | ir::Type::Unknown => "Object".to_string(),
+        ir::Type::TypeParam(_) | ir::Type::Unknown | ir::Type::Union(_) => "Object".to_string(),
         ir::Type::Never => "lume.core.LumePanic".to_string(),
         ir::Type::Unit => "lume.core.LumeUnit".to_string(),
         ir::Type::Bool => "Boolean".to_string(),
@@ -1069,6 +1069,16 @@ fn type_value_expr_with_params(ty: &ir::Type, names: &JavaNames, type_params: &[
                 java_string_literal(&rendered)
             )
         }
+        ir::Type::Union(members) => format!(
+            "lume.core.LumeType.primitive({})",
+            java_string_literal(
+                &members
+                    .iter()
+                    .map(type_descriptor_name)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            )
+        ),
         ir::Type::Tuple(items) => {
             let rendered = format!(
                 "({})",
@@ -1112,6 +1122,11 @@ fn type_descriptor_name(ty: &ir::Type) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        ir::Type::Union(members) => members
+            .iter()
+            .map(type_descriptor_name)
+            .collect::<Vec<_>>()
+            .join(" | "),
         ir::Type::Tuple(items) => format!(
             "({})",
             items
@@ -5131,6 +5146,7 @@ impl JavaNames {
             ir::Type::Int => "Long".to_string(),
             ir::Type::Float => "Double".to_string(),
             ir::Type::Str => "String".to_string(),
+            ir::Type::Union(_) => "Object".to_string(),
             ir::Type::Function { params, ret } => self.function_type(params, ret),
             ir::Type::Named { name, args } if enum_case_view_parts(name).is_some() => {
                 self.enum_case_view_type(name, args)
@@ -5443,6 +5459,9 @@ fn builtin_method_param_types(
                 ("add", 1) => Some(vec![args[0].clone()]),
                 ("addAll", 1) => Some(vec![receiver.clone()]),
                 ("at", 1) => Some(vec![ir::Type::Int]),
+                ("slice", 0) if name == "Vector" => Some(Vec::new()),
+                ("slice", 1) if name == "Vector" => Some(vec![ir::Type::Int]),
+                ("slice", 2) if name == "Vector" => Some(vec![ir::Type::Int, ir::Type::Int]),
                 ("setAt", 2) => Some(vec![ir::Type::Int, args[0].clone()]),
                 ("removeAt", 1) if matches!(name.as_str(), "Vector" | "LinkedList") => {
                     Some(vec![ir::Type::Int])
@@ -5470,6 +5489,11 @@ fn builtin_method_return_type(
     arg_len: usize,
 ) -> Option<ir::Type> {
     match receiver {
+        ir::Type::Named { name, args }
+            if name == "Vector" && args.len() == 1 && method == "slice" && arg_len <= 2 =>
+        {
+            Some(receiver.clone())
+        }
         ir::Type::Named { name, args }
             if matches!(name.as_str(), "Vector" | "LinkedList")
                 && args.len() == 1
@@ -5656,7 +5680,7 @@ fn type_is_float_like(ty: &ir::Type) -> bool {
 fn java_type_contains_type_param(ty: &ir::Type) -> bool {
     match ty {
         ir::Type::TypeParam(_) => true,
-        ir::Type::Named { args, .. } | ir::Type::Tuple(args) => {
+        ir::Type::Named { args, .. } | ir::Type::Tuple(args) | ir::Type::Union(args) => {
             args.iter().any(java_type_contains_type_param)
         }
         ir::Type::Record(fields) => fields
@@ -5678,7 +5702,7 @@ fn java_type_contains_type_param(ty: &ir::Type) -> bool {
 fn java_type_contains_unknown(ty: &ir::Type) -> bool {
     match ty {
         ir::Type::Unknown => true,
-        ir::Type::Named { args, .. } | ir::Type::Tuple(args) => {
+        ir::Type::Named { args, .. } | ir::Type::Tuple(args) | ir::Type::Union(args) => {
             args.iter().any(java_type_contains_unknown)
         }
         ir::Type::Record(fields) => fields
@@ -5704,6 +5728,7 @@ fn java_type_needs_reference_cast(ty: &ir::Type) -> bool {
                 || (java_named_builtin_value(name).is_none() && !is_reflection_type(name))
         }
         ir::Type::TypeParam(_)
+        | ir::Type::Union(_)
         | ir::Type::Tuple(_)
         | ir::Type::Record(_)
         | ir::Type::Function { .. } => true,
@@ -5720,7 +5745,7 @@ fn java_type_needs_reference_cast(ty: &ir::Type) -> bool {
 fn java_type_params_are_bound(ty: &ir::Type, bound: &[String]) -> bool {
     match ty {
         ir::Type::TypeParam(name) => bound.iter().any(|param| param == name),
-        ir::Type::Named { args, .. } | ir::Type::Tuple(args) => args
+        ir::Type::Named { args, .. } | ir::Type::Tuple(args) | ir::Type::Union(args) => args
             .iter()
             .all(|arg| java_type_params_are_bound(arg, bound)),
         ir::Type::Record(fields) => fields
@@ -5815,6 +5840,9 @@ fn type_ref_to_ir(reference: &TypeRef) -> ir::Type {
             name: name.clone(),
             args: args.iter().map(type_ref_to_ir).collect(),
         },
+        TypeRef::Union { members, .. } => {
+            ir::Type::Union(members.iter().map(type_ref_to_ir).collect())
+        }
         TypeRef::Tuple { fields, .. } => ir::Type::Tuple(
             fields
                 .iter()

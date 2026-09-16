@@ -271,6 +271,9 @@ fn rewrite_program_for_runtime(
 fn rewrite_item_for_runtime(item: &mut ast::Item, module: &LoadedModule, graph: &ModuleGraph) {
     match item {
         ast::Item::Function(function) => rewrite_function_for_runtime(function, module, graph),
+        ast::Item::TypeAlias(alias) => {
+            rewrite_type_ref_for_runtime(&mut alias.target, module);
+        }
         ast::Item::Type(decl) => rewrite_type_decl_for_runtime(decl, module, graph),
         ast::Item::Extension(block) => rewrite_extension_block_for_runtime(block, module, graph),
         ast::Item::Statement(stmt) => rewrite_stmt_for_runtime(stmt, module, graph),
@@ -698,12 +701,22 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
             rewrite_type_ref_for_runtime(ty, module);
         }
         ast::Expr::If {
-            condition,
+            condition_clauses,
             then_block,
             else_branch,
             ..
         } => {
-            rewrite_expr_for_runtime(condition, module, graph);
+            for clause in condition_clauses {
+                match clause {
+                    ast::IfConditionClause::Let(clause) => {
+                        rewrite_pattern_for_runtime(&mut clause.pattern, module);
+                        rewrite_expr_for_runtime(&mut clause.value, module, graph);
+                    }
+                    ast::IfConditionClause::Expr(condition) => {
+                        rewrite_expr_for_runtime(condition, module, graph);
+                    }
+                }
+            }
             rewrite_block_for_runtime(then_block, module, graph);
             rewrite_else_expr_branch_for_runtime(else_branch, module, graph);
         }
@@ -785,6 +798,11 @@ fn rewrite_type_ref_for_runtime(reference: &mut ast::TypeRef, module: &LoadedMod
                 rewrite_type_ref_for_runtime(param, module);
             }
             rewrite_type_ref_for_runtime(ret, module);
+        }
+        ast::TypeRef::Union { members, .. } => {
+            for member in members {
+                rewrite_type_ref_for_runtime(member, module);
+            }
         }
     }
 }
@@ -1946,6 +1964,13 @@ impl<'a> Interpreter<'a> {
                 .type_id_by_name_any_kind(name)
                 .map(RuntimeTypeValue::Runtime)
                 .unwrap_or_else(|| RuntimeTypeValue::Primitive(name.clone())),
+            ir::Type::Union(members) => RuntimeTypeValue::Primitive(
+                members
+                    .iter()
+                    .map(render_ir_type)
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+            ),
             ir::Type::Tuple(items) => RuntimeTypeValue::Tuple(items.clone()),
             ir::Type::Record(fields) => RuntimeTypeValue::AnonymousShape(fields.clone()),
             ir::Type::Function { params, ret } => RuntimeTypeValue::Function {
@@ -5041,6 +5066,9 @@ impl<'a> Interpreter<'a> {
                     .type_by_name_kind(name, crate::ast::TypeKind::Record)
                     .is_some_and(|ty| self.value_matches_runtime_shape(other, ty)),
             },
+            ir::Type::Union(members) => members
+                .iter()
+                .any(|member| self.value_matches_type(value, member)),
             ir::Type::Tuple(items) => match value {
                 Value::Tuple(values) => {
                     values.len() == items.len()
@@ -6123,6 +6151,11 @@ fn render_ir_type(ty: &ir::Type) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
+        ir::Type::Union(members) => members
+            .iter()
+            .map(render_ir_type)
+            .collect::<Vec<_>>()
+            .join(" | "),
         ir::Type::Tuple(items) => format!(
             "({})",
             items
@@ -7718,6 +7751,67 @@ $name
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "apple 12\namount 13 cad\n");
+    }
+
+    #[test]
+    fn runs_composed_control_flow_expressions() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                ifValue = if true { 10 } else { 20 } - 1
+                matchValue = match false {
+                    case true => 10
+                    case false => 20
+                } - 1
+                rightIf = 1 + if true { 2 } else { 3 }
+
+                OS.println(ifValue)
+                OS.println(matchValue)
+                OS.println(rightIf)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "9\n19\n3\n");
+    }
+
+    #[test]
+    fn runs_mixed_boolean_and_let_condition_clauses() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                maybe Int? = Some(4)
+
+                selected = if true && let value <- maybe && value > 3 {
+                    value + 1
+                } else {
+                    0
+                }
+                OS.println(selected)
+
+                if true && let value <- maybe && value == 4 {
+                    OS.println(value)
+                }
+
+                var iterations Int = 0
+                while iterations < 1 && let value <- maybe && value == 4 {
+                    OS.println(value + iterations)
+                    iterations += 1
+                }
+
+                unknown Any = "lume"
+                if true && unknown is Str && unknown.size() == 4 {
+                    OS.println(unknown)
+                }
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "5\n4\n4\nlume\n");
     }
 
     #[test]

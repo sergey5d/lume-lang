@@ -190,6 +190,7 @@ pub(crate) enum ImportedKind {
     Function,
     Value,
     Type,
+    TypeAlias,
     Interface,
     Object,
 }
@@ -197,6 +198,7 @@ pub(crate) enum ImportedKind {
 #[derive(Debug, Clone, Default)]
 struct AmbientRegistry {
     types: HashMap<String, TypeInfo>,
+    aliases: HashMap<String, TypeAliasInfo>,
     values: HashSet<String>,
 }
 
@@ -247,6 +249,7 @@ impl AmbientRegistry {
                 registry.values.insert(name.clone());
                 registry.types.insert(name, info);
             }
+            registry.aliases.extend(decls.aliases);
         }
 
         Ok(registry)
@@ -264,6 +267,13 @@ struct TopLevelDecls {
     globals: HashMap<String, Symbol>,
     types: HashMap<String, TypeInfo>,
     objects: HashMap<String, TypeInfo>,
+    aliases: HashMap<String, TypeAliasInfo>,
+}
+
+#[derive(Debug, Clone)]
+struct TypeAliasInfo {
+    visibility: Visibility,
+    span: crate::source::Span,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -384,6 +394,7 @@ struct ModuleNamespace {
     globals: HashMap<String, Symbol>,
     types: HashMap<String, TypeInfo>,
     objects: HashMap<String, TypeInfo>,
+    aliases: HashMap<String, TypeAliasInfo>,
 }
 
 fn load_module_with_options(
@@ -762,6 +773,15 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
             });
         }
     }
+    for (name, alias) in decls.aliases {
+        if alias.visibility != Visibility::Hidden || same_module {
+            out.push(ImportSymbol {
+                name,
+                alias: None,
+                span: alias.span,
+            });
+        }
+    }
     out
 }
 
@@ -840,6 +860,16 @@ fn resolve_imported_symbol(
             });
         }
     }
+    if let Some(alias) = decls.aliases.get(name) {
+        if alias.visibility != Visibility::Hidden || same_module {
+            return Some(ImportedSymbol {
+                original_name: name.to_string(),
+                object_name: None,
+                kind: ImportedKind::TypeAlias,
+                module_path: module.path.clone(),
+            });
+        }
+    }
     None
 }
 
@@ -886,6 +916,15 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
                 } else {
                     decls.types.insert(decl.name.clone(), info);
                 }
+            }
+            crate::ast::Item::TypeAlias(alias) => {
+                decls.aliases.insert(
+                    alias.name.clone(),
+                    TypeAliasInfo {
+                        visibility: alias.visibility,
+                        span: alias.span,
+                    },
+                );
             }
             crate::ast::Item::Statement(Stmt::Binding(binding)) => {
                 for local in &binding.bindings {
@@ -954,11 +993,13 @@ struct Resolver<'a> {
     functions: HashMap<String, crate::source::Span>,
     types: HashMap<String, TypeInfo>,
     objects: HashMap<String, TypeInfo>,
+    aliases: HashMap<String, TypeAliasInfo>,
     enum_case_values: HashMap<String, crate::source::Span>,
     imported_values: HashMap<String, Symbol>,
     imported_functions: HashMap<String, crate::source::Span>,
     imported_types: HashMap<String, TypeInfo>,
     imported_objects: HashMap<String, TypeInfo>,
+    imported_aliases: HashMap<String, TypeAliasInfo>,
     modules_by_alias: HashMap<String, ModuleNamespace>,
     field_hint_scopes: Vec<FieldHintScope>,
     method_hint_scopes: Vec<HashSet<String>>,
@@ -984,11 +1025,13 @@ impl<'a> Resolver<'a> {
             functions: HashMap::new(),
             types: HashMap::new(),
             objects: HashMap::new(),
+            aliases: HashMap::new(),
             enum_case_values: HashMap::new(),
             imported_values: HashMap::new(),
             imported_functions: HashMap::new(),
             imported_types: HashMap::new(),
             imported_objects: HashMap::new(),
+            imported_aliases: HashMap::new(),
             modules_by_alias: HashMap::new(),
             field_hint_scopes: Vec::new(),
             method_hint_scopes: Vec::new(),
@@ -1031,7 +1074,8 @@ impl<'a> Resolver<'a> {
                         self.objects.get(&decl.name).map(|info| info.span)
                     } else {
                         self.types.get(&decl.name).map(|info| info.span)
-                    };
+                    }
+                    .or_else(|| self.aliases.get(&decl.name).map(|info| info.span));
                     if let Some(previous) = previous {
                         self.add_duplicate(
                             "duplicate_type",
@@ -1052,6 +1096,30 @@ impl<'a> Resolver<'a> {
                             }
                             self.types.insert(decl.name.clone(), info);
                         }
+                    }
+                }
+                crate::ast::Item::TypeAlias(alias) => {
+                    let previous = self
+                        .aliases
+                        .get(&alias.name)
+                        .map(|info| info.span)
+                        .or_else(|| self.types.get(&alias.name).map(|info| info.span))
+                        .or_else(|| self.objects.get(&alias.name).map(|info| info.span));
+                    if let Some(previous) = previous {
+                        self.add_duplicate(
+                            "duplicate_type",
+                            format!("duplicate type '{}'", alias.name),
+                            alias.span,
+                            previous,
+                        );
+                    } else {
+                        self.aliases.insert(
+                            alias.name.clone(),
+                            TypeAliasInfo {
+                                visibility: alias.visibility,
+                                span: alias.span,
+                            },
+                        );
                     }
                 }
                 crate::ast::Item::Statement(Stmt::Binding(binding)) => {
@@ -1097,6 +1165,11 @@ impl<'a> Resolver<'a> {
                     .into_iter()
                     .filter(|(_, info)| info.visibility != Visibility::Hidden)
                     .collect(),
+                aliases: decls
+                    .aliases
+                    .into_iter()
+                    .filter(|(_, info)| info.visibility != Visibility::Hidden)
+                    .collect(),
             };
             self.modules_by_alias.insert(alias.clone(), namespace);
         }
@@ -1137,6 +1210,12 @@ impl<'a> Resolver<'a> {
                 ImportedKind::Object => {
                     if let Some(info) = decls.objects.get(&symbol.original_name) {
                         self.imported_objects
+                            .insert(local_name.clone(), info.clone());
+                    }
+                }
+                ImportedKind::TypeAlias => {
+                    if let Some(info) = decls.aliases.get(&symbol.original_name) {
+                        self.imported_aliases
                             .insert(local_name.clone(), info.clone());
                     }
                 }
@@ -1188,6 +1267,9 @@ impl<'a> Resolver<'a> {
         for item in &self.module.program.items {
             match item {
                 crate::ast::Item::Function(function) => self.resolve_function(function),
+                crate::ast::Item::TypeAlias(alias) => {
+                    self.resolve_type_ref(Some(&alias.target));
+                }
                 crate::ast::Item::Type(decl) => self.resolve_type_decl(decl),
                 crate::ast::Item::Extension(block) => self.resolve_extension(block),
                 crate::ast::Item::Statement(Stmt::Binding(_)) => {}
@@ -2063,13 +2145,25 @@ impl<'a> Resolver<'a> {
                 self.resolve_type_ref(Some(ty));
             }
             Expr::If {
-                condition,
+                condition_clauses,
                 then_block,
                 else_branch,
                 ..
             } => {
-                self.resolve_expr(condition);
-                self.resolve_block(then_block);
+                self.push_scope();
+                for clause in condition_clauses {
+                    match clause {
+                        IfConditionClause::Let(clause) => {
+                            self.resolve_expr(&clause.value);
+                            self.resolve_pattern(&clause.pattern);
+                        }
+                        IfConditionClause::Expr(condition) => self.resolve_expr(condition),
+                    }
+                }
+                for statement in &then_block.statements {
+                    self.resolve_stmt(statement);
+                }
+                self.pop_scope();
                 self.resolve_else_expr_branch(else_branch);
             }
             Expr::Block { body, .. } => self.resolve_block(body),
@@ -2267,6 +2361,11 @@ impl<'a> Resolver<'a> {
                 }
                 self.resolve_type_ref(Some(ret));
             }
+            TypeRef::Union { members, .. } => {
+                for member in members {
+                    self.resolve_type_ref(Some(member));
+                }
+            }
             TypeRef::Tuple { fields, .. } => {
                 for field in fields {
                     self.resolve_type_ref(Some(&field.ty));
@@ -2311,6 +2410,16 @@ impl<'a> Resolver<'a> {
                                 name,
                                 arity_label(arity)
                             ),
+                            *span,
+                        );
+                    }
+                    return;
+                }
+                if self.lookup_alias(name).is_some() {
+                    if !args.is_empty() {
+                        self.add_error(
+                            "invalid_type_arity",
+                            format!("type alias '{}' does not accept type arguments", name),
                             *span,
                         );
                     }
@@ -2378,6 +2487,16 @@ impl<'a> Resolver<'a> {
             }
             TypeRef::Function { .. } | TypeRef::Tuple { .. } | TypeRef::Record { .. } => {
                 self.resolve_type_ref(Some(reference));
+            }
+            TypeRef::Union { span, .. } => {
+                self.resolve_type_ref(Some(reference));
+                self.add_error(
+                    diagnostic_code,
+                    format!(
+                        "{construct} require one concrete runtime type; match union alternatives separately"
+                    ),
+                    *span,
+                );
             }
             TypeRef::Named { name, args, span } => {
                 for arg in args {
@@ -2686,6 +2805,13 @@ impl<'a> Resolver<'a> {
             .or_else(|| self.ambient.types.get(name))
     }
 
+    fn lookup_alias(&self, name: &str) -> Option<&TypeAliasInfo> {
+        self.aliases
+            .get(name)
+            .or_else(|| self.imported_aliases.get(name))
+            .or_else(|| self.ambient.aliases.get(name))
+    }
+
     fn is_type_param(&self, name: &str) -> bool {
         self.type_scopes
             .iter()
@@ -2765,6 +2891,7 @@ impl<'a> Resolver<'a> {
                     || namespace.globals.contains_key(member)
                     || namespace.types.contains_key(member)
                     || namespace.objects.contains_key(member)
+                    || namespace.aliases.contains_key(member)
                 {
                     None
                 } else {

@@ -108,6 +108,7 @@ enum Ty {
     Capture(usize),
     Never,
     Named(String, Vec<Ty>),
+    Union(Vec<Ty>),
     Tuple(Vec<Ty>),
     Record(Vec<(String, Ty)>),
     Function(Vec<Ty>, Box<Ty>),
@@ -196,6 +197,26 @@ impl Ty {
         Self::named("Unit")
     }
 
+    fn union(members: impl IntoIterator<Item = Ty>) -> Self {
+        let mut normalized = Vec::new();
+        for member in members {
+            match member {
+                Ty::Union(nested) => normalized.extend(nested),
+                Ty::Never => {}
+                Ty::Unknown => return Ty::Unknown,
+                member if member.is_any() => return Ty::any(),
+                member => normalized.push(member),
+            }
+        }
+        normalized.sort_by_key(|member| format!("{member:?}"));
+        normalized.dedup();
+        match normalized.len() {
+            0 => Ty::Never,
+            1 => normalized.pop().expect("one union member"),
+            _ => Ty::Union(normalized),
+        }
+    }
+
     fn describe(&self) -> String {
         match self {
             Ty::Unknown => "<unknown>".to_string(),
@@ -212,6 +233,11 @@ impl Ty {
                     .unwrap_or_else(|| name.clone()),
                 args.iter().map(Ty::describe).collect::<Vec<_>>().join(", ")
             ),
+            Ty::Union(members) => members
+                .iter()
+                .map(Ty::describe)
+                .collect::<Vec<_>>()
+                .join(" | "),
             Ty::Tuple(items) => format!(
                 "({})",
                 items
@@ -421,6 +447,106 @@ struct TypeSig {
     enum_cases: HashMap<String, EnumCaseSig>,
 }
 
+fn expand_aliases_in_function_sig(sig: &mut FunctionSig, aliases: &HashMap<String, TypeRef>) {
+    for condition in &mut sig.generic_conditions {
+        match condition {
+            GenericConditionSig::Bound { subject, bound } => {
+                *subject = expand_aliases_in_ty(subject, aliases, &mut HashSet::new());
+                *bound = expand_aliases_in_ty(bound, aliases, &mut HashSet::new());
+            }
+            GenericConditionSig::Equal { left, right } => {
+                *left = expand_aliases_in_ty(left, aliases, &mut HashSet::new());
+                *right = expand_aliases_in_ty(right, aliases, &mut HashSet::new());
+            }
+        }
+    }
+    for param in &mut sig.params {
+        param.ty = expand_aliases_in_ty(&param.ty, aliases, &mut HashSet::new());
+    }
+    sig.ret = expand_aliases_in_ty(&sig.ret, aliases, &mut HashSet::new());
+}
+
+fn expand_aliases_in_type_sig(sig: &mut TypeSig, aliases: &HashMap<String, TypeRef>) {
+    for condition in &mut sig.generic_conditions {
+        match condition {
+            GenericConditionSig::Bound { subject, bound } => {
+                *subject = expand_aliases_in_ty(subject, aliases, &mut HashSet::new());
+                *bound = expand_aliases_in_ty(bound, aliases, &mut HashSet::new());
+            }
+            GenericConditionSig::Equal { left, right } => {
+                *left = expand_aliases_in_ty(left, aliases, &mut HashSet::new());
+                *right = expand_aliases_in_ty(right, aliases, &mut HashSet::new());
+            }
+        }
+    }
+    for bound in &mut sig.with_bounds {
+        *bound = expand_aliases_in_ty(bound, aliases, &mut HashSet::new());
+    }
+    for field in &mut sig.fields {
+        field.ty = expand_aliases_in_ty(&field.ty, aliases, &mut HashSet::new());
+    }
+    for overloads in sig.methods.values_mut() {
+        for method in overloads {
+            expand_aliases_in_function_sig(method, aliases);
+        }
+    }
+    for case in sig.enum_cases.values_mut() {
+        for param in &mut case.params {
+            param.ty = expand_aliases_in_ty(&param.ty, aliases, &mut HashSet::new());
+        }
+        case.result = expand_aliases_in_ty(&case.result, aliases, &mut HashSet::new());
+    }
+}
+
+fn expand_aliases_in_ty(
+    ty: &Ty,
+    aliases: &HashMap<String, TypeRef>,
+    visiting: &mut HashSet<String>,
+) -> Ty {
+    match ty {
+        Ty::Named(name, args) if args.is_empty() && aliases.contains_key(name) => {
+            if !visiting.insert(name.clone()) {
+                return ty.clone();
+            }
+            let target = convert_type_ref(&aliases[name], &HashSet::new());
+            let expanded = expand_aliases_in_ty(&target, aliases, visiting);
+            visiting.remove(name);
+            expanded
+        }
+        Ty::Named(name, args) => Ty::Named(
+            name.clone(),
+            args.iter()
+                .map(|arg| expand_aliases_in_ty(arg, aliases, visiting))
+                .collect(),
+        ),
+        Ty::Union(members) => Ty::union(
+            members
+                .iter()
+                .map(|member| expand_aliases_in_ty(member, aliases, visiting)),
+        ),
+        Ty::Tuple(fields) => Ty::Tuple(
+            fields
+                .iter()
+                .map(|field| expand_aliases_in_ty(field, aliases, visiting))
+                .collect(),
+        ),
+        Ty::Record(fields) => Ty::Record(
+            fields
+                .iter()
+                .map(|(name, ty)| (name.clone(), expand_aliases_in_ty(ty, aliases, visiting)))
+                .collect(),
+        ),
+        Ty::Function(params, ret) => Ty::Function(
+            params
+                .iter()
+                .map(|param| expand_aliases_in_ty(param, aliases, visiting))
+                .collect(),
+            Box::new(expand_aliases_in_ty(ret, aliases, visiting)),
+        ),
+        _ => ty.clone(),
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct ModuleInfo {
     path: PathBuf,
@@ -432,6 +558,7 @@ struct ModuleInfo {
     functions: HashMap<String, Vec<FunctionSig>>,
     types: HashMap<String, TypeSig>,
     objects: HashMap<String, TypeSig>,
+    aliases: HashMap<String, TypeRef>,
     extensions: HashMap<String, HashMap<String, Vec<FunctionSig>>>,
     global_binding_stmts: Vec<crate::ast::BindingStmt>,
 }
@@ -448,6 +575,7 @@ impl ModuleInfo {
             functions: HashMap::new(),
             types: HashMap::new(),
             objects: HashMap::new(),
+            aliases: HashMap::new(),
             extensions: HashMap::new(),
             global_binding_stmts: Vec::new(),
         };
@@ -466,6 +594,7 @@ impl ModuleInfo {
             functions: HashMap::new(),
             types: HashMap::new(),
             objects: HashMap::new(),
+            aliases: HashMap::new(),
             extensions: HashMap::new(),
             global_binding_stmts: Vec::new(),
         };
@@ -475,6 +604,15 @@ impl ModuleInfo {
 
     fn collect_items(&mut self) {
         let items = self.program.items.clone();
+
+        // Collect aliases first so signatures do not depend on declaration order.
+        for item in &items {
+            if let Item::TypeAlias(alias) = item {
+                self.aliases
+                    .insert(alias.name.clone(), alias.target.clone());
+            }
+        }
+
         for item in &items {
             match item {
                 Item::Function(function) => {
@@ -491,6 +629,7 @@ impl ModuleInfo {
                         self.types.insert(decl.name.clone(), sig);
                     }
                 }
+                Item::TypeAlias(_) => {}
                 Item::Statement(Stmt::Binding(binding)) => {
                     self.global_binding_stmts.push(binding.clone());
                 }
@@ -498,6 +637,27 @@ impl ModuleInfo {
                     self.collect_extension(block);
                 }
                 _ => {}
+            }
+        }
+
+        self.expand_aliases_in_signatures();
+    }
+
+    fn expand_aliases_in_signatures(&mut self) {
+        let aliases = self.aliases.clone();
+        for overloads in self.functions.values_mut() {
+            for sig in overloads {
+                expand_aliases_in_function_sig(sig, &aliases);
+            }
+        }
+        for sig in self.types.values_mut().chain(self.objects.values_mut()) {
+            expand_aliases_in_type_sig(sig, &aliases);
+        }
+        for methods in self.extensions.values_mut() {
+            for overloads in methods.values_mut() {
+                for sig in overloads {
+                    expand_aliases_in_function_sig(sig, &aliases);
+                }
             }
         }
     }
@@ -522,6 +682,7 @@ struct AmbientInfo {
     functions: HashMap<String, Vec<FunctionSig>>,
     types: HashMap<String, TypeSig>,
     objects: HashMap<String, TypeSig>,
+    aliases: HashMap<String, TypeRef>,
     enum_cases: HashMap<String, EnumCaseSig>,
     extensions: HashMap<String, HashMap<String, Vec<FunctionSig>>>,
 }
@@ -562,6 +723,7 @@ impl AmbientInfo {
             for (name, sig) in module.objects {
                 ambient.objects.insert(name, sig);
             }
+            ambient.aliases.extend(module.aliases);
         }
 
         if let Some(os) = ambient.objects.get("OS") {
@@ -742,6 +904,19 @@ impl World {
         }
     }
 
+    fn lookup_imported_alias(&self, module: &ModuleInfo, name: &str) -> Option<(PathBuf, TypeRef)> {
+        let imported = module.symbol_imports.get(name)?;
+        if imported.kind != ImportedKind::TypeAlias {
+            return None;
+        }
+        let source = self.modules.get(&imported.module_path)?;
+        source
+            .aliases
+            .get(&imported.original_name)
+            .cloned()
+            .map(|target| (source.path.clone(), target))
+    }
+
     fn lookup_imported_global(&self, module: &ModuleInfo, name: &str) -> Option<ValueInfo> {
         let imported = module.symbol_imports.get(name)?;
         if imported.kind != ImportedKind::Value {
@@ -868,12 +1043,24 @@ impl<'a> Checker<'a> {
         for item in &self.module.program.items {
             match item {
                 Item::Function(function) => self.check_function(function),
+                Item::TypeAlias(alias) => self.check_type_alias(alias),
                 Item::Type(decl) => self.check_type_decl(decl),
                 Item::Extension(block) => self.check_extension(block),
                 _ => {}
             }
         }
         self.check_constructor_delegation_cycles();
+    }
+
+    fn check_type_alias(&mut self, alias: &crate::ast::TypeAliasDecl) {
+        let mut visiting = vec![(self.module.path.clone(), alias.name.clone())];
+        if self.type_ref_has_alias_cycle(&alias.target, self.module, &mut visiting) {
+            self.add_error(
+                "cyclic_type_alias",
+                format!("type alias '{}' contains a cycle", alias.name),
+                alias.span,
+            );
+        }
     }
 
     fn check_global_bindings(&mut self) {
@@ -1952,12 +2139,18 @@ impl<'a> Checker<'a> {
             }
             Expr::TypeOf { .. } => {}
             Expr::If {
-                condition,
+                condition_clauses,
                 then_block,
                 else_branch,
                 ..
             } => {
-                self.check_field_initializer_expr(condition, owner, initialized_fields);
+                for clause in condition_clauses {
+                    self.check_field_initializer_expr(
+                        condition_clause_expr(clause),
+                        owner,
+                        initialized_fields,
+                    );
+                }
                 self.check_field_initializer_block(then_block, owner, initialized_fields);
                 self.check_field_initializer_else_expr_branch(
                     else_branch,
@@ -2368,20 +2561,6 @@ impl<'a> Checker<'a> {
         self.check_block_against(block, &Ty::Unknown)
     }
 
-    fn check_block_with_narrowing(
-        &mut self,
-        block: &Block,
-        narrowing: Option<&TypeNarrowing>,
-    ) -> Ty {
-        self.push_scope();
-        if let Some(narrowing) = narrowing {
-            self.define_local(&narrowing.name, narrowing.ty.clone(), false);
-        }
-        let result = self.check_block(block);
-        self.pop_scope();
-        result
-    }
-
     fn check_block_against(&mut self, block: &Block, expected: &Ty) -> Ty {
         self.push_scope();
         let mut last = Ty::unit();
@@ -2432,6 +2611,10 @@ impl<'a> Checker<'a> {
                             condition.span(),
                             "if condition must be Bool",
                         );
+                        if let Some(narrowing) = self.type_narrowing_for_condition(condition, true)
+                        {
+                            self.define_local(&narrowing.name, narrowing.ty, false);
+                        }
                     }
                 }
             }
@@ -2705,6 +2888,11 @@ impl<'a> Checker<'a> {
                                 condition.span(),
                                 "while condition must be Bool",
                             );
+                            if let Some(narrowing) =
+                                self.type_narrowing_for_condition(condition, true)
+                            {
+                                self.define_local(&narrowing.name, narrowing.ty, false);
+                            }
                         }
                         IfConditionClause::Let(clause) => {
                             let value_ty = self.check_expr(&clause.value);
@@ -3946,6 +4134,12 @@ impl<'a> Checker<'a> {
                     return collection_ty;
                 }
                 let mut item_ty = Ty::Unknown;
+                let expected_item_ty = match expected {
+                    Ty::Named(name, args) if name == "Vector" && args.len() == 1 => {
+                        Some(args[0].clone())
+                    }
+                    _ => None,
+                };
                 for item in items {
                     let current = if let Expr::Spread { value, span, .. } = item {
                         let spread_ty = self.check_expr(value);
@@ -3972,7 +4166,10 @@ impl<'a> Checker<'a> {
                             Ty::Unknown
                         }
                     } else {
-                        self.check_expr(item)
+                        expected_item_ty
+                            .as_ref()
+                            .map(|expected| self.check_expr_against(item, expected))
+                            .unwrap_or_else(|| self.check_expr(item))
                     };
                     item_ty = join_types(&item_ty, &current);
                 }
@@ -4336,18 +4533,51 @@ impl<'a> Checker<'a> {
                 Ty::exact_runtime_type(represented)
             }
             Expr::If {
-                condition,
+                condition_clauses,
                 then_block,
                 else_branch,
                 ..
             } => {
-                let cond_ty = self.check_expr(condition);
-                self.require_bool(&cond_ty, condition.span(), "if condition must be Bool");
-                let then_narrowing = self.type_narrowing_for_condition(condition, true);
-                let else_narrowing = self.type_narrowing_for_condition(condition, false);
-                let then_ty = self.check_block_with_narrowing(then_block, then_narrowing.as_ref());
-                let else_ty = self
-                    .check_else_expr_branch_with_narrowing(else_branch, else_narrowing.as_ref());
+                self.push_scope();
+                for clause in condition_clauses {
+                    match clause {
+                        IfConditionClause::Let(clause) => {
+                            let value_ty = self.check_expr(&clause.value);
+                            self.require_refutable_if_pattern(
+                                &clause.pattern,
+                                &value_ty,
+                                clause.pattern.span(),
+                            );
+                            self.bind_pattern(&clause.pattern, &value_ty);
+                        }
+                        IfConditionClause::Expr(condition) => {
+                            let condition_ty = self.check_expr(condition);
+                            self.require_bool(
+                                &condition_ty,
+                                condition.span(),
+                                "if condition must be Bool",
+                            );
+                            if let Some(narrowing) =
+                                self.type_narrowing_for_condition(condition, true)
+                            {
+                                self.define_local(&narrowing.name, narrowing.ty, false);
+                            }
+                        }
+                    }
+                }
+                let then_ty = self.check_block_against(then_block, expected);
+                self.pop_scope();
+                let else_narrowing = match condition_clauses.as_slice() {
+                    [IfConditionClause::Expr(condition)] => {
+                        self.type_narrowing_for_condition(condition, false)
+                    }
+                    _ => None,
+                };
+                let else_ty = self.check_else_expr_branch_against_with_narrowing(
+                    else_branch,
+                    expected,
+                    else_narrowing.as_ref(),
+                );
                 join_types(&then_ty, &else_ty)
             }
             Expr::Block { body, .. } => self.check_block_against(body, expected),
@@ -6251,7 +6481,7 @@ impl<'a> Checker<'a> {
                     self.diagnose_ambiguous_shape_context_call(&functions, args, span);
                     let sig = self
                         .choose_overload(&functions, args)
-                        .or_else(|| functions.first())?
+                        .or_else(|| self.closest_overload(&functions, args))?
                         .clone();
                     return Some(CallableSelection {
                         sig,
@@ -6262,7 +6492,7 @@ impl<'a> Checker<'a> {
                     self.diagnose_ambiguous_shape_context_call(&methods, args, span);
                     let sig = self
                         .choose_overload(&methods, args)
-                        .or_else(|| methods.first())?
+                        .or_else(|| self.closest_overload(&methods, args))?
                         .clone();
                     return Some(CallableSelection {
                         sig,
@@ -6283,7 +6513,7 @@ impl<'a> Checker<'a> {
                         self.diagnose_ambiguous_shape_context_call(functions, args, span);
                         let sig = self
                             .choose_overload(functions, args)
-                            .or_else(|| functions.first())?
+                            .or_else(|| self.closest_overload(functions, args))?
                             .clone();
                         return Some(CallableSelection {
                             sig,
@@ -6295,7 +6525,7 @@ impl<'a> Checker<'a> {
                     self.diagnose_ambiguous_shape_context_call(&sigs, args, span);
                     let sig = self
                         .choose_overload(&sigs, args)
-                        .or_else(|| sigs.first())?
+                        .or_else(|| self.closest_overload(&sigs, args))?
                         .clone();
                     return Some(CallableSelection {
                         sig,
@@ -6307,7 +6537,7 @@ impl<'a> Checker<'a> {
                 self.diagnose_ambiguous_shape_context_call(&methods, args, span);
                 let method = self
                     .choose_overload(&methods, args)
-                    .or_else(|| methods.first())?
+                    .or_else(|| self.closest_overload(&methods, args))?
                     .clone();
                 Some(CallableSelection {
                     sig: method,
@@ -6440,14 +6670,14 @@ impl<'a> Checker<'a> {
                 if let Some(functions) = self.lookup_functions(name) {
                     let sig = self
                         .choose_overload(&functions, args)
-                        .or_else(|| functions.first())?
+                        .or_else(|| self.closest_overload(&functions, args))?
                         .clone();
                     return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
                 }
                 let methods = self.lookup_implicit_method_functions(name)?;
                 let sig = self
                     .choose_overload(&methods, args)
-                    .or_else(|| methods.first())?
+                    .or_else(|| self.closest_overload(&methods, args))?
                     .clone();
                 Some(function_sig_parts_for_probe(sig, &explicit_type_args))
             }
@@ -6462,7 +6692,7 @@ impl<'a> Checker<'a> {
                     if let Some(functions) = module.functions.get(&member) {
                         let sig = self
                             .choose_overload(functions, args)
-                            .or_else(|| functions.first())?
+                            .or_else(|| self.closest_overload(functions, args))?
                             .clone();
                         return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
                     }
@@ -6470,7 +6700,7 @@ impl<'a> Checker<'a> {
                 if let Some(sigs) = self.static_method_sigs(receiver, name) {
                     let sig = self
                         .choose_overload(&sigs, args)
-                        .or_else(|| sigs.first())?
+                        .or_else(|| self.closest_overload(&sigs, args))?
                         .clone();
                     return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
                 }
@@ -6478,7 +6708,7 @@ impl<'a> Checker<'a> {
                 let methods = self.member_method_sigs(&receiver_ty, name)?;
                 let method = self
                     .choose_overload(&methods, args)
-                    .or_else(|| methods.first())?
+                    .or_else(|| self.closest_overload(&methods, args))?
                     .clone();
                 Some(function_sig_parts_for_probe(method, &explicit_type_args))
             }
@@ -6913,23 +7143,20 @@ impl<'a> Checker<'a> {
             .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Object))
     }
 
-    fn check_else_expr_branch(&mut self, branch: &ElseExprBranch) -> Ty {
-        match branch {
-            ElseExprBranch::If(expr) => self.check_expr(expr),
-            ElseExprBranch::Block(block) => self.check_block(block),
-        }
-    }
-
-    fn check_else_expr_branch_with_narrowing(
+    fn check_else_expr_branch_against_with_narrowing(
         &mut self,
         branch: &ElseExprBranch,
+        expected: &Ty,
         narrowing: Option<&TypeNarrowing>,
     ) -> Ty {
         self.push_scope();
         if let Some(narrowing) = narrowing {
             self.define_local(&narrowing.name, narrowing.ty.clone(), false);
         }
-        let result = self.check_else_expr_branch(branch);
+        let result = match branch {
+            ElseExprBranch::If(expr) => self.check_expr_against(expr, expected),
+            ElseExprBranch::Block(block) => self.check_block_against(block, expected),
+        };
         self.pop_scope();
         result
     }
@@ -7005,6 +7232,15 @@ impl<'a> Checker<'a> {
                 }
                 let ret_ty = self.ty_from_type_ref(ret);
                 self.validate_runtime_type_ref(ret, &ret_ty, construct);
+            }
+            TypeRef::Union { span, .. } => {
+                self.add_error(
+                    "invalid_runtime_union_type",
+                    format!(
+                        "{construct} require one concrete runtime type; match union alternatives separately"
+                    ),
+                    *span,
+                );
             }
             TypeRef::Wildcard { .. } => {}
         }
@@ -8679,6 +8915,17 @@ impl<'a> Checker<'a> {
             .map(|(_, sig)| sig)
     }
 
+    fn closest_overload<'b>(
+        &self,
+        overloads: &'b [FunctionSig],
+        args: &[crate::ast::CallArg],
+    ) -> Option<&'b FunctionSig> {
+        overloads.iter().min_by_key(|sig| {
+            let arrangement = arrange_param_args(&sig.params, args);
+            arrangement.overflow + arrangement.missing_required
+        })
+    }
+
     fn arg_matches_expected(&self, arg: &crate::ast::CallArg, actual: &Ty, expected: &Ty) -> bool {
         let _ = arg;
         self.is_assignable(actual, expected)
@@ -9138,33 +9385,174 @@ impl<'a> Checker<'a> {
         Ty::Named(name.to_string(), args)
     }
 
-    fn ty_from_type_ref(&self, reference: &TypeRef) -> Ty {
+    fn lookup_alias_target(
+        &self,
+        module: Option<&ModuleInfo>,
+        name: &str,
+    ) -> Option<(PathBuf, TypeRef)> {
+        if let Some(module) = module {
+            if let Some(target) = module.aliases.get(name) {
+                return Some((module.path.clone(), target.clone()));
+            }
+            if let Some(imported) = self.world.lookup_imported_alias(module, name) {
+                return Some(imported);
+            }
+        }
+        self.world
+            .ambient
+            .aliases
+            .get(name)
+            .cloned()
+            .map(|target| (PathBuf::from("<ambient>"), target))
+    }
+
+    fn module_for_alias_path(&self, path: &Path) -> Option<&ModuleInfo> {
+        if path == self.module.path {
+            Some(self.module)
+        } else {
+            self.world.modules.get(path)
+        }
+    }
+
+    fn resolve_named_type_in_module(
+        &self,
+        module: Option<&ModuleInfo>,
+        name: &str,
+        args: Vec<Ty>,
+    ) -> Ty {
+        if module.is_some_and(|module| module.path == self.module.path) {
+            return self.resolve_named_type(name, args);
+        }
+        if name == "Never" && args.is_empty() {
+            return Ty::Never;
+        }
+        let sig = module
+            .and_then(|module| {
+                module
+                    .types
+                    .get(name)
+                    .or_else(|| module.objects.get(name))
+                    .cloned()
+                    .or_else(|| self.world.lookup_imported_type(module, name))
+            })
+            .or_else(|| self.world.ambient.types.get(name).cloned())
+            .or_else(|| self.world.ambient.objects.get(name).cloned());
+        match sig {
+            Some(sig) => Ty::Named(sig.name, args),
+            None => Ty::Named(name.to_string(), args),
+        }
+    }
+
+    fn ty_from_type_ref_in_module(
+        &self,
+        reference: &TypeRef,
+        module: Option<&ModuleInfo>,
+        visiting: &mut Vec<(PathBuf, String)>,
+    ) -> Ty {
         match reference {
             TypeRef::Wildcard { .. } => Ty::Wildcard,
-            TypeRef::Named { name, args, .. } => self.resolve_named_type(
-                name,
-                args.iter().map(|arg| self.ty_from_type_ref(arg)).collect(),
-            ),
+            TypeRef::Named { name, args, .. } => {
+                if args.is_empty() {
+                    if let Some((path, target)) = self.lookup_alias_target(module, name) {
+                        let key = (path.clone(), name.clone());
+                        if visiting.contains(&key) {
+                            return Ty::Unknown;
+                        }
+                        visiting.push(key);
+                        let owner = self.module_for_alias_path(&path);
+                        let expanded = self.ty_from_type_ref_in_module(&target, owner, visiting);
+                        visiting.pop();
+                        return expanded;
+                    }
+                }
+                let args = args
+                    .iter()
+                    .map(|arg| self.ty_from_type_ref_in_module(arg, module, visiting))
+                    .collect();
+                self.resolve_named_type_in_module(module, name, args)
+            }
             TypeRef::Tuple { fields, .. } => Ty::Tuple(
                 fields
                     .iter()
-                    .map(|field| self.ty_from_type_ref(&field.ty))
+                    .map(|field| self.ty_from_type_ref_in_module(&field.ty, module, visiting))
                     .collect(),
             ),
             TypeRef::Record { fields, .. } => Ty::Record(
                 fields
                     .iter()
-                    .map(|field| (field.name.clone(), self.ty_from_type_ref(&field.ty)))
+                    .map(|field| {
+                        (
+                            field.name.clone(),
+                            self.ty_from_type_ref_in_module(&field.ty, module, visiting),
+                        )
+                    })
                     .collect(),
             ),
             TypeRef::Function { params, ret, .. } => Ty::Function(
                 params
                     .iter()
-                    .map(|param| self.ty_from_type_ref(param))
+                    .map(|param| self.ty_from_type_ref_in_module(param, module, visiting))
                     .collect(),
-                Box::new(self.ty_from_type_ref(ret)),
+                Box::new(self.ty_from_type_ref_in_module(ret, module, visiting)),
+            ),
+            TypeRef::Union { members, .. } => Ty::union(
+                members
+                    .iter()
+                    .map(|member| self.ty_from_type_ref_in_module(member, module, visiting)),
             ),
         }
+    }
+
+    fn type_ref_has_alias_cycle(
+        &self,
+        reference: &TypeRef,
+        module: &ModuleInfo,
+        visiting: &mut Vec<(PathBuf, String)>,
+    ) -> bool {
+        match reference {
+            TypeRef::Named { name, args, .. } => {
+                if args
+                    .iter()
+                    .any(|arg| self.type_ref_has_alias_cycle(arg, module, visiting))
+                {
+                    return true;
+                }
+                let Some((path, target)) = self.lookup_alias_target(Some(module), name) else {
+                    return false;
+                };
+                let key = (path.clone(), name.clone());
+                if visiting.contains(&key) {
+                    return true;
+                }
+                let Some(owner) = self.module_for_alias_path(&path) else {
+                    return false;
+                };
+                visiting.push(key);
+                let cyclic = self.type_ref_has_alias_cycle(&target, owner, visiting);
+                visiting.pop();
+                cyclic
+            }
+            TypeRef::Tuple { fields, .. } => fields
+                .iter()
+                .any(|field| self.type_ref_has_alias_cycle(&field.ty, module, visiting)),
+            TypeRef::Record { fields, .. } => fields
+                .iter()
+                .any(|field| self.type_ref_has_alias_cycle(&field.ty, module, visiting)),
+            TypeRef::Function { params, ret, .. } => {
+                params
+                    .iter()
+                    .any(|param| self.type_ref_has_alias_cycle(param, module, visiting))
+                    || self.type_ref_has_alias_cycle(ret, module, visiting)
+            }
+            TypeRef::Union { members, .. } => members
+                .iter()
+                .any(|member| self.type_ref_has_alias_cycle(member, module, visiting)),
+            TypeRef::Wildcard { .. } => false,
+        }
+    }
+
+    fn ty_from_type_ref(&self, reference: &TypeRef) -> Ty {
+        self.ty_from_type_ref_in_module(reference, Some(self.module), &mut Vec::new())
     }
 
     fn push_scope(&mut self) {
@@ -9330,6 +9718,11 @@ impl<'a> Checker<'a> {
                     self.validate_type_ref_generic_applications(param);
                 }
                 self.validate_type_ref_generic_applications(ret);
+            }
+            TypeRef::Union { members, .. } => {
+                for member in members {
+                    self.validate_type_ref_generic_applications(member);
+                }
             }
         }
     }
@@ -9604,6 +9997,9 @@ impl<'a> Checker<'a> {
             Ty::Record(fields) => fields
                 .iter()
                 .all(|(_, field_ty)| self.is_hashable_type(field_ty, seen)),
+            Ty::Union(members) => members
+                .iter()
+                .all(|member| self.is_hashable_type(member, seen)),
             Ty::Named(name, args) => {
                 let Some(sig) = self.lookup_any_type(name) else {
                     return false;
@@ -9689,6 +10085,23 @@ impl<'a> Checker<'a> {
         expected: &Ty,
         seen: &mut HashSet<(String, String)>,
     ) -> bool {
+        if let Ty::Union(expected_members) = expected {
+            return match actual {
+                Ty::Union(actual_members) => actual_members.iter().all(|actual_member| {
+                    expected_members
+                        .iter()
+                        .any(|expected_member| self.is_assignable(actual_member, expected_member))
+                }),
+                actual => expected_members
+                    .iter()
+                    .any(|expected_member| self.is_assignable(actual, expected_member)),
+            };
+        }
+        if let Ty::Union(actual_members) = actual {
+            return actual_members
+                .iter()
+                .all(|actual_member| self.is_assignable(actual_member, expected));
+        }
         if is_assignable(actual, expected) {
             return true;
         }
@@ -10098,11 +10511,15 @@ fn loop_control_targeting_current_loop_in_expr(expr: &Expr) -> Option<LoopContro
             .or_else(|| loop_control_targeting_current_loop_in_expr(right)),
         Expr::Is { left, .. } => loop_control_targeting_current_loop_in_expr(left),
         Expr::If {
-            condition,
+            condition_clauses,
             then_block,
             else_branch,
             ..
-        } => loop_control_targeting_current_loop_in_expr(condition)
+        } => condition_clauses
+            .iter()
+            .find_map(|clause| {
+                loop_control_targeting_current_loop_in_expr(condition_clause_expr(clause))
+            })
             .or_else(|| loop_control_targeting_current_loop_in_block(then_block))
             .or_else(|| match else_branch.as_ref() {
                 ElseExprBranch::If(expr) => loop_control_targeting_current_loop_in_expr(expr),
@@ -10230,11 +10647,13 @@ fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Sp
             .or_else(|| lazy_arg_forbidden_control_flow_span(right)),
         Expr::Is { left, .. } => lazy_arg_forbidden_control_flow_span(left),
         Expr::If {
-            condition,
+            condition_clauses,
             then_block,
             else_branch,
             ..
-        } => lazy_arg_forbidden_control_flow_span(condition)
+        } => condition_clauses
+            .iter()
+            .find_map(|clause| lazy_arg_forbidden_control_flow_span(condition_clause_expr(clause)))
             .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(then_block))
             .or_else(|| match else_branch.as_ref() {
                 ElseExprBranch::If(expr) => lazy_arg_forbidden_control_flow_span(expr),
@@ -10775,6 +11194,11 @@ fn convert_type_ref(reference: &TypeRef, type_params: &HashSet<String>) -> Ty {
                 .collect(),
             Box::new(convert_type_ref(ret, type_params)),
         ),
+        TypeRef::Union { members, .. } => Ty::union(
+            members
+                .iter()
+                .map(|member| convert_type_ref(member, type_params)),
+        ),
     }
 }
 
@@ -10857,6 +11281,7 @@ fn unit_function_param_span(reference: &TypeRef) -> Option<crate::source::Span> 
         TypeRef::Record { fields, .. } => fields
             .iter()
             .find_map(|field| unit_function_param_span(&field.ty)),
+        TypeRef::Union { members, .. } => members.iter().find_map(unit_function_param_span),
         TypeRef::Wildcard { .. } => None,
     }
 }
@@ -11208,6 +11633,15 @@ fn infer_type_subst(expected: &Ty, actual: &Ty, subst: &mut HashMap<String, Ty>)
                 }
             }
         }
+        Ty::Union(expected_members) => {
+            if let Ty::Union(actual_members) = actual {
+                for (expected_member, actual_member) in
+                    expected_members.iter().zip(actual_members.iter())
+                {
+                    infer_type_subst(expected_member, actual_member, subst);
+                }
+            }
+        }
         Ty::Tuple(expected_items) => {
             if let Ty::Tuple(actual_items) = actual {
                 for (expected_item, actual_item) in expected_items.iter().zip(actual_items.iter()) {
@@ -11254,6 +11688,9 @@ fn substitute_type(ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
             name.clone(),
             args.iter().map(|arg| substitute_type(arg, subst)).collect(),
         ),
+        Ty::Union(members) => {
+            Ty::union(members.iter().map(|member| substitute_type(member, subst)))
+        }
         Ty::Tuple(items) => Ty::Tuple(
             items
                 .iter()
@@ -11307,7 +11744,9 @@ fn generic_condition_contains_wildcard(condition: &GenericConditionSig) -> bool 
 fn type_contains_wildcard(ty: &Ty) -> bool {
     match ty {
         Ty::Wildcard | Ty::Capture(_) => true,
-        Ty::Named(_, args) | Ty::Tuple(args) => args.iter().any(type_contains_wildcard),
+        Ty::Named(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
+            args.iter().any(type_contains_wildcard)
+        }
         Ty::Record(fields) => fields.iter().any(|(_, ty)| type_contains_wildcard(ty)),
         Ty::Function(params, ret) => {
             params.iter().any(type_contains_wildcard) || type_contains_wildcard(ret)
@@ -11364,7 +11803,9 @@ fn type_contains_type_param(ty: &Ty) -> bool {
         Ty::Wildcard => false,
         Ty::Capture(_) => false,
         Ty::TypeParam(_) => true,
-        Ty::Named(_, args) | Ty::Tuple(args) => args.iter().any(type_contains_type_param),
+        Ty::Named(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
+            args.iter().any(type_contains_type_param)
+        }
         Ty::Record(fields) => fields.iter().any(|(_, ty)| type_contains_type_param(ty)),
         Ty::Function(params, ret) => {
             params.iter().any(type_contains_type_param) || type_contains_type_param(ret)
@@ -11382,6 +11823,7 @@ fn materialize_type(ty: &Ty) -> Ty {
         Ty::Named(name, args) => {
             Ty::Named(name.clone(), args.iter().map(materialize_type).collect())
         }
+        Ty::Union(members) => Ty::union(members.iter().map(materialize_type)),
         Ty::Tuple(items) => Ty::Tuple(items.iter().map(materialize_type).collect()),
         Ty::Record(fields) => Ty::Record(
             fields
@@ -11478,6 +11920,23 @@ fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
     }
     if actual == expected {
         return true;
+    }
+    if let Ty::Union(expected_members) = expected {
+        return match actual {
+            Ty::Union(actual_members) => actual_members.iter().all(|actual_member| {
+                expected_members
+                    .iter()
+                    .any(|expected_member| is_assignable(actual_member, expected_member))
+            }),
+            actual => expected_members
+                .iter()
+                .any(|expected_member| is_assignable(actual, expected_member)),
+        };
+    }
+    if let Ty::Union(actual_members) = actual {
+        return actual_members
+            .iter()
+            .all(|actual_member| is_assignable(actual_member, expected));
     }
     match (actual, expected) {
         (Ty::Never, Ty::Never) => true,
@@ -11614,7 +12073,7 @@ fn join_types(left: &Ty, right: &Ty) -> Ty {
     if is_assignable(right, left) {
         return left.clone();
     }
-    Ty::Unknown
+    Ty::union([left.clone(), right.clone()])
 }
 
 fn join_many_types(items: &[Ty]) -> Ty {
@@ -11637,6 +12096,7 @@ fn runtime_type_ref_has_arguments(reference: &TypeRef) -> bool {
         TypeRef::Function { params, ret, .. } => {
             params.iter().any(runtime_type_ref_has_arguments) || runtime_type_ref_has_arguments(ret)
         }
+        TypeRef::Union { .. } => true,
         TypeRef::Wildcard { .. } => false,
     }
 }
@@ -15673,6 +16133,68 @@ def invalid(value Int) Int = value !!
                 .diagnostics
                 .iter()
                 .any(|diag| diag.code == "invalid_unsafe_extract"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn treats_unions_as_unordered_sets_and_allows_widening() {
+        let program = parse_inline(
+            r#"
+class Cat {}
+class Dog {}
+class Bird {}
+
+type Pet = Cat | Dog
+
+def fromAlias(value Pet) Dog | Cat = value
+def widen(value Cat | Dog) Cat | Dog | Bird = value
+def reorderAndWiden(value Cat | Dog) Bird | Dog | Cat = value
+def flatten(value Cat | Dog) Cat | (Dog | Cat) = value
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_union_assignment_when_a_source_alternative_is_uncovered() {
+        let program = parse_inline(
+            r#"
+class Cat {}
+class Dog {}
+class Bird {}
+
+def narrow(value Cat | Dog) Dog | Bird = value
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains("Cat | Dog")
+                    && diagnostic.message.contains("Bird | Dog")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_cyclic_union_aliases() {
+        let program = parse_inline(
+            r#"
+class Cat {}
+type First = Cat | Second
+type Second = Cat | First
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "cyclic_type_alias"),
             "{:#?}",
             result.diagnostics
         );

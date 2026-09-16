@@ -40,6 +40,48 @@ The shorthand may not be repeated. `Int??` is rejected because `??` is the
 extract-or-fallback expression operator. Write `Option[Int?]` when a nested
 optional type is intentional.
 
+### Union Types
+
+Use `|` to declare a value that may have any one of several types:
+
+```txt
+value Cat | Dog = Cat("Milo")
+
+def describe(value Cat | Dog) Str = match value {
+    case Cat { name } => "cat " + name
+    case Dog { name } => "dog " + name
+}
+```
+
+A union may be given a transparent alias:
+
+```txt
+type Pet = Cat | Dog
+
+pet Pet = Dog("Pip")
+```
+
+Type aliases currently name unions only. They introduce no new nominal type:
+`Pet`, `Cat | Dog`, and `Dog | Cat` are the same type. Union members are
+flattened and de-duplicated, and their written order has no semantic effect.
+
+Union assignment follows a subset rule. Every possible source alternative
+must be assignable to at least one destination alternative:
+
+```txt
+source Cat | Dog = Cat("Milo")
+
+same Dog | Cat = source             # valid: same alternatives
+wider Bird | Dog | Cat = source     # valid: destination covers both
+narrower Bird | Dog = source        # error: Cat is not covered
+```
+
+A concrete value is assignable to a union when it is assignable to at least
+one member. A union is assignable to a non-union type only when every member is
+assignable to that type. Narrow a union with `match` or `is` before using
+members that are not shared by its alternatives. A union itself is not a
+runtime type-test target.
+
 Common stdlib/prelude types:
 
 - `Array[T]`
@@ -676,6 +718,23 @@ Bracket access and assignment are unsafe operations supported by `Vector[T]`
 and `Array[T]`; an invalid index panics. `LinkedList[T]` deliberately does not
 support brackets because indexed traversal is linear.
 
+Vector slicing uses a half-open range: the start is included and the end is
+excluded. Either bound may be omitted:
+
+```txt
+prefix = values[:5]      # values.slice(0, 5)
+middle = values[1:5]     # values.slice(1, 5)
+suffix = values[5:]      # values.slice(5)
+copy = values[:]         # values.slice()
+```
+
+`slice()`, `slice(start)`, and `slice(start, end)` return a fresh shallow
+`Vector` and evaluate the receiver once. Bounds must satisfy
+`0 <= start <= end <= values.size()`; an invalid range panics. Slice brackets
+are available only on `Vector`; step syntax such as `values[1:5:2]` is not
+supported. At expression start, `[]` remains the contextual empty vector/map
+literal; `[:]` is meaningful only after a `Vector` expression.
+
 Shape composition and exact update:
 
 ```txt
@@ -971,6 +1030,24 @@ shape(value, other)              # contextual anonymous-shape positional constru
 ```
 
 Single-expression braces such as `{ value }` are block expressions, not anonymous shapes. To construct an anonymous shape, use construction fields with `:`. Bare `{}` is an empty block; use `shape {}` for an empty anonymous shape.
+
+Brace classification uses the first syntactic entry, not punctuation found
+later in the body. A leading construction field or spread selects an anonymous
+shape; otherwise bare braces select a block. When braces follow a callee, an
+explicit lambda head is recognized before shape construction. Commas in an
+ordinary block statement therefore do not reclassify the block:
+
+```txt
+result = {
+    left, right = 1, 2
+    left + right
+}
+
+consume { value =>
+    left, right = 1, 2
+    value + left + right
+}
+```
 
 Shape conversion rules:
 - field names and field types must match at compile time
@@ -1686,6 +1763,25 @@ first call.
 processNamed("compares values", { () => println("inside callback") })
 ```
 
+In a control-flow header, trailing brace-call syntax is disabled only at the
+header's outer nesting level so the header body remains unambiguous. Ordinary
+expression syntax is restored inside explicit delimiters such as parentheses,
+argument lists, indexes, and collection literals. Nested construction and an
+explicitly grouped trailing-lambda call are therefore valid:
+
+```txt
+if positive(Box { value: 1 }) {
+    println("positive")
+}
+
+if (check { () => true }) {
+    println("ready")
+}
+```
+
+The same nesting rule applies to `while` conditions, `for` iterables, and
+`match` scrutinees.
+
 Trailing brace call syntax on non-constructor calls is only for lambda arguments.
 Constructor braces fill constructor inputs by field name, so enum named
 payloads use braces and enum positional payloads use parentheses:
@@ -1731,6 +1827,8 @@ Rules:
 
 - braced blocks may appear as standalone statements or as expressions
 - block expressions evaluate to the value of their last statement
+- successive statements in a braced block must be separated by a newline; a
+  closing `}` may immediately follow the final statement
 - named function and method block bodies may be written as `def name(...) { ... }` or `def name(...) = { ... }`
 - if you want a block value, the last statement must be value-producing
 - value-producing tail forms include ordinary expressions, `if / else`, `match`, and `for ... yield`
@@ -2249,7 +2347,8 @@ This narrowing is intentionally local and conservative:
 
 - mutable bindings are not narrowed, because another read may observe a different value
 - by-name parameters, member reads, indexes, and arbitrary expressions are not narrowed
-- `&&` / `||` conditions do not currently combine narrowing facts
+- narrowing is propagated across top-level `&&` condition clauses, but nested
+  compound Boolean expressions do not currently combine narrowing facts
 - the checker does not currently infer negative types or report unreachable type-test branches
 
 Runtime type arguments are erased. Generic runtime tests and type patterns must
@@ -2288,6 +2387,32 @@ result = if value > 0 {
     0
 }
 ```
+
+Statement `if`, expression `if`, and `while` use the same condition-clause
+grammar. Boolean expressions and `let` clauses may be freely mixed in either
+order with `&&`:
+
+```txt
+if ready && let user <- maybeUser && user.active {
+    println(user.name)
+}
+
+if let user <- maybeUser && ready && user.active {
+    println(user.name)
+}
+
+name = if ready && let user <- maybeUser {
+    user.name
+} else {
+    "unknown"
+}
+```
+
+Clauses are evaluated from left to right and short-circuit on the first false
+Boolean expression or failed pattern. A binding introduced by a `let` clause is
+available to every later clause and to the successful branch, but not to
+`else`. Only `&&` joins clauses; use parentheses for a compound Boolean clause
+that contains `||`.
 
 Invalid:
 
@@ -2586,12 +2711,16 @@ if let {
 }
 ```
 
-And `if let` conditions can be chained with `&&` so later clauses can use
-earlier bindings:
+Condition clauses can be chained with `&&` so later clauses can use earlier
+bindings. Boolean expressions and `let` clauses may appear in either order:
 
 ```txt
 if let Some { value as left } = maybeLeft && let Ok { value as right } = compute() && right > left {
     println(left + right)
+}
+
+if ready && let left <- maybeLeft && left > 0 {
+    println(left)
 }
 ```
 
@@ -2826,12 +2955,16 @@ while let candidate <- current.next {
 }
 ```
 
-Conditions may be chained with `&&`. They are evaluated from left to right,
-short-circuit on the first failure, and later clauses may use bindings created
-by earlier `let` clauses:
+Conditions use the same freely ordered Boolean/`let` clause grammar as `if`.
+They are evaluated from left to right, short-circuit on the first failure, and
+later clauses may use bindings created by earlier `let` clauses:
 
 ```txt
 while let candidate <- current.next && candidate.value == expected {
+    current := candidate
+}
+
+while running && let candidate <- current.next && candidate.value == expected {
     current := candidate
 }
 ```
@@ -3306,6 +3439,8 @@ Boolean:
 
 Other operators / constructs:
 
+- `.` for member access; `..` has no combined meaning and is rejected rather
+  than being treated as one dot
 - `is` for runtime type checks
 - `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
 - `??` for extract-or-fallback through `Option`, `Result`, and `Either`
@@ -3316,13 +3451,15 @@ Other operators / constructs:
 - `with` for interface implementation, generic bounds, and exact shape update
 - `override ...source` for whole-source precedence in shape construction
 - `when` for generic bound and equality conditions
+- `|` between type alternatives in a union and between alternatives in a match case
 - `:` inside map types, map literals, and construction field lists
 
 Expression precedence, from highest to lowest:
 
 | Level | Forms | Associativity |
 | --- | --- | --- |
-| Postfix | calls, member access, indexing, `!!` | left |
+| Primary | literals, groups, blocks, value-producing control flow | n/a |
+| Postfix | calls, member access, indexing, Vector slicing, `!!` | left |
 | Unary | `-`, `!`, `try` | right |
 | Multiplicative | `*`, `/`, `%` | left |
 | Additive | `+`, `-` | left |
@@ -3333,6 +3470,22 @@ Expression precedence, from highest to lowest:
 | Boolean AND | `&&` | left |
 | Boolean OR | `||` | left |
 | Extract or fallback | `??` | right |
+
+Value-producing `if / else`, `match`, `partial match`, and `for ... yield` are
+primary expressions. After the control-flow expression closes, surrounding
+postfix and infix parsing continues normally, and these forms may also appear as
+operator operands:
+
+```txt
+value = if flag { 10 } else { 20 } - 1
+
+value = match flag {
+    case true => 10
+    case false => 20
+} - 1
+
+value = 1 + if flag { 2 } else { 3 }
+```
 
 The shape-update level means:
 

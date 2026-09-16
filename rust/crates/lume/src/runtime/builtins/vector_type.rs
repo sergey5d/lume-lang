@@ -49,6 +49,9 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(31, "nonEmpty", Vec::new(), list_non_empty),
             builtin_method(32, "makeStr", vec![ir::Type::Str], list_make_str),
             builtin_method(16, "at", vec![ir::Type::Int], list_at),
+            builtin_method(37, "slice", Vec::new(), list_slice),
+            builtin_method(38, "slice", vec![ir::Type::Int], list_slice),
+            builtin_method(39, "slice", vec![ir::Type::Int, ir::Type::Int], list_slice),
             builtin_method(
                 17,
                 "setAt",
@@ -465,6 +468,49 @@ fn list_at(
         Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),
     })
+}
+
+fn list_slice(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if args.len() > 2 {
+        return Err(interpreter.runtime_error(span, "Vector.slice expects 0, 1, or 2 arguments"));
+    }
+    let values = list_values(interpreter, &receiver, span, "Vector.slice")?;
+    let start = match args.first() {
+        Some(value) => value.as_int(interpreter, span, "Vector.slice start")?,
+        None => 0,
+    };
+    let end = match args.get(1) {
+        Some(value) => value.as_int(interpreter, span, "Vector.slice end")?,
+        None => values.len() as i64,
+    };
+    let Ok(start_index) = usize::try_from(start) else {
+        return Err(interpreter.runtime_error(
+            span,
+            format!("Vector.slice start {} is out of bounds", start),
+        ));
+    };
+    let Ok(end_index) = usize::try_from(end) else {
+        return Err(
+            interpreter.runtime_error(span, format!("Vector.slice end {} is out of bounds", end))
+        );
+    };
+    if start_index > end_index || end_index > values.len() {
+        return Err(interpreter.runtime_error(
+            span,
+            format!(
+                "Vector.slice range {}:{} is out of bounds for size {}",
+                start,
+                end,
+                values.len()
+            ),
+        ));
+    }
+    Ok(Value::list(values[start_index..end_index].to_vec()))
 }
 
 fn list_set_at(

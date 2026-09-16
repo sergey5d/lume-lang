@@ -168,6 +168,11 @@ fn describe_type(ty: &ir::Type) -> String {
                 .join(", ");
             format!("{name}[{args}]")
         }
+        ir::Type::Union(members) => members
+            .iter()
+            .map(describe_type)
+            .collect::<Vec<_>>()
+            .join(" | "),
         ir::Type::Tuple(items) => {
             let items = items
                 .iter()

@@ -15,16 +15,33 @@ impl<'a> Parser<'a> {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             if let Some(stmt) = self.parse_stmt() {
                 statements.push(stmt);
+                self.finish_braced_statement();
             } else {
                 self.synchronize_stmt();
+                self.skip_newlines();
             }
-            self.skip_newlines();
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after block")?;
         Some(Block {
             statements,
             span: start.cover(end),
         })
+    }
+
+    pub(super) fn finish_braced_statement(&mut self) {
+        if self.at(TokenKind::Newline) {
+            self.skip_newlines();
+            return;
+        }
+        if self.at(TokenKind::RBrace) || self.at(TokenKind::Eof) {
+            return;
+        }
+        self.error_at_current(
+            "missing_statement_separator",
+            "expected newline or '}' after statement",
+        );
+        self.synchronize_stmt();
+        self.skip_newlines();
     }
 
     pub(super) fn parse_stmt(&mut self) -> Option<Stmt> {
@@ -720,58 +737,14 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_if_stmt(&mut self) -> Option<IfStmt> {
         let start = self.consume_keyword(Keyword::If, "expected 'if'")?;
-        let (
-            condition,
-            condition_clauses,
-            pattern,
-            pattern_value,
-            pattern_clauses,
-            bindings,
-            binding_value,
-        ) = if self.match_keyword(Keyword::Let) {
-            if self.at(TokenKind::LBrace) {
-                let (clauses, _) = self.parse_refutable_clause_block("if let")?;
-                if self.at(TokenKind::AndAnd) {
-                    let initial = clauses.into_iter().map(IfConditionClause::Let).collect();
-                    let clauses = self.parse_if_condition_clauses(initial)?;
-                    (None, clauses, None, None, Vec::new(), Vec::new(), None)
-                } else {
-                    (None, Vec::new(), None, None, clauses, Vec::new(), None)
-                }
-            } else {
-                let clause = self.parse_if_condition_refutable_clause("if let")?;
-                if self.at(TokenKind::AndAnd) {
-                    let clauses =
-                        self.parse_if_condition_clauses(vec![IfConditionClause::Let(clause)])?;
-                    (None, clauses, None, None, Vec::new(), Vec::new(), None)
-                } else {
-                    (
-                        None,
-                        Vec::new(),
-                        Some(clause.pattern),
-                        Some(clause.value),
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                    )
-                }
+        let mut parsed_clauses = self.parse_condition_clauses("if")?;
+        let (condition, condition_clauses) = if parsed_clauses.len() == 1 {
+            match parsed_clauses.pop().expect("one condition clause") {
+                IfConditionClause::Expr(condition) => (Some(condition), Vec::new()),
+                clause => (None, vec![clause]),
             }
-        } else if self.pattern_followed_by_refutable_operator(self.index) {
-            self.error_at_current(
-                "unexpected_token",
-                "pattern matches in 'if' require 'let'; use 'if let Pattern = value { ... }' or 'if let Pattern <- value { ... }'",
-            );
-            return None;
         } else {
-            (
-                Some(self.parse_expr_without_trailing_block_call()?),
-                Vec::new(),
-                None,
-                None,
-                Vec::new(),
-                Vec::new(),
-                None,
-            )
+            (None, parsed_clauses)
         };
         let then_block = self.parse_if_body_block()?;
         let else_branch = if self.match_keyword(Keyword::Else) {
@@ -802,11 +775,11 @@ impl<'a> Parser<'a> {
         Some(IfStmt {
             condition,
             condition_clauses,
-            pattern,
-            pattern_value,
-            pattern_clauses,
-            bindings,
-            binding_value,
+            pattern: None,
+            pattern_value: None,
+            pattern_clauses: Vec::new(),
+            bindings: Vec::new(),
+            binding_value: None,
             then_block,
             else_branch,
             span: start.cover(end),
@@ -815,18 +788,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_while_stmt(&mut self) -> Option<WhileStmt> {
         let start = self.consume_keyword(Keyword::While, "expected 'while'")?;
-        let first_clause = if self.match_keyword(Keyword::Let) {
-            IfConditionClause::Let(self.parse_if_condition_refutable_clause("while let")?)
-        } else if self.pattern_followed_by_refutable_operator(self.index) {
-            self.error_at_current(
-                "unexpected_token",
-                "pattern matches in 'while' require 'let'; use 'while let Pattern = value { ... }' or 'while let Pattern <- value { ... }'",
-            );
-            return None;
-        } else {
-            IfConditionClause::Expr(self.parse_if_condition_expr()?)
-        };
-        let condition_clauses = self.parse_if_condition_clauses(vec![first_clause])?;
+        let condition_clauses = self.parse_condition_clauses("while")?;
         let body = self.parse_block()?;
         Some(WhileStmt {
             condition_clauses,

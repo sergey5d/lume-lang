@@ -185,6 +185,24 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_type_ref(&mut self) -> Option<TypeRef> {
+        let first = self.parse_non_union_type_ref()?;
+        if !self.match_token(TokenKind::Pipe) {
+            return Some(first);
+        }
+
+        let start = first.span();
+        let mut members = vec![first];
+        loop {
+            members.push(self.parse_non_union_type_ref()?);
+            if !self.match_token(TokenKind::Pipe) {
+                break;
+            }
+        }
+        let span = start.cover(members.last().expect("union has members").span());
+        Some(TypeRef::Union { members, span })
+    }
+
+    fn parse_non_union_type_ref(&mut self) -> Option<TypeRef> {
         self.skip_newlines();
         let left = if self.at_keyword(Keyword::Fn) {
             self.parse_function_type_ref()?

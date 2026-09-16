@@ -10,6 +10,7 @@ impl<'a> Parser<'a> {
             match self.current_kind() {
                 TokenKind::Keyword(Keyword::Annotation)
                 | TokenKind::Keyword(Keyword::Def)
+                | TokenKind::Keyword(Keyword::Type)
                 | TokenKind::Keyword(Keyword::Class)
                 | TokenKind::Keyword(Keyword::Shape)
                 | TokenKind::Keyword(Keyword::Object)

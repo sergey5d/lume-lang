@@ -125,11 +125,41 @@ impl<'a> Parser<'a> {
         Some((clauses, open.cover(close)))
     }
 
-    pub(super) fn parse_if_condition_clauses(
+    pub(super) fn parse_condition_clauses(
         &mut self,
-        mut clauses: Vec<IfConditionClause>,
+        owner: &'static str,
     ) -> Option<Vec<IfConditionClause>> {
-        while self.match_token(TokenKind::AndAnd) {
+        let let_owner = if owner == "while" {
+            "while let"
+        } else {
+            "if let"
+        };
+        let mut clauses = Vec::new();
+        loop {
+            if self.match_keyword(Keyword::Let) {
+                if self.at(TokenKind::LBrace) {
+                    let (grouped, _) = self.parse_refutable_clause_block(let_owner)?;
+                    clauses.extend(grouped.into_iter().map(IfConditionClause::Let));
+                } else {
+                    clauses.push(IfConditionClause::Let(
+                        self.parse_if_condition_refutable_clause(let_owner)?,
+                    ));
+                }
+            } else if self.pattern_followed_by_refutable_operator(self.index) {
+                self.error_at_current(
+                    "unexpected_token",
+                    format!(
+                        "pattern matches in '{owner}' require 'let'; use '{owner} let Pattern = value {{ ... }}' or '{owner} let Pattern <- value {{ ... }}'"
+                    ),
+                );
+                return None;
+            } else {
+                clauses.push(IfConditionClause::Expr(self.parse_if_condition_expr()?));
+            }
+
+            if !self.match_token(TokenKind::AndAnd) {
+                break;
+            }
             if self.at(TokenKind::Newline) {
                 self.error_at_current(
                     "expected_expression",
@@ -137,18 +167,6 @@ impl<'a> Parser<'a> {
                 );
                 return None;
             }
-            if self.match_keyword(Keyword::Let) {
-                if self.at(TokenKind::LBrace) {
-                    let (grouped, _) = self.parse_refutable_clause_block("if let")?;
-                    clauses.extend(grouped.into_iter().map(IfConditionClause::Let));
-                    continue;
-                }
-                clauses.push(IfConditionClause::Let(
-                    self.parse_if_condition_refutable_clause("if let")?,
-                ));
-                continue;
-            }
-            clauses.push(IfConditionClause::Expr(self.parse_if_condition_expr()?));
         }
         Some(clauses)
     }
@@ -178,17 +196,8 @@ impl<'a> Parser<'a> {
             allow_trailing_block_call: false,
         };
         let expr = parser.parse_expr()?;
-        if !parser.at(TokenKind::Eof) {
-            parser.error_at_current(
-                "unexpected_token",
-                format!(
-                    "expected end of expression, got {}",
-                    parser.current_token_string()
-                ),
-            );
-        }
         self.diagnostics.extend(parser.diagnostics);
-        self.index = end;
+        self.index += parser.index;
         Some(expr)
     }
 

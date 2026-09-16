@@ -393,7 +393,7 @@ pub enum Expr {
         span: Span,
     },
     If {
-        condition: Box<Expr>,
+        condition_clauses: Vec<IfConditionClause>,
         then_block: Block,
         else_branch: Box<ElseExprBranch>,
         span: Span,

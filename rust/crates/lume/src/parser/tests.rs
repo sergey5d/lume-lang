@@ -234,6 +234,106 @@ def consume(start Option[Int]) Unit {
 }
 
 #[test]
+fn freely_mixes_boolean_and_let_condition_clauses() {
+    let result = parse(
+        r#"
+def choose(ready Bool, maybe Int?) Int {
+    if ready && let first <- maybe && first > 0 {
+        println(first)
+    }
+
+    if let second <- maybe && ready && second > 0 {
+        println(second)
+    }
+
+    while ready && let current <- maybe && current > 0 {
+        break
+    }
+
+    return if ready && let selected <- maybe && selected > 0 {
+        selected
+    } else {
+        0
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function declaration");
+    };
+    let CallableBody::Block(block) = &function.body else {
+        panic!("expected block body");
+    };
+
+    let Stmt::If(boolean_first) = &block.statements[0] else {
+        panic!("expected if statement");
+    };
+    assert_eq!(boolean_first.condition_clauses.len(), 3);
+    assert!(matches!(
+        boolean_first.condition_clauses[0],
+        IfConditionClause::Expr(_)
+    ));
+    assert!(matches!(
+        boolean_first.condition_clauses[1],
+        IfConditionClause::Let(_)
+    ));
+    assert!(matches!(
+        boolean_first.condition_clauses[2],
+        IfConditionClause::Expr(_)
+    ));
+
+    let Stmt::If(let_first) = &block.statements[1] else {
+        panic!("expected if statement");
+    };
+    assert_eq!(let_first.condition_clauses.len(), 3);
+    assert!(matches!(
+        let_first.condition_clauses[0],
+        IfConditionClause::Let(_)
+    ));
+    assert!(matches!(
+        let_first.condition_clauses[1],
+        IfConditionClause::Expr(_)
+    ));
+    assert!(matches!(
+        let_first.condition_clauses[2],
+        IfConditionClause::Expr(_)
+    ));
+
+    let Stmt::While(stmt) = &block.statements[2] else {
+        panic!("expected while statement");
+    };
+    assert_eq!(stmt.condition_clauses.len(), 3);
+    assert!(matches!(
+        stmt.condition_clauses[0],
+        IfConditionClause::Expr(_)
+    ));
+    assert!(matches!(
+        stmt.condition_clauses[1],
+        IfConditionClause::Let(_)
+    ));
+    assert!(matches!(
+        stmt.condition_clauses[2],
+        IfConditionClause::Expr(_)
+    ));
+
+    let Stmt::Return(return_stmt) = &block.statements[3] else {
+        panic!("expected return statement");
+    };
+    assert!(matches!(
+        return_stmt.value,
+        Some(Expr::If {
+            ref condition_clauses,
+            ..
+        }) if condition_clauses.len() == 3
+            && matches!(condition_clauses[0], IfConditionClause::Expr(_))
+            && matches!(condition_clauses[1], IfConditionClause::Let(_))
+            && matches!(condition_clauses[2], IfConditionClause::Expr(_))
+    ));
+}
+
+#[test]
 fn rejects_top_level_function_without_def() {
     let result = parse(
         r#"
@@ -1891,15 +1991,13 @@ fn rejects_removed_shape_merge_operator() {
 }
 
 #[test]
-fn rejects_equals_in_shape_update_fields() {
+fn rejects_shape_field_after_parallel_block_binding() {
     let result = parse(r#"def run() Unit = { amount = 42, label: "x" }"#);
     assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "unexpected_token"
-                && diag
-                    .message
-                    .contains("expected ',' or newline between brace entries")
-        }),
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "removed_pair_expression"),
         "{:#?}",
         result.diagnostics
     );
@@ -2123,6 +2221,118 @@ def pick(flag Bool) Int = if flag { 5 } else { 6 }
 }
 
 #[test]
+fn composes_control_flow_expressions_with_postfix_and_infix_operators() {
+    let result = parse(
+        r#"
+def run(flag Bool) Unit {
+    ifValue = if flag { 10 } else { 20 } - 1
+    matchValue = match flag {
+        case true => 10
+        case false => 20
+    } - 1
+    rightIf = 1 + if flag { 2 } else { 3 }
+    partialValue = partial match flag {
+        case true => 10
+    } == Some(10)
+    yielded = for item <- [1] yield { item } + [2]
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    let CallableBody::Block(body) = &function.body else {
+        panic!("expected block body, got {:#?}", function.body);
+    };
+
+    let binding_value = |index: usize| match &body.statements[index] {
+        Stmt::Binding(binding) => &binding.values[0],
+        other => panic!("expected binding, got {other:#?}"),
+    };
+    assert!(matches!(
+        binding_value(0),
+        Expr::Binary {
+            left,
+            op: BinaryOp::Sub,
+            ..
+        } if matches!(left.as_ref(), Expr::If { .. })
+    ));
+    assert!(matches!(
+        binding_value(1),
+        Expr::Binary {
+            left,
+            op: BinaryOp::Sub,
+            ..
+        } if matches!(left.as_ref(), Expr::Match { partial: false, .. })
+    ));
+    assert!(matches!(
+        binding_value(2),
+        Expr::Binary {
+            right,
+            op: BinaryOp::Add,
+            ..
+        } if matches!(right.as_ref(), Expr::If { .. })
+    ));
+    assert!(matches!(
+        binding_value(3),
+        Expr::Binary {
+            left,
+            op: BinaryOp::Eq,
+            ..
+        } if matches!(left.as_ref(), Expr::Match { partial: true, .. })
+    ));
+    assert!(matches!(
+        binding_value(4),
+        Expr::Binary {
+            left,
+            op: BinaryOp::Add,
+            ..
+        } if matches!(left.as_ref(), Expr::ForYield { .. })
+    ));
+}
+
+#[test]
+fn rejects_same_line_statements_without_separator() {
+    let result = parse(
+        r#"
+def main() Unit {
+    println("first") println("second")
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "missing_statement_separator"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_double_dot_member_access() {
+    let result = parse(
+        r#"
+def main() Unit {
+    value = user..name
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message.contains("expected member name after '.'")),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_newline_after_equals_before_callable_expression_body() {
     let result = parse(
         r#"
@@ -2280,15 +2490,21 @@ def run(value Worker) Unit {
     match &function.body {
         CallableBody::Block(block) => {
             match &block.statements[0] {
-                Stmt::If(stmt) => match stmt.pattern.as_ref() {
-                    Some(Pattern::Type { name, .. }) => assert_eq!(name.as_deref(), Some("item")),
+                Stmt::If(stmt) => match stmt.condition_clauses.first() {
+                    Some(IfConditionClause::Let(RefutableClause {
+                        pattern: Pattern::Type { name, .. },
+                        ..
+                    })) => assert_eq!(name.as_deref(), Some("item")),
                     other => panic!("expected first if-let type pattern, got {other:#?}"),
                 },
                 other => panic!("expected if statement, got {other:#?}"),
             }
             match &block.statements[1] {
-                Stmt::If(stmt) => match stmt.pattern.as_ref() {
-                    Some(Pattern::Type { name, .. }) => assert!(name.is_none()),
+                Stmt::If(stmt) => match stmt.condition_clauses.first() {
+                    Some(IfConditionClause::Let(RefutableClause {
+                        pattern: Pattern::Type { name, .. },
+                        ..
+                    })) => assert!(name.is_none()),
                     other => panic!("expected second if-let wildcard type pattern, got {other:#?}"),
                 },
                 other => panic!("expected if statement, got {other:#?}"),
@@ -2924,8 +3140,11 @@ def run(value Option[Int]) Unit {
     };
     match &function.body {
         CallableBody::Block(block) => match &block.statements[0] {
-            Stmt::If(stmt) => match stmt.pattern.as_ref() {
-                Some(Pattern::Extract { inner, .. }) => {
+            Stmt::If(stmt) => match stmt.condition_clauses.first() {
+                Some(IfConditionClause::Let(RefutableClause {
+                    pattern: Pattern::Extract { inner, .. },
+                    ..
+                })) => {
                     assert!(
                         matches!(inner.as_ref(), Pattern::Binding { name, .. } if name == "item")
                     );
@@ -3480,6 +3699,40 @@ def make() Unit = values.forEach { value =>
 }
 
 #[test]
+fn parses_parallel_binding_inside_block_expression() {
+    let result = parse(
+        r#"
+def main() Unit {
+    result = {
+        left, right = 1, 2
+        left + right
+    }
+    println(result)
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn parses_parallel_binding_inside_trailing_lambda() {
+    let result = parse(
+        r#"
+def consume(block fn(Int) Int) Int = block(5)
+
+def main() Unit {
+    result = consume { value =>
+        left, right = 1, 2
+        value + left + right
+    }
+    println(result)
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
 fn parses_trailing_block_lambda_with_typed_single_param() {
     let result = parse(
         r#"
@@ -3487,6 +3740,83 @@ def make() Unit = values.map { (value Int) => value + 5 }
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn parses_brace_construction_inside_control_flow_header_delimiters() {
+    let result = parse(
+        r#"
+class Box {
+    value Int
+}
+
+def positive(box Box) Bool = box.value > 0
+def boxes(box Box) [Box] = [box]
+
+def main() Unit {
+    if positive(Box { value: 1 }) {
+        println("if")
+    }
+
+    while positive((Box { value: 1 })) {
+        break
+    }
+
+    for box <- boxes(Box { value: 1 }) {
+        println(box.value)
+    }
+
+    match boxes(Box { value: 1 })[0] {
+        case Some(box) => println(box.value)
+        case None => ()
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn parses_grouped_trailing_lambda_inside_if_condition() {
+    let result = parse(
+        r#"
+def check(block fn() Bool) Bool = block()
+
+def main() Unit {
+    if (check { () => true }) {
+        println("ok")
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn keeps_trailing_lambda_disabled_at_if_header_depth() {
+    let result = parse(
+        r#"
+def main() Unit {
+    if check { () => true }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let function = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    let CallableBody::Block(body) = &function.body else {
+        panic!("expected block body, got {:#?}", function.body);
+    };
+    let Stmt::If(if_stmt) = &body.statements[0] else {
+        panic!("expected if statement, got {:#?}", body.statements[0]);
+    };
+    assert!(matches!(
+        if_stmt.condition,
+        Some(Expr::Identifier { ref name, .. }) if name == "check"
+    ));
 }
 
 #[test]
@@ -4398,4 +4728,73 @@ fn parses_repo_sources_except_skipped_and_failures() {
         "repo parse failures:\n{}",
         failures.join("\n\n")
     );
+}
+
+#[test]
+fn parses_union_aliases_and_inline_union_types() {
+    let result = parse(
+        r#"
+class Cat {}
+class Dog {}
+class Bird {}
+
+type Pet = Cat | Dog
+
+def widen(value Pet) Bird | Dog | Cat = value
+def inline(value Cat | Bird) Cat | Bird = value
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::TypeAlias(alias) = &program.items[3] else {
+        panic!("expected type alias");
+    };
+    assert_eq!(alias.name, "Pet");
+    assert!(matches!(
+        &alias.target,
+        TypeRef::Union { members, .. } if members.len() == 2
+    ));
+    let Item::Function(widen) = &program.items[4] else {
+        panic!("expected function");
+    };
+    assert!(matches!(
+        &widen.return_type,
+        Some(TypeRef::Union { members, .. }) if members.len() == 3
+    ));
+}
+
+#[test]
+fn rejects_non_union_type_aliases() {
+    let result = parse("type Name = Str");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "invalid_type_alias"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn parses_vector_slice_syntax_as_slice_calls() {
+    for (source, expected_arg_count) in [
+        ("values[:]", 0),
+        ("values[2:]", 1),
+        ("values[:5]", 2),
+        ("values[2:5]", 2),
+    ] {
+        let expr = parse_expr_only(source);
+        let Expr::Call { callee, args, .. } = expr else {
+            panic!("expected slice call for {source}");
+        };
+        assert_eq!(args.len(), expected_arg_count, "{source}");
+        assert!(
+            matches!(
+                callee.as_ref(),
+                Expr::Member { name, .. } if name == "slice"
+            ),
+            "{source}"
+        );
+    }
 }

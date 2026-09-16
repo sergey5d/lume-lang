@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# invalid_argument_type.*has type 'Str'.*expects 'Int'
+
+def main() Unit = {
+    values = [1, 2, 3]
+    println(values["first":2])
+}

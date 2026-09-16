@@ -461,6 +461,9 @@ fn java_library_type_ref_is_exposed(ty: &TypeRef, exposed_names: &HashSet<String
                 .all(|param| java_library_type_ref_is_exposed(param, exposed_names))
                 && java_library_type_ref_is_exposed(ret, exposed_names)
         }
+        TypeRef::Union { members, .. } => members
+            .iter()
+            .all(|member| java_library_type_ref_is_exposed(member, exposed_names)),
     }
 }
 
@@ -613,6 +616,11 @@ fn collect_java_library_type_ref(ty: &TypeRef, names: &mut HashSet<String>) {
             }
             collect_java_library_type_ref(ret, names);
         }
+        TypeRef::Union { members, .. } => {
+            for member in members {
+                collect_java_library_type_ref(member, names);
+            }
+        }
     }
 }
 
@@ -751,6 +759,15 @@ fn sanitize_java_type_ref_for_library(
                 exposed_names,
                 fallback_span,
             )),
+            span: *span,
+        },
+        TypeRef::Union { members, span } => TypeRef::Union {
+            members: members
+                .iter()
+                .map(|member| {
+                    sanitize_java_type_ref_for_library(member, exposed_names, fallback_span)
+                })
+                .collect(),
             span: *span,
         },
     }
@@ -1098,6 +1115,13 @@ fn substitute_java_type_ref(ty: &TypeRef, subst: &HashMap<String, TypeRef>) -> T
                 .map(|param| substitute_java_type_ref(param, subst))
                 .collect(),
             ret: Box::new(substitute_java_type_ref(ret, subst)),
+            span: *span,
+        },
+        TypeRef::Union { members, span } => TypeRef::Union {
+            members: members
+                .iter()
+                .map(|member| substitute_java_type_ref(member, subst))
+                .collect(),
             span: *span,
         },
     }
@@ -3942,6 +3966,95 @@ def main() Unit {
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
             "true\nfalse\ntrue\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_runs_union_aliases_and_widening() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java union test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-unions");
+        let source = temp.join("unions.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/unions
+
+class Cat {
+    name Str
+}
+
+class Dog {
+    name Str
+}
+
+class Bird {
+    name Str
+}
+
+type Pet = Cat | Dog
+
+def describe(value Pet) Str = match value {
+    case Cat { name } => "cat " + name
+    case Dog { name } => "dog " + name
+}
+
+def widen(value Pet) Bird | Dog | Cat = value
+
+def main() Unit {
+    pet Pet = Cat("Milo")
+    reordered Dog | Cat = pet
+    widened Bird | Dog | Cat = reordered
+    println(describe(reordered))
+    println(match widened {
+        case Cat { name } => name
+        case Dog { name } => name
+        case Bird { name } => name
+    })
+}
+"#,
+        )
+        .expect("write source");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let module = fs::read_to_string(out.join("demo/unions/UnionsModule.java"))
+            .expect("read generated module");
+        assert!(module.contains("static String describe(Object"));
+        assert!(module.contains("static Object widen(Object"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.unions.UnionsMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "cat Milo\nMilo\n"
         );
 
         let _ = fs::remove_dir_all(temp);

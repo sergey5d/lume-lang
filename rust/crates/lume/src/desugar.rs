@@ -323,12 +323,15 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             span: *span,
         },
         ast::Expr::If {
-            condition,
+            condition_clauses,
             then_block,
             else_branch,
             span,
         } => core::Expr::If {
-            condition: Box::new(desugar_expr(condition)),
+            condition_clauses: condition_clauses
+                .iter()
+                .map(desugar_if_condition_clause)
+                .collect(),
             then_block: desugar_block(then_block),
             else_branch: Box::new(desugar_else_expr_branch(else_branch)),
             span: *span,

@@ -41,6 +41,30 @@ public final class LumeVector<T> {
         return LumeRuntime.optionSome(values.get((int) index));
     }
 
+    public LumeVector<T> slice() {
+        return slice(0, values.size());
+    }
+
+    public LumeVector<T> slice(long start) {
+        return slice(start, values.size());
+    }
+
+    public LumeVector<T> slice(long start, long end) {
+        if (start < 0 || end < start || end > values.size()) {
+            throw new LumePanic(
+                "Vector.slice range "
+                    + start
+                    + ":"
+                    + end
+                    + " is out of bounds for size "
+                    + values.size()
+            );
+        }
+        return new LumeVector<>(
+            new ArrayList<>(values.subList(Math.toIntExact(start), Math.toIntExact(end)))
+        );
+    }
+
     public Result<T, InvalidIndex> setAt(long index, T value) {
         if (index < 0 || index >= values.size()) {
             return new Result.Err<>(new InvalidIndex(index, values.size()));

@@ -59,6 +59,7 @@ struct Lowerer<'a> {
     diagnostics: Vec<Diagnostic>,
     program: ir::Program,
     type_ids: HashMap<(String, ast::TypeKind), ir::TypeId>,
+    type_aliases: HashMap<String, TypeRef>,
     case_fields: HashMap<String, Vec<String>>,
     function_ids: HashMap<String, ir::FunctionId>,
     global_ids: HashMap<String, ir::GlobalId>,
@@ -70,11 +71,20 @@ struct Lowerer<'a> {
 
 impl<'a> Lowerer<'a> {
     fn new(source: &'a ast::Program) -> Self {
+        let type_aliases = source
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::TypeAlias(alias) => Some((alias.name.clone(), alias.target.clone())),
+                _ => None,
+            })
+            .collect();
         Self {
             source,
             diagnostics: Vec::new(),
             program: ir::Program::new(source.module.as_ref().map(|module| module.name.clone())),
             type_ids: HashMap::new(),
+            type_aliases,
             case_fields: HashMap::new(),
             function_ids: HashMap::new(),
             global_ids: HashMap::new(),
@@ -173,8 +183,13 @@ impl<'a> Lowerer<'a> {
                         &decl.type_params,
                         &decl.type_conditions,
                         &ty.type_params,
+                        &self.type_aliases,
                     );
-                    ty.with_bounds = decl.with_bounds.iter().map(lower_type_ref).collect();
+                    ty.with_bounds = decl
+                        .with_bounds
+                        .iter()
+                        .map(|bound| lower_type_ref_with_aliases(bound, &self.type_aliases))
+                        .collect();
                     ty.span = Some(decl.span);
                     let id = self.program.add_type(ty);
                     self.type_ids.insert(key, id);
@@ -448,7 +463,9 @@ impl<'a> Lowerer<'a> {
             name.to_string(),
             kind,
             return_type
-                .map(|ty| lower_type_ref_with_type_params(ty, &available_type_params))
+                .map(|ty| {
+                    lower_type_ref_with_type_params(ty, &available_type_params, &self.type_aliases)
+                })
                 .unwrap_or(ir::Type::Unknown),
         );
         function.annotations = lower_annotations(annotations);
@@ -459,8 +476,12 @@ impl<'a> Lowerer<'a> {
             .filter(|param| param.reified)
             .map(|param| param.name.clone())
             .collect();
-        function.generic_conditions =
-            lower_generic_conditions(type_params, type_conditions, &available_type_params);
+        function.generic_conditions = lower_generic_conditions(
+            type_params,
+            type_conditions,
+            &available_type_params,
+            &self.type_aliases,
+        );
         function.span = Some(span);
         if let Some((this_name, this_ty)) = this_local {
             function.add_local(this_name, this_ty, false, ir::LocalKind::Capture);
@@ -469,7 +490,9 @@ impl<'a> Lowerer<'a> {
             let source_ty = param
                 .ty
                 .as_ref()
-                .map(|ty| lower_type_ref_with_type_params(ty, &available_type_params))
+                .map(|ty| {
+                    lower_type_ref_with_type_params(ty, &available_type_params, &self.type_aliases)
+                })
                 .unwrap_or(ir::Type::Unknown);
             let runtime_ty = if param.lazy {
                 lazy_storage_type(source_ty)
@@ -559,6 +582,7 @@ impl<'a> Lowerer<'a> {
                 &self.global_ids,
                 &self.function_ids,
                 &self.case_fields,
+                &self.type_aliases,
                 &mut self.diagnostics,
             );
             for (index, param) in job.decl.params.iter().enumerate() {
@@ -583,6 +607,7 @@ impl<'a> Lowerer<'a> {
                 &self.global_ids,
                 &self.function_ids,
                 &self.case_fields,
+                &self.type_aliases,
                 &mut self.diagnostics,
             );
             lowerer.bind_existing("this", job.this_local);
@@ -623,6 +648,7 @@ impl<'a> Lowerer<'a> {
             &self.global_ids,
             &self.function_ids,
             &self.case_fields,
+            &self.type_aliases,
             &mut self.diagnostics,
         );
         for job in jobs {
@@ -660,6 +686,7 @@ impl<'a> Lowerer<'a> {
                 &self.global_ids,
                 &self.function_ids,
                 &self.case_fields,
+                &self.type_aliases,
                 &mut self.diagnostics,
             );
             lowerer.bind_existing("this", job.this_local);
@@ -701,6 +728,7 @@ struct FunctionLowerer<'a> {
     globals: &'a HashMap<String, ir::GlobalId>,
     functions: &'a HashMap<String, ir::FunctionId>,
     case_fields: &'a HashMap<String, Vec<String>>,
+    type_aliases: &'a HashMap<String, TypeRef>,
     scopes: Vec<HashMap<String, ir::LocalId>>,
     capture_sources: HashMap<String, CaptureSource>,
     capture_locals: HashMap<String, ir::LocalId>,
@@ -797,6 +825,7 @@ impl<'a> FunctionLowerer<'a> {
         globals: &'a HashMap<String, ir::GlobalId>,
         functions: &'a HashMap<String, ir::FunctionId>,
         case_fields: &'a HashMap<String, Vec<String>>,
+        type_aliases: &'a HashMap<String, TypeRef>,
         diagnostics: &'a mut Vec<Diagnostic>,
     ) -> Self {
         let entry = program
@@ -810,6 +839,7 @@ impl<'a> FunctionLowerer<'a> {
             globals,
             functions,
             case_fields,
+            type_aliases,
             scopes: vec![HashMap::new()],
             capture_sources: HashMap::new(),
             capture_locals: HashMap::new(),
@@ -1242,6 +1272,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.globals,
                 self.functions,
                 self.case_fields,
+                self.type_aliases,
                 self.diagnostics,
             )
             .with_capture_sources(capture_sources);
@@ -1284,6 +1315,7 @@ impl<'a> FunctionLowerer<'a> {
                 lower_lambda_param_type(
                     param,
                     expected_params.and_then(|params| params.get(index)),
+                    self.type_aliases,
                 ),
             );
         }
@@ -1296,6 +1328,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.globals,
                 self.functions,
                 self.case_fields,
+                self.type_aliases,
                 self.diagnostics,
             )
             .with_capture_sources(capture_sources);
@@ -1354,6 +1387,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.globals,
                 self.functions,
                 self.case_fields,
+                self.type_aliases,
                 self.diagnostics,
             )
             .with_capture_sources(capture_sources);
@@ -1410,6 +1444,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.globals,
                 self.functions,
                 self.case_fields,
+                self.type_aliases,
                 self.diagnostics,
             )
             .with_capture_sources(capture_sources);
@@ -1614,6 +1649,7 @@ impl<'a> FunctionLowerer<'a> {
                     self.globals,
                     self.functions,
                     self.case_fields,
+                    self.type_aliases,
                     self.diagnostics,
                 )
                 .with_capture_sources(capture_sources.clone());
@@ -2001,6 +2037,7 @@ impl<'a> FunctionLowerer<'a> {
                     self.apply_pending_bindings(plan.bindings);
                 }
                 core::IfConditionClause::Expr(condition) => {
+                    let narrowing = self.type_narrowing_for_condition(condition, true);
                     let cond = self.lower_expr(condition);
                     self.terminate(ir::Terminator {
                         span: Some(condition.span()),
@@ -2011,6 +2048,7 @@ impl<'a> FunctionLowerer<'a> {
                         },
                     });
                     self.current_block = Some(success_block);
+                    self.apply_type_narrowing(narrowing.as_ref());
                 }
             }
 
@@ -2511,6 +2549,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.globals,
                 self.functions,
                 self.case_fields,
+                self.type_aliases,
                 self.diagnostics,
             )
             .with_capture_sources(capture_sources);
@@ -3232,7 +3271,7 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             Pattern::Type { name, target, span } => {
-                let ty = lower_type_ref(target);
+                let ty = lower_type_ref_with_aliases(target, &self.type_aliases);
                 let condition = self.emit_temp_from_rvalue(
                     ir::RValue::TypeTest {
                         operand: scrutinee.clone(),
@@ -3551,7 +3590,7 @@ impl<'a> FunctionLowerer<'a> {
     fn whole_pattern_binding_type(&self, pattern: &Pattern, scrutinee: &ir::Operand) -> ir::Type {
         match pattern {
             Pattern::Alias { inner, .. } => self.whole_pattern_binding_type(inner, scrutinee),
-            Pattern::Type { target, .. } => lower_type_ref(target),
+            Pattern::Type { target, .. } => lower_type_ref_with_aliases(target, &self.type_aliases),
             Pattern::Record { path, .. } if !path.is_empty() => {
                 match self.lookup_record_pattern_kind(path) {
                     Some(ConstructorPatternKind::EnumCase { case_name, .. }) => self
@@ -4194,11 +4233,11 @@ impl<'a> FunctionLowerer<'a> {
                 span,
             } => self.lower_logical_expr(left, AstBinaryOp::Or, right, *span),
             Expr::If {
-                condition,
+                condition_clauses,
                 then_block,
                 else_branch,
                 span,
-            } => self.lower_if_expr(condition, then_block, else_branch, *span),
+            } => self.lower_if_expr(condition_clauses, then_block, else_branch, *span),
             Expr::Try { value, span } => self.lower_try_expr(value, *span),
             Expr::ExtractOr {
                 value,
@@ -4681,11 +4720,13 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|(_, inner)| inner)
                     .unwrap_or(ir::Type::Unknown)
             }
-            Expr::TypeOf { ty, .. } => ir_exact_runtime_type(lower_type_ref(ty)),
+            Expr::TypeOf { ty, .. } => {
+                ir_exact_runtime_type(lower_type_ref_with_aliases(ty, &self.type_aliases))
+            }
             Expr::Return { .. } | Expr::Break { .. } | Expr::Continue { .. } => ir::Type::Never,
             Expr::AnonymousInterface { interfaces, .. } => {
                 if interfaces.len() == 1 {
-                    lower_type_ref(&interfaces[0])
+                    lower_type_ref_with_aliases(&interfaces[0], &self.type_aliases)
                 } else {
                     ir::Type::Unknown
                 }
@@ -4807,7 +4848,11 @@ impl<'a> FunctionLowerer<'a> {
                     .iter()
                     .enumerate()
                     .map(|(index, param)| {
-                        lower_lambda_param_type(param, expected_params.get(index))
+                        lower_lambda_param_type(
+                            param,
+                            expected_params.get(index),
+                            self.type_aliases,
+                        )
                     })
                     .collect::<Vec<_>>();
                 let mut body_overrides = overrides.to_vec();
@@ -5022,7 +5067,7 @@ impl<'a> FunctionLowerer<'a> {
                 if local_info.mutable {
                     return None;
                 }
-                let ty = lower_type_ref(target);
+                let ty = lower_type_ref_with_aliases(target, &self.type_aliases);
                 if matches!(ty, ir::Type::Unknown | ir::Type::TypeParam(_)) {
                     return None;
                 }
@@ -5610,31 +5655,26 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_if_expr(
         &mut self,
-        condition: &Expr,
+        condition_clauses: &[core::IfConditionClause],
         then_block: &Block,
         else_branch: &ElseExprBranch,
         span: Span,
     ) -> ir::Operand {
-        let then_narrowing = self.type_narrowing_for_condition(condition, true);
-        let else_narrowing = self.type_narrowing_for_condition(condition, false);
+        let else_narrowing = match condition_clauses {
+            [core::IfConditionClause::Expr(condition)] => {
+                self.type_narrowing_for_condition(condition, false)
+            }
+            _ => None,
+        };
         let temp = self.add_temp(ir::Type::Unknown);
         let then_id = self.add_block();
         let else_id = self.add_block();
         let join_id = self.add_block();
 
-        let cond = self.lower_expr(condition);
-        self.terminate(ir::Terminator {
-            span: Some(span),
-            kind: ir::TerminatorKind::Branch {
-                condition: cond,
-                then_block: then_id,
-                else_block: else_id,
-            },
-        });
+        self.push_scope();
+        self.lower_if_condition_clause_chain(condition_clauses, then_id, else_id);
 
         self.current_block = Some(then_id);
-        self.push_scope();
-        self.apply_type_narrowing(then_narrowing.as_ref());
         if let Some(value) = self.lower_block_value(then_block) {
             self.push_statement(ir::Statement {
                 span: Some(then_block.span),
@@ -5861,14 +5901,14 @@ impl<'a> FunctionLowerer<'a> {
             }),
             Expr::Is { left, target, .. } => Some(ir::RValue::TypeTest {
                 operand: self.lower_expr(left),
-                ty: lower_type_ref(target),
+                ty: lower_type_ref_with_aliases(target, &self.type_aliases),
             }),
             Expr::TypeOf { ty, .. } => {
                 if let Some(operand) = self.reified_type_param_operand(ty) {
                     Some(ir::RValue::Use(operand))
                 } else {
                     Some(ir::RValue::TypeOf {
-                        ty: lower_type_ref(ty),
+                        ty: lower_type_ref_with_aliases(ty, &self.type_aliases),
                     })
                 }
             }
@@ -6058,6 +6098,7 @@ impl<'a> FunctionLowerer<'a> {
                 self.globals,
                 self.functions,
                 self.case_fields,
+                self.type_aliases,
                 self.diagnostics,
             )
             .with_capture_sources(capture_sources);
@@ -7322,17 +7363,53 @@ fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
 }
 
 fn lower_type_ref(reference: &TypeRef) -> ir::Type {
+    lower_type_ref_with_aliases(reference, &HashMap::new())
+}
+
+fn lower_type_ref_with_aliases(
+    reference: &TypeRef,
+    type_aliases: &HashMap<String, TypeRef>,
+) -> ir::Type {
+    lower_type_ref_inner(reference, type_aliases, &mut HashSet::new())
+}
+
+fn lower_type_ref_inner(
+    reference: &TypeRef,
+    type_aliases: &HashMap<String, TypeRef>,
+    visiting: &mut HashSet<String>,
+) -> ir::Type {
     match reference {
         TypeRef::Wildcard { .. } => ir::Type::Unknown,
         TypeRef::Named { name, args, .. } if name == "Never" && args.is_empty() => ir::Type::Never,
+        TypeRef::Named { name, args, .. } if args.is_empty() && type_aliases.contains_key(name) => {
+            if !visiting.insert(name.clone()) {
+                return ir::Type::Unknown;
+            }
+            let lowered = lower_type_ref_inner(
+                type_aliases.get(name).expect("known type alias"),
+                type_aliases,
+                visiting,
+            );
+            visiting.remove(name);
+            lowered
+        }
         TypeRef::Named { name, args, .. } => ir::Type::Named {
             name: name.clone(),
-            args: args.iter().map(lower_type_ref).collect(),
+            args: args
+                .iter()
+                .map(|arg| lower_type_ref_inner(arg, type_aliases, visiting))
+                .collect(),
         },
+        TypeRef::Union { members, .. } => ir::Type::Union(
+            members
+                .iter()
+                .map(|member| lower_type_ref_inner(member, type_aliases, visiting))
+                .collect(),
+        ),
         TypeRef::Tuple { fields, .. } => ir::Type::Tuple(
             fields
                 .iter()
-                .map(|field| lower_type_ref(&field.ty))
+                .map(|field| lower_type_ref_inner(&field.ty, type_aliases, visiting))
                 .collect(),
         ),
         TypeRef::Record { fields, .. } => ir::Type::Record(
@@ -7340,13 +7417,16 @@ fn lower_type_ref(reference: &TypeRef) -> ir::Type {
                 .iter()
                 .map(|field| ir::NamedType {
                     name: field.name.clone(),
-                    ty: lower_type_ref(&field.ty),
+                    ty: lower_type_ref_inner(&field.ty, type_aliases, visiting),
                 })
                 .collect(),
         ),
         TypeRef::Function { params, ret, .. } => ir::Type::Function {
-            params: params.iter().map(lower_type_ref).collect(),
-            ret: Box::new(lower_type_ref(ret)),
+            params: params
+                .iter()
+                .map(|param| lower_type_ref_inner(param, type_aliases, visiting))
+                .collect(),
+            ret: Box::new(lower_type_ref_inner(ret, type_aliases, visiting)),
         },
     }
 }
@@ -7364,6 +7444,7 @@ fn lower_runtime_type_ref_has_arguments(reference: &TypeRef) -> bool {
             params.iter().any(lower_runtime_type_ref_has_arguments)
                 || lower_runtime_type_ref_has_arguments(ret)
         }
+        TypeRef::Union { members, .. } => members.iter().any(lower_runtime_type_ref_has_arguments),
         TypeRef::Wildcard { .. } => false,
     }
 }
@@ -7396,7 +7477,20 @@ fn builtin_extension_receiver_name(ty: &ir::Type) -> Option<&'static str> {
     }
 }
 
-fn lower_type_ref_with_type_params(reference: &TypeRef, type_params: &[String]) -> ir::Type {
+fn lower_type_ref_with_type_params(
+    reference: &TypeRef,
+    type_params: &[String],
+    type_aliases: &HashMap<String, TypeRef>,
+) -> ir::Type {
+    lower_type_ref_with_type_params_inner(reference, type_params, type_aliases, &mut HashSet::new())
+}
+
+fn lower_type_ref_with_type_params_inner(
+    reference: &TypeRef,
+    type_params: &[String],
+    type_aliases: &HashMap<String, TypeRef>,
+    visiting: &mut HashSet<String>,
+) -> ir::Type {
     match reference {
         TypeRef::Named { name, args, .. }
             if args.is_empty() && type_params.iter().any(|param| param == name) =>
@@ -7404,18 +7498,53 @@ fn lower_type_ref_with_type_params(reference: &TypeRef, type_params: &[String]) 
             ir::Type::TypeParam(name.clone())
         }
         TypeRef::Named { name, args, .. } if name == "Never" && args.is_empty() => ir::Type::Never,
+        TypeRef::Named { name, args, .. } if args.is_empty() && type_aliases.contains_key(name) => {
+            if !visiting.insert(name.clone()) {
+                return ir::Type::Unknown;
+            }
+            let lowered = lower_type_ref_with_type_params_inner(
+                type_aliases.get(name).expect("known type alias"),
+                type_params,
+                type_aliases,
+                visiting,
+            );
+            visiting.remove(name);
+            lowered
+        }
         TypeRef::Named { name, args, .. } => ir::Type::Named {
             name: name.clone(),
             args: args
                 .iter()
-                .map(|arg| lower_type_ref_with_type_params(arg, type_params))
+                .map(|arg| {
+                    lower_type_ref_with_type_params_inner(arg, type_params, type_aliases, visiting)
+                })
                 .collect(),
         },
+        TypeRef::Union { members, .. } => ir::Type::Union(
+            members
+                .iter()
+                .map(|member| {
+                    lower_type_ref_with_type_params_inner(
+                        member,
+                        type_params,
+                        type_aliases,
+                        visiting,
+                    )
+                })
+                .collect(),
+        ),
         TypeRef::Wildcard { .. } => ir::Type::Unknown,
         TypeRef::Tuple { fields, .. } => ir::Type::Tuple(
             fields
                 .iter()
-                .map(|field| lower_type_ref_with_type_params(&field.ty, type_params))
+                .map(|field| {
+                    lower_type_ref_with_type_params_inner(
+                        &field.ty,
+                        type_params,
+                        type_aliases,
+                        visiting,
+                    )
+                })
                 .collect(),
         ),
         TypeRef::Record { fields, .. } => ir::Type::Record(
@@ -7423,16 +7552,33 @@ fn lower_type_ref_with_type_params(reference: &TypeRef, type_params: &[String]) 
                 .iter()
                 .map(|field| ir::NamedType {
                     name: field.name.clone(),
-                    ty: lower_type_ref_with_type_params(&field.ty, type_params),
+                    ty: lower_type_ref_with_type_params_inner(
+                        &field.ty,
+                        type_params,
+                        type_aliases,
+                        visiting,
+                    ),
                 })
                 .collect(),
         ),
         TypeRef::Function { params, ret, .. } => ir::Type::Function {
             params: params
                 .iter()
-                .map(|param| lower_type_ref_with_type_params(param, type_params))
+                .map(|param| {
+                    lower_type_ref_with_type_params_inner(
+                        param,
+                        type_params,
+                        type_aliases,
+                        visiting,
+                    )
+                })
                 .collect(),
-            ret: Box::new(lower_type_ref_with_type_params(ret, type_params)),
+            ret: Box::new(lower_type_ref_with_type_params_inner(
+                ret,
+                type_params,
+                type_aliases,
+                visiting,
+            )),
         },
     }
 }
@@ -7441,24 +7587,25 @@ fn lower_generic_conditions(
     params: &[ast::TypeParam],
     conditions: &[ast::GenericCondition],
     type_params: &[String],
+    type_aliases: &HashMap<String, TypeRef>,
 ) -> Vec<ir::GenericCondition> {
     let mut lowered = Vec::new();
     for param in params {
         for bound in &param.bounds {
             lowered.push(ir::GenericCondition::Bound {
                 subject: ir::Type::TypeParam(param.name.clone()),
-                bound: lower_type_ref_with_type_params(bound, type_params),
+                bound: lower_type_ref_with_type_params(bound, type_params, type_aliases),
             });
         }
     }
     lowered.extend(conditions.iter().map(|condition| match condition {
         ast::GenericCondition::Bound { subject, bound, .. } => ir::GenericCondition::Bound {
-            subject: lower_type_ref_with_type_params(subject, type_params),
-            bound: lower_type_ref_with_type_params(bound, type_params),
+            subject: lower_type_ref_with_type_params(subject, type_params, type_aliases),
+            bound: lower_type_ref_with_type_params(bound, type_params, type_aliases),
         },
         ast::GenericCondition::Equal { left, right, .. } => ir::GenericCondition::Equal {
-            left: lower_type_ref_with_type_params(left, type_params),
-            right: lower_type_ref_with_type_params(right, type_params),
+            left: lower_type_ref_with_type_params(left, type_params, type_aliases),
+            right: lower_type_ref_with_type_params(right, type_params, type_aliases),
         },
     }));
     lowered
@@ -7604,9 +7751,13 @@ fn annotation_string_value(raw: &str) -> String {
         .to_string()
 }
 
-fn lower_lambda_param_type(param: &core::LambdaParam, expected: Option<&ir::Type>) -> ir::Type {
+fn lower_lambda_param_type(
+    param: &core::LambdaParam,
+    expected: Option<&ir::Type>,
+    type_aliases: &HashMap<String, TypeRef>,
+) -> ir::Type {
     if let Some(ty) = &param.ty {
-        return lower_type_ref(ty);
+        return lower_type_ref_with_aliases(ty, type_aliases);
     }
     let Some(destructure) = &param.destructure else {
         return expected.cloned().unwrap_or(ir::Type::Unknown);
@@ -8353,6 +8504,10 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: vec![ir::Type::Int],
             ret: Box::new(ir::Type::option(item)),
         }),
+        ("Vector", "slice") => Some(ir::Type::Function {
+            params: vec![ir::Type::Int, ir::Type::Int],
+            ret: Box::new(receiver.clone()),
+        }),
         ("Vector" | "LinkedList" | "Array", "setAt") => Some(ir::Type::Function {
             params: vec![ir::Type::Int, item.clone()],
             ret: Box::new(ir::Type::Named {
@@ -8442,7 +8597,7 @@ fn inferred_storage_type(ty: ir::Type) -> ir::Type {
 fn contains_type_param(ty: &ir::Type) -> bool {
     match ty {
         ir::Type::TypeParam(_) => true,
-        ir::Type::Named { args, .. } | ir::Type::Tuple(args) => {
+        ir::Type::Named { args, .. } | ir::Type::Tuple(args) | ir::Type::Union(args) => {
             args.iter().any(contains_type_param)
         }
         ir::Type::Record(fields) => fields.iter().any(|field| contains_type_param(&field.ty)),
@@ -8608,6 +8763,12 @@ fn substitute_ir_type(ty: &ir::Type, subst: &HashMap<String, ir::Type>) -> ir::T
                 .map(|arg| substitute_ir_type(arg, subst))
                 .collect(),
         },
+        ir::Type::Union(members) => ir::Type::Union(
+            members
+                .iter()
+                .map(|member| substitute_ir_type(member, subst))
+                .collect(),
+        ),
         ir::Type::Tuple(items) => ir::Type::Tuple(
             items
                 .iter()
@@ -8672,6 +8833,9 @@ fn ir_type_is_hashable(
         ir::Type::Record(fields) => fields
             .iter()
             .all(|field| ir_type_is_hashable(&field.ty, owner, types, seen)),
+        ir::Type::Union(members) => members
+            .iter()
+            .all(|member| ir_type_is_hashable(member, owner, types, seen)),
         ir::Type::Named { name, args } => {
             let Some(definition) = types.iter().find(|candidate| candidate.name == *name) else {
                 return false;
@@ -8770,6 +8934,15 @@ fn infer_ir_type_subst(
                     for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
                         infer_ir_type_subst(expected_arg, actual_arg, subst);
                     }
+                }
+            }
+        }
+        ir::Type::Union(expected_members) => {
+            if let ir::Type::Union(actual_members) = actual {
+                for (expected_member, actual_member) in
+                    expected_members.iter().zip(actual_members.iter())
+                {
+                    infer_ir_type_subst(expected_member, actual_member, subst);
                 }
             }
         }
@@ -8872,6 +9045,9 @@ fn erase_ir_type_params(ty: &ir::Type) -> ir::Type {
             name: name.clone(),
             args: args.iter().map(erase_ir_type_params).collect(),
         },
+        ir::Type::Union(members) => {
+            ir::Type::Union(members.iter().map(erase_ir_type_params).collect())
+        }
         ir::Type::Tuple(items) => ir::Type::Tuple(items.iter().map(erase_ir_type_params).collect()),
         ir::Type::Record(fields) => ir::Type::Record(
             fields

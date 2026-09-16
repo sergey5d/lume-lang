@@ -704,6 +704,7 @@ pub enum Type {
     Float,
     Str,
     Named { name: String, args: Vec<Type> },
+    Union(Vec<Type>),
     Tuple(Vec<Type>),
     Record(Vec<NamedType>),
     Function { params: Vec<Type>, ret: Box<Type> },

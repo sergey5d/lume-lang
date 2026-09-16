@@ -51,9 +51,19 @@ pub struct Annotation {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     Function(FunctionDecl),
+    TypeAlias(TypeAliasDecl),
     Type(TypeDecl),
     Extension(ExtensionBlock),
     Statement(Stmt),
+}
+
+/// A transparent `type Name = A | B` union alias.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeAliasDecl {
+    pub visibility: Visibility,
+    pub name: String,
+    pub target: TypeRef,
+    pub span: Span,
 }
 
 /// Visibility modifier carried by declarations and fields.
@@ -227,6 +237,10 @@ pub enum TypeRef {
         ret: Box<TypeRef>,
         span: Span,
     },
+    Union {
+        members: Vec<TypeRef>,
+        span: Span,
+    },
 }
 
 /// One positional element inside a tuple type.
@@ -251,7 +265,8 @@ impl TypeRef {
             | TypeRef::Named { span, .. }
             | TypeRef::Tuple { span, .. }
             | TypeRef::Record { span, .. }
-            | TypeRef::Function { span, .. } => *span,
+            | TypeRef::Function { span, .. }
+            | TypeRef::Union { span, .. } => *span,
         }
     }
 }
@@ -708,7 +723,7 @@ pub enum Expr {
         span: Span,
     },
     If {
-        condition: Box<Expr>,
+        condition_clauses: Vec<IfConditionClause>,
         then_block: Block,
         else_branch: Box<ElseExprBranch>,
         span: Span,

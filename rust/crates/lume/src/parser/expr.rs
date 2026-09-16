@@ -7,21 +7,6 @@ impl<'a> Parser<'a> {
         if let Some(lambda) = self.try_parse_lambda_expr() {
             return Some(lambda);
         }
-        if self.match_keyword(Keyword::If) {
-            return self.parse_if_expr(self.previous_span());
-        }
-        if self.at_keyword(Keyword::Match) {
-            let start = self.consume_keyword(Keyword::Match, "expected 'match'")?;
-            return self.parse_match_expr_after_keyword(start, false);
-        }
-        if self.at_keyword(Keyword::Partial) {
-            let start = self.consume_keyword(Keyword::Partial, "expected 'partial'")?;
-            return self.parse_partial_match_expr_after_partial(start);
-        }
-        if self.at_keyword(Keyword::For) {
-            let start = self.consume_keyword(Keyword::For, "expected 'for'")?;
-            return self.parse_for_yield_expr_after_start(start);
-        }
         self.parse_extract_or_expr()
     }
 
@@ -29,6 +14,17 @@ impl<'a> Parser<'a> {
         let previous = self.allow_trailing_block_call;
         self.allow_trailing_block_call = false;
         let result = self.parse_expr();
+        self.allow_trailing_block_call = previous;
+        result
+    }
+
+    fn with_trailing_block_calls_allowed<T>(
+        &mut self,
+        parse: impl FnOnce(&mut Self) -> Option<T>,
+    ) -> Option<T> {
+        let previous = self.allow_trailing_block_call;
+        self.allow_trailing_block_call = true;
+        let result = parse(self);
         self.allow_trailing_block_call = previous;
         result
     }
@@ -166,7 +162,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_if_expr(&mut self, start: Span) -> Option<Expr> {
-        let condition = self.parse_expr_without_trailing_block_call()?;
+        let condition_clauses = self.parse_condition_clauses("if")?;
         let then_block = self.parse_if_body_block()?;
         if !self.match_keyword(Keyword::Else) {
             self.error_at_current(
@@ -194,7 +190,7 @@ impl<'a> Parser<'a> {
             ElseExprBranch::Block(block) => block.span,
         };
         Some(Expr::If {
-            condition: Box::new(condition),
+            condition_clauses,
             then_block,
             else_branch: Box::new(else_branch),
             span: start.cover(end),
@@ -1215,7 +1211,8 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.match_token(TokenKind::LParen) {
-                let args = self.parse_call_args()?;
+                let args =
+                    self.with_trailing_block_calls_allowed(|parser| parser.parse_call_args())?;
                 let end = self.consume(TokenKind::RParen, "expected ')' after arguments")?;
                 let start = expr.span();
                 expr = Expr::Call {
@@ -1256,13 +1253,95 @@ impl<'a> Parser<'a> {
                     };
                     continue;
                 }
-                let index = self.parse_expr()?;
-                let end = self.consume(TokenKind::RBracket, "expected ']' after index")?;
-                expr = Expr::Index {
-                    receiver: Box::new(expr),
-                    index: Box::new(index),
-                    span: start.cover(end),
-                };
+                self.skip_newlines();
+                let first =
+                    if self.at(TokenKind::Colon) {
+                        None
+                    } else {
+                        Some(self.with_trailing_block_calls_allowed(|parser| {
+                            parser.parse_slice_bound()
+                        })?)
+                    };
+                if self.match_token(TokenKind::Colon) {
+                    let colon = self.previous_span();
+                    self.skip_newlines();
+                    let second = if self.at(TokenKind::RBracket) {
+                        None
+                    } else {
+                        Some(self.with_trailing_block_calls_allowed(|parser| {
+                            parser.parse_slice_bound()
+                        })?)
+                    };
+                    self.skip_newlines();
+                    let end = self.consume(TokenKind::RBracket, "expected ']' after slice")?;
+                    let mut args = Vec::new();
+                    match (first, second) {
+                        (None, None) => {}
+                        (None, Some(end_expr)) => {
+                            let zero = Expr::Integer {
+                                raw: "0".to_string(),
+                                span: colon,
+                            };
+                            args.push(CallArg {
+                                name: None,
+                                ty: None,
+                                span: zero.span(),
+                                value: zero,
+                            });
+                            args.push(CallArg {
+                                name: None,
+                                ty: None,
+                                span: end_expr.span(),
+                                value: end_expr,
+                            });
+                        }
+                        (Some(start_expr), None) => args.push(CallArg {
+                            name: None,
+                            ty: None,
+                            span: start_expr.span(),
+                            value: start_expr,
+                        }),
+                        (Some(start_expr), Some(end_expr)) => {
+                            args.push(CallArg {
+                                name: None,
+                                ty: None,
+                                span: start_expr.span(),
+                                value: start_expr,
+                            });
+                            args.push(CallArg {
+                                name: None,
+                                ty: None,
+                                span: end_expr.span(),
+                                value: end_expr,
+                            });
+                        }
+                    }
+                    let slice_span = start.cover(end);
+                    expr = Expr::Call {
+                        callee: Box::new(Expr::Member {
+                            receiver: Box::new(expr),
+                            name: "slice".to_string(),
+                            span: slice_span,
+                        }),
+                        args,
+                        uses_brace_syntax: false,
+                        span: slice_span,
+                    };
+                } else {
+                    let Some(index) = first else {
+                        self.error_at_current(
+                            "expected_expression",
+                            "expected index expression or ':' in brackets",
+                        );
+                        return None;
+                    };
+                    let end = self.consume(TokenKind::RBracket, "expected ']' after index")?;
+                    expr = Expr::Index {
+                        receiver: Box::new(expr),
+                        index: Box::new(index),
+                        span: start.cover(end),
+                    };
+                }
                 continue;
             }
             if self.match_token(TokenKind::BangBang) {
@@ -1285,12 +1364,12 @@ impl<'a> Parser<'a> {
             if self.allow_trailing_block_call && self.at(TokenKind::LBrace) {
                 let start = expr.span();
                 let open_span = self.current_span();
-                let arg = if self.looks_like_brace_record_literal(true)
+                let arg = if let Some(arg) = self.parse_trailing_lambda_block_arg(open_span) {
+                    arg
+                } else if self.looks_like_brace_record_literal(true)
                     || Self::is_constructor_like_expr(&expr)
                 {
                     self.parse_brace_record_literal_expr()?
-                } else if let Some(arg) = self.parse_trailing_lambda_block_arg(open_span) {
-                    arg
                 } else {
                     let block = self.parse_block()?;
                     if !self.validate_trailing_lambda_block(&block, open_span) {
@@ -1324,6 +1403,21 @@ impl<'a> Parser<'a> {
         Some(expr)
     }
 
+    fn parse_slice_bound(&mut self) -> Option<Expr> {
+        let value = self.parse_or_expr()?;
+        if !self.match_token(TokenKind::QuestionQuestion) {
+            return Some(value);
+        }
+        self.skip_newlines();
+        let fallback = self.parse_slice_bound()?;
+        let span = value.span().cover(fallback.span());
+        Some(Expr::ExtractOr {
+            value: Box::new(value),
+            fallback: Box::new(fallback),
+            span,
+        })
+    }
+
     fn parse_trailing_lambda_block_arg(&mut self, open_span: Span) -> Option<Expr> {
         let checkpoint = self.checkpoint();
         let start = self.consume(TokenKind::LBrace, "expected '{'")?;
@@ -1341,10 +1435,11 @@ impl<'a> Parser<'a> {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             if let Some(stmt) = self.parse_stmt() {
                 statements.push(stmt);
+                self.finish_braced_statement();
             } else {
                 self.synchronize_stmt();
+                self.skip_newlines();
             }
-            self.skip_newlines();
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after block")?;
         let body_span = statements
@@ -1618,7 +1713,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_primary_expr(&mut self) -> Option<Expr> {
         if self.at_keyword(Keyword::Object) {
-            return self.parse_object_expr();
+            return self.with_trailing_block_calls_allowed(|parser| parser.parse_object_expr());
         }
         if self.can_start_type_ref() && self.is_removed_interface_led_expr_start() {
             return self.parse_removed_interface_led_expr();
@@ -1680,7 +1775,8 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Shape) => {
                 let start = self.consume_keyword(Keyword::Shape, "expected 'shape'")?;
                 if self.match_token(TokenKind::LParen) {
-                    let args = self.parse_call_args()?;
+                    let args =
+                        self.with_trailing_block_calls_allowed(|parser| parser.parse_call_args())?;
                     let end = self.consume(TokenKind::RParen, "expected ')' after shape values")?;
                     let mut items = Vec::new();
                     for arg in args {
@@ -1699,13 +1795,19 @@ impl<'a> Parser<'a> {
                     });
                 }
                 if self.match_token(TokenKind::LBrace) {
-                    return self.finish_brace_record_literal_expr(start);
+                    return self.with_trailing_block_calls_allowed(|parser| {
+                        parser.finish_brace_record_literal_expr(start)
+                    });
                 }
                 self.error_at_current(
                     "unexpected_token",
                     "anonymous shape construction uses 'shape { field: value }' or positional 'shape(...)'",
                 );
                 None
+            }
+            TokenKind::Keyword(Keyword::If) => {
+                let start = self.consume_keyword(Keyword::If, "expected 'if'")?;
+                self.parse_if_expr(start)
             }
             TokenKind::Keyword(Keyword::Match) => {
                 let start = self.consume_keyword(Keyword::Match, "expected 'match'")?;
@@ -1719,19 +1821,23 @@ impl<'a> Parser<'a> {
                 let start = self.consume_keyword(Keyword::For, "expected 'for'")?;
                 self.parse_for_yield_expr_after_start(start)
             }
-            TokenKind::LBracket => self.parse_list_literal(),
-            TokenKind::LParen => self.parse_group_or_tuple_expr(),
-            TokenKind::LBrace => {
-                if self.looks_like_brace_record_literal(false) {
-                    self.parse_brace_record_literal_expr()
+            TokenKind::LBracket => {
+                self.with_trailing_block_calls_allowed(|parser| parser.parse_list_literal())
+            }
+            TokenKind::LParen => {
+                self.with_trailing_block_calls_allowed(|parser| parser.parse_group_or_tuple_expr())
+            }
+            TokenKind::LBrace => self.with_trailing_block_calls_allowed(|parser| {
+                if parser.looks_like_brace_record_literal(false) {
+                    parser.parse_brace_record_literal_expr()
                 } else {
-                    let block = self.parse_block()?;
+                    let block = parser.parse_block()?;
                     Some(Expr::Block {
                         span: block.span,
                         body: block,
                     })
                 }
-            }
+            }),
             _ => {
                 self.error_at_current("expected_expression", "expected expression");
                 None
@@ -1790,40 +1896,35 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let mut depth = 1usize;
         let mut nested_parens = 0usize;
         let mut nested_brackets = 0usize;
-        let mut inside_with_header = false;
+        let mut nested_braces = 0usize;
         while let Some(token) = self.tokens.get(lookahead) {
             match token.kind {
-                TokenKind::Keyword(Keyword::With) if depth == 1 => {
-                    inside_with_header = true;
-                }
                 TokenKind::LBrace => {
-                    depth += 1;
-                    inside_with_header = false;
+                    nested_braces += 1;
                 }
-                TokenKind::RBrace => {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
-                        break;
-                    }
+                TokenKind::RBrace
+                    if nested_parens == 0 && nested_brackets == 0 && nested_braces == 0 =>
+                {
+                    return false;
                 }
+                TokenKind::RBrace => nested_braces = nested_braces.saturating_sub(1),
                 TokenKind::LParen => nested_parens += 1,
                 TokenKind::RParen => nested_parens = nested_parens.saturating_sub(1),
                 TokenKind::LBracket => nested_brackets += 1,
                 TokenKind::RBracket => nested_brackets = nested_brackets.saturating_sub(1),
-                TokenKind::Comma
-                    if depth == 1
-                        && nested_parens == 0
-                        && nested_brackets == 0
-                        && !inside_with_header =>
+                TokenKind::Colon
+                    if nested_parens == 0 && nested_brackets == 0 && nested_braces == 0 =>
                 {
                     return true;
                 }
-                TokenKind::Colon if depth == 1 && nested_parens == 0 && nested_brackets == 0 => {
-                    return true;
+                TokenKind::Comma | TokenKind::Newline
+                    if nested_parens == 0 && nested_brackets == 0 && nested_braces == 0 =>
+                {
+                    return false;
                 }
+                TokenKind::Eof => return false,
                 _ => {}
             }
             lookahead += 1;

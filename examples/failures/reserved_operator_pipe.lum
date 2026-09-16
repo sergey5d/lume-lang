@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*expected expression.*
+# .*expected newline.*after statement.*
 
 def main() Unit {
     value = left | right

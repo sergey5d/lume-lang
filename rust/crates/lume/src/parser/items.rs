@@ -111,6 +111,17 @@ impl<'a> Parser<'a> {
                 let function = self.parse_function_decl(annotations, visibility)?;
                 Some(Item::Function(function))
             }
+            TokenKind::Keyword(Keyword::Type) => {
+                if !annotations.is_empty() {
+                    self.error_at_current(
+                        "unexpected_annotation",
+                        "type aliases do not accept annotations",
+                    );
+                    return None;
+                }
+                let alias = self.parse_type_alias_decl(visibility)?;
+                Some(Item::TypeAlias(alias))
+            }
             TokenKind::Keyword(Keyword::Annotation)
             | TokenKind::Keyword(Keyword::Class)
             | TokenKind::Keyword(Keyword::Shape)
@@ -192,6 +203,30 @@ impl<'a> Parser<'a> {
         } else {
             Visibility::Default
         }
+    }
+
+    fn parse_type_alias_decl(&mut self, visibility: Visibility) -> Option<TypeAliasDecl> {
+        let start = self.consume(
+            TokenKind::Keyword(Keyword::Type),
+            "expected 'type' before type alias",
+        )?;
+        let (name, _) = self.expect_identifier("expected type alias name")?;
+        self.consume(TokenKind::Eq, "expected '=' after type alias name")?;
+        let target = self.parse_type_ref()?;
+        if !matches!(target, TypeRef::Union { .. }) {
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_type_alias",
+                "type aliases currently require a union target such as 'type Choice = A | B'",
+                target.span(),
+            ));
+        }
+        let span = start.cover(target.span());
+        Some(TypeAliasDecl {
+            visibility,
+            name,
+            target,
+            span,
+        })
     }
 
     pub(super) fn parse_annotations(&mut self) -> Option<Vec<Annotation>> {
