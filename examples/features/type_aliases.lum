@@ -1,0 +1,31 @@
+# EXPECT:
+# user 7
+# Ada
+# 10
+# 42
+
+shape User {
+    name Str
+}
+
+type UserId = Int
+type Labeler = fn(UserId) Str
+type Users = [User]
+type Scores = [Str: Int]
+type Profile = { name Str, age Int }
+type Identifier = UserId
+
+def apply(labeler Labeler, id Identifier) Str = labeler(id)
+
+def main() Unit {
+    id UserId = 7
+    labeler Labeler = (value Int) => "user " + value
+    users Users = [User("Ada")]
+    scores Scores = ["Ada": 10]
+    profile Profile = { name: "Ada", age: 42 }
+
+    println(apply(labeler, id))
+    println(users[0].name)
+    println(scores["Ada"]!)
+    println(profile.age)
+}

@@ -9,15 +9,15 @@ class User {
 }
 
 def typeName[reified A](value A) Str =
-    typeOf[A].name() !!
+    typeOf[A].name() !
 
 class Inspector {
 
     def valueTypeName[reified A](value A) Str =
-        typeOf[A].name() !!
+        typeOf[A].name() !
 
     def namedTypeName[reified A]() Str =
-        typeOf[A].name() !!
+        typeOf[A].name() !
 }
 
 

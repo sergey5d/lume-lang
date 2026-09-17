@@ -287,7 +287,7 @@ def choose(ready Bool, maybe Int?) Int {
     let Stmt::If(let_first) = &block.statements[1] else {
         panic!("expected if statement");
     };
-    assert_eq!(let_first.condition_clauses.len(), 3);
+    assert_eq!(let_first.condition_clauses.len(), 2);
     assert!(matches!(
         let_first.condition_clauses[0],
         IfConditionClause::Let(_)
@@ -296,11 +296,6 @@ def choose(ready Bool, maybe Int?) Int {
         let_first.condition_clauses[1],
         IfConditionClause::Expr(_)
     ));
-    assert!(matches!(
-        let_first.condition_clauses[2],
-        IfConditionClause::Expr(_)
-    ));
-
     let Stmt::While(stmt) = &block.statements[2] else {
         panic!("expected while statement");
     };
@@ -330,6 +325,79 @@ def choose(ready Bool, maybe Int?) Int {
             && matches!(condition_clauses[0], IfConditionClause::Expr(_))
             && matches!(condition_clauses[1], IfConditionClause::Let(_))
             && matches!(condition_clauses[2], IfConditionClause::Expr(_))
+    ));
+}
+
+#[test]
+fn preserves_boolean_precedence_in_control_flow_headers() {
+    let result = parse(
+        r#"
+def choose(a Bool, b Bool, c Bool) Int {
+    if a || b && c {
+        println("statement")
+    }
+
+    while a || b && c {
+        break
+    }
+
+    return if a || b && c {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function declaration");
+    };
+    let CallableBody::Block(block) = &function.body else {
+        panic!("expected block body");
+    };
+
+    let Stmt::If(stmt) = &block.statements[0] else {
+        panic!("expected if statement");
+    };
+    assert!(matches!(
+        stmt.condition,
+        Some(Expr::Binary {
+            op: BinaryOp::Or,
+            ref right,
+            ..
+        }) if matches!(right.as_ref(), Expr::Binary { op: BinaryOp::And, .. })
+    ));
+
+    let Stmt::While(stmt) = &block.statements[1] else {
+        panic!("expected while statement");
+    };
+    assert!(matches!(
+        stmt.condition_clauses.as_slice(),
+        [IfConditionClause::Expr(Expr::Binary {
+            op: BinaryOp::Or,
+            right,
+            ..
+        })] if matches!(right.as_ref(), Expr::Binary { op: BinaryOp::And, .. })
+    ));
+
+    let Stmt::Return(stmt) = &block.statements[2] else {
+        panic!("expected return statement");
+    };
+    assert!(matches!(
+        stmt.value,
+        Some(Expr::If {
+            ref condition_clauses,
+            ..
+        }) if matches!(
+            condition_clauses.as_slice(),
+            [IfConditionClause::Expr(Expr::Binary {
+                op: BinaryOp::Or,
+                right,
+                ..
+            })] if matches!(right.as_ref(), Expr::Binary { op: BinaryOp::And, .. })
+        )
     ));
 }
 
@@ -3315,6 +3383,62 @@ def run(size Size) Str = match size {
 }
 
 #[test]
+fn parses_negative_numeric_literal_patterns() {
+    for (source, expected_inner) in [("-1", TokenKind::Integer), ("-3.5", TokenKind::Float)] {
+        let (pattern, diagnostics) = parse_pattern_only(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        assert!(matches!(
+            pattern,
+            Pattern::Literal {
+                value: Expr::Unary {
+                    op: UnaryOp::Neg,
+                    expr,
+                    ..
+                },
+                ..
+            } if matches!(
+                (expected_inner, expr.as_ref()),
+                (TokenKind::Integer, Expr::Integer { .. })
+                    | (TokenKind::Float, Expr::Float { .. })
+            )
+        ));
+    }
+
+    let nested = parse(
+        r#"
+shape Reading {
+    value Float
+}
+
+def describe(reading Reading) Str = match reading {
+    case Reading { value: -3.5 } => "negative"
+    case _ => "other"
+}
+"#,
+    );
+    assert!(nested.diagnostics.is_empty(), "{:#?}", nested.diagnostics);
+}
+
+#[test]
+fn rejects_non_numeric_negated_patterns() {
+    let result = parse(
+        r#"
+def describe(code Int, threshold Int) Str = match code {
+    case -threshold => "threshold"
+    case _ => "other"
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "expected_pattern" && diagnostic.message.contains("numeric")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_match_guards_without_consuming_the_case_arrow() {
     let result = parse(
         r#"
@@ -3417,17 +3541,65 @@ shape User {
     name Str
 }
 
-def extract(value Option[Int]) Int = value !!
-def compactName(value Option[User]) Str = value!!.name
-def spacedName(value Option[User]) Str = value !!.name
-def invoke(value Option[fn() Str]) Str = value!!()
-def indexed(value Option[[Int]]) Int = value!![0]!!
-def compactIndex(value [Str: Int]) Int = value["first"]!!
-def spacedIndex(value [Str: Int]) Int = value["first"] !!
-def nested(value Option[Option[Int]]) Int = value!!!!
+def extract(value Option[Int]) Int = value !
+def compactName(value Option[User]) Str = value!.name
+def spacedName(value Option[User]) Str = value !.name
+def invoke(value Option[fn() Str]) Str = value!()
+def indexed(value Option[[Int]]) Int = value![0]!
+def compactIndex(value [Str: Int]) Int = value["first"]!
+def spacedIndex(value [Str: Int]) Int = value["first"] !
+def nested(value Option[Option[Int]]) Int = value!!
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+    let repeated = parse_expr_only("nested!!");
+    assert!(matches!(
+        repeated,
+        Expr::Unary {
+            op: UnaryOp::UnsafeExtract,
+            expr,
+            ..
+        } if matches!(
+            expr.as_ref(),
+            Expr::Unary {
+                op: UnaryOp::UnsafeExtract,
+                ..
+            }
+        )
+    ));
+
+    let negated = parse_expr_only("!maybe!");
+    assert!(matches!(
+        negated,
+        Expr::Unary {
+            op: UnaryOp::Not,
+            expr,
+            ..
+        } if matches!(
+            expr.as_ref(),
+            Expr::Unary {
+                op: UnaryOp::UnsafeExtract,
+                ..
+            }
+        )
+    ));
+
+    let compared = parse_expr_only("maybe! == expected");
+    assert!(matches!(
+        compared,
+        Expr::Binary {
+            op: BinaryOp::Eq,
+            left,
+            ..
+        } if matches!(
+            left.as_ref(),
+            Expr::Unary {
+                op: UnaryOp::UnsafeExtract,
+                ..
+            }
+        )
+    ));
 }
 
 #[test]
@@ -4662,7 +4834,7 @@ fn parses_reference_identity_operators() {
         }
     ));
 
-    let not_equal = parse_expr_only("left !== right");
+    let not_equal = parse_expr_only("left!==right");
     assert!(matches!(
         not_equal,
         Expr::Binary {
@@ -4764,16 +4936,69 @@ def inline(value Cat | Bird) Cat | Bird = value
 }
 
 #[test]
-fn rejects_non_union_type_aliases() {
-    let result = parse("type Name = Str");
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "invalid_type_alias"),
-        "{:#?}",
-        result.diagnostics
+fn parses_general_transparent_type_aliases() {
+    let result = parse(
+        r#"
+type UserId = Int
+type Handler = fn(UserId) Str
+type Users = [Str]
+type Scores = [Str: Int]
+type Profile = { name Str, age Int }
+type Pet = Cat | Dog
+type Companion = Pet
+"#,
     );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    assert!(matches!(
+        &program.items[0],
+        Item::TypeAlias(TypeAliasDecl {
+            target: TypeRef::Named { name, .. },
+            ..
+        }) if name == "Int"
+    ));
+    assert!(matches!(
+        &program.items[1],
+        Item::TypeAlias(TypeAliasDecl {
+            target: TypeRef::Function { .. },
+            ..
+        })
+    ));
+    assert!(matches!(
+        &program.items[2],
+        Item::TypeAlias(TypeAliasDecl {
+            target: TypeRef::Named { name, args, .. },
+            ..
+        }) if name == "Vector" && args.len() == 1
+    ));
+    assert!(matches!(
+        &program.items[3],
+        Item::TypeAlias(TypeAliasDecl {
+            target: TypeRef::Named { name, args, .. },
+            ..
+        }) if name == "Map" && args.len() == 2
+    ));
+    assert!(matches!(
+        &program.items[4],
+        Item::TypeAlias(TypeAliasDecl {
+            target: TypeRef::Record { fields, .. },
+            ..
+        }) if fields.len() == 2
+    ));
+    assert!(matches!(
+        &program.items[5],
+        Item::TypeAlias(TypeAliasDecl {
+            target: TypeRef::Union { members, .. },
+            ..
+        }) if members.len() == 2
+    ));
+    assert!(matches!(
+        &program.items[6],
+        Item::TypeAlias(TypeAliasDecl {
+            target: TypeRef::Named { name, .. },
+            ..
+        }) if name == "Pet"
+    ));
 }
 
 #[test]

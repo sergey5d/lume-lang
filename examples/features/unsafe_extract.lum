@@ -4,6 +4,7 @@
 # 7
 # 9
 # 13
+# true
 
 shape User {
     name Str
@@ -11,17 +12,20 @@ shape User {
 
 def main() Unit {
     maybeUser User? = Some(User { name: "Ada" })
-    println(maybeUser!!.name)
+    println(maybeUser!.name)
 
     greeting (fn() Str)? = Some(() => "hello")
-    println(greeting!!())
+    println(greeting!())
 
     result Result[Int, Str] = Ok(7)
     either Either[Str, Int] = Right(9)
-    println(result !!)
-    println(either !!)
+    println(result !)
+    println(either !)
 
     values LinkedList[Int] = LinkedList {}
     values.add(13)
-    println(values.at(0) !!)
+    println(values.at(0) !)
+
+    maybeReady Bool? = Some(false)
+    println(!maybeReady!)
 }

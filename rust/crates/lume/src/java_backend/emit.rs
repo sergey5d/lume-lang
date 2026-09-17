@@ -2915,7 +2915,7 @@ impl<'a> FunctionEmitter<'a> {
             ir::Type::Named { ref name, ref args } if name == "Map" && args.len() == 2 => {
                 Some(format!("{base_expr}.get({index_expr})"))
             }
-            _ => self.unsupported("index expression"),
+            _ => self.unsupported(&format!("index expression on {base_ty:?}")),
         }
     }
 

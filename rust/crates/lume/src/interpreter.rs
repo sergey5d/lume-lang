@@ -6930,7 +6930,7 @@ mod tests {
                     item + 1
                 }
 
-                count = countItems(items) !!
+                count = countItems(items) !
 
                 var total Int = 0
                 for item <- items {
@@ -6952,6 +6952,35 @@ mod tests {
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "size 3\ntotal 9\n");
         assert_eq!(run.return_value.as_deref(), Some("10"));
+    }
+
+    #[test]
+    fn runs_negative_numeric_literal_patterns() {
+        let program = lower_inline(
+            r#"
+            shape Reading {
+                value Float
+            }
+
+            def main() Unit {
+                intLabel = match -1 {
+                    case -1 => "negative int"
+                    case 0 => "zero"
+                    case _ => "other"
+                }
+                floatLabel = match Reading(-3.5) {
+                    case Reading { value: -3.5 } => "negative float"
+                    case _ => "other"
+                }
+                OS.println(intLabel)
+                OS.println(floatLabel)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "negative int\nnegative float\n");
     }
 
     #[test]
@@ -7134,19 +7163,21 @@ $name
                 values.add(5)
                 values.add(8)
 
-                println(values.at(0) !!)
-                println(Some(13) !!)
-                println(Ok(21) !!)
-                println(Right(34) !!)
-                println(values.removeFirst() !!)
-                println(values.at(0) !!)
+                println(values.at(0) !)
+                println(Some(13) !)
+                println(Ok(21) !)
+                println(Right(34) !)
+                nested Option[Result[Int, Str]] = Some(Ok(55))
+                println(nested!!)
+                println(values.removeFirst() !)
+                println(values.at(0) !)
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "5\n13\n21\n34\n5\n8\n");
+        assert_eq!(run.output, "5\n13\n21\n34\n55\n5\n8\n");
     }
 
     #[test]
@@ -7155,7 +7186,7 @@ $name
             r#"
             def main() Unit {
                 missing Option[Int] = None
-                println(missing !!)
+                println(missing !)
             }
             "#,
         );
@@ -7554,7 +7585,7 @@ $name
             def main() Unit {
                 someValue = Option.when(true, 7)
                 noValue = Option.when(false, 7)
-                OS.println(someValue !!)
+                OS.println(someValue !)
                 OS.println(noValue.isEmpty())
             }
             "#,
@@ -7812,6 +7843,37 @@ $name
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "5\n4\n4\nlume\n");
+    }
+
+    #[test]
+    fn preserves_boolean_precedence_in_control_flow_headers() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                a = true
+                b = false
+                c = false
+
+                if a || b && c {
+                    OS.println("if")
+                }
+
+                value = if a || b && c { 1 } else { 0 }
+                OS.println(value)
+
+                var iterations Int = 0
+                while a || b && c {
+                    iterations += 1
+                    break
+                }
+                OS.println(iterations)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "if\n1\n1\n");
     }
 
     #[test]

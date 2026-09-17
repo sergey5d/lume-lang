@@ -213,13 +213,6 @@ impl<'a> Parser<'a> {
         let (name, _) = self.expect_identifier("expected type alias name")?;
         self.consume(TokenKind::Eq, "expected '=' after type alias name")?;
         let target = self.parse_type_ref()?;
-        if !matches!(target, TypeRef::Union { .. }) {
-            self.diagnostics.push(Diagnostic::error(
-                "invalid_type_alias",
-                "type aliases currently require a union target such as 'type Choice = A | B'",
-                target.span(),
-            ));
-        }
         let span = start.cover(target.span());
         Some(TypeAliasDecl {
             visibility,

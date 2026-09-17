@@ -288,16 +288,16 @@
           "match": "(?<!\\?)\\?(?!\\?)"
         },
         {
-          "name": "keyword.operator.unsafe-extract.lume",
-          "match": "!!"
+          "name": "keyword.operator.comparison.lume",
+          "match": "===|!==|==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.exclamation.lume",
+          "match": "!(?!=)"
         },
         {
           "name": "keyword.operator.spread.lume",
           "match": "\\.\\.\\."
-        },
-        {
-          "name": "keyword.operator.comparison.lume",
-          "match": "===|!==|==|!=|<=|>=|<|>"
         },
         {
           "name": "keyword.operator.logical.lume",

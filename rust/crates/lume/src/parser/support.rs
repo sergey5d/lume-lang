@@ -277,11 +277,20 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn scan_if_condition_expr_end(&self, start: usize) -> usize {
+        self.scan_if_condition_segment_end(start, false)
+    }
+
+    pub(super) fn scan_if_condition_let_value_end(&self, start: usize) -> usize {
+        self.scan_if_condition_segment_end(start, true)
+    }
+
+    fn scan_if_condition_segment_end(&self, start: usize, stop_at_any_and: bool) -> usize {
         let mut i = start;
         let mut paren_depth = 0isize;
         let mut brace_depth = 0isize;
         let mut bracket_depth = 0isize;
         while let Some(token) = self.tokens.get(i) {
+            let at_top_level = paren_depth == 0 && brace_depth == 0 && bracket_depth == 0;
             match token.kind {
                 TokenKind::LParen => paren_depth += 1,
                 TokenKind::RParen => {
@@ -309,11 +318,16 @@ impl<'a> Parser<'a> {
                     }
                     bracket_depth -= 1;
                 }
-                TokenKind::AndAnd | TokenKind::Newline
-                    if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 =>
+                TokenKind::AndAnd
+                    if at_top_level
+                        && (stop_at_any_and
+                            || self.tokens.get(i + 1).is_some_and(|next| {
+                                next.kind == TokenKind::Keyword(Keyword::Let)
+                            })) =>
                 {
                     break;
                 }
+                TokenKind::Newline if at_top_level => break,
                 _ => {}
             }
             i += 1;

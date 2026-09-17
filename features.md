@@ -212,7 +212,7 @@ Parameter-based inference should also be considered:
 
 ```txt
 def describe[reified A](value A) Str {
-    typeOf[A].qualifiedName() !!
+    typeOf[A].qualifiedName() !
 }
 
 name = describe(User { name: "Ada" })

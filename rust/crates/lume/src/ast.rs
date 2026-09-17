@@ -57,7 +57,7 @@ pub enum Item {
     Statement(Stmt),
 }
 
-/// A transparent `type Name = A | B` union alias.
+/// A transparent `type Name = Target` alias.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeAliasDecl {
     pub visibility: Visibility,

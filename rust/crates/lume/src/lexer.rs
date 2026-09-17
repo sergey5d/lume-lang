@@ -70,7 +70,6 @@ pub enum TokenKind {
     Percent,
     Eq,
     Bang,
-    BangBang,
     Less,
     Greater,
     Arrow,
@@ -431,7 +430,6 @@ impl<'a> Lexer<'a> {
                 }
             }
             '=' => Some(TokenKind::Eq),
-            '!' if self.take('!') => Some(TokenKind::BangBang),
             '!' if self.take('=') => {
                 if self.take('=') {
                     Some(TokenKind::IdentityNotEq)
@@ -727,17 +725,38 @@ mod tests {
     }
 
     #[test]
-    fn lexes_unsafe_extract_as_atomic_token() {
+    fn lexes_repeated_postfix_extraction_as_individual_bangs() {
         let result = lex(&source("value = wrapped !!\n"));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-        assert!(
+        assert_eq!(
             result
                 .tokens
                 .iter()
-                .any(|token| token.kind == TokenKind::BangBang && token.lexeme == "!!"),
+                .filter(|token| token.kind == TokenKind::Bang)
+                .count(),
+            2,
             "{:#?}",
             result.tokens
         );
+    }
+
+    #[test]
+    fn keeps_identity_inequality_distinct_from_postfix_extraction() {
+        let result = lex(&source(
+            "unwrapped = maybe! == expected\ndifferent = maybe!==expected\n",
+        ));
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let kinds = result
+            .tokens
+            .iter()
+            .map(|token| token.kind)
+            .collect::<Vec<_>>();
+        assert!(
+            kinds
+                .windows(2)
+                .any(|pair| { pair == [TokenKind::Bang, TokenKind::EqEq] })
+        );
+        assert!(kinds.contains(&TokenKind::IdentityNotEq));
     }
 
     #[test]

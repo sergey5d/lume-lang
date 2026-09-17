@@ -1,5 +1,7 @@
 # EXPECT:
 # exact value
+# negative int
+# negative float
 # 0
 
 def main() Int {
@@ -9,5 +11,17 @@ def main() Int {
         case _ => "miss"
     }
     println(exactValue)
+
+    negativeInt = match -1 {
+        case -1 => "negative int"
+        case _ => "miss"
+    }
+    println(negativeInt)
+
+    negativeFloat = match -3.5 {
+        case -3.5 => "negative float"
+        case _ => "miss"
+    }
+    println(negativeFloat)
     0
 }

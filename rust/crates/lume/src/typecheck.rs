@@ -2611,8 +2611,7 @@ impl<'a> Checker<'a> {
                             condition.span(),
                             "if condition must be Bool",
                         );
-                        if let Some(narrowing) = self.type_narrowing_for_condition(condition, true)
-                        {
+                        for narrowing in self.type_narrowings_for_condition(condition, true) {
                             self.define_local(&narrowing.name, narrowing.ty, false);
                         }
                     }
@@ -2693,28 +2692,23 @@ impl<'a> Checker<'a> {
             let condition_ty = self.check_expr(condition);
             self.require_bool(&condition_ty, condition.span(), "if condition must be Bool");
         }
-        let then_narrowing = stmt
+        let then_narrowings = stmt
             .condition
             .as_ref()
-            .and_then(|condition| self.type_narrowing_for_condition(condition, true));
-        let else_narrowing = stmt
+            .map(|condition| self.type_narrowings_for_condition(condition, true))
+            .unwrap_or_default();
+        let else_narrowings = stmt
             .condition
             .as_ref()
-            .and_then(|condition| self.type_narrowing_for_condition(condition, false));
-        let then_ty = self.check_block_against_with_narrowing(
-            &stmt.then_block,
-            expected,
-            then_narrowing.as_ref(),
-        );
+            .map(|condition| self.type_narrowings_for_condition(condition, false))
+            .unwrap_or_default();
+        let then_ty =
+            self.check_block_against_with_narrowings(&stmt.then_block, expected, &then_narrowings);
         let else_ty = stmt
             .else_branch
             .as_ref()
             .map(|branch| {
-                self.check_else_branch_value_with_narrowing(
-                    branch,
-                    expected,
-                    else_narrowing.as_ref(),
-                )
+                self.check_else_branch_value_with_narrowings(branch, expected, &else_narrowings)
             })
             .unwrap_or_else(Ty::unit);
 
@@ -2724,11 +2718,11 @@ impl<'a> Checker<'a> {
             .as_ref()
             .is_some_and(|branch| self.else_branch_guarantees_control_exit(branch));
         if then_exits && !else_exits {
-            if let Some(narrowing) = else_narrowing {
+            for narrowing in else_narrowings {
                 self.define_local(&narrowing.name, narrowing.ty, false);
             }
         } else if else_exits && !then_exits {
-            if let Some(narrowing) = then_narrowing {
+            for narrowing in then_narrowings {
                 self.define_local(&narrowing.name, narrowing.ty, false);
             }
         }
@@ -2736,14 +2730,14 @@ impl<'a> Checker<'a> {
         join_types(&then_ty, &else_ty)
     }
 
-    fn check_block_against_with_narrowing(
+    fn check_block_against_with_narrowings(
         &mut self,
         block: &Block,
         expected: &Ty,
-        narrowing: Option<&TypeNarrowing>,
+        narrowings: &[TypeNarrowing],
     ) -> Ty {
         self.push_scope();
-        if let Some(narrowing) = narrowing {
+        for narrowing in narrowings {
             self.define_local(&narrowing.name, narrowing.ty.clone(), false);
         }
         let result = self.check_block_against(block, expected);
@@ -2758,14 +2752,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_else_branch_value_with_narrowing(
+    fn check_else_branch_value_with_narrowings(
         &mut self,
         branch: &ElseBranch,
         expected: &Ty,
-        narrowing: Option<&TypeNarrowing>,
+        narrowings: &[TypeNarrowing],
     ) -> Ty {
         self.push_scope();
-        if let Some(narrowing) = narrowing {
+        for narrowing in narrowings {
             self.define_local(&narrowing.name, narrowing.ty.clone(), false);
         }
         let result = self.check_else_branch_value(branch, expected);
@@ -2888,9 +2882,7 @@ impl<'a> Checker<'a> {
                                 condition.span(),
                                 "while condition must be Bool",
                             );
-                            if let Some(narrowing) =
-                                self.type_narrowing_for_condition(condition, true)
-                            {
+                            for narrowing in self.type_narrowings_for_condition(condition, true) {
                                 self.define_local(&narrowing.name, narrowing.ty, false);
                             }
                         }
@@ -4501,7 +4493,7 @@ impl<'a> Checker<'a> {
                             self.add_error(
                                 "invalid_unsafe_extract",
                                 format!(
-                                    "unsafe extraction '!!' requires Option[T], Result[T, E], or Either[L, R], got '{}'",
+                                    "unsafe extraction '!' requires Option[T], Result[T, E], or Either[L, R], got '{}'",
                                     inner.describe()
                                 ),
                                 *span,
@@ -4518,7 +4510,22 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let left_ty = self.check_expr(left);
-                let right_ty = self.check_expr(right);
+                let right_narrowings = match op {
+                    BinaryOp::And => self.type_narrowings_for_condition(left, true),
+                    BinaryOp::Or => self.type_narrowings_for_condition(left, false),
+                    _ => Vec::new(),
+                };
+                let right_ty = if right_narrowings.is_empty() {
+                    self.check_expr(right)
+                } else {
+                    self.push_scope();
+                    for narrowing in right_narrowings {
+                        self.define_local(&narrowing.name, narrowing.ty, false);
+                    }
+                    let ty = self.check_expr(right);
+                    self.pop_scope();
+                    ty
+                };
                 self.check_binary_expr(&left_ty, *op, &right_ty, *span)
             }
             Expr::Is { left, target, .. } => {
@@ -4557,9 +4564,7 @@ impl<'a> Checker<'a> {
                                 condition.span(),
                                 "if condition must be Bool",
                             );
-                            if let Some(narrowing) =
-                                self.type_narrowing_for_condition(condition, true)
-                            {
+                            for narrowing in self.type_narrowings_for_condition(condition, true) {
                                 self.define_local(&narrowing.name, narrowing.ty, false);
                             }
                         }
@@ -4567,16 +4572,16 @@ impl<'a> Checker<'a> {
                 }
                 let then_ty = self.check_block_against(then_block, expected);
                 self.pop_scope();
-                let else_narrowing = match condition_clauses.as_slice() {
+                let else_narrowings = match condition_clauses.as_slice() {
                     [IfConditionClause::Expr(condition)] => {
-                        self.type_narrowing_for_condition(condition, false)
+                        self.type_narrowings_for_condition(condition, false)
                     }
-                    _ => None,
+                    _ => Vec::new(),
                 };
-                let else_ty = self.check_else_expr_branch_against_with_narrowing(
+                let else_ty = self.check_else_expr_branch_against_with_narrowings(
                     else_branch,
                     expected,
-                    else_narrowing.as_ref(),
+                    &else_narrowings,
                 );
                 join_types(&then_ty, &else_ty)
             }
@@ -7143,14 +7148,14 @@ impl<'a> Checker<'a> {
             .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Object))
     }
 
-    fn check_else_expr_branch_against_with_narrowing(
+    fn check_else_expr_branch_against_with_narrowings(
         &mut self,
         branch: &ElseExprBranch,
         expected: &Ty,
-        narrowing: Option<&TypeNarrowing>,
+        narrowings: &[TypeNarrowing],
     ) -> Ty {
         self.push_scope();
-        if let Some(narrowing) = narrowing {
+        for narrowing in narrowings {
             self.define_local(&narrowing.name, narrowing.ty.clone(), false);
         }
         let result = match branch {
@@ -7161,38 +7166,60 @@ impl<'a> Checker<'a> {
         result
     }
 
-    fn type_narrowing_for_condition(
+    fn type_narrowings_for_condition(
         &self,
         condition: &Expr,
         condition_is_true: bool,
-    ) -> Option<TypeNarrowing> {
+    ) -> Vec<TypeNarrowing> {
         match condition {
             Expr::Group { inner, .. } => {
-                self.type_narrowing_for_condition(inner, condition_is_true)
+                self.type_narrowings_for_condition(inner, condition_is_true)
             }
             Expr::Unary {
                 op: crate::ast::UnaryOp::Not,
                 expr,
                 ..
-            } => self.type_narrowing_for_condition(expr, !condition_is_true),
+            } => self.type_narrowings_for_condition(expr, !condition_is_true),
             Expr::Is { left, target, .. } if condition_is_true => {
                 let Expr::Identifier { name, .. } = left.as_ref() else {
-                    return None;
+                    return Vec::new();
                 };
-                let value = self.lookup_scoped_value(name)?;
+                let Some(value) = self.lookup_scoped_value(name) else {
+                    return Vec::new();
+                };
                 if !value.stable || runtime_type_ref_has_arguments(target) {
-                    return None;
+                    return Vec::new();
                 }
                 let ty = self.ty_from_type_ref(target);
                 if matches!(ty, Ty::TypeParam(_) | Ty::Wildcard) {
-                    return None;
+                    return Vec::new();
                 }
-                Some(TypeNarrowing {
+                vec![TypeNarrowing {
                     name: name.clone(),
                     ty,
-                })
+                }]
             }
-            _ => None,
+            Expr::Binary {
+                left,
+                op: BinaryOp::And,
+                right,
+                ..
+            } if condition_is_true => {
+                let mut narrowings = self.type_narrowings_for_condition(left, true);
+                narrowings.extend(self.type_narrowings_for_condition(right, true));
+                narrowings
+            }
+            Expr::Binary {
+                left,
+                op: BinaryOp::Or,
+                right,
+                ..
+            } if !condition_is_true => {
+                let mut narrowings = self.type_narrowings_for_condition(left, false);
+                narrowings.extend(self.type_narrowings_for_condition(right, false));
+                narrowings
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -8690,7 +8717,7 @@ impl<'a> Checker<'a> {
             && self.unwrap_known_lifted_type(receiver_ty).is_some()
         {
             return format!(
-                "method 'orPanic' was removed from '{}'; use postfix '!!' for unsafe extraction",
+                "method 'orPanic' was removed from '{}'; use postfix '!' for unsafe extraction",
                 receiver_ty.describe(),
             );
         }
@@ -15421,11 +15448,11 @@ def main() Unit {
     actual Type[User] = user.runtimeType
     unknown Type[_] = declared
     anyMetadata Type[Any] = typeOf[Any]
-    classType ClassType[User] = declared.asClass() !!
+    classType ClassType[User] = declared.asClass() !
     unknownClass ClassType[_] = classType
-    enumType EnumType[Status] = typeOf[Status].asEnum() !!
-    fieldType Type[_] = (classType.fields().at(0) !!).fieldType()
-    OS.println(actual.name() !!, unknown.name() !!, anyMetadata.kind(), unknownClass.name() !!, enumType.name() !!, fieldType.name() !!)
+    enumType EnumType[Status] = typeOf[Status].asEnum() !
+    fieldType Type[_] = (classType.fields().at(0) !).fieldType()
+    OS.println(actual.name() !, unknown.name() !, anyMetadata.kind(), unknownClass.name() !, enumType.name() !, fieldType.name() !)
 }
 "#,
         );
@@ -15820,17 +15847,17 @@ shape User {
     name Str
 }
 
-def fromOption(value Option[User]) Str = value!!.name
-def fromResult(value Result[Int, Str]) Int = value !!
-def fromEither(value Either[Str, Int]) Int = value !!
-def invoke(value Option[fn() Str]) Str = value!!()
-def indexed(value Option[[Str: Int]]) Int = value!!["first"]!!
-def nested(value Option[Option[Int]]) Int = value!!!!
+def fromOption(value Option[User]) Str = value!.name
+def fromResult(value Result[Int, Str]) Int = value !
+def fromEither(value Either[Str, Int]) Int = value !
+def invoke(value Option[fn() Str]) Str = value!()
+def indexed(value Option[[Str: Int]]) Int = value!["first"]!
+def nested(value Option[Option[Int]]) Int = value!!
 
 def main() Unit {
     values LinkedList[Int] = LinkedList()
     values.add(5)
-    first Int = values.at(0) !!
+    first Int = values.at(0) !
     println(first)
 }
 "#,
@@ -15846,6 +15873,31 @@ def main() Unit {
 def textSize(value Any) Int {
     if value is Str {
         return value.size()
+    }
+    0
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn narrows_logical_right_operands_and_successful_and_branches() {
+        let program = parse_inline(
+            r#"
+def hasTextSize(value Any) Bool = value is Str && value.size() == 4
+
+def textSize(value Any, enabled Bool) Int {
+    if enabled && value is Str && value.size() == 4 {
+        return value.size()
+    }
+    0
+}
+
+def combinedSize(left Any, right Any) Int {
+    if left is Str && right is Str && left.size() > 0 && right.size() > 0 {
+        return left.size() + right.size()
     }
     0
 }
@@ -16124,7 +16176,7 @@ def invalid(context Context[Plain, Str], plain Plain) Unit {
     fn rejects_unsafe_extract_from_plain_values() {
         let program = parse_inline(
             r#"
-def invalid(value Int) Int = value !!
+def invalid(value Int) Int = value !
 "#,
         );
         let result = check_program(&program);
@@ -16159,6 +16211,48 @@ def flatten(value Cat | Dog) Cat | (Dog | Cat) = value
     }
 
     #[test]
+    fn allows_general_transparent_type_aliases() {
+        let program = parse_inline(
+            r#"
+shape User {
+    name Str
+}
+
+class Cat {}
+class Dog {}
+
+type UserId = Int
+type Handler = fn(UserId) Str
+type Users = [User]
+type Scores = [Str: Int]
+type Profile = { name Str, age Int }
+type Companion = Pet
+type Pet = Cat | Dog
+
+def apply(handler Handler, id UserId) Str = handler(id)
+def companion(value Companion) Pet = value
+
+def main() Unit {
+    id UserId = 7
+    handler Handler = (value Int) => value.toStr()
+    users Users = [User("Ada")]
+    scores Scores = ["Ada": 10]
+    profile Profile = { name: "Ada", age: 42 }
+    pet Companion = Cat()
+
+    println(apply(handler, id))
+    println(users[0].name)
+    println(scores["Ada"]!)
+    println(profile.name)
+    _ = companion(pet)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
     fn rejects_union_assignment_when_a_source_alternative_is_uncovered() {
         let program = parse_inline(
             r#"
@@ -16181,12 +16275,11 @@ def narrow(value Cat | Dog) Dog | Bird = value
     }
 
     #[test]
-    fn rejects_cyclic_union_aliases() {
+    fn rejects_cyclic_type_aliases() {
         let program = parse_inline(
             r#"
-class Cat {}
-type First = Cat | Second
-type Second = Cat | First
+type First = Second
+type Second = First
 "#,
         );
         let result = check_program(&program);
@@ -16216,7 +16309,7 @@ def fromEither(value Either[Str, Int]) Int = value.orPanic()
             .filter(|diag| {
                 diag.code == "unknown_member"
                     && diag.message.contains("method 'orPanic' was removed")
-                    && diag.message.contains("postfix '!!'")
+                    && diag.message.contains("postfix '!'")
             })
             .count();
         assert_eq!(removed, 3, "{:#?}", result.diagnostics);

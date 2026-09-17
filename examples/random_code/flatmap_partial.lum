@@ -22,7 +22,7 @@ def expandPage(page [MaybeInt]) [Int] {
         }
 
         if parsed.isSet() {
-            extracted.append(parsed !!)
+            extracted.append(parsed !)
         }
     }
 

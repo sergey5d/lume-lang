@@ -228,7 +228,7 @@ impl<'a> Lowerer<'a> {
                             local
                                 .ty
                                 .as_ref()
-                                .map(lower_type_ref)
+                                .map(|ty| lower_type_ref_with_aliases(ty, &self.type_aliases))
                                 .unwrap_or(ir::Type::Unknown),
                         );
                         global.visibility = binding.visibility;
@@ -294,7 +294,7 @@ impl<'a> Lowerer<'a> {
                     let ty = field
                         .ty
                         .as_ref()
-                        .map(lower_type_ref)
+                        .map(|ty| lower_type_ref_with_aliases(ty, &self.type_aliases))
                         .unwrap_or(ir::Type::Unknown);
                     fields.push(ir::Field {
                         annotations: lower_annotations(&field.annotations),
@@ -345,7 +345,7 @@ impl<'a> Lowerer<'a> {
                             ty: field
                                 .ty
                                 .as_ref()
-                                .map(lower_type_ref)
+                                .map(|ty| lower_type_ref_with_aliases(ty, &self.type_aliases))
                                 .unwrap_or(ir::Type::Unknown),
                             has_initializer: field.initializer.is_some(),
                             initializer: lower_field_initializer_constant(
@@ -1056,17 +1056,21 @@ impl<'a> FunctionLowerer<'a> {
                         }
                         continue;
                     }
-                    let ty = local.ty.as_ref().map(lower_type_ref).unwrap_or_else(|| {
-                        if destructure_single_value {
-                            ir::Type::Unknown
-                        } else {
-                            binding
-                                .values
-                                .get(index)
-                                .map(|expr| inferred_storage_type(self.infer_expr_type(expr)))
-                                .unwrap_or(ir::Type::Unknown)
-                        }
-                    });
+                    let ty = local
+                        .ty
+                        .as_ref()
+                        .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                        .unwrap_or_else(|| {
+                            if destructure_single_value {
+                                ir::Type::Unknown
+                            } else {
+                                binding
+                                    .values
+                                    .get(index)
+                                    .map(|expr| inferred_storage_type(self.infer_expr_type(expr)))
+                                    .unwrap_or(ir::Type::Unknown)
+                            }
+                        });
                     let local_id = self.add_local(
                         local.name.clone(),
                         ty.clone(),
@@ -1198,7 +1202,7 @@ impl<'a> FunctionLowerer<'a> {
                     param
                         .ty
                         .as_ref()
-                        .map(lower_type_ref)
+                        .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
                         .unwrap_or(ir::Type::Unknown)
                 })
                 .collect(),
@@ -1206,7 +1210,7 @@ impl<'a> FunctionLowerer<'a> {
                 function
                     .return_type
                     .as_ref()
-                    .map(lower_type_ref)
+                    .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
                     .unwrap_or(ir::Type::Unknown),
             ),
         };
@@ -1244,7 +1248,7 @@ impl<'a> FunctionLowerer<'a> {
             function
                 .return_type
                 .as_ref()
-                .map(lower_type_ref)
+                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
                 .unwrap_or(ir::Type::Unknown),
         );
         nested.span = Some(function.span);
@@ -1252,7 +1256,7 @@ impl<'a> FunctionLowerer<'a> {
             let source_ty = param
                 .ty
                 .as_ref()
-                .map(lower_type_ref)
+                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
                 .unwrap_or(ir::Type::Unknown);
             let runtime_ty = if param.lazy {
                 lazy_storage_type(source_ty)
@@ -1417,14 +1421,16 @@ impl<'a> FunctionLowerer<'a> {
         let mut nested = ir::Function::new(
             nested_name,
             ir::FunctionKind::Lambda,
-            return_type.map(lower_type_ref).unwrap_or(ir::Type::Unknown),
+            return_type
+                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                .unwrap_or(ir::Type::Unknown),
         );
         nested.span = Some(span);
         for (index, param) in params.iter().enumerate() {
             let source_ty = param
                 .ty
                 .as_ref()
-                .map(lower_type_ref)
+                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
                 .unwrap_or(ir::Type::Unknown);
             let runtime_ty = if param.lazy {
                 lazy_storage_type(source_ty)
@@ -1493,7 +1499,10 @@ impl<'a> FunctionLowerer<'a> {
             })
             .collect();
         ir::RValue::AnonymousInterface {
-            interfaces: interfaces.iter().map(lower_type_ref).collect(),
+            interfaces: interfaces
+                .iter()
+                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                .collect(),
             methods,
         }
     }
@@ -1518,7 +1527,7 @@ impl<'a> FunctionLowerer<'a> {
                 ty: field
                     .ty
                     .as_ref()
-                    .map(lower_type_ref)
+                    .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
                     .or_else(|| {
                         field
                             .initializer
@@ -1565,7 +1574,7 @@ impl<'a> FunctionLowerer<'a> {
                 method
                     .return_type
                     .as_ref()
-                    .map(lower_type_ref)
+                    .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
                     .unwrap_or(ir::Type::Unknown),
             );
             function.annotations = lower_annotations(&method.annotations);
@@ -1592,7 +1601,7 @@ impl<'a> FunctionLowerer<'a> {
                 let source_ty = param
                     .ty
                     .as_ref()
-                    .map(lower_type_ref)
+                    .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
                     .unwrap_or(ir::Type::Unknown);
                 let runtime_ty = if param.lazy {
                     lazy_storage_type(source_ty)
@@ -2651,7 +2660,7 @@ impl<'a> FunctionLowerer<'a> {
                     let ty = binding
                         .ty
                         .as_ref()
-                        .map(lower_type_ref)
+                        .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
                         .unwrap_or(ir::Type::Unknown);
                     let local_id = self.add_local(
                         binding.name.clone(),
@@ -2848,7 +2857,7 @@ impl<'a> FunctionLowerer<'a> {
             let ty = binding
                 .ty
                 .as_ref()
-                .map(lower_type_ref)
+                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
                 .unwrap_or(ir::Type::Unknown);
             let local_id = self.add_local(binding.name.clone(), ty, false, ir::LocalKind::Binding);
             self.current_scope().insert(binding.name.clone(), local_id);
@@ -2869,7 +2878,7 @@ impl<'a> FunctionLowerer<'a> {
         let ty = binding
             .ty
             .as_ref()
-            .map(lower_type_ref)
+            .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
             .unwrap_or(ir::Type::Unknown);
         let local_id = self.add_local(
             binding.name.clone(),
@@ -2941,7 +2950,7 @@ impl<'a> FunctionLowerer<'a> {
         let ty = binding
             .ty
             .as_ref()
-            .map(lower_type_ref)
+            .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
             .unwrap_or(ir::Type::Unknown);
         let local_id = self.add_local(binding.name.clone(), ty, false, ir::LocalKind::Binding);
         self.current_scope().insert(binding.name.clone(), local_id);
@@ -7038,7 +7047,10 @@ impl<'a> FunctionLowerer<'a> {
         };
         (
             receiver.as_ref(),
-            type_args.iter().map(lower_type_ref).collect(),
+            type_args
+                .iter()
+                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                .collect(),
         )
     }
 
@@ -7360,10 +7372,6 @@ fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
         AstBinaryOp::Mod => Some(ir::BinaryOp::Mod),
         AstBinaryOp::Colon => None,
     }
-}
-
-fn lower_type_ref(reference: &TypeRef) -> ir::Type {
-    lower_type_ref_with_aliases(reference, &HashMap::new())
 }
 
 fn lower_type_ref_with_aliases(
@@ -7774,7 +7782,7 @@ fn lower_lambda_param_type(
                     binding
                         .ty
                         .as_ref()
-                        .map(lower_type_ref)
+                        .map(|ty| lower_type_ref_with_aliases(ty, type_aliases))
                         .unwrap_or(ir::Type::Unknown)
                 })
                 .collect(),
@@ -7791,7 +7799,7 @@ fn lower_lambda_param_type(
                     ty: binding
                         .ty
                         .as_ref()
-                        .map(lower_type_ref)
+                        .map(|ty| lower_type_ref_with_aliases(ty, type_aliases))
                         .unwrap_or(ir::Type::Unknown),
                 })
                 .collect(),
@@ -9500,6 +9508,69 @@ mod tests {
         let main = ir.function(ir::FunctionId(1)).expect("main function");
         assert_eq!(main.params.len(), 0);
         assert!(!main.blocks.is_empty());
+    }
+
+    #[test]
+    fn expands_transparent_aliases_throughout_lowered_ir() {
+        let program = parse_inline(
+            r#"
+            type UserId = Int
+            type Names = [Str]
+            type Labeler = fn(UserId) Str
+
+            class Holder {
+                id UserId
+                names Names
+            }
+
+            current UserId = 1
+
+            def main() Unit {
+                id UserId = current
+                names Names = ["Ada"]
+                label Labeler = value => value.toStr()
+                println(label(id))
+                println(names[0])
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+
+        assert_eq!(ir.globals[0].ty, ir::Type::named("Int"));
+        let holder = ir.types.iter().find(|ty| ty.name == "Holder").unwrap();
+        assert_eq!(holder.fields[0].ty, ir::Type::named("Int"));
+        assert_eq!(
+            holder.fields[1].ty,
+            ir::Type::Named {
+                name: "Vector".to_string(),
+                args: vec![ir::Type::named("Str")],
+            }
+        );
+
+        let main = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "main")
+            .unwrap();
+        let local = |name: &str| main.locals.iter().find(|local| local.name == name).unwrap();
+        assert_eq!(local("id").ty, ir::Type::named("Int"));
+        assert_eq!(
+            local("names").ty,
+            ir::Type::Named {
+                name: "Vector".to_string(),
+                args: vec![ir::Type::named("Str")],
+            }
+        );
+        assert_eq!(
+            local("label").ty,
+            ir::Type::Function {
+                params: vec![ir::Type::named("Int")],
+                ret: Box::new(ir::Type::named("Str")),
+            }
+        );
     }
 
     #[test]

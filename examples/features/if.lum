@@ -3,6 +3,7 @@
 # else-if
 # picked 5
 # binding 7
+# precedence
 # 0
 
 def main() Int {
@@ -32,6 +33,13 @@ def main() Int {
         println("binding " + value)
     } else {
         println("binding none")
+    }
+
+    a = true
+    b = false
+    c = false
+    if a || b && c {
+        println("precedence")
     }
 
     0

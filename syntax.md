@@ -40,6 +40,23 @@ The shorthand may not be repeated. `Int??` is rejected because `??` is the
 extract-or-fallback expression operator. Write `Option[Int?]` when a nested
 optional type is intentional.
 
+### Type Aliases
+
+`type` introduces a transparent name for any type expression:
+
+```txt
+type UserId = Int
+type Handler = fn(Request) Response
+type Users = [User]
+type Profile = { name Str, age Int }
+type Companion = Pet
+```
+
+An alias introduces no new nominal type. The alias and its recursively expanded
+target are the same type for assignment, calls, inference, and code generation.
+Aliases may refer to aliases declared before or after them; direct and indirect
+cycles are rejected.
+
 ### Union Types
 
 Use `|` to declare a value that may have any one of several types:
@@ -53,7 +70,7 @@ def describe(value Cat | Dog) Str = match value {
 }
 ```
 
-A union may be given a transparent alias:
+A union may be given an alias like any other type expression:
 
 ```txt
 type Pet = Cat | Dog
@@ -61,9 +78,8 @@ type Pet = Cat | Dog
 pet Pet = Dog("Pip")
 ```
 
-Type aliases currently name unions only. They introduce no new nominal type:
-`Pet`, `Cat | Dog`, and `Dog | Cat` are the same type. Union members are
-flattened and de-duplicated, and their written order has no semantic effect.
+`Pet`, `Cat | Dog`, and `Dog | Cat` are the same type. Union members are flattened
+and de-duplicated, and their written order has no semantic effect.
 
 Union assignment follows a subset rule. Every possible source alternative
 must be assignable to at least one destination alternative:
@@ -282,16 +298,16 @@ capture, not a separate metadata type.
 Common metadata operations:
 
 ```txt
-println(typeOf[User].name() !!)
+println(typeOf[User].name() !)
 println(typeOf[User].kind())
 
-classType ClassType[User] = typeOf[User].asClass() !!
+classType ClassType[User] = typeOf[User].asClass() !
 fields = classType.fields()
 let Some { value as nameField } = classType.field("name") else panic("expected name field")
-println(nameField.fieldType().name() !!)
+println(nameField.fieldType().name() !)
 println(nameField.isHidden())
 
-enumType EnumType[Status] = typeOf[Status].asEnum() !!
+enumType EnumType[Status] = typeOf[Status].asEnum() !
 let Some { value as pendingCase } = enumType.case("Pending") else panic("expected Pending case")
 println(pendingCase.name())
 constructedCase Result[Any, ReflectionError] = pendingCase.construct()
@@ -302,7 +318,7 @@ Safe reflective invocation uses `Result` values:
 ```txt
 constructed Result[User, ReflectionError] = classType.construct("Ada", 42)
 
-user User = constructed !!
+user User = constructed !
 nameValue Result[Any, ReflectionError] = nameField.get(user)
 
 let Some { value as greetMethod } = classType.method("greet") else panic("expected greet method")
@@ -1311,7 +1327,7 @@ Reified generic functions and methods:
 
 ```txt
 def typeName[reified A](value A) Str =
-    typeOf[A].name() !!
+    typeOf[A].name() !
 
 def metadata[reified A]() Type[A] =
     typeOf[A]
@@ -2388,9 +2404,10 @@ result = if value > 0 {
 }
 ```
 
-Statement `if`, expression `if`, and `while` use the same condition-clause
-grammar. Boolean expressions and `let` clauses may be freely mixed in either
-order with `&&`:
+Statement `if`, expression `if`, and `while` use the same condition grammar.
+Boolean expressions keep the ordinary operator precedence in every context,
+so `a || b && c` always means `a || (b && c)`. Extraction clauses may be mixed
+with Boolean segments in either order by writing `&& let`:
 
 ```txt
 if ready && let user <- maybeUser && user.active {
@@ -2411,8 +2428,8 @@ name = if ready && let user <- maybeUser {
 Clauses are evaluated from left to right and short-circuit on the first false
 Boolean expression or failed pattern. A binding introduced by a `let` clause is
 available to every later clause and to the successful branch, but not to
-`else`. Only `&&` joins clauses; use parentheses for a compound Boolean clause
-that contains `||`.
+`else`. An outer `&& let` starts an extraction clause; every other `&&` remains
+part of its ordinary Boolean expression.
 
 Invalid:
 
@@ -2647,10 +2664,10 @@ iterable comprehensions; `Option`, `Result`, and `Either` comprehensions have no
 - `try` propagates the original failure.
 - `??` discards/replaces the failure with an explicit fallback.
 
-Unsafe extraction uses postfix `!!`:
+Unsafe extraction uses postfix `!`:
 
 ```txt
-value = wrapped !!
+value = wrapped!
 ```
 
 It extracts the success value from `Option[T]`, `Result[T, E]`, or
@@ -2658,18 +2675,27 @@ It extracts the success value from `Option[T]`, `Result[T, E]`, or
 when failure is a programming error; prefer `try`, `??`, or `let ... else` for
 recoverable control flow.
 
-`!!` is a normal postfix operator. Whitespace before it is optional, and calls,
+`!` is a normal postfix operator. Whitespace before it is optional, and calls,
 indexing, member access, and further extraction may follow it directly:
 
 ```txt
-item = values[index]!!
-item = values[index] !!
-name = wrapped!!.name
-result = callback!!()
-first = wrappedVector!!.at(0)!!
-entry = wrappedMap!!["key"]!!
-nestedValue = nested!!!!
+item = values[index]!
+item = values[index] !
+name = wrapped!.name
+result = callback!()
+first = wrappedVector!.at(0)!
+entry = wrappedMap!["key"]!
+nestedValue = nested!!
 ```
+
+Each postfix `!` extracts exactly one layer, so `nested!!` means
+`(nested!)!`. Prefix `!` remains Boolean negation; position distinguishes the
+two forms, and `!maybeReady!` means `!(maybeReady!)`.
+
+`!=` and `!==` remain indivisible binary operators. Therefore
+`maybe!==expected` is identity inequality, while extraction followed by
+equality is written `maybe! == expected`. The formatter places spaces around
+binary operators.
 
 Multiple dependent unwraps can be written as sequential `let ... else` / `try`
 statements or as a grouped `let` block with `else`:
@@ -2711,8 +2737,9 @@ if let {
 }
 ```
 
-Condition clauses can be chained with `&&` so later clauses can use earlier
-bindings. Boolean expressions and `let` clauses may appear in either order:
+Condition clauses can be chained so later clauses can use earlier bindings.
+An outer `&& let` begins another extraction clause, while ordinary Boolean
+segments retain the usual `&&`-before-`||` precedence:
 
 ```txt
 if let Some { value as left } = maybeLeft && let Ok { value as right } = compute() && right > left {
@@ -2724,7 +2751,8 @@ if ready && let left <- maybeLeft && left > 0 {
 }
 ```
 
-Only `&&` joins are supported in this form.
+Extraction clauses are joined with `&&`; `||` remains an ordinary Boolean
+operator inside a Boolean segment.
 
 ## `for`
 
@@ -3114,7 +3142,7 @@ Supported pattern families:
 - whole-value alias: `_ as x`, `42 as value`, `None as none`,
   `Some(value) as some`, `[first, ...rest] as list`,
   `User { name } as user`
-- literal/value patterns: `1`, `"hello"`, `true`
+- literal/value patterns: `1`, `-1`, `-3.5`, `"hello"`, `true`
 - case alternatives: `case A | B => ...`
 - tuple patterns: `(x, y)`
 - zero-payload cases and singletons: `None`, `Pending`, `Ready`
@@ -3144,6 +3172,8 @@ Rules:
 - zero-payload enum cases use their bare name; `Case()` is invalid
 - class, shape, primitive, and interface type tests use `_ Type` or `value Type`
 - named-field patterns must select at least one field; `Type {}` is invalid
+- negative numeric patterns are limited to `-` followed by an integer or float
+  literal; arbitrary negated expressions are not patterns
 
 ### Record Patterns
 
@@ -3444,7 +3474,7 @@ Other operators / constructs:
 - `is` for runtime type checks
 - `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
 - `??` for extract-or-fallback through `Option`, `Result`, and `Either`
-- `!!` for unsafe extraction through `Option`, `Result`, and `Either`
+- `!` for unsafe extraction through `Option`, `Result`, and `Either`
 - `fn(...) T` for function types
 - `=>` for lambdas and by-name parameters
 - `=>` for match cases
@@ -3459,7 +3489,7 @@ Expression precedence, from highest to lowest:
 | Level | Forms | Associativity |
 | --- | --- | --- |
 | Primary | literals, groups, blocks, value-producing control flow | n/a |
-| Postfix | calls, member access, indexing, Vector slicing, `!!` | left |
+| Postfix | calls, member access, indexing, Vector slicing, `!` | left |
 | Unary | `-`, `!`, `try` | right |
 | Multiplicative | `*`, `/`, `%` | left |
 | Additive | `+`, `-` | left |

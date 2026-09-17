@@ -82,7 +82,7 @@ impl<'a> Parser<'a> {
             );
             return None;
         }
-        let value = self.parse_if_condition_expr()?;
+        let value = self.parse_if_condition_let_value()?;
         let span = pattern.span().cover(value.span());
         Some(RefutableClause {
             pattern,
@@ -173,6 +173,15 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_if_condition_expr(&mut self) -> Option<Expr> {
         let end = self.scan_if_condition_expr_end(self.index);
+        self.parse_condition_expr_until(end)
+    }
+
+    fn parse_if_condition_let_value(&mut self) -> Option<Expr> {
+        let end = self.scan_if_condition_let_value_end(self.index);
+        self.parse_condition_expr_until(end)
+    }
+
+    fn parse_condition_expr_until(&mut self, end: usize) -> Option<Expr> {
         if end == self.index {
             self.error_at_current("expected_expression", "expected expression");
             return None;
@@ -333,6 +342,38 @@ impl<'a> Parser<'a> {
                         raw: token.lexeme,
                         span: token.span,
                     },
+                })
+            }
+            TokenKind::Minus => {
+                let start = self.current_span();
+                self.advance();
+                let token = self.current().clone();
+                let inner = match token.kind {
+                    TokenKind::Integer => Expr::Integer {
+                        raw: token.lexeme,
+                        span: token.span,
+                    },
+                    TokenKind::Float => Expr::Float {
+                        raw: token.lexeme,
+                        span: token.span,
+                    },
+                    _ => {
+                        self.error_at_current(
+                            "expected_pattern",
+                            "expected numeric literal (integer or floating-point) after '-' in pattern",
+                        );
+                        return None;
+                    }
+                };
+                self.advance();
+                let span = start.cover(token.span);
+                Some(Pattern::Literal {
+                    value: Expr::Unary {
+                        op: crate::ast::UnaryOp::Neg,
+                        expr: Box::new(inner),
+                        span,
+                    },
+                    span,
                 })
             }
             TokenKind::String => {

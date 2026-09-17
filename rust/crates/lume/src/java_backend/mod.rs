@@ -2704,8 +2704,8 @@ def main() Unit {
     parsedInt Option[Int] = Int.parse("41")
     parsedFloat Option[Float] = Float.parse("1.5")
 
-    println((parsedInt !!) + 1)
-    println((parsedFloat !!) + 0.5)
+    println((parsedInt !) + 1)
+    println((parsedFloat !) + 0.5)
     println(Int.parse("oops").isEmpty())
 }
 "#,
@@ -3972,7 +3972,7 @@ def main() Unit {
     }
 
     #[test]
-    fn generated_java_runs_union_aliases_and_widening() {
+    fn generated_java_runs_transparent_aliases_and_union_widening() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java union test because javac/java is not available");
             return;
@@ -4000,9 +4000,12 @@ class Bird {
     name Str
 }
 
+type Companion = Pet
 type Pet = Cat | Dog
+type Names = [Str]
+type Labeler = fn(Str) Str
 
-def describe(value Pet) Str = match value {
+def describe(value Companion) Str = match value {
     case Cat { name } => "cat " + name
     case Dog { name } => "dog " + name
 }
@@ -4010,10 +4013,13 @@ def describe(value Pet) Str = match value {
 def widen(value Pet) Bird | Dog | Cat = value
 
 def main() Unit {
-    pet Pet = Cat("Milo")
+    pet Companion = Cat("Milo")
     reordered Dog | Cat = pet
     widened Bird | Dog | Cat = reordered
+    names Names = ["Milo"]
+    label Labeler = value => "name " + value
     println(describe(reordered))
+    println(label(names[0]))
     println(match widened {
         case Cat { name } => name
         case Dog { name } => name
@@ -4054,7 +4060,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "cat Milo\nMilo\n"
+            "cat Milo\nname Milo\nMilo\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -4134,7 +4140,7 @@ def main() Unit {
     println(first == different)
 
     points [Point: Str] = [first: "found"]
-    println(points[same] !!)
+    println(points[same] !)
 
     reordered = ReorderedPoint("one", 1)
     println(first == reordered)
@@ -4653,26 +4659,26 @@ def main() Unit {
     declared Type[User] = typeOf[User]
     actual Type[User] = user.runtimeType
 
-    println(declared.name() !!)
-    println(actual.qualifiedName() !!)
+    println(declared.name() !)
+    println(actual.qualifiedName() !)
     println(declared.kind())
 
-    classType ClassType[User] = declared.asClass() !!
+    classType ClassType[User] = declared.asClass() !
     fields [Field] = classType.fields()
     println(fields.size())
 
-    nameField Field = fields.at(0) !!
-    ageField Field = fields.at(1) !!
+    nameField Field = fields.at(0) !
+    ageField Field = fields.at(1) !
 
     println(nameField.name())
-    println(nameField.fieldType().name() !!)
+    println(nameField.fieldType().name() !)
     println(ageField.name())
-    println(ageField.fieldType().name() !!)
+    println(ageField.fieldType().name() !)
 
-    enumType EnumType[Status] = typeOf[Status].asEnum() !!
-    println(enumType.name() !!)
+    enumType EnumType[Status] = typeOf[Status].asEnum() !
+    println(enumType.name() !)
     println(enumType.kind())
-    println((enumType.case("Pending") !!).name())
+    println((enumType.case("Pending") !).name())
 }
 "#,
         )
@@ -4795,16 +4801,16 @@ shape User {
 def main() Unit {
     users LinkedList[User] = LinkedList {}
     users.add(User { name: "Ada", cost: 3 })
-    inserted Unit = users.insertAt(0, User { name: "Bob", cost: 2 }) !!
-    println(users.at(0)!!.name)
-    println(users.setAt(0, User { name: "Cara", cost: 4 })!!.name)
-    println(users.removeAt(1)!!.name)
+    inserted Unit = users.insertAt(0, User { name: "Bob", cost: 2 }) !
+    println(users.at(0)!.name)
+    println(users.setAt(0, User { name: "Cara", cost: 4 })!.name)
+    println(users.removeAt(1)!.name)
     println(users.fold(0, (cost, user) => cost + user.cost))
 
     values [Int] = [1, 2]
-    println(values.setAt(0, 3) !!)
-    vectorInserted Unit = values.insertAt(1, 4) !!
-    println(values.removeAt(2) !!)
+    println(values.setAt(0, 3) !)
+    vectorInserted Unit = values.insertAt(1, 4) !
+    println(values.removeAt(2) !)
     println(values[0])
     match values.removeAt(9) {
         case Err { error } => {
@@ -4815,12 +4821,14 @@ def main() Unit {
     }
 
     array Array[Int] = Array.fill(2, 5)
-    println(array.at(1) !!)
-    println(array.setAt(1, 7) !!)
+    println(array.at(1) !)
+    println(array.setAt(1, 7) !)
     println(array[1])
 
     result Result[Int, Str] = Ok(7)
-    println(result !!)
+    println(result !)
+    nested Option[Result[Int, Str]] = Some(Ok(11))
+    println(nested!!)
 }
 "#,
         )
@@ -4856,7 +4864,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Bob\nBob\nAda\n4\n1\n2\n3\n9\n2\n5\n5\n7\n7\n"
+            "Bob\nBob\nAda\n4\n1\n2\n3\n9\n2\n5\n5\n7\n7\n11\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -5051,6 +5059,16 @@ def main() Int {
         println(item)
         next := None
     }
+
+    println(match -1 {
+        case -1 => "negative int"
+        case _ => "other"
+    })
+
+    println(match -3.5 {
+        case -3.5 => "negative float"
+        case _ => "other"
+    })
 
     0
 }

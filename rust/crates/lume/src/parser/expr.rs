@@ -1344,7 +1344,7 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
-            if self.match_token(TokenKind::BangBang) {
+            if self.match_token(TokenKind::Bang) {
                 let operator_span = self.previous_span();
                 let start = expr.span();
                 expr = Expr::Unary {
