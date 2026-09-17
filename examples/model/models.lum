@@ -1,0 +1,17 @@
+# IGNORE
+
+module models
+
+interface NamedModel {
+    def label() Str
+}
+
+class User with NamedModel {
+    def label() Str = "User"
+}
+
+class Guest with NamedModel {
+    def label() Str = "Guest"
+}
+
+type ModelUser = User

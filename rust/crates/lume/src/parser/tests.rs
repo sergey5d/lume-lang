@@ -4112,6 +4112,50 @@ def make() Unit = values.map { (left,
 }
 
 #[test]
+fn parses_qualified_type_paths_in_all_type_positions() {
+    let result = parse(
+        r#"
+def display(user models.User, users Vector[models.User]) models.User | models.Guest = user
+
+def isUser(value Any) Bool = value is models.User
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+    let program = result.program.expect("program");
+    let display = match &program.items[0] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    assert!(matches!(
+        display.params[0].ty.as_ref(),
+        Some(TypeRef::Named { name, args, .. }) if name == "models.User" && args.is_empty()
+    ));
+    assert!(matches!(
+        display.params[1].ty.as_ref(),
+        Some(TypeRef::Named { name, args, .. })
+            if name == "Vector"
+                && matches!(&args[0], TypeRef::Named { name, .. } if name == "models.User")
+    ));
+    assert!(matches!(
+        display.return_type.as_ref(),
+        Some(TypeRef::Union { members, .. })
+            if matches!(&members[0], TypeRef::Named { name, .. } if name == "models.User")
+                && matches!(&members[1], TypeRef::Named { name, .. } if name == "models.Guest")
+    ));
+
+    let is_user = match &program.items[1] {
+        Item::Function(function) => function,
+        other => panic!("expected function, got {other:#?}"),
+    };
+    assert!(matches!(
+        &is_user.body,
+        CallableBody::Expr(Expr::Is { target, .. })
+            if matches!(target, TypeRef::Named { name, .. } if name == "models.User")
+    ));
+}
+
+#[test]
 fn parses_list_type_ref_shorthand() {
     let result = parse(
         r#"

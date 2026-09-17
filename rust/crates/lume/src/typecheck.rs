@@ -498,6 +498,120 @@ fn expand_aliases_in_type_sig(sig: &mut TypeSig, aliases: &HashMap<String, TypeR
     }
 }
 
+fn canonicalize_qualified_function_sig(
+    sig: &mut FunctionSig,
+    owner: &ModuleInfo,
+    modules: &HashMap<PathBuf, ModuleInfo>,
+) {
+    for condition in &mut sig.generic_conditions {
+        match condition {
+            GenericConditionSig::Bound { subject, bound } => {
+                canonicalize_qualified_ty(subject, owner, modules);
+                canonicalize_qualified_ty(bound, owner, modules);
+            }
+            GenericConditionSig::Equal { left, right } => {
+                canonicalize_qualified_ty(left, owner, modules);
+                canonicalize_qualified_ty(right, owner, modules);
+            }
+        }
+    }
+    for param in &mut sig.params {
+        canonicalize_qualified_ty(&mut param.ty, owner, modules);
+    }
+    canonicalize_qualified_ty(&mut sig.ret, owner, modules);
+}
+
+fn canonicalize_qualified_type_sig(
+    sig: &mut TypeSig,
+    owner: &ModuleInfo,
+    modules: &HashMap<PathBuf, ModuleInfo>,
+) {
+    for condition in &mut sig.generic_conditions {
+        match condition {
+            GenericConditionSig::Bound { subject, bound } => {
+                canonicalize_qualified_ty(subject, owner, modules);
+                canonicalize_qualified_ty(bound, owner, modules);
+            }
+            GenericConditionSig::Equal { left, right } => {
+                canonicalize_qualified_ty(left, owner, modules);
+                canonicalize_qualified_ty(right, owner, modules);
+            }
+        }
+    }
+    for bound in &mut sig.with_bounds {
+        canonicalize_qualified_ty(bound, owner, modules);
+    }
+    for field in &mut sig.fields {
+        canonicalize_qualified_ty(&mut field.ty, owner, modules);
+    }
+    for overloads in sig.methods.values_mut() {
+        for method in overloads {
+            canonicalize_qualified_function_sig(method, owner, modules);
+        }
+    }
+    for case in sig.enum_cases.values_mut() {
+        for param in &mut case.params {
+            canonicalize_qualified_ty(&mut param.ty, owner, modules);
+        }
+        canonicalize_qualified_ty(&mut case.result, owner, modules);
+    }
+}
+
+fn canonicalize_qualified_ty(
+    ty: &mut Ty,
+    owner: &ModuleInfo,
+    modules: &HashMap<PathBuf, ModuleInfo>,
+) {
+    match ty {
+        Ty::Named(name, args) => {
+            for arg in args.iter_mut() {
+                canonicalize_qualified_ty(arg, owner, modules);
+            }
+            let Some((module_alias, member)) = name.split_once('.') else {
+                return;
+            };
+            if member.contains('.') {
+                return;
+            }
+            let Some(target) = owner
+                .imports
+                .get(module_alias)
+                .and_then(|path| modules.get(path))
+            else {
+                return;
+            };
+            if args.is_empty()
+                && let Some(alias) = target.aliases.get(member)
+            {
+                let converted = convert_type_ref(alias, &HashSet::new());
+                let mut expanded =
+                    expand_aliases_in_ty(&converted, &target.aliases, &mut HashSet::new());
+                canonicalize_qualified_ty(&mut expanded, target, modules);
+                *ty = expanded;
+            } else {
+                *name = member.to_string();
+            }
+        }
+        Ty::Union(members) | Ty::Tuple(members) => {
+            for member in members {
+                canonicalize_qualified_ty(member, owner, modules);
+            }
+        }
+        Ty::Record(fields) => {
+            for (_, field) in fields {
+                canonicalize_qualified_ty(field, owner, modules);
+            }
+        }
+        Ty::Function(params, ret) => {
+            for param in params {
+                canonicalize_qualified_ty(param, owner, modules);
+            }
+            canonicalize_qualified_ty(ret, owner, modules);
+        }
+        Ty::Unknown | Ty::Wildcard | Ty::Capture(_) | Ty::Never | Ty::TypeParam(_) => {}
+    }
+}
+
 fn expand_aliases_in_ty(
     ty: &Ty,
     aliases: &HashMap<String, TypeRef>,
@@ -675,6 +789,41 @@ impl ModuleInfo {
                 .push(function_sig_from_method(method, &target_type_params));
         }
     }
+
+    fn canonicalize_qualified_types_in_signatures(
+        &mut self,
+        modules: &HashMap<PathBuf, ModuleInfo>,
+    ) {
+        let owner = self.clone();
+        for overloads in self.functions.values_mut() {
+            for sig in overloads {
+                canonicalize_qualified_function_sig(sig, &owner, modules);
+            }
+        }
+        for sig in self.types.values_mut().chain(self.objects.values_mut()) {
+            canonicalize_qualified_type_sig(sig, &owner, modules);
+        }
+
+        let mut extensions = HashMap::new();
+        for (target, mut methods) in std::mem::take(&mut self.extensions) {
+            for overloads in methods.values_mut() {
+                for sig in overloads {
+                    canonicalize_qualified_function_sig(sig, &owner, modules);
+                }
+            }
+            let mut target_ty = Ty::Named(target.clone(), Vec::new());
+            canonicalize_qualified_ty(&mut target_ty, &owner, modules);
+            let target = match target_ty {
+                Ty::Named(name, _) => name,
+                _ => target,
+            };
+            extensions
+                .entry(target)
+                .or_insert_with(HashMap::new)
+                .extend(methods);
+        }
+        self.extensions = extensions;
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -814,6 +963,10 @@ impl World {
         let mut modules = HashMap::new();
         for (path, loaded) in graph.modules {
             modules.insert(path, ModuleInfo::from_loaded(&loaded));
+        }
+        let module_snapshot = modules.clone();
+        for module in modules.values_mut() {
+            module.canonicalize_qualified_types_in_signatures(&module_snapshot);
         }
         let mut visited = HashSet::new();
         let mut order = Vec::new();
@@ -9470,6 +9623,25 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn qualified_type_context<'m, 'n>(
+        &'m self,
+        module: Option<&'m ModuleInfo>,
+        name: &'n str,
+    ) -> (Option<&'m ModuleInfo>, &'n str) {
+        let Some((module_alias, member)) = name.split_once('.') else {
+            return (module, name);
+        };
+        if member.contains('.') {
+            return (module, name);
+        }
+        let Some(owner) =
+            module.and_then(|module| self.world.lookup_module_alias(module, module_alias))
+        else {
+            return (module, name);
+        };
+        (Some(owner), member)
+    }
+
     fn ty_from_type_ref_in_module(
         &self,
         reference: &TypeRef,
@@ -9479,9 +9651,10 @@ impl<'a> Checker<'a> {
         match reference {
             TypeRef::Wildcard { .. } => Ty::Wildcard,
             TypeRef::Named { name, args, .. } => {
+                let (type_module, type_name) = self.qualified_type_context(module, name);
                 if args.is_empty() {
-                    if let Some((path, target)) = self.lookup_alias_target(module, name) {
-                        let key = (path.clone(), name.clone());
+                    if let Some((path, target)) = self.lookup_alias_target(type_module, type_name) {
+                        let key = (path.clone(), type_name.to_string());
                         if visiting.contains(&key) {
                             return Ty::Unknown;
                         }
@@ -9496,7 +9669,7 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|arg| self.ty_from_type_ref_in_module(arg, module, visiting))
                     .collect();
-                self.resolve_named_type_in_module(module, name, args)
+                self.resolve_named_type_in_module(type_module, type_name, args)
             }
             TypeRef::Tuple { fields, .. } => Ty::Tuple(
                 fields
@@ -9544,10 +9717,11 @@ impl<'a> Checker<'a> {
                 {
                     return true;
                 }
-                let Some((path, target)) = self.lookup_alias_target(Some(module), name) else {
+                let (type_module, type_name) = self.qualified_type_context(Some(module), name);
+                let Some((path, target)) = self.lookup_alias_target(type_module, type_name) else {
                     return false;
                 };
-                let key = (path.clone(), name.clone());
+                let key = (path.clone(), type_name.to_string());
                 if visiting.contains(&key) {
                     return true;
                 }

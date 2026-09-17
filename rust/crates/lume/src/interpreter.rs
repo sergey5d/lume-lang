@@ -774,7 +774,12 @@ fn rewrite_type_ref_for_runtime(reference: &mut ast::TypeRef, module: &LoadedMod
     match reference {
         ast::TypeRef::Wildcard { .. } => {}
         ast::TypeRef::Named { name, args, .. } => {
-            if let Some(path) = rewritten_imported_symbol_path(module, name) {
+            if let Some((module_alias, member)) = name.split_once('.')
+                && !member.contains('.')
+                && module.imports.contains_key(module_alias)
+            {
+                *name = member.to_string();
+            } else if let Some(path) = rewritten_imported_symbol_path(module, name) {
                 if path.len() == 1 {
                     *name = path[0].clone();
                 }

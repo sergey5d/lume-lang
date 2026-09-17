@@ -2799,6 +2799,12 @@ impl<'a> Resolver<'a> {
     }
 
     fn lookup_type(&self, name: &str) -> Option<&TypeInfo> {
+        if let Some((module, member)) = qualified_type_parts(name) {
+            return self
+                .modules_by_alias
+                .get(module)
+                .and_then(|namespace| namespace.types.get(member));
+        }
         self.types
             .get(name)
             .or_else(|| self.imported_types.get(name))
@@ -2806,6 +2812,12 @@ impl<'a> Resolver<'a> {
     }
 
     fn lookup_alias(&self, name: &str) -> Option<&TypeAliasInfo> {
+        if let Some((module, member)) = qualified_type_parts(name) {
+            return self
+                .modules_by_alias
+                .get(module)
+                .and_then(|namespace| namespace.aliases.get(member));
+        }
         self.aliases
             .get(name)
             .or_else(|| self.imported_aliases.get(name))
@@ -2971,6 +2983,11 @@ fn type_ref_name(reference: &TypeRef) -> Option<&str> {
         TypeRef::Named { name, .. } => Some(name.as_str()),
         _ => None,
     }
+}
+
+fn qualified_type_parts(name: &str) -> Option<(&str, &str)> {
+    let (module, member) = name.split_once('.')?;
+    (!module.is_empty() && !member.is_empty() && !member.contains('.')).then_some((module, member))
 }
 
 fn builtin_type_arity(name: &str) -> Option<usize> {

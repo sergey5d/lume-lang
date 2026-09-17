@@ -426,7 +426,15 @@ impl<'a> Parser<'a> {
             return Some(TypeRef::Wildcard { span });
         }
 
-        let (name, start) = self.expect_identifier("expected type name")?;
+        let (first, start) = self.expect_identifier("expected type name")?;
+        let mut path = vec![first];
+        let mut end = start;
+        while self.match_token(TokenKind::Dot) {
+            let (segment, segment_span) = self.expect_identifier("expected type name after '.'")?;
+            path.push(segment);
+            end = segment_span;
+        }
+        let name = path.join(".");
         let mut args = Vec::new();
         if self.match_token(TokenKind::LBracket) {
             self.skip_newlines();
@@ -436,13 +444,8 @@ impl<'a> Parser<'a> {
                     args.push(self.parse_type_ref()?);
                 }
             }
-            self.consume(TokenKind::RBracket, "expected ']' after type arguments")?;
+            end = self.consume(TokenKind::RBracket, "expected ']' after type arguments")?;
         }
-        let end = if let Some(last) = args.last() {
-            last.span()
-        } else {
-            start
-        };
         Some(TypeRef::Named {
             name,
             args,

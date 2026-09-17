@@ -40,6 +40,35 @@ The shorthand may not be repeated. `Int??` is rejected because `??` is the
 extract-or-fallback expression operator. Write `Option[Int?]` when a nested
 optional type is intentional.
 
+### Qualified Type Paths
+
+A module imported without a symbol selector exposes its visible types through
+the module alias in every type position:
+
+```txt
+use app/models
+
+def display(user models.User) Str = user.name
+def choose(users Vector[models.User]) models.User | models.Guest = users[0]
+
+if value is models.User {
+    println(value.name)
+}
+```
+
+The grammar is `Identifier ("." Identifier)*`, followed by any generic type
+arguments. Qualified paths therefore work in parameter and return types,
+generic arguments, unions, bounds, annotations, and runtime type tests. The
+first identifier must resolve to a used module alias and the final name must be
+a visible type from that module. Selective aliases remain available when a
+short local name is preferable:
+
+```txt
+use app/models/{User as ModelUser}
+
+def display(user ModelUser) Str = user.name
+```
+
 ### Type Aliases
 
 `type` introduces a transparent name for any type expression:

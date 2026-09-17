@@ -1,0 +1,24 @@
+# EXPECT:
+# User
+# User
+# true
+
+module qualified_types
+
+use model/models
+
+def display(user models.User) Str = user.label()
+
+def displayAlias(user models.ModelUser) Str = user.label()
+
+def first(users Vector[models.User]) models.User = users[0]
+
+def main() Unit {
+    user models.User = models.User {}
+    users Vector[models.User] = [user]
+    choice models.User | models.Guest = first(users)
+
+    println(display(first(users)))
+    println(displayAlias(user))
+    println(choice is models.User)
+}
