@@ -10,10 +10,9 @@ annotation Route {
     method Str = "GET"
 }
 
-enum RouteVisibility {
-    case External
-    case Internal
-}
+type RouteVisibility =
+    object External {}
+    | object Internal {}
 
 annotation Metadata {
     text Str

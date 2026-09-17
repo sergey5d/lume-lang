@@ -1,14 +1,10 @@
 module lume/core
 
-enum Either[L, R] {
-    case Left {
-        value L
-    }
+type Either[L, R] =
+    class Left { value L }
+    | class Right { value R }
 
-    case Right {
-        value R
-    }
-
+ext Either[L, R] {
     def isLeft() Bool = match this {
         case Left { value: _ } => true
         case Right { value: _ } => false

@@ -3,19 +3,13 @@
 # 2
 # 9
 
-enum BoolBox {
-    case Wrap {
-        value Bool
-    }
-    case Empty
-}
+type BoolBox =
+    class Wrap { value Bool }
+    | object Empty {}
 
-enum PairBox {
-    case Full {
-        value (Int, Int)
-    }
-    case NoneX
-}
+type PairBox =
+    class Full { value (Int, Int) }
+    | object NoneX {}
 
 def describeFlag(value BoolBox) Int =
     match value {

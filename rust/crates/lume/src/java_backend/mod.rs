@@ -3056,7 +3056,7 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
                     "default <X> lume.core.Option<X> map(java.util.function.Function<T, X> f_1)",
                     "default <X> lume.core.Option<X> flatMap(java.util.function.Function<T, lume.core.Option<X>> f_1)",
                     "default lume.core.LumeIterator<T> iterator()",
-                    "return new None<>();",
+                    "return None.instance();",
                 ],
             ),
             (
@@ -3900,7 +3900,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Ada Tampa Ada\nother\nother\napproved\nready\n5 5\nNone[]\n7 7\n10 20 2 4\n"
+            "Ada Tampa Ada\nother\nother\napproved\nready\n5 5\nNone\n7 7\n10 20 2 4\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -4061,6 +4061,86 @@ def main() Unit {
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
             "cat Milo\nname Milo\nMilo\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_runs_declared_union_variants() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java declared-union test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-declared-union");
+        let source = temp.join("declared_union.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/declared_union
+
+type Outcome =
+    class Success { value Str }
+    | shape Failure { message Str }
+    | object Cancelled {}
+
+ext Outcome {
+    def result() Str = match this {
+        case Success { value } => value
+        case Failure { message } => "Failed: " + message
+        case Cancelled => "Cancelled"
+    }
+}
+
+def main() Unit {
+    success Outcome = Success { value: "Great" }
+    failure Outcome = Failure { message: "nope" }
+    cancelled Outcome = Cancelled
+    println(success.result())
+    println(failure.result())
+    println(cancelled.result())
+}
+"#,
+        )
+        .expect("write source");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let union = fs::read_to_string(out.join("demo/declared_union/Outcome.java"))
+            .expect("read generated union");
+        assert!(union.contains("final class Success implements Outcome"));
+        assert!(union.contains("record Failure(String message) implements Outcome"));
+        assert!(union.contains("final class Cancelled implements Outcome"));
+        assert!(union.contains("public static Cancelled instance()"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.declared_union.Declared_unionMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "Great\nFailed: nope\nCancelled\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -4571,7 +4651,7 @@ class Runner {
         assert!(runner.contains("new lume.core.Result.Ok<>"));
         assert!(runner.contains("new lume.core.Result.Err<>"));
         assert!(runner.contains("new lume.core.Option.Some<>"));
-        assert!(runner.contains("new lume.core.Option.None<>"));
+        assert!(runner.contains("lume.core.Option.None.instance()"));
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");

@@ -13,29 +13,15 @@ shape JsonField {
     value JsonValue
 }
 
-enum JsonValue {
-    case JsonNull
+type JsonValue =
+    object JsonNull {}
+    | class JsonBool { value Bool }
+    | class JsonNumber { value Str }
+    | class JsonString { value Str }
+    | class JsonArray { values [JsonValue] }
+    | class JsonObject { fields [JsonField] }
 
-    case JsonBool {
-        value Bool
-    }
-
-    case JsonNumber {
-        value Str
-    }
-
-    case JsonString {
-        value Str
-    }
-
-    case JsonArray {
-        values [JsonValue]
-    }
-
-    case JsonObject {
-        fields [JsonField]
-    }
-
+ext JsonValue {
     def stringify() Str = JsonRuntime.stringify(this)
 }
 

@@ -1,16 +1,11 @@
 # PRELUDE_SKIP
 # INTERPRETER
 
-enum Either[L, R] {
+type Either[L, R] =
+    class Left { value L }
+    | class Right { value R }
 
-    case Left {
-        value L
-    }
-
-    case Right {
-        value R
-    }
-
+ext Either[L, R] {
     def isLeft() Bool = match this {
        case Left { value: _ } => true
        case Right { value: _ } => false
@@ -59,7 +54,7 @@ enum Either[L, R] {
     }
 
     def toOption() Option[R] = match this {
-       case Left { value: _ } => None()
+       case Left { value: _ } => None
        case Right { value } => Some(value)
     }
 

@@ -4,12 +4,9 @@
 # item 30
 # item 50
 
-enum MaybeInt {
-    case NoneX
-    case SomeX {
-        value Int
-    }
-}
+type MaybeInt =
+    class SomeX { value Int }
+    | object NoneX {}
 
 def expandPage(page [MaybeInt]) [Int] {
     extracted [Int] = []

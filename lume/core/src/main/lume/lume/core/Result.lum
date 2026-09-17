@@ -1,14 +1,10 @@
 module lume/core
 
-enum Result[T, E] {
-    case Ok {
-        value T
-    }
+type Result[T, E] =
+    class Ok { value T }
+    | class Err { error E }
 
-    case Err {
-        error E
-    }
-
+ext Result[T, E] {
     def isOk() Bool = match this {
         case Ok { value: _ } => true
         case Err { error: _ } => false

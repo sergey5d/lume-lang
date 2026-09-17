@@ -6,19 +6,16 @@
 # left-right
 # 0
 
-enum MaybeInt {
-    case NoneX
-    case SomeX {
-        value Int
-    }
-}
+type MaybeInt =
+    class SomeX { value Int }
+    | object NoneX {}
 
-enum PairText {
-    case PairX {
+type PairText =
+    class PairX {
         left Str
         right Str
     }
-}
+    | object EmptyText {}
 
 def printOption(value MaybeInt) {
     match value {
@@ -47,6 +44,7 @@ def main() Int {
     pairText PairText = PairText.PairX("left", "right")
     println(match pairText {
         case PairX { left, right } => left + "-" + right
+        case EmptyText => "empty"
     })
 
     0

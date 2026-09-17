@@ -20,9 +20,10 @@ Lume separates the main concepts deliberately:
   class construction.
 - `shape` is structural data: visible read-only fields that can be matched,
   passed, and converted by field compatibility.
-- `enum` models tagged alternatives, while a named `object` declares one shared
-  object value with optional fields and methods. `object { ... }` creates an
-  anonymous object value.
+- `type Name = class ... | shape ... | object ...` declares a closed union of
+  alternatives, while a standalone named `object` declares one shared object
+  value with optional fields and methods. `object { ... }` creates an anonymous
+  object value.
 - `interface` describes behavior; types opt in explicitly instead of gaining
   behavior by accidental structural matches.
 

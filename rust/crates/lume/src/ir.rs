@@ -135,6 +135,7 @@ impl TypeDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumCase {
     pub annotations: Vec<Annotation>,
+    pub kind: TypeKind,
     pub name: String,
     pub fields: Vec<Field>,
     pub span: Option<Span>,

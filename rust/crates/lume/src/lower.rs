@@ -132,6 +132,7 @@ impl<'a> Lowerer<'a> {
                 let hashed = ty
                     .fields
                     .iter()
+                    .chain(ty.enum_cases.iter().flat_map(|case| case.fields.iter()))
                     .all(|field| ir_type_is_hashable(&field.ty, ty, &types, &mut HashSet::new()));
                 Some((
                     (!hashed).then(|| ir::Type::Named {
@@ -356,6 +357,7 @@ impl<'a> Lowerer<'a> {
                         .collect();
                     cases.push(ir::EnumCase {
                         annotations: lower_annotations(&case.annotations),
+                        kind: case.kind,
                         name: case.name.clone(),
                         fields: case_fields,
                         span: Some(case.span),
@@ -4202,6 +4204,9 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     let path = vec![name.clone()];
                     if is_named_runtime_value_path(self.program, &path) {
+                        let path = unique_bare_enum_case_owner(self.program, name)
+                            .map(|owner| vec![owner.to_string(), name.clone()])
+                            .unwrap_or(path);
                         return self.emit_temp_from_rvalue(
                             ir::RValue::NamedValue { path },
                             ir::Type::Unknown,
@@ -6664,6 +6669,11 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 if let Some(method) = self.lower_implicit_method_callee(name) {
                     return method;
+                }
+                if let Some(owner) = unique_bare_enum_case_owner(self.program, name) {
+                    return ir::Callee::Named {
+                        path: vec![owner.to_string(), name.clone()],
+                    };
                 }
                 if is_named_runtime_callee_path(self.program, &path) {
                     return ir::Callee::Named { path };
@@ -9316,6 +9326,15 @@ fn unique_bare_enum_case_value_exists(program: &ir::Program, case_name: &str) ->
         .filter(|case| case.name == case_name && enum_case_is_value(case))
         .count()
         == 1
+}
+
+fn unique_bare_enum_case_owner<'a>(program: &'a ir::Program, case_name: &str) -> Option<&'a str> {
+    let mut owners = program.types.iter().filter_map(|ty| {
+        (ty.kind == ast::TypeKind::Enum && ty.enum_cases.iter().any(|case| case.name == case_name))
+            .then_some(ty.name.as_str())
+    });
+    let owner = owners.next()?;
+    owners.next().is_none().then_some(owner)
 }
 
 fn unique_bare_enum_case_exists(program: &ir::Program, case_name: &str) -> bool {

@@ -16,12 +16,9 @@ class User {
     age Int
 }
 
-enum Status {
-    case Pending
-    case Done {
-        label Str
-    }
-}
+type Status =
+    object Pending {}
+    | class Done { label Str }
 
 def main() Unit {
     user User = User("Ada", 42)

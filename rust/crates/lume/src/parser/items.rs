@@ -1,3 +1,4 @@
+use super::types::ParsedGenericClause;
 use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -115,12 +116,11 @@ impl<'a> Parser<'a> {
                 if !annotations.is_empty() {
                     self.error_at_current(
                         "unexpected_annotation",
-                        "type aliases do not accept annotations",
+                        "type declarations do not accept annotations before 'type'",
                     );
                     return None;
                 }
-                let alias = self.parse_type_alias_decl(visibility)?;
-                Some(Item::TypeAlias(alias))
+                self.parse_type_alias_or_union_decl(visibility)
             }
             TokenKind::Keyword(Keyword::Annotation)
             | TokenKind::Keyword(Keyword::Class)
@@ -205,21 +205,141 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_type_alias_decl(&mut self, visibility: Visibility) -> Option<TypeAliasDecl> {
+    fn parse_type_alias_or_union_decl(&mut self, visibility: Visibility) -> Option<Item> {
         let start = self.consume(
             TokenKind::Keyword(Keyword::Type),
-            "expected 'type' before type alias",
+            "expected 'type' before type declaration",
         )?;
         let (name, _) = self.expect_identifier("expected type alias name")?;
+        let generic_clause = self.parse_generic_clause()?;
         self.consume(TokenKind::Eq, "expected '=' after type alias name")?;
+        self.skip_newlines();
+        if matches!(
+            self.current_kind(),
+            TokenKind::Keyword(Keyword::Class)
+                | TokenKind::Keyword(Keyword::Shape)
+                | TokenKind::Keyword(Keyword::Object)
+        ) {
+            return self.parse_inline_union_decl(visibility, name, generic_clause, start);
+        }
+        if !generic_clause.params.is_empty() || !generic_clause.conditions.is_empty() {
+            self.error_at_current(
+                "generic_alias_not_supported",
+                "generic parameters on 'type' are currently supported only for inline union declarations",
+            );
+        }
         let target = self.parse_type_ref()?;
         let span = start.cover(target.span());
-        Some(TypeAliasDecl {
+        Some(Item::TypeAlias(TypeAliasDecl {
             visibility,
             name,
             target,
             span,
-        })
+        }))
+    }
+
+    fn parse_inline_union_decl(
+        &mut self,
+        visibility: Visibility,
+        name: String,
+        generic_clause: ParsedGenericClause,
+        start: Span,
+    ) -> Option<Item> {
+        let mut members = Vec::new();
+        loop {
+            self.skip_newlines();
+            let (kind, variant_start) = match self.current_kind() {
+                TokenKind::Keyword(Keyword::Class) => {
+                    let span = self.current_span();
+                    self.advance();
+                    (TypeKind::Class, span)
+                }
+                TokenKind::Keyword(Keyword::Shape) => {
+                    let span = self.current_span();
+                    self.advance();
+                    (TypeKind::Record, span)
+                }
+                TokenKind::Keyword(Keyword::Object) => {
+                    let span = self.current_span();
+                    self.advance();
+                    (TypeKind::Object, span)
+                }
+                _ => {
+                    self.error_at_current(
+                        "expected_union_variant",
+                        "expected 'class', 'shape', or 'object' union variant",
+                    );
+                    return None;
+                }
+            };
+            let (variant_name, _) = self.expect_identifier("expected union variant name")?;
+            self.skip_newlines();
+            self.consume(TokenKind::LBrace, "expected '{' after union variant name")?;
+            self.skip_newlines();
+            let mut fields = Vec::new();
+            while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+                if self.at_keyword(Keyword::Def) || self.starts_callable_decl() {
+                    self.error_at_current(
+                        "union_variant_method",
+                        "union variants declare data only; put shared behavior in 'ext UnionName { ... }'",
+                    );
+                    return None;
+                }
+                let annotations = self.parse_annotations()?;
+                let field_visibility = self.parse_visibility();
+                fields.push(self.parse_field_decl(annotations, field_visibility)?);
+                self.skip_newlines();
+            }
+            let end = self.consume(TokenKind::RBrace, "expected '}' after union variant")?;
+            if kind == TypeKind::Object && !fields.is_empty() {
+                self.diagnostics.push(Diagnostic::error(
+                    "object_union_variant_fields",
+                    format!(
+                        "object union variant '{}' cannot declare instance fields; use 'class' or 'shape'",
+                        variant_name
+                    ),
+                    variant_start.cover(end),
+                ));
+            }
+            members.push(TypeMember::Case(EnumCaseDecl {
+                annotations: Vec::new(),
+                kind,
+                name: variant_name,
+                fields,
+                span: variant_start.cover(end),
+            }));
+            self.skip_newlines();
+            if !self.match_token(TokenKind::Pipe) {
+                break;
+            }
+        }
+
+        if members.len() < 2 {
+            self.diagnostics.push(Diagnostic::error(
+                "union_variant_count",
+                format!("union type '{}' requires at least two variants", name),
+                start.cover(self.previous_span()),
+            ));
+        }
+        let end = members
+            .last()
+            .map(|member| match member {
+                TypeMember::Field(field) => field.span,
+                TypeMember::Method(method) => method.span,
+                TypeMember::Case(case) => case.span,
+            })
+            .unwrap_or(start);
+        Some(Item::Type(TypeDecl {
+            annotations: Vec::new(),
+            visibility,
+            kind: TypeKind::Enum,
+            name,
+            type_params: generic_clause.params,
+            type_conditions: generic_clause.conditions,
+            with_bounds: Vec::new(),
+            members,
+            span: start.cover(end),
+        }))
     }
 
     pub(super) fn parse_annotations(&mut self) -> Option<Vec<Annotation>> {
@@ -597,6 +717,7 @@ impl<'a> Parser<'a> {
             let end = self.consume(TokenKind::RBrace, "expected '}' after enum case body")?;
             return Some(EnumCaseDecl {
                 annotations,
+                kind: TypeKind::Enum,
                 name,
                 fields,
                 span: case_span.cover(end),
@@ -604,6 +725,7 @@ impl<'a> Parser<'a> {
         }
         Some(EnumCaseDecl {
             annotations,
+            kind: TypeKind::Enum,
             name,
             fields,
             span: case_span.cover(end),

@@ -1,0 +1,42 @@
+# EXPECT:
+# Great
+# Failed: nope
+# Cancelled
+# 7
+
+type Outcome =
+    class Success { value Str }
+    | shape Failure { message Str }
+    | object Cancelled {}
+
+ext Outcome {
+    def result() Str = match this {
+        case Success { value } => value
+        case Failure { message } => "Failed: " + message
+        case Cancelled => "Cancelled"
+    }
+}
+
+type Boxed[T] =
+    class Box { value T }
+    | object Empty {}
+
+ext Boxed[T] {
+    def getOr(fallback => T) T = match this {
+        case Box { value } => value
+        case Empty => fallback
+    }
+}
+
+def main() Unit {
+    success Outcome = Success { value: "Great" }
+    failure Outcome = Failure { message: "nope" }
+    cancelled Outcome = Cancelled
+
+    println(success.result())
+    println(failure.result())
+    println(cancelled.result())
+
+    boxed Boxed[Int] = Box { value: 7 }
+    println(boxed.getOr(0))
+}

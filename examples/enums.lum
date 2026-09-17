@@ -3,37 +3,37 @@
 # some defined: true
 # none: true
 
-# Enums might have 2 flavors.
-# Fully defined where all attributes have values.
-
-enum Color {
-    color Str
-    temperature Int
-
-    case Black {
-        color = "xxx"
-        temperature = 1
+# Declared unions may mix alternatives with their own data.
+type Color =
+    class Black {
+        color Str = "xxx"
+        temperature Int = 1
     }
-    case Red {
-        color = "xxx2"
-        temperature = 2
+    | class Red {
+        color Str = "xxx2"
+        temperature Int = 2
     }
 
-    def isReddish() Bool = this.temperature % 5 == 0
+ext Color {
+    def isReddish() Bool = match this {
+        case Black { temperature } => temperature % 5 == 0
+        case Red { temperature } => temperature % 5 == 0
+    }
 }
 
 # Naive implementation of option type
-enum OptionX[T] {
+type OptionX[T] =
+    object NoneX {}
+    | class SomeX { value T }
 
-    case NoneX
-    case SomeX {
-        value T
+ext OptionX[T] {
+    def isDefined() Bool = match this {
+        case SomeX(_) => true
+        case NoneX => false
     }
-
-    def isDefined() Bool = this != OptionX.NoneX
 }
 
-black = Color.Black
+black = Color.Black()
 reddish = black.isReddish()
 
 someInt = OptionX.SomeX(5)

@@ -1,8 +1,9 @@
 
-enum Side {
-    case NS
-    case EW
+type Side =
+    object NS {}
+    | object EW {}
 
+ext Side {
     def reverse() Side {
         match this {
             case NS => EW

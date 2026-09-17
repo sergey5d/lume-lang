@@ -1,12 +1,10 @@
 module lume/core
 
-enum Option[T] {
-    case Some {
-        value T
-    }
+type Option[T] =
+    class Some { value T }
+    | object None {}
 
-    case None
-
+ext Option[T] {
     def isSet() Bool = match this {
         case Some { value: _ } => true
         case None => false

@@ -44,7 +44,7 @@ public final class LumeRuntime {
     }
 
     public static <T> Option<T> optionNone() {
-        return new Option.None<>();
+        return Option.None.instance();
     }
 
     public static Option<Long> parseInt(String text) {

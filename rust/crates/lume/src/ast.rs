@@ -110,6 +110,7 @@ pub enum TypeMember {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumCaseDecl {
     pub annotations: Vec<Annotation>,
+    pub kind: TypeKind,
     pub name: String,
     pub fields: Vec<FieldDecl>,
     pub span: Span,

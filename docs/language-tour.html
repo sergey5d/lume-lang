@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Lume Language Tour - Classes, shapes, patterns, and typed failure</title>
-    <meta name="description" content="Tour the Lume programming language: immutable bindings, classes, structural shapes, enums, interfaces, pattern matching, Option, Result, Either, collections, and Java generation.">
+    <meta name="description" content="Tour the Lume programming language: immutable bindings, classes, structural shapes, declared unions, interfaces, pattern matching, Option, Result, Either, collections, and Java generation.">
     <meta name="author" content="Sergey Denisov">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://sergey5d.github.io/lume-lang/language-tour.html">
@@ -63,8 +63,8 @@ var retries = 3
 retries := retries - 1</code></pre>
         <p>Local bindings cannot silently shadow parameters, fields, or another live local. Field access can be qualified with <code>this</code> when a parameter has the same name.</p>
 
-        <h2 id="data-model">Classes, shapes, enums, and objects</h2>
-        <p>A <code>class</code> is nominal: construction and class-to-class assignment depend on its declared identity. A <code>shape</code> is structural data with public immutable fields. An <code>enum</code> describes tagged alternatives, and a named <code>object</code> declares one shared object value.</p>
+        <h2 id="data-model">Classes, shapes, unions, and objects</h2>
+        <p>A <code>class</code> is nominal: construction and class-to-class assignment depend on its declared identity. A <code>shape</code> is structural data with public immutable fields. A declared union closes over class, shape, and object alternatives, while a standalone named <code>object</code> declares one shared object value.</p>
         <pre><code>shape Location {
     city Str
     country Str
@@ -80,15 +80,14 @@ class User {
     }
 }
 
-enum Access {
-    case Admin
-    case Member { organization Str }
-}
+type Access =
+    object Admin {}
+    | class Member { organization Str }
 
 object Defaults {
     country Str = "US"
 }</code></pre>
-        <p>Interfaces describe behavior. Classes, shapes, enums, annotations, and named objects can explicitly implement interfaces; enum cases cannot.</p>
+        <p>Interfaces describe behavior. Classes, shapes, annotations, and named objects can explicitly implement interfaces. Shared union behavior belongs in an <code>ext</code> block on the union.</p>
 
         <h2 id="construction">Construction</h2>
         <p>Class constructors are declared with <code>new(...)</code>. Braces supply construction fields by name, while parentheses supply explicitly positional constructor inputs in declaration order.</p>
@@ -112,7 +111,7 @@ label = match access {
     case Admin => "administrator"
     case Member(organization) => organization
 }</code></pre>
-        <p>Tuple, vector, shape, class, and enum patterns are name-aware where the source data is named. Vector patterns may capture a remainder with spread syntax.</p>
+        <p>Tuple, vector, shape, class, and union-alternative patterns are name-aware where the source data is named. Vector patterns may capture a remainder with spread syntax.</p>
 
         <h2 id="failure">Option, Result, Either, and try</h2>
         <p>Lume represents optional values and recoverable failure explicitly. <code>try</code> unwraps the success side and propagates the container's failure. Use <code>mapError</code> or <code>mapLeft</code> before <code>try</code> when the enclosing function uses a different error type.</p>

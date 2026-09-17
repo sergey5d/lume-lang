@@ -1,18 +1,12 @@
 # SKIP
 #
-# Candidate enum-based Either design with behavior defined on the enclosing
-# enum instead of inside each case body.
+# Candidate union-based Either design with behavior defined in an extension.
 
-enum Either[L, R] {
+type Either[L, R] =
+    class Left { value L }
+    | class Right { value R }
 
-   case Left {
-        value L
-    }
-
-    case Right {
-        value R
-    }
-
+ext Either[L, R] {
     def isLeft() Bool = match this {
         case Left { value: _ } => true
         case Right { value: _ } => false

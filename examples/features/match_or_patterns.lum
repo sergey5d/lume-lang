@@ -2,16 +2,11 @@
 # token edge
 # number 42
 
-enum Token {
-    case Start
-    case Stop
-    case Word {
-        value Str
-    }
-    case Number {
-        value Str
-    }
-}
+type Token =
+    object Start {}
+    | object Stop {}
+    | class Word { value Str }
+    | class Number { value Str }
 
 def describe(token Token) Str = {
     match token {

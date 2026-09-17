@@ -11,10 +11,9 @@ class Person with Eq[Person] {
     def equals(other Person) Bool = this.name == other.name
 }
 
-enum Light {
-    case Green
-    case Red
-}
+type Light =
+    object Green {}
+    | object Red {}
 
 object Marker {
     label Str = "marker"

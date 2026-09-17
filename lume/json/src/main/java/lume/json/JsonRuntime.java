@@ -45,7 +45,7 @@ public final class JsonRuntime {
     }
 
     public static JsonValue nil() {
-        return new JsonValue.JsonNull();
+        return JsonValue.JsonNull.instance();
     }
 
     public static JsonField field(String name, JsonValue value) {

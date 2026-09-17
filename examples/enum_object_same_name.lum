@@ -2,10 +2,11 @@
 # red
 # palette
 
-enum Color {
-    case Red
-    case Blue
+type Color =
+    object Red {}
+    | object Blue {}
 
+ext Color {
     def label() Str = match this {
         case Color.Red => "red"
         case Color.Blue => "blue"

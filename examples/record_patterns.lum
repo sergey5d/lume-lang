@@ -29,22 +29,13 @@ class User {
     age Int
 }
 
-enum OrderStatus {
-    case Paid
-    case Pending
-}
+type OrderStatus =
+    object Paid {}
+    | object Pending {}
 
-enum ReviewState {
-    label Str
-
-    case Approved {
-        label = "approved"
-    }
-
-    case Rejected {
-        label = "rejected"
-    }
-}
+type ReviewState =
+    class Approved { label Str = "approved" }
+    | class Rejected { label Str = "rejected" }
 
 class Order {
     status OrderStatus
@@ -132,9 +123,10 @@ def main() Int {
         case { city } => println("known shape " + city)
     }
 
-    review = ReviewState.Approved
+    review = ReviewState.Approved()
     match review {
-        case { label } => println("known enum " + label)
+        case Approved { label } => println("known enum " + label)
+        case Rejected { label } => println("known enum " + label)
     }
 
     let { name as className, age as classAge } = user
@@ -143,7 +135,7 @@ def main() Int {
     let { city as shapeCity } = location
     println("let shape " + shapeCity)
 
-    let { label as enumLabel } = review
+    let Approved { label as enumLabel } = review else return 1
     println("let enum " + enumLabel)
 
     let { name as adultName, age: 37 } = user else {

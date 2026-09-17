@@ -4,22 +4,25 @@
 # left
 # right
 
-enum Outcome {
-    tag Str
-
-    case Left {
+type Outcome =
+    class Left {
         value Str
-        tag = "left"
+        tag Str = "left"
     }
-
-    case Right {
+    | class Right {
         value Int
-        tag = "right"
+        tag Str = "right"
     }
 
+ext Outcome {
     def describe() Str = match this {
         case Left { value } => "left: " + value
         case Right { value } => "right: num " + value
+    }
+
+    def tag() Str = match this {
+        case Left { tag } => tag
+        case Right { tag } => tag
     }
 }
 
@@ -30,6 +33,6 @@ def main() Unit {
 
     println(left.describe())
     println(right.describe())
-    println(left.tag)
-    println(right.tag)
+    println(left.tag())
+    println(right.tag())
 }

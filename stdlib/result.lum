@@ -1,15 +1,11 @@
 # PRELUDE_SKIP
 # INTERPRETER
 
-enum Result[T, E] {
-    case Ok {
-        value T
-    }
+type Result[T, E] =
+    class Ok { value T }
+    | class Err { error E }
 
-    case Err {
-        error E
-    }
-
+ext Result[T, E] {
     def isOk() Bool = match this {
         case Ok { value: _ } => true
         case Err { error: _ } => false
@@ -34,7 +30,7 @@ enum Result[T, E] {
 
     def toOption() Option[T] = match this {
         case Ok { value } => Some(value)
-        case Err { error: _ } => None()
+        case Err { error: _ } => None
     }
 
     def toEither() Either[E, T] = match this {

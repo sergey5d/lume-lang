@@ -1,12 +1,9 @@
 # EXPECT:
 # 0
 
-enum OptionX[T] {
-    case NoneX
-    case SomeX {
-        value T
-    }
-}
+type OptionX[T] =
+    class SomeX { value T }
+    | object NoneX {}
 
 class Box[T] {
     value T

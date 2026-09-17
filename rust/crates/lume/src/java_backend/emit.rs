@@ -533,32 +533,129 @@ fn render_enum(
 
     for case in &ty.enum_cases {
         out.push('\n');
-        out.push_str("    record ");
-        out.push_str(&java_type_name(&case.name));
-        out.push_str(&type_params);
-        out.push('(');
-        out.push_str(
-            &case
-                .fields
-                .iter()
-                .map(|field| {
-                    format!(
-                        "{} {}",
-                        names.value_type(&field.ty),
-                        java_member_name(&field.name)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", "),
+        push_union_variant(
+            &mut out,
+            case,
+            &enum_name,
+            &type_params,
+            &type_args,
+            &ty.type_params,
+            names,
         );
-        out.push_str(") implements ");
-        out.push_str(&enum_name);
-        out.push_str(&type_args);
-        out.push_str(" {}\n");
     }
 
     out.push_str("}\n");
     out
+}
+
+fn push_union_variant(
+    out: &mut String,
+    case: &ir::EnumCase,
+    union_name: &str,
+    type_params: &str,
+    type_args: &str,
+    type_param_names: &[String],
+    names: &JavaNames,
+) {
+    let case_name = java_type_name(&case.name);
+    match case.kind {
+        TypeKind::Object => {
+            out.push_str(&format!(
+                "    final class {case_name}{type_params} implements {union_name}{type_args} {{\n"
+            ));
+            let wildcards = java_wildcard_type_args(type_param_names.len());
+            let constructor_args = if type_param_names.is_empty() {
+                ""
+            } else {
+                "<>"
+            };
+            out.push_str(&format!(
+                "        private static final {case_name}{wildcards} INSTANCE = new {case_name}{constructor_args}();\n"
+            ));
+            out.push_str(&format!("        private {case_name}() {{}}\n"));
+            if type_param_names.is_empty() {
+                out.push_str(&format!(
+                    "        public static {case_name} instance() {{ return INSTANCE; }}\n"
+                ));
+            } else {
+                out.push_str("        @SuppressWarnings(\"unchecked\")\n");
+                out.push_str(&format!(
+                    "        public static {type_params} {case_name}{type_args} instance() {{ return ({case_name}{type_args}) INSTANCE; }}\n"
+                ));
+            }
+            out.push_str(&format!(
+                "        @Override public String toString() {{ return \"{case_name}\"; }}\n"
+            ));
+            out.push_str("    }\n");
+        }
+        TypeKind::Class => {
+            out.push_str(&format!(
+                "    final class {case_name}{type_params} implements {union_name}{type_args} {{\n"
+            ));
+            for field in &case.fields {
+                let final_modifier = if field.mutable { "" } else { "final " };
+                out.push_str(&format!(
+                    "        {final_modifier}{} {};\n",
+                    names.value_type(&field.ty),
+                    java_member_name(&field.name)
+                ));
+            }
+            out.push_str(&format!("        public {case_name}("));
+            out.push_str(
+                &case
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        format!(
+                            "{} {}",
+                            names.value_type(&field.ty),
+                            java_member_name(&field.name)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            out.push_str(") {\n");
+            for field in &case.fields {
+                let name = java_member_name(&field.name);
+                out.push_str(&format!("            this.{name} = {name};\n"));
+            }
+            out.push_str("        }\n");
+            for field in &case.fields {
+                let name = java_member_name(&field.name);
+                out.push_str(&format!(
+                    "        public {} {name}() {{ return {name}; }}\n",
+                    names.value_type(&field.ty)
+                ));
+            }
+            out.push_str("    }\n");
+        }
+        TypeKind::Record | TypeKind::Enum => {
+            out.push_str("    record ");
+            out.push_str(&case_name);
+            out.push_str(type_params);
+            out.push('(');
+            out.push_str(
+                &case
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        format!(
+                            "{} {}",
+                            names.value_type(&field.ty),
+                            java_member_name(&field.name)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            out.push_str(") implements ");
+            out.push_str(union_name);
+            out.push_str(type_args);
+            out.push_str(" {}\n");
+        }
+        _ => unreachable!("unsupported declared union variant kind"),
+    }
 }
 
 fn java_type_visibility(ty: &ir::TypeDef) -> &'static str {
@@ -1860,7 +1957,11 @@ impl<'a> SourceBodyEmitter<'a> {
         match expr {
             ast::Expr::Identifier { name, .. } if name == "this" => Some("this".to_string()),
             ast::Expr::Identifier { name, .. } if self.enum_case(name).is_some() => {
-                Some(format!("new {}<>()", java_type_name(name)))
+                if self.enum_case(name)?.kind == TypeKind::Object {
+                    Some(format!("{}.instance()", java_type_name(name)))
+                } else {
+                    Some(format!("new {}<>()", java_type_name(name)))
+                }
             }
             ast::Expr::Identifier { name, .. } if core_enum_case_owner(name).is_some() => {
                 self.emit_core_enum_case(name, &[])
@@ -1952,6 +2053,11 @@ impl<'a> SourceBodyEmitter<'a> {
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
+                if self.enum_case(name)?.kind == TypeKind::Object {
+                    return args
+                        .is_empty()
+                        .then(|| format!("{}.instance()", java_type_name(name)));
+                }
                 Some(format!(
                     "new {}<>({})",
                     java_type_name(name),
@@ -2044,6 +2150,11 @@ impl<'a> SourceBodyEmitter<'a> {
 
     fn emit_core_enum_case(&self, case: &str, args: &[String]) -> Option<String> {
         let owner = core_enum_case_owner(case)?;
+        if case == "None" {
+            return args
+                .is_empty()
+                .then(|| "lume.core.Option.None.instance()".to_string());
+        }
         Some(format!(
             "new lume.core.{}.{}<>({})",
             java_type_name(owner),
@@ -3271,6 +3382,11 @@ impl<'a> FunctionEmitter<'a> {
     fn emit_core_enum_case_call(&self, case: &str, operands: &[ir::Operand]) -> Option<String> {
         let owner = core_enum_case_owner(case)?;
         let args = self.emit_operands(operands)?;
+        if case == "None" {
+            return args
+                .is_empty()
+                .then(|| "lume.core.Option.None.instance()".to_string());
+        }
         Some(format!(
             "new lume.core.{}.{}<>({})",
             java_type_name(owner),
@@ -3286,6 +3402,15 @@ impl<'a> FunctionEmitter<'a> {
         operands: &[ir::Operand],
     ) -> Option<String> {
         let args = self.emit_operands(operands)?;
+        if self.enum_case(enum_name, case_name)?.kind == TypeKind::Object {
+            return args.is_empty().then(|| {
+                format!(
+                    "{}.{}.instance()",
+                    self.names.named_type(enum_name),
+                    java_type_name(case_name)
+                )
+            });
+        }
         Some(format!(
             "new {}.{}{}({})",
             self.names.named_type(enum_name),

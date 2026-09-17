@@ -25,12 +25,11 @@ shape NamedShape with Labeled {
 }
 
 
-enum Status with Labeled {
-    case Ready
-    case Failed {
-        reason Str
-    }
+type Status =
+    object Ready {}
+    | class Failed { reason Str }
 
+ext Status {
     def label() Str = match this {
         case Ready => "ready"
         case Failed { reason } => reason
@@ -51,8 +50,8 @@ def main() Unit {
     namedLabel Labeled = named
     println("shape", namedLabel.label())
 
-    statusLabel Labeled = Status.Ready
-    println("enum", statusLabel.label())
+    status Status = Status.Ready
+    println("enum", status.label())
 
     greeterLabel Labeled = Greeter
     println("object", greeterLabel.label())

@@ -32,14 +32,15 @@ class Counter {
 }
 
 
-enum Color {
-    code Str
+type Color =
+    class Red { code Str = "red" }
+    | object Unknown {}
 
-    case Red {
-        code = "red"
+ext Color {
+    def label() Str = match this {
+        case Red { code } => code
+        case Unknown => "unknown"
     }
-
-    def label() Str = code
 }
 
 def main() Unit {
@@ -50,7 +51,7 @@ def main() Unit {
     println("plus", counter.plus(10))
     println("shadow", counter.shadow(10))
     println("lambda", counter.lambdaValue())
-    println("enum", Red.label())
+    println("enum", Red().label())
 
     if true {
         reused = 1

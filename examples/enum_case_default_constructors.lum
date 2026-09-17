@@ -4,24 +4,33 @@
 # named
 # named-custom
 
-enum Outcome {
-    value Str
-    tag Str
-
-    case Left {
+type Outcome =
+    class Left {
         value Str
-        tag = "left"
+        tag Str = "left"
+    }
+    | object Empty {}
+
+ext Outcome {
+    def value() Str = match this {
+        case Left { value } => value
+        case Empty => ""
+    }
+
+    def tag() Str = match this {
+        case Left { tag } => tag
+        case Empty => ""
     }
 }
 
 def main() Unit {
-    omitted Outcome = Outcome.Left("bad")
-    explicit Outcome = Outcome.Left("bad", "custom")
-    namedOmitted Outcome = Outcome.Left { value: "named" }
-    namedExplicit Outcome = Outcome.Left { value: "named", tag: "named-custom" }
+    omitted = Outcome.Left("bad")
+    explicit = Outcome.Left("bad", "custom")
+    namedOmitted = Outcome.Left { value: "named" }
+    namedExplicit = Outcome.Left { value: "named", tag: "named-custom" }
 
-    println(omitted.tag)
-    println(explicit.tag)
-    println(namedOmitted.value)
-    println(namedExplicit.tag)
+    println(omitted.tag())
+    println(explicit.tag())
+    println(namedOmitted.value())
+    println(namedExplicit.tag())
 }

@@ -1481,7 +1481,27 @@ impl<'a> Checker<'a> {
                 }
                 TypeMember::Case(case) => {
                     for field in &case.fields {
-                        if field.visibility == Visibility::Hidden {
+                        if case.kind == TypeKind::Record && field.visibility == Visibility::Hidden {
+                            self.add_error(
+                                "invalid_shape_field",
+                                format!(
+                                    "shape union variant '{}' cannot declare hidden field '{}'",
+                                    case.name, field.name
+                                ),
+                                field.span,
+                            );
+                        }
+                        if case.kind == TypeKind::Record && field.mutable {
+                            self.add_error(
+                                "invalid_shape_field",
+                                format!(
+                                    "shape union variant '{}' cannot declare mutable field '{}'",
+                                    case.name, field.name
+                                ),
+                                field.span,
+                            );
+                        }
+                        if case.kind == TypeKind::Enum && field.visibility == Visibility::Hidden {
                             self.add_error(
                                 "invalid_enum_case_field",
                                 format!(
@@ -1491,7 +1511,7 @@ impl<'a> Checker<'a> {
                                 field.span,
                             );
                         }
-                        if field.mutable {
+                        if case.kind == TypeKind::Enum && field.mutable {
                             self.add_error(
                                 "invalid_enum_case_field",
                                 format!(

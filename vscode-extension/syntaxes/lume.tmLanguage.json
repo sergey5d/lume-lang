@@ -19,9 +19,6 @@
       "include": "#keywords"
     },
     {
-      "include": "#enumCases"
-    },
-    {
       "include": "#constants"
     },
     {
@@ -177,7 +174,7 @@
         },
         {
           "name": "keyword.declaration.lume",
-          "match": "\\b(?:def|new|type|annotation|class|shape|enum|interface|object|ext|use|module|with|when|as|hidden|case|var|vararg|let)\\b"
+          "match": "\\b(?:def|new|type|annotation|class|shape|interface|object|ext|use|module|with|when|as|hidden|case|var|vararg|let)\\b"
         },
         {
           "name": "keyword.operator.shape.lume",
@@ -204,22 +201,6 @@
             },
             "2": {
               "name": "entity.name.type.annotation.lume"
-            }
-          }
-        }
-      ]
-    },
-    "enumCases": {
-      "patterns": [
-        {
-          "name": "meta.enum.case.lume",
-          "match": "\\b(case)\\b\\s+([A-Z][A-Za-z0-9_]*)",
-          "captures": {
-            "1": {
-              "name": "keyword.declaration.lume"
-            },
-            "2": {
-              "name": "entity.name.type.variant.lume"
             }
           }
         }

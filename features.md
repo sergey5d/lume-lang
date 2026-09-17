@@ -14,33 +14,7 @@ Open checker/runtime work:
 
 ## Important Next Tier
 
-### 2. Enum Ergonomics
-
-Enum follow-ups:
-- better generic type-pattern ergonomics
-
-The biggest remaining enum work is more expressive generic type-pattern support.
-
-Possible later enum constant/ordinal support:
-- enum-wide fields could eventually have generated constant values
-- candidate direction:
-
-```txt
-enum MyConstant {
-    someId Int = auto
-
-    case Constant1
-    case Constant2
-}
-```
-
-Open questions:
-- whether `auto` is the right marker, or whether another explicit auto-increment marker would read better
-- whether generated values should instead be exposed through a built-in property like `ordinal`
-- whether explicit overrides should be allowed in the same enum
-- how generated values should interact with non-`Int` enum-wide fields
-
-### 3. Derived Protocols
+### 2. Derived Protocols
 
 Classes should eventually support auto-derived protocols when they stay value-like.
 
@@ -51,7 +25,7 @@ Likely targets:
 
 This reduces boilerplate and helps stdlib types feel native.
 
-### 4. Collection / Query APIs
+### 3. Collection / Query APIs
 
 Open stdlib collection/query ergonomics:
 - clearer `Map` update ergonomics beyond `put`
@@ -71,16 +45,16 @@ Open construction helper naming direction:
 
 ## Medium Priority
 
-### 5. Module / Visibility Polish
+### 4. Module / Visibility Polish
 
 Open module/use questions:
 - whether named-object methods should ever be usable directly beyond explicit `use module/Object/*` and builtin `OS` prelude behavior
 - if both a wide module use and a renamed selective use target the same module, the wide use should come first and the `as` use should come after it
-- decide how enum cases are imported: if `EnumA` is imported, should users write `EnumA.CaseA`, or should `CaseA` also become directly available
+- decide how declared-union alternatives are imported: if `Outcome` is imported, should users write `Outcome.Success`, or should `Success` also become directly available
 - decide whether extension-method imports should keep using ordinary wildcard module use, or get a dedicated import surface such as `use ext app/module/*` or `use ext app/module/TypeName`
 - decide whether extension methods should also be allowed on named `object` types
 
-### 6. Interface Method Conflict Resolution
+### 5. Interface Method Conflict Resolution
 
 Open checker/runtime design:
 - decide how method resolution should work when a type implements multiple interfaces that inherit or declare conflicting method signatures
@@ -98,7 +72,7 @@ Related syntax question:
 - if added, decide whether they should mark interface satisfaction, override of a concrete method, or both
 - define diagnostics for accidental signature mismatches even if no marker is added
 
-### 7. Function Type Variance
+### 6. Function Type Variance
 
 Open checker work:
 - make sure function/lambda type assignability follows the usual variance rule
@@ -122,7 +96,7 @@ same way, but functional-interface APIs express the same idea through wildcard
 positions such as `? super T` for consumed argument types and `? extends R` for
 produced return types.
 
-### 8. Annotation Targets
+### 7. Annotation Targets
 
 Open question:
 - do we want annotations on global functions/method-like top-level `def` declarations as a first-class supported target
@@ -134,7 +108,7 @@ Leaning:
 - global functions are probably useful annotation targets for routing, tests, effects, permissions, and generated bindings
 - immutable top-level constants may be useful too, but annotation metadata should describe stable declarations, not changing state
 
-### 9. Primitive Type Definitions
+### 8. Primitive Type Definitions
 
 Primitive types such as `Int`, `Float`, `Str`, `Rune`, `Bool`, and `Unit` should eventually have their public companion/static-style signatures defined in Lume source instead of being scattered through checker, interpreter, and backend special cases.
 
@@ -151,7 +125,7 @@ Goal:
 
 ## Longer-Term Ideas
 
-### 10. Result / Either Style Error Values
+### 9. Result / Either Style Error Values
 
 Still open:
 - whether `try`-style propagation should stay hardcoded to these builtins or later grow a broader protocol
@@ -168,7 +142,7 @@ Clarification on "failure conversion":
   - enclosing function returns `Result[Int, AppError]`
   - failure conversion would mean allowing `IoError` to be turned into something like `AppError.Io(...)` during propagation
 
-### 11. Advanced Flow Analysis
+### 10. Advanced Flow Analysis
 
 The settled conservative `is` narrowing rules live in `syntax.md`. Possible
 later flow-analysis work is limited to broader deductions:
@@ -178,7 +152,7 @@ later flow-analysis work is limited to broader deductions:
 - detecting unreachable type-test branches and match cases
 - deciding whether stable field paths deserve narrowing, rather than only immutable identifiers
 
-### 12. Reified Generic Follow-Ups
+### 11. Reified Generic Follow-Ups
 
 Open reified-generic follow-ups:
 - whether expected return types should help infer a reified parameter when no ordinary argument carries it
@@ -227,7 +201,7 @@ recover the hidden concrete implementation type behind an interface value.
 Reifiable type arguments should probably include every closed type that has a
 runtime descriptor:
 - primitive types such as `Int`, `Float`, `Bool`, `Str`, `Rune`, and `Unit`
-- classes, enums, enum payload cases through their enum type, named objects, annotations, and named shapes
+- classes, declared unions and their alternatives, named objects, annotations, and named shapes
 - interfaces, as interface metadata only
 - tuples and function types, if their component types are also reifiable
 - anonymous shapes only when the full static field shape is known
@@ -241,15 +215,15 @@ The critical distinction:
 
 Constraints to preserve:
 - automatic reification of every generic parameter
-- reified type parameters on classes, shapes, enums, annotations, or named objects
+- reified type parameters on classes, shapes, declared unions, annotations, or named objects
 
-### 13. Deferred Cleanup Follow-Ups
+### 12. Deferred Cleanup Follow-Ups
 
 Open questions:
 - whether runtime errors should also run pending defers
 - whether future async/concurrency features need a stronger cleanup model
 
-### 14. Explicit Tuple Projection
+### 13. Explicit Tuple Projection
 
 Possible later syntax:
 
@@ -333,6 +307,6 @@ Leaning:
 
 ## Suggested Priority Order
 
-1. enum + pattern ergonomics
+1. declared-union + pattern ergonomics
 2. derived `Eq[T]` / `Hashed[T]`
 3. stdlib collection/query growth

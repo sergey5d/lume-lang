@@ -107,6 +107,38 @@ type Pet = Cat | Dog
 pet Pet = Dog("Pip")
 ```
 
+A union may also declare its alternatives inline. Each alternative states what
+kind of value it is:
+
+```txt
+type Outcome =
+    class Success { value Str }
+    | shape Failure { message Str }
+    | object Cancelled {}
+
+ext Outcome {
+    def result() Str = match this {
+        case Success { value } => value
+        case Failure { message } => "Failed: " + message
+        case Cancelled => "Cancelled"
+    }
+}
+```
+
+Inline union rules:
+
+- a declared union contains at least two alternatives
+- alternatives use `class`, `shape`, or `object`
+- a class alternative has nominal class semantics
+- a shape alternative is immutable structural data
+- an object alternative is fieldless and denotes one singleton value
+- alternatives declare data only; shared behavior belongs in `ext UnionName`
+- generic parameters belong to the union and are available to every alternative,
+  for example `type Option[T] = class Some { value T } | object None {}`
+- payload alternatives use their normal construction syntax, while object
+  alternatives are referenced by name
+- `match` over a declared union is exhaustive over its alternatives
+
 `Pet`, `Cat | Dog`, and `Dog | Cat` are the same type. Union members are flattened
 and de-duplicated, and their written order has no semantic effect.
 
@@ -226,7 +258,7 @@ value !== copy  # true
 ```
 
 `===` and `!==` do not call `equals`. They accept compatible class, object, or
-concrete collection reference types. Primitives, shapes, enums, interfaces,
+concrete collection reference types. Primitives, shapes, declared unions, interfaces,
 `Any`, and lifted wrappers such as `Option[T]` are not identity operands; unwrap
 or narrow to a concrete reference type first.
 
@@ -324,6 +356,11 @@ otherwise not known precisely, the represented type is captured and may be
 written at use sites as `Type[_]`. This is still `Type[T]` with wildcard
 capture, not a separate metadata type.
 
+The current reflection ABI retains the compatibility names `EnumType`,
+`EnumCase`, `TypeKind.Enum`, and `asEnum()` for closed declared-union metadata.
+These are reflection API names only; source declarations use `type ... =` with
+`class`, `shape`, and `object` alternatives.
+
 Common metadata operations:
 
 ```txt
@@ -363,10 +400,10 @@ Rules:
 - `typeOf[T]` is a built-in type metadata operator, not an index operation
 - `runtimeType` is available as a read-only synthetic field on values
 - `TypeKind` includes `Class`, `Shape`, `Enum`, `Interface`, `Object`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
-- field, method, parameter, and enum-case metadata are runtime values with methods such as `name()`, `fieldType()`, `isHidden()`, `params()`, and `returnType()`
+- field, method, parameter, and declared-union alternative metadata are runtime values with methods such as `name()`, `fieldType()`, `isHidden()`, `params()`, and `returnType()`
 - annotation lookup is typed and reified: use `metadata.hasAnnotation[Route]()` and `metadata.annotation[Route]()`
 - reflective construction is supported for class and named shape metadata through `construct(args...)`
-- reflective enum case construction is supported through `EnumCase.construct(args...)`
+- reflective declared-union alternative construction is supported through the compatibility API `EnumCase.construct(args...)`
 - annotations are metadata only; they cannot be constructed as runtime values in source code or through reflection
 - reflective field reads use `Field.get(receiver)` and reflective safe method calls use `Method.call(receiver, args...)`
 
@@ -505,10 +542,9 @@ annotation Route {
     method Str = "GET"
 }
 
-enum RouteVisibility {
-    case External
-    case Internal
-}
+type RouteVisibility =
+    object External {}
+    | object Internal {}
 
 annotation Metadata {
     text Str
@@ -560,18 +596,18 @@ Annotation arguments are compile-time metadata values. They may only be literals
 - immutable top-level constants, including constants brought in with `use`
 - immutable fields on named `object` values, such as `Routes.health`
 - immutable constants through a module alias, such as `routes.healthPath`
-- enum cases, such as `RouteVisibility.External`
+- declared-union object alternatives, such as `RouteVisibility.External`
 - arithmetic, comparison, boolean, and string-concatenation expressions whose operands are also annotation-safe
 
 Calls, constructors, indexing, mutable object fields, ordinary instance field reads, `try`, `for ... yield`, `match`, `if`, lambdas, and blocks are rejected in annotation arguments. Top-level mutable bindings are not allowed at all, so they are rejected before annotation argument checking.
 
 Supported annotation targets:
 
-- top-level `def`, `annotation`, `interface`, `class`, `shape`, `object`, `enum`
+- top-level `def`, `type`, `annotation`, `interface`, `class`, `shape`, `object`
 - fields
 - methods
 - interface methods
-- enum cases
+- declared-union alternatives
 
 Module declaration:
 
@@ -587,7 +623,7 @@ Top-level forms:
 - `class`
 - `shape`
 - `object`
-- `enum`
+- `type`
 - `ext TypeName`
 - `name Type = expr`
 - `hidden def`
@@ -597,7 +633,7 @@ Top-level forms:
 - `hidden class`
 - `hidden shape`
 - `hidden object`
-- `hidden enum`
+- `hidden type`
 
 Examples:
 
@@ -636,12 +672,9 @@ class Amount {
     label Str
 }
 
-enum OptionX[T] {
-    case NoneX
-    case SomeX {
-        value T
-    }
-}
+type OptionX[T] =
+    class SomeX { value T }
+    | object NoneX {}
 ```
 
 Arbitrary statements such as `if`, `for`, `match`, `defer`, or expression statements are not valid at top level. Put executable code inside a function such as `def main() Unit { ... }`.
@@ -694,7 +727,7 @@ object Greeter {
 }
 ```
 
-Visible class fields, shape fields, enum fields, and object fields still require explicit field types.
+Visible class fields, shape fields, union-variant fields, and object fields still require explicit field types.
 
 ## Assignment and Update
 
@@ -862,13 +895,13 @@ user User = User("Ada", 10)
 maybe = Some(5)
 ```
 
-Braces are also the field construction form for enum payload cases:
+Braces are also the field construction form for declared-union payload alternatives:
 
 ```txt
 maybe = Some { value: 5 }
 ```
 
-Zero-payload enum cases are bare values, not calls:
+Object alternatives are bare values, not calls:
 
 ```txt
 none = None
@@ -1066,7 +1099,7 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 shape { field: value }           # explicit anonymous shape literal
 shape {}                         # explicit empty anonymous shape literal
 { expr }                         # block expression
-Type { field: value }            # brace field construction or enum field payload
+Type { field: value }            # brace field construction or union payload
 call { x => ... }                # trailing lambda
 object { field Type = value; def method() Type = value } # anonymous object
 object with Interface, Other { def method() Type = value } # anonymous interface implementation
@@ -1172,7 +1205,7 @@ class Map[K with Hashed[K], V] {
 }
 ```
 
-- primitives, enums, and object values are intrinsically hashable
+- primitives, declared-union alternatives, and object values are intrinsically hashable
 - nested shapes are hashable when their own fields are recursively hashable
 - a class is hashable only when it explicitly implements `Hashed[ClassName]`, including `equals` and `hash`
 - a type parameter is hashable only when it has a `Hashed[T]` bound
@@ -1493,8 +1526,9 @@ mapped = maybe.map(value => value + 1)
 leftMapped = either.mapLeft(error => error.toStr())
 ```
 
-Classes, shapes, enums, and named objects declare methods directly in their
-declaration bodies, after storage fields and constructors:
+Classes, shapes, and named objects declare methods directly in their declaration
+bodies, after storage fields and constructors. Declared unions put shared
+behavior in an extension block:
 
 ```txt
 class Counter {
@@ -1518,8 +1552,8 @@ println(counter.doubled())
 Extension rules:
 
 - extension blocks use `ext TypeName { def method(...) ... }`
-- extension targets may be classes, shapes, enums, interfaces, or built-in primitive types such as `Int`, `Float`, `Bool`, `Str`, and `Rune`
-- extension targets cannot be named objects, annotations, or enum cases
+- extension targets may be classes, shapes, declared unions, interfaces, or built-in primitive types such as `Int`, `Float`, `Bool`, `Str`, and `Rune`
+- extension targets cannot be named objects, annotations, or individual union alternatives
 - extension blocks cannot declare constructors
 - a module may declare multiple `ext` blocks for the same target type
 - extension methods use the same call syntax as regular methods
@@ -1542,7 +1576,7 @@ the class body.
 - `new(...)` declares constructor inputs
 - `new(...) { body }` declares a block-bodied constructor
 - `new(...) = expression` declares an expression-bodied constructor
-- shape, enum, enum case, object, annotation, and interface declarations cannot define custom `new` constructors
+- shape, union alternative, object, annotation, and interface declarations cannot define custom `new` constructors
 - constructor parameters use `name Type`, with optional defaults such as `age Int = 0`
 - `Type { field: value }` constructs by matching constructor parameters by field name
 - `Type(value)` constructs by filling constructor parameters positionally by declaration order
@@ -1560,11 +1594,11 @@ the class body.
 - class call sites use braces for construction fields, for example `Person { name: "Ada", age: 10 }`
 - class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
 - `this` is the instance receiver
-- instance fields on classes, enums, and named objects may be accessed bare when they are not shadowed
+- instance fields on classes and named objects may be accessed bare when they are not shadowed
 - use `this.field` when a parameter/local shadows a field, for example `this.age`
 - member order is storage first, constructors next, methods last
-- class, shape, enum, and object bodies list storage fields before behavior
-- enum cases count as enum storage and must appear before enum methods
+- class, shape, and object bodies list storage fields before behavior
+- declared-union alternatives contain fields only; put shared methods in `ext UnionName`
 - a class body may declare constructors after its fields and before its methods
 
 ```txt
@@ -1828,8 +1862,8 @@ The same nesting rule applies to `while` conditions, `for` iterables, and
 `match` scrutinees.
 
 Trailing brace call syntax on non-constructor calls is only for lambda arguments.
-Constructor braces fill constructor inputs by field name, so enum named
-payloads use braces and enum positional payloads use parentheses:
+Constructor braces fill constructor inputs by field name, so declared-union
+payloads use braces and unary payload shorthand uses parentheses:
 
 ```txt
 maybeOrder = Some(Order { id: 7 })
@@ -1879,7 +1913,7 @@ Rules:
 - value-producing tail forms include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
 
-## Classes, Shapes, Objects, Interfaces, Enums
+## Classes, Shapes, Objects, Interfaces, Declared Unions
 
 Class:
 
@@ -1890,7 +1924,7 @@ class Box[T] with Named {
 }
 ```
 
-When a class, shape, enum, or named object implements an interface method inside
+When a class, shape, or named object implements an interface method inside
 its body, it uses an ordinary `def` method declaration.
 
 Named object:
@@ -2007,42 +2041,26 @@ handler = object with Reader, Closer {
 }
 ```
 
-Enums:
+Declared unions:
 
 ```txt
-enum Color {
-    code Str
+type OptionX[T] =
+    class SomeX { value T }
+    | object NoneX {}
 
-    case Red {
-        code = "red"
-    }
-
-    def isWarm() Bool = code == "red"
-}
-```
-
-```txt
-enum OptionX[T] {
-    case NoneX
-    case SomeX {
-        value T
+ext OptionX[T] {
+    def isSet() Bool = match this {
+        case SomeX(_) => true
+        case NoneX => false
     }
 }
 ```
 
-Enum cases are data-only:
-
-- cases may declare payload fields
-- cases may assign shared enum fields
-- cases may not declare methods
-- cases may not declare custom constructors
-- zero-payload cases are values and are written without call syntax, for example `None`
-- payload cases use positional constructor syntax, for example `Some(value)`
-- payload cases may also use construction fields in braces, for example `Some { value: value }`
-- payload and shared fields with defaults may be omitted from enum case constructors
-
-Behavior for enums belongs directly in the enum declaration body. Case-specific
-behavior should be expressed with `match`.
+Declared alternatives are data-only. Class and shape alternatives may declare
+payload fields; object alternatives are singleton values and therefore have no
+instance fields. Alternatives do not declare methods or custom constructors.
+Put behavior for the complete union in `ext UnionName` and distinguish
+alternatives with `match`.
 
 ## Calls
 
@@ -3193,12 +3211,12 @@ Generic arguments inside runtime type patterns are intentionally rejected for no
 
 Rules:
 
-- enum exhaustiveness is checked
+- declared-union exhaustiveness is checked
 - expression `partial match` skips exhaustiveness checking and wraps the result in `Option[...]`
 - statement `partial match` skips exhaustiveness checking and does nothing when no case matches
 - a bare case-head identifier is a named zero-payload case or singleton, never
   a new local binding; use `_ as value` to bind an otherwise unrestricted value
-- zero-payload enum cases use their bare name; `Case()` is invalid
+- object alternatives use their bare name; `Alternative()` is invalid
 - class, shape, primitive, and interface type tests use `_ Type` or `value Type`
 - named-field patterns must select at least one field; `Type {}` is invalid
 - negative numeric patterns are limited to `-` followed by an integer or float
@@ -3206,7 +3224,7 @@ Rules:
 
 ### Record Patterns
 
-Classes, named shapes, anonymous shapes, and enum cases use the same
+Classes, named shapes, anonymous shapes, and payload alternatives use the same
 name-based record pattern language:
 
 ```txt
@@ -3219,7 +3237,7 @@ case Err { error }
 ```
 
 The forms compose recursively. `field: pattern` may contain a literal, tuple,
-list, type, enum-case, class, shape, or another record pattern.
+list, type, union-alternative, class, shape, or another record pattern.
 
 Rules:
 
@@ -3255,7 +3273,7 @@ match value {
 }
 ```
 
-When the value's concrete class, shape, anonymous-shape, or enum type is
+When the value's concrete class, shape, anonymous-shape, or declared-union type is
 already known, omit the type head:
 
 ```txt
@@ -3272,13 +3290,9 @@ match profile {
     case _ => ()
 }
 
-match outcome {
-    case { tag } => println(tag) # shared enum field
-}
 ```
 
-For enums, a headless record pattern can name only shared enum fields.
-Case-specific payload fields still require the case head, for example
+For declared unions, alternative-specific payload fields require the alternative head, for example
 `Some { value }`, because the payload is not present on every case. Interface
 values do not provide a concrete record layout and therefore require a type or
 case pattern before record fields can be matched.
@@ -3304,8 +3318,8 @@ case Ok(value Worker) => ...
 case Some(x) as some => println(x, some.value)
 ```
 
-Aliasing a unary enum-case pattern retains that concrete case view, so the
-complete alias exposes the matched case's fields while the nested pattern
+Aliasing a unary union-alternative pattern retains that concrete alternative view,
+so the complete alias exposes the matched fields while the nested pattern
 continues to bind or test its payload.
 
 Inside a `match` case, `as` may alias any complete pattern, including literals
@@ -3335,8 +3349,8 @@ for example `let { location as home } = user`.
 
 Conceptually, `Some(x)` is `Some { value as x }`, and `Some(User { name })`
 is `Some { value: User { name } }`. The type or case must have exactly one
-extractable field. Classes and shapes count visible data fields; enum cases
-count payload fields but not shared enum-wide fields; constructor parameters
+extractable field. Classes and shapes count visible data fields; union alternatives
+count their payload fields; constructor parameters
 never participate in matching.
 
 Named data with multiple fields uses braces and fields are selected by name:
@@ -3384,7 +3398,7 @@ case _ => ...
 case _ as other => println(other)
 ```
 
-Bare names match zero-payload enum cases or singleton objects:
+Bare names match object alternatives or other singleton objects:
 
 ```txt
 case None => ...
@@ -3585,7 +3599,8 @@ merged = {
 }
 ```
 
-Operator declarations use symbolic `def` forms on interfaces, classes, and enums:
+Operator declarations use symbolic `def` forms on interfaces and classes. Shared
+declared-union behavior belongs in an extension block on the union:
 
 ```txt
 def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
@@ -3681,7 +3696,7 @@ Supported today:
 - `hidden` on top-level `def`
 - `hidden` on top-level immutable bindings
 - `hidden` on top-level `interface`
-- `hidden` on top-level `class` / `shape` / `object` / `enum`
+- `hidden` on top-level `class` / `shape` / `object` / `type`
 - `hidden` on fields
 - `hidden` on methods
 

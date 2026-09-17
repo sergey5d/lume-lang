@@ -4980,6 +4980,89 @@ def inline(value Cat | Bird) Cat | Bird = value
 }
 
 #[test]
+fn parses_declared_union_variants_and_preserves_their_kinds() {
+    let result = parse(
+        r#"
+type Outcome =
+    class Success { value Str }
+    | shape Failure { message Str }
+    | object Cancelled {}
+
+ext Outcome {
+    def result() Str = "ok"
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Type(outcome) = &program.items[0] else {
+        panic!("expected declared union type");
+    };
+    assert_eq!(outcome.kind, TypeKind::Enum);
+    let kinds = outcome
+        .members
+        .iter()
+        .filter_map(|member| match member {
+            TypeMember::Case(case) => Some(case.kind),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        kinds,
+        vec![TypeKind::Class, TypeKind::Record, TypeKind::Object]
+    );
+    assert!(matches!(&program.items[1], Item::Extension(_)));
+}
+
+#[test]
+fn rejects_invalid_declared_union_variant_bodies() {
+    let object_field = parse(
+        r#"
+type Outcome =
+    object Cancelled { reason Str }
+    | object Pending {}
+"#,
+    );
+    assert!(
+        object_field
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "object_union_variant_fields"),
+        "{:#?}",
+        object_field.diagnostics
+    );
+
+    let method = parse(
+        r#"
+type Outcome =
+    class Success {
+        value Str
+        def text() Str = value
+    }
+    | object Cancelled {}
+"#,
+    );
+    assert!(
+        method
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "union_variant_method"),
+        "{:#?}",
+        method.diagnostics
+    );
+
+    let single = parse("type Outcome = class Success { value Str }");
+    assert!(
+        single
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "union_variant_count"),
+        "{:#?}",
+        single.diagnostics
+    );
+}
+
+#[test]
 fn parses_general_transparent_type_aliases() {
     let result = parse(
         r#"

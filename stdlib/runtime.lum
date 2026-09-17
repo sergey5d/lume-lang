@@ -16,18 +16,17 @@ class ReflectionError {
     message Str
 }
 
-enum TypeKind {
-    case Class
-    case Shape
-    case Enum
-    case Interface
-    case Object
-    case Annotation
-    case Primitive
-    case Tuple
-    case Function
-    case AnonymousShape
-}
+type TypeKind =
+    object Class {}
+    | object Shape {}
+    | object Enum {}
+    | object Interface {}
+    | object Object {}
+    | object Annotation {}
+    | object Primitive {}
+    | object Tuple {}
+    | object Function {}
+    | object AnonymousShape {}
 
 interface Type[A] with Annotated {
     def name() Option[Str]

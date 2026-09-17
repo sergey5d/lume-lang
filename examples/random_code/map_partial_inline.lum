@@ -3,12 +3,9 @@
 # second true
 # third 60
 
-enum MaybeInt {
-    case NoneX
-    case SomeX {
-        value Int
-    }
-}
+type MaybeInt =
+    class SomeX { value Int }
+    | object NoneX {}
 
 def main() Unit {
     values [MaybeInt] = [

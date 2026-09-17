@@ -45,38 +45,25 @@ class PairShape {
     pair (Int, Int)
 }
 
-enum InnerFlag {
-    case Off
-    case On
-}
+type InnerFlag =
+    object Off {}
+    | object On {}
 
-enum OuterFlag {
-    case Empty
-    case Wrap {
-        value InnerFlag
-    }
-}
+type OuterFlag =
+    class Wrap { value InnerFlag }
+    | object Empty {}
 
-enum MaybeApple {
-    case NoneX
-    case SomeX {
-        value Apple
-    }
-}
+type MaybeApple =
+    class SomeX { value Apple }
+    | object NoneX {}
 
-enum MaybeAmount {
-    case NoneX
-    case SomeX {
-        value Amount
-    }
-}
+type MaybeAmount =
+    class SomeX { value Amount }
+    | object NoneX {}
 
-enum MaybePair {
-    case NoneX
-    case SomeX {
-        value (Int, Int)
-    }
-}
+type MaybePair =
+    class SomeX { value (Int, Int) }
+    | object NoneX {}
 
 class FlagBox {
     value InnerFlag

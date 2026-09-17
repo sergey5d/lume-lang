@@ -66,19 +66,13 @@ class Marker {}
 
 object Ready {}
 
-enum Status {
-    case Pending
-    case Complete
-}
+type Status =
+    object Pending {}
+    | object Complete {}
 
-enum Tagged {
-    tag Str
-
-    case Named {
-        tag = "named"
-        value Int
-    }
-}
+type Tagged =
+    class Named { value Int }
+    | object Unnamed {}
 
 def showSome(value Int?) Unit {
     match value {
@@ -152,9 +146,10 @@ def main() Int {
         case SecretBox(value) => println("hidden", value)
     }
 
-    tagged Tagged = Tagged.Named("named", 13)
+    tagged Tagged = Tagged.Named(13)
     match tagged {
         case Tagged.Named(value) => println("tagged", value)
+        case Unnamed => ()
     }
 
     marker = Marker {}

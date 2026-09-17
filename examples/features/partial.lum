@@ -3,12 +3,9 @@
 # partial missing true
 # partial statement 4
 
-enum MaybeInt {
-    case NoneX
-    case SomeX {
-        value Int
-    }
-}
+type MaybeInt =
+    class SomeX { value Int }
+    | object NoneX {}
 
 def partialValue(value MaybeInt) Int? =
     partial match value {

@@ -5,12 +5,9 @@
 # 1
 # 1
 
-enum MaybeInt {
-    case NoneX
-    case SomeX {
-        value Int
-    }
-}
+type MaybeInt =
+    class SomeX { value Int }
+    | object NoneX {}
 
 def describe(value MaybeInt) Int =
     match value {

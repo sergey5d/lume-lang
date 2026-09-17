@@ -1,10 +1,9 @@
 # EXPECT:
 # case large
 
-enum Size {
-    case Small
-    case Large
-}
+type Size =
+    object Small {}
+    | object Large {}
 
 def main() Unit {
     size Size = Size.Large

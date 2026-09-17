@@ -1,12 +1,11 @@
 # PRELUDE_SKIP
 # INTERPRETER
 
-enum Option[T] {
-    case None
-    case Some {
-        value T
-    }
+type Option[T] =
+    class Some { value T }
+    | object None {}
 
+ext Option[T] {
     def isSet() Bool = match this {
         case Some { value: _ } => true
         case Option.None => false
@@ -36,11 +35,11 @@ enum Option[T] {
 
     def map[X](f fn(T) X) Option[X] = match this {
         case Some { value } => Some(f(value))
-        case Option.None => None()
+        case Option.None => None
     }
 
     def flatMap[X](f fn(T) Option[X]) Option[X] = match this {
         case Some { value } => f(value)
-        case Option.None => None()
+        case Option.None => None
     }
 }
