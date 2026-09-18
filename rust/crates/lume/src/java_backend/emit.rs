@@ -6,6 +6,7 @@ use std::{
 use crate::{
     ast::{self, TypeKind, TypeRef, Visibility},
     backend::BackendBundle,
+    core,
     ir::{self, FunctionKind},
     java_backend::{JavaExternalClass, JavaGenerationStyle, JavaPrimitiveCoercion},
 };
@@ -1532,15 +1533,6 @@ fn push_variadic_bridge_overload(
     out.push_str("    }\n");
 }
 
-fn function_param_types(function: &ir::Function) -> Vec<ir::Type> {
-    function
-        .params
-        .iter()
-        .filter_map(|param| function.locals.get(param.0))
-        .map(|local| local.ty.clone())
-        .collect()
-}
-
 #[derive(Clone)]
 struct JavaParamSpec {
     ty: ir::Type,
@@ -1634,7 +1626,14 @@ fn structured_source_function_body(
     function: &ir::Function,
     names: &JavaNames,
 ) -> Option<String> {
-    let (owner, body) = source_callable_body(bundle, function)?;
+    let body = bundle.core_bodies.get(&function.id)?;
+    let owner = match function.kind {
+        FunctionKind::Method { owner } => bundle.ir.types.get(owner.0),
+        FunctionKind::TopLevel => None,
+        FunctionKind::Local { .. } | FunctionKind::Lambda | FunctionKind::Synthetic => {
+            return None;
+        }
+    };
     SourceBodyEmitter {
         bundle,
         function,
@@ -1642,107 +1641,6 @@ fn structured_source_function_body(
         owner,
     }
     .emit_body(body)
-}
-
-fn source_callable_body<'a>(
-    bundle: &'a BackendBundle,
-    function: &ir::Function,
-) -> Option<(Option<&'a ir::TypeDef>, &'a ast::CallableBody)> {
-    match function.kind {
-        FunctionKind::TopLevel => {
-            let source = bundle.ast.items.iter().find_map(|item| {
-                let ast::Item::Function(source) = item else {
-                    return None;
-                };
-                source_function_matches(source, function).then_some(source)
-            })?;
-            Some((None, &source.body))
-        }
-        FunctionKind::Method { owner } => {
-            let owner = bundle.ir.types.get(owner.0)?;
-            let method = find_source_method(&bundle.ast, owner, function)?;
-            Some((Some(owner), method.body.as_ref()?))
-        }
-        FunctionKind::Local { .. } | FunctionKind::Lambda | FunctionKind::Synthetic => None,
-    }
-}
-
-fn source_function_matches(source: &ast::FunctionDecl, function: &ir::Function) -> bool {
-    function.span.is_none_or(|span| span == source.span)
-        && source.name == function.name
-        && source.params.len() == function.params.len()
-        && source
-            .params
-            .iter()
-            .zip(function_param_types(function))
-            .all(|(param, ty)| source_param_shape_matches_ir(param, &ty))
-}
-
-fn find_source_method<'a>(
-    program: &'a ast::Program,
-    owner: &ir::TypeDef,
-    function: &ir::Function,
-) -> Option<&'a ast::MethodDecl> {
-    for item in &program.items {
-        match item {
-            ast::Item::Type(type_decl) if type_decl.name == owner.name => {
-                for member in &type_decl.members {
-                    let ast::TypeMember::Method(method) = member else {
-                        continue;
-                    };
-                    if source_method_matches(method, function) {
-                        return Some(method);
-                    }
-                }
-            }
-            ast::Item::Extension(ext_block)
-                if type_ref_base_name(&ext_block.target).is_some_and(|name| name == owner.name) =>
-            {
-                for method in &ext_block.methods {
-                    if source_method_matches(method, function) {
-                        return Some(method);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn source_method_matches(method: &ast::MethodDecl, function: &ir::Function) -> bool {
-    if function.span.is_some_and(|span| span != method.span)
-        || method.name != function.name
-        || method.params.len() != function.params.len()
-    {
-        return false;
-    }
-
-    method
-        .params
-        .iter()
-        .zip(function_param_types(function))
-        .all(|(param, ty)| source_param_shape_matches_ir(param, &ty))
-}
-
-fn source_param_shape_matches_ir(param: &ast::Param, ty: &ir::Type) -> bool {
-    if param.lazy {
-        return matches!(ty, ir::Type::Function { params, .. } if params.is_empty());
-    }
-
-    match (&param.ty, ty) {
-        (Some(TypeRef::Function { .. }), ir::Type::Function { .. }) => true,
-        (Some(TypeRef::Function { .. }), _) => false,
-        (Some(_), ir::Type::Function { .. }) => false,
-        _ => true,
-    }
-}
-
-fn type_ref_base_name(ty: &ast::TypeRef) -> Option<&str> {
-    match ty {
-        ast::TypeRef::Named { name, .. } => Some(name),
-        _ => None,
-    }
 }
 
 struct SourceBodyEmitter<'a> {
@@ -1753,24 +1651,24 @@ struct SourceBodyEmitter<'a> {
 }
 
 impl<'a> SourceBodyEmitter<'a> {
-    fn emit_body(&self, body: &ast::CallableBody) -> Option<String> {
+    fn emit_body(&self, body: &core::CallableBody) -> Option<String> {
         let mut out = String::new();
         out.push_str(" {\n");
         match body {
-            ast::CallableBody::Expr(expr) => self.emit_returning_expr(
+            core::CallableBody::Expr(expr) => self.emit_returning_expr(
                 &mut out,
                 expr,
                 "        ",
                 &HashMap::new(),
                 &HashMap::new(),
             )?,
-            ast::CallableBody::Block(block) => self.emit_function_block(&mut out, block)?,
+            core::CallableBody::Block(block) => self.emit_function_block(&mut out, block)?,
         }
         out.push_str("    }\n");
         Some(out)
     }
 
-    fn emit_function_block(&self, out: &mut String, block: &ast::Block) -> Option<()> {
+    fn emit_function_block(&self, out: &mut String, block: &core::Block) -> Option<()> {
         let mut bindings = HashMap::new();
         let mut binding_types = HashMap::new();
         let mut used_locals = HashSet::new();
@@ -1778,7 +1676,7 @@ impl<'a> SourceBodyEmitter<'a> {
         for (index, statement) in block.statements.iter().enumerate() {
             let is_tail = index + 1 == block.statements.len();
             match statement {
-                ast::Stmt::Binding(binding)
+                core::Stmt::Binding(binding)
                     if binding.destructure.is_none()
                         && binding.bindings.len() == binding.values.len() =>
                 {
@@ -1803,7 +1701,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         binding_types.insert(binding.name.clone(), local.ty.clone());
                     }
                 }
-                ast::Stmt::Return(statement) if is_tail => {
+                core::Stmt::Return(statement) if is_tail => {
                     out.push_str("        return");
                     if let Some(value) = &statement.value {
                         out.push(' ');
@@ -1815,7 +1713,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     }
                     out.push_str(";\n");
                 }
-                ast::Stmt::Assignment(statement)
+                core::Stmt::Assignment(statement)
                     if statement.targets.len() == 1 && statement.values.len() == 1 =>
                 {
                     let target = self.emit_assignment_target(&statement.targets[0], &bindings)?;
@@ -1836,7 +1734,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     out.push_str(&value);
                     out.push_str(";\n");
                 }
-                ast::Stmt::Expr(statement) if is_tail => {
+                core::Stmt::Expr(statement) if is_tail => {
                     self.emit_returning_expr(
                         out,
                         &statement.expr,
@@ -1845,7 +1743,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         &binding_types,
                     )?;
                 }
-                ast::Stmt::Expr(statement) => {
+                core::Stmt::Expr(statement) => {
                     out.push_str("        ");
                     out.push_str(&self.emit_expr(&statement.expr, &bindings)?);
                     out.push_str(";\n");
@@ -1858,15 +1756,15 @@ impl<'a> SourceBodyEmitter<'a> {
 
     fn emit_assignment_target(
         &self,
-        target: &ast::Expr,
+        target: &core::Expr,
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
         match target {
-            ast::Expr::Identifier { name, .. } => bindings
+            core::Expr::Identifier { name, .. } => bindings
                 .get(name)
                 .cloned()
                 .or_else(|| self.param_reference(name)),
-            ast::Expr::Member { receiver, name, .. } if matches!(receiver.as_ref(), ast::Expr::Identifier { name, .. } if name == "this") => {
+            core::Expr::Member { receiver, name, .. } if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "this") => {
                 Some(format!("this.{}", java_member_name(name)))
             }
             _ => None,
@@ -1888,13 +1786,27 @@ impl<'a> SourceBodyEmitter<'a> {
     fn emit_returning_expr(
         &self,
         out: &mut String,
-        expr: &ast::Expr,
+        expr: &core::Expr,
         indent: &str,
         bindings: &HashMap<String, String>,
         binding_types: &HashMap<String, ir::Type>,
     ) -> Option<()> {
         match expr {
-            ast::Expr::Match {
+            core::Expr::If {
+                condition_clauses,
+                then_block,
+                else_branch,
+                ..
+            } => self.emit_if_return(
+                out,
+                condition_clauses,
+                then_block,
+                else_branch,
+                indent,
+                bindings,
+                binding_types,
+            ),
+            core::Expr::Match {
                 partial: false,
                 value,
                 cases,
@@ -1932,11 +1844,99 @@ impl<'a> SourceBodyEmitter<'a> {
         }
     }
 
+    fn emit_if_return(
+        &self,
+        out: &mut String,
+        condition_clauses: &[core::IfConditionClause],
+        then_block: &core::Block,
+        else_branch: &core::ElseExprBranch,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<()> {
+        let conditions = condition_clauses
+            .iter()
+            .map(|clause| match clause {
+                core::IfConditionClause::Expr(condition) => self.emit_expr(condition, bindings),
+                core::IfConditionClause::Let(_) => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        if conditions.is_empty() {
+            return None;
+        }
+
+        out.push_str(indent);
+        out.push_str("if (");
+        out.push_str(&conditions.join(" && "));
+        out.push_str(") {\n");
+        self.emit_simple_returning_block(
+            out,
+            then_block,
+            &format!("{indent}    "),
+            bindings,
+            binding_types,
+        )?;
+        out.push_str(indent);
+        out.push_str("} else {\n");
+        match else_branch {
+            core::ElseExprBranch::If(expr) => self.emit_returning_expr(
+                out,
+                expr,
+                &format!("{indent}    "),
+                bindings,
+                binding_types,
+            )?,
+            core::ElseExprBranch::Block(block) => self.emit_simple_returning_block(
+                out,
+                block,
+                &format!("{indent}    "),
+                bindings,
+                binding_types,
+            )?,
+        }
+        out.push_str(indent);
+        out.push_str("}\n");
+        Some(())
+    }
+
+    fn emit_simple_returning_block(
+        &self,
+        out: &mut String,
+        block: &core::Block,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<()> {
+        let [statement] = block.statements.as_slice() else {
+            return None;
+        };
+        match statement {
+            core::Stmt::Expr(statement) => {
+                self.emit_returning_expr(out, &statement.expr, indent, bindings, binding_types)
+            }
+            core::Stmt::Return(statement) => {
+                out.push_str(indent);
+                out.push_str("return");
+                if let Some(value) = &statement.value {
+                    out.push(' ');
+                    out.push_str(&self.emit_expr_against(
+                        value,
+                        bindings,
+                        &self.function.return_ty,
+                    )?);
+                }
+                out.push_str(";\n");
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
     fn emit_match_return(
         &self,
         out: &mut String,
-        value: &ast::Expr,
-        cases: &[ast::MatchCase],
+        value: &core::Expr,
+        cases: &[core::MatchCase],
         indent: &str,
         bindings: &HashMap<String, String>,
         binding_types: &HashMap<String, ir::Type>,
@@ -1970,16 +1970,16 @@ impl<'a> SourceBodyEmitter<'a> {
     fn emit_match_case_body(
         &self,
         out: &mut String,
-        body: &ast::MatchCaseBody,
+        body: &core::MatchCaseBody,
         indent: &str,
         bindings: &HashMap<String, String>,
         binding_types: &HashMap<String, ir::Type>,
     ) -> Option<()> {
         match body {
-            ast::MatchCaseBody::Expr(expr) => {
+            core::MatchCaseBody::Expr(expr) => {
                 self.emit_returning_expr(out, expr, indent, bindings, binding_types)
             }
-            ast::MatchCaseBody::Block(_) => None,
+            core::MatchCaseBody::Block(_) => None,
         }
     }
 
@@ -2148,40 +2148,40 @@ impl<'a> SourceBodyEmitter<'a> {
         self.owner?.enum_cases.iter().find(|case| case.name == name)
     }
 
-    fn emit_expr(&self, expr: &ast::Expr, bindings: &HashMap<String, String>) -> Option<String> {
+    fn emit_expr(&self, expr: &core::Expr, bindings: &HashMap<String, String>) -> Option<String> {
         match expr {
-            ast::Expr::Identifier { name, .. } if name == "this" => Some("this".to_string()),
-            ast::Expr::Identifier { name, .. } if self.enum_case(name).is_some() => {
+            core::Expr::Identifier { name, .. } if name == "this" => Some("this".to_string()),
+            core::Expr::Identifier { name, .. } if self.enum_case(name).is_some() => {
                 if self.enum_case(name)?.kind == TypeKind::Object {
                     Some(format!("{}.instance()", java_type_name(name)))
                 } else {
                     Some(format!("new {}<>()", java_type_name(name)))
                 }
             }
-            ast::Expr::Identifier { name, .. } if core_enum_case_owner(name).is_some() => {
+            core::Expr::Identifier { name, .. } if core_enum_case_owner(name).is_some() => {
                 self.emit_core_enum_case(name, &[])
             }
-            ast::Expr::Identifier { name, .. } => bindings
+            core::Expr::Identifier { name, .. } => bindings
                 .get(name)
                 .cloned()
                 .or_else(|| self.lazy_param_value_reference(name))
                 .or_else(|| self.param_reference(name)),
-            ast::Expr::Bool { value, .. } => Some(value.to_string()),
-            ast::Expr::Integer { raw, .. } => Some(format!("{raw}L")),
-            ast::Expr::Float { raw, .. } => Some(raw.clone()),
-            ast::Expr::String { raw, .. } => {
+            core::Expr::Bool { value, .. } => Some(value.to_string()),
+            core::Expr::Integer { raw, .. } => Some(format!("{raw}L")),
+            core::Expr::Float { raw, .. } => Some(raw.clone()),
+            core::Expr::String { raw, .. } => {
                 Some(java_string_literal(&decode_lume_string_literal(raw)))
             }
-            ast::Expr::Unit { .. } => Some("lume.core.LumeUnit.INSTANCE".to_string()),
-            ast::Expr::ListLiteral { items, .. } => {
+            core::Expr::Unit { .. } => Some("lume.core.LumeUnit.INSTANCE".to_string()),
+            core::Expr::ListLiteral { items, .. } => {
                 if items
                     .iter()
-                    .any(|item| matches!(item, ast::Expr::Spread { .. }))
+                    .any(|item| matches!(item, core::Expr::Spread { .. }))
                 {
                     let mut out = "lume.core.LumeVector.empty()".to_string();
                     for item in items {
                         match item {
-                            ast::Expr::Spread { value, .. } => {
+                            core::Expr::Spread { value, .. } => {
                                 out =
                                     format!("{}.addAll({})", out, self.emit_expr(value, bindings)?);
                             }
@@ -2199,9 +2199,8 @@ impl<'a> SourceBodyEmitter<'a> {
                     Some(format!("lume.core.LumeVector.of({})", items.join(", ")))
                 }
             }
-            ast::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
-            ast::Expr::Group { inner, .. } => self.emit_expr(inner, bindings),
-            ast::Expr::Member { receiver, name, .. } if matches!(receiver.as_ref(), ast::Expr::Identifier { name, .. } if name == "this") =>
+            core::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
+            core::Expr::Member { receiver, name, .. } if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "this") =>
             {
                 let receiver = self.emit_expr(receiver, bindings)?;
                 let member = java_member_name(name);
@@ -2214,7 +2213,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     Some(format!("{receiver}.{member}"))
                 }
             }
-            ast::Expr::Unary { op, expr, .. } => {
+            core::Expr::Unary { op, expr, .. } => {
                 let value = self.emit_expr(expr, bindings)?;
                 match op {
                     ast::UnaryOp::Neg => Some(format!("(-{value})")),
@@ -2222,7 +2221,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     ast::UnaryOp::UnsafeExtract => None,
                 }
             }
-            ast::Expr::Binary {
+            core::Expr::Binary {
                 left, op, right, ..
             } => {
                 let left = self.emit_expr(left, bindings)?;
@@ -2258,19 +2257,19 @@ impl<'a> SourceBodyEmitter<'a> {
                     }
                 }
             }
-            ast::Expr::Call { callee, args, .. } => self.emit_call(callee, args, bindings),
+            core::Expr::Call { callee, args, .. } => self.emit_call(callee, args, bindings),
             _ => None,
         }
     }
 
     fn emit_expr_against(
         &self,
-        expr: &ast::Expr,
+        expr: &core::Expr,
         bindings: &HashMap<String, String>,
         expected: &ir::Type,
     ) -> Option<String> {
         match expr {
-            ast::Expr::ListLiteral { items, .. }
+            core::Expr::ListLiteral { items, .. }
                 if items.is_empty()
                     && matches!(
                         expected,
@@ -2279,28 +2278,25 @@ impl<'a> SourceBodyEmitter<'a> {
             {
                 Some("lume.core.LumeMap.empty()".to_string())
             }
-            ast::Expr::Group { inner, .. } => self
-                .emit_expr_against(inner, bindings, expected)
-                .map(|value| format!("({value})")),
             _ => self.emit_expr(expr, bindings),
         }
     }
 
     fn emit_call(
         &self,
-        callee: &ast::Expr,
-        args: &[ast::CallArg],
+        callee: &core::Expr,
+        args: &[core::CallArg],
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
         match callee {
-            ast::Expr::Identifier { name, .. } if name == "panic" => {
+            core::Expr::Identifier { name, .. } if name == "panic" => {
                 let message = match args.first() {
                     Some(arg) => self.emit_expr(&arg.value, bindings)?,
                     None => java_string_literal("panic"),
                 };
                 Some(format!("lume.core.LumePanic.panic({message})"))
             }
-            ast::Expr::Identifier { name, .. } if self.enum_case(name).is_some() => {
+            core::Expr::Identifier { name, .. } if self.enum_case(name).is_some() => {
                 let args = args
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
@@ -2316,14 +2312,14 @@ impl<'a> SourceBodyEmitter<'a> {
                     args.join(", ")
                 ))
             }
-            ast::Expr::Identifier { name, .. } if core_enum_case_owner(name).is_some() => {
+            core::Expr::Identifier { name, .. } if core_enum_case_owner(name).is_some() => {
                 let args = args
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
                 self.emit_core_enum_case(name, &args)
             }
-            ast::Expr::Identifier { name, .. } if self.function_param(name).is_some() => {
+            core::Expr::Identifier { name, .. } if self.function_param(name).is_some() => {
                 let args = args
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
@@ -2335,7 +2331,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 };
                 emit_functional_call(&target, &args)
             }
-            ast::Expr::Identifier { name, .. } => {
+            core::Expr::Identifier { name, .. } => {
                 let mut candidates = self.bundle.ir.functions.iter().filter(|candidate| {
                     candidate.name == *name
                         && matches!(candidate.kind, FunctionKind::TopLevel)
@@ -2364,37 +2360,37 @@ impl<'a> SourceBodyEmitter<'a> {
                     ))
                 }
             }
-            ast::Expr::Member { receiver, name, .. }
+            core::Expr::Member { receiver, name, .. }
                 if name == "iterator"
                     && args.is_empty()
                     && matches!(
                         receiver.as_ref(),
-                        ast::Expr::ListLiteral { items, .. } if items.is_empty()
+                        core::Expr::ListLiteral { items, .. } if items.is_empty()
                     ) =>
             {
                 Some("lume.core.LumeIterator.from(lume.core.LumeVector.of())".to_string())
             }
-            ast::Expr::Member { receiver, name, .. }
+            core::Expr::Member { receiver, name, .. }
                 if name == "iterator"
                     && args.is_empty()
                     && matches!(
                         receiver.as_ref(),
-                        ast::Expr::Call {
+                        core::Expr::Call {
                             callee,
                             args,
-                            uses_brace_syntax: false,
+                            style: core::CallStyle::Paren,
                             ..
                         } if args.is_empty()
                             && matches!(
                                 callee.as_ref(),
-                                ast::Expr::Identifier { name, .. } if name == "Vector"
+                                core::Expr::Identifier { name, .. } if name == "Vector"
                             )
                     ) =>
             {
                 Some("lume.core.LumeIterator.from(lume.core.LumeVector.of())".to_string())
             }
-            ast::Expr::Member { name, .. } if lazy_core_member_call_name(name) => None,
-            ast::Expr::Member { receiver, name, .. } => {
+            core::Expr::Member { name, .. } if lazy_core_member_call_name(name) => None,
+            core::Expr::Member { receiver, name, .. } => {
                 // Argument adaptation (notably Lume vararg packing) is already
                 // resolved in lowered IR. Keep argument-bearing member calls on
                 // that path until the readable emitter consumes typed calls.
@@ -2426,11 +2422,11 @@ impl<'a> SourceBodyEmitter<'a> {
 
     fn emit_call_arg(
         &self,
-        arg: &ast::CallArg,
+        arg: &core::CallArg,
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
         match &arg.value {
-            ast::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
+            core::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
             _ => self.emit_expr(&arg.value, bindings),
         }
     }
@@ -2467,28 +2463,30 @@ impl<'a> SourceBodyEmitter<'a> {
             .find(|local| local.name == name && matches!(local.ty, ir::Type::Function { .. }))
     }
 
-    fn expr_type(&self, expr: &ast::Expr, _bindings: &HashMap<String, String>) -> Option<ir::Type> {
+    fn expr_type(
+        &self,
+        expr: &core::Expr,
+        _bindings: &HashMap<String, String>,
+    ) -> Option<ir::Type> {
         match expr {
-            ast::Expr::Identifier { name, .. } => self
+            core::Expr::Identifier { name, .. } => self
                 .function
                 .params
                 .iter()
                 .filter_map(|param| self.function.locals.get(param.0))
                 .find(|local| local.name == *name)
                 .map(|local| local.ty.clone()),
-            ast::Expr::Group { inner, .. } => self.expr_type(inner, _bindings),
             _ => None,
         }
     }
 
     fn pattern_binding_expr_type(
         &self,
-        expr: &ast::Expr,
+        expr: &core::Expr,
         binding_types: &HashMap<String, ir::Type>,
     ) -> Option<ir::Type> {
         match expr {
-            ast::Expr::Identifier { name, .. } => binding_types.get(name).cloned(),
-            ast::Expr::Group { inner, .. } => self.pattern_binding_expr_type(inner, binding_types),
+            core::Expr::Identifier { name, .. } => binding_types.get(name).cloned(),
             _ => None,
         }
     }

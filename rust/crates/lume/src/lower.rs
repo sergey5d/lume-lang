@@ -15,6 +15,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct LowerResult {
     pub program: Option<ir::Program>,
+    pub core_bodies: HashMap<ir::FunctionId, core::CallableBody>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -23,6 +24,7 @@ pub fn lower_program(program: &ast::Program) -> LowerResult {
     let lowered = lowerer.lower();
     LowerResult {
         program: Some(lowered),
+        core_bodies: std::mem::take(&mut lowerer.core_bodies),
         diagnostics: lowerer.diagnostics,
     }
 }
@@ -58,6 +60,7 @@ struct Lowerer<'a> {
     source: &'a ast::Program,
     diagnostics: Vec<Diagnostic>,
     program: ir::Program,
+    core_bodies: HashMap<ir::FunctionId, core::CallableBody>,
     type_ids: HashMap<(String, ast::TypeKind), ir::TypeId>,
     type_aliases: HashMap<String, TypeRef>,
     case_fields: HashMap<String, Vec<String>>,
@@ -83,6 +86,7 @@ impl<'a> Lowerer<'a> {
             source,
             diagnostics: Vec::new(),
             program: ir::Program::new(source.module.as_ref().map(|module| module.name.clone())),
+            core_bodies: HashMap::new(),
             type_ids: HashMap::new(),
             type_aliases,
             case_fields: HashMap::new(),
@@ -214,10 +218,9 @@ impl<'a> Lowerer<'a> {
                         function.span,
                     );
                     self.function_ids.insert(function.name.clone(), id);
-                    self.function_work.push(FunctionWork {
-                        id,
-                        decl: desugar::desugar_function_decl(function),
-                    });
+                    let decl = desugar::desugar_function_decl(function);
+                    self.core_bodies.insert(id, decl.body.clone());
+                    self.function_work.push(FunctionWork { id, decl });
                 }
                 Item::Statement(ast::Stmt::Binding(binding)) => {
                     for (index, local) in binding.bindings.iter().enumerate() {
@@ -321,9 +324,13 @@ impl<'a> Lowerer<'a> {
                     let (id, this_local) =
                         self.declare_method_function(type_id, &decl.name, method);
                     methods_to_attach.push(id);
+                    let method = desugar::desugar_method_decl(method);
+                    if let Some(body) = &method.body {
+                        self.core_bodies.insert(id, body.clone());
+                    }
                     self.method_work.push(MethodWork {
                         id,
-                        decl: desugar::desugar_method_decl(method),
+                        decl: method,
                         this_local,
                     });
                 }
@@ -412,9 +419,13 @@ impl<'a> Lowerer<'a> {
         for method in &block.methods {
             let (id, this_local) = self.declare_method_function(type_id, target_name, method);
             method_ids.push(id);
+            let method = desugar::desugar_method_decl(method);
+            if let Some(body) = &method.body {
+                self.core_bodies.insert(id, body.clone());
+            }
             self.method_work.push(MethodWork {
                 id,
-                decl: desugar::desugar_method_decl(method),
+                decl: method,
                 this_local,
             });
         }
@@ -9978,5 +9989,31 @@ mod tests {
                 )
             })
         }));
+    }
+
+    #[test]
+    fn retains_core_bodies_by_stable_function_id() {
+        let program = parse_inline(
+            r#"
+            def choose(flag Bool) Int = if flag {
+                1
+            } else {
+                2
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let choose = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "choose")
+            .expect("choose function");
+        assert!(matches!(
+            lowered.core_bodies.get(&choose.id),
+            Some(core::CallableBody::Expr(core::Expr::If { .. }))
+        ));
     }
 }

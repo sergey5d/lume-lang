@@ -1,8 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use crate::{
-    ast,
     backend::descriptors::BackendDescriptors,
+    core,
     interpreter::merged_runtime_program,
     ir,
     lower::lower_program,
@@ -15,7 +18,7 @@ use crate::{
 pub struct BackendBundle {
     pub root_path: PathBuf,
     pub root_display_path: String,
-    pub ast: ast::Program,
+    pub core_bodies: HashMap<ir::FunctionId, core::CallableBody>,
     pub ir: ir::Program,
     pub descriptors: BackendDescriptors,
 }
@@ -66,6 +69,7 @@ pub(crate) fn build_backend_bundle_with_load_options(
         });
     }
 
+    let core_bodies = lowered.core_bodies;
     let ir = lowered
         .program
         .expect("ir program after successful lowering");
@@ -76,7 +80,7 @@ pub(crate) fn build_backend_bundle_with_load_options(
         bundle: Some(BackendBundle {
             root_path,
             root_display_path,
-            ast,
+            core_bodies,
             ir,
             descriptors,
         }),

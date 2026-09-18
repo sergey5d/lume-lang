@@ -3037,7 +3037,13 @@ def add(left Int, right Int) Int {
 
 def twice(value Int) Int = add(value, value)
 
-def main() Int = twice(3)
+def choose(flag Bool) Int = if flag {
+    10
+} else {
+    20
+}
+
+def main() Int = twice(3) + choose(true)
 "#,
         )
         .expect("write source");
@@ -3067,6 +3073,9 @@ def main() Int = twice(3)
         assert!(readable_java.contains("Long total_2 = (left_0 + right_1);"));
         assert!(readable_java.contains("return total_2;"));
         assert!(readable_java.contains("return add(value_0, value_0);"));
+        assert!(readable_java.contains("if (flag_0) {"));
+        assert!(readable_java.contains("return 10L;"));
+        assert!(readable_java.contains("return 20L;"));
         assert!(!readable_java.contains("__block"));
         assert!(!readable_java.contains("while (true)"));
         assert!(lowered_java.contains("__block"));
@@ -3091,7 +3100,7 @@ def main() Int = twice(3)
                 );
                 assert_eq!(
                     String::from_utf8(output.stdout).expect("Java stdout utf8"),
-                    "6\n"
+                    "16\n"
                 );
             }
         }
