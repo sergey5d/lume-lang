@@ -1638,7 +1638,7 @@ fn is_lume_builtin_java_bound(name: &str, args: &[TypeRef]) -> bool {
     args.is_empty()
         && matches!(
             name,
-            "Any" | "Bool" | "Int" | "Float" | "Rune" | "Str" | "Unit"
+            "Any" | "Bool" | "Int" | "Float" | "Rune" | "Str" | "Unit" | "LumeTyped"
         )
         || matches!(name, "Vector" | "LinkedList" | "Set" | "Map" | "Option")
 }
@@ -2380,6 +2380,27 @@ mod tests {
     }
 
     #[test]
+    fn hides_java_runtime_marker_from_imported_lume_interfaces() {
+        let span = Span::new(0, 0, LineColumn::new(1, 1), LineColumn::new(1, 1));
+        let local_type_names = HashMap::new();
+        let ctx = JavaTypeContext {
+            type_params: HashSet::new(),
+            local_type_names: &local_type_names,
+            current_package: "lume.http",
+            allow_cross_package_refs: true,
+            span,
+        };
+
+        let bounds = parse_javap_bounds(
+            "public interface lume.http.Context extends lume.core.LumeTyped {",
+            TypeKind::Interface,
+            &ctx,
+        );
+
+        assert!(bounds.is_empty());
+    }
+
+    #[test]
     fn keeps_lume_type_params_visible_for_plain_java_methods() {
         let span = Span::new(0, 0, LineColumn::new(1, 1), LineColumn::new(1, 1));
         let local_type_names = HashMap::new();
@@ -3010,9 +3031,9 @@ enum Maybe[T] {
         assert!(!maybe.contains("__block"));
         assert!(!maybe.contains("while (true)"));
         assert!(!maybe.contains("variantField"));
-        assert!(maybe.contains("if (this instanceof Some<?>)"));
-        assert!(maybe.contains("if (this instanceof None<?>)"));
-        assert!(maybe.contains("if (this instanceof Some<?> __case0)"));
+        assert!(maybe.contains("instanceof Some<?>)"));
+        assert!(maybe.contains("instanceof None<?>)"));
+        assert!(maybe.contains("instanceof Some<?> __case0)"));
         assert!(maybe.contains("return ((T) __case0.value());"));
 
         let _ = fs::remove_dir_all(temp);
@@ -3043,7 +3064,32 @@ def choose(flag Bool) Int = if flag {
     20
 }
 
-def main() Int = twice(3) + choose(true)
+def sumEven(limit Int) Int {
+    var total Int = 0
+    var index Int = 0
+    while index < limit {
+        if index % 2 == 0 {
+            total += index
+        } else {
+            total += 1
+        }
+        index += 1
+    }
+    total
+}
+
+def incrementer() fn(Int) Int = (value Int) => value + 1
+
+def classify(value Int) Int {
+    var result Int = 0
+    match value {
+        case 1 => { result := 10 }
+        case _ => { result := 20 }
+    }
+    result
+}
+
+def main() Int = twice(3) + choose(true) + sumEven(4) + classify(1)
 "#,
         )
         .expect("write source");
@@ -3076,6 +3122,11 @@ def main() Int = twice(3) + choose(true)
         assert!(readable_java.contains("if (flag_0) {"));
         assert!(readable_java.contains("return 10L;"));
         assert!(readable_java.contains("return 20L;"));
+        assert!(readable_java.contains("while ((index_2 < limit_0)) {"));
+        assert!(readable_java.contains("total_1 += index_2;"));
+        assert!(readable_java.contains("return (value_arg0) -> (value_arg0 + 1L);"));
+        assert!(readable_java.contains("java.util.Objects.equals(__match"));
+        assert!(readable_java.contains("result_1 = 10L;"));
         assert!(!readable_java.contains("__block"));
         assert!(!readable_java.contains("while (true)"));
         assert!(lowered_java.contains("__block"));
@@ -3100,10 +3151,221 @@ def main() Int = twice(3) + choose(true)
                 );
                 assert_eq!(
                     String::from_utf8(output.stdout).expect("Java stdout utf8"),
-                    "16\n"
+                    "30\n"
                 );
             }
         }
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_simple_for_loops_structured() {
+        let temp = temp_path("lume-java-readable-for-loop");
+        let source = temp.join("for_loop.lum");
+        let out = temp.join("generated");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/for_loop
+
+def sum(items [Int]) Int {
+    var total Int = 0
+    for item <- items {
+        total += item
+    }
+    total
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/for_loop/For_loopModule.java"))
+            .expect("read module Java");
+        assert!(
+            module.contains("lume.core.LumeIterator<?> __iterator"),
+            "{module}"
+        );
+        assert!(module.contains("Long item_"), "{module}");
+        assert!(module.contains("while (__iterator"), "{module}");
+        assert!(!module.contains("__block"), "{module}");
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_uses_resolved_metadata_for_member_calls() {
+        let temp = temp_path("lume-java-readable-resolved-member-call");
+        let source = temp.join("member_call.lum");
+        let out = temp.join("generated");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/member_call
+
+interface Calculator {
+    def addOne(value Int) Int
+}
+
+def through(calc Calculator, value Int) Int = calc.addOne(value)
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/member_call/Member_callModule.java"))
+            .expect("read module Java");
+        assert!(
+            module.contains("return calc_0.addOne(value_1);"),
+            "{module}"
+        );
+        assert!(!module.contains("__block"), "{module}");
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_intrinsic_calls_source_shaped() {
+        let temp = temp_path("lume-java-readable-intrinsics");
+        let source = temp.join("intrinsics.lum");
+        let out = temp.join("generated");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/intrinsics
+
+def echo(value Int) Int = identity(value)
+
+def report(value Int) Unit {
+    println("value", value)
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/intrinsics/IntrinsicsModule.java"))
+            .expect("read module Java");
+        assert!(module.contains("return value_0;"), "{module}");
+        assert!(
+            module.contains("lume.core.LumeRuntime.println(\"value\", value_0);"),
+            "{module}"
+        );
+        assert!(!module.contains("__block"), "{module}");
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_emits_typed_source_expressions() {
+        let temp = temp_path("lume-java-readable-source-expressions");
+        let source = temp.join("expressions.lum");
+        let out = temp.join("generated");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/expressions
+
+shape Point {
+    x Int
+    y Int
+}
+
+class Cat {
+    name Str
+}
+
+class Dog {
+    name Str
+}
+
+type Pet = Cat | Dog
+
+def pointX(point Point) Int = point.x
+def makePoint() Point = Point { y: 2, x: 1 }
+def at(values [Int], index Int) Int = values[index]
+def isText(value Any) Bool = value is Str
+def pair() (Int, Str) = (1, "one")
+def mapping() [Str: Int] = ["one": 1]
+def required(value Int?) Int = value!
+def text(value Int) Str = value.toStr()
+def widen(value Int) Any = Any(value)
+def describe(value Int) Str = match value {
+    case -1 => "missing"
+    case 0 => "zero"
+    case _ as other => other.toStr()
+}
+def optionValue(value Int?) Int = match value {
+    case Some(item) => item
+    case None => 0
+}
+def petName(value Pet) Str = match value {
+    case Cat { name } => name
+    case Dog { name } => name
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/expressions/ExpressionsModule.java"))
+            .expect("read module Java");
+        assert!(module.contains("return point_0.x();"), "{module}");
+        assert!(module.contains("return new Point(1L, 2L);"), "{module}");
+        assert!(
+            module.contains("lume.core.LumeRuntime.indexValue(values_0, index_1)"),
+            "{module}"
+        );
+        assert!(module.contains("value_0 instanceof String"), "{module}");
+        assert!(
+            module.contains("return new lume.core.Tuple2<>(1L, \"one\");"),
+            "{module}"
+        );
+        assert!(
+            module.contains("lume.core.LumeMap.fromParts(new lume.core.Tuple2<>(\"one\", 1L))"),
+            "{module}"
+        );
+        assert!(
+            module.contains("lume.core.LumeRuntime.extractSuccessValue(value_0)"),
+            "{module}"
+        );
+        assert!(
+            module.contains("return String.valueOf(value_0);"),
+            "{module}"
+        );
+        assert!(module.contains("return value_0;"), "{module}");
+        assert!(
+            module.contains("java.util.Objects.equals(__match"),
+            "{module}"
+        );
+        assert!(
+            module.contains("instanceof lume.core.Option.Some<?> __case0"),
+            "{module}"
+        );
+        assert!(
+            module.contains("instanceof lume.core.Option.None<?>"),
+            "{module}"
+        );
+        assert!(module.contains("instanceof Cat __case0"), "{module}");
+        assert!(module.contains("instanceof Dog __case1"), "{module}");
+        assert!(!module.contains("__block"), "{module}");
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -3158,9 +3420,9 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
             (
                 "Option",
                 vec![
-                    "if (this instanceof Some<?>)",
-                    "if (this instanceof None<?>)",
-                    "if (this instanceof Some<?> __case0)",
+                    "instanceof Some<?>)",
+                    "instanceof None<?>)",
+                    "instanceof Some<?> __case0)",
                     "default <X> lume.core.Option<X> map(java.util.function.Function<T, X> f_1)",
                     "default <X> lume.core.Option<X> flatMap(java.util.function.Function<T, lume.core.Option<X>> f_1)",
                     "default lume.core.LumeIterator<T> iterator()",
@@ -3170,9 +3432,9 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
             (
                 "Result",
                 vec![
-                    "if (this instanceof Ok<?, ?>)",
-                    "if (this instanceof Err<?, ?>)",
-                    "if (this instanceof Ok<?, ?> __case0)",
+                    "instanceof Ok<?, ?>)",
+                    "instanceof Err<?, ?>)",
+                    "instanceof Ok<?, ?> __case0)",
                     "default <X> lume.core.Result<X, E> map(java.util.function.Function<T, X> f_1)",
                     "default <X> lume.core.Result<X, E> flatMap(java.util.function.Function<T, lume.core.Result<X, E>> f_1)",
                     "return ((T) __case0.value());",
@@ -3181,9 +3443,9 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
             (
                 "Either",
                 vec![
-                    "if (this instanceof Left<?, ?>)",
-                    "if (this instanceof Right<?, ?>)",
-                    "if (this instanceof Right<?, ?> __case1)",
+                    "instanceof Left<?, ?>)",
+                    "instanceof Right<?, ?>)",
+                    "instanceof Right<?, ?> __case1)",
                     "default <X> lume.core.Either<L, X> map(java.util.function.Function<R, X> f_1)",
                     "default <X> lume.core.Either<L, X> flatMap(java.util.function.Function<R, lume.core.Either<L, X>> f_1)",
                     "default L merge()",
@@ -3305,9 +3567,8 @@ def main() Unit {
         assert!(result.diagnostics.is_empty());
         let module =
             fs::read_to_string(out.join("demo/builder/BuilderModule.java")).expect("read module");
-        assert!(module.contains("String tmp"));
-        assert!(module.contains(" = text();"));
-        assert!(module.contains(".append(tmp"));
+        assert!(module.contains("builder_0.append(text());"));
+        assert!(!module.contains("__block"));
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -4806,7 +5067,8 @@ def main() Unit {
             .expect("read module");
         assert!(!module.contains("UnsupportedOperationException"));
         assert!(module.contains("new Greeter()"));
-        assert!(module.contains("greeter_0 = tmp1_1;"));
+        assert!(module.contains("Greeter greeter_0 = new Greeter();"));
+        assert!(!module.contains("__block"));
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -4955,7 +5217,8 @@ def main() Unit {
         let module = fs::read_to_string(out.join("demo/genericappend/GenericappendModule.java"))
             .expect("read module");
         assert!(module.contains("out_"));
-        assert!(module.contains(".add(((T)"));
+        assert!(module.contains(".add(mapper_1.apply(item_"));
+        assert!(!module.contains("__block"));
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -5183,7 +5446,8 @@ def main() Unit {
             .expect("read module");
         assert!(module.contains("lume.core.Function7<"));
         assert!(module.contains(".apply(1L, 2L, 3L, 4L, 5L, 6L, 7L)"));
-        assert!(module.contains("public Long apply("));
+        assert!(module.contains("(a_arg0, b_arg1, c_arg2, d_arg3, e_arg4, g_arg5, h_arg6) ->"));
+        assert!(!module.contains("__block"));
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");

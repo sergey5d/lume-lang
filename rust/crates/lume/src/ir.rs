@@ -37,8 +37,37 @@ pub struct Program {
     pub globals: Vec<Global>,
     pub functions: Vec<Function>,
     pub types: Vec<TypeDef>,
+    pub source_calls: Vec<SourceCall>,
+    pub source_exprs: Vec<SourceExpr>,
     pub global_init: Option<FunctionId>,
     pub entry: Option<FunctionId>,
+}
+
+/// Checked call information retained for source-shaped backends.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceCall {
+    pub function: FunctionId,
+    pub span: Span,
+    pub callee: Callee,
+    pub lowered_args: Vec<Operand>,
+    pub ordered_arg_spans: Vec<Span>,
+    pub param_specs: Vec<Option<SourceCallParamSpec>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceCallParamSpec {
+    pub ty: Type,
+    pub lazy: bool,
+    pub variadic: bool,
+}
+
+/// Checked expression information retained for source-shaped backends.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceExpr {
+    pub function: FunctionId,
+    pub span: Span,
+    pub ty: Type,
+    pub expected: Option<Type>,
 }
 
 impl Program {

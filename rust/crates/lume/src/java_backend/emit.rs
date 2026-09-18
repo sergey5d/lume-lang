@@ -1672,7 +1672,30 @@ impl<'a> SourceBodyEmitter<'a> {
         let mut bindings = HashMap::new();
         let mut binding_types = HashMap::new();
         let mut used_locals = HashSet::new();
+        self.emit_statement_block(
+            out,
+            block,
+            "        ",
+            &mut bindings,
+            &mut binding_types,
+            &mut used_locals,
+            true,
+            0,
+        )
+    }
 
+    #[allow(clippy::too_many_arguments)]
+    fn emit_statement_block(
+        &self,
+        out: &mut String,
+        block: &core::Block,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        returns_tail: bool,
+        loop_depth: usize,
+    ) -> Option<()> {
         for (index, statement) in block.statements.iter().enumerate() {
             let is_tail = index + 1 == block.statements.len();
             match statement {
@@ -1682,7 +1705,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 {
                     for (binding, value) in binding.bindings.iter().zip(&binding.values) {
                         if binding.name == "_" {
-                            out.push_str("        ");
+                            out.push_str(indent);
                             out.push_str(&self.emit_expr(value, &bindings)?);
                             out.push_str(";\n");
                             continue;
@@ -1690,7 +1713,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         let local = self.source_binding_local(&binding.name, &used_locals)?;
                         used_locals.insert(local.id);
                         let java_name = java_local_name(local);
-                        out.push_str("        ");
+                        out.push_str(indent);
                         out.push_str(&self.names.value_type(&local.ty));
                         out.push(' ');
                         out.push_str(&java_name);
@@ -1702,7 +1725,8 @@ impl<'a> SourceBodyEmitter<'a> {
                     }
                 }
                 core::Stmt::Return(statement) if is_tail => {
-                    out.push_str("        return");
+                    out.push_str(indent);
+                    out.push_str("return");
                     if let Some(value) = &statement.value {
                         out.push(' ');
                         out.push_str(&self.emit_expr_against(
@@ -1726,7 +1750,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         ast::AssignOp::DivAssign => "/=",
                         ast::AssignOp::ModAssign => "%=",
                     };
-                    out.push_str("        ");
+                    out.push_str(indent);
                     out.push_str(&target);
                     out.push(' ');
                     out.push_str(operator);
@@ -1734,17 +1758,71 @@ impl<'a> SourceBodyEmitter<'a> {
                     out.push_str(&value);
                     out.push_str(";\n");
                 }
-                core::Stmt::Expr(statement) if is_tail => {
+                core::Stmt::If(statement) => {
+                    let branches_return =
+                        is_tail && returns_tail && !is_java_void_type(&self.function.return_ty);
+                    self.emit_if_statement(
+                        out,
+                        statement,
+                        indent,
+                        bindings,
+                        binding_types,
+                        used_locals,
+                        loop_depth,
+                        branches_return,
+                    )?;
+                }
+                core::Stmt::Match(statement) => {
+                    let branches_return =
+                        is_tail && returns_tail && !is_java_void_type(&self.function.return_ty);
+                    self.emit_match_statement(
+                        out,
+                        statement,
+                        indent,
+                        bindings,
+                        binding_types,
+                        used_locals,
+                        loop_depth,
+                        branches_return,
+                    )?;
+                }
+                core::Stmt::While(statement) => self.emit_while_statement(
+                    out,
+                    statement,
+                    indent,
+                    bindings,
+                    binding_types,
+                    used_locals,
+                    loop_depth,
+                )?,
+                core::Stmt::For(statement) => self.emit_for_statement(
+                    out,
+                    statement,
+                    indent,
+                    bindings,
+                    binding_types,
+                    used_locals,
+                    loop_depth,
+                )?,
+                core::Stmt::Break(_) if is_tail && loop_depth > 0 => {
+                    out.push_str(indent);
+                    out.push_str("break;\n");
+                }
+                core::Stmt::Continue(_) if is_tail && loop_depth > 0 => {
+                    out.push_str(indent);
+                    out.push_str("continue;\n");
+                }
+                core::Stmt::Expr(statement) if is_tail && returns_tail => {
                     self.emit_returning_expr(
                         out,
                         &statement.expr,
-                        "        ",
+                        indent,
                         &bindings,
                         &binding_types,
                     )?;
                 }
                 core::Stmt::Expr(statement) => {
-                    out.push_str("        ");
+                    out.push_str(indent);
                     out.push_str(&self.emit_expr(&statement.expr, &bindings)?);
                     out.push_str(";\n");
                 }
@@ -1752,6 +1830,379 @@ impl<'a> SourceBodyEmitter<'a> {
             }
         }
         Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_match_statement(
+        &self,
+        out: &mut String,
+        statement: &core::MatchStmt,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+        branches_return: bool,
+    ) -> Option<()> {
+        let value_ty = self.expr_type(&statement.value, bindings)?;
+        let value = self.emit_expr(&statement.value, bindings)?;
+        let match_local = format!("__match{}", statement.span.start);
+        out.push_str(indent);
+        out.push_str("var ");
+        out.push_str(&match_local);
+        out.push_str(" = ");
+        out.push_str(&value);
+        out.push_str(";\n");
+
+        for (index, case) in statement.cases.iter().enumerate() {
+            let matched = self.match_case_pattern(
+                &case.pattern,
+                &match_local,
+                &value_ty,
+                index,
+                bindings,
+                binding_types,
+            )?;
+            let condition = match &case.guard {
+                Some(guard) => format!(
+                    "({}) && ({})",
+                    matched.condition,
+                    self.emit_expr(guard, &matched.bindings)?
+                ),
+                None => matched.condition,
+            };
+            out.push_str(indent);
+            if index > 0 {
+                out.push_str("else ");
+            }
+            out.push_str("if (");
+            out.push_str(&condition);
+            out.push_str(") {\n");
+            let branch_indent = format!("{indent}    ");
+            let mut branch_bindings = matched.bindings;
+            let mut branch_types = matched.binding_types;
+            match &case.body {
+                core::MatchCaseBody::Expr(expr) if branches_return => self.emit_returning_expr(
+                    out,
+                    expr,
+                    &branch_indent,
+                    &branch_bindings,
+                    &branch_types,
+                )?,
+                core::MatchCaseBody::Expr(expr) => {
+                    out.push_str(&branch_indent);
+                    out.push_str(&self.emit_expr(expr, &branch_bindings)?);
+                    out.push_str(";\n");
+                }
+                core::MatchCaseBody::Block(block) => self.emit_statement_block(
+                    out,
+                    block,
+                    &branch_indent,
+                    &mut branch_bindings,
+                    &mut branch_types,
+                    used_locals,
+                    branches_return,
+                    loop_depth,
+                )?,
+            }
+            out.push_str(indent);
+            out.push_str("} ");
+        }
+        if statement.cases.is_empty() {
+            return None;
+        }
+        if statement.partial {
+            out.push_str("\n");
+        } else {
+            out.push_str("else {\n");
+            out.push_str(&format!(
+                "{indent}    throw new IllegalStateException(\"non-exhaustive Lume match\");\n"
+            ));
+            out.push_str(indent);
+            out.push_str("}\n");
+        }
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_for_statement(
+        &self,
+        out: &mut String,
+        statement: &core::ForStmt,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+    ) -> Option<()> {
+        let [generator] = statement.bindings.as_slice() else {
+            return None;
+        };
+        if generator.pattern.is_some()
+            || generator.destructure.is_some()
+            || !generator.values.is_empty()
+            || generator.bindings.len() != 1
+        {
+            return None;
+        }
+        let iterable = generator.iterable.as_ref()?;
+        let iterable = self.emit_expr(iterable, bindings)?;
+        let iterator = format!("__iterator{}", statement.span.start);
+
+        out.push_str(indent);
+        out.push_str("lume.core.LumeIterator<?> ");
+        out.push_str(&iterator);
+        out.push_str(" = lume.core.LumeIterator.from(");
+        out.push_str(&iterable);
+        out.push_str(");\n");
+        out.push_str(indent);
+        out.push_str("while (");
+        out.push_str(&iterator);
+        out.push_str(".hasNext()) {\n");
+
+        let binding = &generator.bindings[0];
+        let mut body_bindings = bindings.clone();
+        let mut body_types = binding_types.clone();
+        if binding.name == "_" {
+            out.push_str(&format!("{indent}    {iterator}.next();\n"));
+        } else {
+            let local = self.source_binding_local(&binding.name, used_locals)?;
+            used_locals.insert(local.id);
+            let java_name = java_local_name(local);
+            let binding_ty = if matches!(local.ty, ir::Type::Unknown) {
+                self.iterable_item_type(generator.iterable.as_ref()?, binding_types)?
+            } else {
+                local.ty.clone()
+            };
+            let java_type = self.names.value_type(&binding_ty);
+            out.push_str(&format!(
+                "{indent}    {java_type} {java_name} = ({java_type}) {iterator}.next();\n"
+            ));
+            body_bindings.insert(binding.name.clone(), java_name);
+            body_types.insert(binding.name.clone(), binding_ty);
+        }
+
+        self.emit_statement_block(
+            out,
+            &statement.body,
+            &format!("{indent}    "),
+            &mut body_bindings,
+            &mut body_types,
+            used_locals,
+            false,
+            loop_depth + 1,
+        )?;
+        out.push_str(indent);
+        out.push_str("}\n");
+        Some(())
+    }
+
+    fn iterable_item_type(
+        &self,
+        iterable: &core::Expr,
+        binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<ir::Type> {
+        let iterable_ty = match iterable {
+            core::Expr::Identifier { name, .. } => {
+                binding_types.get(name).cloned().or_else(|| {
+                    self.function
+                        .params
+                        .iter()
+                        .filter_map(|param| self.function.locals.get(param.0))
+                        .find(|local| local.name == *name)
+                        .map(|local| local.ty.clone())
+                })?
+            }
+            core::Expr::ListLiteral { items, .. } => {
+                let element = items
+                    .iter()
+                    .filter_map(source_literal_type)
+                    .find(|ty| !matches!(ty, ir::Type::Unknown))
+                    .unwrap_or(ir::Type::Unknown);
+                ir::Type::list(element)
+            }
+            _ => return None,
+        };
+        match iterable_ty {
+            ir::Type::Named { name, args }
+                if matches!(
+                    name.as_str(),
+                    "Vector" | "Iterable" | "Iterator" | "Array" | "LinkedList" | "Set"
+                ) && args.len() == 1 =>
+            {
+                args.into_iter().next()
+            }
+            ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
+                Some(ir::Type::Tuple(args))
+            }
+            ir::Type::Named { name, args } if name == "IntRange" && args.is_empty() => {
+                Some(ir::Type::Int)
+            }
+            _ => None,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_if_statement(
+        &self,
+        out: &mut String,
+        statement: &core::IfStmt,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+        branches_return: bool,
+    ) -> Option<()> {
+        if statement.pattern.is_some()
+            || statement.pattern_value.is_some()
+            || !statement.pattern_clauses.is_empty()
+            || !statement.bindings.is_empty()
+            || statement.binding_value.is_some()
+        {
+            return None;
+        }
+        let condition = self.emit_plain_conditions(
+            statement.condition.as_ref(),
+            &statement.condition_clauses,
+            bindings,
+        )?;
+        if branches_return && statement.else_branch.is_none() {
+            return None;
+        }
+        out.push_str(indent);
+        out.push_str("if (");
+        out.push_str(&condition);
+        out.push_str(") {\n");
+        let mut then_bindings = bindings.clone();
+        let mut then_types = binding_types.clone();
+        self.emit_statement_block(
+            out,
+            &statement.then_block,
+            &format!("{indent}    "),
+            &mut then_bindings,
+            &mut then_types,
+            used_locals,
+            branches_return,
+            loop_depth,
+        )?;
+        out.push_str(indent);
+        match &statement.else_branch {
+            Some(core::ElseBranch::If(next)) => {
+                out.push_str("} else ");
+                self.emit_if_statement_after_else(
+                    out,
+                    next,
+                    indent,
+                    bindings,
+                    binding_types,
+                    used_locals,
+                    loop_depth,
+                    branches_return,
+                )?;
+            }
+            Some(core::ElseBranch::Block(block)) => {
+                out.push_str("} else {\n");
+                let mut else_bindings = bindings.clone();
+                let mut else_types = binding_types.clone();
+                self.emit_statement_block(
+                    out,
+                    block,
+                    &format!("{indent}    "),
+                    &mut else_bindings,
+                    &mut else_types,
+                    used_locals,
+                    branches_return,
+                    loop_depth,
+                )?;
+                out.push_str(indent);
+                out.push_str("}\n");
+            }
+            None => out.push_str("}\n"),
+        }
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_if_statement_after_else(
+        &self,
+        out: &mut String,
+        statement: &core::IfStmt,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+        branches_return: bool,
+    ) -> Option<()> {
+        let mut nested = String::new();
+        self.emit_if_statement(
+            &mut nested,
+            statement,
+            indent,
+            bindings,
+            binding_types,
+            used_locals,
+            loop_depth,
+            branches_return,
+        )?;
+        out.push_str(nested.trim_start());
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_while_statement(
+        &self,
+        out: &mut String,
+        statement: &core::WhileStmt,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+    ) -> Option<()> {
+        let condition = self.emit_plain_conditions(None, &statement.condition_clauses, bindings)?;
+        out.push_str(indent);
+        out.push_str("while (");
+        out.push_str(&condition);
+        out.push_str(") {\n");
+        let mut body_bindings = bindings.clone();
+        let mut body_types = binding_types.clone();
+        self.emit_statement_block(
+            out,
+            &statement.body,
+            &format!("{indent}    "),
+            &mut body_bindings,
+            &mut body_types,
+            used_locals,
+            false,
+            loop_depth + 1,
+        )?;
+        out.push_str(indent);
+        out.push_str("}\n");
+        Some(())
+    }
+
+    fn emit_plain_conditions(
+        &self,
+        legacy_condition: Option<&core::Expr>,
+        clauses: &[core::IfConditionClause],
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        if let Some(condition) = legacy_condition {
+            if !clauses.is_empty() {
+                return None;
+            }
+            return self.emit_expr(condition, bindings);
+        }
+        let conditions = clauses
+            .iter()
+            .map(|clause| match clause {
+                core::IfConditionClause::Expr(condition) => self.emit_expr(condition, bindings),
+                core::IfConditionClause::Let(_) => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        (!conditions.is_empty()).then(|| conditions.join(" && "))
     }
 
     fn emit_assignment_target(
@@ -1810,10 +2261,8 @@ impl<'a> SourceBodyEmitter<'a> {
                 partial: false,
                 value,
                 cases,
-                ..
-            } if self.owner.is_some_and(|owner| owner.kind == TypeKind::Enum) => {
-                self.emit_match_return(out, value, cases, indent, bindings, binding_types)
-            }
+                span,
+            } => self.emit_match_return(out, value, cases, *span, indent, bindings, binding_types),
             _ => {
                 out.push_str(indent);
                 let source_ty = self
@@ -1937,20 +2386,40 @@ impl<'a> SourceBodyEmitter<'a> {
         out: &mut String,
         value: &core::Expr,
         cases: &[core::MatchCase],
+        span: crate::source::Span,
         indent: &str,
         bindings: &HashMap<String, String>,
         binding_types: &HashMap<String, ir::Type>,
     ) -> Option<()> {
+        let value_ty = self.expr_type(value, bindings)?;
         let value = self.emit_expr(value, bindings)?;
+        let match_local = format!("__match{}", span.start);
+        out.push_str(indent);
+        out.push_str("var ");
+        out.push_str(&match_local);
+        out.push_str(" = ");
+        out.push_str(&value);
+        out.push_str(";\n");
         for (index, case) in cases.iter().enumerate() {
-            if case.guard.is_some() {
-                return None;
-            }
-            let matched =
-                self.match_case_pattern(&case.pattern, &value, index, bindings, binding_types)?;
+            let matched = self.match_case_pattern(
+                &case.pattern,
+                &match_local,
+                &value_ty,
+                index,
+                bindings,
+                binding_types,
+            )?;
+            let condition = match &case.guard {
+                Some(guard) => format!(
+                    "({}) && ({})",
+                    matched.condition,
+                    self.emit_expr(guard, &matched.bindings)?
+                ),
+                None => matched.condition.clone(),
+            };
             out.push_str(indent);
             out.push_str("if (");
-            out.push_str(&matched.condition);
+            out.push_str(&condition);
             out.push_str(") {\n");
             self.emit_match_case_body(
                 out,
@@ -1987,32 +2456,113 @@ impl<'a> SourceBodyEmitter<'a> {
         &self,
         pattern: &ast::Pattern,
         value: &str,
+        value_ty: &ir::Type,
         index: usize,
         parent_bindings: &HashMap<String, String>,
         parent_binding_types: &HashMap<String, ir::Type>,
     ) -> Option<MatchedCase> {
         match pattern {
-            ast::Pattern::Record { path, fields, .. } => {
-                let case_name = path.last()?;
-                self.enum_record_case_match(
-                    case_name,
-                    fields,
+            ast::Pattern::Wildcard { .. } => Some(MatchedCase {
+                condition: "true".to_string(),
+                bindings: parent_bindings.clone(),
+                binding_types: parent_binding_types.clone(),
+            }),
+            ast::Pattern::Alias { inner, name, .. } => {
+                let mut matched = self.match_case_pattern(
+                    inner,
                     value,
+                    value_ty,
                     index,
                     parent_bindings,
                     parent_binding_types,
-                )
+                )?;
+                if name != "_" {
+                    let (alias_value, alias_ty) = self.pattern_alias_value(inner, value, value_ty);
+                    matched.bindings.insert(name.clone(), alias_value);
+                    matched.binding_types.insert(name.clone(), alias_ty);
+                }
+                Some(matched)
+            }
+            ast::Pattern::Literal { value: literal, .. } => Some(MatchedCase {
+                condition: format!(
+                    "java.util.Objects.equals({value}, {})",
+                    emit_pattern_literal(literal)?
+                ),
+                bindings: parent_bindings.clone(),
+                binding_types: parent_binding_types.clone(),
+            }),
+            ast::Pattern::Type { name, target, .. } => {
+                let target = type_ref_to_ir(target);
+                let java_type = self.names.value_type(&target);
+                let raw_java_type = java_type.split('<').next().unwrap_or(&java_type);
+                let mut bindings = parent_bindings.clone();
+                let mut binding_types = parent_binding_types.clone();
+                if let Some(name) = name.as_ref().filter(|name| name.as_str() != "_") {
+                    bindings.insert(name.clone(), format!("(({java_type}) {value})"));
+                    binding_types.insert(name.clone(), target);
+                }
+                Some(MatchedCase {
+                    condition: format!("{value} instanceof {raw_java_type}"),
+                    bindings,
+                    binding_types,
+                })
+            }
+            ast::Pattern::Record { path, fields, .. } => {
+                let case_name = path.last()?;
+                if self.enum_case(case_name).is_some() {
+                    self.enum_record_case_match(
+                        case_name,
+                        fields,
+                        value,
+                        index,
+                        parent_bindings,
+                        parent_binding_types,
+                    )
+                } else if core_enum_case_owner(case_name).is_some() {
+                    self.core_enum_record_case_match(
+                        case_name,
+                        fields,
+                        value,
+                        value_ty,
+                        index,
+                        parent_bindings,
+                        parent_binding_types,
+                    )
+                } else {
+                    self.declared_record_pattern_match(
+                        case_name,
+                        fields,
+                        value,
+                        index,
+                        parent_bindings,
+                        parent_binding_types,
+                    )
+                }
             }
             ast::Pattern::Constructor { path, args, .. } => {
                 let case_name = path.last()?;
-                self.enum_case_match(
-                    case_name,
-                    args,
-                    value,
-                    index,
-                    parent_bindings,
-                    parent_binding_types,
-                )
+                if self.enum_case(case_name).is_some() {
+                    self.enum_case_match(
+                        case_name,
+                        args,
+                        value,
+                        index,
+                        parent_bindings,
+                        parent_binding_types,
+                    )
+                } else if core_enum_case_owner(case_name).is_some() {
+                    self.core_enum_case_match(
+                        case_name,
+                        args,
+                        value,
+                        value_ty,
+                        index,
+                        parent_bindings,
+                        parent_binding_types,
+                    )
+                } else {
+                    None
+                }
             }
             ast::Pattern::Binding { name, .. } if self.enum_case(name).is_some() => self
                 .enum_case_match(
@@ -2023,9 +2573,294 @@ impl<'a> SourceBodyEmitter<'a> {
                     parent_bindings,
                     parent_binding_types,
                 ),
+            ast::Pattern::Binding { name, .. } if core_enum_case_owner(name).is_some() => self
+                .core_enum_case_match(
+                    name,
+                    &[],
+                    value,
+                    value_ty,
+                    index,
+                    parent_bindings,
+                    parent_binding_types,
+                ),
+            ast::Pattern::Binding { name, .. } => {
+                let mut bindings = parent_bindings.clone();
+                let mut binding_types = parent_binding_types.clone();
+                bindings.insert(name.clone(), value.to_string());
+                binding_types.insert(name.clone(), value_ty.clone());
+                Some(MatchedCase {
+                    condition: "true".to_string(),
+                    bindings,
+                    binding_types,
+                })
+            }
             ast::Pattern::List { .. } => None,
             _ => None,
         }
+    }
+
+    fn pattern_alias_value(
+        &self,
+        pattern: &ast::Pattern,
+        value: &str,
+        value_ty: &ir::Type,
+    ) -> (String, ir::Type) {
+        let named_pattern = match pattern {
+            ast::Pattern::Record { path, .. } | ast::Pattern::Constructor { path, .. } => {
+                path.last().map(String::as_str)
+            }
+            ast::Pattern::Binding { name, .. }
+                if core_enum_case_owner(name).is_some() || self.enum_case(name).is_some() =>
+            {
+                Some(name.as_str())
+            }
+            _ => None,
+        };
+
+        if let Some(case_name) = named_pattern
+            && self.enum_case(case_name).is_some()
+        {
+            let case_type = format!(
+                "{}{}",
+                java_type_name(case_name),
+                java_wildcard_type_args(
+                    self.owner.map(|owner| owner.type_params.len()).unwrap_or(0)
+                )
+            );
+            return (format!("(({case_type}) {value})"), value_ty.clone());
+        }
+
+        if let Some(case_name) = named_pattern
+            && let Some(owner) = core_enum_case_owner(case_name)
+        {
+            let arity = if owner == "Option" { 1 } else { 2 };
+            let case_type = format!(
+                "lume.core.{owner}.{}{}",
+                java_type_name(case_name),
+                java_wildcard_type_args(arity)
+            );
+            let args = match value_ty {
+                ir::Type::Named { name, args } if name == owner => args.clone(),
+                _ => vec![ir::Type::Unknown; arity],
+            };
+            return (
+                format!("(({case_type}) {value})"),
+                ir::Type::Named {
+                    name: format!("{owner}::{case_name}"),
+                    args,
+                },
+            );
+        }
+
+        if let Some(type_name) = named_pattern {
+            if self.bundle.ir.types.iter().any(|ty| ty.name == type_name) {
+                let java_type = self.names.named_type(type_name);
+                return (
+                    format!("(({java_type}) {value})"),
+                    ir::Type::Named {
+                        name: type_name.to_string(),
+                        args: Vec::new(),
+                    },
+                );
+            }
+        }
+
+        if let ast::Pattern::Type { target, .. } = pattern {
+            let target = type_ref_to_ir(target);
+            return (
+                format!("(({}) {value})", self.names.value_type(&target)),
+                target,
+            );
+        }
+
+        (value.to_string(), value_ty.clone())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn declared_record_pattern_match(
+        &self,
+        type_name: &str,
+        fields: &[ast::RecordPatternField],
+        value: &str,
+        index: usize,
+        parent_bindings: &HashMap<String, String>,
+        parent_binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<MatchedCase> {
+        let ty = self
+            .bundle
+            .ir
+            .types
+            .iter()
+            .find(|ty| ty.name == type_name)?;
+        if !matches!(
+            ty.kind,
+            TypeKind::Class | TypeKind::Record | TypeKind::Object
+        ) {
+            return None;
+        }
+        let java_type = self.names.named_type(type_name);
+        let case_local = format!("__case{index}");
+        let needs_case_local = fields
+            .iter()
+            .any(|field| !matches!(field.pattern, ast::Pattern::Wildcard { .. }));
+        let mut conditions = vec![if needs_case_local {
+            format!("{value} instanceof {java_type} {case_local}")
+        } else {
+            format!("{value} instanceof {java_type}")
+        }];
+        let mut bindings = parent_bindings.clone();
+        let mut binding_types = parent_binding_types.clone();
+        for field_pattern in fields {
+            let field = ty
+                .fields
+                .iter()
+                .find(|field| field.name == field_pattern.name)?;
+            let member = java_member_name(&field.name);
+            let access = if ty.kind == TypeKind::Record {
+                format!("{case_local}.{member}()")
+            } else {
+                format!("{case_local}.{member}")
+            };
+            match &field_pattern.pattern {
+                ast::Pattern::Wildcard { .. } => {}
+                ast::Pattern::Binding { name, .. } => {
+                    if name != "_" {
+                        bindings.insert(name.clone(), access);
+                        binding_types.insert(name.clone(), field.ty.clone());
+                    }
+                }
+                ast::Pattern::Literal { value, .. } => conditions.push(format!(
+                    "java.util.Objects.equals({access}, {})",
+                    emit_pattern_literal(value)?
+                )),
+                _ => return None,
+            }
+        }
+        Some(MatchedCase {
+            condition: conditions.join(" && "),
+            bindings,
+            binding_types,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn core_enum_record_case_match(
+        &self,
+        case_name: &str,
+        fields: &[ast::RecordPatternField],
+        value: &str,
+        value_ty: &ir::Type,
+        index: usize,
+        parent_bindings: &HashMap<String, String>,
+        parent_binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<MatchedCase> {
+        let field_defs = core_enum_case_fields(case_name, value_ty)?;
+        let patterns = fields
+            .iter()
+            .map(|field| {
+                field_defs
+                    .iter()
+                    .find(|(name, _)| name == &field.name)
+                    .map(|(_, ty)| (&field.pattern, field.name.as_str(), ty.clone()))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        self.core_enum_case_pattern_match(
+            case_name,
+            &patterns,
+            value,
+            index,
+            parent_bindings,
+            parent_binding_types,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn core_enum_case_match(
+        &self,
+        case_name: &str,
+        args: &[ast::Pattern],
+        value: &str,
+        value_ty: &ir::Type,
+        index: usize,
+        parent_bindings: &HashMap<String, String>,
+        parent_binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<MatchedCase> {
+        let fields = core_enum_case_fields(case_name, value_ty)?;
+        if fields.len() != args.len() {
+            return None;
+        }
+        let patterns = args
+            .iter()
+            .zip(fields)
+            .map(|(pattern, (name, ty))| (pattern, name, ty))
+            .collect::<Vec<_>>();
+        self.core_enum_case_pattern_match(
+            case_name,
+            &patterns,
+            value,
+            index,
+            parent_bindings,
+            parent_binding_types,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn core_enum_case_pattern_match(
+        &self,
+        case_name: &str,
+        patterns: &[(&ast::Pattern, &str, ir::Type)],
+        value: &str,
+        index: usize,
+        parent_bindings: &HashMap<String, String>,
+        parent_binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<MatchedCase> {
+        let owner = core_enum_case_owner(case_name)?;
+        let case_local = format!("__case{index}");
+        let arity = match owner {
+            "Option" => 1,
+            "Result" | "Either" => 2,
+            _ => return None,
+        };
+        let case_type = format!(
+            "lume.core.{owner}.{}{}",
+            java_type_name(case_name),
+            java_wildcard_type_args(arity)
+        );
+        let needs_case_local = patterns
+            .iter()
+            .any(|(pattern, _, _)| !matches!(pattern, ast::Pattern::Wildcard { .. }));
+        let condition = if needs_case_local {
+            format!("{value} instanceof {case_type} {case_local}")
+        } else {
+            format!("{value} instanceof {case_type}")
+        };
+        let mut bindings = parent_bindings.clone();
+        let mut binding_types = parent_binding_types.clone();
+        for (pattern, field_name, field_ty) in patterns {
+            match pattern {
+                ast::Pattern::Wildcard { .. } => {}
+                ast::Pattern::Binding { name, .. } => {
+                    if name == "_" {
+                        continue;
+                    }
+                    bindings.insert(
+                        name.clone(),
+                        format!(
+                            "(({}) {case_local}.{}())",
+                            self.names.value_type(field_ty),
+                            java_member_name(field_name)
+                        ),
+                    );
+                    binding_types.insert(name.clone(), field_ty.clone());
+                }
+                _ => return None,
+            }
+        }
+        Some(MatchedCase {
+            condition,
+            bindings,
+            binding_types,
+        })
     }
 
     fn enum_record_case_match(
@@ -2173,6 +3008,46 @@ impl<'a> SourceBodyEmitter<'a> {
                 Some(java_string_literal(&decode_lume_string_literal(raw)))
             }
             core::Expr::Unit { .. } => Some("lume.core.LumeUnit.INSTANCE".to_string()),
+            core::Expr::TupleLiteral { items, .. } if (2..=8).contains(&items.len()) => {
+                let items = items
+                    .iter()
+                    .map(|item| self.emit_expr(item, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(format!(
+                    "new lume.core.Tuple{}<>({})",
+                    items.len(),
+                    items.join(", ")
+                ))
+            }
+            core::Expr::ListLiteral { items, .. }
+                if matches!(
+                    self.expr_type(expr, bindings),
+                    Some(ir::Type::Named { name, args }) if name == "Map" && args.len() == 2
+                ) =>
+            {
+                let parts = items
+                    .iter()
+                    .map(|item| match item {
+                        core::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
+                        core::Expr::Binary {
+                            left,
+                            op: ast::BinaryOp::Colon,
+                            right,
+                            ..
+                        } => Some(format!(
+                            "new lume.core.Tuple2<>({}, {})",
+                            self.emit_expr(left, bindings)?,
+                            self.emit_expr(right, bindings)?
+                        )),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                if parts.is_empty() {
+                    Some("lume.core.LumeMap.empty()".to_string())
+                } else {
+                    Some(format!("lume.core.LumeMap.fromParts({})", parts.join(", ")))
+                }
+            }
             core::Expr::ListLiteral { items, .. } => {
                 if items
                     .iter()
@@ -2213,12 +3088,139 @@ impl<'a> SourceBodyEmitter<'a> {
                     Some(format!("{receiver}.{member}"))
                 }
             }
-            core::Expr::Unary { op, expr, .. } => {
-                let value = self.emit_expr(expr, bindings)?;
+            core::Expr::Member { receiver, name, .. } => {
+                if matches!(
+                    self.expr_type(expr, bindings),
+                    Some(ir::Type::Function { .. })
+                ) {
+                    return None;
+                }
+                let receiver_expr = self.emit_expr(receiver, bindings)?;
+                let member = java_member_name(name);
+                let receiver_ty = self.expr_type(receiver, bindings)?;
+                match receiver_ty {
+                    ir::Type::Tuple(_) => {
+                        let accessor = tuple_accessor_name(name)?;
+                        Some(format!("{receiver_expr}.{accessor}()"))
+                    }
+                    ir::Type::Named {
+                        name: type_name, ..
+                    } if enum_case_view_parts(&type_name).is_some()
+                        || is_core_accessor_backed_type(&type_name)
+                        || self.bundle.ir.types.iter().any(|ty| {
+                            ty.name == type_name
+                                && (ty.kind == TypeKind::Record
+                                    || ((ty.kind == TypeKind::Interface
+                                        || is_anonymous_object_type(ty))
+                                        && ty.fields.iter().any(|field| field.name == *name)))
+                        }) =>
+                    {
+                        Some(format!("{receiver_expr}.{member}()"))
+                    }
+                    ir::Type::Named { .. } => Some(format!("{receiver_expr}.{member}")),
+                    _ => None,
+                }
+            }
+            core::Expr::Index {
+                receiver, index, ..
+            } => {
+                let receiver_expr = self.emit_expr(receiver, bindings)?;
+                let index_expr = self.emit_expr(index, bindings)?;
+                match self.expr_type(receiver, bindings)? {
+                    ir::Type::Named { name, args }
+                        if matches!(name.as_str(), "Vector" | "Array") && args.len() == 1 =>
+                    {
+                        let result_ty = self
+                            .expr_type(expr, bindings)
+                            .unwrap_or_else(|| args[0].clone());
+                        Some(format!(
+                            "(({}) lume.core.LumeRuntime.indexValue({receiver_expr}, {index_expr}))",
+                            self.names.value_type(&result_ty)
+                        ))
+                    }
+                    ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
+                        Some(format!("{receiver_expr}.get({index_expr})"))
+                    }
+                    _ => None,
+                }
+            }
+            core::Expr::Is { left, target, .. } => {
+                let value = self.emit_expr(left, bindings)?;
+                let target = type_ref_to_ir(target);
+                if matches!(target, ir::Type::Never) {
+                    return Some("false".to_string());
+                }
+                if matches!(target, ir::Type::Unknown) || is_named_builtin(&target, "Any") {
+                    return Some(format!("{value} != null"));
+                }
+                if matches!(target, ir::Type::Record(_)) {
+                    return None;
+                }
+                let erased = match target {
+                    ir::Type::Named { name, .. } => ir::Type::Named {
+                        name,
+                        args: Vec::new(),
+                    },
+                    ir::Type::Tuple(items) => ir::Type::Tuple(vec![ir::Type::Unknown; items.len()]),
+                    ir::Type::Function { params, .. } => ir::Type::Function {
+                        params: vec![ir::Type::Unknown; params.len()],
+                        ret: Box::new(ir::Type::Unknown),
+                    },
+                    other => other,
+                };
+                let java_type = self.names.value_type(&erased);
+                let raw_java_type = java_type.split('<').next().unwrap_or(&java_type);
+                Some(format!("{value} instanceof {raw_java_type}"))
+            }
+            core::Expr::TypeOf { ty, .. } => Some(type_value_expr(&type_ref_to_ir(ty), self.names)),
+            core::Expr::Lambda { params, body, .. }
+                if !matches!(body.as_ref(), core::Expr::Block { .. })
+                    && params.iter().all(|param| param.destructure.is_none()) =>
+            {
+                let mut lambda_bindings = bindings.clone();
+                let java_params = params
+                    .iter()
+                    .enumerate()
+                    .map(|(index, param)| {
+                        let name = if param.name == "_" {
+                            format!("__ignored{index}")
+                        } else {
+                            format!("{}_arg{index}", java_member_name(&param.name))
+                        };
+                        if param.name != "_" {
+                            lambda_bindings.insert(param.name.clone(), name.clone());
+                        }
+                        name
+                    })
+                    .collect::<Vec<_>>();
+                let body = self.emit_expr(body, &lambda_bindings)?;
+                Some(format!("({}) -> {body}", java_params.join(", ")))
+            }
+            core::Expr::Unary {
+                op,
+                expr: operand,
+                span,
+            } => {
+                let value = self.emit_expr(operand, bindings)?;
                 match op {
                     ast::UnaryOp::Neg => Some(format!("(-{value})")),
-                    ast::UnaryOp::Not => Some(format!("(!{value})")),
-                    ast::UnaryOp::UnsafeExtract => None,
+                    ast::UnaryOp::Not => Some(format!("(!({value}))")),
+                    ast::UnaryOp::UnsafeExtract => {
+                        let result_ty = self
+                            .bundle
+                            .ir
+                            .source_exprs
+                            .iter()
+                            .find(|source| {
+                                source.function == self.function.id && source.span == *span
+                            })?
+                            .ty
+                            .clone();
+                        Some(format!(
+                            "(({}) lume.core.LumeRuntime.extractSuccessValue({value}))",
+                            self.names.value_type(&result_ty)
+                        ))
+                    }
                 }
             }
             core::Expr::Binary {
@@ -2257,7 +3259,9 @@ impl<'a> SourceBodyEmitter<'a> {
                     }
                 }
             }
-            core::Expr::Call { callee, args, .. } => self.emit_call(callee, args, bindings),
+            core::Expr::Call {
+                callee, args, span, ..
+            } => self.emit_call(callee, args, *span, bindings),
             _ => None,
         }
     }
@@ -2286,9 +3290,13 @@ impl<'a> SourceBodyEmitter<'a> {
         &self,
         callee: &core::Expr,
         args: &[core::CallArg],
+        span: crate::source::Span,
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
         match callee {
+            core::Expr::Identifier { name, .. } if name == "Any" && args.len() == 1 => {
+                self.emit_call_arg(&args[0], bindings)
+            }
             core::Expr::Identifier { name, .. } if name == "panic" => {
                 let message = match args.first() {
                     Some(arg) => self.emit_expr(&arg.value, bindings)?,
@@ -2332,21 +3340,41 @@ impl<'a> SourceBodyEmitter<'a> {
                 emit_functional_call(&target, &args)
             }
             core::Expr::Identifier { name, .. } => {
-                let mut candidates = self.bundle.ir.functions.iter().filter(|candidate| {
-                    candidate.name == *name
-                        && matches!(candidate.kind, FunctionKind::TopLevel)
-                        && function_accepts_arg_len(candidate, args.len())
-                });
-                let target = candidates.next()?;
-                if candidates.next().is_some()
+                let call = self.source_call(span)?;
+                if let ir::Callee::Intrinsic(intrinsic) = &call.callee {
+                    return self.emit_source_intrinsic_call(intrinsic, args, call, bindings);
+                }
+                if let ir::Callee::Named { path } = &call.callee {
+                    return self.emit_source_named_call(path, args, call, bindings);
+                }
+                let ir::Callee::Direct(target) = call.callee else {
+                    return None;
+                };
+                let target = self.bundle.ir.function(target)?;
+                if target.name != *name
                     || target.param_variadic.iter().any(|variadic| *variadic)
+                    || target.param_lazy.iter().any(|lazy| *lazy)
                     || !target.reified_type_params.is_empty()
                 {
                     return None;
                 }
-                let args = args
+                let ordered_args = self.ordered_source_args(args, call)?;
+                let args = ordered_args
                     .iter()
-                    .map(|arg| self.emit_call_arg(arg, bindings))
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        let expected = target
+                            .params
+                            .get(index)
+                            .and_then(|param| target.locals.get(param.0))
+                            .map(|local| &local.ty);
+                        match expected {
+                            Some(expected) => {
+                                self.emit_expr_against(&arg.value, bindings, expected)
+                            }
+                            None => self.emit_call_arg(arg, bindings),
+                        }
+                    })
                     .collect::<Option<Vec<_>>>()?;
                 let method = java_member_name(&target.name);
                 if matches!(self.function.kind, FunctionKind::TopLevel) {
@@ -2390,21 +3418,46 @@ impl<'a> SourceBodyEmitter<'a> {
                 Some("lume.core.LumeIterator.from(lume.core.LumeVector.of())".to_string())
             }
             core::Expr::Member { name, .. } if lazy_core_member_call_name(name) => None,
+            core::Expr::Member { receiver, name, .. } if name == "toStr" && args.is_empty() => {
+                Some(format!(
+                    "String.valueOf({})",
+                    self.emit_expr(receiver, bindings)?
+                ))
+            }
+            core::Expr::Member { receiver, name, .. } if name == "equals" && args.len() == 1 => {
+                Some(format!(
+                    "java.util.Objects.equals({}, {})",
+                    self.emit_expr(receiver, bindings)?,
+                    self.emit_call_arg(&args[0], bindings)?
+                ))
+            }
+            core::Expr::Member { receiver, name, .. } if name == "sameValue" && args.len() == 1 => {
+                Some(format!(
+                    "lume.core.LumeRuntime.sameValue({}, {})",
+                    self.emit_expr(receiver, bindings)?,
+                    self.emit_call_arg(&args[0], bindings)?
+                ))
+            }
+            core::Expr::Member { receiver, name, .. } if name == "hash" && args.is_empty() => {
+                Some(format!(
+                    "lume.core.LumeRuntime.hashValue({})",
+                    self.emit_expr(receiver, bindings)?
+                ))
+            }
+            core::Expr::Member { receiver, name, .. }
+                if matches!(name.as_str(), "isSuccess" | "isSet" | "isDefined")
+                    && args.is_empty() =>
+            {
+                Some(format!(
+                    "lume.core.LumeRuntime.extractSuccessIsSet({})",
+                    self.emit_expr(receiver, bindings)?
+                ))
+            }
             core::Expr::Member { receiver, name, .. } => {
-                // Argument adaptation (notably Lume vararg packing) is already
-                // resolved in lowered IR. Keep argument-bearing member calls on
-                // that path until the readable emitter consumes typed calls.
                 if !args.is_empty() {
-                    return None;
+                    return self.emit_resolved_member_call(receiver, name, args, span, bindings);
                 }
-                let mut receiver_expr = self.emit_expr(receiver, bindings)?;
-                if let Some(receiver_ty) = self.expr_type(receiver, bindings)
-                    && let Some(param) = self.type_param_name(&receiver_ty)
-                    && let Some(bound) = self.generic_bound_for_type_param(param)
-                {
-                    receiver_expr =
-                        format!("(({}) {})", self.names.value_type(&bound), receiver_expr);
-                }
+                let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
                 let args = args
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
@@ -2418,6 +3471,251 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             _ => None,
         }
+    }
+
+    fn emit_source_named_call(
+        &self,
+        path: &[String],
+        args: &[core::CallArg],
+        call: &ir::SourceCall,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let ordered_args = self.ordered_source_args(args, call)?;
+        if call.lowered_args.len() != ordered_args.len() {
+            return None;
+        }
+        let emitter = FunctionEmitter::new(self.bundle, self.function, self.names);
+        let param_specs = match path {
+            [owner]
+                if self.names.is_java_type(owner) || emitter.is_lume_constructible_type(owner) =>
+            {
+                emitter.constructor_param_specs(owner, &call.lowered_args)
+            }
+            [owner, method] => emitter
+                .external_method_param_specs(owner, method, &call.lowered_args)
+                .or_else(|| emitter.type_method_param_specs(owner, method, &call.lowered_args)),
+            _ => None,
+        };
+        if param_specs.as_ref().is_some_and(|specs| {
+            specs.len() != ordered_args.len()
+                || specs
+                    .iter()
+                    .any(|spec| spec.lazy || spec.variadic || spec.coercion.is_some())
+        }) {
+            return None;
+        }
+        let emitted = ordered_args
+            .iter()
+            .enumerate()
+            .map(
+                |(index, arg)| match param_specs.as_ref().and_then(|specs| specs.get(index)) {
+                    Some(spec) => self.emit_expr_against(&arg.value, bindings, &spec.ty),
+                    None => self.emit_call_arg(arg, bindings),
+                },
+            )
+            .collect::<Option<Vec<_>>>()?;
+        let joined = emitted.join(", ");
+
+        match path {
+            [case] if core_enum_case_owner(case).is_some() => {
+                self.emit_core_enum_case(case, &emitted)
+            }
+            [owner, case]
+                if core_enum_case_owner(case).is_some_and(|expected| expected == owner) =>
+            {
+                self.emit_core_enum_case(case, &emitted)
+            }
+            [owner, case] if emitter.enum_case(owner, case).is_some() => {
+                let generic = self
+                    .bundle
+                    .ir
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == *owner)
+                    .is_some_and(|ty| !ty.type_params.is_empty())
+                    .then_some("<>")
+                    .unwrap_or("");
+                Some(format!(
+                    "new {}.{}{generic}({joined})",
+                    self.names.named_type(owner),
+                    java_type_name(case)
+                ))
+            }
+            [owner] if owner == "Vector" => Some(format!("lume.core.LumeVector.of({joined})")),
+            [owner] if owner == "LinkedList" => {
+                Some(format!("lume.core.LumeLinkedList.of({joined})"))
+            }
+            [owner] if owner == "Map" => {
+                if emitted.is_empty() {
+                    Some("lume.core.LumeMap.empty()".to_string())
+                } else {
+                    Some(format!("lume.core.LumeMap.fromParts({joined})"))
+                }
+            }
+            [owner] if owner == "Set" && emitted.is_empty() => {
+                Some("lume.core.LumeSet.empty()".to_string())
+            }
+            [owner] if owner == "Range" && emitted.len() == 2 => {
+                Some(format!("new lume.core.Range({joined})"))
+            }
+            [owner] if self.names.is_java_type(owner) => Some(format!(
+                "new {}{}({joined})",
+                self.names.named_type(owner),
+                self.names.java_constructor_type_args(owner)
+            )),
+            [owner] if emitter.is_lume_constructible_type(owner) => {
+                let generic = emitter.lume_constructor_type_args(owner);
+                Some(format!(
+                    "new {}{generic}({joined})",
+                    self.names.named_type(owner)
+                ))
+            }
+            [owner, method] if self.names.is_java_single_type(owner) => Some(format!(
+                "{}.INSTANCE.{}({joined})",
+                self.names.named_type(owner),
+                java_member_name(method)
+            )),
+            [owner, method] if self.names.is_java_type(owner) => Some(format!(
+                "{}.{}({joined})",
+                self.names.named_type(owner),
+                java_member_name(method)
+            )),
+            [owner, method] if emitter.is_lume_single_type(owner) => Some(format!(
+                "{}.INSTANCE.{}({joined})",
+                self.names.named_type(owner),
+                java_member_name(method)
+            )),
+            _ => None,
+        }
+    }
+
+    fn emit_source_intrinsic_call(
+        &self,
+        intrinsic: &ir::Intrinsic,
+        args: &[core::CallArg],
+        call: &ir::SourceCall,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let ordered_args = self.ordered_source_args(args, call)?;
+        let emitted = ordered_args
+            .iter()
+            .enumerate()
+            .map(|(index, arg)| {
+                let value = self.emit_call_arg(arg, bindings)?;
+                if call
+                    .param_specs
+                    .get(index)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|spec| spec.lazy)
+                {
+                    Some(format!("() -> {value}"))
+                } else {
+                    Some(value)
+                }
+            })
+            .collect::<Option<Vec<_>>>()?;
+
+        match intrinsic {
+            ir::Intrinsic::Print => Some(format!(
+                "lume.core.LumeRuntime.print({})",
+                emitted.join(", ")
+            )),
+            ir::Intrinsic::Println => Some(format!(
+                "lume.core.LumeRuntime.println({})",
+                emitted.join(", ")
+            )),
+            ir::Intrinsic::Printf => Some(format!(
+                "lume.core.LumeRuntime.printf({})",
+                emitted.join(", ")
+            )),
+            ir::Intrinsic::Panic => Some(format!(
+                "lume.core.LumePanic.panic({})",
+                emitted
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| java_string_literal("panic"))
+            )),
+            ir::Intrinsic::Assert => {
+                let condition = emitted.first()?;
+                let message = emitted
+                    .get(1)
+                    .cloned()
+                    .unwrap_or_else(|| java_string_literal("assertion failed"));
+                Some(format!(
+                    "lume.core.LumeRuntime.assertTrue({condition}, {message})"
+                ))
+            }
+            ir::Intrinsic::Ensure if emitted.len() == 2 => Some(format!(
+                "lume.core.LumeRuntime.ensure({}, {})",
+                emitted[0], emitted[1]
+            )),
+            ir::Intrinsic::Identity if emitted.len() == 1 => emitted.first().cloned(),
+            _ => None,
+        }
+    }
+
+    fn source_call(&self, span: crate::source::Span) -> Option<&ir::SourceCall> {
+        self.bundle
+            .ir
+            .source_calls
+            .iter()
+            .find(|call| call.function == self.function.id && call.span == span)
+    }
+
+    fn ordered_source_args<'call>(
+        &self,
+        args: &'call [core::CallArg],
+        call: &ir::SourceCall,
+    ) -> Option<Vec<&'call core::CallArg>> {
+        call.ordered_arg_spans
+            .iter()
+            .map(|span| find_source_call_arg(args, *span))
+            .collect()
+    }
+
+    fn emit_resolved_member_call(
+        &self,
+        receiver: &core::Expr,
+        name: &str,
+        args: &[core::CallArg],
+        span: crate::source::Span,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let call = self.source_call(span)?;
+        let ir::Callee::Method {
+            receiver: lowered_receiver,
+            method,
+        } = &call.callee
+        else {
+            return None;
+        };
+        if method != name {
+            return None;
+        }
+
+        let param_specs = FunctionEmitter::new(self.bundle, self.function, self.names)
+            .method_param_specs_for_receiver(lowered_receiver, method, &call.lowered_args)?;
+        if param_specs.len() != args.len()
+            || param_specs
+                .iter()
+                .any(|spec| spec.lazy || spec.variadic || spec.coercion.is_some())
+        {
+            return None;
+        }
+
+        let ordered_args = self.ordered_source_args(args, call)?;
+        let args = ordered_args
+            .iter()
+            .zip(&param_specs)
+            .map(|(arg, spec)| self.emit_expr_against(&arg.value, bindings, &spec.ty))
+            .collect::<Option<Vec<_>>>()?;
+        let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
+        Some(format!(
+            "{}.{}({})",
+            receiver_expr,
+            java_member_name(name),
+            args.join(", ")
+        ))
     }
 
     fn emit_call_arg(
@@ -2468,16 +3766,83 @@ impl<'a> SourceBodyEmitter<'a> {
         expr: &core::Expr,
         _bindings: &HashMap<String, String>,
     ) -> Option<ir::Type> {
-        match expr {
-            core::Expr::Identifier { name, .. } => self
-                .function
-                .params
-                .iter()
-                .filter_map(|param| self.function.locals.get(param.0))
-                .find(|local| local.name == *name)
-                .map(|local| local.ty.clone()),
-            _ => None,
+        if matches!(expr, core::Expr::Identifier { name, .. } if name == "this") {
+            return self.owner.map(|owner| ir::Type::Named {
+                name: owner.name.clone(),
+                args: owner
+                    .type_params
+                    .iter()
+                    .map(|param| ir::Type::TypeParam(param.clone()))
+                    .collect(),
+            });
         }
+        self.bundle
+            .ir
+            .source_exprs
+            .iter()
+            .find(|source| source.function == self.function.id && source.span == expr.span())
+            .filter(|source| !matches!(source.ty, ir::Type::Unknown))
+            .map(|source| source.ty.clone())
+            .or_else(|| match expr {
+                core::Expr::Identifier { name, .. } => self
+                    .function
+                    .params
+                    .iter()
+                    .filter_map(|param| self.function.locals.get(param.0))
+                    .find(|local| local.name == *name)
+                    .map(|local| local.ty.clone()),
+                _ => None,
+            })
+    }
+
+    fn emit_receiver_expr(
+        &self,
+        receiver: &core::Expr,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let mut receiver_expr = self.emit_expr(receiver, bindings)?;
+        let Some(mut receiver_ty) = self.expr_type(receiver, bindings) else {
+            return Some(receiver_expr);
+        };
+
+        if let Some(param) = self.type_param_name(&receiver_ty)
+            && let Some(bound) = self.generic_bound_for_type_param(param)
+        {
+            receiver_ty = bound;
+        }
+
+        let declared_ty = match receiver {
+            core::Expr::Identifier { name, .. } => {
+                let reference = bindings
+                    .get(name)
+                    .cloned()
+                    .or_else(|| self.param_reference(name));
+                reference.and_then(|reference| {
+                    self.function
+                        .locals
+                        .iter()
+                        .find(|local| java_local_name(local) == reference)
+                        .map(|local| local.ty.clone())
+                })
+            }
+            _ => None,
+        };
+        let receiver_java_type = self.names.value_type(&receiver_ty);
+        let needs_cast = declared_ty
+            .as_ref()
+            .map(|declared| self.names.value_type(declared) != receiver_java_type)
+            .unwrap_or_else(|| {
+                self.type_param_name(
+                    &self
+                        .expr_type(receiver, bindings)
+                        .unwrap_or(ir::Type::Unknown),
+                )
+                .is_some()
+            });
+        if needs_cast && receiver_java_type != "Object" {
+            receiver_expr = format!("(({receiver_java_type}) {receiver_expr})");
+        }
+        Some(receiver_expr)
     }
 
     fn pattern_binding_expr_type(
@@ -6076,6 +7441,74 @@ fn type_is_named_or_primitive(
 fn is_java_void_type(ty: &ir::Type) -> bool {
     matches!(ty, ir::Type::Unit)
         || matches!(ty, ir::Type::Named { name, args } if name == "Unit" && args.is_empty())
+}
+
+fn source_literal_type(expr: &core::Expr) -> Option<ir::Type> {
+    match expr {
+        core::Expr::Integer { .. } => Some(ir::Type::Int),
+        core::Expr::Float { .. } => Some(ir::Type::Float),
+        core::Expr::String { .. } => Some(ir::Type::Str),
+        core::Expr::Bool { .. } => Some(ir::Type::Bool),
+        core::Expr::Unit { .. } => Some(ir::Type::Unit),
+        core::Expr::Spread { value, .. } => source_literal_type(value),
+        _ => None,
+    }
+}
+
+fn emit_pattern_literal(expr: &ast::Expr) -> Option<String> {
+    match expr {
+        ast::Expr::Integer { raw, .. } => Some(format!("{raw}L")),
+        ast::Expr::Float { raw, .. } => Some(raw.clone()),
+        ast::Expr::String { raw, .. } => {
+            Some(java_string_literal(&decode_lume_string_literal(raw)))
+        }
+        ast::Expr::Bool { value, .. } => Some(value.to_string()),
+        ast::Expr::Unit { .. } => Some("lume.core.LumeUnit.INSTANCE".to_string()),
+        ast::Expr::Unary {
+            op: ast::UnaryOp::Neg,
+            expr,
+            ..
+        } => Some(format!("(-{})", emit_pattern_literal(expr)?)),
+        ast::Expr::Group { inner, .. } => emit_pattern_literal(inner),
+        _ => None,
+    }
+}
+
+fn core_enum_case_fields(
+    case_name: &str,
+    value_ty: &ir::Type,
+) -> Option<Vec<(&'static str, ir::Type)>> {
+    let owner = core_enum_case_owner(case_name)?;
+    let ir::Type::Named { name, args } = value_ty else {
+        return None;
+    };
+    if name != owner {
+        return None;
+    }
+    match (owner, case_name, args.as_slice()) {
+        ("Option", "Some", [value]) => Some(vec![("value", value.clone())]),
+        ("Option", "None", [_]) => Some(Vec::new()),
+        ("Result", "Ok", [value, _]) => Some(vec![("value", value.clone())]),
+        ("Result", "Err", [_, error]) => Some(vec![("error", error.clone())]),
+        ("Either", "Left", [left, _]) => Some(vec![("value", left.clone())]),
+        ("Either", "Right", [_, right]) => Some(vec![("value", right.clone())]),
+        _ => None,
+    }
+}
+
+fn find_source_call_arg(
+    args: &[core::CallArg],
+    span: crate::source::Span,
+) -> Option<&core::CallArg> {
+    args.iter().find_map(|arg| {
+        if arg.span == span {
+            return Some(arg);
+        }
+        match &arg.value {
+            core::Expr::RecordLiteral { fields, .. } => find_source_call_arg(fields, span),
+            _ => None,
+        }
+    })
 }
 
 fn is_named_builtin(ty: &ir::Type, expected: &str) -> bool {

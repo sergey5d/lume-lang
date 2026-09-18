@@ -4119,6 +4119,7 @@ impl<'a> FunctionLowerer<'a> {
         expr: &Expr,
         expected: Option<&ir::Type>,
     ) -> ir::Operand {
+        self.retain_source_expr(expr, expected);
         if let Some(value) = explicit_any_widening_value(expr) {
             return self.lower_expr(value);
         }
@@ -4189,6 +4190,7 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_expr(&mut self, expr: &Expr) -> ir::Operand {
+        self.retain_source_expr(expr, None);
         if self.current_block.is_none() {
             return ir::Operand::Const(ir::Constant::Unit);
         }
@@ -4315,6 +4317,31 @@ impl<'a> FunctionLowerer<'a> {
                 ir::Operand::Const(ir::Constant::Unit)
             }
         }
+    }
+
+    fn retain_source_expr(&mut self, expr: &Expr, expected: Option<&ir::Type>) {
+        let span = expr.span();
+        let inferred = self.infer_expr_type(expr);
+        if let Some(existing) = self
+            .program
+            .source_exprs
+            .iter_mut()
+            .find(|source| source.function == self.function_id && source.span == span)
+        {
+            if matches!(existing.ty, ir::Type::Unknown) && !matches!(inferred, ir::Type::Unknown) {
+                existing.ty = inferred;
+            }
+            if existing.expected.is_none() {
+                existing.expected = expected.cloned();
+            }
+            return;
+        }
+        self.program.source_exprs.push(ir::SourceExpr {
+            function: self.function_id,
+            span,
+            ty: inferred,
+            expected: expected.cloned(),
+        });
     }
 
     fn lower_expr_from_rvalue(&mut self, expr: &Expr) -> ir::Operand {
@@ -5851,7 +5878,7 @@ impl<'a> FunctionLowerer<'a> {
                 callee,
                 args,
                 style,
-                ..
+                span,
             } => {
                 if let Expr::Member { receiver, name, .. } = callee.as_ref()
                     && name == "equals"
@@ -5908,8 +5935,27 @@ impl<'a> FunctionLowerer<'a> {
                 lowered_args.extend(
                     self.builtin_reified_metadata_evidence_args(call_callee, &explicit_type_args),
                 );
+                let lowered_callee = self.lower_callee(call_callee);
+                self.program.source_calls.push(ir::SourceCall {
+                    function: self.function_id,
+                    span: *span,
+                    callee: lowered_callee.clone(),
+                    lowered_args: lowered_args.clone(),
+                    ordered_arg_spans: ordered_args.iter().map(|arg| arg.span).collect(),
+                    param_specs: expected_args
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|spec| {
+                            spec.map(|spec| ir::SourceCallParamSpec {
+                                ty: spec.ty,
+                                lazy: spec.lazy,
+                                variadic: spec.variadic,
+                            })
+                        })
+                        .collect(),
+                });
                 Some(ir::RValue::Call {
-                    callee: self.lower_callee(call_callee),
+                    callee: lowered_callee,
                     args: lowered_args,
                     structural: call_uses_structural_record_arg(&normalized_args, *style),
                 })
@@ -10015,5 +10061,52 @@ mod tests {
             lowered.core_bodies.get(&choose.id),
             Some(core::CallableBody::Expr(core::Expr::If { .. }))
         ));
+    }
+
+    #[test]
+    fn retains_resolved_call_metadata_for_source_backends() {
+        let program = parse_inline(
+            r#"
+            def add(left Int, right Int) Int = left + right
+            def main() Int = add(1, 2)
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let add = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "add")
+            .expect("add function");
+        let main = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "main")
+            .expect("main function");
+        let call = ir
+            .source_calls
+            .iter()
+            .find(|call| call.function == main.id)
+            .expect("resolved main call");
+        assert!(matches!(call.callee, ir::Callee::Direct(id) if id == add.id));
+        assert_eq!(call.ordered_arg_spans.len(), 2);
+        assert_eq!(call.param_specs.len(), 2);
+        assert!(
+            call.param_specs.iter().all(|spec| {
+                spec.as_ref().is_some_and(|spec| {
+                    spec.ty == ir::Type::named("Int") && !spec.lazy && !spec.variadic
+                })
+            }),
+            "{:#?}",
+            call.param_specs
+        );
+        let call_expr = ir
+            .source_exprs
+            .iter()
+            .find(|expr| expr.function == main.id && expr.span == call.span)
+            .expect("checked source expression");
+        assert_eq!(call_expr.ty, ir::Type::named("Int"));
     }
 }
