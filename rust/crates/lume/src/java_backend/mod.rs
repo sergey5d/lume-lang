@@ -22,6 +22,14 @@ use crate::{
 pub struct JavaBackendOptions {
     pub output_dir: PathBuf,
     pub classpath: Vec<PathBuf>,
+    pub generation_style: JavaGenerationStyle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum JavaGenerationStyle {
+    #[default]
+    Readable,
+    Lowered,
 }
 
 impl JavaBackendOptions {
@@ -29,11 +37,17 @@ impl JavaBackendOptions {
         Self {
             output_dir: output_dir.into(),
             classpath: Vec::new(),
+            generation_style: JavaGenerationStyle::Readable,
         }
     }
 
     pub fn with_classpath_entry(mut self, entry: impl Into<PathBuf>) -> Self {
         self.classpath.push(entry.into());
+        self
+    }
+
+    pub fn with_generation_style(mut self, generation_style: JavaGenerationStyle) -> Self {
+        self.generation_style = generation_style;
         self
     }
 }
@@ -72,7 +86,11 @@ pub fn generate_java_path(
     let bundle = bundled
         .bundle
         .expect("backend bundle after successful build");
-    let sources = emit::render_declaration_skeletons(&bundle, &external_resolution.classes);
+    let sources = emit::render_declaration_skeletons(
+        &bundle,
+        &external_resolution.classes,
+        options.generation_style,
+    );
     let unsupported_diagnostics =
         unsupported_java_body_diagnostics(&bundle.root_display_path, &sources);
     if !unsupported_diagnostics.is_empty() {
@@ -3001,6 +3019,87 @@ enum Maybe[T] {
     }
 
     #[test]
+    fn defaults_to_readable_java_and_keeps_lowered_java_available() {
+        let temp = temp_path("lume-java-generation-styles");
+        let source = temp.join("readable.lum");
+        let readable_out = temp.join("readable");
+        let lowered_out = temp.join("lowered");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/readable
+
+def add(left Int, right Int) Int {
+    total Int = left + right
+    total
+}
+
+def twice(value Int) Int = add(value, value)
+
+def main() Int = twice(3)
+"#,
+        )
+        .expect("write source");
+
+        let readable = generate_java_path(&source, JavaBackendOptions::new(&readable_out))
+            .expect("generate readable Java");
+        assert!(
+            readable.diagnostics.is_empty(),
+            "{:?}",
+            readable.diagnostics
+        );
+
+        let lowered = generate_java_path(
+            &source,
+            JavaBackendOptions::new(&lowered_out)
+                .with_generation_style(JavaGenerationStyle::Lowered),
+        )
+        .expect("generate lowered Java");
+        assert!(lowered.diagnostics.is_empty(), "{:?}", lowered.diagnostics);
+
+        let relative = Path::new("demo/readable/ReadableModule.java");
+        let readable_java =
+            fs::read_to_string(readable_out.join(relative)).expect("read readable Java");
+        let lowered_java =
+            fs::read_to_string(lowered_out.join(relative)).expect("read lowered Java");
+
+        assert!(readable_java.contains("Long total_2 = (left_0 + right_1);"));
+        assert!(readable_java.contains("return total_2;"));
+        assert!(readable_java.contains("return add(value_0, value_0);"));
+        assert!(!readable_java.contains("__block"));
+        assert!(!readable_java.contains("while (true)"));
+        assert!(lowered_java.contains("__block"));
+        assert!(lowered_java.contains("while (true)"));
+
+        if command_available("javac") {
+            for output_dir in [&readable_out, &lowered_out] {
+                let classes = output_dir.join("classes");
+                let mut sources = Vec::new();
+                collect_java_sources(output_dir, &mut sources).expect("collect generated Java");
+                fs::create_dir_all(&classes).expect("create classes dir");
+                run_checked(
+                    Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                    "javac",
+                );
+                let output = run_checked(
+                    Command::new("java")
+                        .arg("-cp")
+                        .arg(&classes)
+                        .arg("demo.readable.ReadableMain"),
+                    "java",
+                );
+                assert_eq!(
+                    String::from_utf8(output.stdout).expect("Java stdout utf8"),
+                    "6\n"
+                );
+            }
+        }
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn emits_typed_enum_payload_pattern_bindings() {
         let temp = temp_path("lume-java-typed-enum-pattern-bindings");
         let source = temp.join("main.lum");
@@ -4416,7 +4515,11 @@ def main() Unit {
         )
         .expect("write source");
 
-        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        let result = generate_java_path(
+            &source,
+            JavaBackendOptions::new(&out).with_generation_style(JavaGenerationStyle::Lowered),
+        )
+        .expect("generate");
 
         assert!(result.diagnostics.is_empty());
         let module =

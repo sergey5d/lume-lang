@@ -12,9 +12,8 @@ source
 -> resolver
 -> type checker
 -> body-level Core desugaring
--> lowered IR
--> runtime metadata
--> interpreter
+-> readable Java (default)
+   or lowered IR -> low-level Java / interpreter
 ```
 
 ## Current Scope
@@ -73,6 +72,17 @@ cargo run --manifest-path rust/Cargo.toml -p lume -- tokens examples/os.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- parse examples/random_code/bumper.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- check examples/import_forms.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- run examples/range.lum
+cargo run --manifest-path rust/Cargo.toml -p lume -- gen examples/range.lum --out build/generated/lume
+```
+
+`gen` produces readable, source-shaped Java by default. During the migration,
+constructs not yet covered by the readable emitter use the existing lowered IR
+emitter so generation remains complete. Use `--java-style lowered` to force the
+low-level control-flow backend for every callable:
+
+```bash
+cargo run --manifest-path rust/Cargo.toml -p lume -- \
+  gen examples/range.lum --out build/generated/lume --java-style lowered
 ```
 
 The `tokens` command prints the token stream with spans.

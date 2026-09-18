@@ -7,7 +7,7 @@ use crate::{
     ast::{self, TypeKind, TypeRef, Visibility},
     backend::BackendBundle,
     ir::{self, FunctionKind},
-    java_backend::{JavaExternalClass, JavaPrimitiveCoercion},
+    java_backend::{JavaExternalClass, JavaGenerationStyle, JavaPrimitiveCoercion},
 };
 
 pub(crate) struct JavaSource {
@@ -21,6 +21,7 @@ const MAX_JAVA_FUNCTION_ARITY: usize = 12;
 pub(crate) fn render_declaration_skeletons(
     bundle: &BackendBundle,
     external_classes: &HashMap<String, JavaExternalClass>,
+    generation_style: JavaGenerationStyle,
 ) -> Vec<JavaSource> {
     let package = JavaPackage::from_module(bundle.ir.module.as_deref());
     let names = JavaNames::from_external_classes(external_classes);
@@ -33,7 +34,7 @@ pub(crate) fn render_declaration_skeletons(
         &mut source_indexes,
         JavaSource {
             relative_path: module_path,
-            contents: render_module_wrapper(bundle, &package, &names),
+            contents: render_module_wrapper(bundle, &package, &names, generation_style),
         },
         false,
     );
@@ -52,7 +53,7 @@ pub(crate) fn render_declaration_skeletons(
             &mut source_indexes,
             JavaSource {
                 relative_path,
-                contents: render_type_shell(bundle, ty, &package, &names),
+                contents: render_type_shell(bundle, ty, &package, &names, generation_style),
             },
             is_java_library_placeholder_type(ty),
         );
@@ -95,6 +96,7 @@ fn render_module_wrapper(
     bundle: &BackendBundle,
     package: &JavaPackage,
     names: &JavaNames,
+    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
@@ -121,7 +123,7 @@ fn render_module_wrapper(
         out.push('\n');
         out.push_str("    static ");
         push_function_signature(&mut out, function, names);
-        push_function_body(&mut out, bundle, function, names);
+        push_function_body(&mut out, bundle, function, names, generation_style);
         let has_fixed_overload = variadic_fixed_arity(function).is_some_and(|arity| {
             bundle.ir.functions.iter().any(|other| {
                 other.id != function.id
@@ -179,17 +181,18 @@ fn render_type_shell(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
+    generation_style: JavaGenerationStyle,
 ) -> String {
     if is_anonymous_object_type(ty) {
-        return render_interface(bundle, ty, package, names);
+        return render_interface(bundle, ty, package, names, generation_style);
     }
     match ty.kind {
         TypeKind::Annotation => render_annotation(bundle, ty, package, names),
-        TypeKind::Class => render_class(bundle, ty, package, names),
-        TypeKind::Record => render_shape(bundle, ty, package, names),
-        TypeKind::Object => render_single(bundle, ty, package, names),
-        TypeKind::Interface => render_interface(bundle, ty, package, names),
-        TypeKind::Enum => render_enum(bundle, ty, package, names),
+        TypeKind::Class => render_class(bundle, ty, package, names, generation_style),
+        TypeKind::Record => render_shape(bundle, ty, package, names, generation_style),
+        TypeKind::Object => render_single(bundle, ty, package, names, generation_style),
+        TypeKind::Interface => render_interface(bundle, ty, package, names, generation_style),
+        TypeKind::Enum => render_enum(bundle, ty, package, names, generation_style),
     }
 }
 
@@ -198,6 +201,7 @@ fn render_class(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
+    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
@@ -213,7 +217,14 @@ fn render_class(
     push_fields(&mut out, ty, names);
     push_class_field_initializer(&mut out, bundle, ty, names);
     push_class_constructors(&mut out, bundle, ty, names);
-    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
+    push_instance_methods(
+        &mut out,
+        bundle,
+        ty,
+        MethodShell::StubBody,
+        names,
+        generation_style,
+    );
     push_class_equality_bridge(&mut out, bundle, ty, names);
     push_class_hash_bridge(&mut out, bundle, ty);
     out.push_str("}\n");
@@ -333,6 +344,7 @@ fn render_shape(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
+    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
@@ -355,7 +367,14 @@ fn render_shape(
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, false);
     push_shape_value_methods(&mut out, ty);
-    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
+    push_instance_methods(
+        &mut out,
+        bundle,
+        ty,
+        MethodShell::StubBody,
+        names,
+        generation_style,
+    );
     out.push_str("}\n");
     out
 }
@@ -418,6 +437,7 @@ fn render_single(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
+    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     let name = java_type_name(&ty.name);
@@ -443,7 +463,14 @@ fn render_single(
         out.push_str(" {}\n");
     }
     push_fields(&mut out, ty, names);
-    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
+    push_instance_methods(
+        &mut out,
+        bundle,
+        ty,
+        MethodShell::StubBody,
+        names,
+        generation_style,
+    );
     out.push_str("}\n");
     out
 }
@@ -453,6 +480,7 @@ fn render_interface(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
+    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
@@ -465,7 +493,14 @@ fn render_interface(
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, true);
-    push_instance_methods(&mut out, bundle, ty, MethodShell::Abstract, names);
+    push_instance_methods(
+        &mut out,
+        bundle,
+        ty,
+        MethodShell::Abstract,
+        names,
+        generation_style,
+    );
     out.push_str("}\n");
     out
 }
@@ -500,6 +535,7 @@ fn render_enum(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
+    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     let enum_name = java_type_name(&ty.name);
@@ -529,7 +565,14 @@ fn render_enum(
 
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, true);
-    push_instance_methods(&mut out, bundle, ty, MethodShell::DefaultBody, names);
+    push_instance_methods(
+        &mut out,
+        bundle,
+        ty,
+        MethodShell::DefaultBody,
+        names,
+        generation_style,
+    );
 
     for case in &ty.enum_cases {
         out.push('\n');
@@ -1244,6 +1287,7 @@ fn push_instance_methods(
     ty: &ir::TypeDef,
     shell: MethodShell,
     names: &JavaNames,
+    generation_style: JavaGenerationStyle,
 ) {
     for method_id in &ty.methods {
         let Some(function) = bundle.ir.function(*method_id) else {
@@ -1283,7 +1327,7 @@ fn push_instance_methods(
                 );
             }
             MethodShell::DefaultBody | MethodShell::StubBody => {
-                push_function_body(out, bundle, function, names);
+                push_function_body(out, bundle, function, names, generation_style);
                 let prefix = match shell {
                     MethodShell::DefaultBody => "    default ",
                     MethodShell::StubBody => "    public ",
@@ -1570,10 +1614,13 @@ fn push_function_body(
     bundle: &BackendBundle,
     function: &ir::Function,
     names: &JavaNames,
+    generation_style: JavaGenerationStyle,
 ) {
-    if let Some(body) = structured_source_function_body(bundle, function, names) {
-        out.push_str(&body);
-        return;
+    if generation_style == JavaGenerationStyle::Readable {
+        if let Some(body) = structured_source_function_body(bundle, function, names) {
+            out.push_str(&body);
+            return;
+        }
     }
 
     match FunctionEmitter::new(bundle, function, names).emit_body() {
@@ -1587,28 +1634,48 @@ fn structured_source_function_body(
     function: &ir::Function,
     names: &JavaNames,
 ) -> Option<String> {
-    let (owner, expr) = source_method_expr(bundle, function)?;
+    let (owner, body) = source_callable_body(bundle, function)?;
     SourceBodyEmitter {
+        bundle,
         function,
         names,
         owner,
     }
-    .emit_body(expr)
+    .emit_body(body)
 }
 
-fn source_method_expr<'a>(
+fn source_callable_body<'a>(
     bundle: &'a BackendBundle,
     function: &ir::Function,
-) -> Option<(&'a ir::TypeDef, &'a ast::Expr)> {
-    let FunctionKind::Method { owner } = function.kind else {
-        return None;
-    };
-    let owner = bundle.ir.types.get(owner.0)?;
-    let method = find_source_method(&bundle.ast, owner, function)?;
-    let ast::CallableBody::Expr(expr) = method.body.as_ref()? else {
-        return None;
-    };
-    Some((owner, expr))
+) -> Option<(Option<&'a ir::TypeDef>, &'a ast::CallableBody)> {
+    match function.kind {
+        FunctionKind::TopLevel => {
+            let source = bundle.ast.items.iter().find_map(|item| {
+                let ast::Item::Function(source) = item else {
+                    return None;
+                };
+                source_function_matches(source, function).then_some(source)
+            })?;
+            Some((None, &source.body))
+        }
+        FunctionKind::Method { owner } => {
+            let owner = bundle.ir.types.get(owner.0)?;
+            let method = find_source_method(&bundle.ast, owner, function)?;
+            Some((Some(owner), method.body.as_ref()?))
+        }
+        FunctionKind::Local { .. } | FunctionKind::Lambda | FunctionKind::Synthetic => None,
+    }
+}
+
+fn source_function_matches(source: &ast::FunctionDecl, function: &ir::Function) -> bool {
+    function.span.is_none_or(|span| span == source.span)
+        && source.name == function.name
+        && source.params.len() == function.params.len()
+        && source
+            .params
+            .iter()
+            .zip(function_param_types(function))
+            .all(|(param, ty)| source_param_shape_matches_ir(param, &ty))
 }
 
 fn find_source_method<'a>(
@@ -1644,7 +1711,10 @@ fn find_source_method<'a>(
 }
 
 fn source_method_matches(method: &ast::MethodDecl, function: &ir::Function) -> bool {
-    if method.name != function.name || method.params.len() != function.params.len() {
+    if function.span.is_some_and(|span| span != method.span)
+        || method.name != function.name
+        || method.params.len() != function.params.len()
+    {
         return false;
     }
 
@@ -1676,18 +1746,143 @@ fn type_ref_base_name(ty: &ast::TypeRef) -> Option<&str> {
 }
 
 struct SourceBodyEmitter<'a> {
+    bundle: &'a BackendBundle,
     function: &'a ir::Function,
     names: &'a JavaNames,
-    owner: &'a ir::TypeDef,
+    owner: Option<&'a ir::TypeDef>,
 }
 
 impl<'a> SourceBodyEmitter<'a> {
-    fn emit_body(&self, expr: &ast::Expr) -> Option<String> {
+    fn emit_body(&self, body: &ast::CallableBody) -> Option<String> {
         let mut out = String::new();
         out.push_str(" {\n");
-        self.emit_returning_expr(&mut out, expr, "        ", &HashMap::new(), &HashMap::new())?;
+        match body {
+            ast::CallableBody::Expr(expr) => self.emit_returning_expr(
+                &mut out,
+                expr,
+                "        ",
+                &HashMap::new(),
+                &HashMap::new(),
+            )?,
+            ast::CallableBody::Block(block) => self.emit_function_block(&mut out, block)?,
+        }
         out.push_str("    }\n");
         Some(out)
+    }
+
+    fn emit_function_block(&self, out: &mut String, block: &ast::Block) -> Option<()> {
+        let mut bindings = HashMap::new();
+        let mut binding_types = HashMap::new();
+        let mut used_locals = HashSet::new();
+
+        for (index, statement) in block.statements.iter().enumerate() {
+            let is_tail = index + 1 == block.statements.len();
+            match statement {
+                ast::Stmt::Binding(binding)
+                    if binding.destructure.is_none()
+                        && binding.bindings.len() == binding.values.len() =>
+                {
+                    for (binding, value) in binding.bindings.iter().zip(&binding.values) {
+                        if binding.name == "_" {
+                            out.push_str("        ");
+                            out.push_str(&self.emit_expr(value, &bindings)?);
+                            out.push_str(";\n");
+                            continue;
+                        }
+                        let local = self.source_binding_local(&binding.name, &used_locals)?;
+                        used_locals.insert(local.id);
+                        let java_name = java_local_name(local);
+                        out.push_str("        ");
+                        out.push_str(&self.names.value_type(&local.ty));
+                        out.push(' ');
+                        out.push_str(&java_name);
+                        out.push_str(" = ");
+                        out.push_str(&self.emit_expr_against(value, &bindings, &local.ty)?);
+                        out.push_str(";\n");
+                        bindings.insert(binding.name.clone(), java_name);
+                        binding_types.insert(binding.name.clone(), local.ty.clone());
+                    }
+                }
+                ast::Stmt::Return(statement) if is_tail => {
+                    out.push_str("        return");
+                    if let Some(value) = &statement.value {
+                        out.push(' ');
+                        out.push_str(&self.emit_expr_against(
+                            value,
+                            &bindings,
+                            &self.function.return_ty,
+                        )?);
+                    }
+                    out.push_str(";\n");
+                }
+                ast::Stmt::Assignment(statement)
+                    if statement.targets.len() == 1 && statement.values.len() == 1 =>
+                {
+                    let target = self.emit_assignment_target(&statement.targets[0], &bindings)?;
+                    let value = self.emit_expr(&statement.values[0], &bindings)?;
+                    let operator = match statement.operator {
+                        ast::AssignOp::Assign | ast::AssignOp::Reassign => "=",
+                        ast::AssignOp::AddAssign => "+=",
+                        ast::AssignOp::SubAssign => "-=",
+                        ast::AssignOp::MulAssign => "*=",
+                        ast::AssignOp::DivAssign => "/=",
+                        ast::AssignOp::ModAssign => "%=",
+                    };
+                    out.push_str("        ");
+                    out.push_str(&target);
+                    out.push(' ');
+                    out.push_str(operator);
+                    out.push(' ');
+                    out.push_str(&value);
+                    out.push_str(";\n");
+                }
+                ast::Stmt::Expr(statement) if is_tail => {
+                    self.emit_returning_expr(
+                        out,
+                        &statement.expr,
+                        "        ",
+                        &bindings,
+                        &binding_types,
+                    )?;
+                }
+                ast::Stmt::Expr(statement) => {
+                    out.push_str("        ");
+                    out.push_str(&self.emit_expr(&statement.expr, &bindings)?);
+                    out.push_str(";\n");
+                }
+                _ => return None,
+            }
+        }
+        Some(())
+    }
+
+    fn emit_assignment_target(
+        &self,
+        target: &ast::Expr,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        match target {
+            ast::Expr::Identifier { name, .. } => bindings
+                .get(name)
+                .cloned()
+                .or_else(|| self.param_reference(name)),
+            ast::Expr::Member { receiver, name, .. } if matches!(receiver.as_ref(), ast::Expr::Identifier { name, .. } if name == "this") => {
+                Some(format!("this.{}", java_member_name(name)))
+            }
+            _ => None,
+        }
+    }
+
+    fn source_binding_local(
+        &self,
+        name: &str,
+        used_locals: &HashSet<ir::LocalId>,
+    ) -> Option<&'a ir::Local> {
+        self.function.locals.iter().find(|local| {
+            local.name == name
+                && local.kind == ir::LocalKind::Binding
+                && !used_locals.contains(&local.id)
+        })
     }
 
     fn emit_returning_expr(
@@ -1704,7 +1899,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 value,
                 cases,
                 ..
-            } if self.owner.kind == TypeKind::Enum => {
+            } if self.owner.is_some_and(|owner| owner.kind == TypeKind::Enum) => {
                 self.emit_match_return(out, value, cases, indent, bindings, binding_types)
             }
             _ => {
@@ -1847,7 +2042,7 @@ impl<'a> SourceBodyEmitter<'a> {
         let case_local = format!("__case{index}");
         let case_type = format!(
             "{java_case}{}",
-            java_wildcard_type_args(self.owner.type_params.len())
+            java_wildcard_type_args(self.owner?.type_params.len())
         );
         let needs_case_local = fields
             .iter()
@@ -1910,7 +2105,7 @@ impl<'a> SourceBodyEmitter<'a> {
         let case_local = format!("__case{index}");
         let case_type = format!(
             "{java_case}{}",
-            java_wildcard_type_args(self.owner.type_params.len())
+            java_wildcard_type_args(self.owner?.type_params.len())
         );
         let needs_case_local = args
             .iter()
@@ -1950,7 +2145,7 @@ impl<'a> SourceBodyEmitter<'a> {
     }
 
     fn enum_case(&self, name: &str) -> Option<&'a ir::EnumCase> {
-        self.owner.enum_cases.iter().find(|case| case.name == name)
+        self.owner?.enum_cases.iter().find(|case| case.name == name)
     }
 
     fn emit_expr(&self, expr: &ast::Expr, bindings: &HashMap<String, String>) -> Option<String> {
@@ -2006,6 +2201,63 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             ast::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
             ast::Expr::Group { inner, .. } => self.emit_expr(inner, bindings),
+            ast::Expr::Member { receiver, name, .. } if matches!(receiver.as_ref(), ast::Expr::Identifier { name, .. } if name == "this") =>
+            {
+                let receiver = self.emit_expr(receiver, bindings)?;
+                let member = java_member_name(name);
+                if self
+                    .owner
+                    .is_some_and(|owner| owner.kind == TypeKind::Record)
+                {
+                    Some(format!("{receiver}.{member}()"))
+                } else {
+                    Some(format!("{receiver}.{member}"))
+                }
+            }
+            ast::Expr::Unary { op, expr, .. } => {
+                let value = self.emit_expr(expr, bindings)?;
+                match op {
+                    ast::UnaryOp::Neg => Some(format!("(-{value})")),
+                    ast::UnaryOp::Not => Some(format!("(!{value})")),
+                    ast::UnaryOp::UnsafeExtract => None,
+                }
+            }
+            ast::Expr::Binary {
+                left, op, right, ..
+            } => {
+                let left = self.emit_expr(left, bindings)?;
+                let right = self.emit_expr(right, bindings)?;
+                match op {
+                    ast::BinaryOp::Eq => Some(format!("java.util.Objects.equals({left}, {right})")),
+                    ast::BinaryOp::NotEq => {
+                        Some(format!("!java.util.Objects.equals({left}, {right})"))
+                    }
+                    ast::BinaryOp::IdentityEq => Some(format!("({left} == {right})")),
+                    ast::BinaryOp::IdentityNotEq => Some(format!("({left} != {right})")),
+                    ast::BinaryOp::Colon => None,
+                    _ => {
+                        let operator = match op {
+                            ast::BinaryOp::Or => "||",
+                            ast::BinaryOp::And => "&&",
+                            ast::BinaryOp::Less => "<",
+                            ast::BinaryOp::LessEq => "<=",
+                            ast::BinaryOp::Greater => ">",
+                            ast::BinaryOp::GreaterEq => ">=",
+                            ast::BinaryOp::Add => "+",
+                            ast::BinaryOp::Sub => "-",
+                            ast::BinaryOp::Mul => "*",
+                            ast::BinaryOp::Div => "/",
+                            ast::BinaryOp::Mod => "%",
+                            ast::BinaryOp::Colon
+                            | ast::BinaryOp::Eq
+                            | ast::BinaryOp::NotEq
+                            | ast::BinaryOp::IdentityEq
+                            | ast::BinaryOp::IdentityNotEq => unreachable!(),
+                        };
+                        Some(format!("({left} {operator} {right})"))
+                    }
+                }
+            }
             ast::Expr::Call { callee, args, .. } => self.emit_call(callee, args, bindings),
             _ => None,
         }
@@ -2083,6 +2335,35 @@ impl<'a> SourceBodyEmitter<'a> {
                 };
                 emit_functional_call(&target, &args)
             }
+            ast::Expr::Identifier { name, .. } => {
+                let mut candidates = self.bundle.ir.functions.iter().filter(|candidate| {
+                    candidate.name == *name
+                        && matches!(candidate.kind, FunctionKind::TopLevel)
+                        && function_accepts_arg_len(candidate, args.len())
+                });
+                let target = candidates.next()?;
+                if candidates.next().is_some()
+                    || target.param_variadic.iter().any(|variadic| *variadic)
+                    || !target.reified_type_params.is_empty()
+                {
+                    return None;
+                }
+                let args = args
+                    .iter()
+                    .map(|arg| self.emit_call_arg(arg, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                let method = java_member_name(&target.name);
+                if matches!(self.function.kind, FunctionKind::TopLevel) {
+                    Some(format!("{method}({})", args.join(", ")))
+                } else {
+                    Some(format!(
+                        "{}.{}({})",
+                        module_class_name(self.bundle),
+                        method,
+                        args.join(", ")
+                    ))
+                }
+            }
             ast::Expr::Member { receiver, name, .. }
                 if name == "iterator"
                     && args.is_empty()
@@ -2114,6 +2395,12 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             ast::Expr::Member { name, .. } if lazy_core_member_call_name(name) => None,
             ast::Expr::Member { receiver, name, .. } => {
+                // Argument adaptation (notably Lume vararg packing) is already
+                // resolved in lowered IR. Keep argument-bearing member calls on
+                // that path until the readable emitter consumes typed calls.
+                if !args.is_empty() {
+                    return None;
+                }
                 let mut receiver_expr = self.emit_expr(receiver, bindings)?;
                 if let Some(receiver_ty) = self.expr_type(receiver, bindings)
                     && let Some(param) = self.type_param_name(&receiver_ty)
@@ -2212,7 +2499,9 @@ impl<'a> SourceBodyEmitter<'a> {
             ir::Type::Named { name, args }
                 if args.is_empty()
                     && (self.function.type_params.contains(name)
-                        || self.owner.type_params.contains(name)) =>
+                        || self
+                            .owner
+                            .is_some_and(|owner| owner.type_params.contains(name))) =>
             {
                 Some(name)
             }
@@ -2221,10 +2510,11 @@ impl<'a> SourceBodyEmitter<'a> {
     }
 
     fn generic_conditions(&self) -> impl Iterator<Item = &ir::GenericCondition> {
-        self.function
-            .generic_conditions
-            .iter()
-            .chain(self.owner.generic_conditions.iter())
+        self.function.generic_conditions.iter().chain(
+            self.owner
+                .into_iter()
+                .flat_map(|owner| owner.generic_conditions.iter()),
+        )
     }
 
     fn generic_bound_for_type_param(&self, name: &str) -> Option<ir::Type> {
