@@ -494,9 +494,9 @@ impl<'a> Parser<'a> {
                     "computed-key brace syntax has been removed; construct a map with '[key: value]'",
                 );
                 return None;
-            } else if self.at(TokenKind::Identifier) {
+            } else if self.at(TokenKind::Identifier) || self.at_keyword(Keyword::Type) {
                 let checkpoint = self.checkpoint();
-                let (name, name_span) = self.expect_identifier("expected shape field name")?;
+                let (name, name_span) = self.expect_data_name("expected shape field name")?;
                 if self.match_token(TokenKind::Colon) {
                     let value = self.parse_expr()?;
                     RecordEntry::Field {
@@ -1626,6 +1626,7 @@ impl<'a> Parser<'a> {
     fn parse_member_name(&mut self, message: &'static str) -> Option<(String, Span)> {
         if self.at(TokenKind::Keyword(Keyword::Annotation))
             || self.at(TokenKind::Keyword(Keyword::Case))
+            || self.at(TokenKind::Keyword(Keyword::Type))
             || self.at(TokenKind::Keyword(Keyword::When))
         {
             let token = self.current().clone();
@@ -1678,8 +1679,10 @@ impl<'a> Parser<'a> {
                         span,
                     },
                 });
-            } else if self.at(TokenKind::Identifier) && self.at_next(TokenKind::Eq) {
-                let (name, name_span) = self.expect_identifier("expected named argument")?;
+            } else if (self.at(TokenKind::Identifier) || self.at_keyword(Keyword::Type))
+                && self.at_next(TokenKind::Eq)
+            {
+                let (name, name_span) = self.expect_data_name("expected named argument")?;
                 self.consume(TokenKind::Eq, "expected '=' after argument name")?;
                 let value = self.parse_expr()?;
                 let span = name_span.cover(value.span());

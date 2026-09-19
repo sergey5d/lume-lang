@@ -400,7 +400,7 @@ impl<'a> Parser<'a> {
             let mut fields = Vec::new();
             if !self.at(TokenKind::RBrace) {
                 loop {
-                    let (name, name_span) = self.expect_identifier("expected shape field name")?;
+                    let (name, name_span) = self.expect_data_name("expected shape field name")?;
                     let ty = self.parse_type_ref()?;
                     let span = name_span.cover(ty.span());
                     fields.push(RecordTypeField { name, ty, span });

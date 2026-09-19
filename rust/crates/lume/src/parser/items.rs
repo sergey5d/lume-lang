@@ -999,7 +999,7 @@ impl<'a> Parser<'a> {
     ) -> Option<FieldDecl> {
         let start = self.current_span();
         let mutable = self.match_keyword(Keyword::Var);
-        let (name, _) = self.expect_binding_name("expected field name")?;
+        let (name, _) = self.expect_data_name("expected field name")?;
 
         let ty = if self.can_start_type_ref() {
             Some(self.parse_type_ref()?)

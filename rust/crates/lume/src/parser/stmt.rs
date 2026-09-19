@@ -457,7 +457,7 @@ impl<'a> Parser<'a> {
         }
 
         let (field_name, field_span) =
-            self.expect_identifier("expected field name in brace destructuring")?;
+            self.expect_data_name("expected field name in brace destructuring")?;
         if field_name == "_" {
             self.error_at_current(
                 "unexpected_token",

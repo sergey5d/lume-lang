@@ -1,9 +1,8 @@
 use std::{env, fs, path::Path, process::ExitCode};
 
 use lume::{
-    Diagnostic, JavaBackendOptions, JavaGenerationStyle, LocatedDiagnostic, SourceFile, check_path,
-    generate_java_path, lex, parse_program, render_diagnostic, render_path_diagnostic, run_path,
-    test_path,
+    Diagnostic, JavaBackendOptions, LocatedDiagnostic, SourceFile, check_path, generate_java_path,
+    lex, parse_program, render_diagnostic, render_path_diagnostic, run_path, test_path,
 };
 
 fn main() -> ExitCode {
@@ -178,7 +177,7 @@ fn print_usage() {
     eprintln!("  lume check <file>");
     eprintln!("  lume run <file> [entry]");
     eprintln!("  lume test <file>");
-    eprintln!("  lume gen <file> --out <dir> [--classpath <path>] [--java-style readable|lowered]");
+    eprintln!("  lume gen <file> --out <dir> [--classpath <path>]");
 }
 
 fn read_source_arg(
@@ -218,8 +217,6 @@ fn read_gen_options(
 ) -> Result<JavaBackendOptions, ExitCode> {
     let mut out = None;
     let mut classpath = Vec::new();
-    let mut generation_style = JavaGenerationStyle::Readable;
-
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--out" => {
@@ -238,24 +235,6 @@ fn read_gen_options(
                 };
                 classpath.extend(env::split_paths(&value));
             }
-            "--java-style" => {
-                let Some(value) = args.next() else {
-                    eprintln!("missing style after --java-style for 'gen'");
-                    print_usage();
-                    return Err(ExitCode::from(2));
-                };
-                generation_style = match value.as_str() {
-                    "readable" => JavaGenerationStyle::Readable,
-                    "lowered" => JavaGenerationStyle::Lowered,
-                    _ => {
-                        eprintln!(
-                            "unknown Java generation style '{value}'; expected 'readable' or 'lowered'"
-                        );
-                        print_usage();
-                        return Err(ExitCode::from(2));
-                    }
-                };
-            }
             _ => {
                 eprintln!("unknown argument '{flag}' for 'gen'");
                 print_usage();
@@ -269,7 +248,7 @@ fn read_gen_options(
         print_usage();
         return Err(ExitCode::from(2));
     };
-    let mut options = JavaBackendOptions::new(out).with_generation_style(generation_style);
+    let mut options = JavaBackendOptions::new(out);
     for entry in classpath {
         options = options.with_classpath_entry(entry);
     }

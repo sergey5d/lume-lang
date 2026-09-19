@@ -22,14 +22,6 @@ use crate::{
 pub struct JavaBackendOptions {
     pub output_dir: PathBuf,
     pub classpath: Vec<PathBuf>,
-    pub generation_style: JavaGenerationStyle,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum JavaGenerationStyle {
-    #[default]
-    Readable,
-    Lowered,
 }
 
 impl JavaBackendOptions {
@@ -37,17 +29,11 @@ impl JavaBackendOptions {
         Self {
             output_dir: output_dir.into(),
             classpath: Vec::new(),
-            generation_style: JavaGenerationStyle::Readable,
         }
     }
 
     pub fn with_classpath_entry(mut self, entry: impl Into<PathBuf>) -> Self {
         self.classpath.push(entry.into());
-        self
-    }
-
-    pub fn with_generation_style(mut self, generation_style: JavaGenerationStyle) -> Self {
-        self.generation_style = generation_style;
         self
     }
 }
@@ -86,11 +72,7 @@ pub fn generate_java_path(
     let bundle = bundled
         .bundle
         .expect("backend bundle after successful build");
-    let sources = emit::render_declaration_skeletons(
-        &bundle,
-        &external_resolution.classes,
-        options.generation_style,
-    );
+    let sources = emit::render_declaration_skeletons(&bundle, &external_resolution.classes);
     let unsupported_diagnostics =
         unsupported_java_body_diagnostics(&bundle.root_display_path, &sources);
     if !unsupported_diagnostics.is_empty() {
@@ -2488,7 +2470,7 @@ def main() Unit {
 
         let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
 
-        assert!(result.diagnostics.is_empty());
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         assert!(
             result
                 .written_files
@@ -2697,7 +2679,7 @@ def main() Unit {
         let module = fs::read_to_string(out.join("demo/lazyoption/LazyoptionModule.java"))
             .expect("read module");
         assert!(module.contains(".toResult("));
-        assert!(module.contains("java.util.function.Supplier"));
+        assert!(module.contains("() -> fail()"));
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -2758,6 +2740,7 @@ def main() Unit {
             .expect("read module");
         assert!(module.contains("lume.core.LumeRuntime.parseInt("));
         assert!(module.contains("lume.core.LumeRuntime.parseFloat("));
+        assert!(!module.contains("__block"), "{module}");
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -2858,6 +2841,7 @@ def main() Unit {
                 .expect("read module");
         assert!(module.contains(".first()"));
         assert!(module.contains(".second()"));
+        assert!(!module.contains("__block"), "{module}");
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -2877,6 +2861,74 @@ def main() Unit {
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
             "3\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_record_destructuring_structured() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping record destructuring Java test because a JDK tool is unavailable");
+            return;
+        }
+
+        let temp = temp_path("lume-java-record-destructuring");
+        let source = temp.join("record_destructuring.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/recorddestructuring
+
+shape User {
+    name Str
+    age Int
+}
+
+def main() Unit {
+    user User = User { name: "Ada", age: 3 }
+    let { name as userName, age } = user
+    var total Int = age
+    for let { age as nextAge } <- [user] {
+        total += nextAge
+    }
+    println(userName, total)
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module =
+            fs::read_to_string(out.join("demo/recorddestructuring/RecorddestructuringModule.java"))
+                .expect("read module");
+        assert!(module.contains(".name()"), "{module}");
+        assert!(module.contains(".age()"), "{module}");
+        assert!(!module.contains("__block"), "{module}");
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.recorddestructuring.RecorddestructuringMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "Ada 6\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -2917,6 +2969,7 @@ def main() Unit {
         assert!(module.contains(".zipWithIndex()"));
         assert!(module.contains(".first()"));
         assert!(module.contains(".second()"));
+        assert!(!module.contains("__block"), "{module}");
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -3033,18 +3086,17 @@ enum Maybe[T] {
         assert!(!maybe.contains("variantField"));
         assert!(maybe.contains("instanceof Some<?>)"));
         assert!(maybe.contains("instanceof None<?>)"));
-        assert!(maybe.contains("instanceof Some<?> __case0)"));
-        assert!(maybe.contains("return ((T) __case0.value());"));
+        assert!(maybe.contains("instanceof Some<?> __case"));
+        assert!(maybe.contains("return ((T) __case"));
 
         let _ = fs::remove_dir_all(temp);
     }
 
     #[test]
-    fn defaults_to_readable_java_and_keeps_lowered_java_available() {
-        let temp = temp_path("lume-java-generation-styles");
+    fn generates_readable_java() {
+        let temp = temp_path("lume-java-readable");
         let source = temp.join("readable.lum");
-        let readable_out = temp.join("readable");
-        let lowered_out = temp.join("lowered");
+        let out = temp.join("generated");
         fs::create_dir_all(&temp).expect("create temp dir");
         fs::write(
             &source,
@@ -3094,7 +3146,7 @@ def main() Int = twice(3) + choose(true) + sumEven(4) + classify(1)
         )
         .expect("write source");
 
-        let readable = generate_java_path(&source, JavaBackendOptions::new(&readable_out))
+        let readable = generate_java_path(&source, JavaBackendOptions::new(&out))
             .expect("generate readable Java");
         assert!(
             readable.diagnostics.is_empty(),
@@ -3102,19 +3154,8 @@ def main() Int = twice(3) + choose(true) + sumEven(4) + classify(1)
             readable.diagnostics
         );
 
-        let lowered = generate_java_path(
-            &source,
-            JavaBackendOptions::new(&lowered_out)
-                .with_generation_style(JavaGenerationStyle::Lowered),
-        )
-        .expect("generate lowered Java");
-        assert!(lowered.diagnostics.is_empty(), "{:?}", lowered.diagnostics);
-
         let relative = Path::new("demo/readable/ReadableModule.java");
-        let readable_java =
-            fs::read_to_string(readable_out.join(relative)).expect("read readable Java");
-        let lowered_java =
-            fs::read_to_string(lowered_out.join(relative)).expect("read lowered Java");
+        let readable_java = fs::read_to_string(out.join(relative)).expect("read readable Java");
 
         assert!(readable_java.contains("Long total_2 = (left_0 + right_1);"));
         assert!(readable_java.contains("return total_2;"));
@@ -3129,31 +3170,27 @@ def main() Int = twice(3) + choose(true) + sumEven(4) + classify(1)
         assert!(readable_java.contains("result_1 = 10L;"));
         assert!(!readable_java.contains("__block"));
         assert!(!readable_java.contains("while (true)"));
-        assert!(lowered_java.contains("__block"));
-        assert!(lowered_java.contains("while (true)"));
 
         if command_available("javac") {
-            for output_dir in [&readable_out, &lowered_out] {
-                let classes = output_dir.join("classes");
-                let mut sources = Vec::new();
-                collect_java_sources(output_dir, &mut sources).expect("collect generated Java");
-                fs::create_dir_all(&classes).expect("create classes dir");
-                run_checked(
-                    Command::new("javac").arg("-d").arg(&classes).args(&sources),
-                    "javac",
-                );
-                let output = run_checked(
-                    Command::new("java")
-                        .arg("-cp")
-                        .arg(&classes)
-                        .arg("demo.readable.ReadableMain"),
-                    "java",
-                );
-                assert_eq!(
-                    String::from_utf8(output.stdout).expect("Java stdout utf8"),
-                    "30\n"
-                );
-            }
+            let classes = out.join("classes");
+            let mut sources = Vec::new();
+            collect_java_sources(&out, &mut sources).expect("collect generated Java");
+            fs::create_dir_all(&classes).expect("create classes dir");
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg("demo.readable.ReadableMain"),
+                "java",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).expect("Java stdout utf8"),
+                "30\n"
+            );
         }
 
         let _ = fs::remove_dir_all(temp);
@@ -3194,6 +3231,751 @@ def sum(items [Int]) Int {
         assert!(module.contains("Long item_"), "{module}");
         assert!(module.contains("while (__iterator"), "{module}");
         assert!(!module.contains("__block"), "{module}");
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_explicit_constructors_structured() {
+        let temp = temp_path("lume-java-readable-constructor");
+        let source = temp.join("constructor.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/constructor
+
+class Account {
+    name Str
+    count Int = 1
+
+    new(name Str) {
+        this.name = name
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let account =
+            fs::read_to_string(out.join("demo/constructor/Account.java")).expect("read class");
+        assert!(account.contains("this.__lume_field_init();"), "{account}");
+        assert!(account.contains("this.name = name_1;"), "{account}");
+        assert!(!account.contains("__block"), "{account}");
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_emits_variadic_reified_and_primitive_coercion_calls() {
+        let temp = temp_path("lume-java-readable-call-boundaries");
+        let source = temp.join("calls.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/calls
+
+use java/lang/StringBuilder
+
+def collect(values [Int] vararg) [Int] = values
+
+def forwarded(values [Int]) Int = collect(...values).size()
+
+def direct() Int = collect(1, 2, 3).size()
+
+def typeName[reified T]() Str = typeOf[T].name().getOr("?")
+
+def concreteTypeName() Str = typeName[Int]()
+
+def inserted() Str {
+    builder StringBuilder = StringBuilder("bc")
+    builder.insert(0, "a")
+    builder.toStr()
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module =
+            fs::read_to_string(out.join("demo/calls/CallsModule.java")).expect("read module");
+        assert!(module.contains("collect(values_0)"), "{module}");
+        assert!(
+            module.contains("collect(lume.core.LumeVector.of(1L, 2L, 3L))"),
+            "{module}"
+        );
+        assert!(
+            module.contains("typeName(lume.core.LumeType.primitive(\"Int\"))"),
+            "{module}"
+        );
+        assert!(
+            module.contains(".insert(((Number) (0L)).intValue(), \"a\")"),
+            "{module}"
+        );
+        assert!(!module.contains("__block"), "{module}");
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_early_control_transfer_structured() {
+        let temp = temp_path("lume-java-readable-early-control-transfer");
+        let source = temp.join("early.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/early
+
+def valueOrZero(value Option[Int]) Int {
+    if let Some(item) = value {
+        return item
+    }
+    0
+}
+
+def firstPositive(values [Int]) Int {
+    for value <- values {
+        if value <= 0 {
+            continue
+        }
+        return value
+    }
+    0
+}
+
+def cached(values Map[Str, Int], key Str) Int {
+    if let Some(value) = values.get(key) {
+        return value
+    }
+    0
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module =
+            fs::read_to_string(out.join("demo/early/EarlyModule.java")).expect("read module");
+        assert!(module.contains("return ((Long) __case"), "{module}");
+        assert!(module.contains("continue;"), "{module}");
+        assert!(module.contains("return value_"), "{module}");
+        assert!(module.contains("values_0.get(key_1)"), "{module}");
+        assert!(!module.contains("__block"), "{module}");
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_anonymous_interface_methods_structured() {
+        let temp = temp_path("lume-java-readable-anonymous-interface");
+        let source = temp.join("anonymous_interface.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/anonymousinterface
+
+interface Handler {
+    def handle(value Int) Int
+}
+
+def handler(offset Int) Handler = object with Handler {
+    def handle(value Int) Int {
+        if value > 0 {
+            return value + offset
+        }
+        offset
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module =
+            fs::read_to_string(out.join("demo/anonymousinterface/AnonymousinterfaceModule.java"))
+                .expect("read module");
+        assert!(module.contains("new Handler()"), "{module}");
+        assert!(module.contains("if ((value_0 > 0L))"), "{module}");
+        assert!(module.contains("return (value_0 + __capture_"), "{module}");
+        assert!(!module.contains("__block"), "{module}");
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_block_lambdas_structured() {
+        let temp = temp_path("lume-java-readable-block-lambda");
+        let source = temp.join("block_lambda.lum");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/block_lambda
+
+def apply(value Int, mapper fn(Int) Int) Int = mapper(value)
+
+def withOffset(offset Int) Int {
+    mapper fn(Int) Int = (value Int) => {
+        doubled Int = value * 2
+        doubled + offset
+    }
+    apply(3, mapper)
+}
+
+def main() Int = withOffset(4)
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/block_lambda/Block_lambdaModule.java"))
+            .expect("read module Java");
+        assert!(module.contains("(value_arg0) -> {"), "{module}");
+        assert!(module.contains("Long doubled_"), "{module}");
+        assert!(module.contains("return (doubled_"), "{module}");
+        assert!(!module.contains("__block"), "{module}");
+
+        if command_available("javac") && command_available("java") {
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).expect("collect generated Java");
+            fs::create_dir_all(&classes).expect("create classes dir");
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg("demo.block_lambda.Block_lambdaMain"),
+                "java",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).expect("Java stdout utf8"),
+                "10\n"
+            );
+        }
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_mixed_let_conditions_structured() {
+        let temp = temp_path("lume-java-readable-let-conditions");
+        let source = temp.join("let_conditions.lum");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/let_conditions
+
+def positive(ready Bool, value Int?) Int {
+    if ready && let Some(item) = value && item > 0 {
+        return item
+    }
+    0
+}
+
+def sum(items [Int]) Int {
+    var index Int = 0
+    var total Int = 0
+    while let item <- items.at(index) && item < 4 {
+        total += item
+        index += 1
+    }
+    total
+}
+
+def main() Int = positive(true, Some(2)) + sum([1, 2, 5])
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/let_conditions/Let_conditionsModule.java"))
+            .expect("read module Java");
+        assert!(
+            module.contains("if (ready_0 && value_1 instanceof"),
+            "{module}"
+        );
+        assert!(
+            module.contains("while (items_0.at(index_1) instanceof"),
+            "{module}"
+        );
+        assert!(!module.contains("__block"), "{module}");
+
+        if command_available("javac") && command_available("java") {
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).expect("collect generated Java");
+            fs::create_dir_all(&classes).expect("create classes dir");
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg("demo.let_conditions.Let_conditionsMain"),
+                "java",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).expect("Java stdout utf8"),
+                "5\n"
+            );
+        }
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_preserves_by_name_arguments_and_forwarding() {
+        let temp = temp_path("lume-java-readable-by-name");
+        let source = temp.join("by_name.lum");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/by_name
+
+def fallback() Int {
+    println("fallback")
+    9
+}
+
+def choose(useFallback Bool, value => Int) Int =
+    if useFallback { value } else { 5 }
+
+def forward(useFallback Bool, value => Int) Int =
+    choose(useFallback, value)
+
+def direct(useFallback Bool) Int =
+    forward(useFallback, fallback())
+
+def optionValue() Int {
+    present Int? = Some(3)
+    present.getOr(fallback())
+}
+
+def main() Unit {
+    println(direct(false))
+    println(direct(true))
+    println(optionValue())
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/by_name/By_nameModule.java"))
+            .expect("read module Java");
+        assert!(
+            module.contains("choose(useFallback_0, value_1)"),
+            "{module}"
+        );
+        assert!(module.contains("() -> fallback()"), "{module}");
+        assert!(module.contains(".getOr(() -> fallback())"), "{module}");
+        assert!(!module.contains("__block"), "{module}");
+
+        if command_available("javac") && command_available("java") {
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).expect("collect generated Java");
+            fs::create_dir_all(&classes).expect("create classes dir");
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg("demo.by_name.By_nameMain"),
+                "java",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).expect("Java stdout utf8"),
+                "5\nfallback\n9\n3\n"
+            );
+        }
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_let_else_extraction_structured() {
+        let temp = temp_path("lume-java-readable-let-else");
+        let source = temp.join("let_else.lum");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/let_else
+
+def explicit(value Int?) Int {
+    let Some(item) = value else return 0
+    item
+}
+
+def pair(left Int?, right Int?) Int {
+    let {
+        a <- left
+        b <- right
+    } else return -1
+    a + b
+}
+
+def prefix(values [Int?]) Int {
+    var total Int = 0
+    for value <- values {
+        let item <- value else break
+        total += item
+    }
+    total
+}
+
+def main() Int =
+    explicit(Some(4)) + pair(Some(2), Some(3)) + pair(Some(2), None) + prefix([Some(1), Some(2), None, Some(9)])
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/let_else/Let_elseModule.java"))
+            .expect("read module Java");
+        assert!(module.contains("if (!(__let"), "{module}");
+        assert!(
+            module.contains("instanceof lume.core.Option.Some<?>"),
+            "{module}"
+        );
+        assert!(module.contains("break;"), "{module}");
+        assert!(!module.contains("__block"), "{module}");
+
+        if command_available("javac") && command_available("java") {
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).expect("collect generated Java");
+            fs::create_dir_all(&classes).expect("create classes dir");
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg("demo.let_else.Let_elseMain"),
+                "java",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).expect("Java stdout utf8"),
+                "11\n"
+            );
+        }
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_extract_or_defaults_structured_and_lazy() {
+        let temp = temp_path("lume-java-readable-extract-or");
+        let source = temp.join("extract_or.lum");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/extract_or
+
+def fallback(label Str, value Int) Int {
+    println(label)
+    value
+}
+
+def main() Unit {
+    some Int? = Some(5)
+    none Int? = None
+    ok Result[Int, Str] = Ok(7)
+    left Either[Str, Int] = Left("missing")
+
+    println(some ?? fallback("some fallback", 10))
+    println(none ?? fallback("none fallback", 11))
+    println(ok ?? fallback("ok fallback", 12))
+    println(left ?? fallback("left fallback", 13))
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/extract_or/Extract_orModule.java"))
+            .expect("read module Java");
+        assert!(
+            module.contains("instanceof lume.core.Option.Some<?>"),
+            "{module}"
+        );
+        assert!(
+            module.contains("instanceof lume.core.Result.Ok<?, ?>"),
+            "{module}"
+        );
+        assert!(
+            module.contains("instanceof lume.core.Either.Right<?, ?>"),
+            "{module}"
+        );
+        assert!(!module.contains("__block"), "{module}");
+
+        if command_available("javac") && command_available("java") {
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).expect("collect generated Java");
+            fs::create_dir_all(&classes).expect("create classes dir");
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg("demo.extract_or.Extract_orMain"),
+                "java",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).expect("Java stdout utf8"),
+                "5\nnone fallback\n11\n7\nleft fallback\n13\n"
+            );
+        }
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_try_bindings_structured() {
+        let temp = temp_path("lume-java-readable-try-binding");
+        let source = temp.join("try_binding.lum");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/try_binding
+
+def parse(value Str) Result[Int, Str] =
+    if value == "4" { Ok(4) } else { Err("invalid Int: " + value) }
+
+def increment(value Str) Result[Int, Str] {
+    number Int = try parse(value)
+    Ok(number + 1)
+}
+
+def main() Unit {
+    println(increment("4").getOr(0))
+    println(increment("bad").getError())
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/try_binding/Try_bindingModule.java"))
+            .expect("read module Java");
+        assert!(
+            module.contains("instanceof lume.core.Result.Ok<?, ?>"),
+            "{module}"
+        );
+        assert!(
+            module.contains("return (lume.core.Result<Long, String>) (Object) __try"),
+            "{module}"
+        );
+        assert!(!module.contains("__block"), "{module}");
+
+        if command_available("javac") && command_available("java") {
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).expect("collect generated Java");
+            fs::create_dir_all(&classes).expect("create classes dir");
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg("demo.try_binding.Try_bindingMain"),
+                "java",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).expect("Java stdout utf8"),
+                "5\ninvalid Int: bad\n"
+            );
+        }
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_keeps_nested_try_and_union_flow_structured() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping nested try Java test because a JDK tool is unavailable");
+            return;
+        }
+
+        let temp = temp_path("lume-java-readable-nested-try");
+        let source = temp.join("nested_try.lum");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/nested_try
+
+class Box {
+    value Int
+
+    new(value Int) = {
+        this.value = value
+    }
+}
+
+type Choice =
+    class First { value Int }
+    | class Second { value Int }
+
+def succeed(value Int) Result[Int, Str] = Ok(value)
+
+def checked(value Int) Result[Bool, Str] = Ok(value > 0)
+
+def choiceValue(choice Choice) Int = match choice {
+    case Choice.First { value } => value
+    case Choice.Second { value } => value
+}
+
+def observe(value Option[Int]) Unit = {
+    match value {
+        case Some(_) => ()
+        case None => ()
+    }
+}
+
+def captured(flag Bool, value Option[Int]) Int = {
+    let Some { value as item } = value else return 0
+    selected Int = if flag { item } else if item > 0 { item + 1 } else { item - 1 }
+    result Option[Int] = Some(0).map(_ => selected + item)
+    result.getOr(0)
+}
+
+def compute(flag Bool) Result[Int, Str] = {
+    box Box = Box(try succeed(4))
+    let (left Int, right Int) = if flag { (box.value, 2) } else { (1, 3) }
+    selected Int = if flag {
+        value Int = try succeed(left)
+        value
+    } else {
+        value Int = try succeed(right)
+        value
+    }
+    positive Bool = flag && try checked(selected)
+    var total Int = selected
+    for index <- Range(0, 2) {
+        total += index
+    }
+    try checked(total)
+    if positive { Ok(total) } else { Ok(total + 10) }
+}
+
+def main() Unit = {
+    observe(None)
+    println(compute(true).getOr(0))
+    println(compute(false).getOr(0))
+    println(choiceValue(Choice.First(7)))
+    println(captured(true, Some(3)))
+    println(captured(false, Some(3)))
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/nested_try/Nested_tryModule.java"))
+            .expect("read module Java");
+        assert!(!module.contains("__block"), "{module}");
+        assert!(!module.contains("lume.core.LumeUnit.INSTANCE;"), "{module}");
+        assert!(module.contains("if (flag_0)"), "{module}");
+        assert!(
+            module.contains("instanceof lume.core.Result.Ok<?, ?>"),
+            "{module}"
+        );
+        let choice =
+            fs::read_to_string(out.join("demo/nested_try/Choice.java")).expect("read union Java");
+        assert!(choice.contains("final class First"), "{choice}");
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated Java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.nested_try.Nested_tryMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("Java stdout utf8"),
+            "5\n14\n7\n6\n7\n"
+        );
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -3356,15 +4138,15 @@ def petName(value Pet) Str = match value {
             "{module}"
         );
         assert!(
-            module.contains("instanceof lume.core.Option.Some<?> __case0"),
+            module.contains("instanceof lume.core.Option.Some<?> __case"),
             "{module}"
         );
         assert!(
             module.contains("instanceof lume.core.Option.None<?>"),
             "{module}"
         );
-        assert!(module.contains("instanceof Cat __case0"), "{module}");
-        assert!(module.contains("instanceof Dog __case1"), "{module}");
+        assert!(module.contains("instanceof Cat __case"), "{module}");
+        assert!(module.contains("instanceof Dog __case"), "{module}");
         assert!(!module.contains("__block"), "{module}");
 
         let _ = fs::remove_dir_all(temp);
@@ -3422,7 +4204,7 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
                 vec![
                     "instanceof Some<?>)",
                     "instanceof None<?>)",
-                    "instanceof Some<?> __case0)",
+                    "instanceof Some<?> __case",
                     "default <X> lume.core.Option<X> map(java.util.function.Function<T, X> f_1)",
                     "default <X> lume.core.Option<X> flatMap(java.util.function.Function<T, lume.core.Option<X>> f_1)",
                     "default lume.core.LumeIterator<T> iterator()",
@@ -3434,10 +4216,10 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
                 vec![
                     "instanceof Ok<?, ?>)",
                     "instanceof Err<?, ?>)",
-                    "instanceof Ok<?, ?> __case0)",
+                    "instanceof Ok<?, ?> __case",
                     "default <X> lume.core.Result<X, E> map(java.util.function.Function<T, X> f_1)",
                     "default <X> lume.core.Result<X, E> flatMap(java.util.function.Function<T, lume.core.Result<X, E>> f_1)",
-                    "return ((T) __case0.value());",
+                    "return ((T) __case",
                 ],
             ),
             (
@@ -3445,12 +4227,12 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
                 vec![
                     "instanceof Left<?, ?>)",
                     "instanceof Right<?, ?>)",
-                    "instanceof Right<?, ?> __case1)",
+                    "instanceof Right<?, ?> __case",
                     "default <X> lume.core.Either<L, X> map(java.util.function.Function<R, X> f_1)",
                     "default <X> lume.core.Either<L, X> flatMap(java.util.function.Function<R, lume.core.Either<L, X>> f_1)",
                     "default L merge()",
-                    "return ((R) __case1.value());",
-                    "return ((L) ((Object) ((R) __case1.value())));",
+                    "return ((R) __case",
+                    "return ((L) ((Object) ((R) __case",
                 ],
             ),
         ] {
@@ -4250,7 +5032,8 @@ def main() Unit {
 
         let module = fs::read_to_string(out.join("demo/recordpatterns/RecordpatternsModule.java"))
             .expect("read module");
-        assert!(module.contains("LumeRuntime.patternField"));
+        assert!(module.contains("instanceof User"));
+        assert!(module.contains("LumeRuntime.listLen"));
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -4754,7 +5537,7 @@ def main() Int {
     }
 
     #[test]
-    fn emits_mvp_function_bodies_for_supported_ir() {
+    fn emits_readable_function_bodies() {
         let temp = temp_path("lume-java-bodies");
         let source = temp.join("body.lum");
         let out = temp.join("out");
@@ -4785,24 +5568,18 @@ def main() Unit {
         )
         .expect("write source");
 
-        let result = generate_java_path(
-            &source,
-            JavaBackendOptions::new(&out).with_generation_style(JavaGenerationStyle::Lowered),
-        )
-        .expect("generate");
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
 
         assert!(result.diagnostics.is_empty());
         let module =
             fs::read_to_string(out.join("demo/body/BodyModule.java")).expect("read module");
         assert!(!module.contains("UnsupportedOperationException"));
         assert!(module.contains("static Long add(Long left_0, Long right_1)"));
-        assert!(module.contains("tmp3_3 = (left_0 + right_1);"));
-        assert!(module.contains("result_2 = tmp3_3;"));
+        assert!(module.contains("Long result_2 = (left_0 + right_1);"));
         assert!(module.contains("return result_2;"));
         assert!(module.contains("if (flag_0)"));
-        assert!(module.contains("return tmp1_1;"));
-        assert!(module.contains("tmp1_1 = add(2L, 3L);"));
-        assert!(module.contains("value_0 = tmp1_1;"));
+        assert!(module.contains("return 10L;"));
+        assert!(module.contains("Long value_0 = add(2L, 3L);"));
         assert!(module.contains("lume.core.LumeRuntime.println(value_0)"));
 
         let _ = fs::remove_dir_all(temp);
@@ -4875,11 +5652,18 @@ shape HttpError {
     contentType Str = "application/json"
 }
 
+enum Status {
+    case Pending
+}
+
 def ok() Result[HttpResponse, HttpError] =
     Ok({ body: "ok" })
 
 def err() Result[HttpResponse, HttpError] =
     Err({ status: 400, body: "bad" })
+
+def pending() Option[Status] =
+    Some(Status.Pending)
 "#,
         )
         .expect("write source");
@@ -4892,7 +5676,9 @@ def err() Result[HttpResponse, HttpError] =
         assert!(!module.contains("UnsupportedOperationException"));
         assert!(module.contains("new HttpResponse(200L"));
         assert!(module.contains("new HttpError(400L"));
+        assert!(module.contains("new lume.core.Option.Some<>(new Status.Pending())"));
         assert!(module.contains("\"application/json\""));
+        assert!(!module.contains("__block"), "{module}");
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -4912,6 +5698,9 @@ object Cache {
 
     def label(targetType Type[_]) Str =
         targetType.name().getOr("?")
+
+    def reifiedLabel[reified T]() Str =
+        typeOf[T].name().getOr("?")
 }
 
 
@@ -4922,18 +5711,28 @@ class Reader {
     }
 }
 
+def concrete() Str = Cache.reifiedLabel[Int]()
+
 "#,
         )
         .expect("write source");
 
         let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
 
-        assert!(result.diagnostics.is_empty());
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         let reader =
             fs::read_to_string(out.join("demo/object_reified/Reader.java")).expect("read reader");
         assert!(!reader.contains("UnsupportedOperationException"));
         assert!(reader.contains("Cache.INSTANCE.label"));
         assert!(reader.contains("__type_T_1"));
+        let module = fs::read_to_string(out.join("demo/object_reified/Object_reifiedModule.java"))
+            .expect("read module");
+        assert!(
+            module.contains("Cache.INSTANCE.reifiedLabel(lume.core.LumeType.primitive(\"Int\"))"),
+            "{module}"
+        );
+        assert!(!reader.contains("__block"), "{reader}");
+        assert!(!module.contains("__block"), "{module}");
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -5150,8 +5949,9 @@ def main() Unit {
         let module =
             fs::read_to_string(out.join("demo/metadata/MetadataModule.java")).expect("read module");
         assert!(!module.contains("UnsupportedOperationException"));
-        assert!(module.contains("tmp3_3 = User.TYPE;"));
-        assert!(module.matches("User.TYPE").count() >= 2);
+        assert!(module.contains("= User.TYPE;"));
+        assert!(module.contains("lume.core.LumeRuntime.runtimeTypeOf(user_"));
+        assert!(!module.contains("__block"));
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");

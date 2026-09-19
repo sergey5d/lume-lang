@@ -329,6 +329,23 @@ def choose(ready Bool, maybe Int?) Int {
 }
 
 #[test]
+fn parses_multiline_boolean_condition_after_operators() {
+    let result = parse(
+        r#"
+def valid(a Bool, b Bool, c Bool) Bool {
+    if a &&
+        b &&
+        c {
+        return true
+    }
+    false
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
 fn preserves_boolean_precedence_in_control_flow_headers() {
     let result = parse(
         r#"
@@ -4977,6 +4994,26 @@ def inline(value Cat | Bird) Cat | Bird = value
         &widen.return_type,
         Some(TypeRef::Union { members, .. }) if members.len() == 3
     ));
+}
+
+#[test]
+fn keeps_type_contextual_in_data_field_positions() {
+    let result = parse(
+        r#"
+shape Entry {
+    type Str
+}
+
+def read(entry Entry) Str {
+    copied Entry = Entry { type: entry.type }
+    let { type as kind } = copied
+    match copied {
+        case Entry { type as matched } => kind + matched
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]

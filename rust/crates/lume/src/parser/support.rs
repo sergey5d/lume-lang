@@ -106,6 +106,17 @@ impl<'a> Parser<'a> {
         self.expect_identifier(message)
     }
 
+    pub(super) fn expect_data_name(&mut self, message: &'static str) -> Option<(String, Span)> {
+        if self.at(TokenKind::Identifier) || self.at_keyword(Keyword::Type) {
+            let token = self.current().clone();
+            self.advance();
+            Some((token.lexeme, token.span))
+        } else {
+            self.error_at_current("expected_identifier", message);
+            None
+        }
+    }
+
     pub(super) fn parse_callable_name(&mut self, message: &'static str) -> Option<(String, Span)> {
         if self.at(TokenKind::Identifier) {
             return self.expect_identifier(message);
@@ -327,7 +338,36 @@ impl<'a> Parser<'a> {
                 {
                     break;
                 }
-                TokenKind::Newline if at_top_level => break,
+                TokenKind::Newline
+                    if at_top_level
+                        && !self.tokens[..i]
+                            .iter()
+                            .rev()
+                            .find(|candidate| candidate.kind != TokenKind::Newline)
+                            .is_some_and(|previous| {
+                                matches!(
+                                    previous.kind,
+                                    TokenKind::AndAnd
+                                        | TokenKind::OrOr
+                                        | TokenKind::EqEq
+                                        | TokenKind::NotEq
+                                        | TokenKind::IdentityEq
+                                        | TokenKind::IdentityNotEq
+                                        | TokenKind::Less
+                                        | TokenKind::LessEq
+                                        | TokenKind::Greater
+                                        | TokenKind::GreaterEq
+                                        | TokenKind::Plus
+                                        | TokenKind::Minus
+                                        | TokenKind::Star
+                                        | TokenKind::Slash
+                                        | TokenKind::Percent
+                                        | TokenKind::QuestionQuestion
+                                )
+                            }) =>
+                {
+                    break;
+                }
                 _ => {}
             }
             i += 1;

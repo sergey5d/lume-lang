@@ -8,7 +8,7 @@ use crate::{
     backend::BackendBundle,
     core,
     ir::{self, FunctionKind},
-    java_backend::{JavaExternalClass, JavaGenerationStyle, JavaPrimitiveCoercion},
+    java_backend::{JavaExternalClass, JavaPrimitiveCoercion},
 };
 
 pub(crate) struct JavaSource {
@@ -22,7 +22,6 @@ const MAX_JAVA_FUNCTION_ARITY: usize = 12;
 pub(crate) fn render_declaration_skeletons(
     bundle: &BackendBundle,
     external_classes: &HashMap<String, JavaExternalClass>,
-    generation_style: JavaGenerationStyle,
 ) -> Vec<JavaSource> {
     let package = JavaPackage::from_module(bundle.ir.module.as_deref());
     let names = JavaNames::from_external_classes(external_classes);
@@ -35,7 +34,7 @@ pub(crate) fn render_declaration_skeletons(
         &mut source_indexes,
         JavaSource {
             relative_path: module_path,
-            contents: render_module_wrapper(bundle, &package, &names, generation_style),
+            contents: render_module_wrapper(bundle, &package, &names),
         },
         false,
     );
@@ -54,7 +53,7 @@ pub(crate) fn render_declaration_skeletons(
             &mut source_indexes,
             JavaSource {
                 relative_path,
-                contents: render_type_shell(bundle, ty, &package, &names, generation_style),
+                contents: render_type_shell(bundle, ty, &package, &names),
             },
             is_java_library_placeholder_type(ty),
         );
@@ -97,7 +96,6 @@ fn render_module_wrapper(
     bundle: &BackendBundle,
     package: &JavaPackage,
     names: &JavaNames,
-    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
@@ -124,7 +122,7 @@ fn render_module_wrapper(
         out.push('\n');
         out.push_str("    static ");
         push_function_signature(&mut out, function, names);
-        push_function_body(&mut out, bundle, function, names, generation_style);
+        push_function_body(&mut out, bundle, function, names);
         let has_fixed_overload = variadic_fixed_arity(function).is_some_and(|arity| {
             bundle.ir.functions.iter().any(|other| {
                 other.id != function.id
@@ -182,18 +180,17 @@ fn render_type_shell(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
-    generation_style: JavaGenerationStyle,
 ) -> String {
     if is_anonymous_object_type(ty) {
-        return render_interface(bundle, ty, package, names, generation_style);
+        return render_interface(bundle, ty, package, names);
     }
     match ty.kind {
         TypeKind::Annotation => render_annotation(bundle, ty, package, names),
-        TypeKind::Class => render_class(bundle, ty, package, names, generation_style),
-        TypeKind::Record => render_shape(bundle, ty, package, names, generation_style),
-        TypeKind::Object => render_single(bundle, ty, package, names, generation_style),
-        TypeKind::Interface => render_interface(bundle, ty, package, names, generation_style),
-        TypeKind::Enum => render_enum(bundle, ty, package, names, generation_style),
+        TypeKind::Class => render_class(bundle, ty, package, names),
+        TypeKind::Record => render_shape(bundle, ty, package, names),
+        TypeKind::Object => render_single(bundle, ty, package, names),
+        TypeKind::Interface => render_interface(bundle, ty, package, names),
+        TypeKind::Enum => render_enum(bundle, ty, package, names),
     }
 }
 
@@ -202,7 +199,6 @@ fn render_class(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
-    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
@@ -218,14 +214,7 @@ fn render_class(
     push_fields(&mut out, ty, names);
     push_class_field_initializer(&mut out, bundle, ty, names);
     push_class_constructors(&mut out, bundle, ty, names);
-    push_instance_methods(
-        &mut out,
-        bundle,
-        ty,
-        MethodShell::StubBody,
-        names,
-        generation_style,
-    );
+    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     push_class_equality_bridge(&mut out, bundle, ty, names);
     push_class_hash_bridge(&mut out, bundle, ty);
     out.push_str("}\n");
@@ -345,7 +334,6 @@ fn render_shape(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
-    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
@@ -368,14 +356,7 @@ fn render_shape(
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, false);
     push_shape_value_methods(&mut out, ty);
-    push_instance_methods(
-        &mut out,
-        bundle,
-        ty,
-        MethodShell::StubBody,
-        names,
-        generation_style,
-    );
+    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     out.push_str("}\n");
     out
 }
@@ -438,7 +419,6 @@ fn render_single(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
-    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     let name = java_type_name(&ty.name);
@@ -464,14 +444,7 @@ fn render_single(
         out.push_str(" {}\n");
     }
     push_fields(&mut out, ty, names);
-    push_instance_methods(
-        &mut out,
-        bundle,
-        ty,
-        MethodShell::StubBody,
-        names,
-        generation_style,
-    );
+    push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     out.push_str("}\n");
     out
 }
@@ -481,7 +454,6 @@ fn render_interface(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
-    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     push_header(&mut out, package);
@@ -494,14 +466,7 @@ fn render_interface(
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, true);
-    push_instance_methods(
-        &mut out,
-        bundle,
-        ty,
-        MethodShell::Abstract,
-        names,
-        generation_style,
-    );
+    push_instance_methods(&mut out, bundle, ty, MethodShell::Abstract, names);
     out.push_str("}\n");
     out
 }
@@ -536,7 +501,6 @@ fn render_enum(
     ty: &ir::TypeDef,
     package: &JavaPackage,
     names: &JavaNames,
-    generation_style: JavaGenerationStyle,
 ) -> String {
     let mut out = String::new();
     let enum_name = java_type_name(&ty.name);
@@ -566,14 +530,7 @@ fn render_enum(
 
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, true);
-    push_instance_methods(
-        &mut out,
-        bundle,
-        ty,
-        MethodShell::DefaultBody,
-        names,
-        generation_style,
-    );
+    push_instance_methods(&mut out, bundle, ty, MethodShell::DefaultBody, names);
 
     for case in &ty.enum_cases {
         out.push('\n');
@@ -1288,7 +1245,6 @@ fn push_instance_methods(
     ty: &ir::TypeDef,
     shell: MethodShell,
     names: &JavaNames,
-    generation_style: JavaGenerationStyle,
 ) {
     for method_id in &ty.methods {
         let Some(function) = bundle.ir.function(*method_id) else {
@@ -1328,7 +1284,7 @@ fn push_instance_methods(
                 );
             }
             MethodShell::DefaultBody | MethodShell::StubBody => {
-                push_function_body(out, bundle, function, names, generation_style);
+                push_function_body(out, bundle, function, names);
                 let prefix = match shell {
                     MethodShell::DefaultBody => "    default ",
                     MethodShell::StubBody => "    public ",
@@ -1533,7 +1489,7 @@ fn push_variadic_bridge_overload(
     out.push_str("    }\n");
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct JavaParamSpec {
     ty: ir::Type,
     variadic: bool,
@@ -1555,6 +1511,26 @@ fn function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
                 lazy: function.param_lazy.get(index).copied().unwrap_or(false),
                 default: function.param_defaults.get(index).cloned().flatten(),
                 coercion: None,
+            })
+        })
+        .collect()
+}
+
+fn source_function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
+    function
+        .params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, param)| {
+            let local = function.locals.get(param.0)?;
+            (local.name != "this" && !is_reified_type_param_local(&local.name)).then(|| {
+                JavaParamSpec {
+                    ty: local.ty.clone(),
+                    variadic: function.param_variadic.get(index).copied().unwrap_or(false),
+                    lazy: function.param_lazy.get(index).copied().unwrap_or(false),
+                    default: function.param_defaults.get(index).cloned().flatten(),
+                    coercion: None,
+                }
             })
         })
         .collect()
@@ -1606,16 +1582,8 @@ fn push_function_body(
     bundle: &BackendBundle,
     function: &ir::Function,
     names: &JavaNames,
-    generation_style: JavaGenerationStyle,
 ) {
-    if generation_style == JavaGenerationStyle::Readable {
-        if let Some(body) = structured_source_function_body(bundle, function, names) {
-            out.push_str(&body);
-            return;
-        }
-    }
-
-    match FunctionEmitter::new(bundle, function, names).emit_body() {
+    match structured_source_function_body(bundle, function, names) {
         Some(body) => out.push_str(&body),
         None => push_stub_body(out),
     }
@@ -1643,6 +1611,58 @@ fn structured_source_function_body(
     .emit_body(body)
 }
 
+fn structured_source_function_body_with_local_overrides(
+    bundle: &BackendBundle,
+    function: &ir::Function,
+    names: &JavaNames,
+    local_overrides: &HashMap<ir::LocalId, String>,
+) -> Option<String> {
+    let body = bundle.core_bodies.get(&function.id)?;
+    let owner = match function.kind {
+        FunctionKind::Method { owner } => bundle.ir.types.get(owner.0),
+        FunctionKind::TopLevel | FunctionKind::Local { .. } | FunctionKind::Lambda => None,
+        FunctionKind::Synthetic => return None,
+    };
+    let mut bindings = HashMap::new();
+    let mut binding_types = HashMap::new();
+    for (local_id, java_name) in local_overrides {
+        let local = function.locals.get(local_id.0)?;
+        bindings.insert(local.name.clone(), java_name.clone());
+        binding_types.insert(local.name.clone(), local.ty.clone());
+    }
+    SourceBodyEmitter {
+        bundle,
+        function,
+        names,
+        owner,
+    }
+    .emit_body_with_bindings(body, bindings, binding_types)
+}
+
+fn structured_source_constructor_body(
+    bundle: &BackendBundle,
+    function: &ir::Function,
+    names: &JavaNames,
+    prologue: Option<&str>,
+) -> Option<String> {
+    let body = bundle.core_bodies.get(&function.id)?;
+    let FunctionKind::Method { owner } = function.kind else {
+        return None;
+    };
+    let owner = bundle.ir.types.get(owner.0)?;
+    let mut emitted = SourceBodyEmitter {
+        bundle,
+        function,
+        names,
+        owner: Some(owner),
+    }
+    .emit_body(body)?;
+    if let Some(prologue) = prologue {
+        emitted.insert_str(3, &format!("        {prologue}\n"));
+    }
+    Some(emitted)
+}
+
 struct SourceBodyEmitter<'a> {
     bundle: &'a BackendBundle,
     function: &'a ir::Function,
@@ -1652,36 +1672,34 @@ struct SourceBodyEmitter<'a> {
 
 impl<'a> SourceBodyEmitter<'a> {
     fn emit_body(&self, body: &core::CallableBody) -> Option<String> {
+        self.emit_body_with_bindings(body, HashMap::new(), HashMap::new())
+    }
+
+    fn emit_body_with_bindings(
+        &self,
+        body: &core::CallableBody,
+        mut bindings: HashMap<String, String>,
+        mut binding_types: HashMap<String, ir::Type>,
+    ) -> Option<String> {
         let mut out = String::new();
         out.push_str(" {\n");
         match body {
-            core::CallableBody::Expr(expr) => self.emit_returning_expr(
+            core::CallableBody::Expr(expr) => {
+                self.emit_returning_expr(&mut out, expr, "        ", &bindings, &binding_types)?
+            }
+            core::CallableBody::Block(block) => self.emit_statement_block(
                 &mut out,
-                expr,
+                block,
                 "        ",
-                &HashMap::new(),
-                &HashMap::new(),
+                &mut bindings,
+                &mut binding_types,
+                &mut HashSet::new(),
+                true,
+                0,
             )?,
-            core::CallableBody::Block(block) => self.emit_function_block(&mut out, block)?,
         }
         out.push_str("    }\n");
         Some(out)
-    }
-
-    fn emit_function_block(&self, out: &mut String, block: &core::Block) -> Option<()> {
-        let mut bindings = HashMap::new();
-        let mut binding_types = HashMap::new();
-        let mut used_locals = HashSet::new();
-        self.emit_statement_block(
-            out,
-            block,
-            "        ",
-            &mut bindings,
-            &mut binding_types,
-            &mut used_locals,
-            true,
-            0,
-        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1701,6 +1719,67 @@ impl<'a> SourceBodyEmitter<'a> {
             match statement {
                 core::Stmt::Binding(binding)
                     if binding.destructure.is_none()
+                        && binding.bindings.len() == 1
+                        && matches!(binding.values.as_slice(), [core::Expr::Try { .. }]) =>
+                {
+                    let core::Expr::Try { value, span } = &binding.values[0] else {
+                        unreachable!();
+                    };
+                    self.emit_try_binding(
+                        out,
+                        &binding.bindings[0],
+                        value,
+                        *span,
+                        indent,
+                        bindings,
+                        binding_types,
+                        used_locals,
+                    )?;
+                }
+                core::Stmt::Binding(binding) if binding.destructure.is_some() => {
+                    if matches!(binding.values.as_slice(), [core::Expr::If { .. }]) {
+                        self.emit_if_destructuring_binding(
+                            out,
+                            binding,
+                            indent,
+                            bindings,
+                            binding_types,
+                            used_locals,
+                        )?;
+                    } else {
+                        self.emit_flat_destructuring_binding(
+                            out,
+                            binding.destructure?,
+                            &binding.bindings,
+                            binding.values.as_slice(),
+                            binding.span,
+                            indent,
+                            bindings,
+                            binding_types,
+                            used_locals,
+                        )?;
+                    }
+                }
+                core::Stmt::Binding(binding)
+                    if binding.destructure.is_none()
+                        && binding.bindings.len() == 1
+                        && matches!(binding.values.as_slice(), [core::Expr::If { .. }]) =>
+                {
+                    let [value] = binding.values.as_slice() else {
+                        unreachable!();
+                    };
+                    self.emit_if_value_binding(
+                        out,
+                        &binding.bindings[0],
+                        value,
+                        indent,
+                        bindings,
+                        binding_types,
+                        used_locals,
+                    )?;
+                }
+                core::Stmt::Binding(binding)
+                    if binding.destructure.is_none()
                         && binding.bindings.len() == binding.values.len() =>
                 {
                     for (binding, value) in binding.bindings.iter().zip(&binding.values) {
@@ -1713,6 +1792,27 @@ impl<'a> SourceBodyEmitter<'a> {
                         let local = self.source_binding_local(&binding.name, &used_locals)?;
                         used_locals.insert(local.id);
                         let java_name = java_local_name(local);
+                        if let Some(Some(call)) =
+                            self.emit_call_with_hoisted_try_args(out, value, indent, bindings)
+                        {
+                            out.push_str(indent);
+                            out.push_str(&self.names.value_type(&local.ty));
+                            out.push(' ');
+                            out.push_str(&java_name);
+                            out.push_str(" = ");
+                            out.push_str(&call);
+                            out.push_str(";\n");
+                            bindings.insert(binding.name.clone(), java_name);
+                            binding_types.insert(binding.name.clone(), local.ty.clone());
+                            continue;
+                        }
+                        if self.emit_short_circuit_try_binding(
+                            out, value, &java_name, &local.ty, indent, bindings,
+                        )? {
+                            bindings.insert(binding.name.clone(), java_name);
+                            binding_types.insert(binding.name.clone(), local.ty.clone());
+                            continue;
+                        }
                         out.push_str(indent);
                         out.push_str(&self.names.value_type(&local.ty));
                         out.push(' ');
@@ -1724,7 +1824,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         binding_types.insert(binding.name.clone(), local.ty.clone());
                     }
                 }
-                core::Stmt::Return(statement) if is_tail => {
+                core::Stmt::Return(statement) => {
                     out.push_str(indent);
                     out.push_str("return");
                     if let Some(value) = &statement.value {
@@ -1738,10 +1838,77 @@ impl<'a> SourceBodyEmitter<'a> {
                     out.push_str(";\n");
                 }
                 core::Stmt::Assignment(statement)
+                    if statement.targets.len() == 1
+                        && statement.values.len() == 1
+                        && matches!(
+                            statement.operator,
+                            ast::AssignOp::Assign | ast::AssignOp::Reassign
+                        )
+                        && matches!(statement.targets.as_slice(), [core::Expr::Index { .. }]) =>
+                {
+                    let core::Expr::Index {
+                        receiver, index, ..
+                    } = &statement.targets[0]
+                    else {
+                        unreachable!();
+                    };
+                    let ir::Type::Named { name, args } = self.expr_type(receiver, bindings)? else {
+                        return None;
+                    };
+                    if name != "Map" || args.len() != 2 {
+                        return None;
+                    }
+                    out.push_str(indent);
+                    out.push_str(&self.emit_expr(receiver, bindings)?);
+                    out.push_str(".set(");
+                    out.push_str(&self.emit_expr_against(index, bindings, &args[0])?);
+                    out.push_str(", ");
+                    out.push_str(&self.emit_expr_against(
+                        &statement.values[0],
+                        bindings,
+                        &args[1],
+                    )?);
+                    out.push_str(");\n");
+                }
+                core::Stmt::Assignment(statement)
+                    if statement.targets.len() == 1
+                        && statement.values.len() == 1
+                        && matches!(statement.values.as_slice(), [core::Expr::Try { .. }])
+                        && matches!(
+                            statement.operator,
+                            ast::AssignOp::Assign | ast::AssignOp::Reassign
+                        ) =>
+                {
+                    let core::Expr::Try { value, span } = &statement.values[0] else {
+                        unreachable!();
+                    };
+                    let target = self.emit_assignment_target(&statement.targets[0], bindings)?;
+                    let target_ty = self.assignment_target_type(
+                        &statement.targets[0],
+                        bindings,
+                        binding_types,
+                    )?;
+                    self.emit_try_assignment(
+                        out, &target, &target_ty, value, *span, indent, bindings,
+                    )?;
+                }
+                core::Stmt::Assignment(statement)
                     if statement.targets.len() == 1 && statement.values.len() == 1 =>
                 {
                     let target = self.emit_assignment_target(&statement.targets[0], &bindings)?;
-                    let value = self.emit_expr(&statement.values[0], &bindings)?;
+                    let value = match statement.operator {
+                        ast::AssignOp::Assign | ast::AssignOp::Reassign => self
+                            .assignment_target_type(
+                                &statement.targets[0],
+                                &bindings,
+                                &binding_types,
+                            )
+                            .and_then(|target_ty| {
+                                self.emit_expr_against(&statement.values[0], &bindings, &target_ty)
+                            })
+                            .or_else(|| self.emit_expr(&statement.values[0], &bindings))?,
+                        _ => self.emit_expr(&statement.values[0], &bindings)?,
+                    };
                     let operator = match statement.operator {
                         ast::AssignOp::Assign | ast::AssignOp::Reassign => "=",
                         ast::AssignOp::AddAssign => "+=",
@@ -1758,6 +1925,15 @@ impl<'a> SourceBodyEmitter<'a> {
                     out.push_str(&value);
                     out.push_str(";\n");
                 }
+                core::Stmt::LetElse(statement) => self.emit_let_else_statement(
+                    out,
+                    statement,
+                    indent,
+                    bindings,
+                    binding_types,
+                    used_locals,
+                    loop_depth,
+                )?,
                 core::Stmt::If(statement) => {
                     let branches_return =
                         is_tail && returns_tail && !is_java_void_type(&self.function.return_ty);
@@ -1804,13 +1980,22 @@ impl<'a> SourceBodyEmitter<'a> {
                     used_locals,
                     loop_depth,
                 )?,
-                core::Stmt::Break(_) if is_tail && loop_depth > 0 => {
+                core::Stmt::Break(_) if loop_depth > 0 => {
                     out.push_str(indent);
                     out.push_str("break;\n");
                 }
-                core::Stmt::Continue(_) if is_tail && loop_depth > 0 => {
+                core::Stmt::Continue(_) if loop_depth > 0 => {
                     out.push_str(indent);
                     out.push_str("continue;\n");
+                }
+                core::Stmt::Expr(statement)
+                    if matches!(statement.expr, core::Expr::Try { .. })
+                        && !(is_tail && returns_tail) =>
+                {
+                    let core::Expr::Try { value, span } = &statement.expr else {
+                        unreachable!();
+                    };
+                    self.emit_try_statement(out, value, *span, indent, bindings)?;
                 }
                 core::Stmt::Expr(statement) if is_tail && returns_tail => {
                     self.emit_returning_expr(
@@ -1821,13 +2006,731 @@ impl<'a> SourceBodyEmitter<'a> {
                         &binding_types,
                     )?;
                 }
+                core::Stmt::Expr(statement)
+                    if matches!(statement.expr, core::Expr::Unit { .. }) => {}
                 core::Stmt::Expr(statement) => {
                     out.push_str(indent);
                     out.push_str(&self.emit_expr(&statement.expr, &bindings)?);
                     out.push_str(";\n");
                 }
-                _ => return None,
+                unsupported => {
+                    if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                        eprintln!(
+                            "readable java cannot emit statement in '{}': {:?}",
+                            self.function.name, unsupported
+                        );
+                    }
+                    return None;
+                }
             }
+        }
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_if_destructuring_binding(
+        &self,
+        out: &mut String,
+        binding: &core::BindingStmt,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+    ) -> Option<()> {
+        let [value @ core::Expr::If { .. }] = binding.values.as_slice() else {
+            return None;
+        };
+        let value_ty = self
+            .expr_type_with_binding_types(value, bindings, binding_types)
+            .or_else(|| {
+                (binding.destructure == Some(ast::DestructureKind::Tuple))
+                    .then(|| {
+                        binding
+                            .bindings
+                            .iter()
+                            .map(|declared| {
+                                self.source_binding_local(&declared.name, used_locals)
+                                    .map(|local| local.ty.clone())
+                            })
+                            .collect::<Option<Vec<_>>>()
+                            .map(ir::Type::Tuple)
+                    })
+                    .flatten()
+            })?;
+        let temp = format!("__destructure{}", binding.span.start);
+        out.push_str(indent);
+        out.push_str(&self.names.value_type(&value_ty));
+        out.push(' ');
+        out.push_str(&temp);
+        out.push_str(" = ");
+        out.push_str(&java_default_value(&value_ty));
+        out.push_str(";\n");
+        self.emit_assigning_expr(
+            out,
+            &temp,
+            &value_ty,
+            value,
+            indent,
+            bindings,
+            binding_types,
+            used_locals,
+        )?;
+        self.emit_flat_destructure(
+            out,
+            binding.destructure?,
+            &binding.bindings,
+            &temp,
+            &value_ty,
+            indent,
+            bindings,
+            binding_types,
+            used_locals,
+        )
+    }
+
+    fn emit_call_with_hoisted_try_args(
+        &self,
+        out: &mut String,
+        expr: &core::Expr,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+    ) -> Option<Option<String>> {
+        let core::Expr::Call {
+            callee,
+            args,
+            style: _,
+            span,
+        } = expr
+        else {
+            return Some(None);
+        };
+        if !args
+            .iter()
+            .any(|arg| matches!(arg.value, core::Expr::Try { .. }))
+        {
+            return Some(None);
+        }
+
+        let mut rewritten = args.clone();
+        let mut rewritten_bindings = bindings.clone();
+        for arg in &mut rewritten {
+            let core::Expr::Try {
+                value,
+                span: try_span,
+            } = &arg.value
+            else {
+                continue;
+            };
+            let wrapped_ty = self.expr_type(value, &rewritten_bindings)?;
+            let success_ty = lifted_success_type(&wrapped_ty)?;
+            let java_temp = format!("__tryValue{}", try_span.start);
+            let source_temp = format!("__try_arg_{}", try_span.start);
+            out.push_str(indent);
+            out.push_str(&self.names.value_type(&success_ty));
+            out.push(' ');
+            out.push_str(&java_temp);
+            out.push_str(" = ");
+            out.push_str(&java_default_value(&success_ty));
+            out.push_str(";\n");
+            self.emit_try_assignment(
+                out,
+                &java_temp,
+                &success_ty,
+                value,
+                *try_span,
+                indent,
+                &rewritten_bindings,
+            )?;
+            rewritten_bindings.insert(source_temp.clone(), java_temp);
+            arg.value = core::Expr::Identifier {
+                name: source_temp,
+                span: *try_span,
+            };
+        }
+
+        Some(Some(self.emit_call(
+            callee,
+            &rewritten,
+            *span,
+            &rewritten_bindings,
+        )?))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_short_circuit_try_binding(
+        &self,
+        out: &mut String,
+        value: &core::Expr,
+        java_name: &str,
+        target_ty: &ir::Type,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+    ) -> Option<bool> {
+        let core::Expr::Binary {
+            left, op, right, ..
+        } = value
+        else {
+            return Some(false);
+        };
+        let core::Expr::Try {
+            value: wrapped,
+            span,
+        } = right.as_ref()
+        else {
+            return Some(false);
+        };
+        let initial = match op {
+            ast::BinaryOp::And => "false",
+            ast::BinaryOp::Or => "true",
+            _ => return Some(false),
+        };
+        let condition = self.emit_expr(left, bindings)?;
+        out.push_str(indent);
+        out.push_str(&self.names.value_type(target_ty));
+        out.push(' ');
+        out.push_str(java_name);
+        out.push_str(" = ");
+        out.push_str(initial);
+        out.push_str(";\n");
+        out.push_str(indent);
+        out.push_str("if (");
+        if matches!(op, ast::BinaryOp::Or) {
+            out.push_str("!(");
+            out.push_str(&condition);
+            out.push(')');
+        } else {
+            out.push_str(&condition);
+        }
+        out.push_str(") {\n");
+        self.emit_try_assignment(
+            out,
+            java_name,
+            target_ty,
+            wrapped,
+            *span,
+            &format!("{indent}    "),
+            bindings,
+        )?;
+        out.push_str(indent);
+        out.push_str("}\n");
+        Some(true)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_if_value_binding(
+        &self,
+        out: &mut String,
+        binding: &ast::Binding,
+        value: &core::Expr,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+    ) -> Option<()> {
+        if binding.name == "_" {
+            return None;
+        }
+        let local = self.source_binding_local(&binding.name, used_locals)?;
+        used_locals.insert(local.id);
+        let java_name = java_local_name(local);
+
+        if matches!(value, core::Expr::If { .. })
+            && let Some(inline_value) =
+                self.emit_inline_value_expr(value, &local.ty, bindings, binding_types)
+        {
+            out.push_str(indent);
+            out.push_str(&self.names.value_type(&local.ty));
+            out.push(' ');
+            out.push_str(&java_name);
+            out.push_str(" = ");
+            out.push_str(&inline_value);
+            out.push_str(";\n");
+            bindings.insert(binding.name.clone(), java_name);
+            binding_types.insert(binding.name.clone(), local.ty.clone());
+            return Some(());
+        }
+
+        out.push_str(indent);
+        out.push_str(&self.names.value_type(&local.ty));
+        out.push(' ');
+        out.push_str(&java_name);
+        out.push_str(" = ");
+        out.push_str(&java_default_value(&local.ty));
+        out.push_str(";\n");
+        self.emit_assigning_expr(
+            out,
+            &java_name,
+            &local.ty,
+            value,
+            indent,
+            bindings,
+            binding_types,
+            used_locals,
+        )?;
+        bindings.insert(binding.name.clone(), java_name);
+        binding_types.insert(binding.name.clone(), local.ty.clone());
+        Some(())
+    }
+
+    fn emit_inline_value_expr(
+        &self,
+        expr: &core::Expr,
+        target_ty: &ir::Type,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<String> {
+        let core::Expr::If {
+            condition_clauses,
+            then_block,
+            else_branch,
+            ..
+        } = expr
+        else {
+            return self.emit_expr_against(expr, bindings, target_ty);
+        };
+        let [core::Stmt::Expr(then_expr)] = then_block.statements.as_slice() else {
+            return None;
+        };
+        let (condition, then_bindings, then_types) =
+            self.emit_condition_clauses(None, condition_clauses, bindings, binding_types)?;
+        let then_value =
+            self.emit_inline_value_expr(&then_expr.expr, target_ty, &then_bindings, &then_types)?;
+        let else_value = match else_branch.as_ref() {
+            core::ElseExprBranch::If(next) => {
+                self.emit_inline_value_expr(next, target_ty, bindings, binding_types)?
+            }
+            core::ElseExprBranch::Block(block) => {
+                let [core::Stmt::Expr(else_expr)] = block.statements.as_slice() else {
+                    return None;
+                };
+                self.emit_inline_value_expr(&else_expr.expr, target_ty, bindings, binding_types)?
+            }
+        };
+        Some(format!("({condition}) ? {then_value} : {else_value}"))
+    }
+
+    fn emit_assigning_expr(
+        &self,
+        out: &mut String,
+        target: &str,
+        target_ty: &ir::Type,
+        expr: &core::Expr,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+    ) -> Option<()> {
+        match expr {
+            core::Expr::If {
+                condition_clauses,
+                then_block,
+                else_branch,
+                ..
+            } => {
+                let (condition, then_bindings, then_types) =
+                    self.emit_condition_clauses(None, condition_clauses, bindings, binding_types)?;
+                out.push_str(indent);
+                out.push_str("if (");
+                out.push_str(&condition);
+                out.push_str(") {\n");
+                self.emit_assigning_block(
+                    out,
+                    target,
+                    target_ty,
+                    then_block,
+                    &format!("{indent}    "),
+                    &then_bindings,
+                    &then_types,
+                    used_locals,
+                )?;
+                out.push_str(indent);
+                out.push_str("} else {\n");
+                match else_branch.as_ref() {
+                    core::ElseExprBranch::If(next) => self.emit_assigning_expr(
+                        out,
+                        target,
+                        target_ty,
+                        next,
+                        &format!("{indent}    "),
+                        bindings,
+                        binding_types,
+                        used_locals,
+                    )?,
+                    core::ElseExprBranch::Block(block) => self.emit_assigning_block(
+                        out,
+                        target,
+                        target_ty,
+                        block,
+                        &format!("{indent}    "),
+                        bindings,
+                        binding_types,
+                        used_locals,
+                    )?,
+                }
+                out.push_str(indent);
+                out.push_str("}\n");
+                Some(())
+            }
+            core::Expr::Try { value, span } => {
+                self.emit_try_assignment(out, target, target_ty, value, *span, indent, bindings)
+            }
+            _ => {
+                out.push_str(indent);
+                out.push_str(target);
+                out.push_str(" = ");
+                out.push_str(&self.emit_expr_against(expr, bindings, target_ty)?);
+                out.push_str(";\n");
+                Some(())
+            }
+        }
+    }
+
+    fn emit_assigning_block(
+        &self,
+        out: &mut String,
+        target: &str,
+        target_ty: &ir::Type,
+        block: &core::Block,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+    ) -> Option<()> {
+        let (tail, prefix) = block.statements.split_last()?;
+        let mut branch_bindings = bindings.clone();
+        let mut branch_types = binding_types.clone();
+        if !prefix.is_empty() {
+            self.emit_statement_block(
+                out,
+                &core::Block {
+                    statements: prefix.to_vec(),
+                    span: block.span,
+                },
+                indent,
+                &mut branch_bindings,
+                &mut branch_types,
+                used_locals,
+                false,
+                0,
+            )?;
+        }
+        let core::Stmt::Expr(statement) = tail else {
+            return None;
+        };
+        self.emit_assigning_expr(
+            out,
+            target,
+            target_ty,
+            &statement.expr,
+            indent,
+            &branch_bindings,
+            &branch_types,
+            used_locals,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_try_assignment(
+        &self,
+        out: &mut String,
+        target: &str,
+        target_ty: &ir::Type,
+        value: &core::Expr,
+        span: crate::source::Span,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+    ) -> Option<()> {
+        let wrapped_ty = self.expr_type(value, bindings)?;
+        let (case_type, accessor) = match &wrapped_ty {
+            ir::Type::Named { name, .. } if name == "Option" => {
+                ("lume.core.Option.Some<?>".to_string(), "value")
+            }
+            ir::Type::Named { name, .. } if name == "Result" => {
+                ("lume.core.Result.Ok<?, ?>".to_string(), "value")
+            }
+            ir::Type::Named { name, .. } if name == "Either" => {
+                ("lume.core.Either.Right<?, ?>".to_string(), "value")
+            }
+            _ => return None,
+        };
+        let wrapped = format!("__try{}", span.start);
+        let success = format!("__success{}", span.start);
+        out.push_str(indent);
+        out.push_str("var ");
+        out.push_str(&wrapped);
+        out.push_str(" = ");
+        out.push_str(&self.emit_expr(value, bindings)?);
+        out.push_str(";\n");
+        out.push_str(indent);
+        out.push_str("if (!(");
+        out.push_str(&wrapped);
+        out.push_str(" instanceof ");
+        out.push_str(&case_type);
+        out.push(' ');
+        out.push_str(&success);
+        out.push_str(")) {\n");
+        out.push_str(indent);
+        out.push_str("    return (");
+        out.push_str(&self.names.value_type(&self.function.return_ty));
+        out.push_str(") (Object) ");
+        out.push_str(&wrapped);
+        out.push_str(";\n");
+        out.push_str(indent);
+        out.push_str("}\n");
+        out.push_str(indent);
+        out.push_str(target);
+        out.push_str(" = (");
+        out.push_str(&self.names.value_type(target_ty));
+        out.push_str(") ");
+        out.push_str(&success);
+        out.push('.');
+        out.push_str(accessor);
+        out.push_str("();\n");
+        Some(())
+    }
+
+    fn emit_try_statement(
+        &self,
+        out: &mut String,
+        value: &core::Expr,
+        span: crate::source::Span,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+    ) -> Option<()> {
+        let wrapped_ty = self.expr_type(value, bindings)?;
+        let success_case = match &wrapped_ty {
+            ir::Type::Named { name, .. } if name == "Option" => "lume.core.Option.Some<?>",
+            ir::Type::Named { name, .. } if name == "Result" => "lume.core.Result.Ok<?, ?>",
+            ir::Type::Named { name, .. } if name == "Either" => "lume.core.Either.Right<?, ?>",
+            _ => return None,
+        };
+        let wrapped = format!("__try{}", span.start);
+        out.push_str(indent);
+        out.push_str("var ");
+        out.push_str(&wrapped);
+        out.push_str(" = ");
+        out.push_str(&self.emit_expr(value, bindings)?);
+        out.push_str(";\n");
+        out.push_str(indent);
+        out.push_str("if (!(");
+        out.push_str(&wrapped);
+        out.push_str(" instanceof ");
+        out.push_str(success_case);
+        out.push_str(")) {\n");
+        out.push_str(indent);
+        out.push_str("    return (");
+        out.push_str(&self.names.value_type(&self.function.return_ty));
+        out.push_str(") (Object) ");
+        out.push_str(&wrapped);
+        out.push_str(";\n");
+        out.push_str(indent);
+        out.push_str("}\n");
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_try_binding(
+        &self,
+        out: &mut String,
+        binding: &ast::Binding,
+        value: &core::Expr,
+        span: crate::source::Span,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+    ) -> Option<()> {
+        if binding.name == "_" {
+            return None;
+        }
+        let wrapped_ty = self.expr_type(value, bindings)?;
+        let success_ty = lifted_success_type(&wrapped_ty)?;
+        let (case_type, accessor) = match &wrapped_ty {
+            ir::Type::Named { name, .. } if name == "Option" => {
+                ("lume.core.Option.Some<?>".to_string(), "value")
+            }
+            ir::Type::Named { name, .. } if name == "Result" => {
+                ("lume.core.Result.Ok<?, ?>".to_string(), "value")
+            }
+            ir::Type::Named { name, .. } if name == "Either" => {
+                ("lume.core.Either.Right<?, ?>".to_string(), "value")
+            }
+            _ => return None,
+        };
+        let local = self.source_binding_local(&binding.name, used_locals)?;
+        used_locals.insert(local.id);
+        let local_ty = if matches!(local.ty, ir::Type::Unknown) {
+            success_ty
+        } else {
+            local.ty.clone()
+        };
+        let java_name = java_local_name(local);
+        let wrapped = format!("__try{}", span.start);
+        let success = format!("__success{}", span.start);
+
+        out.push_str(indent);
+        out.push_str("var ");
+        out.push_str(&wrapped);
+        out.push_str(" = ");
+        out.push_str(&self.emit_expr(value, bindings)?);
+        out.push_str(";\n");
+        out.push_str(indent);
+        out.push_str("if (!(");
+        out.push_str(&wrapped);
+        out.push_str(" instanceof ");
+        out.push_str(&case_type);
+        out.push(' ');
+        out.push_str(&success);
+        out.push_str(")) {\n");
+        out.push_str(indent);
+        out.push_str("    return (");
+        out.push_str(&self.names.value_type(&self.function.return_ty));
+        out.push_str(") (Object) ");
+        out.push_str(&wrapped);
+        out.push_str(";\n");
+        out.push_str(indent);
+        out.push_str("}\n");
+        out.push_str(indent);
+        out.push_str(&self.names.value_type(&local_ty));
+        out.push(' ');
+        out.push_str(&java_name);
+        out.push_str(" = (");
+        out.push_str(&self.names.value_type(&local_ty));
+        out.push_str(") ");
+        out.push_str(&success);
+        out.push('.');
+        out.push_str(accessor);
+        out.push_str("();\n");
+
+        bindings.insert(binding.name.clone(), java_name);
+        binding_types.insert(binding.name.clone(), local_ty);
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_let_else_statement(
+        &self,
+        out: &mut String,
+        statement: &core::LetElseStmt,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+    ) -> Option<()> {
+        if statement.clauses.is_empty() {
+            return self.emit_let_else_clause(
+                out,
+                &statement.pattern,
+                &statement.value,
+                &statement.else_block,
+                statement.span.start,
+                indent,
+                bindings,
+                binding_types,
+                used_locals,
+                loop_depth,
+            );
+        }
+
+        for (index, clause) in statement.clauses.iter().enumerate() {
+            self.emit_let_else_clause(
+                out,
+                &clause.pattern,
+                &clause.value,
+                &statement.else_block,
+                statement.span.start + index,
+                indent,
+                bindings,
+                binding_types,
+                used_locals,
+                loop_depth,
+            )?;
+        }
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_let_else_clause(
+        &self,
+        out: &mut String,
+        pattern: &ast::Pattern,
+        value: &core::Expr,
+        else_block: &core::Block,
+        unique: usize,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+    ) -> Option<()> {
+        let value_ty = self.expr_type_with_binding_types(value, bindings, binding_types)?;
+        let value_expr = self.emit_expr(value, bindings)?;
+        let value_local = format!("__let{unique}");
+        out.push_str(indent);
+        out.push_str("var ");
+        out.push_str(&value_local);
+        out.push_str(" = ");
+        out.push_str(&value_expr);
+        out.push_str(";\n");
+
+        let matched = self.match_case_pattern(
+            pattern,
+            &value_local,
+            &value_ty,
+            unique,
+            bindings,
+            binding_types,
+        )?;
+        let mut new_bindings = matched
+            .bindings
+            .iter()
+            .filter(|(name, value)| bindings.get(*name) != Some(*value))
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        new_bindings.sort_by(|left, right| left.0.cmp(&right.0));
+
+        let mut materialized = Vec::new();
+        for (name, value) in new_bindings {
+            let local = self.source_binding_local(&name, used_locals)?;
+            used_locals.insert(local.id);
+            let java_name = java_local_name(local);
+            let ty = matched.binding_types.get(&name)?.clone();
+            materialized.push((name, java_name, ty, value));
+        }
+
+        out.push_str(indent);
+        out.push_str("if (!(");
+        out.push_str(&matched.condition);
+        out.push_str(")) {\n");
+        let mut fallback_bindings = bindings.clone();
+        let mut fallback_types = binding_types.clone();
+        self.emit_statement_block(
+            out,
+            else_block,
+            &format!("{indent}    "),
+            &mut fallback_bindings,
+            &mut fallback_types,
+            used_locals,
+            false,
+            loop_depth,
+        )?;
+        out.push_str(indent);
+        out.push_str("}\n");
+
+        for (_, java_name, ty, value) in &materialized {
+            out.push_str(indent);
+            out.push_str(&self.names.value_type(ty));
+            out.push(' ');
+            out.push_str(java_name);
+            out.push_str(" = ");
+            out.push_str(value);
+            out.push_str(";\n");
+        }
+
+        for (name, java_name, ty, _) in materialized {
+            bindings.insert(name.clone(), java_name);
+            binding_types.insert(name, ty);
         }
         Some(())
     }
@@ -1859,10 +2762,19 @@ impl<'a> SourceBodyEmitter<'a> {
                 &case.pattern,
                 &match_local,
                 &value_ty,
-                index,
+                statement.span.start + index,
                 bindings,
                 binding_types,
-            )?;
+            )
+            .or_else(|| {
+                if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                    eprintln!(
+                        "readable java cannot emit match pattern in '{}': pattern={:?}, value_type={value_ty:?}",
+                        self.function.name, case.pattern
+                    );
+                }
+                None
+            })?;
             let condition = match &case.guard {
                 Some(guard) => format!(
                     "({}) && ({})",
@@ -1889,6 +2801,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     &branch_bindings,
                     &branch_types,
                 )?,
+                core::MatchCaseBody::Expr(core::Expr::Unit { .. }) => {}
                 core::MatchCaseBody::Expr(expr) => {
                     out.push_str(&branch_indent);
                     out.push_str(&self.emit_expr(expr, &branch_bindings)?);
@@ -1938,15 +2851,24 @@ impl<'a> SourceBodyEmitter<'a> {
         let [generator] = statement.bindings.as_slice() else {
             return None;
         };
-        if generator.pattern.is_some()
-            || generator.destructure.is_some()
-            || !generator.values.is_empty()
-            || generator.bindings.len() != 1
-        {
+        if generator.pattern.is_some() || !generator.values.is_empty() {
             return None;
         }
-        let iterable = generator.iterable.as_ref()?;
-        let iterable = self.emit_expr(iterable, bindings)?;
+        if generator.destructure.is_none() && generator.bindings.len() != 1 {
+            return None;
+        }
+        let iterable_source = generator.iterable.as_ref()?;
+        let item_ty = self
+            .iterable_item_type(iterable_source, bindings, binding_types)
+            .or_else(|| {
+                generator
+                    .bindings
+                    .iter()
+                    .find(|binding| binding.name != "_")
+                    .and_then(|binding| self.source_binding_local(&binding.name, used_locals))
+                    .map(|local| local.ty.clone())
+            })?;
+        let iterable = self.emit_expr(iterable_source, bindings)?;
         let iterator = format!("__iterator{}", statement.span.start);
 
         out.push_str(indent);
@@ -1960,26 +2882,45 @@ impl<'a> SourceBodyEmitter<'a> {
         out.push_str(&iterator);
         out.push_str(".hasNext()) {\n");
 
-        let binding = &generator.bindings[0];
         let mut body_bindings = bindings.clone();
         let mut body_types = binding_types.clone();
-        if binding.name == "_" {
-            out.push_str(&format!("{indent}    {iterator}.next();\n"));
-        } else {
-            let local = self.source_binding_local(&binding.name, used_locals)?;
-            used_locals.insert(local.id);
-            let java_name = java_local_name(local);
-            let binding_ty = if matches!(local.ty, ir::Type::Unknown) {
-                self.iterable_item_type(generator.iterable.as_ref()?, binding_types)?
-            } else {
-                local.ty.clone()
-            };
-            let java_type = self.names.value_type(&binding_ty);
+        if let Some(destructure) = generator.destructure {
+            let item = format!("__item{}", generator.span.start);
+            let java_type = self.names.value_type(&item_ty);
             out.push_str(&format!(
-                "{indent}    {java_type} {java_name} = ({java_type}) {iterator}.next();\n"
+                "{indent}    {java_type} {item} = ({java_type}) {iterator}.next();\n"
             ));
-            body_bindings.insert(binding.name.clone(), java_name);
-            body_types.insert(binding.name.clone(), binding_ty);
+            self.emit_flat_destructure(
+                out,
+                destructure,
+                &generator.bindings,
+                &item,
+                &item_ty,
+                &format!("{indent}    "),
+                &mut body_bindings,
+                &mut body_types,
+                used_locals,
+            )?;
+        } else {
+            let binding = &generator.bindings[0];
+            if binding.name == "_" {
+                out.push_str(&format!("{indent}    {iterator}.next();\n"));
+            } else {
+                let local = self.source_binding_local(&binding.name, used_locals)?;
+                used_locals.insert(local.id);
+                let java_name = java_local_name(local);
+                let binding_ty = if matches!(local.ty, ir::Type::Unknown) {
+                    item_ty
+                } else {
+                    local.ty.clone()
+                };
+                let java_type = self.names.value_type(&binding_ty);
+                out.push_str(&format!(
+                    "{indent}    {java_type} {java_name} = ({java_type}) {iterator}.next();\n"
+                ));
+                body_bindings.insert(binding.name.clone(), java_name);
+                body_types.insert(binding.name.clone(), binding_ty);
+            }
         }
 
         self.emit_statement_block(
@@ -2000,29 +2941,65 @@ impl<'a> SourceBodyEmitter<'a> {
     fn iterable_item_type(
         &self,
         iterable: &core::Expr,
+        bindings: &HashMap<String, String>,
         binding_types: &HashMap<String, ir::Type>,
     ) -> Option<ir::Type> {
-        let iterable_ty = match iterable {
-            core::Expr::Identifier { name, .. } => {
-                binding_types.get(name).cloned().or_else(|| {
-                    self.function
-                        .params
+        if matches!(
+            iterable,
+            core::Expr::Call { callee, .. }
+                if matches!(callee.as_ref(), core::Expr::Identifier { name, .. } if name == "Range")
+        ) {
+            return Some(ir::Type::Int);
+        }
+        let iterable_ty = self
+            .expr_type(iterable, bindings)
+            .or_else(|| match iterable {
+                core::Expr::Identifier { name, .. } => {
+                    binding_types.get(name).cloned().or_else(|| {
+                        self.function
+                            .params
+                            .iter()
+                            .filter_map(|param| self.function.locals.get(param.0))
+                            .find(|local| local.name == *name)
+                            .map(|local| local.ty.clone())
+                    })
+                }
+                core::Expr::ListLiteral { items, .. } => {
+                    let element = items
                         .iter()
-                        .filter_map(|param| self.function.locals.get(param.0))
-                        .find(|local| local.name == *name)
-                        .map(|local| local.ty.clone())
-                })?
-            }
-            core::Expr::ListLiteral { items, .. } => {
-                let element = items
-                    .iter()
-                    .filter_map(source_literal_type)
-                    .find(|ty| !matches!(ty, ir::Type::Unknown))
-                    .unwrap_or(ir::Type::Unknown);
-                ir::Type::list(element)
-            }
-            _ => return None,
-        };
+                        .filter_map(source_literal_type)
+                        .find(|ty| !matches!(ty, ir::Type::Unknown))
+                        .unwrap_or(ir::Type::Unknown);
+                    Some(ir::Type::list(element))
+                }
+                core::Expr::Call {
+                    callee,
+                    args,
+                    style: core::CallStyle::Paren,
+                    ..
+                } if args.is_empty() => {
+                    let core::Expr::Member { receiver, name, .. } = callee.as_ref() else {
+                        return None;
+                    };
+                    if name != "zipWithIndex" {
+                        return None;
+                    }
+                    let receiver_ty =
+                        self.expr_type(receiver, bindings)
+                            .or_else(|| match receiver.as_ref() {
+                                core::Expr::Identifier { name, .. } => {
+                                    binding_types.get(name).cloned()
+                                }
+                                _ => None,
+                            })?;
+                    let item_ty = iterable_item_type(&receiver_ty)?;
+                    Some(ir::Type::list(ir::Type::Tuple(vec![
+                        item_ty,
+                        ir::Type::Int,
+                    ])))
+                }
+                _ => None,
+            })?;
         match iterable_ty {
             ir::Type::Named { name, args }
                 if matches!(
@@ -2035,11 +3012,135 @@ impl<'a> SourceBodyEmitter<'a> {
             ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
                 Some(ir::Type::Tuple(args))
             }
-            ir::Type::Named { name, args } if name == "IntRange" && args.is_empty() => {
+            ir::Type::Named { name, args }
+                if matches!(name.as_str(), "IntRange" | "Range") && args.is_empty() =>
+            {
                 Some(ir::Type::Int)
             }
             _ => None,
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_flat_destructuring_binding(
+        &self,
+        out: &mut String,
+        destructure: ast::DestructureKind,
+        declared_bindings: &[ast::Binding],
+        values: &[core::Expr],
+        span: crate::source::Span,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+    ) -> Option<()> {
+        let [value] = values else {
+            return None;
+        };
+        let value_ty = self.expr_type_with_binding_types(value, bindings, binding_types)?;
+        let temp = format!("__destructure{}", span.start);
+        out.push_str(indent);
+        out.push_str(&self.names.value_type(&value_ty));
+        out.push(' ');
+        out.push_str(&temp);
+        out.push_str(" = ");
+        out.push_str(&self.emit_expr_against(value, bindings, &value_ty)?);
+        out.push_str(";\n");
+        self.emit_flat_destructure(
+            out,
+            destructure,
+            declared_bindings,
+            &temp,
+            &value_ty,
+            indent,
+            bindings,
+            binding_types,
+            used_locals,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_flat_destructure(
+        &self,
+        out: &mut String,
+        destructure: ast::DestructureKind,
+        declared_bindings: &[ast::Binding],
+        value: &str,
+        value_ty: &ir::Type,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+    ) -> Option<()> {
+        let fields = match destructure {
+            ast::DestructureKind::Tuple => {
+                let ir::Type::Tuple(items) = value_ty else {
+                    return None;
+                };
+                if items.len() != declared_bindings.len() {
+                    return None;
+                }
+                declared_bindings
+                    .iter()
+                    .zip(items)
+                    .enumerate()
+                    .map(|(index, (binding, ty))| {
+                        let accessor = tuple_accessor_name(&format!("_{}", index + 1))?;
+                        Some((binding, ty.clone(), format!("{value}.{accessor}()")))
+                    })
+                    .collect::<Option<Vec<_>>>()?
+            }
+            ast::DestructureKind::Record => {
+                let ir::Type::Named { name, .. } = value_ty else {
+                    return None;
+                };
+                let ty = self.bundle.ir.types.iter().find(|ty| ty.name == *name)?;
+                declared_bindings
+                    .iter()
+                    .map(|binding| {
+                        let field_name = binding.field_name.as_deref().unwrap_or(&binding.name);
+                        let field = ty.fields.iter().find(|field| field.name == field_name)?;
+                        let member = java_member_name(field_name);
+                        let access = if ty.kind == TypeKind::Record
+                            || ty.kind == TypeKind::Interface
+                            || is_anonymous_object_type(ty)
+                        {
+                            format!("{value}.{member}()")
+                        } else {
+                            format!("{value}.{member}")
+                        };
+                        Some((binding, field.ty.clone(), access))
+                    })
+                    .collect::<Option<Vec<_>>>()?
+            }
+        };
+
+        for (binding, field_ty, access) in fields {
+            if binding.name == "_" {
+                continue;
+            }
+            let local = self.source_binding_local(&binding.name, used_locals)?;
+            used_locals.insert(local.id);
+            let local_ty = if matches!(local.ty, ir::Type::Unknown) {
+                field_ty
+            } else {
+                local.ty.clone()
+            };
+            let java_name = java_local_name(local);
+            let java_type = self.names.value_type(&local_ty);
+            out.push_str(indent);
+            out.push_str(&java_type);
+            out.push(' ');
+            out.push_str(&java_name);
+            out.push_str(" = (");
+            out.push_str(&java_type);
+            out.push_str(") ");
+            out.push_str(&access);
+            out.push_str(";\n");
+            bindings.insert(binding.name.clone(), java_name);
+            binding_types.insert(binding.name.clone(), local_ty);
+        }
+        Some(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2054,19 +3155,56 @@ impl<'a> SourceBodyEmitter<'a> {
         loop_depth: usize,
         branches_return: bool,
     ) -> Option<()> {
-        if statement.pattern.is_some()
-            || statement.pattern_value.is_some()
-            || !statement.pattern_clauses.is_empty()
-            || !statement.bindings.is_empty()
-            || statement.binding_value.is_some()
-        {
+        if !statement.bindings.is_empty() || statement.binding_value.is_some() {
+            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                eprintln!(
+                    "readable java cannot emit legacy if bindings in '{}': {:?}",
+                    self.function.name, statement
+                );
+            }
             return None;
         }
-        let condition = self.emit_plain_conditions(
-            statement.condition.as_ref(),
-            &statement.condition_clauses,
-            bindings,
-        )?;
+        let mut conditions = Vec::new();
+        let mut then_bindings = bindings.clone();
+        let mut then_types = binding_types.clone();
+        if statement.condition.is_some() || !statement.condition_clauses.is_empty() {
+            let (condition, next_bindings, next_types) = self.emit_condition_clauses(
+                statement.condition.as_ref(),
+                &statement.condition_clauses,
+                &then_bindings,
+                &then_types,
+            )?;
+            conditions.push(condition);
+            then_bindings = next_bindings;
+            then_types = next_types;
+        }
+        if let (Some(pattern), Some(value)) = (&statement.pattern, &statement.pattern_value) {
+            let (condition, next_bindings, next_types) = self.emit_refutable_condition(
+                pattern,
+                value,
+                statement.span.start,
+                &then_bindings,
+                &then_types,
+            )?;
+            conditions.push(condition);
+            then_bindings = next_bindings;
+            then_types = next_types;
+        } else if statement.pattern.is_some() || statement.pattern_value.is_some() {
+            return None;
+        }
+        for (index, clause) in statement.pattern_clauses.iter().enumerate() {
+            let (condition, next_bindings, next_types) = self.emit_refutable_condition(
+                &clause.pattern,
+                &clause.value,
+                clause.span.start + index,
+                &then_bindings,
+                &then_types,
+            )?;
+            conditions.push(condition);
+            then_bindings = next_bindings;
+            then_types = next_types;
+        }
+        let condition = (!conditions.is_empty()).then(|| conditions.join(" && "))?;
         if branches_return && statement.else_branch.is_none() {
             return None;
         }
@@ -2074,8 +3212,6 @@ impl<'a> SourceBodyEmitter<'a> {
         out.push_str("if (");
         out.push_str(&condition);
         out.push_str(") {\n");
-        let mut then_bindings = bindings.clone();
-        let mut then_types = binding_types.clone();
         self.emit_statement_block(
             out,
             &statement.then_block,
@@ -2123,6 +3259,21 @@ impl<'a> SourceBodyEmitter<'a> {
         Some(())
     }
 
+    fn emit_refutable_condition(
+        &self,
+        pattern: &ast::Pattern,
+        value: &core::Expr,
+        unique: usize,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<(String, HashMap<String, String>, HashMap<String, ir::Type>)> {
+        let value_ty = self.expr_type(value, bindings)?;
+        let value = self.emit_expr(value, bindings)?;
+        let matched =
+            self.match_case_pattern(pattern, &value, &value_ty, unique, bindings, binding_types)?;
+        Some((matched.condition, matched.bindings, matched.binding_types))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn emit_if_statement_after_else(
         &self,
@@ -2161,13 +3312,16 @@ impl<'a> SourceBodyEmitter<'a> {
         used_locals: &mut HashSet<ir::LocalId>,
         loop_depth: usize,
     ) -> Option<()> {
-        let condition = self.emit_plain_conditions(None, &statement.condition_clauses, bindings)?;
+        let (condition, mut body_bindings, mut body_types) = self.emit_condition_clauses(
+            None,
+            &statement.condition_clauses,
+            bindings,
+            binding_types,
+        )?;
         out.push_str(indent);
         out.push_str("while (");
         out.push_str(&condition);
         out.push_str(") {\n");
-        let mut body_bindings = bindings.clone();
-        let mut body_types = binding_types.clone();
         self.emit_statement_block(
             out,
             &statement.body,
@@ -2183,26 +3337,91 @@ impl<'a> SourceBodyEmitter<'a> {
         Some(())
     }
 
-    fn emit_plain_conditions(
+    fn emit_condition_clauses(
         &self,
         legacy_condition: Option<&core::Expr>,
         clauses: &[core::IfConditionClause],
         bindings: &HashMap<String, String>,
-    ) -> Option<String> {
+        binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<(String, HashMap<String, String>, HashMap<String, ir::Type>)> {
         if let Some(condition) = legacy_condition {
             if !clauses.is_empty() {
                 return None;
             }
-            return self.emit_expr(condition, bindings);
+            return Some((
+                self.emit_expr(condition, bindings)?,
+                bindings.clone(),
+                binding_types.clone(),
+            ));
         }
-        let conditions = clauses
-            .iter()
-            .map(|clause| match clause {
-                core::IfConditionClause::Expr(condition) => self.emit_expr(condition, bindings),
-                core::IfConditionClause::Let(_) => None,
-            })
-            .collect::<Option<Vec<_>>>()?;
-        (!conditions.is_empty()).then(|| conditions.join(" && "))
+
+        let mut conditions = Vec::new();
+        let mut clause_bindings = bindings.clone();
+        let mut clause_types = binding_types.clone();
+        for (index, clause) in clauses.iter().enumerate() {
+            match clause {
+                core::IfConditionClause::Expr(condition) => {
+                    conditions.push(self.emit_expr(condition, &clause_bindings)?);
+                }
+                core::IfConditionClause::Let(clause) => {
+                    let value_ty = match self.expr_type_with_binding_types(
+                        &clause.value,
+                        &clause_bindings,
+                        &clause_types,
+                    ) {
+                        Some(value_ty) => value_ty,
+                        None => {
+                            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                                eprintln!(
+                                    "readable java cannot determine refutable condition value type in '{}': span={:?}",
+                                    self.function.name,
+                                    clause.value.span()
+                                );
+                            }
+                            return None;
+                        }
+                    };
+                    let value = match self.emit_expr(&clause.value, &clause_bindings) {
+                        Some(value) => value,
+                        None => {
+                            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                                eprintln!(
+                                    "readable java cannot emit refutable condition value in '{}'",
+                                    self.function.name
+                                );
+                            }
+                            return None;
+                        }
+                    };
+                    let matched = match self.match_case_pattern(
+                        &clause.pattern,
+                        &value,
+                        &value_ty,
+                        clause.span.start + index,
+                        &clause_bindings,
+                        &clause_types,
+                    ) {
+                        Some(matched) => matched,
+                        None => {
+                            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                                eprintln!(
+                                    "readable java cannot emit refutable condition pattern in '{}': pattern={:?}, value_type={value_ty:?}",
+                                    self.function.name, clause.pattern
+                                );
+                            }
+                            return None;
+                        }
+                    };
+                    conditions.push(matched.condition);
+                    clause_bindings = matched.bindings;
+                    clause_types = matched.binding_types;
+                }
+            }
+        }
+        if conditions.is_empty() {
+            return None;
+        }
+        Some((conditions.join(" && "), clause_bindings, clause_types))
     }
 
     fn emit_assignment_target(
@@ -2214,11 +3433,41 @@ impl<'a> SourceBodyEmitter<'a> {
             core::Expr::Identifier { name, .. } => bindings
                 .get(name)
                 .cloned()
-                .or_else(|| self.param_reference(name)),
+                .or_else(|| self.param_reference(name))
+                .or_else(|| self.implicit_field_reference(name)),
             core::Expr::Member { receiver, name, .. } if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "this") => {
                 Some(format!("this.{}", java_member_name(name)))
             }
             _ => None,
+        }
+    }
+
+    fn assignment_target_type(
+        &self,
+        target: &core::Expr,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<ir::Type> {
+        match target {
+            core::Expr::Identifier { name, .. } => binding_types
+                .get(name)
+                .cloned()
+                .or_else(|| self.expr_type(target, bindings)),
+            core::Expr::Member { receiver, name, .. }
+                if matches!(
+                    receiver.as_ref(),
+                    core::Expr::Identifier { name, .. } if name == "this"
+                ) =>
+            {
+                self.owner.and_then(|owner| {
+                    owner
+                        .fields
+                        .iter()
+                        .find(|field| field.name == *name)
+                        .map(|field| field.ty.clone())
+                })
+            }
+            _ => self.expr_type(target, bindings),
         }
     }
 
@@ -2303,27 +3552,19 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
         binding_types: &HashMap<String, ir::Type>,
     ) -> Option<()> {
-        let conditions = condition_clauses
-            .iter()
-            .map(|clause| match clause {
-                core::IfConditionClause::Expr(condition) => self.emit_expr(condition, bindings),
-                core::IfConditionClause::Let(_) => None,
-            })
-            .collect::<Option<Vec<_>>>()?;
-        if conditions.is_empty() {
-            return None;
-        }
+        let (condition, then_bindings, then_types) =
+            self.emit_condition_clauses(None, condition_clauses, bindings, binding_types)?;
 
         out.push_str(indent);
         out.push_str("if (");
-        out.push_str(&conditions.join(" && "));
+        out.push_str(&condition);
         out.push_str(") {\n");
         self.emit_simple_returning_block(
             out,
             then_block,
             &format!("{indent}    "),
-            bindings,
-            binding_types,
+            &then_bindings,
+            &then_types,
         )?;
         out.push_str(indent);
         out.push_str("} else {\n");
@@ -2391,8 +3632,24 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
         binding_types: &HashMap<String, ir::Type>,
     ) -> Option<()> {
-        let value_ty = self.expr_type(value, bindings)?;
-        let value = self.emit_expr(value, bindings)?;
+        let value_ty = self.expr_type(value, bindings).or_else(|| {
+            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                eprintln!(
+                    "readable java cannot infer returning match value type in '{}': {value:?}",
+                    self.function.name
+                );
+            }
+            None
+        })?;
+        let value = self.emit_expr(value, bindings).or_else(|| {
+            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                eprintln!(
+                    "readable java cannot emit returning match value in '{}': {value:?}",
+                    self.function.name
+                );
+            }
+            None
+        })?;
         let match_local = format!("__match{}", span.start);
         out.push_str(indent);
         out.push_str("var ");
@@ -2405,10 +3662,19 @@ impl<'a> SourceBodyEmitter<'a> {
                 &case.pattern,
                 &match_local,
                 &value_ty,
-                index,
+                span.start + index,
                 bindings,
                 binding_types,
-            )?;
+            )
+            .or_else(|| {
+                if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                    eprintln!(
+                        "readable java cannot emit returning match pattern in '{}': pattern={:?}, value_type={value_ty:?}",
+                        self.function.name, case.pattern
+                    );
+                }
+                None
+            })?;
             let condition = match &case.guard {
                 Some(guard) => format!(
                     "({}) && ({})",
@@ -2427,7 +3693,16 @@ impl<'a> SourceBodyEmitter<'a> {
                 &format!("{indent}    "),
                 &matched.bindings,
                 &matched.binding_types,
-            )?;
+            )
+            .or_else(|| {
+                if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                    eprintln!(
+                        "readable java cannot emit returning match body in '{}': {:?}",
+                        self.function.name, case.body
+                    );
+                }
+                None
+            })?;
             out.push_str(indent);
             out.push_str("}\n");
         }
@@ -2483,6 +3758,39 @@ impl<'a> SourceBodyEmitter<'a> {
                 }
                 Some(matched)
             }
+            ast::Pattern::Extract { inner, .. } => {
+                let inner_ty = lifted_success_type(value_ty)?;
+                let (case_type, accessor) = match value_ty {
+                    ir::Type::Named { name, .. } if name == "Option" => {
+                        ("lume.core.Option.Some<?>".to_string(), "value")
+                    }
+                    ir::Type::Named { name, .. } if name == "Result" => {
+                        ("lume.core.Result.Ok<?, ?>".to_string(), "value")
+                    }
+                    ir::Type::Named { name, .. } if name == "Either" => {
+                        ("lume.core.Either.Right<?, ?>".to_string(), "value")
+                    }
+                    _ => return None,
+                };
+                let extracted_local = format!("__extract{index}");
+                let extracted = format!(
+                    "(({}) {extracted_local}.{accessor}())",
+                    self.names.value_type(&inner_ty),
+                );
+                let mut matched = self.match_case_pattern(
+                    inner,
+                    &extracted,
+                    &inner_ty,
+                    index,
+                    parent_bindings,
+                    parent_binding_types,
+                )?;
+                matched.condition = format!(
+                    "{value} instanceof {case_type} {extracted_local} && ({})",
+                    matched.condition
+                );
+                Some(matched)
+            }
             ast::Pattern::Literal { value: literal, .. } => Some(MatchedCase {
                 condition: format!(
                     "java.util.Objects.equals({value}, {})",
@@ -2508,10 +3816,16 @@ impl<'a> SourceBodyEmitter<'a> {
                 })
             }
             ast::Pattern::Record { path, fields, .. } => {
-                let case_name = path.last()?;
-                if self.enum_case(case_name).is_some() {
+                let case_name = path.last().map(String::as_str).or_else(|| match value_ty {
+                    ir::Type::Named { name, .. } => Some(name.as_str()),
+                    _ => None,
+                })?;
+                if let Some((owner, enum_case)) =
+                    self.declared_enum_case_for_pattern(path, value_ty)
+                {
                     self.enum_record_case_match(
-                        case_name,
+                        owner,
+                        enum_case,
                         fields,
                         value,
                         index,
@@ -2541,9 +3855,12 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             ast::Pattern::Constructor { path, args, .. } => {
                 let case_name = path.last()?;
-                if self.enum_case(case_name).is_some() {
+                if let Some((owner, enum_case)) =
+                    self.declared_enum_case_for_pattern(path, value_ty)
+                {
                     self.enum_case_match(
-                        case_name,
+                        owner,
+                        enum_case,
                         args,
                         value,
                         index,
@@ -2560,19 +3877,43 @@ impl<'a> SourceBodyEmitter<'a> {
                         parent_bindings,
                         parent_binding_types,
                     )
+                } else if args.is_empty()
+                    && self
+                        .bundle
+                        .ir
+                        .types
+                        .iter()
+                        .any(|ty| ty.name == *case_name && ty.kind == TypeKind::Object)
+                {
+                    Some(MatchedCase {
+                        condition: format!(
+                            "{value} instanceof {}",
+                            self.names.named_type(case_name)
+                        ),
+                        bindings: parent_bindings.clone(),
+                        binding_types: parent_binding_types.clone(),
+                    })
                 } else {
                     None
                 }
             }
-            ast::Pattern::Binding { name, .. } if self.enum_case(name).is_some() => self
-                .enum_case_match(
-                    name,
+            ast::Pattern::Binding { name, .. }
+                if self
+                    .declared_enum_case_for_pattern(std::slice::from_ref(name), value_ty)
+                    .is_some() =>
+            {
+                let (owner, enum_case) =
+                    self.declared_enum_case_for_pattern(std::slice::from_ref(name), value_ty)?;
+                self.enum_case_match(
+                    owner,
+                    enum_case,
                     &[],
                     value,
                     index,
                     parent_bindings,
                     parent_binding_types,
-                ),
+                )
+            }
             ast::Pattern::Binding { name, .. } if core_enum_case_owner(name).is_some() => self
                 .core_enum_case_match(
                     name,
@@ -2583,6 +3924,20 @@ impl<'a> SourceBodyEmitter<'a> {
                     parent_bindings,
                     parent_binding_types,
                 ),
+            ast::Pattern::Binding { name, .. }
+                if self
+                    .bundle
+                    .ir
+                    .types
+                    .iter()
+                    .any(|ty| ty.name == *name && ty.kind == TypeKind::Object) =>
+            {
+                Some(MatchedCase {
+                    condition: format!("{value} instanceof {}", self.names.named_type(name)),
+                    bindings: parent_bindings.clone(),
+                    binding_types: parent_binding_types.clone(),
+                })
+            }
             ast::Pattern::Binding { name, .. } => {
                 let mut bindings = parent_bindings.clone();
                 let mut binding_types = parent_binding_types.clone();
@@ -2594,7 +3949,15 @@ impl<'a> SourceBodyEmitter<'a> {
                     binding_types,
                 })
             }
-            ast::Pattern::List { .. } => None,
+            ast::Pattern::List { elements, rest, .. } => self.list_pattern_match(
+                elements,
+                rest.as_ref(),
+                value,
+                value_ty,
+                index,
+                parent_bindings,
+                parent_binding_types,
+            ),
             _ => None,
         }
     }
@@ -2605,6 +3968,35 @@ impl<'a> SourceBodyEmitter<'a> {
         value: &str,
         value_ty: &ir::Type,
     ) -> (String, ir::Type) {
+        let declared_path = match pattern {
+            ast::Pattern::Record { path, .. } | ast::Pattern::Constructor { path, .. } => {
+                Some(path.as_slice())
+            }
+            ast::Pattern::Binding { name, .. } => Some(std::slice::from_ref(name)),
+            _ => None,
+        };
+        if let Some(path) = declared_path
+            && let Some((owner, enum_case)) = self.declared_enum_case_for_pattern(path, value_ty)
+        {
+            let case_type = format!(
+                "{}.{}{}",
+                self.names.named_type(&owner.name),
+                java_type_name(&enum_case.name),
+                java_wildcard_type_args(owner.type_params.len())
+            );
+            let args = match value_ty {
+                ir::Type::Named { name, args } if name == &owner.name => args.clone(),
+                _ => vec![ir::Type::Unknown; owner.type_params.len()],
+            };
+            return (
+                format!("(({case_type}) {value})"),
+                ir::Type::Named {
+                    name: format!("{}::{}", owner.name, enum_case.name),
+                    args,
+                },
+            );
+        }
+
         let named_pattern = match pattern {
             ast::Pattern::Record { path, .. } | ast::Pattern::Constructor { path, .. } => {
                 path.last().map(String::as_str)
@@ -2677,6 +4069,70 @@ impl<'a> SourceBodyEmitter<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn list_pattern_match(
+        &self,
+        elements: &[ast::Pattern],
+        rest: Option<&ast::ListPatternRest>,
+        value: &str,
+        value_ty: &ir::Type,
+        index: usize,
+        parent_bindings: &HashMap<String, String>,
+        parent_binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<MatchedCase> {
+        let ir::Type::Named { name, args } = value_ty else {
+            return None;
+        };
+        if name != "Vector" || args.len() != 1 {
+            return None;
+        }
+        let element_ty = &args[0];
+        let comparison = if rest.is_some() { ">=" } else { "==" };
+        let mut conditions = vec![format!(
+            "lume.core.LumeRuntime.listLen({value}) {comparison} {}L",
+            elements.len()
+        )];
+        let mut bindings = parent_bindings.clone();
+        let mut binding_types = parent_binding_types.clone();
+        for (offset, pattern) in elements.iter().enumerate() {
+            let item = format!(
+                "(({}) lume.core.LumeRuntime.listGet({value}, {offset}L))",
+                self.names.value_type(element_ty)
+            );
+            let matched = self.match_case_pattern(
+                pattern,
+                &item,
+                element_ty,
+                index + offset + 1,
+                &bindings,
+                &binding_types,
+            )?;
+            if matched.condition != "true" {
+                conditions.push(format!("({})", matched.condition));
+            }
+            bindings = matched.bindings;
+            binding_types = matched.binding_types;
+        }
+        if let Some(rest) = rest
+            && rest.name != "_"
+        {
+            bindings.insert(
+                rest.name.clone(),
+                format!(
+                    "((lume.core.LumeVector<{}>) lume.core.LumeRuntime.listSlice({value}, {}L))",
+                    self.names.value_type(element_ty),
+                    elements.len()
+                ),
+            );
+            binding_types.insert(rest.name.clone(), value_ty.clone());
+        }
+        Some(MatchedCase {
+            condition: conditions.join(" && "),
+            bindings,
+            binding_types,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn declared_record_pattern_match(
         &self,
         type_name: &str,
@@ -2694,7 +4150,7 @@ impl<'a> SourceBodyEmitter<'a> {
             .find(|ty| ty.name == type_name)?;
         if !matches!(
             ty.kind,
-            TypeKind::Class | TypeKind::Record | TypeKind::Object
+            TypeKind::Class | TypeKind::Record | TypeKind::Object | TypeKind::Enum
         ) {
             return None;
         }
@@ -2716,10 +4172,15 @@ impl<'a> SourceBodyEmitter<'a> {
                 .iter()
                 .find(|field| field.name == field_pattern.name)?;
             let member = java_member_name(&field.name);
-            let access = if ty.kind == TypeKind::Record {
-                format!("{case_local}.{member}()")
-            } else {
-                format!("{case_local}.{member}")
+            let access = match ty.kind {
+                TypeKind::Record => format!("{case_local}.{member}()"),
+                TypeKind::Enum => format!(
+                    "(({}) lume.core.LumeRuntime.patternField({}, {}))",
+                    self.names.value_type(&field.ty),
+                    case_local,
+                    java_string_literal(&field.name)
+                ),
+                _ => format!("{case_local}.{member}"),
             };
             match &field_pattern.pattern {
                 ast::Pattern::Wildcard { .. } => {}
@@ -2733,7 +4194,21 @@ impl<'a> SourceBodyEmitter<'a> {
                     "java.util.Objects.equals({access}, {})",
                     emit_pattern_literal(value)?
                 )),
-                _ => return None,
+                pattern => {
+                    let matched = self.match_case_pattern(
+                        pattern,
+                        &access,
+                        &field.ty,
+                        index + conditions.len(),
+                        &bindings,
+                        &binding_types,
+                    )?;
+                    if matched.condition != "true" {
+                        conditions.push(format!("({})", matched.condition));
+                    }
+                    bindings = matched.bindings;
+                    binding_types = matched.binding_types;
+                }
             }
         }
         Some(MatchedCase {
@@ -2865,19 +4340,24 @@ impl<'a> SourceBodyEmitter<'a> {
 
     fn enum_record_case_match(
         &self,
-        case_name: &str,
+        owner: &ir::TypeDef,
+        enum_case: &ir::EnumCase,
         fields: &[ast::RecordPatternField],
         value: &str,
         index: usize,
         parent_bindings: &HashMap<String, String>,
         parent_binding_types: &HashMap<String, ir::Type>,
     ) -> Option<MatchedCase> {
-        let enum_case = self.enum_case(case_name)?;
-        let java_case = java_type_name(case_name);
+        let java_case = java_type_name(&enum_case.name);
         let case_local = format!("__case{index}");
+        let owner_prefix = if self.owner.is_some_and(|current| current.name == owner.name) {
+            String::new()
+        } else {
+            format!("{}.", self.names.named_type(&owner.name))
+        };
         let case_type = format!(
-            "{java_case}{}",
-            java_wildcard_type_args(self.owner?.type_params.len())
+            "{owner_prefix}{java_case}{}",
+            java_wildcard_type_args(owner.type_params.len())
         );
         let needs_case_local = fields
             .iter()
@@ -2924,23 +4404,28 @@ impl<'a> SourceBodyEmitter<'a> {
 
     fn enum_case_match(
         &self,
-        case_name: &str,
+        owner: &ir::TypeDef,
+        enum_case: &ir::EnumCase,
         args: &[ast::Pattern],
         value: &str,
         index: usize,
         parent_bindings: &HashMap<String, String>,
         parent_binding_types: &HashMap<String, ir::Type>,
     ) -> Option<MatchedCase> {
-        let enum_case = self.enum_case(case_name)?;
         if enum_case.fields.len() != args.len() {
             return None;
         }
 
-        let java_case = java_type_name(case_name);
+        let java_case = java_type_name(&enum_case.name);
         let case_local = format!("__case{index}");
+        let owner_prefix = if self.owner.is_some_and(|current| current.name == owner.name) {
+            String::new()
+        } else {
+            format!("{}.", self.names.named_type(&owner.name))
+        };
         let case_type = format!(
-            "{java_case}{}",
-            java_wildcard_type_args(self.owner?.type_params.len())
+            "{owner_prefix}{java_case}{}",
+            java_wildcard_type_args(owner.type_params.len())
         );
         let needs_case_local = args
             .iter()
@@ -2979,6 +4464,32 @@ impl<'a> SourceBodyEmitter<'a> {
         })
     }
 
+    fn declared_enum_case_for_pattern<'b>(
+        &'b self,
+        path: &[String],
+        value_ty: &ir::Type,
+    ) -> Option<(&'b ir::TypeDef, &'b ir::EnumCase)> {
+        let case_name = path.last()?;
+        let owner_name = if path.len() > 1 {
+            path.get(path.len() - 2).map(String::as_str)
+        } else if let ir::Type::Named { name, .. } = value_ty {
+            Some(name.as_str())
+        } else {
+            self.owner.map(|owner| owner.name.as_str())
+        }?;
+        let owner = self
+            .bundle
+            .ir
+            .types
+            .iter()
+            .find(|ty| ty.name == owner_name)?;
+        let enum_case = owner
+            .enum_cases
+            .iter()
+            .find(|enum_case| enum_case.name == *case_name)?;
+        Some((owner, enum_case))
+    }
+
     fn enum_case(&self, name: &str) -> Option<&'a ir::EnumCase> {
         self.owner?.enum_cases.iter().find(|case| case.name == name)
     }
@@ -2996,11 +4507,110 @@ impl<'a> SourceBodyEmitter<'a> {
             core::Expr::Identifier { name, .. } if core_enum_case_owner(name).is_some() => {
                 self.emit_core_enum_case(name, &[])
             }
+            core::Expr::Identifier { name, .. }
+                if self
+                    .bundle
+                    .ir
+                    .types
+                    .iter()
+                    .filter(|owner| {
+                        owner
+                            .enum_cases
+                            .iter()
+                            .any(|case| case.name == *name && case.kind == TypeKind::Object)
+                    })
+                    .count()
+                    == 1 =>
+            {
+                let owner = self.bundle.ir.types.iter().find(|owner| {
+                    owner
+                        .enum_cases
+                        .iter()
+                        .any(|case| case.name == *name && case.kind == TypeKind::Object)
+                })?;
+                JavaIrSupport::new(self.bundle, self.function, self.names)
+                    .emit_enum_case_call(&owner.name, name, &[])
+            }
+            core::Expr::Identifier { name, .. }
+                if self
+                    .bundle
+                    .ir
+                    .types
+                    .iter()
+                    .any(|ty| ty.name == *name && ty.kind == TypeKind::Object) =>
+            {
+                Some(format!("{}.INSTANCE", self.names.named_type(name)))
+            }
             core::Expr::Identifier { name, .. } => bindings
                 .get(name)
                 .cloned()
                 .or_else(|| self.lazy_param_value_reference(name))
-                .or_else(|| self.param_reference(name)),
+                .or_else(|| self.param_reference(name))
+                .or_else(|| self.implicit_field_reference(name))
+                .or_else(|| {
+                    if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                        let mut visible = bindings.keys().cloned().collect::<Vec<_>>();
+                        visible.sort();
+                        eprintln!(
+                            "readable java cannot resolve identifier '{name}' in '{}'; bindings={visible:?}, params={:?}",
+                            self.function.name,
+                            self.function
+                                .params
+                                .iter()
+                                .filter_map(|id| self.function.locals.get(id.0))
+                                .map(|local| local.name.as_str())
+                                .collect::<Vec<_>>()
+                        );
+                    }
+                    None
+                }),
+            core::Expr::Member {
+                receiver, name, ..
+            } if matches!(
+                receiver.as_ref(),
+                core::Expr::Identifier { name: owner, .. }
+                    if self.bundle.ir.types.iter().any(|ty| {
+                        ty.name == *owner && ty.enum_cases.iter().any(|case| case.name == *name)
+                    })
+            ) => {
+                let core::Expr::Identifier { name: owner, .. } = receiver.as_ref() else {
+                    unreachable!();
+                };
+                let case = self
+                    .bundle
+                    .ir
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == *owner)?
+                    .enum_cases
+                    .iter()
+                    .find(|case| case.name == *name)?;
+                if !case.fields.is_empty() {
+                    return None;
+                }
+                if case.kind == TypeKind::Object {
+                    Some(format!(
+                        "{}.{}.instance()",
+                        self.names.named_type(owner),
+                        java_type_name(name)
+                    ))
+                } else {
+                    let generic = self
+                        .bundle
+                        .ir
+                        .types
+                        .iter()
+                        .find(|ty| ty.name == *owner)
+                        .is_some_and(|ty| !ty.type_params.is_empty())
+                        .then_some("<>")
+                        .unwrap_or("");
+                    Some(format!(
+                        "new {}.{}{generic}()",
+                        self.names.named_type(owner),
+                        java_type_name(name)
+                    ))
+                }
+            }
             core::Expr::Bool { value, .. } => Some(value.to_string()),
             core::Expr::Integer { raw, .. } => Some(format!("{raw}L")),
             core::Expr::Float { raw, .. } => Some(raw.clone()),
@@ -3075,6 +4685,10 @@ impl<'a> SourceBodyEmitter<'a> {
                 }
             }
             core::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
+            core::Expr::Member { receiver, name, .. } if name == "runtimeType" => Some(format!(
+                "lume.core.LumeRuntime.runtimeTypeOf({})",
+                self.emit_expr(receiver, bindings)?
+            )),
             core::Expr::Member { receiver, name, .. } if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "this") =>
             {
                 let receiver = self.emit_expr(receiver, bindings)?;
@@ -3089,6 +4703,15 @@ impl<'a> SourceBodyEmitter<'a> {
                 }
             }
             core::Expr::Member { receiver, name, .. } => {
+                if let core::Expr::Identifier {
+                    name: owner_name, ..
+                } = receiver.as_ref()
+                {
+                    let emitter = JavaIrSupport::new(self.bundle, self.function, self.names);
+                    if emitter.enum_case(owner_name, name).is_some() {
+                        return emitter.emit_enum_case_call(owner_name, name, &[]);
+                    }
+                }
                 if matches!(
                     self.expr_type(expr, bindings),
                     Some(ir::Type::Function { .. })
@@ -3172,12 +4795,32 @@ impl<'a> SourceBodyEmitter<'a> {
                 let raw_java_type = java_type.split('<').next().unwrap_or(&java_type);
                 Some(format!("{value} instanceof {raw_java_type}"))
             }
-            core::Expr::TypeOf { ty, .. } => Some(type_value_expr(&type_ref_to_ir(ty), self.names)),
-            core::Expr::Lambda { params, body, .. }
-                if !matches!(body.as_ref(), core::Expr::Block { .. })
-                    && params.iter().all(|param| param.destructure.is_none()) =>
+            core::Expr::TypeOf { ty, .. } => {
+                if let TypeRef::Named { name, args, .. } = ty
+                    && args.is_empty()
+                    && self.function.reified_type_params.contains(name)
+                {
+                    return self
+                        .function
+                        .params
+                        .iter()
+                        .filter_map(|param| self.function.locals.get(param.0))
+                        .find(|local| local.name == format!("__type_{name}"))
+                        .map(java_local_name);
+                }
+                Some(type_value_expr(&type_ref_to_ir(ty), self.names))
+            }
+            core::Expr::Lambda { params, body, span }
+                if params.iter().all(|param| param.destructure.is_none()) =>
             {
                 let mut lambda_bindings = bindings.clone();
+                for param in &self.function.params {
+                    if let Some(local) = self.function.locals.get(param.0) {
+                        lambda_bindings
+                            .entry(local.name.clone())
+                            .or_insert_with(|| java_local_name(local));
+                    }
+                }
                 let java_params = params
                     .iter()
                     .enumerate()
@@ -3193,8 +4836,148 @@ impl<'a> SourceBodyEmitter<'a> {
                         name
                     })
                     .collect::<Vec<_>>();
-                let body = self.emit_expr(body, &lambda_bindings)?;
-                Some(format!("({}) -> {body}", java_params.join(", ")))
+                if let core::Expr::Block { body, .. } = body.as_ref() {
+                    let lambda_function = self.bundle.ir.functions.iter().find(|function| {
+                        matches!(function.kind, FunctionKind::Lambda)
+                            && function.span == Some(*span)
+                            && function.params.len() == params.len()
+                    })?;
+                    let lambda_emitter = SourceBodyEmitter {
+                        bundle: self.bundle,
+                        function: lambda_function,
+                        names: self.names,
+                        owner: self.owner,
+                    };
+                    let mut lambda_types = HashMap::new();
+                    for name in lambda_bindings.keys() {
+                        if let Some(local) = self
+                            .function
+                            .locals
+                            .iter()
+                            .find(|local| local.name == *name)
+                        {
+                            lambda_types.insert(name.clone(), local.ty.clone());
+                        }
+                    }
+                    for (index, param) in params.iter().enumerate() {
+                        if param.name == "_" {
+                            continue;
+                        }
+                        if let Some(local) = lambda_function
+                            .params
+                            .get(index)
+                            .and_then(|param| lambda_function.locals.get(param.0))
+                        {
+                            lambda_types.insert(param.name.clone(), local.ty.clone());
+                        }
+                    }
+                    let body = lambda_emitter.emit_inline_block(
+                        body,
+                        lambda_bindings,
+                        lambda_types,
+                        true,
+                    )?;
+                    Some(format!("({}) -> {body}", java_params.join(", ")))
+                } else {
+                    let body = self.emit_expr(body, &lambda_bindings)?;
+                    Some(format!("({}) -> {body}", java_params.join(", ")))
+                }
+            }
+            core::Expr::AnonymousObject { .. } => {
+                let ty = self.expr_type(expr, bindings).or_else(|| {
+                    if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                        eprintln!(
+                            "readable java cannot determine anonymous object type in '{}' at {:?}",
+                            self.function.name,
+                            expr.span()
+                        );
+                    }
+                    None
+                })?;
+                let lowered = self.function.blocks.iter().find_map(|block| {
+                    block.statements.iter().find_map(|statement| {
+                        let ir::StatementKind::Assign {
+                            value:
+                                ir::RValue::AnonymousObject {
+                                    ty: object_ty,
+                                    fields,
+                                    methods,
+                                },
+                            ..
+                        } = &statement.kind
+                        else {
+                            return None;
+                        };
+                        (object_ty == &ty).then_some((object_ty, fields, methods))
+                    })
+                }).or_else(|| {
+                    if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                        eprintln!(
+                            "readable java cannot find lowered anonymous object in '{}': type={ty:?}",
+                            self.function.name
+                        );
+                    }
+                    None
+                })?;
+                JavaIrSupport::new(self.bundle, self.function, self.names)
+                    .emit_anonymous_object(lowered.0, lowered.1, lowered.2, None)
+                    .or_else(|| {
+                        if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                            eprintln!(
+                                "readable java cannot emit lowered anonymous object in '{}'",
+                                self.function.name
+                            );
+                        }
+                        None
+                    })
+            }
+            core::Expr::AnonymousInterface { interfaces, .. } => {
+                let interface_types = interfaces.iter().map(type_ref_to_ir).collect::<Vec<_>>();
+                let lowered = self.function.blocks.iter().find_map(|block| {
+                    block.statements.iter().find_map(|statement| {
+                        let ir::StatementKind::Assign {
+                            value:
+                                ir::RValue::AnonymousInterface {
+                                    interfaces,
+                                    methods,
+                                },
+                            ..
+                        } = &statement.kind
+                        else {
+                            return None;
+                        };
+                        (interfaces == &interface_types).then_some((interfaces, methods))
+                    })
+                })?;
+                JavaIrSupport::new(self.bundle, self.function, self.names)
+                    .emit_anonymous_interface(lowered.0, lowered.1)
+            }
+            core::Expr::ExtractOr {
+                value,
+                fallback,
+                span,
+            } => {
+                let source_ty = self.expr_type(value, bindings)?;
+                let success_ty = lifted_success_type(&source_ty)?;
+                let (case_type, accessor) = match &source_ty {
+                    ir::Type::Named { name, .. } if name == "Option" => {
+                        ("lume.core.Option.Some<?>".to_string(), "value")
+                    }
+                    ir::Type::Named { name, .. } if name == "Result" => {
+                        ("lume.core.Result.Ok<?, ?>".to_string(), "value")
+                    }
+                    ir::Type::Named { name, .. } if name == "Either" => {
+                        ("lume.core.Either.Right<?, ?>".to_string(), "value")
+                    }
+                    _ => return None,
+                };
+                let source = self.emit_expr(value, bindings)?;
+                let fallback = self.emit_expr_against(fallback, bindings, &success_ty)?;
+                let local = format!("__extractOr{}", span.start);
+                Some(format!(
+                    "({source} instanceof {case_type} {local} ? (({}) {local}.{accessor}()) : {fallback})",
+                    self.names.value_type(&success_ty)
+                ))
             }
             core::Expr::Unary {
                 op,
@@ -3225,45 +5008,280 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             core::Expr::Binary {
                 left, op, right, ..
-            } => {
-                let left = self.emit_expr(left, bindings)?;
-                let right = self.emit_expr(right, bindings)?;
-                match op {
-                    ast::BinaryOp::Eq => Some(format!("java.util.Objects.equals({left}, {right})")),
-                    ast::BinaryOp::NotEq => {
-                        Some(format!("!java.util.Objects.equals({left}, {right})"))
-                    }
-                    ast::BinaryOp::IdentityEq => Some(format!("({left} == {right})")),
-                    ast::BinaryOp::IdentityNotEq => Some(format!("({left} != {right})")),
-                    ast::BinaryOp::Colon => None,
-                    _ => {
-                        let operator = match op {
-                            ast::BinaryOp::Or => "||",
-                            ast::BinaryOp::And => "&&",
-                            ast::BinaryOp::Less => "<",
-                            ast::BinaryOp::LessEq => "<=",
-                            ast::BinaryOp::Greater => ">",
-                            ast::BinaryOp::GreaterEq => ">=",
-                            ast::BinaryOp::Add => "+",
-                            ast::BinaryOp::Sub => "-",
-                            ast::BinaryOp::Mul => "*",
-                            ast::BinaryOp::Div => "/",
-                            ast::BinaryOp::Mod => "%",
-                            ast::BinaryOp::Colon
-                            | ast::BinaryOp::Eq
-                            | ast::BinaryOp::NotEq
-                            | ast::BinaryOp::IdentityEq
-                            | ast::BinaryOp::IdentityNotEq => unreachable!(),
-                        };
-                        Some(format!("({left} {operator} {right})"))
-                    }
+            } => match op {
+                ast::BinaryOp::Eq => self.emit_equality(left, right, bindings, false),
+                ast::BinaryOp::NotEq => self.emit_equality(left, right, bindings, true),
+                ast::BinaryOp::IdentityEq => Some(format!(
+                    "({} == {})",
+                    self.emit_expr(left, bindings)?,
+                    self.emit_expr(right, bindings)?
+                )),
+                ast::BinaryOp::IdentityNotEq => Some(format!(
+                    "({} != {})",
+                    self.emit_expr(left, bindings)?,
+                    self.emit_expr(right, bindings)?
+                )),
+                ast::BinaryOp::Colon => None,
+                _ => {
+                    let left = self.emit_expr(left, bindings)?;
+                    let right = self.emit_expr(right, bindings)?;
+                    let operator = match op {
+                        ast::BinaryOp::Or => "||",
+                        ast::BinaryOp::And => "&&",
+                        ast::BinaryOp::Less => "<",
+                        ast::BinaryOp::LessEq => "<=",
+                        ast::BinaryOp::Greater => ">",
+                        ast::BinaryOp::GreaterEq => ">=",
+                        ast::BinaryOp::Add => "+",
+                        ast::BinaryOp::Sub => "-",
+                        ast::BinaryOp::Mul => "*",
+                        ast::BinaryOp::Div => "/",
+                        ast::BinaryOp::Mod => "%",
+                        ast::BinaryOp::Colon
+                        | ast::BinaryOp::Eq
+                        | ast::BinaryOp::NotEq
+                        | ast::BinaryOp::IdentityEq
+                        | ast::BinaryOp::IdentityNotEq => unreachable!(),
+                    };
+                    Some(format!("({left} {operator} {right})"))
                 }
-            }
+            },
+            core::Expr::Match {
+                partial: false,
+                value,
+                cases,
+                span,
+            } => self.emit_match_expression(value, cases, *span, bindings),
             core::Expr::Call {
                 callee, args, span, ..
-            } => self.emit_call(callee, args, *span, bindings),
+            } => {
+                let emitted = self.emit_call(callee, args, *span, bindings);
+                if emitted.is_none() && std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                    eprintln!(
+                        "readable java cannot emit call in '{}': {:?}",
+                        self.function.name, callee
+                    );
+                }
+                emitted
+            }
             _ => None,
         }
+    }
+
+    fn emit_match_expression(
+        &self,
+        value: &core::Expr,
+        cases: &[core::MatchCase],
+        span: crate::source::Span,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let value_ty = self.expr_type(value, bindings).or_else(|| {
+            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                eprintln!(
+                    "readable java cannot infer match value type in '{}': {value:?}",
+                    self.function.name
+                );
+            }
+            None
+        })?;
+        let result_ty = self
+            .source_expr_type(span)
+            .or_else(|| {
+                cases.iter().find_map(|case| match &case.body {
+                    core::MatchCaseBody::Expr(expr) => self.source_expr_type(expr.span()),
+                    core::MatchCaseBody::Block(_) => None,
+                })
+            })
+            .or_else(|| {
+                if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                    eprintln!(
+                        "readable java cannot infer match result type in '{}': span={span:?}",
+                        self.function.name
+                    );
+                }
+                None
+            })?;
+        let match_local = format!("__match{}", span.start);
+        let mut out = format!(
+            "((java.util.function.Supplier<{}>) () -> {{\n            var {match_local} = {};\n",
+            self.names.value_type(&result_ty),
+            self.emit_expr(value, bindings)?
+        );
+        for (index, case) in cases.iter().enumerate() {
+            let matched = self
+                .match_case_pattern(
+                    &case.pattern,
+                    &match_local,
+                    &value_ty,
+                    span.start + index,
+                    bindings,
+                    &HashMap::new(),
+                )
+                .or_else(|| {
+                    if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                        eprintln!(
+                            "readable java cannot emit match-expression pattern in '{}': {:?}",
+                            self.function.name, case.pattern
+                        );
+                    }
+                    None
+                })?;
+            let condition = match &case.guard {
+                Some(guard) => format!(
+                    "({}) && ({})",
+                    matched.condition,
+                    self.emit_expr(guard, &matched.bindings)?
+                ),
+                None => matched.condition,
+            };
+            let core::MatchCaseBody::Expr(body) = &case.body else {
+                return None;
+            };
+            out.push_str("            if (");
+            out.push_str(&condition);
+            out.push_str(") {\n                return ");
+            out.push_str(
+                &self
+                    .emit_expr_against(body, &matched.bindings, &result_ty)
+                    .or_else(|| {
+                        if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                            eprintln!(
+                                "readable java cannot emit match-expression body in '{}': {body:?}",
+                                self.function.name
+                            );
+                        }
+                        None
+                    })?,
+            );
+            out.push_str(";\n            }\n");
+        }
+        out.push_str(
+            "            throw new IllegalStateException(\"non-exhaustive Lume match\");\n        }).get()",
+        );
+        Some(out)
+    }
+
+    fn implicit_field_reference(&self, name: &str) -> Option<String> {
+        let owner = self.owner?;
+        owner.fields.iter().find(|field| field.name == name)?;
+        let member = java_member_name(name);
+        Some(if matches!(owner.kind, TypeKind::Record | TypeKind::Enum) {
+            format!("this.{member}()")
+        } else {
+            format!("this.{member}")
+        })
+    }
+
+    fn emit_equality(
+        &self,
+        left: &core::Expr,
+        right: &core::Expr,
+        bindings: &HashMap<String, String>,
+        negated: bool,
+    ) -> Option<String> {
+        let left_expr = self.emit_expr(left, bindings)?;
+        let mut right_expr = self.emit_expr(right, bindings)?;
+        if let (Some(left_ty), Some(right_ty)) = (
+            self.expr_type(left, bindings),
+            self.expr_type(right, bindings),
+        ) && left_ty != right_ty
+            && let Some(projected) =
+                self.emit_shape_equality_projection(&left_ty, right, &right_ty, bindings)
+        {
+            right_expr = projected;
+        }
+        let equality = format!("java.util.Objects.equals({left_expr}, {right_expr})");
+        Some(if negated {
+            format!("!{equality}")
+        } else {
+            equality
+        })
+    }
+
+    fn emit_shape_equality_projection(
+        &self,
+        target: &ir::Type,
+        source: &core::Expr,
+        source_ty: &ir::Type,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        if !matches!(source, core::Expr::Identifier { .. }) {
+            return None;
+        }
+        let ir::Type::Named {
+            name: target_name,
+            args: target_args,
+        } = target
+        else {
+            return None;
+        };
+        let ir::Type::Named {
+            name: source_name,
+            args: source_args,
+        } = source_ty
+        else {
+            return None;
+        };
+        let target_def = self
+            .bundle
+            .ir
+            .types
+            .iter()
+            .find(|ty| ty.name == *target_name && ty.kind == TypeKind::Record)?;
+        let source_def = self
+            .bundle
+            .ir
+            .types
+            .iter()
+            .find(|ty| ty.name == *source_name && ty.kind == TypeKind::Record)?;
+        let target_subst = target_def
+            .type_params
+            .iter()
+            .cloned()
+            .zip(target_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        let source_subst = source_def
+            .type_params
+            .iter()
+            .cloned()
+            .zip(source_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        let source_fields = source_def
+            .fields
+            .iter()
+            .filter(|field| field.visibility != Visibility::Hidden)
+            .map(|field| {
+                (
+                    field.name.as_str(),
+                    substitute_java_emit_type(&field.ty, &source_subst),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let target_fields = target_def
+            .fields
+            .iter()
+            .filter(|field| field.visibility != Visibility::Hidden)
+            .collect::<Vec<_>>();
+        if target_fields.len() != source_fields.len()
+            || target_fields.iter().any(|field| {
+                source_fields.get(field.name.as_str())
+                    != Some(&substitute_java_emit_type(&field.ty, &target_subst))
+            })
+        {
+            return None;
+        }
+
+        let source_expr = self.emit_expr(source, bindings)?;
+        let args = target_fields
+            .iter()
+            .map(|field| format!("{source_expr}.{}()", java_member_name(&field.name)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let generic = (!target_args.is_empty()).then_some("<>").unwrap_or("");
+        Some(format!(
+            "new {}{generic}({args})",
+            self.names.named_type(target_name)
+        ))
     }
 
     fn emit_expr_against(
@@ -3273,6 +5291,27 @@ impl<'a> SourceBodyEmitter<'a> {
         expected: &ir::Type,
     ) -> Option<String> {
         match expr {
+            core::Expr::Call { callee, args, .. } if matches!(callee.as_ref(), core::Expr::Identifier { name, .. } if core_enum_case_owner(name).is_some()) =>
+            {
+                let core::Expr::Identifier { name, .. } = callee.as_ref() else {
+                    unreachable!()
+                };
+                let payload_ty = core_enum_case_payload_type(name, expected);
+                let emitted = args
+                    .iter()
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        if index == 0
+                            && let Some(payload_ty) = payload_ty.as_ref()
+                        {
+                            self.emit_expr_against(&arg.value, bindings, payload_ty)
+                        } else {
+                            self.emit_call_arg(arg, bindings)
+                        }
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                self.emit_core_enum_case(name, &emitted)
+            }
             core::Expr::ListLiteral { items, .. }
                 if items.is_empty()
                     && matches!(
@@ -3282,8 +5321,81 @@ impl<'a> SourceBodyEmitter<'a> {
             {
                 Some("lume.core.LumeMap.empty()".to_string())
             }
+            core::Expr::RecordLiteral { fields, values, .. } => {
+                self.emit_record_literal_against(fields, values, bindings, expected)
+            }
             _ => self.emit_expr(expr, bindings),
         }
+    }
+
+    fn emit_record_literal_against(
+        &self,
+        fields: &[core::CallArg],
+        values: &[core::Expr],
+        bindings: &HashMap<String, String>,
+        expected: &ir::Type,
+    ) -> Option<String> {
+        let ir::Type::Named { name, args } = expected else {
+            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                eprintln!(
+                    "readable java cannot construct record literal against non-named type: {expected:?}"
+                );
+            }
+            return None;
+        };
+        let type_def = self
+            .bundle
+            .ir
+            .types
+            .iter()
+            .find(|ty| ty.name == *name && ty.kind == TypeKind::Record)?;
+        let substitution = type_def
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+
+        let mut constructor_args = Vec::with_capacity(type_def.fields.len());
+        if fields.is_empty() && !values.is_empty() {
+            if values.len() != type_def.fields.len() {
+                return None;
+            }
+            for (field, value) in type_def.fields.iter().zip(values) {
+                let field_ty = substitute_java_emit_type(&field.ty, &substitution);
+                constructor_args.push(self.emit_expr_against(value, bindings, &field_ty)?);
+            }
+        } else {
+            if fields.iter().any(|field| field.name.is_none()) {
+                return None;
+            }
+            for field in &type_def.fields {
+                let field_ty = substitute_java_emit_type(&field.ty, &substitution);
+                if let Some(value) = fields
+                    .iter()
+                    .find(|value| value.name.as_deref() == Some(field.name.as_str()))
+                {
+                    constructor_args.push(self.emit_expr_against(
+                        &value.value,
+                        bindings,
+                        &field_ty,
+                    )?);
+                } else if let Some(initializer) = &field.initializer {
+                    constructor_args.push(java_constant(initializer));
+                } else if field.has_initializer {
+                    constructor_args.push(java_default_value(&field_ty));
+                } else {
+                    return None;
+                }
+            }
+        }
+
+        let generic = (!args.is_empty()).then_some("<>").unwrap_or("");
+        Some(format!(
+            "new {}{generic}({})",
+            self.names.named_type(name),
+            constructor_args.join(", ")
+        ))
     }
 
     fn emit_call(
@@ -3294,6 +5406,18 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
         match callee {
+            core::Expr::Index { receiver, .. }
+                if self.source_call(span).is_some_and(|call| {
+                    matches!(
+                        call.callee,
+                        ir::Callee::Direct(_)
+                            | ir::Callee::Named { .. }
+                            | ir::Callee::Method { .. }
+                    )
+                }) =>
+            {
+                self.emit_call(receiver, args, span, bindings)
+            }
             core::Expr::Identifier { name, .. } if name == "Any" && args.len() == 1 => {
                 self.emit_call_arg(&args[0], bindings)
             }
@@ -3321,9 +5445,28 @@ impl<'a> SourceBodyEmitter<'a> {
                 ))
             }
             core::Expr::Identifier { name, .. } if core_enum_case_owner(name).is_some() => {
+                let source_ty = self.source_expr_type(span);
+                let payload_ty = source_ty
+                    .as_ref()
+                    .and_then(|ty| core_enum_case_payload_type(name, ty));
+                if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() && payload_ty.is_none() {
+                    eprintln!(
+                        "readable java has no payload type for core case '{name}' in '{}': {source_ty:?}",
+                        self.function.name
+                    );
+                }
                 let args = args
                     .iter()
-                    .map(|arg| self.emit_call_arg(arg, bindings))
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        if index == 0
+                            && let Some(expected) = payload_ty.as_ref()
+                        {
+                            self.emit_expr_against(&arg.value, bindings, expected)
+                        } else {
+                            self.emit_call_arg(arg, bindings)
+                        }
+                    })
                     .collect::<Option<Vec<_>>>()?;
                 self.emit_core_enum_case(name, &args)
             }
@@ -3339,6 +5482,46 @@ impl<'a> SourceBodyEmitter<'a> {
                 };
                 emit_functional_call(&target, &args)
             }
+            core::Expr::Identifier { name, .. } if bindings.contains_key(name) => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.emit_call_arg(arg, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                emit_functional_call(bindings.get(name)?, &args)
+            }
+            core::Expr::Identifier { name, .. }
+                if self.owner.is_some_and(|owner| {
+                    owner.methods.iter().any(|method| {
+                        self.bundle.ir.function(*method).is_some_and(|function| {
+                            function.name == *name
+                                && param_specs_accept_arg_len(
+                                    &source_function_param_specs(function),
+                                    args.len(),
+                                )
+                        })
+                    })
+                }) =>
+            {
+                let target = self.owner?.methods.iter().find_map(|method| {
+                    let function = self.bundle.ir.function(*method)?;
+                    (function.name == *name
+                        && param_specs_accept_arg_len(
+                            &source_function_param_specs(function),
+                            args.len(),
+                        ))
+                    .then_some(function)
+                })?;
+                let emitted = self.emit_source_args_for_param_specs(
+                    &args.iter().collect::<Vec<_>>(),
+                    &source_function_param_specs(target),
+                    bindings,
+                )?;
+                Some(format!(
+                    "this.{}({})",
+                    java_member_name(name),
+                    emitted.join(", ")
+                ))
+            }
             core::Expr::Identifier { name, .. } => {
                 let call = self.source_call(span)?;
                 if let ir::Callee::Intrinsic(intrinsic) = &call.callee {
@@ -3347,46 +5530,75 @@ impl<'a> SourceBodyEmitter<'a> {
                 if let ir::Callee::Named { path } = &call.callee {
                     return self.emit_source_named_call(path, args, call, bindings);
                 }
+                if let ir::Callee::Method { method, .. } = &call.callee {
+                    let target = self.bundle.ir.function(call.function)?;
+                    let ordered_args = self.ordered_source_args(args, call)?;
+                    let param_specs = source_function_param_specs(target);
+                    let mut emitted = self.emit_source_args_for_param_specs(
+                        &ordered_args,
+                        &param_specs,
+                        bindings,
+                    )?;
+                    emitted.extend(
+                        self.emit_source_reified_evidence(call, target.reified_type_params.len())?,
+                    );
+                    return Some(format!(
+                        "this.{}({})",
+                        java_member_name(method),
+                        emitted.join(", ")
+                    ));
+                }
                 let ir::Callee::Direct(target) = call.callee else {
                     return None;
                 };
                 let target = self.bundle.ir.function(target)?;
-                if target.name != *name
-                    || target.param_variadic.iter().any(|variadic| *variadic)
-                    || target.param_lazy.iter().any(|lazy| *lazy)
-                    || !target.reified_type_params.is_empty()
-                {
+                if target.name != *name {
                     return None;
                 }
                 let ordered_args = self.ordered_source_args(args, call)?;
-                let args = ordered_args
-                    .iter()
-                    .enumerate()
-                    .map(|(index, arg)| {
-                        let expected = target
-                            .params
-                            .get(index)
-                            .and_then(|param| target.locals.get(param.0))
-                            .map(|local| &local.ty);
-                        match expected {
-                            Some(expected) => {
-                                self.emit_expr_against(&arg.value, bindings, expected)
-                            }
-                            None => self.emit_call_arg(arg, bindings),
-                        }
-                    })
-                    .collect::<Option<Vec<_>>>()?;
+                let param_specs = source_function_param_specs(target);
+                let mut args =
+                    self.emit_source_args_for_param_specs(&ordered_args, &param_specs, bindings)?;
+                args.extend(
+                    self.emit_source_reified_evidence(call, target.reified_type_params.len())?,
+                );
                 let method = java_member_name(&target.name);
-                if matches!(self.function.kind, FunctionKind::TopLevel) {
-                    Some(format!("{method}({})", args.join(", ")))
-                } else {
-                    Some(format!(
+                match target.kind {
+                    FunctionKind::Method { .. } => {
+                        Some(format!("this.{method}({})", args.join(", ")))
+                    }
+                    FunctionKind::TopLevel
+                        if matches!(self.function.kind, FunctionKind::TopLevel) =>
+                    {
+                        Some(format!("{method}({})", args.join(", ")))
+                    }
+                    FunctionKind::TopLevel => Some(format!(
                         "{}.{}({})",
                         module_class_name(self.bundle),
                         method,
                         args.join(", ")
-                    ))
+                    )),
+                    FunctionKind::Local { .. } | FunctionKind::Lambda | FunctionKind::Synthetic => {
+                        None
+                    }
                 }
+            }
+            core::Expr::Member { receiver, name, .. }
+                if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "Array")
+                    && matches!(
+                        name.as_str(),
+                        "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" | "fill"
+                    ) =>
+            {
+                let args = args
+                    .iter()
+                    .map(|arg| self.emit_call_arg(arg, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(format!(
+                    "lume.core.LumeArray.{}({})",
+                    java_member_name(name),
+                    args.join(", ")
+                ))
             }
             core::Expr::Member { receiver, name, .. }
                 if name == "iterator"
@@ -3417,7 +5629,27 @@ impl<'a> SourceBodyEmitter<'a> {
             {
                 Some("lume.core.LumeIterator.from(lume.core.LumeVector.of())".to_string())
             }
-            core::Expr::Member { name, .. } if lazy_core_member_call_name(name) => None,
+            core::Expr::Member { receiver, name, .. }
+                if name == "parse"
+                    && matches!(
+                        receiver.as_ref(),
+                        core::Expr::Identifier { name, .. } if name == "Int" || name == "Float"
+                    ) =>
+            {
+                let core::Expr::Identifier { name: owner, .. } = receiver.as_ref() else {
+                    unreachable!()
+                };
+                let [arg] = args else {
+                    return None;
+                };
+                let value = self.emit_call_arg(arg, bindings)?;
+                let method = if owner == "Int" {
+                    "parseInt"
+                } else {
+                    "parseFloat"
+                };
+                Some(format!("lume.core.LumeRuntime.{method}({value})"))
+            }
             core::Expr::Member { receiver, name, .. } if name == "toStr" && args.is_empty() => {
                 Some(format!(
                     "String.valueOf({})",
@@ -3425,11 +5657,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 ))
             }
             core::Expr::Member { receiver, name, .. } if name == "equals" && args.len() == 1 => {
-                Some(format!(
-                    "java.util.Objects.equals({}, {})",
-                    self.emit_expr(receiver, bindings)?,
-                    self.emit_call_arg(&args[0], bindings)?
-                ))
+                self.emit_equality(receiver, &args[0].value, bindings, false)
             }
             core::Expr::Member { receiver, name, .. } if name == "sameValue" && args.len() == 1 => {
                 Some(format!(
@@ -3453,8 +5681,43 @@ impl<'a> SourceBodyEmitter<'a> {
                     self.emit_expr(receiver, bindings)?
                 ))
             }
+            core::Expr::Member { receiver, name, .. }
+                if matches!(
+                    receiver.as_ref(),
+                    core::Expr::Member {
+                        receiver: owner,
+                        name: case,
+                        ..
+                    } if matches!(owner.as_ref(), core::Expr::Identifier { name: owner_name, .. }
+                        if self.bundle.ir.types.iter().any(|ty| {
+                            ty.name == *owner_name
+                                && ty.enum_cases.iter().any(|item| item.name == *case)
+                        }))
+                ) =>
+            {
+                let receiver = self.emit_expr(receiver, bindings)?;
+                let args = args
+                    .iter()
+                    .map(|arg| self.emit_call_arg(arg, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(format!(
+                    "{receiver}.{}({})",
+                    java_member_name(name),
+                    args.join(", ")
+                ))
+            }
             core::Expr::Member { receiver, name, .. } => {
-                if !args.is_empty() {
+                if let Some(call) = self.source_call(span)
+                    && let ir::Callee::Named { path } = &call.callee
+                {
+                    return self.emit_source_named_call(path, args, call, bindings);
+                }
+                if self.source_call(span).is_some_and(|call| {
+                    matches!(
+                        &call.callee,
+                        ir::Callee::Method { method, .. } if method == name
+                    )
+                }) {
                     return self.emit_resolved_member_call(receiver, name, args, span, bindings);
                 }
                 let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
@@ -3469,6 +5732,16 @@ impl<'a> SourceBodyEmitter<'a> {
                     args.join(", ")
                 ))
             }
+            core::Expr::Index { .. } => {
+                if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                    eprintln!(
+                        "readable java cannot classify indexed callee in '{}': {:?}",
+                        self.function.name,
+                        self.source_call(span).map(|call| &call.callee)
+                    );
+                }
+                None
+            }
             _ => None,
         }
     }
@@ -3480,11 +5753,18 @@ impl<'a> SourceBodyEmitter<'a> {
         call: &ir::SourceCall,
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
-        let ordered_args = self.ordered_source_args(args, call)?;
-        if call.lowered_args.len() != ordered_args.len() {
-            return None;
-        }
-        let emitter = FunctionEmitter::new(self.bundle, self.function, self.names);
+        let ordered_args = self.ordered_source_args(args, call).or_else(|| {
+            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                eprintln!(
+                    "readable java cannot order source arguments for '{}': source={:?}, lowered={:?}",
+                    path.join("."),
+                    args.iter().map(|arg| arg.span).collect::<Vec<_>>(),
+                    call.ordered_arg_spans
+                );
+            }
+            None
+        })?;
+        let emitter = JavaIrSupport::new(self.bundle, self.function, self.names);
         let param_specs = match path {
             [owner]
                 if self.names.is_java_type(owner) || emitter.is_lume_constructible_type(owner) =>
@@ -3496,24 +5776,35 @@ impl<'a> SourceBodyEmitter<'a> {
                 .or_else(|| emitter.type_method_param_specs(owner, method, &call.lowered_args)),
             _ => None,
         };
-        if param_specs.as_ref().is_some_and(|specs| {
-            specs.len() != ordered_args.len()
-                || specs
+        let emitted = match param_specs.as_deref() {
+            Some(specs) => {
+                let source_param_count = if call.param_specs.is_empty() {
+                    ordered_args.len()
+                } else {
+                    call.param_specs.len()
+                };
+                let metadata_evidence_count = specs.len().saturating_sub(source_param_count);
+                let source_specs = &specs[..specs.len().saturating_sub(metadata_evidence_count)];
+                let mut emitted =
+                    self.emit_source_args_for_param_specs(&ordered_args, source_specs, bindings)?;
+                let lowered_evidence_count =
+                    call.lowered_args.len().saturating_sub(ordered_args.len());
+                emitted.extend(self.emit_source_reified_evidence(
+                    call,
+                    metadata_evidence_count.max(lowered_evidence_count),
+                )?);
+                emitted
+            }
+            None => {
+                let mut emitted = ordered_args
                     .iter()
-                    .any(|spec| spec.lazy || spec.variadic || spec.coercion.is_some())
-        }) {
-            return None;
-        }
-        let emitted = ordered_args
-            .iter()
-            .enumerate()
-            .map(
-                |(index, arg)| match param_specs.as_ref().and_then(|specs| specs.get(index)) {
-                    Some(spec) => self.emit_expr_against(&arg.value, bindings, &spec.ty),
-                    None => self.emit_call_arg(arg, bindings),
-                },
-            )
-            .collect::<Option<Vec<_>>>()?;
+                    .map(|arg| self.emit_call_arg(arg, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                let evidence_count = call.lowered_args.len().saturating_sub(ordered_args.len());
+                emitted.extend(self.emit_source_reified_evidence(call, evidence_count)?);
+                emitted
+            }
+        };
         let joined = emitted.join(", ");
 
         match path {
@@ -3660,6 +5951,36 @@ impl<'a> SourceBodyEmitter<'a> {
             .source_calls
             .iter()
             .find(|call| call.function == self.function.id && call.span == span)
+            .or_else(|| {
+                let mut matches = self
+                    .bundle
+                    .ir
+                    .source_calls
+                    .iter()
+                    .filter(|call| call.span == span);
+                let call = matches.next()?;
+                matches.next().is_none().then_some(call)
+            })
+    }
+
+    fn source_expr_type(&self, span: crate::source::Span) -> Option<ir::Type> {
+        self.bundle
+            .ir
+            .source_exprs
+            .iter()
+            .find(|source| source.function == self.function.id && source.span == span)
+            .or_else(|| {
+                let mut matches = self
+                    .bundle
+                    .ir
+                    .source_exprs
+                    .iter()
+                    .filter(|source| source.span == span);
+                let source = matches.next()?;
+                matches.next().is_none().then_some(source)
+            })
+            .filter(|source| !matches!(source.ty, ir::Type::Unknown))
+            .map(|source| source.ty.clone())
     }
 
     fn ordered_source_args<'call>(
@@ -3681,7 +6002,12 @@ impl<'a> SourceBodyEmitter<'a> {
         span: crate::source::Span,
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
-        let call = self.source_call(span)?;
+        let call = self.source_call(span).or_else(|| {
+            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                eprintln!("readable java has no resolved call metadata for member '{name}'");
+            }
+            None
+        })?;
         let ir::Callee::Method {
             receiver: lowered_receiver,
             method,
@@ -3693,29 +6019,311 @@ impl<'a> SourceBodyEmitter<'a> {
             return None;
         }
 
-        let param_specs = FunctionEmitter::new(self.bundle, self.function, self.names)
-            .method_param_specs_for_receiver(lowered_receiver, method, &call.lowered_args)?;
-        if param_specs.len() != args.len()
-            || param_specs
+        let resolved_function = self
+            .bundle
+            .ir
+            .function(call.function)
+            .unwrap_or(self.function);
+        let ordered_args = self.ordered_source_args(args, call).or_else(|| {
+            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                eprintln!(
+                    "readable java cannot order source arguments for member '{name}': source={:?}, lowered={:?}",
+                    args.iter().map(|arg| arg.span).collect::<Vec<_>>(),
+                    call.ordered_arg_spans
+                );
+            }
+            None
+        })?;
+        let param_specs = JavaIrSupport::new(self.bundle, resolved_function, self.names)
+            .method_param_specs_for_receiver(lowered_receiver, method, &call.lowered_args);
+        let Some(param_specs) = param_specs else {
+            let mut emitted_args = ordered_args
                 .iter()
-                .any(|spec| spec.lazy || spec.variadic || spec.coercion.is_some())
-        {
+                .map(|arg| self.emit_call_arg(arg, bindings))
+                .collect::<Option<Vec<_>>>()?;
+            let evidence_count = call.lowered_args.len().saturating_sub(ordered_args.len());
+            emitted_args.extend(self.emit_source_reified_evidence(call, evidence_count)?);
+            let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
+            return Some(format!(
+                "{}.{}({})",
+                receiver_expr,
+                java_member_name(name),
+                emitted_args.join(", ")
+            ));
+        };
+        let source_param_count = if call.param_specs.is_empty() {
+            ordered_args.len()
+        } else {
+            call.param_specs.len()
+        };
+        let metadata_evidence_count = param_specs.len().saturating_sub(source_param_count);
+        let lowered_evidence_count = call.lowered_args.len().saturating_sub(ordered_args.len());
+        let evidence_count = metadata_evidence_count.max(lowered_evidence_count);
+        let source_param_specs =
+            &param_specs[..param_specs.len().saturating_sub(metadata_evidence_count)];
+        if source_param_specs.is_empty() && !ordered_args.is_empty() {
             return None;
         }
-
-        let ordered_args = self.ordered_source_args(args, call)?;
-        let args = ordered_args
-            .iter()
-            .zip(&param_specs)
-            .map(|(arg, spec)| self.emit_expr_against(&arg.value, bindings, &spec.ty))
-            .collect::<Option<Vec<_>>>()?;
-        let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
+        if !param_specs_accept_arg_len(source_param_specs, ordered_args.len()) {
+            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                eprintln!(
+                    "readable java resolved incompatible parameter specs for member '{name}': specs={param_specs:?}, args={}",
+                    ordered_args.len()
+                );
+            }
+            return None;
+        }
+        if evidence_count == 0
+            && source_param_specs.len() == ordered_args.len()
+            && source_param_specs
+                .iter()
+                .all(|spec| !spec.variadic && spec.coercion.is_none())
+        {
+            let mut emitted_args = Vec::with_capacity(ordered_args.len());
+            for (index, (arg, spec)) in ordered_args.iter().zip(source_param_specs).enumerate() {
+                let value = self
+                    .emit_source_arg_for_param_spec(arg, bindings, spec)
+                    .or_else(|| {
+                        if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                            eprintln!(
+                                "readable java cannot emit argument {index} for member '{name}': span={:?}, target={:?}",
+                                arg.span, spec.ty
+                            );
+                        }
+                        None
+                    })?;
+                emitted_args.push(value);
+            }
+            let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
+            return Some(format!(
+                "{}.{}({})",
+                receiver_expr,
+                java_member_name(name),
+                emitted_args.join(", ")
+            ));
+        }
+        let mut args = self
+            .emit_source_args_for_param_specs(&ordered_args, source_param_specs, bindings)
+            .or_else(|| {
+                if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                    eprintln!(
+                        "readable java cannot emit source arguments for member '{name}': specs={source_param_specs:?}"
+                    );
+                }
+                None
+            })?;
+        let evidence = self
+            .emit_source_reified_evidence(call, evidence_count)
+            .or_else(|| {
+                if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                    eprintln!(
+                        "readable java cannot emit {evidence_count} reified arguments for member '{name}': lowered={:?}",
+                        call.lowered_args
+                    );
+                }
+                None
+            })?;
+        args.extend(evidence);
+        let receiver_expr = self.emit_receiver_expr(receiver, bindings).or_else(|| {
+            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                eprintln!("readable java cannot emit receiver for member '{name}': {receiver:?}");
+            }
+            None
+        })?;
         Some(format!(
             "{}.{}({})",
             receiver_expr,
             java_member_name(name),
             args.join(", ")
         ))
+    }
+
+    fn emit_source_arg_for_param_spec(
+        &self,
+        arg: &core::CallArg,
+        bindings: &HashMap<String, String>,
+        spec: &JavaParamSpec,
+    ) -> Option<String> {
+        let source = match &arg.value {
+            core::Expr::Spread { value, .. } => value.as_ref(),
+            value => value,
+        };
+        if !spec.lazy {
+            let value = self
+                .emit_expr_against(source, bindings, &spec.ty)
+                .or_else(|| {
+                    if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                        eprintln!(
+                            "readable java cannot emit source argument {source:?} against {:?}",
+                            spec.ty
+                        );
+                    }
+                    None
+                })?;
+            if matches!(source, core::Expr::Lambda { .. })
+                && matches!(spec.ty, ir::Type::Function { .. })
+            {
+                return Some(format!("(({}) ({value}))", self.names.value_type(&spec.ty)));
+            }
+            let emitter = JavaIrSupport::new(self.bundle, self.function, self.names);
+            let value =
+                emitter.coerce_to_target_type(value, self.expr_type(source, bindings), &spec.ty);
+            return Some(coerce_to_java_primitive(value, spec.coercion));
+        }
+        if let core::Expr::Identifier { name, .. } = source
+            && self.is_lazy_param(name)
+        {
+            return self.param_reference(name);
+        }
+        let target_ty = lazy_param_value_type(&spec.ty);
+        let value = self
+            .emit_expr_against(source, bindings, target_ty)
+            .or_else(|| {
+                if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                    eprintln!(
+                        "readable java cannot emit lazy source argument {source:?} against {target_ty:?}"
+                    );
+                }
+                None
+            })?;
+        let emitter = JavaIrSupport::new(self.bundle, self.function, self.names);
+        let value =
+            emitter.coerce_to_target_type(value, self.expr_type(source, bindings), target_ty);
+        let value = coerce_to_java_primitive(value, spec.coercion);
+        Some(format!("() -> {value}"))
+    }
+
+    fn emit_source_args_for_param_specs(
+        &self,
+        args: &[&core::CallArg],
+        specs: &[JavaParamSpec],
+        bindings: &HashMap<String, String>,
+    ) -> Option<Vec<String>> {
+        let Some(variadic_index) = specs.iter().position(|spec| spec.variadic) else {
+            if args.len() != specs.len() {
+                return None;
+            }
+            return args
+                .iter()
+                .zip(specs)
+                .map(|(arg, spec)| self.emit_source_arg_for_param_spec(arg, bindings, spec))
+                .collect();
+        };
+        if args.len() < variadic_index {
+            return None;
+        }
+
+        let mut emitted = args
+            .iter()
+            .take(variadic_index)
+            .zip(specs.iter())
+            .map(|(arg, spec)| self.emit_source_arg_for_param_spec(arg, bindings, spec))
+            .collect::<Option<Vec<_>>>()?;
+        let variadic = specs.get(variadic_index)?;
+        let rest = &args[variadic_index..];
+        if rest.is_empty() {
+            emitted.push(
+                variadic
+                    .default
+                    .as_ref()
+                    .map(java_constant)
+                    .unwrap_or_else(|| "lume.core.LumeVector.of()".to_string()),
+            );
+            return Some(emitted);
+        }
+
+        if rest.len() == 1 {
+            let arg = rest[0];
+            let value = match &arg.value {
+                core::Expr::Spread { value, .. } => value.as_ref(),
+                value => value,
+            };
+            if matches!(arg.value, core::Expr::Spread { .. })
+                || self.expr_type(value, bindings).as_ref() == Some(&variadic.ty)
+            {
+                emitted.push(self.emit_source_arg_for_param_spec(arg, bindings, variadic)?);
+                return Some(emitted);
+            }
+        }
+
+        let element_ty = variadic_element_type(&variadic.ty)?;
+        let has_spread = rest
+            .iter()
+            .any(|arg| matches!(arg.value, core::Expr::Spread { .. }));
+        if !has_spread {
+            let items = rest
+                .iter()
+                .map(|arg| {
+                    self.emit_expr_against(&arg.value, bindings, element_ty)
+                        .or_else(|| {
+                            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                                eprintln!(
+                                    "readable java cannot emit variadic argument {:?} against {element_ty:?}",
+                                    arg.value
+                                );
+                            }
+                            None
+                        })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            emitted.push(format!("lume.core.LumeVector.of({})", items.join(", ")));
+            return Some(emitted);
+        }
+
+        let mut packed = "lume.core.LumeVector.empty()".to_string();
+        for arg in rest {
+            packed = match &arg.value {
+                core::Expr::Spread { value, .. } => format!(
+                    "{packed}.addAll({})",
+                    self.emit_expr_against(value, bindings, &variadic.ty)?
+                ),
+                value => format!(
+                    "{packed}.add({})",
+                    self.emit_expr_against(value, bindings, element_ty)?
+                ),
+            };
+        }
+        emitted.push(packed);
+        Some(emitted)
+    }
+
+    fn emit_source_reified_evidence(
+        &self,
+        call: &ir::SourceCall,
+        count: usize,
+    ) -> Option<Vec<String>> {
+        if count == 0 {
+            return Some(Vec::new());
+        }
+        let resolved_function = self
+            .bundle
+            .ir
+            .function(call.function)
+            .unwrap_or(self.function);
+        let emitter = JavaIrSupport::new(self.bundle, resolved_function, self.names);
+        call.lowered_args
+            .iter()
+            .rev()
+            .take(count)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(|operand| {
+                if let Some(local_id) = operand_local_id(operand)
+                    && let Some(local) = resolved_function.locals.get(local_id.0)
+                    && is_reified_type_param_local(&local.name)
+                    && call.function == self.function.id
+                {
+                    return Some(java_local_name(local));
+                }
+                match emitter.operand_type(operand) {
+                    Some(ir::Type::Named { name, args }) if name == "Type" && args.len() == 1 => {
+                        Some(type_value_expr(&args[0], self.names))
+                    }
+                    _ => emitter.emit_operand(operand),
+                }
+            })
+            .collect()
     }
 
     fn emit_call_arg(
@@ -3761,11 +6369,7 @@ impl<'a> SourceBodyEmitter<'a> {
             .find(|local| local.name == name && matches!(local.ty, ir::Type::Function { .. }))
     }
 
-    fn expr_type(
-        &self,
-        expr: &core::Expr,
-        _bindings: &HashMap<String, String>,
-    ) -> Option<ir::Type> {
+    fn expr_type(&self, expr: &core::Expr, bindings: &HashMap<String, String>) -> Option<ir::Type> {
         if matches!(expr, core::Expr::Identifier { name, .. } if name == "this") {
             return self.owner.map(|owner| ir::Type::Named {
                 name: owner.name.clone(),
@@ -3781,18 +6385,168 @@ impl<'a> SourceBodyEmitter<'a> {
             .source_exprs
             .iter()
             .find(|source| source.function == self.function.id && source.span == expr.span())
+            .or_else(|| {
+                let mut matches = self
+                    .bundle
+                    .ir
+                    .source_exprs
+                    .iter()
+                    .filter(|source| source.span == expr.span());
+                let source = matches.next()?;
+                matches.next().is_none().then_some(source)
+            })
             .filter(|source| !matches!(source.ty, ir::Type::Unknown))
             .map(|source| source.ty.clone())
+            .or_else(|| self.source_call_return_type(expr.span()))
             .or_else(|| match expr {
+                core::Expr::Bool { .. } => Some(ir::Type::Bool),
+                core::Expr::Integer { .. } => Some(ir::Type::Int),
+                core::Expr::Float { .. } => Some(ir::Type::Float),
+                core::Expr::String { .. } => Some(ir::Type::Str),
+                core::Expr::Unit { .. } => Some(ir::Type::Unit),
+                core::Expr::Unary { expr, .. } => self.expr_type(expr, bindings),
+                core::Expr::Member { receiver, name, .. }
+                    if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "this") =>
+                {
+                    self.owner.and_then(|owner| {
+                        owner
+                            .fields
+                            .iter()
+                            .find(|field| field.name == *name)
+                            .map(|field| field.ty.clone())
+                    })
+                }
+                core::Expr::Call { callee, args, .. } => {
+                    if let Some(ir::Type::Function { ret, .. }) = self.expr_type(callee, bindings) {
+                        return Some(*ret);
+                    }
+                    let core::Expr::Member { receiver, name, .. } = callee.as_ref() else {
+                        return None;
+                    };
+                    let receiver_ty = self.expr_type(receiver, bindings)?;
+                    if let Some(ret) = builtin_method_return_type(&receiver_ty, name, args.len()) {
+                        return Some(ret);
+                    }
+                    let ir::Type::Named {
+                        name: receiver_name,
+                        args: receiver_args,
+                    } = receiver_ty
+                    else {
+                        return None;
+                    };
+                    let emitter = JavaIrSupport::new(self.bundle, self.function, self.names);
+                    let ret = emitter.type_method_return_type(&receiver_name, name, args.len())?;
+                    Some(emitter.substitute_receiver_type_args(
+                        &receiver_name,
+                        &receiver_args,
+                        &ret,
+                    ))
+                }
                 core::Expr::Identifier { name, .. } => self
                     .function
                     .params
                     .iter()
                     .filter_map(|param| self.function.locals.get(param.0))
                     .find(|local| local.name == *name)
-                    .map(|local| local.ty.clone()),
+                    .map(|local| local.ty.clone())
+                    .or_else(|| {
+                        self.owner.and_then(|owner| {
+                            owner
+                                .fields
+                                .iter()
+                                .find(|field| field.name == *name)
+                                .map(|field| field.ty.clone())
+                        })
+                    }),
                 _ => None,
             })
+    }
+
+    fn source_call_return_type(&self, span: crate::source::Span) -> Option<ir::Type> {
+        let call = self.source_call(span)?;
+        let resolved_function = self
+            .bundle
+            .ir
+            .function(call.function)
+            .unwrap_or(self.function);
+        let emitter = JavaIrSupport::new(self.bundle, resolved_function, self.names);
+        match &call.callee {
+            ir::Callee::Direct(id) => self
+                .bundle
+                .ir
+                .function(*id)
+                .map(|function| function.return_ty.clone()),
+            ir::Callee::Method { receiver, method } => {
+                emitter.method_return_type_for_receiver(receiver, method, call.lowered_args.len())
+            }
+            ir::Callee::Named { path } => {
+                emitter.named_runtime_call_return_type(path, call.lowered_args.len())
+            }
+            ir::Callee::Intrinsic(ir::Intrinsic::Identity) => call
+                .lowered_args
+                .first()
+                .and_then(|arg| emitter.operand_type(arg)),
+            ir::Callee::Intrinsic(
+                ir::Intrinsic::Print
+                | ir::Intrinsic::Println
+                | ir::Intrinsic::Printf
+                | ir::Intrinsic::Assert,
+            ) => Some(ir::Type::Unit),
+            ir::Callee::Intrinsic(ir::Intrinsic::Ensure) => Some(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::Unit, ir::Type::Unknown],
+            }),
+            _ => None,
+        }
+    }
+
+    fn expr_type_with_binding_types(
+        &self,
+        expr: &core::Expr,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<ir::Type> {
+        if let Some(ty) = self.expr_type(expr, bindings) {
+            return Some(ty);
+        }
+        match expr {
+            core::Expr::Identifier { name, .. } => binding_types.get(name).cloned(),
+            core::Expr::Call { callee, args, .. } => {
+                let member = match callee.as_ref() {
+                    core::Expr::Member { .. } => callee.as_ref(),
+                    core::Expr::Index { receiver, .. }
+                        if matches!(receiver.as_ref(), core::Expr::Member { .. }) =>
+                    {
+                        receiver.as_ref()
+                    }
+                    _ => return None,
+                };
+                let core::Expr::Member { receiver, name, .. } = member else {
+                    unreachable!();
+                };
+                let receiver_ty =
+                    self.expr_type_with_binding_types(receiver, bindings, binding_types)?;
+                if let Some(ret) = builtin_method_return_type(&receiver_ty, name, args.len()) {
+                    return Some(ret);
+                }
+                let ir::Type::Named {
+                    name: receiver_name,
+                    args: receiver_args,
+                } = receiver_ty
+                else {
+                    return None;
+                };
+                let emitter = JavaIrSupport::new(self.bundle, self.function, self.names);
+                let ret = emitter
+                    .type_method_return_type(&receiver_name, name, args.len())
+                    .or_else(|| {
+                        self.names
+                            .java_method_return_type(&receiver_name, name, args.len())
+                    })?;
+                Some(emitter.substitute_receiver_type_args(&receiver_name, &receiver_args, &ret))
+            }
+            _ => None,
+        }
     }
 
     fn emit_receiver_expr(
@@ -3843,6 +6597,28 @@ impl<'a> SourceBodyEmitter<'a> {
             receiver_expr = format!("(({receiver_java_type}) {receiver_expr})");
         }
         Some(receiver_expr)
+    }
+
+    fn emit_inline_block(
+        &self,
+        block: &core::Block,
+        mut bindings: HashMap<String, String>,
+        mut binding_types: HashMap<String, ir::Type>,
+        returns_tail: bool,
+    ) -> Option<String> {
+        let mut out = String::from("{\n");
+        self.emit_statement_block(
+            &mut out,
+            block,
+            "            ",
+            &mut bindings,
+            &mut binding_types,
+            &mut HashSet::new(),
+            returns_tail,
+            0,
+        )?;
+        out.push_str("        }");
+        Some(out)
     }
 
     fn pattern_binding_expr_type(
@@ -3990,17 +6766,7 @@ fn emit_field_initializer_constructor_body(
     function: &ir::Function,
     names: &JavaNames,
 ) -> Option<String> {
-    let mut overrides = HashMap::new();
-    for param in &function.params {
-        let local = function.locals.get(param.0)?;
-        if local.name == "this" {
-            overrides.insert(local.id, "this".to_string());
-        }
-    }
-    FunctionEmitter::new(bundle, function, names)
-        .with_constructor_body()
-        .with_capture_overrides(overrides)
-        .emit_body()
+    structured_source_function_body(bundle, function, names)
 }
 
 fn push_class_field_initializer(
@@ -4012,20 +6778,11 @@ fn push_class_field_initializer(
     let Some(function) = ty.field_init.and_then(|id| bundle.ir.function(id)) else {
         return;
     };
-    let mut overrides = HashMap::new();
-    for param in &function.params {
-        let local = match function.locals.get(param.0) {
-            Some(local) if local.name == "this" => local,
-            _ => continue,
-        };
-        overrides.insert(local.id, "this".to_string());
-    }
-    let Some(body) = FunctionEmitter::new(bundle, function, names)
-        .with_capture_overrides(overrides)
-        .emit_body()
-    else {
-        return;
-    };
+    let body = structured_source_function_body(bundle, function, names).unwrap_or_else(|| {
+        let mut body = String::new();
+        push_stub_body(&mut body);
+        body
+    });
     out.push('\n');
     out.push_str("    private void __lume_field_init()");
     out.push_str(&body);
@@ -4065,11 +6822,12 @@ fn push_explicit_class_constructor(
     out.push('(');
     out.push_str(&java_param_list(function, names, true));
     out.push(')');
-    match FunctionEmitter::new(bundle, function, names)
-        .with_prologue_line(ty.field_init.map(|_| "this.__lume_field_init();"))
-        .with_constructor_body()
-        .emit_body()
-    {
+    match structured_source_constructor_body(
+        bundle,
+        function,
+        names,
+        ty.field_init.map(|_| "this.__lume_field_init();"),
+    ) {
         Some(body) => out.push_str(&body),
         None => push_stub_body(out),
     }
@@ -4126,91 +6884,23 @@ fn constructor_param_name(field: &ir::Field, index: usize) -> String {
     format!("{}_arg{index}", java_member_name(&field.name))
 }
 
-struct FunctionEmitter<'a> {
+struct JavaIrSupport<'a> {
     bundle: &'a BackendBundle,
     function: &'a ir::Function,
     names: &'a JavaNames,
-    module_class: String,
-    constructor_body: bool,
-    capture_overrides: HashMap<ir::LocalId, String>,
     inferred_local_types: HashMap<ir::LocalId, ir::Type>,
-    assignment_counts: HashMap<ir::LocalId, usize>,
-    captured_locals: HashSet<ir::LocalId>,
-    control_var: String,
-    local_prefix: String,
-    prologue_lines: Vec<String>,
 }
 
-impl<'a> FunctionEmitter<'a> {
+impl<'a> JavaIrSupport<'a> {
     fn new(bundle: &'a BackendBundle, function: &'a ir::Function, names: &'a JavaNames) -> Self {
         let mut emitter = Self {
             bundle,
             function,
             names,
-            module_class: module_class_name(bundle),
-            constructor_body: false,
-            capture_overrides: HashMap::new(),
             inferred_local_types: HashMap::new(),
-            assignment_counts: HashMap::new(),
-            captured_locals: HashSet::new(),
-            control_var: "__block".to_string(),
-            local_prefix: String::new(),
-            prologue_lines: Vec::new(),
         };
-        emitter.index_local_usage();
         emitter.infer_local_types();
         emitter
-    }
-
-    fn with_constructor_body(mut self) -> Self {
-        self.constructor_body = true;
-        self
-    }
-
-    fn with_capture_overrides(mut self, capture_overrides: HashMap<ir::LocalId, String>) -> Self {
-        self.capture_overrides = capture_overrides;
-        self
-    }
-
-    fn with_control_var(mut self, control_var: impl Into<String>) -> Self {
-        self.control_var = control_var.into();
-        self
-    }
-
-    fn with_local_prefix(mut self, local_prefix: impl Into<String>) -> Self {
-        self.local_prefix = local_prefix.into();
-        self
-    }
-
-    fn with_prologue_line(mut self, line: Option<&str>) -> Self {
-        if let Some(line) = line {
-            self.prologue_lines.push(line.to_string());
-        }
-        self
-    }
-
-    fn index_local_usage(&mut self) {
-        for block in &self.function.blocks {
-            for statement in &block.statements {
-                let ir::StatementKind::Assign { target, value } = &statement.kind else {
-                    continue;
-                };
-                if let ir::Place::Local(local_id) = target {
-                    *self.assignment_counts.entry(*local_id).or_insert(0) += 1;
-                }
-                self.index_rvalue_usage(value);
-            }
-        }
-    }
-
-    fn index_rvalue_usage(&mut self, value: &ir::RValue) {
-        if let ir::RValue::Closure { captures, .. } = value {
-            for capture in captures {
-                if let Some(local_id) = operand_local_id(capture) {
-                    self.captured_locals.insert(local_id);
-                }
-            }
-        }
     }
 
     fn infer_local_types(&mut self) {
@@ -4247,805 +6937,6 @@ impl<'a> FunctionEmitter<'a> {
                 }
             }
         }
-    }
-
-    fn emit_body(&self) -> Option<String> {
-        let mut out = String::new();
-        out.push_str(" {\n");
-        for line in &self.prologue_lines {
-            out.push_str("        ");
-            out.push_str(line);
-            out.push('\n');
-        }
-        for local in &self.function.locals {
-            if self.local_is_declared_elsewhere(local) {
-                continue;
-            }
-            let local_ty = self
-                .inferred_local_types
-                .get(&local.id)
-                .unwrap_or(&local.ty);
-            out.push_str("        ");
-            out.push_str(&self.local_value_type(local_ty));
-            out.push(' ');
-            out.push_str(&self.local_name(local));
-            out.push_str(" = ");
-            out.push_str(&java_default_value(local_ty));
-            out.push_str(";\n");
-        }
-
-        if !self.function.blocks.is_empty() {
-            out.push_str("        int ");
-            out.push_str(&self.control_var);
-            out.push_str(" = ");
-            out.push_str(&self.function.entry.0.to_string());
-            out.push_str(";\n");
-            out.push_str("        while (true) {\n");
-            out.push_str("            switch (");
-            out.push_str(&self.control_var);
-            out.push_str(") {\n");
-            for block in &self.function.blocks {
-                self.emit_block(&mut out, block)?;
-            }
-            out.push_str("                default:\n");
-            out.push_str(
-                "                    throw new IllegalStateException(\"unknown Lume block \" + ",
-            );
-            out.push_str(&self.control_var);
-            out.push_str(");\n");
-            out.push_str("            }\n");
-            out.push_str("        }\n");
-        }
-
-        out.push_str("    }\n");
-        Some(out)
-    }
-
-    fn emit_block(&self, out: &mut String, block: &ir::BasicBlock) -> Option<()> {
-        out.push_str("                case ");
-        out.push_str(&block.id.0.to_string());
-        out.push_str(":\n");
-        out.push_str("                {\n");
-        for statement in &block.statements {
-            self.emit_statement(out, statement)?;
-        }
-        self.emit_terminator(out, &block.terminator)?;
-        out.push_str("                }\n");
-        if !terminator_exits_case(&block.terminator.kind) {
-            out.push_str("                break;\n");
-        }
-        Some(())
-    }
-
-    fn emit_statement(&self, out: &mut String, statement: &ir::Statement) -> Option<()> {
-        match &statement.kind {
-            ir::StatementKind::Assign { target, value } => {
-                let target_ty = self.place_type(target);
-                let value_ty = self.rvalue_type(value);
-                let closure_capture_initializers = match value {
-                    ir::RValue::Closure { function, captures } => {
-                        Some(self.emit_closure_capture_snapshots(out, *function, captures)?)
-                    }
-                    _ => None,
-                };
-                let anonymous_object_capture_initializers = match value {
-                    ir::RValue::AnonymousObject {
-                        fields, methods, ..
-                    } => Some(self.emit_anonymous_object_capture_snapshots(out, fields, methods)?),
-                    _ => None,
-                };
-                if matches!(
-                    value,
-                    ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit))
-                ) && !matches!(target, ir::Place::Index { .. })
-                    && target_ty.as_ref().is_some_and(|ty| !is_java_void_type(ty))
-                {
-                    let target_ty = target_ty.as_ref()?;
-                    out.push_str("                    ");
-                    out.push_str(&self.emit_place(target)?);
-                    out.push_str(" = (");
-                    out.push_str(&self.names.value_type(target_ty));
-                    out.push_str(") ((Object) lume.core.LumeUnit.INSTANCE);\n");
-                    return Some(());
-                }
-                if target_ty.as_ref().is_some_and(is_java_void_type)
-                    && rvalue_can_be_java_statement(value)
-                    && !matches!(target, ir::Place::Index { .. })
-                {
-                    out.push_str("                    ");
-                    out.push_str(&self.emit_rvalue(value)?);
-                    out.push_str(";\n");
-                    out.push_str("                    ");
-                    out.push_str(&self.emit_place(target)?);
-                    out.push_str(" = lume.core.LumeUnit.INSTANCE;\n");
-                    return Some(());
-                }
-                let mut value_expr = match value {
-                    ir::RValue::Closure { function, captures } => self.emit_closure(
-                        *function,
-                        captures,
-                        closure_capture_initializers.as_deref(),
-                    )?,
-                    ir::RValue::Record(fields) => {
-                        let target_ty = target_ty.as_ref()?;
-                        self.emit_record_as_named_construct(target_ty, fields)?
-                    }
-                    ir::RValue::AnonymousObject {
-                        ty,
-                        fields,
-                        methods,
-                    } => {
-                        let (field_values, method_captures) =
-                            anonymous_object_capture_initializers.as_ref()?;
-                        self.emit_anonymous_object(
-                            ty,
-                            fields,
-                            methods,
-                            Some(field_values),
-                            Some(method_captures),
-                        )?
-                    }
-                    _ => self.emit_rvalue(value)?,
-                };
-                if let Some(target_ty) = target_ty {
-                    value_expr = self.coerce_to_target_type(value_expr, value_ty, &target_ty);
-                }
-                if let ir::Place::Index { base, index } = target {
-                    out.push_str("                    ");
-                    out.push_str(&self.emit_index_assignment(base, index, &value_expr)?);
-                    out.push_str(";\n");
-                    return Some(());
-                }
-                out.push_str("                    ");
-                out.push_str(&self.emit_place(target)?);
-                out.push_str(" = ");
-                out.push_str(&value_expr);
-                out.push_str(";\n");
-                Some(())
-            }
-            ir::StatementKind::Eval { value } => {
-                if !rvalue_can_be_java_statement(value) {
-                    return Some(());
-                }
-                out.push_str("                    ");
-                out.push_str(&self.emit_rvalue(value)?);
-                out.push_str(";\n");
-                Some(())
-            }
-            ir::StatementKind::Defer { .. } => self.unsupported("defer statement"),
-        }
-    }
-
-    fn emit_terminator(&self, out: &mut String, terminator: &ir::Terminator) -> Option<()> {
-        match &terminator.kind {
-            ir::TerminatorKind::Goto(target) => {
-                out.push_str("                    ");
-                out.push_str(&self.control_var);
-                out.push_str(" = ");
-                out.push_str(&target.0.to_string());
-                out.push_str(";\n");
-                Some(())
-            }
-            ir::TerminatorKind::Branch {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                let condition_ty = ir::Type::Bool;
-                let condition_expr = self.coerce_to_target_type(
-                    self.emit_operand(condition)?,
-                    self.operand_type(condition),
-                    &condition_ty,
-                );
-                out.push_str("                    if (");
-                out.push_str(&condition_expr);
-                out.push_str(") {\n");
-                out.push_str("                        ");
-                out.push_str(&self.control_var);
-                out.push_str(" = ");
-                out.push_str(&then_block.0.to_string());
-                out.push_str(";\n");
-                out.push_str("                    } else {\n");
-                out.push_str("                        ");
-                out.push_str(&self.control_var);
-                out.push_str(" = ");
-                out.push_str(&else_block.0.to_string());
-                out.push_str(";\n");
-                out.push_str("                    }\n");
-                Some(())
-            }
-            ir::TerminatorKind::Switch {
-                scrutinee,
-                arms,
-                default,
-            } => {
-                out.push_str("                    Object __switch = ");
-                out.push_str(&self.emit_operand(scrutinee)?);
-                out.push_str(";\n");
-                for arm in arms {
-                    out.push_str("                    if (java.util.Objects.equals(__switch, ");
-                    out.push_str(&self.emit_switch_value(&arm.value)?);
-                    out.push_str(")) {\n");
-                    out.push_str("                        ");
-                    out.push_str(&self.control_var);
-                    out.push_str(" = ");
-                    out.push_str(&arm.target.0.to_string());
-                    out.push_str(";\n");
-                    out.push_str("                        break;\n");
-                    out.push_str("                    }\n");
-                }
-                out.push_str("                    ");
-                out.push_str(&self.control_var);
-                out.push_str(" = ");
-                out.push_str(&default.0.to_string());
-                out.push_str(";\n");
-                Some(())
-            }
-            ir::TerminatorKind::Return(value) => {
-                if self.constructor_body || is_java_void_type(&self.function.return_ty) {
-                    out.push_str("                    return;\n");
-                } else {
-                    out.push_str("                    return ");
-                    if let Some(value) = value {
-                        let value_expr = self.coerce_to_target_type(
-                            self.emit_operand(value)?,
-                            self.operand_type(value),
-                            &self.function.return_ty,
-                        );
-                        out.push_str(&value_expr);
-                    } else {
-                        out.push_str(&java_default_value(&self.function.return_ty));
-                    }
-                    out.push_str(";\n");
-                }
-                Some(())
-            }
-            ir::TerminatorKind::Unreachable => {
-                out.push_str("                    throw new IllegalStateException(\"entered unreachable Lume block\");\n");
-                Some(())
-            }
-        }
-    }
-
-    fn emit_switch_value(&self, value: &ir::SwitchValue) -> Option<String> {
-        match value {
-            ir::SwitchValue::Bool(value) => Some(value.to_string()),
-            ir::SwitchValue::Int(value) => Some(format!("{value}L")),
-            ir::SwitchValue::String(value) => Some(java_string_literal(value)),
-            ir::SwitchValue::EnumCase(_) => self.unsupported("enum-case switch value"),
-        }
-    }
-
-    fn emit_rvalue(&self, value: &ir::RValue) -> Option<String> {
-        match value {
-            ir::RValue::Use(operand) => self.emit_operand(operand),
-            ir::RValue::Unary { op, operand } => {
-                let op = match op {
-                    ir::UnaryOp::Neg => "-",
-                    ir::UnaryOp::Not => "!",
-                };
-                Some(format!("({op}{})", self.emit_operand(operand)?))
-            }
-            ir::RValue::Binary { op, left, right } => self.emit_binary(*op, left, right),
-            ir::RValue::Call { callee, args, .. } => self.emit_call(callee, args),
-            ir::RValue::Tuple(items) => self.emit_tuple(items),
-            ir::RValue::List(items) => {
-                let args = self.emit_operands(items)?;
-                Some(format!("lume.core.LumeVector.of({})", args.join(", ")))
-            }
-            ir::RValue::AnonymousInterface {
-                interfaces,
-                methods,
-            } => self.emit_anonymous_interface(interfaces, methods),
-            ir::RValue::AnonymousObject {
-                ty,
-                fields,
-                methods,
-            } => self.emit_anonymous_object(ty, fields, methods, None, None),
-            ir::RValue::Construct { ty, fields } => self.emit_construct(ty, fields),
-            ir::RValue::Variant {
-                enum_name,
-                case_name,
-                fields,
-            } => self.emit_variant(enum_name, case_name, fields),
-            ir::RValue::Field { base, name } if name == "runtimeType" => {
-                self.emit_runtime_type_for_operand(base)
-            }
-            ir::RValue::Field { base, name } => {
-                let base_expr = self.emit_operand(base)?;
-                match self.operand_type(base) {
-                    Some(ir::Type::Tuple(_)) => {
-                        let accessor = tuple_accessor_name(name)?;
-                        Some(format!("{base_expr}.{accessor}()"))
-                    }
-                    Some(ir::Type::Named {
-                        name: ref type_name,
-                        ..
-                    }) if enum_case_view_parts(type_name).is_some()
-                        || is_core_accessor_backed_type(type_name)
-                        || self.type_def(type_name).is_some_and(|ty| {
-                            ty.kind == TypeKind::Record
-                                || ((ty.kind == TypeKind::Interface
-                                    || is_anonymous_object_type(ty))
-                                    && ty.fields.iter().any(|field| field.name == *name))
-                        }) =>
-                    {
-                        Some(format!("{base_expr}.{}()", java_member_name(name)))
-                    }
-                    _ => Some(format!("{base_expr}.{}", java_member_name(name))),
-                }
-            }
-            ir::RValue::TypeOf { ty } => Some(type_value_expr(ty, self.names)),
-            ir::RValue::Cast { operand, ty } => self
-                .emit_operand(operand)
-                .map(|expr| self.unchecked_reference_cast(expr, ty)),
-            ir::RValue::NamedValue { path } => self.emit_named_runtime_value(path),
-            ir::RValue::Record(fields) => self.unsupported(&format!(
-                "anonymous shape literal {{{}}}",
-                fields
-                    .iter()
-                    .map(|field| field.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )),
-            ir::RValue::RecordSpread(_) => self.unsupported("anonymous shape spread"),
-            ir::RValue::RecordUpdate { .. } => self.unsupported("shape update"),
-            ir::RValue::Index { base, index } => self.emit_index(base, index),
-            ir::RValue::TypeTest { operand, ty } => self.emit_type_test(operand, ty),
-            ir::RValue::Closure { function, captures } => {
-                self.emit_closure(*function, captures, None)
-            }
-        }
-    }
-
-    fn emit_runtime_type_for_operand(&self, operand: &ir::Operand) -> Option<String> {
-        self.operand_type(operand)
-            .map(|ty| {
-                if is_named_builtin(&ty, "Any") {
-                    format!(
-                        "lume.core.LumeRuntime.runtimeTypeOf({})",
-                        self.emit_operand(operand)
-                            .unwrap_or_else(|| "null".to_string())
-                    )
-                } else {
-                    type_value_expr(&ty, self.names)
-                }
-            })
-            .or_else(|| match operand {
-                ir::Operand::Const(ir::Constant::Bool(_)) => {
-                    Some("lume.core.LumeType.primitive(\"Bool\")".to_string())
-                }
-                ir::Operand::Const(ir::Constant::Int(_)) => {
-                    Some("lume.core.LumeType.primitive(\"Int\")".to_string())
-                }
-                ir::Operand::Const(ir::Constant::Float(_)) => {
-                    Some("lume.core.LumeType.primitive(\"Float\")".to_string())
-                }
-                ir::Operand::Const(ir::Constant::String(_)) => {
-                    Some("lume.core.LumeType.primitive(\"Str\")".to_string())
-                }
-                ir::Operand::Const(ir::Constant::Unit) => {
-                    Some("lume.core.LumeType.primitive(\"Unit\")".to_string())
-                }
-                ir::Operand::Const(ir::Constant::List(_)) => {
-                    Some("lume.core.LumeType.primitive(\"Vector\")".to_string())
-                }
-                _ => None,
-            })
-    }
-
-    fn emit_type_test(&self, operand: &ir::Operand, ty: &ir::Type) -> Option<String> {
-        let value = self.emit_operand(operand)?;
-        if matches!(ty, ir::Type::Never) {
-            return Some("false".to_string());
-        }
-        if matches!(ty, ir::Type::Unknown) || is_named_builtin(ty, "Any") {
-            return Some(format!("{value} != null"));
-        }
-        if matches!(ty, ir::Type::Record(_)) {
-            return self.unsupported("anonymous shape type test");
-        }
-
-        let erased = match ty {
-            ir::Type::Named { name, .. } => ir::Type::Named {
-                name: name.clone(),
-                args: Vec::new(),
-            },
-            ir::Type::Tuple(items) => ir::Type::Tuple(vec![ir::Type::Unknown; items.len()]),
-            ir::Type::Function { params, .. } => ir::Type::Function {
-                params: vec![ir::Type::Unknown; params.len()],
-                ret: Box::new(ir::Type::Unknown),
-            },
-            other => other.clone(),
-        };
-        let java_type = self.names.value_type(&erased);
-        let raw_java_type = java_type.split('<').next().unwrap_or(&java_type);
-        Some(format!("{value} instanceof {raw_java_type}"))
-    }
-
-    fn emit_index(&self, base: &ir::Operand, index: &ir::Operand) -> Option<String> {
-        let base_ty = self.operand_type(base)?;
-        let base_expr = self.emit_operand(base)?;
-        let index_expr = self.emit_operand(index)?;
-
-        match base_ty {
-            ir::Type::Named { ref name, ref args }
-                if (name == "Vector" || name == "Array") && args.len() == 1 =>
-            {
-                let indexed =
-                    format!("lume.core.LumeRuntime.indexValue({base_expr}, {index_expr})");
-                Some(self.coerce_to_target_type(indexed, Some(ir::Type::Unknown), &args[0]))
-            }
-            ir::Type::Named { ref name, ref args } if name == "Map" && args.len() == 2 => {
-                Some(format!("{base_expr}.get({index_expr})"))
-            }
-            _ => self.unsupported(&format!("index expression on {base_ty:?}")),
-        }
-    }
-
-    fn emit_index_assignment(
-        &self,
-        base: &ir::Operand,
-        index: &ir::Operand,
-        value: &str,
-    ) -> Option<String> {
-        let base_ty = self.operand_type(base)?;
-        let base_expr = self.emit_operand(base)?;
-        let index_expr = self.emit_operand(index)?;
-        match base_ty {
-            ir::Type::Named { ref name, ref args }
-                if matches!(name.as_str(), "Array" | "Vector") && args.len() == 1 =>
-            {
-                Some(format!("{base_expr}.set({index_expr}, {value})"))
-            }
-            ir::Type::Named { ref name, ref args } if name == "Map" && args.len() == 2 => {
-                Some(format!("{base_expr}.set({index_expr}, {value})"))
-            }
-            _ => self.unsupported("indexed assignment target"),
-        }
-    }
-
-    fn emit_binary(
-        &self,
-        op: ir::BinaryOp,
-        left: &ir::Operand,
-        right: &ir::Operand,
-    ) -> Option<String> {
-        let left = self.emit_operand(left)?;
-        let right = self.emit_operand(right)?;
-        match op {
-            ir::BinaryOp::Eq => Some(format!("java.util.Objects.equals({left}, {right})")),
-            ir::BinaryOp::NotEq => Some(format!("!java.util.Objects.equals({left}, {right})")),
-            ir::BinaryOp::IdentityEq => Some(format!("({left} == {right})")),
-            ir::BinaryOp::IdentityNotEq => Some(format!("({left} != {right})")),
-            _ => {
-                let op = match op {
-                    ir::BinaryOp::Add => "+",
-                    ir::BinaryOp::Sub => "-",
-                    ir::BinaryOp::Mul => "*",
-                    ir::BinaryOp::Div => "/",
-                    ir::BinaryOp::Mod => "%",
-                    ir::BinaryOp::Less => "<",
-                    ir::BinaryOp::LessEq => "<=",
-                    ir::BinaryOp::Greater => ">",
-                    ir::BinaryOp::GreaterEq => ">=",
-                    ir::BinaryOp::And => "&&",
-                    ir::BinaryOp::Or => "||",
-                    ir::BinaryOp::Eq
-                    | ir::BinaryOp::NotEq
-                    | ir::BinaryOp::IdentityEq
-                    | ir::BinaryOp::IdentityNotEq => unreachable!(),
-                };
-                Some(format!("({left} {op} {right})"))
-            }
-        }
-    }
-
-    fn emit_call(&self, callee: &ir::Callee, args: &[ir::Operand]) -> Option<String> {
-        match callee {
-            ir::Callee::Direct(id) => {
-                let target = self.bundle.ir.function(*id)?;
-                let args = self.emit_operands_for_function(args, target)?;
-                match target.kind {
-                    ir::FunctionKind::TopLevel => {
-                        let name = java_member_name(&target.name);
-                        if matches!(self.function.kind, ir::FunctionKind::TopLevel) {
-                            Some(format!("{name}({})", args.join(", ")))
-                        } else {
-                            Some(format!(
-                                "{}.{}({})",
-                                self.module_class,
-                                name,
-                                args.join(", ")
-                            ))
-                        }
-                    }
-                    ir::FunctionKind::Method { owner } => {
-                        let owner_ty = self.bundle.ir.types.get(owner.0)?;
-                        let name = java_member_name(&target.name);
-                        if owner_ty.kind == TypeKind::Object {
-                            Some(format!(
-                                "{}.INSTANCE.{}({})",
-                                self.names.named_type(&owner_ty.name),
-                                name,
-                                args.join(", ")
-                            ))
-                        } else if matches!(
-                            self.function.kind,
-                            ir::FunctionKind::Method { owner: current_owner } if current_owner == owner
-                        ) {
-                            Some(format!("this.{}({})", name, args.join(", ")))
-                        } else {
-                            self.unsupported("direct call to non-top-level function")
-                        }
-                    }
-                    _ => self.unsupported("direct call to non-top-level function"),
-                }
-            }
-            ir::Callee::Method { receiver, method } => match method.as_str() {
-                "toStr" if args.is_empty() => self.emit_to_string_call(receiver),
-                "equals" if args.len() == 1 => {
-                    let args = self.emit_operands(args)?;
-                    let other = args.first()?;
-                    let receiver = self.emit_operand(receiver)?;
-                    Some(format!("java.util.Objects.equals({receiver}, {other})"))
-                }
-                "sameValue" if args.len() == 1 => {
-                    let args = self.emit_operands(args)?;
-                    let other = args.first()?;
-                    let receiver = self.emit_operand(receiver)?;
-                    Some(format!(
-                        "lume.core.LumeRuntime.sameValue({receiver}, {other})"
-                    ))
-                }
-                "hash" if args.is_empty() => {
-                    let receiver = self.emit_operand(receiver)?;
-                    Some(format!("lume.core.LumeRuntime.hashValue({receiver})"))
-                }
-                "isSuccess" | "isSet" | "isDefined" if args.is_empty() => {
-                    let receiver = self.emit_operand(receiver)?;
-                    Some(format!(
-                        "lume.core.LumeRuntime.extractSuccessIsSet({receiver})"
-                    ))
-                }
-                _ => {
-                    let params = self
-                        .method_param_specs_for_receiver(receiver, method, args)
-                        .unwrap_or_default();
-                    let args = self.emit_operands_for_param_specs(args, &params)?;
-                    let mut receiver_expr = self.emit_operand(receiver)?;
-                    if let Some(ir::Type::TypeParam(param)) = self.operand_type(receiver)
-                        && let Some(bound) = self.generic_bound_for_type_param(&param)
-                    {
-                        receiver_expr =
-                            format!("(({}) {})", self.names.value_type(&bound), receiver_expr);
-                    }
-                    Some(format!(
-                        "{}.{}({})",
-                        receiver_expr,
-                        java_member_name(method),
-                        args.join(", ")
-                    ))
-                }
-            },
-            ir::Callee::Intrinsic(intrinsic) => {
-                let args = self.emit_operands(args)?;
-                self.emit_intrinsic(intrinsic, &args)
-            }
-            ir::Callee::Named { path } => self.emit_named_runtime_call(path, args),
-            ir::Callee::Indirect(callee) => self.emit_indirect_call(callee, args),
-        }
-    }
-
-    fn emit_indirect_call(&self, callee: &ir::Operand, args: &[ir::Operand]) -> Option<String> {
-        let params = match self.operand_type(callee) {
-            Some(ir::Type::Function { params, .. }) => params,
-            _ => Vec::new(),
-        };
-        let args = self.emit_operands_for_params(args, &params)?;
-        let callee = self.emit_operand(callee)?;
-        if args.len() > MAX_JAVA_FUNCTION_ARITY {
-            return self.unsupported("function call with more than 12 arguments");
-        }
-        emit_functional_call(&callee, &args)
-    }
-
-    fn emit_to_string_call(&self, receiver: &ir::Operand) -> Option<String> {
-        match receiver {
-            ir::Operand::Const(ir::Constant::Unit) => {
-                Some("lume.core.LumeUnit.INSTANCE.toString()".to_string())
-            }
-            ir::Operand::Const(ir::Constant::Bool(value)) => {
-                Some(format!("Boolean.toString({value})"))
-            }
-            ir::Operand::Const(ir::Constant::Int(value)) => {
-                Some(format!("Long.toString({value}L)"))
-            }
-            ir::Operand::Const(ir::Constant::Float(value)) => {
-                Some(format!("Double.toString({})", java_float_literal(*value)))
-            }
-            ir::Operand::Const(ir::Constant::String(value)) => Some(format!(
-                "{}.toString()",
-                java_string_literal(&decode_lume_string_literal(value))
-            )),
-            _ => Some(format!("{}.toString()", self.emit_operand(receiver)?)),
-        }
-    }
-
-    fn emit_named_runtime_call(&self, path: &[String], operands: &[ir::Operand]) -> Option<String> {
-        match path {
-            [case] if core_enum_case_owner(case).is_some() => {
-                self.emit_core_enum_case_call(case, operands)
-            }
-            [owner, case]
-                if core_enum_case_owner(case).is_some_and(|expected| expected == owner) =>
-            {
-                self.emit_core_enum_case_call(case, operands)
-            }
-            [owner, case] if self.enum_case(owner, case).is_some() => {
-                self.emit_enum_case_call(owner, case, operands)
-            }
-            [owner, case, method] if self.enum_case(owner, case).is_some() => {
-                let args = self.emit_operands(operands)?;
-                let receiver = self.emit_enum_case_call(owner, case, &[])?;
-                Some(format!(
-                    "{}.{}({})",
-                    receiver,
-                    java_member_name(method),
-                    args.join(", ")
-                ))
-            }
-            [owner] if owner == "Vector" => {
-                let args = self.emit_operands(operands)?;
-                Some(format!("lume.core.LumeVector.of({})", args.join(", ")))
-            }
-            [owner] if owner == "LinkedList" => {
-                let args = self.emit_operands(operands)?;
-                Some(format!("lume.core.LumeLinkedList.of({})", args.join(", ")))
-            }
-            [owner] if owner == "Map" => {
-                let args = self.emit_operands(operands)?;
-                if args.is_empty() {
-                    Some("lume.core.LumeMap.empty()".to_string())
-                } else {
-                    Some(format!("lume.core.LumeMap.fromParts({})", args.join(", ")))
-                }
-            }
-            [owner] if owner == "Set" && operands.is_empty() => {
-                Some("lume.core.LumeSet.empty()".to_string())
-            }
-            [owner] if owner == "Range" && operands.len() == 2 => {
-                let args = self.emit_operands(operands)?;
-                Some(format!("new lume.core.Range({})", args.join(", ")))
-            }
-            [owner, method] if owner == "Int" && method == "parse" => {
-                let args = self.emit_operands(operands)?;
-                Some(format!(
-                    "lume.core.LumeRuntime.parseInt({})",
-                    args.join(", ")
-                ))
-            }
-            [owner, method] if owner == "Float" && method == "parse" => {
-                let args = self.emit_operands(operands)?;
-                Some(format!(
-                    "lume.core.LumeRuntime.parseFloat({})",
-                    args.join(", ")
-                ))
-            }
-            [owner] if self.names.is_java_type(owner) => {
-                let params = self
-                    .constructor_param_specs(owner, operands)
-                    .unwrap_or_default();
-                let args = self.emit_operands_for_param_specs(operands, &params)?;
-                Some(format!(
-                    "new {}{}({})",
-                    self.names.named_type(owner),
-                    self.names.java_constructor_type_args(owner),
-                    args.join(", ")
-                ))
-            }
-            [owner] if self.is_lume_constructible_type(owner) => {
-                let params = self
-                    .constructor_param_specs(owner, operands)
-                    .unwrap_or_default();
-                let args = self.emit_operands_for_param_specs(operands, &params)?;
-                Some(format!(
-                    "new {}({})",
-                    self.names.named_type(owner),
-                    args.join(", ")
-                ))
-            }
-            [owner, method] if self.names.is_java_single_type(owner) => {
-                let params = self
-                    .external_method_param_specs(owner, method, operands)
-                    .or_else(|| self.type_method_param_specs(owner, method, operands))
-                    .unwrap_or_default();
-                let args = self.emit_operands_for_param_specs(operands, &params)?;
-                Some(format!(
-                    "{}.INSTANCE.{}({})",
-                    self.names.named_type(owner),
-                    java_member_name(method),
-                    args.join(", ")
-                ))
-            }
-            [owner, method] if self.names.is_java_type(owner) => {
-                let params = self
-                    .external_method_param_specs(owner, method, operands)
-                    .or_else(|| self.type_method_param_specs(owner, method, operands))
-                    .unwrap_or_default();
-                let args = self.emit_operands_for_param_specs(operands, &params)?;
-                Some(format!(
-                    "{}.{}({})",
-                    self.names.named_type(owner),
-                    java_member_name(method),
-                    args.join(", ")
-                ))
-            }
-            [owner, method] if self.is_lume_single_type(owner) => {
-                let params = self
-                    .type_method_param_specs(owner, method, operands)
-                    .unwrap_or_default();
-                let args = self.emit_operands_for_param_specs(operands, &params)?;
-                Some(format!(
-                    "{}.INSTANCE.{}({})",
-                    self.names.named_type(owner),
-                    java_member_name(method),
-                    args.join(", ")
-                ))
-            }
-            [owner, method] if owner == "Array" => {
-                let args = self.emit_operands(operands)?;
-                let target = match method.as_str() {
-                    "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" | "fill" => {
-                        format!("lume.core.LumeArray.{}", java_member_name(method))
-                    }
-                    _ => return None,
-                };
-                Some(format!("{target}({})", args.join(", ")))
-            }
-            _ => self.unsupported(&format!("named runtime call {}", path.join("."))),
-        }
-    }
-
-    fn emit_named_runtime_value(&self, path: &[String]) -> Option<String> {
-        match path {
-            [case] if core_enum_case_owner(case).is_some() => {
-                self.emit_core_enum_case_call(case, &[])
-            }
-            [owner, case]
-                if core_enum_case_owner(case).is_some_and(|expected| expected == owner) =>
-            {
-                self.emit_core_enum_case_call(case, &[])
-            }
-            [owner, case] if self.enum_case(owner, case).is_some() => {
-                self.emit_enum_case_call(owner, case, &[])
-            }
-            _ if path.last().is_some_and(|name| {
-                self.type_def(name)
-                    .is_some_and(|ty| ty.kind == TypeKind::Object)
-            }) =>
-            {
-                let name = path.last()?;
-                Some(format!("{}.INSTANCE", self.names.named_type(name)))
-            }
-            _ => self.unsupported("named runtime value"),
-        }
-    }
-
-    fn emit_core_enum_case_call(&self, case: &str, operands: &[ir::Operand]) -> Option<String> {
-        let owner = core_enum_case_owner(case)?;
-        let args = self.emit_operands(operands)?;
-        if case == "None" {
-            return args
-                .is_empty()
-                .then(|| "lume.core.Option.None.instance()".to_string());
-        }
-        Some(format!(
-            "new lume.core.{}.{}<>({})",
-            java_type_name(owner),
-            java_type_name(case),
-            args.join(", ")
-        ))
     }
 
     fn emit_enum_case_call(
@@ -5103,445 +6994,6 @@ impl<'a> FunctionEmitter<'a> {
             .is_some_and(|ty| ty.kind == TypeKind::Object)
     }
 
-    fn emit_intrinsic(&self, intrinsic: &ir::Intrinsic, args: &[String]) -> Option<String> {
-        match intrinsic {
-            ir::Intrinsic::Print => {
-                Some(format!("lume.core.LumeRuntime.print({})", args.join(", ")))
-            }
-            ir::Intrinsic::Println => Some(format!(
-                "lume.core.LumeRuntime.println({})",
-                args.join(", ")
-            )),
-            ir::Intrinsic::Printf => {
-                Some(format!("lume.core.LumeRuntime.printf({})", args.join(", ")))
-            }
-            ir::Intrinsic::Panic => Some(format!(
-                "lume.core.LumePanic.panic({})",
-                args.first()
-                    .cloned()
-                    .unwrap_or_else(|| java_string_literal("panic"))
-            )),
-            ir::Intrinsic::Assert => {
-                let condition = args.first()?;
-                let message = args
-                    .get(1)
-                    .cloned()
-                    .unwrap_or_else(|| java_string_literal("assertion failed"));
-                Some(format!(
-                    "lume.core.LumeRuntime.assertTrue({condition}, {message})"
-                ))
-            }
-            ir::Intrinsic::Ensure => {
-                if args.len() != 2 {
-                    return None;
-                }
-                Some(format!(
-                    "lume.core.LumeRuntime.ensure({}, {})",
-                    args[0], args[1]
-                ))
-            }
-            ir::Intrinsic::Identity => {
-                if args.len() != 1 {
-                    return None;
-                }
-                Some(args[0].clone())
-            }
-            ir::Intrinsic::ExtractSuccessIsSet => {
-                if args.len() != 1 {
-                    return None;
-                }
-                Some(format!(
-                    "lume.core.LumeRuntime.extractSuccessIsSet({})",
-                    args[0]
-                ))
-            }
-            ir::Intrinsic::ExtractSuccessValue => {
-                if args.len() != 1 {
-                    return None;
-                }
-                Some(format!(
-                    "lume.core.LumeRuntime.probeSuccessValue({})",
-                    args[0]
-                ))
-            }
-            ir::Intrinsic::UnsafeExtractSuccessValue => {
-                if args.len() != 1 {
-                    return None;
-                }
-                Some(format!(
-                    "lume.core.LumeRuntime.extractSuccessValue({})",
-                    args[0]
-                ))
-            }
-            ir::Intrinsic::ListAppend => {
-                if args.len() != 2 {
-                    return None;
-                }
-                Some(format!("{}.add({})", args[0], args[1]))
-            }
-            ir::Intrinsic::ListExtend => {
-                if args.len() != 2 {
-                    return None;
-                }
-                Some(format!("{}.addAll({})", args[0], args[1]))
-            }
-            ir::Intrinsic::ListLen => {
-                if args.len() != 1 {
-                    return None;
-                }
-                Some(format!("lume.core.LumeRuntime.listLen({})", args[0]))
-            }
-            ir::Intrinsic::ListGet => {
-                if args.len() != 2 {
-                    return None;
-                }
-                Some(format!(
-                    "lume.core.LumeRuntime.listGet({}, {})",
-                    args[0], args[1]
-                ))
-            }
-            ir::Intrinsic::ListSlice => {
-                if args.len() != 2 {
-                    return None;
-                }
-                Some(format!(
-                    "lume.core.LumeRuntime.listSlice({}, {})",
-                    args[0], args[1]
-                ))
-            }
-            ir::Intrinsic::IterInit => {
-                if args.len() != 1 {
-                    return None;
-                }
-                Some(format!("lume.core.LumeRuntime.iterInit({})", args[0]))
-            }
-            ir::Intrinsic::IterHasNext => {
-                if args.len() != 1 {
-                    return None;
-                }
-                Some(format!("lume.core.LumeRuntime.iterHasNext({})", args[0]))
-            }
-            ir::Intrinsic::IterNext => {
-                if args.len() != 1 {
-                    return None;
-                }
-                Some(format!("lume.core.LumeRuntime.iterNext({})", args[0]))
-            }
-            ir::Intrinsic::VariantIs(case_name) => {
-                if args.len() != 1 {
-                    return None;
-                }
-                Some(format!(
-                    "lume.core.LumeRuntime.variantIs({}, {})",
-                    args[0],
-                    java_string_literal(case_name)
-                ))
-            }
-            ir::Intrinsic::VariantField(field_name) => {
-                if args.len() != 1 {
-                    return None;
-                }
-                Some(format!(
-                    "lume.core.LumeRuntime.variantField({}, {})",
-                    args[0],
-                    java_string_literal(field_name)
-                ))
-            }
-            ir::Intrinsic::PatternField(field_name) => {
-                if args.len() != 1 {
-                    return None;
-                }
-                Some(format!(
-                    "lume.core.LumeRuntime.patternField({}, {})",
-                    args[0],
-                    java_string_literal(field_name)
-                ))
-            }
-        }
-    }
-
-    fn emit_tuple(&self, items: &[ir::Operand]) -> Option<String> {
-        if !(2..=8).contains(&items.len()) {
-            return self.unsupported("tuple arity outside Java Tuple2..Tuple8");
-        }
-        let args = self.emit_operands(items)?;
-        Some(format!(
-            "new lume.core.Tuple{}<>({})",
-            items.len(),
-            args.join(", ")
-        ))
-    }
-
-    fn emit_construct(&self, ty: &ir::Type, fields: &[ir::NamedOperand]) -> Option<String> {
-        let ir::Type::Named { name, .. } = ty else {
-            return self.unsupported("non-named construction");
-        };
-        let operands = fields
-            .iter()
-            .map(|field| field.value.clone())
-            .collect::<Vec<_>>();
-        let params = self
-            .constructor_param_specs(name, &operands)
-            .unwrap_or_default();
-        let args = self.emit_operands_for_param_specs(&operands, &params)?;
-        Some(format!(
-            "new {}({})",
-            self.names.named_type(name),
-            args.join(", ")
-        ))
-    }
-
-    fn emit_record_as_named_construct(
-        &self,
-        ty: &ir::Type,
-        fields: &[ir::NamedOperand],
-    ) -> Option<String> {
-        let ir::Type::Named { name, args } = ty else {
-            return self.unsupported(&format!(
-                "anonymous shape literal {{{}}}",
-                fields
-                    .iter()
-                    .map(|field| field.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        };
-        let type_def = self.type_def(name)?;
-        if !matches!(type_def.kind, TypeKind::Class | TypeKind::Record) {
-            return None;
-        }
-        let subst = type_def
-            .type_params
-            .iter()
-            .cloned()
-            .zip(args.iter().cloned())
-            .collect::<HashMap<_, _>>();
-        let mut constructor_args = Vec::new();
-        for field in &type_def.fields {
-            let field_ty = substitute_java_emit_type(&field.ty, &subst);
-            if let Some(value) = fields.iter().find(|value| value.name == field.name) {
-                constructor_args.push(self.emit_operand_for_param_spec(
-                    &value.value,
-                    &JavaParamSpec {
-                        ty: field_ty,
-                        variadic: false,
-                        lazy: false,
-                        default: None,
-                        coercion: None,
-                    },
-                )?);
-            } else if let Some(initializer) = &field.initializer {
-                constructor_args.push(java_constant(initializer));
-            } else if field.has_initializer {
-                constructor_args.push(java_default_value(&field_ty));
-            } else {
-                return None;
-            }
-        }
-        Some(format!(
-            "new {}({})",
-            self.names.named_type(name),
-            constructor_args.join(", ")
-        ))
-    }
-
-    fn emit_variant(
-        &self,
-        enum_name: &str,
-        case_name: &str,
-        fields: &[ir::NamedOperand],
-    ) -> Option<String> {
-        let args = fields
-            .iter()
-            .map(|field| self.emit_operand(&field.value))
-            .collect::<Option<Vec<_>>>()?;
-        let owner = if matches!(enum_name, "Option" | "Result" | "Either") {
-            format!("lume.core.{}", java_type_name(enum_name))
-        } else {
-            self.names.named_type(enum_name)
-        };
-        Some(format!(
-            "new {}.{}{}({})",
-            owner,
-            java_type_name(case_name),
-            self.lume_constructor_type_args(enum_name),
-            args.join(", ")
-        ))
-    }
-
-    fn emit_closure(
-        &self,
-        function_id: ir::FunctionId,
-        captures: &[ir::Operand],
-        capture_initializers: Option<&[String]>,
-    ) -> Option<String> {
-        let function = self.bundle.ir.function(function_id)?;
-        let local_prefix = format!("lambda{}_", function_id.0);
-        let param_locals = function
-            .params
-            .iter()
-            .filter_map(|param| function.locals.get(param.0))
-            .collect::<Vec<_>>();
-        let target_ty = ir::Type::Function {
-            params: param_locals.iter().map(|local| local.ty.clone()).collect(),
-            ret: Box::new(function.return_ty.clone()),
-        };
-        let target_java_ty = self.names.value_type(&target_ty);
-        let return_java_ty = self.names.value_type(&function.return_ty);
-        if param_locals.len() > MAX_JAVA_FUNCTION_ARITY {
-            return self.unsupported("lambda with more than 12 parameters");
-        }
-        let method_name = if param_locals.is_empty() {
-            "get"
-        } else {
-            "apply"
-        };
-        let method_params = param_locals
-            .iter()
-            .map(|param| {
-                format!(
-                    "{} {local_prefix}{}",
-                    self.local_value_type(&param.ty),
-                    java_local_name(param)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        let capture_overrides =
-            self.closure_capture_field_overrides(function_id, function, captures)?;
-        let body = FunctionEmitter::new(self.bundle, function, self.names)
-            .with_capture_overrides(capture_overrides)
-            .with_control_var(format!("__block_lambda_{}", function_id.0))
-            .with_local_prefix(local_prefix)
-            .emit_body()?;
-
-        let mut out = String::new();
-        out.push_str("new ");
-        out.push_str(&target_java_ty);
-        out.push_str("() {\n");
-        self.push_closure_capture_fields(
-            &mut out,
-            function_id,
-            function,
-            captures,
-            capture_initializers,
-        )?;
-        out.push_str("        @Override\n");
-        out.push_str("        public ");
-        out.push_str(&return_java_ty);
-        out.push(' ');
-        out.push_str(method_name);
-        out.push('(');
-        out.push_str(&method_params);
-        out.push(')');
-        out.push_str(&body);
-        out.push_str("    }");
-        Some(out)
-    }
-
-    fn closure_capture_field_overrides(
-        &self,
-        function_id: ir::FunctionId,
-        function: &ir::Function,
-        captures: &[ir::Operand],
-    ) -> Option<HashMap<ir::LocalId, String>> {
-        let capture_locals = function
-            .locals
-            .iter()
-            .filter(|local| matches!(local.kind, ir::LocalKind::Capture))
-            .collect::<Vec<_>>();
-        if capture_locals.len() != captures.len() {
-            return None;
-        }
-        capture_locals
-            .iter()
-            .enumerate()
-            .map(|(index, local)| {
-                Some((
-                    local.id,
-                    format!(
-                        "__capture_lambda_{}_{}_{}",
-                        function_id.0, local.id.0, index
-                    ),
-                ))
-            })
-            .collect()
-    }
-
-    fn emit_closure_capture_snapshots(
-        &self,
-        out: &mut String,
-        function_id: ir::FunctionId,
-        captures: &[ir::Operand],
-    ) -> Option<Vec<String>> {
-        let function = self.bundle.ir.function(function_id)?;
-        let capture_locals = function
-            .locals
-            .iter()
-            .filter(|local| matches!(local.kind, ir::LocalKind::Capture))
-            .collect::<Vec<_>>();
-        if capture_locals.len() != captures.len() {
-            return None;
-        }
-
-        let mut snapshot_names = Vec::new();
-        for (index, (local, capture)) in capture_locals.iter().zip(captures).enumerate() {
-            let snapshot_name = format!(
-                "__capture_value_lambda_{}_{}_{}",
-                function_id.0, local.id.0, index
-            );
-            out.push_str("                    final ");
-            out.push_str(&self.local_value_type(&local.ty));
-            out.push(' ');
-            out.push_str(&snapshot_name);
-            out.push_str(" = ");
-            out.push_str(&self.emit_capture_initializer(capture)?);
-            out.push_str(";\n");
-            snapshot_names.push(snapshot_name);
-        }
-        Some(snapshot_names)
-    }
-
-    fn push_closure_capture_fields(
-        &self,
-        out: &mut String,
-        function_id: ir::FunctionId,
-        function: &ir::Function,
-        captures: &[ir::Operand],
-        capture_initializers: Option<&[String]>,
-    ) -> Option<()> {
-        let capture_locals = function
-            .locals
-            .iter()
-            .filter(|local| matches!(local.kind, ir::LocalKind::Capture))
-            .collect::<Vec<_>>();
-        if capture_locals.len() != captures.len() {
-            return None;
-        }
-
-        for (index, (local, capture)) in capture_locals.iter().zip(captures).enumerate() {
-            let field_name = format!(
-                "__capture_lambda_{}_{}_{}",
-                function_id.0, local.id.0, index
-            );
-            out.push_str("        private final ");
-            out.push_str(&self.local_value_type(&local.ty));
-            out.push(' ');
-            out.push_str(&field_name);
-            out.push_str(" = ");
-            let initializer = capture_initializers
-                .and_then(|values| values.get(index))
-                .cloned()
-                .unwrap_or(self.emit_capture_initializer(capture)?);
-            out.push_str(&initializer);
-            out.push_str(";\n");
-        }
-        if !capture_locals.is_empty() {
-            out.push('\n');
-        }
-        Some(())
-    }
-
     fn emit_anonymous_interface(
         &self,
         interfaces: &[ir::Type],
@@ -5568,11 +7020,13 @@ impl<'a> FunctionEmitter<'a> {
             out.push_str("        @Override\n");
             out.push_str("        public ");
             push_function_signature_named(&mut out, function, self.names, &method.name);
-            out.push_str(
-                &FunctionEmitter::new(self.bundle, function, self.names)
-                    .with_capture_overrides(capture_overrides)
-                    .emit_body()?,
-            );
+            let body = structured_source_function_body_with_local_overrides(
+                self.bundle,
+                function,
+                self.names,
+                &capture_overrides,
+            )?;
+            out.push_str(&body);
         }
 
         out.push_str("    }");
@@ -5585,7 +7039,6 @@ impl<'a> FunctionEmitter<'a> {
         fields: &[ir::NamedOperand],
         methods: &[ir::AnonymousInterfaceMethod],
         field_initializers: Option<&[String]>,
-        method_capture_initializers: Option<&[Vec<String>]>,
     ) -> Option<String> {
         let ir::Type::Named { name, .. } = ty else {
             return None;
@@ -5621,84 +7074,23 @@ impl<'a> FunctionEmitter<'a> {
             out.push_str("; }\n");
         }
 
-        for (method_index, method) in methods.iter().enumerate() {
+        for method in methods {
             let function = self.bundle.ir.function(method.function)?;
-            let capture_overrides = self.push_anonymous_interface_capture_fields(
-                &mut out,
-                method,
-                function,
-                method_capture_initializers
-                    .and_then(|values| values.get(method_index))
-                    .map(Vec::as_slice),
-            )?;
+            let capture_overrides =
+                self.push_anonymous_interface_capture_fields(&mut out, method, function, None)?;
             out.push_str("        @Override\n        public ");
             push_function_signature_named(&mut out, function, self.names, &method.name);
-            out.push_str(
-                &FunctionEmitter::new(self.bundle, function, self.names)
-                    .with_capture_overrides(capture_overrides)
-                    .emit_body()?,
-            );
+            let body = structured_source_function_body_with_local_overrides(
+                self.bundle,
+                function,
+                self.names,
+                &capture_overrides,
+            )?;
+            out.push_str(&body);
         }
 
         out.push_str("    }");
         Some(out)
-    }
-
-    fn emit_anonymous_object_capture_snapshots(
-        &self,
-        out: &mut String,
-        fields: &[ir::NamedOperand],
-        methods: &[ir::AnonymousInterfaceMethod],
-    ) -> Option<(Vec<String>, Vec<Vec<String>>)> {
-        let mut field_names = Vec::new();
-        for (index, field) in fields.iter().enumerate() {
-            let name = format!("__object_field_value_{}_{}", self.function.id.0, index);
-            let ty = self.operand_type(&field.value).unwrap_or(ir::Type::Unknown);
-            out.push_str("                    final ");
-            out.push_str(&self.local_value_type(&ty));
-            out.push(' ');
-            out.push_str(&name);
-            out.push_str(" = ");
-            out.push_str(&self.emit_operand(&field.value)?);
-            out.push_str(";\n");
-            field_names.push(name);
-        }
-
-        let mut method_names = Vec::new();
-        for (method_index, method) in methods.iter().enumerate() {
-            let function = self.bundle.ir.function(method.function)?;
-            let capture_locals = function
-                .locals
-                .iter()
-                .filter(|local| {
-                    matches!(local.kind, ir::LocalKind::Capture)
-                        && !(matches!(function.kind, ir::FunctionKind::Method { .. })
-                            && local.name == "this")
-                })
-                .collect::<Vec<_>>();
-            if capture_locals.len() != method.captures.len() {
-                return None;
-            }
-            let mut names = Vec::new();
-            for (capture_index, (local, capture)) in
-                capture_locals.iter().zip(&method.captures).enumerate()
-            {
-                let name = format!(
-                    "__object_method_capture_{}_{}_{}",
-                    self.function.id.0, method_index, capture_index
-                );
-                out.push_str("                    final ");
-                out.push_str(&self.local_value_type(&local.ty));
-                out.push(' ');
-                out.push_str(&name);
-                out.push_str(" = ");
-                out.push_str(&self.emit_capture_initializer(capture)?);
-                out.push_str(";\n");
-                names.push(name);
-            }
-            method_names.push(names);
-        }
-        Some((field_names, method_names))
     }
 
     fn push_anonymous_interface_capture_fields(
@@ -5772,122 +7164,11 @@ impl<'a> FunctionEmitter<'a> {
             .collect()
     }
 
-    fn emit_operands_for_params(
-        &self,
-        operands: &[ir::Operand],
-        params: &[ir::Type],
-    ) -> Option<Vec<String>> {
-        self.emit_operands_for_param_specs(operands, &param_specs_from_types(params.to_vec()))
-    }
-
-    fn emit_operands_for_function(
-        &self,
-        operands: &[ir::Operand],
-        function: &ir::Function,
-    ) -> Option<Vec<String>> {
-        self.emit_operands_for_param_specs(operands, &function_param_specs(function))
-    }
-
-    fn emit_operands_for_param_specs(
-        &self,
-        operands: &[ir::Operand],
-        params: &[JavaParamSpec],
-    ) -> Option<Vec<String>> {
-        let Some(variadic_index) = params.iter().position(|param| param.variadic) else {
-            return operands
-                .iter()
-                .enumerate()
-                .map(|(index, operand)| {
-                    Some(match params.get(index) {
-                        Some(target) => self.emit_operand_for_param_spec(operand, target)?,
-                        None => self.emit_operand(operand)?,
-                    })
-                })
-                .collect();
-        };
-
-        if operands.len() < variadic_index {
-            return None;
-        }
-
-        let mut args = Vec::new();
-        for (operand, target) in operands.iter().take(variadic_index).zip(params.iter()) {
-            args.push(self.emit_operand_for_param_spec(operand, target)?);
-        }
-
-        let variadic_target = params.get(variadic_index)?;
-        if operands.len() == variadic_index {
-            args.push(
-                variadic_target
-                    .default
-                    .as_ref()
-                    .map(java_constant)
-                    .unwrap_or_else(|| "lume.core.LumeVector.of()".to_string()),
-            );
-            return Some(args);
-        }
-        if operands.len() == params.len() {
-            let operand = operands.get(variadic_index)?;
-            if self.operand_type_is_variadic_list(operand, &variadic_target.ty) {
-                args.push(self.emit_operand_for_param_spec(operand, variadic_target)?);
-                return Some(args);
-            }
-        }
-
-        let element_ty = variadic_element_type(&variadic_target.ty);
-        let items = operands
-            .iter()
-            .skip(variadic_index)
-            .map(|operand| {
-                let expr = self.emit_operand(operand)?;
-                Some(match element_ty {
-                    Some(target_ty) => {
-                        self.coerce_to_target_type(expr, self.operand_type(operand), target_ty)
-                    }
-                    None => expr,
-                })
-            })
-            .collect::<Option<Vec<_>>>()?;
-        args.push(format!("lume.core.LumeVector.of({})", items.join(", ")));
-        Some(args)
-    }
-
-    fn emit_operand_for_param_spec(
-        &self,
-        operand: &ir::Operand,
-        target: &JavaParamSpec,
-    ) -> Option<String> {
-        if target.lazy && self.operand_is_zero_arg_function(operand) {
-            return self.emit_operand(operand);
-        }
-
-        let expr = self.emit_operand(operand)?;
-        let target_ty = if target.lazy {
-            lazy_param_value_type(&target.ty)
-        } else {
-            &target.ty
-        };
-        let expr = self.coerce_to_target_type(expr, self.operand_type(operand), target_ty);
-        let expr = coerce_to_java_primitive(expr, target.coercion);
-        if target.lazy {
-            Some(format!("() -> {expr}"))
-        } else {
-            Some(expr)
-        }
-    }
-
     fn emit_operand(&self, operand: &ir::Operand) -> Option<String> {
         match operand {
             ir::Operand::Copy(place) | ir::Operand::Move(place) => self.emit_place(place),
             ir::Operand::Const(constant) => Some(java_constant(constant)),
         }
-    }
-
-    fn operand_is_zero_arg_function(&self, operand: &ir::Operand) -> bool {
-        matches!(
-            self.operand_type(operand),
-            Some(ir::Type::Function { params, .. }) if params.is_empty()
-        )
     }
 
     fn emit_place(&self, place: &ir::Place) -> Option<String> {
@@ -6619,6 +7900,12 @@ impl<'a> FunctionEmitter<'a> {
         {
             return format!("(({}) ({expr}))", self.names.value_type(target_ty));
         }
+        if source_ty
+            .as_ref()
+            .is_some_and(|source| self.names.value_type(source) == self.names.value_type(target_ty))
+        {
+            return expr;
+        }
         if source_ty.as_ref().is_some_and(|source| source != target_ty)
             && self.target_type_needs_reference_cast(target_ty)
         {
@@ -6730,30 +8017,6 @@ impl<'a> FunctionEmitter<'a> {
             }
     }
 
-    fn generic_bound_for_type_param(&self, name: &str) -> Option<ir::Type> {
-        let owner_conditions = match self.function.kind {
-            ir::FunctionKind::Method { owner } => self
-                .bundle
-                .ir
-                .types
-                .get(owner.0)
-                .map(|ty| ty.generic_conditions.as_slice())
-                .unwrap_or(&[]),
-            _ => &[],
-        };
-        self.function
-            .generic_conditions
-            .iter()
-            .chain(owner_conditions.iter())
-            .find_map(|condition| match condition {
-                ir::GenericCondition::Bound {
-                    subject: ir::Type::TypeParam(subject),
-                    bound,
-                } if subject == name => Some(bound.clone()),
-                _ => None,
-            })
-    }
-
     fn type_params_are_bound(&self, ty: &ir::Type) -> bool {
         let mut bound = self.function.type_params.clone();
         if let ir::FunctionKind::Method { owner } = self.function.kind
@@ -6765,32 +8028,12 @@ impl<'a> FunctionEmitter<'a> {
     }
 
     fn local_reference(&self, local: &ir::Local) -> String {
-        if let Some(name) = self.capture_overrides.get(&local.id) {
-            return name.clone();
-        }
         if matches!(local.kind, ir::LocalKind::Capture) && local.name == "this" {
             "this".to_string()
         } else {
-            self.local_name(local)
+            java_local_name(local)
         }
     }
-
-    fn local_name(&self, local: &ir::Local) -> String {
-        format!("{}{}", self.local_prefix, java_local_name(local))
-    }
-
-    fn local_is_declared_elsewhere(&self, local: &ir::Local) -> bool {
-        matches!(local.kind, ir::LocalKind::Param)
-            || self.capture_overrides.contains_key(&local.id)
-            || (matches!(local.kind, ir::LocalKind::Capture) && local.name == "this")
-    }
-}
-
-fn rvalue_can_be_java_statement(value: &ir::RValue) -> bool {
-    matches!(
-        value,
-        ir::RValue::Call { .. } | ir::RValue::Construct { .. } | ir::RValue::Variant { .. }
-    )
 }
 
 fn operand_local_id(operand: &ir::Operand) -> Option<ir::LocalId> {
@@ -6801,13 +8044,6 @@ fn operand_local_id(operand: &ir::Operand) -> Option<ir::LocalId> {
         },
         ir::Operand::Const(_) => None,
     }
-}
-
-fn terminator_exits_case(kind: &ir::TerminatorKind) -> bool {
-    matches!(
-        kind,
-        ir::TerminatorKind::Return(_) | ir::TerminatorKind::Unreachable
-    )
 }
 
 fn module_class_name(bundle: &BackendBundle) -> String {
@@ -7219,8 +8455,18 @@ fn core_enum_case_owner(case: &str) -> Option<&'static str> {
     }
 }
 
-fn lazy_core_member_call_name(name: &str) -> bool {
-    matches!(name, "getOr" | "orElse" | "toResult" | "toEither")
+fn core_enum_case_payload_type(case: &str, ty: &ir::Type) -> Option<ir::Type> {
+    let ir::Type::Named { name, args } = ty else {
+        return None;
+    };
+    match (case, name.as_str(), args.as_slice()) {
+        ("Some", "Option", [value]) => Some(value.clone()),
+        ("Ok", "Result", [value, _]) => Some(value.clone()),
+        ("Err", "Result", [_, error]) => Some(error.clone()),
+        ("Left", "Either", [left, _]) => Some(left.clone()),
+        ("Right", "Either", [_, right]) => Some(right.clone()),
+        _ => None,
+    }
 }
 
 fn builtin_method_param_types(
@@ -7267,6 +8513,45 @@ fn builtin_method_return_type(
     arg_len: usize,
 ) -> Option<ir::Type> {
     match receiver {
+        ir::Type::Named { name, .. }
+            if matches!(
+                name.as_str(),
+                "Type"
+                    | "ClassType"
+                    | "ShapeType"
+                    | "EnumType"
+                    | "InterfaceType"
+                    | "ObjectType"
+                    | "AnnotationType"
+                    | "Field"
+                    | "Method"
+                    | "EnumCase"
+            ) && method == "annotation"
+                && arg_len == 0 =>
+        {
+            Some(ir::Type::Named {
+                name: "Option".to_string(),
+                args: vec![ir::Type::named("AnnotationValue")],
+            })
+        }
+        ir::Type::Named { name, .. }
+            if matches!(
+                name.as_str(),
+                "Type"
+                    | "ClassType"
+                    | "ShapeType"
+                    | "EnumType"
+                    | "InterfaceType"
+                    | "ObjectType"
+                    | "AnnotationType"
+                    | "Field"
+                    | "Method"
+                    | "EnumCase"
+            ) && method == "hasAnnotation"
+                && arg_len == 0 =>
+        {
+            Some(ir::Type::Bool)
+        }
         ir::Type::Named { name, args }
             if name == "Vector" && args.len() == 1 && method == "slice" && arg_len <= 2 =>
         {
@@ -7282,6 +8567,16 @@ fn builtin_method_return_type(
                 args[0].clone(),
                 ir::Type::Int,
             ])))
+        }
+        ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
+            match (method, arg_len) {
+                ("get", 1) => Some(ir::Type::Named {
+                    name: "Option".to_string(),
+                    args: vec![args[1].clone()],
+                }),
+                ("put", 2) => Some(receiver.clone()),
+                _ => None,
+            }
         }
         _ => None,
     }
@@ -7492,6 +8787,21 @@ fn core_enum_case_fields(
         ("Result", "Err", [_, error]) => Some(vec![("error", error.clone())]),
         ("Either", "Left", [left, _]) => Some(vec![("value", left.clone())]),
         ("Either", "Right", [_, right]) => Some(vec![("value", right.clone())]),
+        _ => None,
+    }
+}
+
+fn lifted_success_type(ty: &ir::Type) -> Option<ir::Type> {
+    match ty {
+        ir::Type::Named { name, args } if name == "Option" && args.len() == 1 => {
+            args.first().cloned()
+        }
+        ir::Type::Named { name, args } if name == "Result" && args.len() == 2 => {
+            args.first().cloned()
+        }
+        ir::Type::Named { name, args } if name == "Either" && args.len() == 2 => {
+            args.get(1).cloned()
+        }
         _ => None,
     }
 }

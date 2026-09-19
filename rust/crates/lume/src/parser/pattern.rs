@@ -528,7 +528,7 @@ impl<'a> Parser<'a> {
         let mut names = std::collections::HashSet::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let (name, name_span) =
-                self.expect_identifier("expected field name in record pattern")?;
+                self.expect_data_name("expected field name in record pattern")?;
             let pattern = if self.match_keyword(Keyword::As) {
                 let (binding, binding_span) =
                     self.expect_binding_name("expected binding name after 'as'")?;

@@ -375,13 +375,16 @@ impl<'a> Lowerer<'a> {
 
         let field_init = (!field_init_stmts.is_empty()).then(|| {
             let (id, this_local) = self.declare_field_init_function(type_id, &decl.name, decl.span);
+            let body = Block {
+                statements: field_init_stmts,
+                span: decl.span,
+            };
+            self.core_bodies
+                .insert(id, CallableBody::Block(body.clone()));
             self.field_init_work.push(FieldInitWork {
                 id,
                 this_local,
-                body: Block {
-                    statements: field_init_stmts,
-                    span: decl.span,
-                },
+                body,
                 span: decl.span,
             });
             id
@@ -591,6 +594,7 @@ impl<'a> Lowerer<'a> {
             }
             let mut lowerer = FunctionLowerer::new(
                 &mut self.program,
+                &mut self.core_bodies,
                 job.id,
                 &self.global_ids,
                 &self.function_ids,
@@ -616,6 +620,7 @@ impl<'a> Lowerer<'a> {
             }
             let mut lowerer = FunctionLowerer::new(
                 &mut self.program,
+                &mut self.core_bodies,
                 job.id,
                 &self.global_ids,
                 &self.function_ids,
@@ -657,6 +662,7 @@ impl<'a> Lowerer<'a> {
         let jobs = self.global_inits.clone();
         let mut lowerer = FunctionLowerer::new(
             &mut self.program,
+            &mut self.core_bodies,
             init_id,
             &self.global_ids,
             &self.function_ids,
@@ -695,6 +701,7 @@ impl<'a> Lowerer<'a> {
             }
             let mut lowerer = FunctionLowerer::new(
                 &mut self.program,
+                &mut self.core_bodies,
                 job.id,
                 &self.global_ids,
                 &self.function_ids,
@@ -736,6 +743,7 @@ impl<'a> Lowerer<'a> {
 
 struct FunctionLowerer<'a> {
     program: &'a mut ir::Program,
+    core_bodies: &'a mut HashMap<ir::FunctionId, core::CallableBody>,
     function_id: ir::FunctionId,
     diagnostics: &'a mut Vec<Diagnostic>,
     globals: &'a HashMap<String, ir::GlobalId>,
@@ -834,6 +842,7 @@ impl PatternPlan {
 impl<'a> FunctionLowerer<'a> {
     fn new(
         program: &'a mut ir::Program,
+        core_bodies: &'a mut HashMap<ir::FunctionId, core::CallableBody>,
         function_id: ir::FunctionId,
         globals: &'a HashMap<String, ir::GlobalId>,
         functions: &'a HashMap<String, ir::FunctionId>,
@@ -847,6 +856,7 @@ impl<'a> FunctionLowerer<'a> {
             .unwrap_or(ir::BlockId(0));
         let mut this = Self {
             program,
+            core_bodies,
             function_id,
             diagnostics,
             globals,
@@ -1285,6 +1295,7 @@ impl<'a> FunctionLowerer<'a> {
         let captures = {
             let mut lowerer = FunctionLowerer::new(
                 self.program,
+                self.core_bodies,
                 function_id,
                 self.globals,
                 self.functions,
@@ -1337,10 +1348,13 @@ impl<'a> FunctionLowerer<'a> {
             );
         }
         let function_id = self.program.add_function(nested);
+        self.core_bodies
+            .insert(function_id, CallableBody::Expr(body.clone()));
         let capture_sources = self.visible_capture_sources(None);
         let captures = {
             let mut lowerer = FunctionLowerer::new(
                 self.program,
+                self.core_bodies,
                 function_id,
                 self.globals,
                 self.functions,
@@ -1400,6 +1414,7 @@ impl<'a> FunctionLowerer<'a> {
         let captures = {
             let mut lowerer = FunctionLowerer::new(
                 self.program,
+                self.core_bodies,
                 function_id,
                 self.globals,
                 self.functions,
@@ -1455,10 +1470,14 @@ impl<'a> FunctionLowerer<'a> {
             nested.set_param_lazy(index, param.lazy);
         }
         let function_id = self.program.add_function(nested);
+        if let Some(body) = body {
+            self.core_bodies.insert(function_id, body.clone());
+        }
         let capture_sources = self.visible_capture_sources(None);
         let captures = {
             let mut lowerer = FunctionLowerer::new(
                 self.program,
+                self.core_bodies,
                 function_id,
                 self.globals,
                 self.functions,
@@ -1664,9 +1683,13 @@ impl<'a> FunctionLowerer<'a> {
         let capture_sources = self.visible_capture_sources(Some("this"));
         let mut lowered_methods = Vec::new();
         for (method, function_id) in declared_methods {
+            if let Some(body) = &method.body {
+                self.core_bodies.insert(function_id, body.clone());
+            }
             let captures = {
                 let mut lowerer = FunctionLowerer::new(
                     self.program,
+                    self.core_bodies,
                     function_id,
                     self.globals,
                     self.functions,
@@ -2567,6 +2590,7 @@ impl<'a> FunctionLowerer<'a> {
         let captures = {
             let mut lowerer = FunctionLowerer::new(
                 self.program,
+                self.core_bodies,
                 function_id,
                 self.globals,
                 self.functions,
@@ -6165,6 +6189,7 @@ impl<'a> FunctionLowerer<'a> {
         let captures = {
             let mut lowerer = FunctionLowerer::new(
                 self.program,
+                self.core_bodies,
                 function_id,
                 self.globals,
                 self.functions,

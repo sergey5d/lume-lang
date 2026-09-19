@@ -24,9 +24,7 @@ pub use interpreter::{
     PathRunResult, RunResult, run_path, run_program, run_program_entry, run_program_specs,
     test_path,
 };
-pub use java_backend::{
-    JavaBackendOptions, JavaBackendResult, JavaGenerationStyle, generate_java_path,
-};
+pub use java_backend::{JavaBackendOptions, JavaBackendResult, generate_java_path};
 pub use lexer::{Keyword, LexResult, Token, TokenKind, lex};
 pub use lower::{LowerResult, lower_program};
 pub use parser::{ParseResult, parse_program};
