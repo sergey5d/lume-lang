@@ -1,5 +1,6 @@
 .gocache/
 .idea/
+.vscode/
 bin/
 rust/target/
 **/build/
