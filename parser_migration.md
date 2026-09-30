@@ -99,8 +99,6 @@ Move:
 - `parse_import_symbol_list`
 - `parse_function_decl`
 - `parse_type_decl`
-- `parse_enum_case`
-- `parse_impl_block`
 - `parse_method_decl`
 - `parse_field_decl`
 - `parse_callable_body`

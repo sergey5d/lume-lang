@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*empty parenthesized pattern 'User\(\)' is not supported; use the bare case name for a zero-payload enum case.*
+# .*empty parenthesized pattern 'User\(\)' is not supported; use the bare variant name for a zero-payload union variant.*
 
 class User {
     name Str

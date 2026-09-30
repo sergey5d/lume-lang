@@ -1,12 +1,12 @@
 # FAIL_REGEX:
 # .*unary pattern 'Values\(\.\.\.\)' requires exactly one extractable field and one pattern; 'Values' has 2 extractable fields and the pattern contains 2.*
 
-enum Pair {
-    case Values {
+type Pair =
+    class Values {
         left Int
         right Int
     }
-}
+    | object Empty {}
 
 def main() Unit {
     pair Pair = Pair.Values(1, 2)

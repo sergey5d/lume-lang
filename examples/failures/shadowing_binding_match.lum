@@ -1,13 +1,9 @@
 # FAIL_REGEX:
 # .*binding 'value' shadows a local binding; use a different name.*
 
-enum MaybeInt {
-    case SomeX {
-        value Int
-    }
-
-    case NoneX
-}
+type MaybeInt =
+    class SomeX { value Int }
+    | object NoneX {}
 
 def main() Int {
     value = 3

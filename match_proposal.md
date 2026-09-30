@@ -7,7 +7,7 @@ guards, nested patterns, and `partial` landed.
 
 The current supported surface includes:
 
-- name-based record patterns for enum cases, classes, named shapes, and anonymous shapes
+- name-based record patterns for union variants, classes, named shapes, and anonymous shapes
 - tuple and list patterns
 - nested record, tuple, and list patterns
 - `_` in any nested position to ignore a value
@@ -15,7 +15,7 @@ The current supported surface includes:
 - type patterns may be nested inside unary and record patterns
 - do not support destructuring classes into tuples
 - guards do not contribute coverage
-- nested singleton enum cases stay qualified when needed, for example `Wrap { value: InnerFlag.On }`
+- nested singleton union variants stay qualified when needed, for example `Wrap { value: InnerFlag.On }`
 
 Examples of supported shapes:
 
@@ -57,7 +57,7 @@ Clarification:
 Constructor and extractor patterns already carry substituted field types correctly, but type-pattern matching still needs a clearer generic story, especially for:
 
 - generic classes behind interface-typed values
-- generic enums behind wider typed values
+- generic declared unions behind wider typed values
 - distinguishing `Box[Int]` from `Box[Str]` when the runtime currently does not preserve explicit type arguments on instances
 
 This is now mostly about deciding whether generic type patterns should:
@@ -117,7 +117,7 @@ This should come after the core `match` model is finished.
 
 ### 5. Exhaustiveness Depth
 
-Enum exhaustiveness already exists in a basic form.
+Declared-union exhaustiveness already exists in a basic form.
 
 Possible next improvements:
 

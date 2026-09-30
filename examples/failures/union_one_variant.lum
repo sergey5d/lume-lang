@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*union type 'Empty' requires at least two variants.*
+
+type Empty = object Missing {}

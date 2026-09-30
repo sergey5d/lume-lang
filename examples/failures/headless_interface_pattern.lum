@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*headless record pattern requires a concrete class, shape, anonymous shape, or enum value; got 'Named'.*
+# .*headless record pattern requires a concrete class, shape, anonymous shape, or declared-union value; got 'Named'.*
 
 interface Named {
     def name() Str

@@ -328,13 +328,13 @@ impl SymbolKind {
                 "object constructor parameter"
             }
             SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Enum)) => {
-                "enum constructor parameter"
+                "declared-union constructor parameter"
             }
             SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Interface)) => {
                 "interface constructor parameter"
             }
             SymbolKind::This => "'this' receiver",
-            SymbolKind::EnumCase => "enum case",
+            SymbolKind::EnumCase => "union variant",
         }
     }
 }
@@ -2727,9 +2727,12 @@ impl<'a> Resolver<'a> {
             || self.imported_functions.contains_key(name)
             || self.imported_types.contains_key(name)
             || self.imported_objects.contains_key(name)
+            || self.aliases.contains_key(name)
+            || self.imported_aliases.contains_key(name)
             || self.modules_by_alias.contains_key(name)
             || self.ambient.values.contains(name)
             || self.ambient.types.contains_key(name)
+            || self.ambient.aliases.contains_key(name)
     }
 
     fn push_field_hints<'b>(
@@ -2951,7 +2954,7 @@ impl<'a> Resolver<'a> {
                         return None;
                     }
                     return Some(format!(
-                        "type '{}.{}' has no visible enum case '{}'",
+                        "type '{}.{}' has no visible union variant '{}'",
                         module, object_name, member
                     ));
                 }
@@ -2961,7 +2964,7 @@ impl<'a> Resolver<'a> {
                 ))
             }
             _ => Some(format!(
-                "module '{}' access is only supported for direct members, object members, and enum cases",
+                "module '{}' access is only supported for direct members, object members, and union variants",
                 segments.first().unwrap_or(&"<unknown>".to_string())
             )),
         }
@@ -3038,7 +3041,7 @@ fn field_label(kind: TypeKind) -> &'static str {
         TypeKind::Record => "shape field",
         TypeKind::Object => "object field",
         TypeKind::Interface => "interface field",
-        TypeKind::Enum => "enum field",
+        TypeKind::Enum => "declared-union field",
     }
 }
 
@@ -3115,9 +3118,9 @@ annotation Route {
     path Str
 }
 
-enum RouteKind {
-    case External
-}
+type RouteKind =
+    object External {}
+    | object Internal {}
 
 annotation Metadata {
     kind RouteKind

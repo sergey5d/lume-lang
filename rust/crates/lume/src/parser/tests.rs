@@ -973,25 +973,15 @@ class User {
 }
 
 #[test]
-fn rejects_enum_case_after_method() {
-    let result = parse(
-        r#"
-enum MaybeInt {
-    def isSet() Bool = true
-    case Some { value Int }
-}
-"#,
-    );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_member_order"
-                && diag
-                    .message
-                    .contains("enum cases must appear before methods")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
+fn parses_enum_as_an_ordinary_identifier() {
+    let result = parse("enum Int = 5\n");
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    assert!(matches!(
+        &program.items[0],
+        Item::Statement(Stmt::Binding(binding))
+            if binding.bindings.len() == 1 && binding.bindings[0].name == "enum"
+    ));
 }
 
 #[test]
@@ -3454,11 +3444,10 @@ def run(flag Bool) Unit = match flag {
 fn parses_match_case_or_patterns_as_case_alternatives() {
     let result = parse(
         r#"
-enum Size {
-    case Small
-    case Medium
-    case Large
-}
+type Size =
+    object Small {}
+    | object Medium {}
+    | object Large {}
 
 def run(size Size) Str = match size {
     case Size.Small | Size.Medium => "common"
@@ -5292,12 +5281,12 @@ type Companion = Pet
 }
 
 #[test]
-fn parses_explicit_and_short_anonymous_shape_types_as_the_same_type_form() {
+fn parses_anonymous_shape_types_with_bare_braces() {
     let result = parse(
         r#"
 type ExplicitSession = shape {
-    position Str,
-    start Int,
+    position Str
+    start Int
     end Int
 }
 
@@ -5307,10 +5296,7 @@ type ShortSession = {
     end Int
 }
 
-def project(value shape { position Str, start Int }) shape { position Str } =
-    shape { position: value.position }
-
-def projectShort(value { position Str, start Int }) { position Str } =
+def project(value { position Str, start Int }) { position Str } =
     shape { position: value.position }
 "#,
     );
@@ -5343,28 +5329,31 @@ def projectShort(value { position Str, start Int }) { position Str } =
         project.return_type,
         Some(TypeRef::Record { ref fields, .. }) if fields.len() == 1
     ));
-    let Item::Function(project_short) = &program.items[3] else {
-        panic!("expected short project function");
-    };
-    assert!(matches!(
-        project_short.params[0].ty,
-        Some(TypeRef::Record { ref fields, .. }) if fields.len() == 2
-    ));
-    assert!(matches!(
-        project_short.return_type,
-        Some(TypeRef::Record { ref fields, .. }) if fields.len() == 1
-    ));
 }
 
 #[test]
-fn parses_type_equals_forms_for_all_supported_kinds() {
+fn rejects_shape_prefix_on_anonymous_shape_types() {
+    for source in [
+        "value shape { x Str } = shape { x: \"hello\" }",
+        "def value() shape { x Str } = shape { x: \"hello\" }",
+    ] {
+        let result = parse(source);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "removed_anonymous_shape_type_prefix"
+                    && diagnostic.message.contains("write '{ ... }'")
+            }),
+            "expected removed shape-type-prefix diagnostic for {source:?}, got {:#?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
+fn parses_type_equals_forms_for_named_declaration_kinds() {
     let result = parse(
         r#"
 type A = class {
-    value Int
-}
-
-type B = shape {
     value Int
 }
 
@@ -5384,7 +5373,7 @@ type E = object {
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
-    assert_eq!(program.items.len(), 5);
+    assert_eq!(program.items.len(), 4);
     assert!(matches!(
         &program.items[0],
         Item::Type(TypeDecl {
@@ -5393,18 +5382,10 @@ type E = object {
             ..
         }) if name == "A"
     ));
-    assert!(matches!(
-        &program.items[1],
-        Item::TypeAlias(TypeAliasDecl {
-            name,
-            target: TypeRef::Record { fields, .. },
-            ..
-        }) if name == "B" && fields.len() == 1
-    ));
     let expected_named = [
-        (2, "C", TypeKind::Interface),
-        (3, "D", TypeKind::Annotation),
-        (4, "E", TypeKind::Object),
+        (1, "C", TypeKind::Interface),
+        (2, "D", TypeKind::Annotation),
+        (3, "E", TypeKind::Object),
     ];
     for (index, expected_name, expected_kind) in expected_named {
         let item = &program.items[index];

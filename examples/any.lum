@@ -1,7 +1,7 @@
 # EXPECT:
 # class true Person{name=Ada}
 # shape true shape{name=Ada}
-# enum true Green
+# union true Green
 # object true Marker{label=marker}
 # any true 42
 
@@ -29,7 +29,7 @@ def main() Unit {
     println("shape", shapeValue.equals(otherShapeValue), shapeValue.toStr())
 
     light = Green
-    println("enum", light.equals(Green), light.toStr())
+    println("union", light.equals(Green), light.toStr())
 
     marker Any = Marker
     println("object", marker.sameValue(Marker), marker.toStr())

@@ -127,6 +127,7 @@ ext Outcome {
 
 Inline union rules:
 
+- there is no `enum` declaration keyword; closed variants use declared unions
 - a declared union contains at least two alternatives
 - alternatives use `class`, `shape`, or `object`
 - a class alternative has nominal class semantics
@@ -987,29 +988,38 @@ Anonymous shape type:
 def describe(user { name Str, age Int }) Str =
     user.name + " is " + user.age
 
-def explicit(user shape { name Str, age Int }) shape { name Str } =
+def project(user { name Str, age Int }) { name Str } =
     shape { name: user.name }
 ```
 
-The `shape` prefix is optional for an anonymous shape type. `{ name Str }` and
-`shape { name Str }` normalize to the same structural type. The explicit form
-is recommended in public function signatures because it keeps the return type
-visually distinct from the function body.
+Anonymous shape types in parameters, return types, fields, and local bindings
+use bare braces. The `shape` prefix is not valid in those inline type positions.
 
-Anonymous shape aliases may use either spelling:
+Anonymous shape aliases accept either spelling:
 
 ```txt
-type Result = shape { x Str }
+type ExplicitResult = shape { x Str }
+type ShortResult = { x Str }
 ```
 
-or equivalently:
+Both are transparent aliases for the same anonymous structural shape; neither
+introduces a named shape.
+
+An anonymous-shape alias may be used as a positional constructor name. This is
+syntax sugar for contextual `shape(...)`; the result remains an anonymous
+structural shape:
 
 ```txt
-type Result = { x Str }
+type Session = shape {
+    start Int
+    end Int
+}
+
+session Session = Session(10, 20)
 ```
 
-Both declarations are transparent aliases for the same anonymous structural
-shape. Neither declaration introduces a named shape.
+Values map to fields in written order and the argument count must match the
+alias fields exactly.
 
 A named shape uses a shape declaration:
 
@@ -1037,12 +1047,22 @@ object E { ... }      # type E = object { ... }
 The long form creates the same named declaration as the short form; it is not a
 transparent alias. It therefore supports the same fields, methods, generic
 parameters, and `with` interfaces. Shapes are deliberately excluded from this
-long-form rule so `type Name = shape { ... }` always means a transparent alias.
+named-declaration long-form rule: use `shape Name { ... }` for a named shape.
+Transparent anonymous-shape aliases accept either equivalent spelling:
+
+```txt
+type Profile = { name Str, age Int }
+type Profile = shape { name Str, age Int }
+```
+
+The optional `shape` prefix is available only in an anonymous-shape alias
+target. Inline variable, parameter, and return types use bare braces, for
+example `value { name Str }` and `def profile() { name Str }`.
 
 After `type Name =`, a declaration kind immediately followed by `{` or `with`
-starts a long-form declaration, except for `shape { ... }`, which is an
-anonymous structural type. A named `class`, `shape`, or `object` after the kind
-remains an inline union member, as in
+starts a long-form declaration for `class`, `interface`, `annotation`, and
+`object`. A named `class`, `shape`, or `object` after the kind remains an inline
+union member, as in
 `type Outcome = class Success { value Str } | object Cancelled {}`.
 
 Anonymous shape positional construction uses `shape(...)`. It is contextual:
@@ -3440,7 +3460,7 @@ match profile {
 ```
 
 For declared unions, alternative-specific payload fields require the alternative head, for example
-`Some { value }`, because the payload is not present on every case. Interface
+`Some { value }`, because the payload is not present on every alternative. Interface
 values do not provide a concrete record layout and therefore require a type or
 case pattern before record fields can be matched.
 

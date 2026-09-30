@@ -15,20 +15,9 @@ impl<'a> Parser<'a> {
                 | TokenKind::Keyword(Keyword::Shape)
                 | TokenKind::Keyword(Keyword::Object)
                 | TokenKind::Keyword(Keyword::Interface)
-                | TokenKind::Keyword(Keyword::Enum)
                 | TokenKind::Keyword(Keyword::Ext) => return,
                 _ => self.advance(),
             }
-        }
-    }
-
-    pub(super) fn synchronize_member(&mut self) {
-        while !self.at(TokenKind::Eof) && !self.at(TokenKind::RBrace) {
-            if self.at(TokenKind::Newline) {
-                self.advance();
-                return;
-            }
-            self.advance();
         }
     }
 
@@ -590,7 +579,6 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Shape) => "SHAPE",
             TokenKind::Keyword(Keyword::Object) => "OBJECT",
             TokenKind::Keyword(Keyword::Interface) => "INTERFACE",
-            TokenKind::Keyword(Keyword::Enum) => "ENUM",
             TokenKind::Keyword(Keyword::Ext) => "EXT",
             TokenKind::Keyword(Keyword::Private) => "PRIVATE",
             TokenKind::Keyword(Keyword::Var) => "VAR",

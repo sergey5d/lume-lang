@@ -16,7 +16,7 @@ class ClassPoint {
 def makeClassPoint(x Int, y Int) ClassPoint =
     ClassPoint { x, y }
 
-def makeAnonymousPoint(x Int, y Int) shape { x Int, y Int } =
+def makeAnonymousPoint(x Int, y Int) { x Int, y Int } =
     shape { x, y }
 
 def main() Unit {

@@ -18,11 +18,11 @@ This would make diagnostics much better and help `match` feel more complete.
 
 ## 2. Deeper Exhaustiveness
 
-Enum exhaustiveness exists, but it is still fairly shallow.
+Declared-union exhaustiveness exists, but it is still fairly shallow.
 
 Remaining work:
 
-- nested enum exhaustiveness
+- nested declared-union exhaustiveness
 - finite-domain tuple exhaustiveness
 - stronger missing-case reporting
 - better interaction with guards and richer pattern forms
@@ -70,7 +70,7 @@ The main user-facing match story is now:
 - `match` is exhaustive / total
 - `partial` is the partial form and returns `Option[...]`
 - guards are supported on top-level cases
-- nested enum, tuple, class, and shape patterns are supported
+- nested union, tuple, class, and shape patterns are supported
 - unary named data may use `Type(pattern)`; multi-field named data uses braces
 - zero-payload cases and singleton objects use bare names
 - `_ Type` and `value Type` provide type-only matching

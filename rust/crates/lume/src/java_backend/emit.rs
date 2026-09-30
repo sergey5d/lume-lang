@@ -6363,6 +6363,34 @@ impl<'a> SourceBodyEmitter<'a> {
             core::Expr::Identifier { name, .. } if name == "Any" && args.len() == 1 => {
                 self.emit_call_arg(&args[0], bindings)
             }
+            core::Expr::Identifier { .. }
+                if self.source_call(span).is_none()
+                    && matches!(self.source_expr_type(span), Some(ir::Type::Record(_))) =>
+            {
+                let Some(ir::Type::Record(fields)) = self.source_expr_type(span) else {
+                    unreachable!()
+                };
+                let ordered_args = if args.iter().all(|arg| arg.name.is_none()) {
+                    args.iter().collect::<Vec<_>>()
+                } else {
+                    fields
+                        .iter()
+                        .map(|field| {
+                            args.iter()
+                                .find(|arg| arg.name.as_deref() == Some(field.name.as_str()))
+                        })
+                        .collect::<Option<Vec<_>>>()?
+                };
+                if ordered_args.len() != fields.len() {
+                    return None;
+                }
+                let mut parts = Vec::with_capacity(fields.len() * 2);
+                for (field, arg) in fields.iter().zip(ordered_args) {
+                    parts.push(java_string_literal(&field.name));
+                    parts.push(self.emit_expr_against(&arg.value, bindings, &field.ty)?);
+                }
+                Some(format!("lume.core.LumeShape.of({})", parts.join(", ")))
+            }
             core::Expr::Identifier { name, .. } if name == "panic" => {
                 let message = match args.first() {
                     Some(arg) => self.emit_expr(&arg.value, bindings)?,
@@ -6678,11 +6706,13 @@ impl<'a> SourceBodyEmitter<'a> {
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
-                Some(format!(
-                    "{}.{}({})",
-                    receiver_expr,
-                    java_member_name(name),
-                    args.join(", ")
+                let widen_string_compare = self.is_java_string_compare(receiver, name, bindings);
+                let method = self.java_instance_method_name(receiver, name, bindings);
+                Some(format_java_instance_call(
+                    &receiver_expr,
+                    &method,
+                    &args,
+                    widen_string_compare,
                 ))
             }
             core::Expr::Index { .. } => {
@@ -6997,6 +7027,17 @@ impl<'a> SourceBodyEmitter<'a> {
         if method != name {
             return None;
         }
+        let receiver_ty = JavaIrSupport::new(self.bundle, self.function, self.names)
+            .operand_type(lowered_receiver);
+        let widen_string_compare = name == "compare"
+            && receiver_ty.as_ref().is_some_and(|ty| {
+                type_is_named_or_primitive(ty, "Str", |ty| matches!(ty, ir::Type::Str))
+            });
+        let java_method = if widen_string_compare {
+            "compareTo".to_string()
+        } else {
+            self.java_instance_method_name(receiver, name, bindings)
+        };
 
         let resolved_function = self
             .bundle
@@ -7023,11 +7064,11 @@ impl<'a> SourceBodyEmitter<'a> {
             let evidence_count = call.lowered_args.len().saturating_sub(ordered_args.len());
             emitted_args.extend(self.emit_source_reified_evidence(call, evidence_count)?);
             let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
-            return Some(format!(
-                "{}.{}({})",
-                receiver_expr,
-                java_member_name(name),
-                emitted_args.join(", ")
+            return Some(format_java_instance_call(
+                &receiver_expr,
+                &java_method,
+                &emitted_args,
+                widen_string_compare,
             ));
         };
         let source_param_count = if call.param_specs.is_empty() {
@@ -7088,11 +7129,11 @@ impl<'a> SourceBodyEmitter<'a> {
                 emitted_args.push(value);
             }
             let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
-            return Some(format!(
-                "{}.{}({})",
-                receiver_expr,
-                java_member_name(name),
-                emitted_args.join(", ")
+            return Some(format_java_instance_call(
+                &receiver_expr,
+                &java_method,
+                &emitted_args,
+                widen_string_compare,
             ));
         }
         let mut args = self
@@ -7123,12 +7164,40 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             None
         })?;
-        Some(format!(
-            "{}.{}({})",
-            receiver_expr,
-            java_member_name(name),
-            args.join(", ")
+        Some(format_java_instance_call(
+            &receiver_expr,
+            &java_method,
+            &args,
+            widen_string_compare,
         ))
+    }
+
+    fn java_instance_method_name(
+        &self,
+        receiver: &core::Expr,
+        name: &str,
+        bindings: &HashMap<String, String>,
+    ) -> String {
+        if self.is_java_string_compare(receiver, name, bindings) {
+            "compareTo".to_string()
+        } else {
+            java_member_name(name)
+        }
+    }
+
+    fn is_java_string_compare(
+        &self,
+        receiver: &core::Expr,
+        name: &str,
+        bindings: &HashMap<String, String>,
+    ) -> bool {
+        name == "compare"
+            && self
+                .expr_type(receiver, bindings)
+                .as_ref()
+                .is_some_and(|ty| {
+                    type_is_named_or_primitive(ty, "Str", |ty| matches!(ty, ir::Type::Str))
+                })
     }
 
     fn emit_source_arg_for_param_spec(
@@ -9811,6 +9880,20 @@ fn coerce_to_java_primitive(expr: String, coercion: Option<JavaPrimitiveCoercion
 
 fn java_member_name(name: &str) -> String {
     sanitize_identifier(name, IdentifierStyle::Member)
+}
+
+fn format_java_instance_call(
+    receiver: &str,
+    method: &str,
+    args: &[String],
+    widen_string_compare: bool,
+) -> String {
+    let call = format!("{receiver}.{method}({})", args.join(", "));
+    if widen_string_compare {
+        format!("((long) {call})")
+    } else {
+        call
+    }
 }
 
 fn tuple_field_index(name: &str) -> Option<usize> {

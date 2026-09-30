@@ -1,12 +1,9 @@
 # FAIL_REGEX:
-# .*enum case 'Signal.Stop' does not accept call syntax; use 'Signal.Stop'.*
+# .*union variant 'Signal.Stop' does not accept call syntax; use 'Signal.Stop'.*
 
-enum Signal {
-    case Start {
-        code Int
-    }
-    case Stop
-}
+type Signal =
+    class Start { code Int }
+    | object Stop {}
 
 def main() Unit {
     value Signal = Signal.Stop()

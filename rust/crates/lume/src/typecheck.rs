@@ -894,7 +894,7 @@ fn type_kind_label(kind: TypeKind) -> &'static str {
         TypeKind::Record => "shape",
         TypeKind::Object => "object",
         TypeKind::Interface => "interface",
-        TypeKind::Enum => "enum",
+        TypeKind::Enum => "declared union",
     }
 }
 
@@ -909,7 +909,7 @@ fn custom_constructor_error(sig: &TypeSig) -> String {
             sig.name
         ),
         TypeKind::Enum => format!(
-            "only classes can declare custom constructors; enum '{}' uses enum cases for construction",
+            "only classes can declare custom constructors; declared union '{}' uses variants for construction",
             sig.name
         ),
         TypeKind::Interface => format!(
@@ -1380,14 +1380,6 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if decl.kind == TypeKind::Enum && type_sig.enum_cases.is_empty() {
-            self.add_error(
-                "empty_enum",
-                format!("enum '{}' must declare at least one case", decl.name),
-                decl.span,
-            );
-        }
-
         for member in &decl.members {
             match member {
                 TypeMember::Field(field) => {
@@ -1435,28 +1427,6 @@ impl<'a> Checker<'a> {
                             );
                         }
                     }
-                    if decl.kind == TypeKind::Enum {
-                        if field.visibility == Visibility::Private {
-                            self.add_error(
-                                "invalid_enum_field",
-                                format!(
-                                    "enum '{}' cannot declare private field '{}'",
-                                    decl.name, field.name
-                                ),
-                                field.span,
-                            );
-                        }
-                        if field.mutable {
-                            self.add_error(
-                                "invalid_enum_field",
-                                format!(
-                                    "enum '{}' cannot declare mutable field '{}'",
-                                    decl.name, field.name
-                                ),
-                                field.span,
-                            );
-                        }
-                    }
                 }
                 TypeMember::Method(method) => {
                     if method.name == "new" && decl.kind != TypeKind::Class {
@@ -1497,26 +1467,6 @@ impl<'a> Checker<'a> {
                                 "invalid_shape_field",
                                 format!(
                                     "shape union variant '{}' cannot declare mutable field '{}'",
-                                    case.name, field.name
-                                ),
-                                field.span,
-                            );
-                        }
-                        if case.kind == TypeKind::Enum && field.visibility == Visibility::Private {
-                            self.add_error(
-                                "invalid_enum_case_field",
-                                format!(
-                                    "enum case '{}' cannot declare private field '{}'",
-                                    case.name, field.name
-                                ),
-                                field.span,
-                            );
-                        }
-                        if case.kind == TypeKind::Enum && field.mutable {
-                            self.add_error(
-                                "invalid_enum_case_field",
-                                format!(
-                                    "enum case '{}' cannot declare mutable field '{}'",
                                     case.name, field.name
                                 ),
                                 field.span,
@@ -6088,6 +6038,23 @@ impl<'a> Checker<'a> {
                         return Some(ty);
                     }
                 }
+                if let Some(ret) = self.lookup_anonymous_shape_alias_type(name) {
+                    let Ty::Record(fields) = &ret else {
+                        unreachable!("anonymous shape alias lookup returned a non-record type")
+                    };
+                    let params = fields
+                        .iter()
+                        .map(|(name, ty)| FieldSig {
+                            name: name.clone(),
+                            ty: ty.clone(),
+                            mutable: false,
+                            hidden: false,
+                            has_initializer: false,
+                            variadic: false,
+                        })
+                        .collect::<Vec<_>>();
+                    return Some(self.check_constructor_signature(&params, &ret, args, span));
+                }
                 if let Some(case) = self.world.lookup_enum_case(self.module, name) {
                     return Some(self.check_enum_case_constructor_signature(
                         name,
@@ -6655,8 +6622,10 @@ impl<'a> Checker<'a> {
         let (params, ret) = self.materialized_enum_case_signature_against(case, expected);
         if case.field_count == 0 && args.is_empty() {
             self.add_error(
-                "invalid_enum_case_call",
-                format!("enum case '{case_name}' does not accept call syntax; use '{case_name}'"),
+                "invalid_union_variant_call",
+                format!(
+                    "union variant '{case_name}' does not accept call syntax; use '{case_name}'"
+                ),
                 span,
             );
             return ret;
@@ -7607,7 +7576,7 @@ impl<'a> Checker<'a> {
                         "unknown_match_case",
                         if path.is_empty() {
                             format!(
-                                "headless record pattern requires a concrete class, shape, anonymous shape, or enum value; got '{}'",
+                                "headless record pattern requires a concrete class, shape, anonymous shape, or declared-union value; got '{}'",
                                 scrutinee.describe()
                             )
                         } else {
@@ -7868,7 +7837,10 @@ impl<'a> Checker<'a> {
         }
         self.add_error(
             "non_exhaustive_match",
-            format!("match does not cover enum cases: {}", missing.join(", ")),
+            format!(
+                "match does not cover union variants: {}",
+                missing.join(", ")
+            ),
             span,
         );
     }
@@ -9695,6 +9667,14 @@ impl<'a> Checker<'a> {
             .get(name)
             .cloned()
             .map(|target| (PathBuf::from("<ambient>"), target))
+    }
+
+    fn lookup_anonymous_shape_alias_type(&self, name: &str) -> Option<Ty> {
+        let (path, target) = self.lookup_alias_target(Some(self.module), name)?;
+        let owner = self.module_for_alias_path(&path);
+        let mut visiting = vec![(path, name.to_string())];
+        let ty = self.ty_from_type_ref_in_module(&target, owner, &mut visiting);
+        matches!(ty, Ty::Record(_)).then_some(ty)
     }
 
     fn module_for_alias_path(&self, path: &Path) -> Option<&ModuleInfo> {
@@ -12782,9 +12762,9 @@ def main() Unit {
     fn derives_eq_and_hashed_bounds_for_eligible_shapes() {
         let program = parse_inline(
             r#"
-enum State {
-    case Ready
-}
+type State =
+    object Ready {}
+    | object Busy {}
 
 object Marker {
 }
@@ -15178,12 +15158,9 @@ def main() Unit {
     fn allows_diverging_let_else_with_continue() {
         let program = parse_inline(
             r#"
-enum MaybeInt {
-    case NoneX
-    case SomeX {
-        value Int
-    }
-}
+type MaybeInt =
+    object NoneX {}
+    | class SomeX { value Int }
 
 def main() Unit {
     values Vector[MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX]
@@ -15202,12 +15179,9 @@ def main() Unit {
     fn allows_let_else_with_never_call_fallback() {
         let program = parse_inline(
             r#"
-enum MaybeInt {
-    case NoneX
-    case SomeX {
-        value Int
-    }
-}
+type MaybeInt =
+    object NoneX {}
+    | class SomeX { value Int }
 
 def fail() Never = panic("boom")
 
@@ -15291,15 +15265,12 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_bare_zero_payload_enum_cases() {
+    fn allows_bare_zero_payload_union_variants() {
         let program = parse_inline(
             r#"
-enum MaybeInt {
-    case Missing
-    case Present {
-        value Int
-    }
-}
+type MaybeInt =
+    object Missing {}
+    | class Present { value Int }
 
 def main() Unit {
     first MaybeInt = Missing
@@ -15313,7 +15284,7 @@ def main() Unit {
     }
 
     #[test]
-    fn materializes_bare_zero_payload_enum_case_patterns() {
+    fn materializes_bare_zero_payload_variant_patterns() {
         let program = parse_inline(
             r#"
 def mapOption[X](value Option[Int], f fn(Int) X) Option[X] {
@@ -15329,7 +15300,7 @@ def mapOption[X](value Option[Int], f fn(Int) X) Option[X] {
     }
 
     #[test]
-    fn rejects_bare_enum_cases_with_payloads() {
+    fn rejects_bare_union_variants_with_payloads() {
         let program = parse_inline(
             r#"
 def main(value Option[Int]) Int {
@@ -15361,21 +15332,20 @@ class User {
     name Str
 }
 
-enum Status {
-    case Pending
-}
+type Status =
+    object Pending {}
+    | object Complete {}
 
-enum Payload {
-    case Item {
-        value Int
-    }
-}
+type Payload =
+    class Item { value Int }
+    | object Empty {}
 
 object Ready {}
 
 def main(value Any, status Status, maybe Option[Int], payload Payload) Unit {
     match status {
         case Pending => ()
+        case Complete => ()
     }
     match value {
         case User { name } as user => println(name, user.name)
@@ -15390,6 +15360,7 @@ def main(value Any, status Status, maybe Option[Int], payload Payload) Unit {
     }
     match payload {
         case Payload.Item(item) as whole => println(item, whole.value)
+        case Payload.Empty => ()
     }
 }
 "#,
@@ -15399,17 +15370,15 @@ def main(value Any, status Status, maybe Option[Int], payload Payload) Unit {
     }
 
     #[test]
-    fn allows_enum_case_default_constructor_shapes() {
+    fn allows_union_variant_default_constructor_shapes() {
         let program = parse_inline(
             r#"
-enum Outcome {
-    tag Str
-
-    case Left {
+type Outcome =
+    class Left {
         value Str
-        tag = "left"
+        tag Str = "left"
     }
-}
+    | object Empty {}
 
 def main() Unit {
     omitted Outcome = Outcome.Left("bad")
@@ -15424,7 +15393,7 @@ def main() Unit {
     }
 
     #[test]
-    fn materializes_bare_enum_case_in_expected_shape_field() {
+    fn materializes_bare_union_variant_in_expected_shape_field() {
         let program = parse_inline(
             r#"
 class Node {
@@ -15441,7 +15410,7 @@ def missing() { node Option[Node] } {
     }
 
     #[test]
-    fn rejects_zero_payload_enum_case_call_syntax() {
+    fn rejects_zero_payload_union_variant_call_syntax() {
         let program = parse_inline(
             r#"
 def main() Unit {
@@ -15452,10 +15421,10 @@ def main() Unit {
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diag| {
-                diag.code == "invalid_enum_case_call"
+                diag.code == "invalid_union_variant_call"
                     && diag
                         .message
-                        .contains("enum case 'None' does not accept call syntax")
+                        .contains("union variant 'None' does not accept call syntax")
             }),
             "{:#?}",
             result.diagnostics
@@ -15793,9 +15762,9 @@ class User {
     name Str
 }
 
-enum Status {
-    case Pending
-}
+type Status =
+    object Pending {}
+    | object Complete {}
 
 def main() Unit {
     user User = User("Ada")
@@ -16644,7 +16613,7 @@ def main() Unit {
     handler Handler = (value Int) => value.toStr()
     users Users = [User("Ada")]
     scores Scores = ["Ada": 10]
-    profile Profile = { name: "Ada", age: 42 }
+    profile Profile = Profile("Ada", 42)
     pet Companion = Cat()
 
     println(apply(handler, id))
@@ -16660,7 +16629,7 @@ def main() Unit {
     }
 
     #[test]
-    fn treats_explicit_and_short_anonymous_shape_aliases_as_equivalent() {
+    fn treats_anonymous_shape_alias_as_transparent() {
         let program = parse_inline(
             r#"
 shape Session {
@@ -16671,21 +16640,18 @@ shape Session {
     def duration() Int = this.end - this.start
 }
 
-type ExplicitView = shape { position Str }
-type ShortView = { position Str }
+type View = { position Str }
 
-def project(value shape { position Str, start Int }) ExplicitView =
+def project(value { position Str, start Int }) View =
     shape { position: value.position }
 
-def toShort(value ExplicitView) ShortView = value
-def toExplicit(value ShortView) ExplicitView = value
+def copy(value View) { position Str } = value
 
 def main() Unit {
     session Session = Session("engineer", 10, 30)
-    explicit ExplicitView = project(session)
-    short ShortView = toShort(explicit)
-    roundTrip ExplicitView = toExplicit(short)
-    println(roundTrip.position, session.duration())
+    view View = project(session)
+    copied { position Str } = copy(view)
+    println(copied.position, session.duration())
 }
 "#,
         );

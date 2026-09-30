@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*empty parenthesized pattern 'None\(\)' is not supported; use the bare case name for a zero-payload enum case.*
+# .*empty parenthesized pattern 'None\(\)' is not supported; use the bare variant name for a zero-payload union variant.*
 
 def main(value Option[Int]) Int = match value {
     case Some(value) => value

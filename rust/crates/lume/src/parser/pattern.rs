@@ -483,7 +483,7 @@ impl<'a> Parser<'a> {
                         self.diagnostics.push(Diagnostic::error(
                             "empty_parenthesized_pattern",
                             format!(
-                                "empty parenthesized pattern '{}()' is not supported; use the bare case name for a zero-payload enum case, '_ {}' to ignore a value of that type, or 'value {}' to bind it",
+                                "empty parenthesized pattern '{}()' is not supported; use the bare variant name for a zero-payload union variant, '_ {}' to ignore a value of that type, or 'value {}' to bind it",
                                 path.join("."),
                                 path.join("."),
                                 path.join(".")

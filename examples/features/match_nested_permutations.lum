@@ -8,13 +8,13 @@
 # class in tuple 6 9
 # shape in tuple 8 eur
 # tuple in shape 10 11
-# enum in enum on
-# class in enum 12
-# shape in enum 13 cad
-# tuple in enum 14 15
-# enum in class off
-# enum in shape on
-# enum in tuple off 16
+# union in union on
+# class in union 12
+# shape in union 13 cad
+# tuple in union 14 15
+# union in class off
+# union in shape on
+# union in tuple off 16
 
 class Apple {
     size Int
@@ -129,50 +129,50 @@ def main() Unit {
     }
     println(tupleInShape)
 
-    enumInEnum = match OuterFlag.Wrap(InnerFlag.On) {
-        case Wrap { value: InnerFlag.On } => "enum in enum on"
-        case Wrap { value: InnerFlag.Off } => "enum in enum off"
-        case OuterFlag.Empty => "enum in enum empty"
+    unionInUnion = match OuterFlag.Wrap(InnerFlag.On) {
+        case Wrap { value: InnerFlag.On } => "union in union on"
+        case Wrap { value: InnerFlag.Off } => "union in union off"
+        case OuterFlag.Empty => "union in union empty"
     }
-    println(enumInEnum)
+    println(unionInUnion)
 
     apple12 = Apple(12)
-    classInEnum = match MaybeApple.SomeX(apple12) {
-        case SomeX { value: Apple { size } } => "class in enum " + size
-        case MaybeApple.NoneX => "class in enum none"
+    classInUnion = match MaybeApple.SomeX(apple12) {
+        case SomeX { value: Apple { size } } => "class in union " + size
+        case MaybeApple.NoneX => "class in union none"
     }
-    println(classInEnum)
+    println(classInUnion)
 
     amount13 = Amount(13, "cad")
-    shapeInEnum = match MaybeAmount.SomeX(amount13) {
-        case SomeX { value: Amount { count, label } } => "shape in enum " + count + " " + label
-        case MaybeAmount.NoneX => "shape in enum none"
+    shapeInUnion = match MaybeAmount.SomeX(amount13) {
+        case SomeX { value: Amount { count, label } } => "shape in union " + count + " " + label
+        case MaybeAmount.NoneX => "shape in union none"
     }
-    println(shapeInEnum)
+    println(shapeInUnion)
 
-    tupleInEnum = match MaybePair.SomeX((14, 15)) {
-        case SomeX { value: (left, right) } => "tuple in enum " + left + " " + right
-        case MaybePair.NoneX => "tuple in enum none"
+    tupleInUnion = match MaybePair.SomeX((14, 15)) {
+        case SomeX { value: (left, right) } => "tuple in union " + left + " " + right
+        case MaybePair.NoneX => "tuple in union none"
     }
-    println(tupleInEnum)
+    println(tupleInUnion)
 
     flagBox = FlagBox { value: InnerFlag.Off }
-    enumInClass = match flagBox {
-        case FlagBox { value: InnerFlag.On } => "enum in class on"
-        case FlagBox { value: InnerFlag.Off } => "enum in class off"
+    unionInClass = match flagBox {
+        case FlagBox { value: InnerFlag.On } => "union in class on"
+        case FlagBox { value: InnerFlag.Off } => "union in class off"
     }
-    println(enumInClass)
+    println(unionInClass)
 
     flagShape = FlagShape { value: InnerFlag.On }
-    enumInShape = match flagShape {
-        case FlagShape { value: InnerFlag.On } => "enum in shape on"
-        case FlagShape { value: InnerFlag.Off } => "enum in shape off"
+    unionInShape = match flagShape {
+        case FlagShape { value: InnerFlag.On } => "union in shape on"
+        case FlagShape { value: InnerFlag.Off } => "union in shape off"
     }
-    println(enumInShape)
+    println(unionInShape)
 
-    enumInTuple = match (InnerFlag.Off, 16) {
-        case (InnerFlag.On, value) => "enum in tuple on " + value
-        case (InnerFlag.Off, value) => "enum in tuple off " + value
+    unionInTuple = match (InnerFlag.Off, 16) {
+        case (InnerFlag.On, value) => "union in tuple on " + value
+        case (InnerFlag.Off, value) => "union in tuple off " + value
     }
-    println(enumInTuple)
+    println(unionInTuple)
 }

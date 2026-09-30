@@ -1,6 +1,6 @@
 # EXPECT:
 # shape shape-value
-# enum ready
+# union ready
 # object hi
 # ref hi
 # annotation Annotation
@@ -51,7 +51,7 @@ def main() Unit {
     println("shape", namedLabel.label())
 
     status Status = Status.Ready
-    println("enum", status.label())
+    println("union", status.label())
 
     greeterLabel Labeled = Greeter
     println("object", greeterLabel.label())

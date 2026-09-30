@@ -156,8 +156,8 @@ AST program
 `runtime/` builds the dense runtime view used by the interpreter hot path.
 
 - `runtime/types.rs` converts `ir::Program` type information into
-  `RuntimeProgram`, `RuntimeType`, `RuntimeField`, `RuntimeMethod`, and enum
-  case metadata.
+  `RuntimeProgram`, `RuntimeType`, `RuntimeField`, `RuntimeMethod`, and declared-
+  union variant metadata.
 - `runtime/builtins/` provides builtin runtime types and host-implemented
   methods for currently hardcoded builtins such as `Str`, `Option`, `Result`,
   `Either`, `Vector`, `Array`, `Set`, and `Map`.

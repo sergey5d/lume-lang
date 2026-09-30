@@ -14,7 +14,6 @@ pub enum Keyword {
     Defer,
     Def,
     Else,
-    Enum,
     Ext,
     False,
     Fn,
@@ -333,7 +332,6 @@ impl<'a> Lexer<'a> {
             "defer" => TokenKind::Keyword(Keyword::Defer),
             "def" => TokenKind::Keyword(Keyword::Def),
             "else" => TokenKind::Keyword(Keyword::Else),
-            "enum" => TokenKind::Keyword(Keyword::Enum),
             "ext" => TokenKind::Keyword(Keyword::Ext),
             "false" => TokenKind::Keyword(Keyword::False),
             "fn" => TokenKind::Keyword(Keyword::Fn),
@@ -604,6 +602,14 @@ mod tests {
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(result.tokens[0].kind, TokenKind::Newline);
         assert_eq!(result.tokens[1].kind, TokenKind::Keyword(Keyword::Def));
+    }
+
+    #[test]
+    fn treats_removed_enum_keyword_as_an_identifier() {
+        let result = lex(&source("enum Int = 1\n"));
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(result.tokens[0].kind, TokenKind::Identifier);
+        assert_eq!(result.tokens[0].lexeme, "enum");
     }
 
     #[test]

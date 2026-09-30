@@ -1,12 +1,9 @@
 # FAIL_REGEX:
-# non_exhaustive_match at .*: match does not cover enum cases: NoneX
+# non_exhaustive_match at .*: match does not cover union variants: NoneX
 
-enum MaybeInt {
-    case NoneX
-    case SomeX {
-        value Int
-    }
-}
+type MaybeInt =
+    object NoneX {}
+    | class SomeX { value Int }
 
 def main() Int =
     match MaybeInt.SomeX(5) {

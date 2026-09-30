@@ -1,12 +1,9 @@
 # FAIL_REGEX:
-# .*enum case 'Missing' does not accept call syntax; use 'Missing'.*
+# .*union variant 'Missing' does not accept call syntax; use 'Missing'.*
 
-enum MaybeInt {
-    case Missing
-    case Present {
-        value Int
-    }
-}
+type MaybeInt =
+    object Missing {}
+    | class Present { value Int }
 
 def main() Unit {
     value MaybeInt = Missing()

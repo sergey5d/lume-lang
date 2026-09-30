@@ -5,10 +5,7 @@
 type ExplicitResult = shape { x Str }
 type ShortResult = { x Str }
 
-def explicitResult() shape { x Str } =
-    shape { x: "hello" }
-
-def shortResult() { x Str } =
+def result() { x Str } =
     shape { x: "hello" }
 
 def toExplicit(value ShortResult) ExplicitResult = value
@@ -22,8 +19,8 @@ shape NamedResult {
 }
 
 def main() Unit {
-    explicit ExplicitResult = toExplicit(shortResult())
-    short ShortResult = toShort(explicitResult())
+    explicit ExplicitResult = toExplicit(result())
+    short ShortResult = toShort(explicit)
     println("aliases", explicit.x, short.x)
 
     named NamedResult = NamedResult { x: 5 }

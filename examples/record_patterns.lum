@@ -11,10 +11,10 @@
 # anonymous Ana
 # known class Sergey
 # known shape Tampa
-# known enum approved
+# known union approved
 # let class Sergey 37
 # let shape Tampa
-# let enum approved
+# let union approved
 # let refutable Sergey
 # 0
 
@@ -125,8 +125,8 @@ def main() Int {
 
     review = ReviewState.Approved()
     match review {
-        case Approved { label } => println("known enum " + label)
-        case Rejected { label } => println("known enum " + label)
+        case Approved { label } => println("known union " + label)
+        case Rejected { label } => println("known union " + label)
     }
 
     let { name as className, age as classAge } = user
@@ -135,8 +135,8 @@ def main() Int {
     let { city as shapeCity } = location
     println("let shape " + shapeCity)
 
-    let Approved { label as enumLabel } = review else return 1
-    println("let enum " + enumLabel)
+    let Approved { label as unionLabel } = review else return 1
+    println("let union " + unionLabel)
 
     let { name as adultName, age: 37 } = user else {
         return 1

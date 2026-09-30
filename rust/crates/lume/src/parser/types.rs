@@ -377,10 +377,15 @@ impl<'a> Parser<'a> {
         }
         if self.match_keyword(Keyword::Shape) {
             let start = self.previous_span();
+            self.diagnostics.push(Diagnostic::error(
+                "removed_anonymous_shape_type_prefix",
+                "anonymous shape types use bare braces; write '{ ... }' without 'shape'",
+                start,
+            ));
             self.skip_newlines();
             self.consume(
                 TokenKind::LBrace,
-                "expected '{' after 'shape' in shape type",
+                "expected '{' after removed anonymous shape type prefix",
             )?;
             return self.finish_anonymous_shape_type_ref(start);
         }
@@ -443,7 +448,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn finish_anonymous_shape_type_ref(&mut self, start: Span) -> Option<TypeRef> {
+    pub(super) fn finish_anonymous_shape_type_ref(&mut self, start: Span) -> Option<TypeRef> {
         self.skip_newlines();
         let mut fields = Vec::new();
         if !self.at(TokenKind::RBrace) {
@@ -452,11 +457,19 @@ impl<'a> Parser<'a> {
                 let ty = self.parse_type_ref()?;
                 let span = name_span.cover(ty.span());
                 fields.push(RecordTypeField { name, ty, span });
+                let separated_by_newline = self.at(TokenKind::Newline);
                 self.skip_newlines();
-                if !self.match_token(TokenKind::Comma) {
+                if self.match_token(TokenKind::Comma) {
+                    self.skip_newlines();
+                    continue;
+                }
+                if separated_by_newline && !self.at(TokenKind::RBrace) {
+                    continue;
+                }
+                if !self.at(TokenKind::RBrace) {
                     break;
                 }
-                self.skip_newlines();
+                break;
             }
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after anonymous shape type")?;

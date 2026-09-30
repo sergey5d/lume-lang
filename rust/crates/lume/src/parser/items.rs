@@ -126,8 +126,7 @@ impl<'a> Parser<'a> {
             | TokenKind::Keyword(Keyword::Class)
             | TokenKind::Keyword(Keyword::Shape)
             | TokenKind::Keyword(Keyword::Object)
-            | TokenKind::Keyword(Keyword::Interface)
-            | TokenKind::Keyword(Keyword::Enum) => {
+            | TokenKind::Keyword(Keyword::Interface) => {
                 let decl = self.parse_type_decl(annotations, visibility)?;
                 Some(Item::Type(decl))
             }
@@ -259,7 +258,7 @@ impl<'a> Parser<'a> {
                 )
                 .map(Item::Type);
         }
-        let starts_anonymous_shape_alias = if self.at_keyword(Keyword::Shape) {
+        let starts_prefixed_anonymous_shape_alias = if self.at_keyword(Keyword::Shape) {
             let mut lookahead = self.index + 1;
             while self
                 .tokens
@@ -277,7 +276,7 @@ impl<'a> Parser<'a> {
         if matches!(
             self.current_kind(),
             TokenKind::Keyword(Keyword::Class) | TokenKind::Keyword(Keyword::Object)
-        ) || (self.at_keyword(Keyword::Shape) && !starts_anonymous_shape_alias)
+        ) || (self.at_keyword(Keyword::Shape) && !starts_prefixed_anonymous_shape_alias)
         {
             return self.parse_inline_union_decl(visibility, name, generic_clause, start);
         }
@@ -287,7 +286,18 @@ impl<'a> Parser<'a> {
                 "generic parameters on 'type' are currently supported only for inline union declarations",
             );
         }
-        let target = self.parse_type_ref()?;
+        let target = if starts_prefixed_anonymous_shape_alias {
+            let shape_span = self.current_span();
+            self.advance();
+            self.skip_newlines();
+            self.consume(
+                TokenKind::LBrace,
+                "expected '{' after 'shape' in type alias",
+            )?;
+            self.finish_anonymous_shape_type_ref(shape_span)?
+        } else {
+            self.parse_type_ref()?
+        };
         let span = start.cover(target.span());
         Some(Item::TypeAlias(TypeAliasDecl {
             visibility,
@@ -536,15 +546,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 (TypeKind::Interface, span)
             }
-            TokenKind::Keyword(Keyword::Enum) => {
-                let span = self.current_span();
-                self.advance();
-                (TypeKind::Enum, span)
-            }
             _ => {
                 self.error_at_current(
                     "expected_type_decl",
-                    "expected annotation, class, shape, object, interface, or enum",
+                    "expected annotation, class, shape, object, or interface",
                 );
                 return None;
             }
@@ -592,41 +597,6 @@ impl<'a> Parser<'a> {
             }
 
             let member_annotations = self.parse_annotations()?;
-
-            if kind == TypeKind::Enum && self.match_keyword(Keyword::Case) {
-                if let Some(case_decl) =
-                    self.parse_enum_case(member_annotations, self.previous_span(), &name)
-                {
-                    match body_order {
-                        TypeBodyOrder::Storage => {}
-                        TypeBodyOrder::Constructor => {
-                            self.diagnostics.push(Diagnostic::error(
-                                "invalid_member_order",
-                                format!(
-                                    "enum cases must appear before constructors in enum '{}'; move case '{}' above constructor declarations",
-                                    name, case_decl.name
-                                ),
-                                case_decl.span,
-                            ));
-                        }
-                        TypeBodyOrder::Method => {
-                            self.diagnostics.push(Diagnostic::error(
-                                "invalid_member_order",
-                                format!(
-                                    "enum cases must appear before methods in enum '{}'; move case '{}' above method declarations",
-                                    name, case_decl.name
-                                ),
-                                case_decl.span,
-                            ));
-                        }
-                    }
-                    members.push(TypeMember::Case(case_decl));
-                } else {
-                    self.synchronize_member();
-                }
-                self.skip_newlines();
-                continue;
-            }
 
             let member_visibility = self.parse_visibility();
             match self.current_kind() {
@@ -771,79 +741,19 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub(super) fn parse_enum_case(
-        &mut self,
-        annotations: Vec<Annotation>,
-        case_span: Span,
-        enum_name: &str,
-    ) -> Option<EnumCaseDecl> {
-        let (name, name_span) = self.expect_identifier("expected enum case name")?;
-        let mut fields = Vec::new();
-        self.skip_newlines();
-        let mut end = name_span;
-        if self.match_keyword(Keyword::With) {
-            end = self.report_enum_case_interface_bound(enum_name, &name)?;
-            self.skip_newlines();
-        }
-        if self.match_token(TokenKind::LBrace) {
-            self.skip_newlines();
-            while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-                let field_annotations = self.parse_annotations()?;
-                let field_visibility = self.parse_visibility();
-                let field = self.parse_field_decl(field_annotations, field_visibility)?;
-                fields.push(field);
-                self.skip_newlines();
-            }
-            let end = self.consume(TokenKind::RBrace, "expected '}' after enum case body")?;
-            return Some(EnumCaseDecl {
-                annotations,
-                kind: TypeKind::Enum,
-                name,
-                fields,
-                span: case_span.cover(end),
-            });
-        }
-        Some(EnumCaseDecl {
-            annotations,
-            kind: TypeKind::Enum,
-            name,
-            fields,
-            span: case_span.cover(end),
-        })
-    }
-
-    fn report_enum_case_interface_bound(
-        &mut self,
-        enum_name: &str,
-        case_name: &str,
-    ) -> Option<Span> {
-        let with_span = self.previous_span();
-        let bounds = self.parse_interface_ref_list_after_with()?;
-        let end = bounds.last().map(TypeRef::span).unwrap_or(with_span);
-        self.diagnostics.push(Diagnostic::error(
-            "invalid_enum_case_interface",
-            format!(
-                "enum case '{}.{}' cannot implement interfaces; put 'with ...' on enum '{}'",
-                enum_name, case_name, enum_name
-            ),
-            with_span.cover(end),
-        ));
-        Some(end)
-    }
-
     pub(super) fn parse_extension_block(&mut self) -> Option<ExtensionBlock> {
         let start = self.consume_keyword(Keyword::Ext, "expected 'ext'")?;
         let target = self.parse_type_ref()?;
         if self.match_token(TokenKind::Dot) {
-            let _ = self.expect_identifier("expected enum case name after '.'")?;
+            let _ = self.expect_identifier("expected union variant name after '.'")?;
             let owner = match &target {
                 TypeRef::Named { name, .. } => name.as_str(),
-                _ => "enum",
+                _ => "declared union",
             };
             self.error_at_current(
                 "unexpected_extension_target",
                 format!(
-                    "enum cases cannot be extended directly; put extension methods on enum '{}'",
+                    "union variants cannot be extended directly; put extension methods on declared union '{}'",
                     owner
                 ),
             );
@@ -1165,7 +1075,7 @@ fn type_kind_name(kind: TypeKind) -> &'static str {
         TypeKind::Record => "shape",
         TypeKind::Object => "object",
         TypeKind::Interface => "interface",
-        TypeKind::Enum => "enum",
+        TypeKind::Enum => "declared union",
     }
 }
 
@@ -1194,7 +1104,7 @@ fn type_body_constructor_message(kind: TypeKind, name: &str) -> String {
         }
         TypeKind::Enum => {
             format!(
-                "only classes can declare custom constructors; enum '{name}' uses enum cases for construction"
+                "only classes can declare custom constructors; declared union '{name}' uses variants for construction"
             )
         }
     }

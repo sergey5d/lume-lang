@@ -2450,12 +2450,9 @@ interface Named {
     def name() Str
 }
 
-enum Maybe[T] {
-    case None
-    case Some {
-        value T
-    }
-}
+type Maybe[T] =
+    object None {}
+    | class Some { value T }
 
 annotation Route {
     path Str
@@ -3123,8 +3120,8 @@ def main() Unit {
     }
 
     #[test]
-    fn emits_structured_java_for_simple_enum_match_methods() {
-        let temp = temp_path("lume-java-enum-match-methods");
+    fn emits_structured_java_for_simple_union_match_methods() {
+        let temp = temp_path("lume-java-union-match-methods");
         let source = temp.join("maybe.lum");
         let out = temp.join("out");
         fs::create_dir_all(&temp).expect("create temp dir");
@@ -3133,12 +3130,11 @@ def main() Unit {
             r#"
 module demo/maybe
 
-enum Maybe[T] {
-    case None
-    case Some {
-        value T
-    }
+type Maybe[T] =
+    object None {}
+    | class Some { value T }
 
+ext Maybe[T] {
     def isDefined() Bool = match this {
         case Some { value: _ } => true
         case None => false
@@ -5111,23 +5107,13 @@ class User {
 
 object Ready {}
 
-enum ReviewState {
-    label Str
+type ReviewState =
+    class Approved { label Str = "approved" }
+    | class Rejected { label Str = "rejected" }
 
-    case Approved {
-        label = "approved"
-    }
-
-    case Rejected {
-        label = "rejected"
-    }
-}
-
-enum Payload {
-    case Item {
-        value Int
-    }
-}
+type Payload =
+    class Item { value Int }
+    | object Empty {}
 
 def describe(value Any) Str = match value {
     case User {
@@ -5144,7 +5130,8 @@ def describeSingleton(value Any) Str = match value {
 }
 
 def describeReview(value ReviewState) Str = match value {
-    case { label } => label
+    case Approved { label } => label
+    case Rejected { label } => label
 }
 
 def describeMaybe(value Option[Int]) Str = match value {
@@ -5159,6 +5146,7 @@ def describeNoneAlias(value Option[Int]) Str = match value {
 
 def describePayload(value Payload) Str = match value {
     case Payload.Item(item) as whole => whole.value.toStr() + " " + item.toStr()
+    case Payload.Empty => "empty"
 }
 
 def describeList(values [Int]) Str = match values {
@@ -5335,8 +5323,11 @@ type Companion = Pet
 type Pet = Cat | Dog
 type Names = [Str]
 type Labeler = fn(Str) Str
-type ExplicitView = shape { name Str }
-type ShortView = { name Str }
+type View = { name Str }
+type Span = shape {
+    start Int
+    end Int
+}
 
 def describe(value Companion) Str = match value {
     case Cat { name } => "cat " + name
@@ -5345,8 +5336,8 @@ def describe(value Companion) Str = match value {
 
 def widen(value Pet) Bird | Dog | Cat = value
 
-def explicitView() ExplicitView = shape { name: "Milo" }
-def shortView(value ExplicitView) ShortView = value
+def view() View = shape { name: "Milo" }
+def copyView(value View) { name Str } = value
 
 def main() Unit {
     pet Companion = Cat("Milo")
@@ -5354,6 +5345,7 @@ def main() Unit {
     widened Bird | Dog | Cat = reordered
     names Names = ["Milo"]
     label Labeler = value => "name " + value
+    span Span = Span(10, 30)
     println(describe(reordered))
     println(label(names[0]))
     println(match widened {
@@ -5361,7 +5353,9 @@ def main() Unit {
         case Dog { name } => name
         case Bird { name } => name
     })
-    println(shortView(explicitView()).name)
+    println(copyView(view()).name)
+    println(span.end - span.start)
+    println("alice".compare("bob") < 0)
 }
 "#,
         )
@@ -5397,7 +5391,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "cat Milo\nname Milo\nMilo\nMilo\n"
+            "cat Milo\nname Milo\nMilo\nMilo\n20\ntrue\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -5841,9 +5835,9 @@ shape HttpError {
     contentType Str = "application/json"
 }
 
-enum Status {
-    case Pending
-}
+type Status =
+    object Pending {}
+    | object Complete {}
 
 def ok() Result[HttpResponse, HttpError] =
     Ok({ body: "ok" })
@@ -5865,7 +5859,7 @@ def pending() Option[Status] =
         assert!(!module.contains("UnsupportedOperationException"));
         assert!(module.contains("new HttpResponse(200L"));
         assert!(module.contains("new HttpError(400L"));
-        assert!(module.contains("new Option.Some<>(new Status.Pending())"));
+        assert!(module.contains("new Option.Some<>(Status.Pending.instance())"));
         assert!(module.contains("\"application/json\""));
         assert!(!module.contains("__block"), "{module}");
 
@@ -6088,12 +6082,9 @@ class User {
     age Int
 }
 
-enum Status {
-    case Pending
-    case Done {
-        label Str
-    }
-}
+type Status =
+    object Pending {}
+    | class Done { label Str }
 
 def main() Unit {
     user User = User("Ada", 42)

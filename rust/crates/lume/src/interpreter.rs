@@ -3221,7 +3221,7 @@ impl<'a> Interpreter<'a> {
             "None" => {
                 return Err(self.runtime_error(
                     span,
-                    "enum case 'None' does not accept call syntax; use 'None'",
+                    "union variant 'None' does not accept call syntax; use 'None'",
                 ));
             }
             "Ok" => {
@@ -3749,12 +3749,12 @@ impl<'a> Interpreter<'a> {
             })
             .collect::<Vec<_>>();
         if matches.is_empty() {
-            return Err(self.runtime_error(span, format!("unknown enum case '{}'", case_name)));
+            return Err(self.runtime_error(span, format!("unknown union variant '{}'", case_name)));
         }
         if matches.len() > 1 {
             return Err(self.runtime_error(
                 span,
-                format!("enum case '{}' is ambiguous in this runtime", case_name),
+                format!("union variant '{}' is ambiguous in this runtime", case_name),
             ));
         }
         let ty = matches.remove(0);
@@ -3770,7 +3770,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "enum case '{display_name}' does not accept call syntax; use '{display_name}'"
+                    "union variant '{display_name}' does not accept call syntax; use '{display_name}'"
                 ),
             ));
         }
@@ -3798,7 +3798,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "enum case '{}.{}' expects {}..{} arguments, got {}",
+                    "union variant '{}.{}' expects {}..{} arguments, got {}",
                     ty.name,
                     case_name,
                     required,
@@ -7536,36 +7536,39 @@ $name
     }
 
     #[test]
-    fn runs_enum_methods_and_default_case_values() {
+    fn runs_declared_union_methods_and_default_variant_values() {
         let program = lower_inline(
             r#"
-            enum Color {
-                color Str
-                temperature Int
-
-                case Black {
-                    color = "xxx"
-                    temperature = 1
+            type Color =
+                class Black {
+                    color Str = "xxx"
+                    temperature Int = 1
                 }
-                case Red {
-                    color = "xxx2"
-                    temperature = 10
+                | class Red {
+                    color Str = "xxx2"
+                    temperature Int = 10
                 }
 
-                def isReddish() Bool = this.temperature % 5 == 0
+            ext Color {
+                def isReddish() Bool = match this {
+                    case Black { temperature } => temperature % 5 == 0
+                    case Red { temperature } => temperature % 5 == 0
+                }
             }
 
-            enum OptionX[T] {
-                case NoneX
-                case SomeX {
-                    value T
-                }
+            type OptionX[T] =
+                object NoneX {}
+                | class SomeX { value T }
 
-                def isDefined() Bool = this != OptionX.NoneX
+            ext OptionX[T] {
+                def isDefined() Bool = match this {
+                    case SomeX(_) => true
+                    case NoneX => false
+                }
             }
 
             def main() Unit {
-                black = Color.Black
+                black = Color.Black()
                 someInt = OptionX.SomeX(5)
                 noneInt = OptionX.NoneX
 
@@ -7582,13 +7585,14 @@ $name
     }
 
     #[test]
-    fn runs_enum_and_object_with_same_name() {
+    fn runs_declared_union_and_object_with_same_name() {
         let program = lower_inline(
             r#"
-            enum Color {
-                case Red
-                case Blue
+            type Color =
+                object Red {}
+                | object Blue {}
 
+            ext Color {
                 def label() Str = match this {
                     case Color.Red => "red"
                     case Color.Blue => "blue"
@@ -7684,7 +7688,7 @@ $name
     }
 
     #[test]
-    fn runs_match_patterns_for_shapes_classes_and_partial_enums() {
+    fn runs_match_patterns_for_shapes_classes_and_partial_unions() {
         let program = lower_inline(
             r#"
             class Amount {
@@ -7697,12 +7701,9 @@ $name
                 right Int
             }
 
-            enum MaybeInt {
-                case NoneX
-                case SomeX {
-                    value Int
-                }
-            }
+            type MaybeInt =
+                object NoneX {}
+                | class SomeX { value Int }
 
             def main() Unit {
                 amount Amount = Amount(42, "hello")
@@ -7837,19 +7838,13 @@ $name
                 label Str
             }
 
-            enum MaybeApple {
-                case NoneX
-                case SomeX {
-                    value Apple
-                }
-            }
+            type MaybeApple =
+                object NoneX {}
+                | class SomeX { value Apple }
 
-            enum MaybeAmount {
-                case NoneX
-                case SomeX {
-                    value Amount
-                }
-            }
+            type MaybeAmount =
+                object NoneX {}
+                | class SomeX { value Amount }
 
             def main() Unit {
                 apple = Apple(12)
@@ -8204,15 +8199,20 @@ $name
     }
 
     #[test]
-    fn runs_enum_case_defaults_and_short_circuit_boolean_ops() {
+    fn runs_union_variant_defaults_and_short_circuit_boolean_ops() {
         let program = lower_inline(
             r#"
-            enum Outcome {
-                tag Str
-
-                case Left {
+            type Outcome =
+                class Left {
                     value Str
-                    tag = "left"
+                    tag Str = "left"
+                }
+                | object Empty {}
+
+            ext Outcome {
+                def tag() Str = match this {
+                    case Left { tag } => tag
+                    case Empty => ""
                 }
             }
 
@@ -8224,7 +8224,7 @@ $name
             def main() Unit {
                 left = Outcome.Left("bad")
                 if true || boom() {
-                    OS.println(left.tag)
+                    OS.println(left.tag())
                 }
             }
             "#,

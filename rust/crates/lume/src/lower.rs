@@ -4823,6 +4823,12 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|(_, inner)| inner)
                     .unwrap_or(ir::Type::Unknown)
             }
+            Expr::Try { value, .. } => {
+                let source_ty = self.infer_expr_type_with_overrides(value, overrides);
+                unwrap_lifted_ir_type(&source_ty)
+                    .map(|(_, inner)| inner)
+                    .unwrap_or(ir::Type::Unknown)
+            }
             Expr::Unary {
                 op: ast::UnaryOp::Pure,
                 ..
@@ -4840,6 +4846,53 @@ impl<'a> FunctionLowerer<'a> {
             Expr::TypeOf { ty, .. } => {
                 ir_exact_runtime_type(lower_type_ref_with_aliases(ty, &self.type_aliases))
             }
+            Expr::Binary {
+                left, op, right, ..
+            } => {
+                let left = self.infer_expr_type_with_overrides(left, overrides);
+                let right = self.infer_expr_type_with_overrides(right, overrides);
+                match op {
+                    AstBinaryOp::Or
+                    | AstBinaryOp::And
+                    | AstBinaryOp::Less
+                    | AstBinaryOp::LessEq
+                    | AstBinaryOp::Greater
+                    | AstBinaryOp::GreaterEq
+                    | AstBinaryOp::Eq
+                    | AstBinaryOp::NotEq
+                    | AstBinaryOp::IdentityEq
+                    | AstBinaryOp::IdentityNotEq => ir::Type::Bool,
+                    AstBinaryOp::Add
+                        if matches!(&left, ir::Type::Str) || matches!(&right, ir::Type::Str) =>
+                    {
+                        ir::Type::Str
+                    }
+                    AstBinaryOp::Add
+                    | AstBinaryOp::Sub
+                    | AstBinaryOp::Mul
+                    | AstBinaryOp::Div
+                    | AstBinaryOp::Mod => join_ir_types(left, right),
+                    AstBinaryOp::Colon => ir::Type::Unknown,
+                }
+            }
+            Expr::Is { .. } => ir::Type::Bool,
+            Expr::If {
+                then_block,
+                else_branch,
+                ..
+            } => {
+                let then_ty = self.infer_block_type_with_overrides(then_block, overrides);
+                let else_ty = match else_branch.as_ref() {
+                    core::ElseExprBranch::If(expr) => {
+                        self.infer_expr_type_with_overrides(expr, overrides)
+                    }
+                    core::ElseExprBranch::Block(block) => {
+                        self.infer_block_type_with_overrides(block, overrides)
+                    }
+                };
+                join_ir_types(then_ty, else_ty)
+            }
+            Expr::Block { body, .. } => self.infer_block_type_with_overrides(body, overrides),
             Expr::Return { .. } | Expr::Break { .. } | Expr::Continue { .. } => ir::Type::Never,
             Expr::AnonymousInterface { interfaces, .. } => {
                 if interfaces.len() == 1 {
@@ -4851,17 +4904,29 @@ impl<'a> FunctionLowerer<'a> {
             Expr::AnonymousObject { span, .. } => {
                 ir::Type::named(crate::source::anonymous_object_type_name(*span))
             }
-            Expr::If { .. }
-            | Expr::Block { .. }
-            | Expr::Match { .. }
+            Expr::Match { .. }
             | Expr::ForYield { .. }
-            | Expr::Try { .. }
             | Expr::Unary { .. }
-            | Expr::Binary { .. }
-            | Expr::Is { .. }
             | Expr::Lambda { .. }
             | Expr::Placeholder { .. } => ir::Type::Unknown,
         }
+    }
+
+    fn infer_block_type_with_overrides(
+        &self,
+        block: &Block,
+        overrides: &[(String, ir::Type)],
+    ) -> ir::Type {
+        block
+            .statements
+            .last()
+            .and_then(|statement| match statement {
+                Stmt::Expr(expr) => {
+                    Some(self.infer_expr_type_with_overrides(&expr.expr, overrides))
+                }
+                _ => None,
+            })
+            .unwrap_or(ir::Type::Unknown)
     }
 
     fn infer_call_type(
@@ -4877,6 +4942,9 @@ impl<'a> FunctionLowerer<'a> {
         let normalized_args = self.normalize_trailing_brace_call_args(callee, args, style);
         if let Some(ty) = self.infer_builtin_case_call_type(callee, &normalized_args, overrides) {
             return ty;
+        }
+        if let Some(fields) = self.anonymous_shape_alias_fields(callee) {
+            return ir::Type::Record(fields);
         }
         if let Some(ty) = self.infer_constructor_call_type(callee) {
             return ty;
@@ -5567,11 +5635,52 @@ impl<'a> FunctionLowerer<'a> {
                 _ => None,
             });
         };
-        if matches!(type_name.as_str(), "Vector" | "LinkedList")
-            && matches!(name.as_str(), "fold" | "reduce")
-            && args.len() == 2
-        {
-            return Some(self.infer_expr_type_with_overrides(&args[0].value, overrides));
+        if matches!(
+            type_name.as_str(),
+            "Vector" | "LinkedList" | "Array" | "Set"
+        ) {
+            match (name.as_str(), args) {
+                ("filter" | "sort" | "take", [_]) => return Some(receiver_ty),
+                ("fold" | "reduce", [initial, _]) => {
+                    return Some(self.infer_expr_type_with_overrides(&initial.value, overrides));
+                }
+                ("map", [mapper]) => {
+                    let item = type_args.first().cloned().unwrap_or(ir::Type::Unknown);
+                    let expected = ir::Type::Function {
+                        params: vec![item],
+                        ret: Box::new(ir::Type::Unknown),
+                    };
+                    let mapped = self.infer_expr_type_against_with_overrides(
+                        &mapper.value,
+                        &expected,
+                        overrides,
+                    );
+                    let ir::Type::Function { ret, .. } = mapped else {
+                        return Some(ir::Type::Unknown);
+                    };
+                    return Some(ir::Type::Named {
+                        name: type_name.clone(),
+                        args: vec![*ret],
+                    });
+                }
+                ("flatMap", [mapper]) => {
+                    let item = type_args.first().cloned().unwrap_or(ir::Type::Unknown);
+                    let expected = ir::Type::Function {
+                        params: vec![item],
+                        ret: Box::new(ir::Type::Unknown),
+                    };
+                    let mapped = self.infer_expr_type_against_with_overrides(
+                        &mapper.value,
+                        &expected,
+                        overrides,
+                    );
+                    let ir::Type::Function { ret, .. } = mapped else {
+                        return Some(ir::Type::Unknown);
+                    };
+                    return Some(*ret);
+                }
+                _ => {}
+            }
         }
         let Some(ty) = self.program.types.iter().find(|ty| ty.name == *type_name) else {
             return builtin_member_type(&receiver_ty, name).and_then(|ty| match ty {
@@ -6011,6 +6120,25 @@ impl<'a> FunctionLowerer<'a> {
                         &args[0].value,
                     ));
                 }
+                if let Some(fields) = self.anonymous_shape_alias_fields(callee) {
+                    let ordered_args = self.reorder_call_args(callee, args);
+                    if ordered_args.len() != fields.len() {
+                        self.invariant(
+                            "anonymous shape alias constructor arity should be checked before lowering",
+                            *span,
+                        );
+                    }
+                    return Some(ir::RValue::Record(
+                        fields
+                            .into_iter()
+                            .zip(ordered_args)
+                            .map(|(field, arg)| ir::NamedOperand {
+                                name: field.name,
+                                value: self.lower_expr_with_expected(&arg.value, Some(&field.ty)),
+                            })
+                            .collect(),
+                    ));
+                }
                 let (candidate_callee, candidate_type_args) =
                     self.split_generic_call_callee(callee);
                 let candidate_normalized_args =
@@ -6304,6 +6432,20 @@ impl<'a> FunctionLowerer<'a> {
         ordered_args: &[core::CallArg],
         expected: Option<&ir::Type>,
     ) -> Option<Vec<Option<ExpectedArgSpec>>> {
+        if let Some(fields) = self.anonymous_shape_alias_fields(callee) {
+            return Some(
+                fields
+                    .into_iter()
+                    .map(|field| {
+                        Some(ExpectedArgSpec {
+                            ty: field.ty,
+                            lazy: false,
+                            variadic: false,
+                        })
+                    })
+                    .collect(),
+            );
+        }
         if let Some(fields) =
             expected.and_then(|expected| self.enum_case_expected_arg_types(callee, expected))
         {
@@ -6627,6 +6769,18 @@ impl<'a> FunctionLowerer<'a> {
                 })
                 .collect(),
         ))
+    }
+
+    fn anonymous_shape_alias_fields(&self, callee: &Expr) -> Option<Vec<ir::NamedType>> {
+        let path = expr_path(callee)?;
+        let [name] = path.as_slice() else {
+            return None;
+        };
+        let target = self.type_aliases.get(name)?;
+        match lower_type_ref_with_aliases(target, self.type_aliases) {
+            ir::Type::Record(fields) => Some(fields),
+            _ => None,
+        }
     }
 
     fn named_construct_fields(
@@ -7019,6 +7173,9 @@ impl<'a> FunctionLowerer<'a> {
                 let name = &path[0];
                 if let Some(id) = self.functions.get(name).copied() {
                     return self.function_param_names(id);
+                }
+                if let Some(fields) = self.anonymous_shape_alias_fields(callee) {
+                    return Some(fields.into_iter().map(|field| field.name).collect());
                 }
                 if let Some(type_def) = self.program.types.iter().find(|ty| {
                     ty.name == *name
@@ -9745,6 +9902,42 @@ mod tests {
     }
 
     #[test]
+    fn lowers_anonymous_shape_alias_constructor_as_record() {
+        let program = parse_inline(
+            r#"
+            type Session = shape {
+                start Int
+                end Int
+            }
+
+            def main() Int {
+                session Session = Session(10, 30)
+                return session.end - session.start
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let main = ir
+            .function(ir.entry.expect("entry function"))
+            .expect("main");
+        assert!(
+            main.blocks
+                .iter()
+                .flat_map(|block| &block.statements)
+                .any(|statement| matches!(
+                    &statement.kind,
+                    ir::StatementKind::Assign {
+                        value: ir::RValue::Record(fields),
+                        ..
+                    } if fields.iter().map(|field| field.name.as_str()).eq(["start", "end"])
+                ))
+        );
+    }
+
+    #[test]
     fn expands_transparent_aliases_throughout_lowered_ir() {
         let program = parse_inline(
             r#"
@@ -9808,14 +10001,12 @@ mod tests {
     }
 
     #[test]
-    fn lowers_enum_case_alias_as_case_view() {
+    fn lowers_union_variant_alias_as_variant_view() {
         let program = parse_inline(
             r#"
-            enum Payload {
-                case Item {
-                    value Int
-                }
-            }
+            type Payload =
+                class Item { value Int }
+                | object Empty {}
 
             def read(payload Payload) Int = match payload {
                 case Payload.Item(item) as whole => whole.value + item
@@ -10051,6 +10242,45 @@ mod tests {
                 args: vec![ir::Type::Unit, ir::Type::named("Str")],
             }
         );
+    }
+
+    #[test]
+    fn infers_builtin_vector_pipeline_result_types() {
+        let program = parse_inline(
+            r#"
+            class Entry {
+                value Int
+            }
+
+            def main(entries Vector[Entry]) Unit {
+                selected = entries.filter { entry => entry.value > 0 }
+                total = selected.fold(0, (sum, entry) => sum + entry.value)
+                labels = selected.map { entry => entry.value.toStr() }
+                first = labels.take(1)
+                println(total, first)
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
+        let local_type = |name: &str| {
+            main.locals
+                .iter()
+                .find(|local| local.name == name)
+                .map(|local| local.ty.clone())
+                .expect("pipeline local")
+        };
+
+        assert_eq!(
+            local_type("selected"),
+            ir::Type::list(ir::Type::named("Entry"))
+        );
+        assert_eq!(local_type("total"), ir::Type::Int);
+        assert_eq!(local_type("labels"), ir::Type::list(ir::Type::Str));
+        assert_eq!(local_type("first"), ir::Type::list(ir::Type::Str));
     }
 
     #[test]

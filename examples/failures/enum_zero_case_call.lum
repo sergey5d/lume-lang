@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*enum case 'None' does not accept call syntax; use 'None'.*
+# .*union variant 'None' does not accept call syntax; use 'None'.*
 
 def main() Unit {
     value Int? = None()
