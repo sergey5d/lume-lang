@@ -839,6 +839,7 @@ pub struct CallArg {
 pub enum UnaryOp {
     Neg,
     Not,
+    Pure,
     UnsafeExtract,
 }
 

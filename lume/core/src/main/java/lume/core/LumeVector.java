@@ -3,6 +3,8 @@ package lume.core;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 public final class LumeVector<T> {
     private final ArrayList<T> values;
@@ -90,6 +92,42 @@ public final class LumeVector<T> {
     public LumeVector<T> add(T value) {
         values.add(value);
         return this;
+    }
+
+    public <X> LumeVector<X> map(Function<? super T, ? extends X> mapper) {
+        var result = LumeVector.<X>empty();
+        for (var value : values) {
+            result.add(mapper.apply(value));
+        }
+        return result;
+    }
+
+    public LumeVector<T> filter(Function<? super T, Boolean> predicate) {
+        var result = LumeVector.<T>empty();
+        for (var value : values) {
+            if (Boolean.TRUE.equals(predicate.apply(value))) {
+                result.add(value);
+            }
+        }
+        return result;
+    }
+
+    public <X> X fold(X initial, BiFunction<X, T, X> reducer) {
+        var result = initial;
+        for (var value : values) {
+            result = reducer.apply(result, value);
+        }
+        return result;
+    }
+
+    public LumeVector<T> sort(BiFunction<T, T, Long> compare) {
+        values.sort((left, right) -> Long.compare(compare.apply(left, right), 0));
+        return this;
+    }
+
+    public LumeVector<T> take(long count) {
+        var end = Math.min(Math.max(count, 0), values.size());
+        return new LumeVector<>(new ArrayList<>(values.subList(0, Math.toIntExact(end))));
     }
 
     public void set(long index, T value) {

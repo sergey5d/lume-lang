@@ -7,16 +7,13 @@ interface WorkerLike {
 }
 
 class Worker with WorkerLike {
-
     def doWork() Int = 7
 }
 
 
 class Other with WorkerLike {
-
     def doWork() Int = 3
 }
-
 
 class PairBox {
     left Int

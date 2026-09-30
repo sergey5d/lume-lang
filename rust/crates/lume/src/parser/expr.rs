@@ -222,6 +222,17 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_for_yield_expr_after_start(&mut self, start: Span) -> Option<Expr> {
+        if self.parenthesized_for_generator_header() {
+            self.error_at_current(
+                "parenthesized_for_generator",
+                "for generator headers cannot be parenthesized; write 'for item <- items yield { ... }' without parentheses",
+            );
+            self.discard_parenthesized_for_generator_header();
+            if self.match_keyword(Keyword::Yield) && self.at(TokenKind::LBrace) {
+                self.parse_yield_body_block()?;
+            }
+            return None;
+        }
         let bindings = if self.at(TokenKind::LBrace) {
             self.consume(TokenKind::LBrace, "expected '{' after 'for'")?;
             self.parse_for_binding_block()?
@@ -504,6 +515,19 @@ impl<'a> Parser<'a> {
                         ty: None,
                         span: name_span.cover(value.span()),
                         value,
+                    }
+                } else if self.at(TokenKind::Comma)
+                    || self.at(TokenKind::Newline)
+                    || self.at(TokenKind::RBrace)
+                {
+                    RecordEntry::Field {
+                        value: Expr::Identifier {
+                            name: name.clone(),
+                            span: name_span,
+                        },
+                        name,
+                        ty: None,
+                        span: name_span,
                     }
                 } else if self.can_start_type_ref() {
                     let ty = self.parse_type_ref();
@@ -1150,6 +1174,17 @@ impl<'a> Parser<'a> {
                 "lift operator was removed; use explicit try/let extraction and construct the value directly",
             );
             return None;
+        }
+        if self.match_token(TokenKind::Caret) {
+            let start = self.previous_span();
+            self.skip_newlines();
+            let expr = self.parse_unary_expr()?;
+            let span = start.cover(expr.span());
+            return Some(Expr::Unary {
+                op: UnaryOp::Pure,
+                expr: Box::new(expr),
+                span,
+            });
         }
         if self.match_token(TokenKind::Bang) {
             let start = self.previous_span();

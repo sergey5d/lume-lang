@@ -1,0 +1,12 @@
+# EXPECT:
+# -1
+# 0
+# 1
+# -1
+
+def main() Unit {
+    println("alice".compare("bob"))
+    println("alice".compare("alice"))
+    println("bob".compare("alice"))
+    println("alice".compare("alice2"))
+}

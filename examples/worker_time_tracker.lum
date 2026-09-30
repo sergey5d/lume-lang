@@ -1,0 +1,73 @@
+# EXPECT:
+# add true false
+# register true true
+# total 20
+# top Bob Ada
+
+module worker_time_tracker
+
+class WorkerInfo {
+    workerId Str
+    position Str
+    compensation Int
+    completed [Int]
+    var open Int?
+
+    def total() Int = completed.fold(0, (total, duration) => total + duration)
+}
+
+class WorkerTimeTracker {
+    hidden workers [Str: WorkerInfo] = []
+
+    def addWorker(workerId Str, position Str, compensation Int) Bool {
+        if workers.contains(workerId) {
+            return false
+        }
+
+        workers[workerId] := WorkerInfo(workerId, position, compensation, [], None)
+        true
+    }
+
+    def register(workerId Str, timestamp Int) Bool {
+        let worker <- workers[workerId] else return false
+
+        if worker.open is None {
+            worker.open := Some(timestamp)
+        } else {
+            worker.completed.add(timestamp - worker.open!)
+            worker.open := None
+        }
+        true
+    }
+
+    def get(workerId Str) Int? {
+        worker = try workers[workerId]
+        Some(worker.total())
+    }
+
+    def topWorkers(count Int, position Str) [Str] {
+        eligible = workers.values().filter(worker => worker.position == position)
+        totals [Str: Int] = []
+
+        for worker <- eligible {
+            totals[worker.workerId] := worker.total()
+        }
+
+        eligible.sort((left, right) => totals[right.workerId]! - totals[left.workerId]!)
+        eligible.take(count).map(worker => worker.workerId)
+    }
+}
+
+def main() Unit {
+    tracker = WorkerTimeTracker()
+    println("add", tracker.addWorker("Ada", "engineer", 100), tracker.addWorker("Ada", "engineer", 100))
+    tracker.addWorker("Bob", "engineer", 120)
+
+    println("register", tracker.register("Ada", 10), tracker.register("Ada", 30))
+    tracker.register("Bob", 5)
+    tracker.register("Bob", 35)
+
+    println("total", tracker.get("Ada").getOr(0))
+    top = tracker.topWorkers(2, "engineer")
+    println("top", top.at(0).getOr(""), top.at(1).getOr(""))
+}

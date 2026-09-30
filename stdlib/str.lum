@@ -4,6 +4,7 @@
 
 interface Str {
     def size() Int
+    def compare(other Str) Int
     def runeAt(index Int) Option[Rune]
     def expectRuneAt(index Int) Rune
     def split(separator Str) Array[Str]

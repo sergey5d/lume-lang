@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*for generator headers cannot be parenthesized; write 'for item <- items yield \{ \.\.\. \}' without parentheses.*
+
+def increment(items [Int]) [Int] = for (item <- items) yield {
+    item + 1
+}
+
+def main() Unit {}

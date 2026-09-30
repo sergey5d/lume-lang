@@ -68,6 +68,7 @@ pub enum TokenKind {
     Star,
     Slash,
     Percent,
+    Caret,
     Eq,
     Bang,
     Less,
@@ -419,6 +420,7 @@ impl<'a> Lexer<'a> {
             '/' => Some(TokenKind::Slash),
             '%' if self.take('=') => Some(TokenKind::PercentEq),
             '%' => Some(TokenKind::Percent),
+            '^' => Some(TokenKind::Caret),
             '?' if self.take('?') => Some(TokenKind::QuestionQuestion),
             '?' => Some(TokenKind::Question),
             '=' if self.take('>') => Some(TokenKind::FatArrow),
@@ -737,6 +739,18 @@ mod tests {
             2,
             "{:#?}",
             result.tokens
+        );
+    }
+
+    #[test]
+    fn lexes_contextual_pure_operator() {
+        let result = lex(&source("value Option[Int] = ^5\n"));
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert!(
+            result
+                .tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Caret)
         );
     }
 

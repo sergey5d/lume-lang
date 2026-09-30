@@ -277,6 +277,10 @@
           "match": "!(?!=)"
         },
         {
+          "name": "keyword.operator.pure.lume",
+          "match": "\\^"
+        },
+        {
           "name": "keyword.operator.spread.lume",
           "match": "\\.\\.\\."
         },

@@ -19,12 +19,12 @@ def main() Unit {
 
     result Result[Int, Str] = Ok(7)
     either Either[Str, Int] = Right(9)
-    println(result !)
-    println(either !)
+    println(result!)
+    println(either!)
 
     values LinkedList[Int] = LinkedList {}
     values.add(13)
-    println(values.at(0) !)
+    println(values.at(0)!)
 
     maybeReady Bool? = Some(false)
     println(!maybeReady!)

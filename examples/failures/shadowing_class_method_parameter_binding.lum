@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*binding 'value' shadows a class method parameter; use a different name.*
+# .*binding 'value' shadows a method parameter; use a different name.*
 
 class Box {
     value Int

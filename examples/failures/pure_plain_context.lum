@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*pure operator '\^' requires an expected Option, Result, or Either type, got 'Int'.*
+
+def value() Int = ^5

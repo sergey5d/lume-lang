@@ -715,6 +715,50 @@ def run(rows Vector[(Int, Int)]) Unit {
 }
 
 #[test]
+fn rejects_parenthesized_for_generator_header_with_specific_diagnostic() {
+    let result = parse(
+        r#"
+def run(items [Int]) Unit {
+    for (item <- items) {
+        println(item)
+    }
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "parenthesized_for_generator"
+                && diag
+                    .message
+                    .contains("for generator headers cannot be parenthesized")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_parenthesized_for_yield_generator_header_with_specific_diagnostic() {
+    let result = parse(
+        r#"
+def run(items [Int]) [Int] = for (item <- items) yield {
+    item + 1
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.code == "parenthesized_for_generator"
+                && diag
+                    .message
+                    .contains("for generator headers cannot be parenthesized")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_for_yield_with_irrefutable_let_clauses() {
     let result = parse(
         r#"
@@ -1610,6 +1654,24 @@ fn parses_shape_literal_forms() {
         other => panic!("expected explicit anonymous shape literal, got {other:#?}"),
     }
 
+    match parse_expr_only("shape { name, age }") {
+        Expr::RecordLiteral { fields, values, .. } => {
+            assert!(values.is_empty());
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name.as_deref(), Some("name"));
+            assert!(matches!(
+                &fields[0].value,
+                Expr::Identifier { name, .. } if name == "name"
+            ));
+            assert_eq!(fields[1].name.as_deref(), Some("age"));
+            assert!(matches!(
+                &fields[1].value,
+                Expr::Identifier { name, .. } if name == "age"
+            ));
+        }
+        other => panic!("expected field-punned anonymous shape literal, got {other:#?}"),
+    }
+
     match parse_expr_only("shape {}") {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(fields.is_empty());
@@ -1708,6 +1770,33 @@ fn parses_shape_literal_forms() {
             }
         }
         other => panic!("expected call, got {other:#?}"),
+    }
+
+    match parse_expr_only("Person { name, age, city: home }") {
+        Expr::Call {
+            args,
+            uses_brace_syntax,
+            ..
+        } => {
+            assert!(uses_brace_syntax);
+            let Expr::RecordLiteral { fields, values, .. } = &args[0].value else {
+                panic!("expected shape literal call argument");
+            };
+            assert!(values.is_empty());
+            assert_eq!(fields.len(), 3);
+            assert_eq!(fields[0].name.as_deref(), Some("name"));
+            assert_eq!(fields[1].name.as_deref(), Some("age"));
+            assert_eq!(fields[2].name.as_deref(), Some("city"));
+            assert!(matches!(
+                &fields[0].value,
+                Expr::Identifier { name, .. } if name == "name"
+            ));
+            assert!(matches!(
+                &fields[1].value,
+                Expr::Identifier { name, .. } if name == "age"
+            ));
+        }
+        other => panic!("expected field-punned constructor call, got {other:#?}"),
     }
 
     let file = SourceFile::new("test.lum", r#"Map { "a": 1 }"#);
@@ -3620,6 +3709,43 @@ def nested(value Option[Option[Int]]) Int = value!!
 }
 
 #[test]
+fn parses_contextual_pure_as_a_prefix_operator() {
+    let result = parse(
+        r#"
+def optionValue() Option[Int] = ^5
+def nestedValue() Option[Option[Int]] = ^^5
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+    let pure = parse_expr_only("^5");
+    assert!(matches!(
+        pure,
+        Expr::Unary {
+            op: UnaryOp::Pure,
+            expr,
+            ..
+        } if matches!(expr.as_ref(), Expr::Integer { raw, .. } if raw == "5")
+    ));
+
+    let nested = parse_expr_only("^^5");
+    assert!(matches!(
+        nested,
+        Expr::Unary {
+            op: UnaryOp::Pure,
+            expr,
+            ..
+        } if matches!(
+            expr.as_ref(),
+            Expr::Unary {
+                op: UnaryOp::Pure,
+                ..
+            }
+        )
+    ));
+}
+
+#[test]
 fn parses_single_statement_match_case_body_without_braces() {
     let result = parse(
         r#"
@@ -5163,6 +5289,91 @@ type Companion = Pet
             ..
         }) if name == "Pet"
     ));
+}
+
+#[test]
+fn parses_shape_prefixed_type_expressions_and_named_shape_long_form() {
+    let result = parse(
+        r#"
+type Session = shape {
+    position Str
+    start Int
+    end Int
+}
+
+def project(value shape { position Str, start Int }) shape { position Str } =
+    shape { position: value.position }
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    assert!(matches!(
+        &program.items[0],
+        Item::Type(TypeDecl {
+            kind: TypeKind::Record,
+            name,
+            ..
+        }) if name == "Session"
+    ));
+    let Item::Function(project) = &program.items[1] else {
+        panic!("expected project function");
+    };
+    assert!(matches!(
+        project.params[0].ty,
+        Some(TypeRef::Record { ref fields, .. }) if fields.len() == 2
+    ));
+    assert!(matches!(
+        project.return_type,
+        Some(TypeRef::Record { ref fields, .. }) if fields.len() == 1
+    ));
+}
+
+#[test]
+fn parses_long_form_type_declarations_for_all_supported_kinds() {
+    let result = parse(
+        r#"
+type A = class {
+    value Int
+}
+
+type B = shape {
+    value Int
+}
+
+type C = interface {
+    def value() Int
+}
+
+type D = annotation {
+    value Str
+}
+
+type E = object {
+    value Int = 5
+    def get() Int = this.value
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let expected = [
+        ("A", TypeKind::Class),
+        ("B", TypeKind::Record),
+        ("C", TypeKind::Interface),
+        ("D", TypeKind::Annotation),
+        ("E", TypeKind::Object),
+    ];
+    assert_eq!(program.items.len(), expected.len());
+    for (item, (expected_name, expected_kind)) in program.items.iter().zip(expected) {
+        assert!(
+            matches!(
+                item,
+                Item::Type(TypeDecl { name, kind, .. })
+                    if name == expected_name && *kind == expected_kind
+            ),
+            "expected {expected_name} to be {expected_kind:?}, got {item:?}"
+        );
+    }
 }
 
 #[test]

@@ -42,6 +42,7 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(9, "forEach", vec![function_unknown()], list_for_each),
             builtin_method(10, "forAll", vec![function_unknown()], list_for_all),
             builtin_method(11, "sort", vec![ir::Type::Unknown], list_sort),
+            builtin_method(40, "take", vec![ir::Type::Int], list_take),
             builtin_method(12, "zip", vec![ir::Type::Unknown], list_zip),
             builtin_method(13, "zipWithIndex", Vec::new(), list_zip_with_index),
             builtin_method(14, "size", Vec::new(), list_size),
@@ -318,7 +319,7 @@ fn list_sort(
     args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let [ordering] = args.as_slice() else {
+    let [ordering_or_compare] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Vector.sort expects 1 argument"));
     };
     let items = list_items(&receiver);
@@ -329,19 +330,39 @@ fn list_sort(
     let len = values.len();
     for i in 0..len {
         for j in (i + 1)..len {
-            let cmp = interpreter.invoke_method(
-                ordering.clone(),
-                "compare",
-                vec![values[i].clone(), values[j].clone()],
-                span,
-            )?;
-            if cmp.as_int(interpreter, span, "Ordering.compare result")? > 0 {
+            let compare_args = vec![values[i].clone(), values[j].clone()];
+            let cmp = if matches!(ordering_or_compare, Value::Closure(_)) {
+                interpreter.invoke_value(ordering_or_compare.clone(), compare_args, span)?
+            } else {
+                interpreter.invoke_method(
+                    ordering_or_compare.clone(),
+                    "compare",
+                    compare_args,
+                    span,
+                )?
+            };
+            if cmp.as_int(interpreter, span, "Vector.sort comparison result")? > 0 {
                 values.swap(i, j);
             }
         }
     }
     *items.borrow_mut() = values;
     Ok(receiver)
+}
+
+fn list_take(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let [count] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Vector.take expects 1 argument"));
+    };
+    let count = count.as_int(interpreter, span, "Vector.take count")?;
+    let values = list_values(interpreter, &receiver, span, "Vector.take")?;
+    let end = usize::try_from(count).unwrap_or(0).min(values.len());
+    Ok(Value::list(values[..end].to_vec()))
 }
 
 fn list_zip(

@@ -16,7 +16,6 @@ class Worker with Named {
     def label() Str = this.name
 }
 
-
 class Amount {
     count Int
     label Str

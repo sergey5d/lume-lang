@@ -2,6 +2,7 @@ package lume.core;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 
 public final class LumeMap<K, V> {
     private final LinkedHashMap<K, V> values;
@@ -49,11 +50,22 @@ public final class LumeMap<K, V> {
         values.put(key, value);
     }
 
+    public void update(K key, UnaryOperator<V> operation) {
+        if (!values.containsKey(key)) {
+            throw new LumePanic("map compound assignment requires an existing key");
+        }
+        values.put(key, operation.apply(values.get(key)));
+    }
+
     public Option<V> get(K key) {
         if (!values.containsKey(key)) {
             return LumeRuntime.optionNone();
         }
         return LumeRuntime.optionSome(values.get(key));
+    }
+
+    public boolean contains(K key) {
+        return values.containsKey(key);
     }
 
     public long size() {
@@ -70,6 +82,10 @@ public final class LumeMap<K, V> {
             entries.add(new Tuple2<>(entry.getKey(), entry.getValue()));
         }
         return entries;
+    }
+
+    public LumeVector<V> values() {
+        return LumeVector.from(values.values());
     }
 
     public Map<K, V> asJava() {

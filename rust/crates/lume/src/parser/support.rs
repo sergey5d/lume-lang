@@ -138,6 +138,7 @@ impl<'a> Parser<'a> {
             TokenKind::Star => "*",
             TokenKind::Slash => "/",
             TokenKind::Percent => "%",
+            TokenKind::Caret => "^",
             _ => {
                 self.error_at_current("expected_identifier", message);
                 return None;
@@ -285,6 +286,49 @@ impl<'a> Parser<'a> {
             return false;
         }
         matches!(parser.current_kind(), TokenKind::Eq | TokenKind::LeftArrow)
+    }
+
+    pub(super) fn parenthesized_for_generator_header(&self) -> bool {
+        if !self.at(TokenKind::LParen) {
+            return false;
+        }
+
+        let mut depth = 0usize;
+        let mut contains_generator_arrow = false;
+        for token in &self.tokens[self.index..] {
+            match token.kind {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return contains_generator_arrow;
+                    }
+                }
+                TokenKind::LeftArrow if depth > 0 => contains_generator_arrow = true,
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    pub(super) fn discard_parenthesized_for_generator_header(&mut self) {
+        let mut depth = 0usize;
+        while !self.at(TokenKind::Eof) {
+            match self.current_kind() {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen => {
+                    depth = depth.saturating_sub(1);
+                    self.advance();
+                    if depth == 0 {
+                        return;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            self.advance();
+        }
     }
 
     pub(super) fn scan_if_condition_expr_end(&self, start: usize) -> usize {

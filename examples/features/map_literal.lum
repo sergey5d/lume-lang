@@ -21,7 +21,7 @@ shape PersonKey {
 def main() Int {
     dynamicKey = "dynamic"
 
-    builtIn [Str : Int] = [
+    builtIn [Str: Int] = [
         "one": 1,
         "two": 2,
         dynamicKey: 3,
@@ -41,7 +41,7 @@ def main() Int {
     let Some(shapeValue) = personMap[PersonKey("Ada", 1)] else return 1
     println("shape key", shapeValue)
 
-    empty [Str : Int] = []
+    empty [Str: Int] = []
     println("empty", empty.size())
     empty["ready"] := 5
     let Some(emptyValue) = empty["ready"] else return 1
@@ -52,10 +52,10 @@ def main() Int {
     spreadVector = [0, ...first, ...second, 5]
     println("vector spread", spreadVector.size())
 
-    defaults [Str : Int] = ["one": 1, "shared": 2]
-    overrides [Str : Int] = ["shared": 20, "three": 3]
-    copied [Str : Int] = [...defaults]
-    merged [Str : Int] = [...copied, "two": 2, ...overrides]
+    defaults [Str: Int] = ["one": 1, "shared": 2]
+    overrides [Str: Int] = ["shared": 20, "three": 3]
+    copied [Str: Int] = [...defaults]
+    merged [Str: Int] = [...copied, "two": 2, ...overrides]
     let Some(shared) = merged["shared"] else return 1
     println("map spread shared", shared)
     println("map spread size", merged.size())

@@ -59,17 +59,11 @@ pub fn run_program_entry(program: &ir::Program, requested_entry: Option<&str>) -
 
 pub fn run_program_specs(program: &ir::Program) -> RunResult {
     let mut interpreter = Interpreter::new(program);
-    match interpreter.run_specs() {
-        Ok(()) => RunResult {
-            diagnostics: Vec::new(),
-            output: interpreter.output,
-            return_value: None,
-        },
-        Err(diagnostic) => RunResult {
-            diagnostics: vec![diagnostic],
-            output: interpreter.output,
-            return_value: None,
-        },
+    let diagnostics = interpreter.run_specs();
+    RunResult {
+        diagnostics,
+        output: interpreter.output,
+        return_value: None,
     }
 }
 
@@ -1191,40 +1185,64 @@ impl<'a> Interpreter<'a> {
         Ok((!matches!(value, Value::Unit)).then_some(value))
     }
 
-    fn run_specs(&mut self) -> Result<(), Diagnostic> {
-        self.ensure_globals()?;
+    fn run_specs(&mut self) -> Vec<Diagnostic> {
+        if let Err(diagnostic) = self.ensure_globals() {
+            return vec![diagnostic];
+        }
         if self
             .lookup_type_by_kind("Spec", ast::TypeKind::Interface)
             .is_none()
         {
-            return Err(self.runtime_error(
+            return vec![self.runtime_error(
                 None,
                 "test runner requires interface 'Spec'; import 'spec/*' or declare Spec",
-            ));
+            )];
         }
 
         let specs = self.discover_specs();
         if specs.is_empty() {
-            return Err(self.runtime_error(
+            return vec![self.runtime_error(
                 None,
                 "no specs found; define a class or object that implements Spec",
-            ));
+            )];
         }
 
+        let mut passed = 0usize;
+        let mut diagnostics = Vec::new();
         for spec in specs {
+            match self.run_spec(&spec) {
+                Ok(()) => {
+                    passed += 1;
+                    self.output.push_str("PASS ");
+                }
+                Err(diagnostic) => {
+                    diagnostics.push(diagnostic);
+                    self.output.push_str("FAIL ");
+                }
+            }
             self.output.push_str(&spec.name);
             self.output.push('\n');
-            let receiver = self.instantiate_spec_receiver(&spec)?;
-            let Some(method) = self.find_method_overload_for_kind(&spec.name, spec.kind, "it", &[])
-            else {
-                return Err(self.runtime_error(
-                    spec.span,
-                    format!("spec '{}' does not provide it()", spec.name),
-                ));
-            };
-            let _ = self.call_function(method, Some(receiver), None, Vec::new(), spec.span)?;
         }
+        self.output.push('\n');
+        self.output.push_str(&format!(
+            "{} passed, {} failed\n",
+            passed,
+            diagnostics.len()
+        ));
 
+        diagnostics
+    }
+
+    fn run_spec(&mut self, spec: &SpecCandidate) -> Result<(), Diagnostic> {
+        let receiver = self.instantiate_spec_receiver(spec)?;
+        let Some(method) = self.find_method_overload_for_kind(&spec.name, spec.kind, "it", &[])
+        else {
+            return Err(self.runtime_error(
+                spec.span,
+                format!("spec '{}' does not provide it()", spec.name),
+            ));
+        };
+        let _ = self.call_function(method, Some(receiver), None, Vec::new(), spec.span)?;
         Ok(())
     }
 
@@ -2703,6 +2721,23 @@ impl<'a> Interpreter<'a> {
             ir::Place::Index { base, index } => {
                 let base = self.eval_operand_ref(frame, base, span)?;
                 let index = self.eval_operand_ref(frame, index, span)?;
+                if let Value::Map(entries) = &base {
+                    self.ensure_observable_value(&index, span, "map lookup key")?;
+                    let current = entries
+                        .borrow()
+                        .iter()
+                        .find(|(key, _)| values_equal(key, &index))
+                        .map(|(_, value)| value.clone());
+                    return current.ok_or_else(|| {
+                        self.runtime_error(
+                            span,
+                            format!(
+                                "map compound assignment requires existing key {}",
+                                index.render()
+                            ),
+                        )
+                    });
+                }
                 self.index_value(base, index, span)
             }
         }
@@ -5029,6 +5064,17 @@ impl<'a> Interpreter<'a> {
             ir::Type::Int => matches!(value, Value::Int(_)),
             ir::Type::Float => matches!(value, Value::Float(_)),
             ir::Type::Str => matches!(value, Value::String(_)),
+            ir::Type::Named { name, .. } if name.contains("::") => {
+                let Some((owner, case_name)) = name.split_once("::") else {
+                    return false;
+                };
+                matches!(
+                    value,
+                    Value::Aggregate(aggregate)
+                        if aggregate.borrow().type_name == owner
+                            && aggregate.borrow().case_name.as_deref() == Some(case_name)
+                )
+            }
             ir::Type::Named { name, .. } => match value {
                 Value::List(_) => name == "Vector" || name == "LinkedList" || name == "Array",
                 Value::Set(_) => name == "Set",
@@ -6825,7 +6871,10 @@ mod tests {
 
                 pairs = ["a": 1]
                 pairs.put("b", 2)
+                pairs["a"] += 6
+                pairs["a"] -= 2
                 OS.println(pairs.size())
+                OS.println(pairs["a"]!)
 
                 left Vec = Vec(5, 6)
                 OS.println((left + Vec(1, 2))[1])
@@ -6844,7 +6893,7 @@ mod tests {
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "5\n3\n2\n8\n-5\n0 0.0 false  true\n");
+        assert_eq!(run.output, "5\n3\n2\n5\n8\n-5\n0 0.0 false  true\n");
         assert_eq!(run.return_value, None);
     }
 
@@ -8262,6 +8311,41 @@ $name
         let path = repo_root().join("examples/unit_tests.lum");
         let run = test_path(path).expect("run unit tests");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "PrimitiveSpec\nAnotherSpec\n");
+        assert_eq!(
+            run.output,
+            "PASS PrimitiveSpec\nPASS AnotherSpec\n\n2 passed, 0 failed\n"
+        );
+    }
+
+    #[test]
+    fn spec_runner_reports_failures_and_continues() {
+        let program = lower_inline(
+            r#"
+interface Spec {
+    def it()
+}
+
+class PassingSpec with Spec {
+    def it() Unit {}
+}
+
+class FailingSpec with Spec {
+    def it() Unit {
+        panic("expected failure")
+    }
+}
+
+class LaterSpec with Spec {
+    def it() Unit {}
+}
+"#,
+        );
+        let run = run_program_specs(&program);
+        assert_eq!(run.diagnostics.len(), 1);
+        assert!(run.diagnostics[0].message.contains("expected failure"));
+        assert_eq!(
+            run.output,
+            "PASS PassingSpec\nFAIL FailingSpec\nPASS LaterSpec\n\n2 passed, 1 failed\n"
+        );
     }
 }

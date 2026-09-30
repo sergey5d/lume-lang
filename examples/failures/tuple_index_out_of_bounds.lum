@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*tuple index 2 is out of bounds for tuple with 2 elements.*
+
+def main() Unit {
+    pair (Int, Str) = (1, "one")
+    println(pair[2])
+}

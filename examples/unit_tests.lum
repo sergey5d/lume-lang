@@ -1,6 +1,8 @@
 # TEST_EXPECT:
-# PrimitiveSpec
-# AnotherSpec
+# PASS PrimitiveSpec
+# PASS AnotherSpec
+#
+# 2 passed, 0 failed
 
 use spec/*
 

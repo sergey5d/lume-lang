@@ -214,6 +214,52 @@ impl<'a> Parser<'a> {
         let generic_clause = self.parse_generic_clause()?;
         self.consume(TokenKind::Eq, "expected '=' after type alias name")?;
         self.skip_newlines();
+        let inline_type_decl_kind = match self.current_kind() {
+            TokenKind::Keyword(Keyword::Annotation) => Some(TypeKind::Annotation),
+            TokenKind::Keyword(Keyword::Class) => Some(TypeKind::Class),
+            TokenKind::Keyword(Keyword::Shape) => Some(TypeKind::Record),
+            TokenKind::Keyword(Keyword::Object) => Some(TypeKind::Object),
+            TokenKind::Keyword(Keyword::Interface) => Some(TypeKind::Interface),
+            _ => None,
+        };
+        let inline_type_decl_kind = inline_type_decl_kind.filter(|_| {
+            let mut lookahead = self.index + 1;
+            while self
+                .tokens
+                .get(lookahead)
+                .is_some_and(|token| token.kind == TokenKind::Newline)
+            {
+                lookahead += 1;
+            }
+            matches!(
+                self.tokens.get(lookahead).map(|token| token.kind),
+                Some(TokenKind::LBrace) | Some(TokenKind::Keyword(Keyword::With))
+            )
+        });
+        if let Some(kind) = inline_type_decl_kind {
+            self.advance();
+            let with_bounds = if self.match_keyword(Keyword::With) {
+                self.parse_interface_ref_list_after_with()?
+            } else {
+                Vec::new()
+            };
+            self.skip_newlines();
+            self.consume(
+                TokenKind::LBrace,
+                "expected '{' after type declaration kind",
+            )?;
+            return self
+                .finish_type_decl_body(
+                    Vec::new(),
+                    visibility,
+                    kind,
+                    name,
+                    generic_clause,
+                    with_bounds,
+                    start,
+                )
+                .map(Item::Type);
+        }
         if matches!(
             self.current_kind(),
             TokenKind::Keyword(Keyword::Class)
@@ -500,6 +546,27 @@ impl<'a> Parser<'a> {
         };
         self.skip_newlines();
         self.consume(TokenKind::LBrace, "expected '{' after type declaration")?;
+        self.finish_type_decl_body(
+            annotations,
+            visibility,
+            kind,
+            name,
+            generic_clause,
+            with_bounds,
+            start,
+        )
+    }
+
+    fn finish_type_decl_body(
+        &mut self,
+        annotations: Vec<Annotation>,
+        visibility: Visibility,
+        kind: TypeKind,
+        name: String,
+        generic_clause: ParsedGenericClause,
+        with_bounds: Vec<TypeRef>,
+        start: Span,
+    ) -> Option<TypeDecl> {
         self.skip_newlines();
 
         let mut members = Vec::new();

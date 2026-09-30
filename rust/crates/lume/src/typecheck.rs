@@ -4405,6 +4405,40 @@ impl<'a> Checker<'a> {
             } => {
                 let receiver_ty = self.check_expr(receiver);
                 let index_ty = self.check_expr(index);
+                if let Ty::Tuple(items) = &receiver_ty {
+                    let Some(index_value) = static_integer_literal(index) else {
+                        self.add_error(
+                            "tuple_index_must_be_literal",
+                            "tuple index must be a compile-time integer literal",
+                            index.span(),
+                        );
+                        return Ty::Unknown;
+                    };
+                    let Ok(index_value) = usize::try_from(index_value) else {
+                        self.add_error(
+                            "tuple_index_out_of_bounds",
+                            format!(
+                                "tuple index {} is out of bounds for tuple with {} elements",
+                                index_value,
+                                items.len()
+                            ),
+                            index.span(),
+                        );
+                        return Ty::Unknown;
+                    };
+                    return items.get(index_value).cloned().unwrap_or_else(|| {
+                        self.add_error(
+                            "tuple_index_out_of_bounds",
+                            format!(
+                                "tuple index {} is out of bounds for tuple with {} elements",
+                                index_value,
+                                items.len()
+                            ),
+                            index.span(),
+                        );
+                        Ty::Unknown
+                    });
+                }
                 if matches!(&receiver_ty, Ty::Named(name, args) if name == "LinkedList" && args.len() == 1)
                 {
                     self.add_error(
@@ -4633,6 +4667,11 @@ impl<'a> Checker<'a> {
             Expr::Return { value, span } => self.check_return_control_expr(value.as_deref(), *span),
             Expr::Break { span } => self.check_break_control_expr(*span),
             Expr::Continue { span } => self.check_continue_control_expr(*span),
+            Expr::Unary {
+                op: crate::ast::UnaryOp::Pure,
+                expr,
+                span,
+            } => self.check_pure_expr(expr, expected, *span),
             Expr::Unary { op, expr, span } => {
                 let inner = self.check_expr(expr);
                 match op {
@@ -4660,6 +4699,7 @@ impl<'a> Checker<'a> {
                         self.require_bool(&inner, *span, "unary '!' expects Bool");
                         Ty::bool()
                     }
+                    crate::ast::UnaryOp::Pure => unreachable!(),
                     crate::ast::UnaryOp::UnsafeExtract => {
                         let extracted = self.unwrap_inner_type(&inner);
                         if matches!(extracted, Ty::Unknown) && !matches!(inner, Ty::Unknown) {
@@ -4703,7 +4743,14 @@ impl<'a> Checker<'a> {
             }
             Expr::Is { left, target, .. } => {
                 self.check_expr(left);
-                let target_ty = self.ty_from_type_ref(target);
+                let target_ty = match target {
+                    TypeRef::Named { name, args, .. } if args.is_empty() => self
+                        .world
+                        .lookup_enum_case(self.module, name)
+                        .map(|case| case.result)
+                        .unwrap_or_else(|| self.ty_from_type_ref(target)),
+                    _ => self.ty_from_type_ref(target),
+                };
                 self.validate_runtime_type_ref(target, &target_ty, "type tests");
                 Ty::bool()
             }
@@ -8086,6 +8133,49 @@ impl<'a> Checker<'a> {
             Ty::Named(name, args) if name == "Either" && args.len() == 2 => args[1].clone(),
             _ => Ty::Unknown,
         }
+    }
+
+    fn check_pure_expr(&mut self, value: &Expr, expected: &Ty, span: crate::source::Span) -> Ty {
+        let success = match expected {
+            Ty::Named(name, args) if name == "Option" && args.len() == 1 => args.first().cloned(),
+            Ty::Named(name, args) if name == "Result" && args.len() == 2 => args.first().cloned(),
+            Ty::Named(name, args) if name == "Either" && args.len() == 2 => args.get(1).cloned(),
+            _ => None,
+        };
+        let Some(success) = success else {
+            self.check_expr(value);
+            if matches!(expected, Ty::Unknown) {
+                self.add_error(
+                    "pure_requires_context",
+                    "pure operator '^' requires an expected Option, Result, or Either type; add a type annotation",
+                    span,
+                );
+            } else {
+                self.add_error(
+                    "invalid_pure_context",
+                    format!(
+                        "pure operator '^' requires an expected Option, Result, or Either type, got '{}'",
+                        expected.describe()
+                    ),
+                    span,
+                );
+            }
+            return Ty::Unknown;
+        };
+
+        let actual = self.check_expr_against(value, &success);
+        self.require_assignable(
+            &actual,
+            &success,
+            value.span(),
+            "invalid_pure_value",
+            format!(
+                "pure value has type {} but the expected success type is {}",
+                self.diagnostic_type_phrase(&actual),
+                self.diagnostic_type_phrase(&success)
+            ),
+        );
+        expected.clone()
     }
 
     fn list_element_type(&self, ty: &Ty) -> Option<Ty> {
@@ -11809,6 +11899,19 @@ fn format_help_expr(expr: &Expr) -> String {
     }
 }
 
+fn static_integer_literal(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::Integer { raw, .. } => raw.parse().ok(),
+        Expr::Unary {
+            op: crate::ast::UnaryOp::Neg,
+            expr,
+            ..
+        } => static_integer_literal(expr)?.checked_neg(),
+        Expr::Group { inner, .. } => static_integer_literal(inner),
+        _ => None,
+    }
+}
+
 fn path_starts_with_os(expr: &Expr) -> bool {
     match expr {
         Expr::Identifier { name, .. } => name == "OS",
@@ -13363,6 +13466,11 @@ class Cache {
 
     def store(key Str) Unit {
         values[key] := currentValue()
+        values[key] += 5
+        values[key] -= 2
+        values[key] *= 3
+        values[key] /= 2
+        values[key] %= 4
     }
 
     def reset() Unit {
@@ -14070,6 +14178,58 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_field_punning_in_named_and_anonymous_construction() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Int
+}
+
+class ClassPoint {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    x = 4
+    y = 5
+    named Point = Point { x, y }
+    instance ClassPoint = ClassPoint { x, y }
+    anonymous { x Int, y Int } = shape { x, y }
+    explicit Point = Point { x, y, }
+    OS.println(named.x + instance.y + anonymous.x + explicit.y)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn field_punning_matches_anonymous_shape_fields_by_name() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    x = 4
+    y = 5
+    point { x Int, z Int } = shape { x, y }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_binding_type"
+                    && diagnostic.message.contains("y Int")
+                    && diagnostic.message.contains("z Int")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -16061,6 +16221,58 @@ def main() Unit {
     }
 
     #[test]
+    fn checks_contextual_pure_for_lifted_families() {
+        let program = parse_inline(
+            r#"
+def optionValue() Option[Int] = ^5
+def resultValue() Result[Str, Int] = ^"ready"
+def eitherValue() Either[Bool, Int] = ^7
+def nestedValue() Option[Option[Int]] = ^^9
+def choose(flag Bool) Option[Int] = if flag { ^1 } else { ^2 }
+def consume(value Option[Int]) Int = value ?? 0
+
+def main() Unit {
+    option Option[Int] = ^1
+    result Result[Int, Str] = ^2
+    either Either[Str, Int] = ^3
+    println(consume(^4))
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_pure_without_a_lifted_expected_type() {
+        let program = parse_inline(
+            r#"
+def missingContext() Unit {
+    value = ^5
+}
+
+def plainContext() Int = ^5
+def wrongValue() Option[Int] = ^"five"
+"#,
+        );
+        let result = check_program(&program);
+        for code in [
+            "pure_requires_context",
+            "invalid_pure_context",
+            "invalid_pure_value",
+        ] {
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == code),
+                "missing {code}: {:#?}",
+                result.diagnostics
+            );
+        }
+    }
+
+    #[test]
     fn narrows_stable_identifier_inside_successful_is_branch() {
         let program = parse_inline(
             r#"
@@ -16439,6 +16651,32 @@ def main() Unit {
     println(scores["Ada"]!)
     println(profile.name)
     _ = companion(pet)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn treats_type_equals_shape_as_named_shape_declaration() {
+        let program = parse_inline(
+            r#"
+type Session = shape {
+    position Str
+    start Int
+    end Int
+
+    def duration() Int = this.end - this.start
+}
+
+def project(value shape { position Str, start Int }) shape { position Str } =
+    shape { position: value.position }
+
+def main() Unit {
+    session Session = Session("engineer", 10, 30)
+    view shape { position Str } = project(session)
+    println(view.position, session.duration())
 }
 "#,
         );

@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -303,7 +303,7 @@ enum SymbolKind {
 enum ParameterKind {
     Function,
     Lambda,
-    Method(TypeKind),
+    Method,
     Constructor(TypeKind),
 }
 
@@ -314,22 +314,7 @@ impl SymbolKind {
             SymbolKind::GlobalBinding => "global binding",
             SymbolKind::Parameter(ParameterKind::Function) => "function parameter",
             SymbolKind::Parameter(ParameterKind::Lambda) => "lambda parameter",
-            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Class)) => {
-                "class method parameter"
-            }
-            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Annotation)) => {
-                "annotation method parameter"
-            }
-            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Record)) => {
-                "shape method parameter"
-            }
-            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Object)) => {
-                "object method parameter"
-            }
-            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Enum)) => "enum method parameter",
-            SymbolKind::Parameter(ParameterKind::Method(TypeKind::Interface)) => {
-                "interface method parameter"
-            }
+            SymbolKind::Parameter(ParameterKind::Method) => "method parameter",
             SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Class)) => {
                 "class constructor parameter"
             }
@@ -689,6 +674,19 @@ pub(crate) fn read_directives(path: &Path) -> Result<FileDirectives, String> {
 }
 
 pub(crate) fn find_stdlib_dir(start: &Path) -> Result<PathBuf, String> {
+    if let Some(configured) = env::var_os("LUME_STDLIB") {
+        let configured = PathBuf::from(configured);
+        let resolved = fs::canonicalize(&configured)
+            .map_err(|err| format!("resolve LUME_STDLIB {}: {err}", configured.display()))?;
+        if !resolved.is_dir() {
+            return Err(format!(
+                "LUME_STDLIB is not a directory: {}",
+                resolved.display()
+            ));
+        }
+        return Ok(resolved);
+    }
+
     let mut dir =
         fs::canonicalize(start).map_err(|err| format!("resolve {}: {err}", start.display()))?;
     loop {
@@ -1345,6 +1343,10 @@ impl<'a> Resolver<'a> {
                 .lookup_global_value(name)
                 .is_some_and(|symbol| !symbol.mutable),
             Expr::Member { .. } => self.is_stable_annotation_member(expr),
+            Expr::Unary {
+                op: crate::ast::UnaryOp::Pure,
+                ..
+            } => false,
             Expr::Unary { expr, .. } => self.is_annotation_static_value(expr),
             Expr::Binary {
                 left, op, right, ..
@@ -2502,6 +2504,9 @@ impl<'a> Resolver<'a> {
                 for arg in args {
                     self.resolve_type_ref(Some(arg));
                 }
+                if args.is_empty() && self.is_unique_enum_case(name) {
+                    return;
+                }
                 if self.type_pattern_uses_erased_generic(name) {
                     if !args.is_empty() {
                         self.add_error(
@@ -2524,6 +2529,22 @@ impl<'a> Resolver<'a> {
             return arity > 0;
         }
         self.lookup_type(name).is_some_and(|info| info.arity > 0)
+    }
+
+    fn is_unique_enum_case(&self, name: &str) -> bool {
+        if let Some((owner, case_name)) = name.split_once('.') {
+            return self.lookup_type(owner).is_some_and(|info| {
+                info.kind == TypeKind::Enum && info.enum_cases.contains_key(case_name)
+            });
+        }
+
+        self.types
+            .values()
+            .chain(self.imported_types.values())
+            .chain(self.ambient.types.values())
+            .filter(|info| info.kind == TypeKind::Enum && info.enum_cases.contains_key(name))
+            .count()
+            == 1
     }
 
     fn define_binding(&mut self, binding: &Binding, code: &'static str) {
@@ -2772,7 +2793,7 @@ impl<'a> Resolver<'a> {
         if is_constructor {
             ParameterKind::Constructor(owner_kind)
         } else {
-            ParameterKind::Method(owner_kind)
+            ParameterKind::Method
         }
     }
 

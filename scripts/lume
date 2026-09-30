@@ -1,0 +1,23 @@
+#!/bin/sh
+
+set -eu
+
+script_path="$0"
+while [ -L "$script_path" ]; do
+    script_dir=$(cd -P "$(dirname "$script_path")" && pwd)
+    script_path=$(readlink "$script_path")
+    case "$script_path" in
+        /*) ;;
+        *) script_path="$script_dir/$script_path" ;;
+    esac
+done
+
+script_dir=$(cd -P "$(dirname "$script_path")" && pwd)
+LUME_REPOSITORY=$(cd "$script_dir/.." && pwd)
+export LUME_STDLIB="$LUME_REPOSITORY/stdlib"
+
+exec cargo run \
+    --quiet \
+    --manifest-path "$LUME_REPOSITORY/rust/Cargo.toml" \
+    --package lume \
+    -- "$@"

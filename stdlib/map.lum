@@ -19,6 +19,7 @@ hidden interface MapApi[K with Hashed[K], V] with Iterable[(K, V)] {
     def size() Int
     def clear() Unit
     def entries() [(K, V)]
+    def values() [V]
 }
 
 class Map[K with Hashed[K], V] with MapApi[K, V] {

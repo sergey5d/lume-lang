@@ -1727,9 +1727,25 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn visible_capture_sources(
-        &self,
+        &mut self,
         excluded_name: Option<&str>,
     ) -> HashMap<String, CaptureSource> {
+        // A nested closure can be the first place an enclosing value is used.
+        // Forward inherited captures through this function's own frame so the
+        // child never refers directly to a grandparent function's local.
+        let inherited_names = self
+            .capture_sources
+            .keys()
+            .filter(|name| {
+                name.as_str() != "_"
+                    && !excluded_name.is_some_and(|excluded| excluded == name.as_str())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for name in inherited_names {
+            self.capture_local(&name);
+        }
+
         let mut sources = HashMap::new();
         for scope in &self.scopes {
             for (name, local) in scope {
@@ -4191,6 +4207,18 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Block { body, .. } => self
                 .lower_block_value_with_expected(body, Some(expected))
                 .unwrap_or(ir::Operand::Const(ir::Constant::Unit)),
+            Expr::If {
+                condition_clauses,
+                then_block,
+                else_branch,
+                span,
+            } => self.lower_if_expr(
+                condition_clauses,
+                then_block,
+                else_branch,
+                *span,
+                Some(expected),
+            ),
             Expr::ExtractOr {
                 value,
                 fallback,
@@ -4200,9 +4228,11 @@ impl<'a> FunctionLowerer<'a> {
             | Expr::RecordLiteral { .. }
             | Expr::ShapeLiteral { .. }
             | Expr::Lambda { .. }
-            | Expr::AnonymousObject { .. } => {
-                self.lower_expr_from_rvalue_with_expected(expr, Some(expected))
-            }
+            | Expr::AnonymousObject { .. }
+            | Expr::Unary {
+                op: ast::UnaryOp::Pure,
+                ..
+            } => self.lower_expr_from_rvalue_with_expected(expr, Some(expected)),
             Expr::Identifier { .. } | Expr::Member { .. }
                 if matches!(expected, ir::Type::Function { .. })
                     && self.is_callable_reference_expr(expr) =>
@@ -4288,7 +4318,7 @@ impl<'a> FunctionLowerer<'a> {
                 then_block,
                 else_branch,
                 span,
-            } => self.lower_if_expr(condition_clauses, then_block, else_branch, *span),
+            } => self.lower_if_expr(condition_clauses, then_block, else_branch, *span, None),
             Expr::Try { value, span } => self.lower_try_expr(value, *span),
             Expr::ExtractOr {
                 value,
@@ -4773,9 +4803,16 @@ impl<'a> FunctionLowerer<'a> {
                 self.infer_member_type(&receiver_ty, name)
                     .unwrap_or(ir::Type::Unknown)
             }
-            Expr::Index { receiver, .. } => {
+            Expr::Index {
+                receiver, index, ..
+            } => {
                 let receiver_ty = self.infer_expr_type_with_overrides(receiver, overrides);
-                index_result_ir_type(&receiver_ty)
+                match (&receiver_ty, static_tuple_index(index)) {
+                    (ir::Type::Tuple(items), Some(index)) => {
+                        items.get(index).cloned().unwrap_or(ir::Type::Unknown)
+                    }
+                    _ => index_result_ir_type(&receiver_ty),
+                }
             }
             Expr::RecordUpdate { receiver, .. } => {
                 self.infer_expr_type_with_overrides(receiver, overrides)
@@ -4786,6 +4823,10 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|(_, inner)| inner)
                     .unwrap_or(ir::Type::Unknown)
             }
+            Expr::Unary {
+                op: ast::UnaryOp::Pure,
+                ..
+            } => ir::Type::Unknown,
             Expr::Unary {
                 op: ast::UnaryOp::UnsafeExtract,
                 expr,
@@ -5233,6 +5274,26 @@ impl<'a> FunctionLowerer<'a> {
             return Some(ir::Type::option(ir::Type::Unknown));
         }
         self.lookup_enum_case_type_by_path(&[name.to_string()])
+    }
+
+    fn lower_type_test_target(&self, target: &TypeRef) -> ir::Type {
+        if let TypeRef::Named { name, args, .. } = target
+            && args.is_empty()
+        {
+            let owner = match name.as_str() {
+                "Some" | "None" => Some("Option"),
+                "Ok" | "Err" => Some("Result"),
+                "Left" | "Right" => Some("Either"),
+                _ => unique_bare_enum_case_owner(self.program, name),
+            };
+            if let Some(owner) = owner {
+                return ir::Type::Named {
+                    name: format!("{owner}::{name}"),
+                    args: Vec::new(),
+                };
+            }
+        }
+        lower_type_ref_with_aliases(target, &self.type_aliases)
     }
 
     fn lookup_enum_case_type_by_path(&self, path: &[String]) -> Option<ir::Type> {
@@ -5735,6 +5796,7 @@ impl<'a> FunctionLowerer<'a> {
         then_block: &Block,
         else_branch: &ElseExprBranch,
         span: Span,
+        expected: Option<&ir::Type>,
     ) -> ir::Operand {
         let else_narrowing = match condition_clauses {
             [core::IfConditionClause::Expr(condition)] => {
@@ -5742,7 +5804,7 @@ impl<'a> FunctionLowerer<'a> {
             }
             _ => None,
         };
-        let temp = self.add_temp(ir::Type::Unknown);
+        let temp = self.add_temp(expected.cloned().unwrap_or(ir::Type::Unknown));
         let then_id = self.add_block();
         let else_id = self.add_block();
         let join_id = self.add_block();
@@ -5751,7 +5813,7 @@ impl<'a> FunctionLowerer<'a> {
         self.lower_if_condition_clause_chain(condition_clauses, then_id, else_id);
 
         self.current_block = Some(then_id);
-        if let Some(value) = self.lower_block_value(then_block) {
+        if let Some(value) = self.lower_block_value_with_expected(then_block, expected) {
             self.push_statement(ir::Statement {
                 span: Some(then_block.span),
                 kind: ir::StatementKind::Assign {
@@ -5769,8 +5831,8 @@ impl<'a> FunctionLowerer<'a> {
         self.push_scope();
         self.apply_type_narrowing(else_narrowing.as_ref());
         let else_value = match else_branch {
-            ElseExprBranch::If(expr) => Some(self.lower_expr(expr)),
-            ElseExprBranch::Block(block) => self.lower_block_value(block),
+            ElseExprBranch::If(expr) => Some(self.lower_expr_with_expected(expr, expected)),
+            ElseExprBranch::Block(block) => self.lower_block_value_with_expected(block, expected),
         };
         if let Some(value) = else_value {
             self.push_statement(ir::Statement {
@@ -5879,6 +5941,22 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             Expr::Unary {
+                op: ast::UnaryOp::Pure,
+                expr,
+                ..
+            } => {
+                let expected = expected?;
+                let (enum_name, case_name, success_ty) = pure_variant_ir(expected)?;
+                Some(ir::RValue::Variant {
+                    enum_name: enum_name.to_string(),
+                    case_name: case_name.to_string(),
+                    fields: vec![ir::NamedOperand {
+                        name: "value".to_string(),
+                        value: self.lower_expr_with_expected(expr, Some(&success_ty)),
+                    }],
+                })
+            }
+            Expr::Unary {
                 op: ast::UnaryOp::UnsafeExtract,
                 expr,
                 ..
@@ -5891,6 +5969,7 @@ impl<'a> FunctionLowerer<'a> {
                 op: match op {
                     ast::UnaryOp::Neg => ir::UnaryOp::Neg,
                     ast::UnaryOp::Not => ir::UnaryOp::Not,
+                    ast::UnaryOp::Pure => unreachable!(),
                     ast::UnaryOp::UnsafeExtract => unreachable!(),
                 },
                 operand: self.lower_expr(expr),
@@ -5996,7 +6075,7 @@ impl<'a> FunctionLowerer<'a> {
             }),
             Expr::Is { left, target, .. } => Some(ir::RValue::TypeTest {
                 operand: self.lower_expr(left),
-                ty: lower_type_ref_with_aliases(target, &self.type_aliases),
+                ty: self.lower_type_test_target(target),
             }),
             Expr::TypeOf { ty, .. } => {
                 if let Some(operand) = self.reified_type_param_operand(ty) {
@@ -6777,10 +6856,29 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_implicit_method_callee(&mut self, name: &str) -> Option<ir::Callee> {
-        let ir::FunctionKind::Method { owner } = self.function().kind else {
-            return None;
+        let owner_type = match self.function().kind {
+            ir::FunctionKind::Method { owner } => self.program.types.get(owner.0),
+            _ => {
+                let this_ty = if let Some(this_local) = self.this_local {
+                    self.function()
+                        .locals
+                        .get(this_local.0)
+                        .map(|local| local.ty.clone())
+                } else {
+                    self.capture_sources
+                        .get("this")
+                        .map(|source| source.ty.clone())
+                }?;
+                let ir::Type::Named {
+                    name: owner_name, ..
+                } = this_ty
+                else {
+                    return None;
+                };
+                self.program.types.iter().find(|ty| ty.name == owner_name)
+            }
         };
-        let owner_type = self.program.types.get(owner.0)?;
+        let owner_type = owner_type?;
         let method_exists = owner_type.methods.iter().any(|method_id| {
             self.program
                 .function(*method_id)
@@ -7949,6 +8047,21 @@ fn unwrap_lifted_ir_type(ty: &ir::Type) -> Option<(LiftedIrFamily, ir::Type)> {
     }
 }
 
+fn pure_variant_ir(ty: &ir::Type) -> Option<(&'static str, &'static str, ir::Type)> {
+    match ty {
+        ir::Type::Named { name, args } if name == "Option" && args.len() == 1 => {
+            Some(("Option", "Some", args[0].clone()))
+        }
+        ir::Type::Named { name, args } if name == "Result" && args.len() == 2 => {
+            Some(("Result", "Ok", args[0].clone()))
+        }
+        ir::Type::Named { name, args } if name == "Either" && args.len() == 2 => {
+            Some(("Either", "Right", args[1].clone()))
+        }
+        _ => None,
+    }
+}
+
 fn known_lifted_ir_type(ty: &ir::Type) -> Option<(LiftedIrFamily, ir::Type)> {
     match ty {
         ir::Type::Unknown => None,
@@ -7990,6 +8103,13 @@ fn index_result_ir_type(ty: &ir::Type) -> ir::Type {
             .unwrap_or(ir::Type::Unknown),
         ir::Type::Unknown => ir::Type::Unknown,
         _ => ir::Type::Unknown,
+    }
+}
+
+fn static_tuple_index(expr: &Expr) -> Option<usize> {
+    match expr {
+        Expr::Integer { raw, .. } => raw.parse().ok(),
+        _ => None,
     }
 }
 
@@ -10032,6 +10152,34 @@ mod tests {
                 )
             })
         }));
+    }
+
+    #[test]
+    fn lowers_transitive_lambda_captures_and_enclosing_method_calls() {
+        let program = parse_inline(
+            r#"
+            class Tracker {
+                def min(left Int, right Int) Int = if left <= right { left } else { right }
+
+                def matching(position Int, groups [[Int]]) [[Int]] =
+                    groups.map(group => group.filter(value => value == position))
+
+                def cappedTotal(values [Int], limit Int) Int =
+                    values.fold(0, (acc, value) => acc + min(value, limit))
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        assert!(
+            ir.functions
+                .iter()
+                .filter(|function| matches!(function.kind, ir::FunctionKind::Lambda))
+                .count()
+                >= 3
+        );
     }
 
     #[test]

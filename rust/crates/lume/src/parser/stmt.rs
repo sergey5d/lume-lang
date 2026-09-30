@@ -399,6 +399,7 @@ impl<'a> Parser<'a> {
                         | TokenKind::Integer
                         | TokenKind::Float
                         | TokenKind::String
+                        | TokenKind::Caret
                         | TokenKind::Bang
                         | TokenKind::Minus
                         | TokenKind::LBracket
@@ -419,6 +420,7 @@ impl<'a> Parser<'a> {
                         | TokenKind::Integer
                         | TokenKind::Float
                         | TokenKind::String
+                        | TokenKind::Caret
                         | TokenKind::Bang
                         | TokenKind::Minus
                         | TokenKind::LParen
@@ -799,6 +801,17 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_for_stmt(&mut self) -> Option<ForStmt> {
         let start = self.consume_keyword(Keyword::For, "expected 'for'")?;
+        if self.parenthesized_for_generator_header() {
+            self.error_at_current(
+                "parenthesized_for_generator",
+                "for generator headers cannot be parenthesized; write 'for item <- items { ... }' without parentheses",
+            );
+            self.discard_parenthesized_for_generator_header();
+            if self.at(TokenKind::LBrace) {
+                self.parse_block()?;
+            }
+            return None;
+        }
         let binding = if self.match_keyword(Keyword::Let) {
             self.parse_for_let_generator_head()?
         } else {

@@ -1,0 +1,9 @@
+# FAIL_REGEX:
+# .*for generator headers cannot be parenthesized; write 'for item <- items \{ \.\.\. \}' without parentheses.*
+
+def main() Unit {
+    items = [1, 2, 3]
+    for (item <- items) {
+        println(item)
+    }
+}

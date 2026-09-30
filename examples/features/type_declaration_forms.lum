@@ -1,0 +1,46 @@
+# EXPECT:
+# class Ada
+# shape 8
+# object settings
+# annotation ok
+
+type C = interface {
+    def label() Str
+}
+
+type A = class with C {
+    value Str
+
+    def label() Str = this.value
+}
+
+type B = shape {
+    value Int
+
+    def doubled() Int = this.value * 2
+}
+
+type D = annotation {
+    value Str
+}
+
+type E = object with C {
+    value Str = "settings"
+
+    def label() Str = this.value
+}
+
+@D { value: "example" }
+class Marked {
+}
+
+def main() Unit {
+    a A = A { value: "Ada" }
+    b B = B { value: 4 }
+    marked Marked = Marked {}
+
+    println("class", a.label())
+    println("shape", b.doubled())
+    println("object", E.label())
+    println("annotation ok")
+}

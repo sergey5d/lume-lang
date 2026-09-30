@@ -375,6 +375,15 @@ impl<'a> Parser<'a> {
         if self.at_keyword(Keyword::Fn) {
             return self.parse_function_type_ref();
         }
+        if self.match_keyword(Keyword::Shape) {
+            let start = self.previous_span();
+            self.skip_newlines();
+            self.consume(
+                TokenKind::LBrace,
+                "expected '{' after 'shape' in shape type",
+            )?;
+            return self.finish_anonymous_shape_type_ref(start);
+        }
         if self.match_token(TokenKind::LBracket) {
             let start = self.previous_span();
             let first = self.parse_type_ref()?;
@@ -396,26 +405,7 @@ impl<'a> Parser<'a> {
         }
         if self.match_token(TokenKind::LBrace) {
             let start = self.previous_span();
-            self.skip_newlines();
-            let mut fields = Vec::new();
-            if !self.at(TokenKind::RBrace) {
-                loop {
-                    let (name, name_span) = self.expect_data_name("expected shape field name")?;
-                    let ty = self.parse_type_ref()?;
-                    let span = name_span.cover(ty.span());
-                    fields.push(RecordTypeField { name, ty, span });
-                    self.skip_newlines();
-                    if !self.match_token(TokenKind::Comma) {
-                        break;
-                    }
-                    self.skip_newlines();
-                }
-            }
-            let end = self.consume(TokenKind::RBrace, "expected '}' after anonymous shape type")?;
-            return Some(TypeRef::Record {
-                fields,
-                span: start.cover(end),
-            });
+            return self.finish_anonymous_shape_type_ref(start);
         }
         if self.at(TokenKind::LParen) {
             return self.parse_parenthesized_or_function_type_ref();
@@ -453,6 +443,29 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn finish_anonymous_shape_type_ref(&mut self, start: Span) -> Option<TypeRef> {
+        self.skip_newlines();
+        let mut fields = Vec::new();
+        if !self.at(TokenKind::RBrace) {
+            loop {
+                let (name, name_span) = self.expect_data_name("expected shape field name")?;
+                let ty = self.parse_type_ref()?;
+                let span = name_span.cover(ty.span());
+                fields.push(RecordTypeField { name, ty, span });
+                self.skip_newlines();
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+                self.skip_newlines();
+            }
+        }
+        let end = self.consume(TokenKind::RBrace, "expected '}' after anonymous shape type")?;
+        Some(TypeRef::Record {
+            fields,
+            span: start.cover(end),
+        })
+    }
+
     pub(super) fn parse_tuple_type_field(&mut self) -> Option<TupleTypeField> {
         if self.at(TokenKind::Identifier) && self.at_next(TokenKind::Identifier) {
             let name_span = self.current_span();
@@ -475,6 +488,7 @@ impl<'a> Parser<'a> {
             self.current_kind(),
             TokenKind::Identifier
                 | TokenKind::Keyword(Keyword::Fn)
+                | TokenKind::Keyword(Keyword::Shape)
                 | TokenKind::LParen
                 | TokenKind::LBrace
                 | TokenKind::LBracket

@@ -9,6 +9,7 @@
 # tuple skip 14 xxx
 # tuple full arity 31
 # tuple if 1 2
+# tuple index 41 indexed
 # 0
 
 def main() Int {
@@ -47,6 +48,11 @@ def main() Int {
         (3, 4)
     }
     println("tuple if", ifTupleLeft, ifTupleRight)
+
+    indexed (Int, Str) = (41, "indexed")
+    indexedNumber Int = indexed[0]
+    indexedText Str = indexed[1]
+    println("tuple index", indexedNumber, indexedText)
 
     0
 }

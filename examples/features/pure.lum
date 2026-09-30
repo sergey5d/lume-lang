@@ -1,0 +1,29 @@
+# EXPECT:
+# 5
+# ready
+# 9
+# 11
+# 12
+# 13
+
+def optionValue() Int? = ^5
+
+def resultValue() Result[Str, Str] = ^"ready"
+
+def eitherValue() Either[Str, Int] = ^9
+
+def choose(flag Bool) Int? = if flag { ^12 } else { ^0 }
+
+def consume(value Int?) Int = value ?? 0
+
+def main() Unit {
+    println(optionValue()!)
+    println(resultValue()!)
+    println(eitherValue()!)
+
+    nested Option[Option[Int]] = ^^11
+    println(nested!!)
+
+    println(choose(true)!)
+    println(consume(^13))
+}

@@ -26,10 +26,33 @@ pub(super) fn define() -> RuntimeType {
                 vec![crate::ir::Type::Int],
                 str_expect_rune_at,
             ),
+            builtin_method(4, "compare", vec![crate::ir::Type::Str], str_compare),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
     }
+}
+
+fn str_compare(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(left) = receiver else {
+        unreachable!();
+    };
+    let [right] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Str.compare expects 1 argument"));
+    };
+    let Value::String(right) = right else {
+        return Err(interpreter.runtime_error(span, "Str.compare argument must be Str"));
+    };
+    Ok(Value::Int(match left.cmp(right) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }))
 }
 
 fn string_rune_at(text: &str, index: i64) -> Option<char> {

@@ -796,6 +796,19 @@ Bracket access and assignment are unsafe operations supported by `Vector[T]`
 and `Array[T]`; an invalid index panics. `LinkedList[T]` deliberately does not
 support brackets because indexed traversal is linear.
 
+Tuples support zero-based, read-only bracket access with a compile-time integer
+literal. The compiler checks the bound and returns the exact element type:
+
+```txt
+pair (Int, Str) = (7, "seven")
+number Int = pair[0]
+text Str = pair[1]
+```
+
+A dynamic index such as `pair[index]`, a negative index, or an out-of-bounds
+literal is rejected during compilation. Tuple indexed assignment is not
+supported because tuples are immutable.
+
 Vector slicing uses a half-open range: the start is included and the end is
 excluded. Either bound may be omitted:
 
@@ -888,6 +901,22 @@ user = { name: "Ada", age: 10 }
 user User = User { name: "Ada", age: 10 }
 ```
 
+A bare identifier in construction braces is field punning: `field` means
+`field: field`. It works for named shape and class construction, and for the
+explicit anonymous-shape form:
+
+```txt
+point Point = Point { x, y }
+instance ClassPoint = ClassPoint { x, y }
+anonymous { x Int, y Int } = shape { x, y }
+mixed Point3 = Point3 { x, y, z: 10 }
+```
+
+Punned fields are matched by name, never by position. For example,
+`value { x Int, z Int } = shape { x, y }` is invalid because the constructed
+shape provides `y`, not `z`. Bare `{ x }` remains a block expression; use
+`shape { x }` when an anonymous shape contains only punned fields.
+
 Parentheses are for positional construction and calls:
 
 ```txt
@@ -948,7 +977,44 @@ Anonymous shape type:
 ```txt
 def describe(user { name Str, age Int }) Str =
     user.name + " is " + user.age
+
+def explicit(user shape { name Str, age Int }) shape { name Str } =
+    shape { name: user.name }
 ```
+
+The `shape` prefix is optional for an anonymous shape type. `{ name Str }` and
+`shape { name Str }` denote the same structural type.
+
+Every named type declaration has a short form and an equivalent `type` form:
+
+```txt
+class A { ... }       # type A = class { ... }
+shape B { ... }       # type B = shape { ... }
+interface C { ... }   # type C = interface { ... }
+annotation D { ... }  # type D = annotation { ... }
+object E { ... }      # type E = object { ... }
+```
+
+The long form creates the same named declaration as the short form; it is not a
+transparent alias. It therefore supports the same fields, methods, generic
+parameters, and `with` interfaces. For example, a long-form shape remains
+constructible and may contain methods:
+
+```txt
+type Session = shape {
+    start Int
+    end Int
+
+    def duration() Int = this.end - this.start
+}
+
+session = Session(10, 20)
+```
+
+After `type Name =`, a declaration kind immediately followed by `{` or `with`
+starts a long-form declaration. A named `class`, `shape`, or `object` after the
+kind remains an inline union member, as in
+`type Outcome = class Success { value Str } | object Cancelled {}`.
 
 Anonymous shape positional construction uses `shape(...)`. It is contextual:
 the expected type must be an anonymous shape type, and values map to fields in
@@ -1097,9 +1163,11 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 { field: value }                 # anonymous shape literal
 { field Type: value }            # typed anonymous shape literal
 shape { field: value }           # explicit anonymous shape literal
+shape { field }                  # explicit anonymous shape with a punned field
 shape {}                         # explicit empty anonymous shape literal
 { expr }                         # block expression
 Type { field: value }            # brace field construction or union payload
+Type { field }                   # brace construction with a punned field
 call { x => ... }                # trailing lambda
 object { field Type = value; def method() Type = value } # anonymous object
 object with Interface, Other { def method() Type = value } # anonymous interface implementation
@@ -1144,7 +1212,7 @@ Shape conversion rules:
 - tuple-to-shape and tuple-to-class are not allowed; use `shape(...)`, named shape construction, or class constructors
 - ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
 - `shape { ... }` is exactly the explicit spelling of an anonymous shape literal and accepts the same typed fields and spreads as bare field braces
-- construction fields inside braces use `field: value`
+- construction fields inside braces use `field: value`; bare `field` is shorthand for `field: field`
 - construction fields may carry an explicit initializer type as `field Type: value`
 - single-expression braces like `{ value }` are still block expressions, not anonymous shapes
 
@@ -2178,18 +2246,42 @@ Vectors expose `at`, `setAt`, `insertAt`, and `removeAt` with the same safe
 return types as LinkedList. Vector and Array bracket access remains available
 as the explicit unsafe alternative.
 
+`take(count)` returns a new vector containing at most the first `count` values;
+a non-positive count produces an empty vector. `sort` mutates the vector and
+accepts either an `Ordering[T]` or a comparator function:
+
+```txt
+values.sort(ordering)
+values.sort((left, right) => left.score - right.score)
+firstTen = values.take(10)
+```
+
+A comparator returns a negative value when `left` belongs before `right`, zero
+when they compare equally, and a positive value when `left` belongs after
+`right`.
+
 Map construction:
 
 ```txt
 entries [Str : Int] = ["a": 1, "b": 2]
 empty [Str : Int] = []
 value Option[Int] = entries["a"]
+allValues [Int] = entries.values()
+
+totals [Str : Int] = ["Ada": 10]
+totals["Ada"] += 5
+totals["Ada"] -= 2
 
 defaults [Str : Int] = ["port": 80, "secure": 0]
 overrides [Str : Int] = ["port": 443]
 copy = [...defaults]
 merged = [...defaults, "retries": 3, ...overrides]
 ```
+
+Indexed map compound assignment updates an existing entry and supports the same
+`+=`, `-=`, `*=`, `/=`, and `%=` operators as ordinary mutable numeric targets.
+It panics when the key is absent; use `map[key] := initial` when insertion is
+intended.
 
 `[K : V]` is the concise map type syntax and is equivalent to `Map[K, V]`.
 The colon belongs to type grammar here; it does not construct a pair value.
@@ -2710,6 +2802,32 @@ iterable comprehensions; `Option`, `Result`, and `Either` comprehensions have no
 
 - `try` propagates the original failure.
 - `??` discards/replaces the failure with an explicit fallback.
+
+The prefix pure operator `^` injects a value into the success side of the
+lifted family required by the surrounding expected type:
+
+```txt
+optional Int? = ^5
+result Result[Str, DbError] = ^"ready"
+either Either[AppError, Int] = ^42
+```
+
+It constructs `Some`, `Ok`, or `Right`, respectively. The expected type is
+required because the operand alone cannot identify which family to construct:
+
+```txt
+value = ^5 # error: add an Option, Result, or Either type annotation
+```
+
+The operator injects exactly one layer and checks its operand against that
+layer's success type. Repeating it explicitly injects multiple layers:
+
+```txt
+nested Option[Option[Int]] = ^^5
+```
+
+`^` does not flatten an already lifted operand. Use `map`, `flatMap`, `try`, or
+`??` when transforming or extracting an existing lifted value.
 
 Unsafe extraction uses postfix `!`:
 
@@ -3517,6 +3635,7 @@ Other operators / constructs:
 - `is` for runtime type checks
 - `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
 - `??` for extract-or-fallback through `Option`, `Result`, and `Either`
+- `^` for contextual pure injection into `Option`, `Result`, and `Either`
 - `!` for unsafe extraction through `Option`, `Result`, and `Either`
 - `fn(...) T` for function types
 - `=>` for lambdas and by-name parameters
@@ -3533,7 +3652,7 @@ Expression precedence, from highest to lowest:
 | --- | --- | --- |
 | Primary | literals, groups, blocks, value-producing control flow | n/a |
 | Postfix | calls, member access, indexing, Vector slicing, `!` | left |
-| Unary | `-`, `!`, `try` | right |
+| Unary | `-`, `!`, `^`, `try` | right |
 | Multiplicative | `*`, `/`, `%` | left |
 | Additive | `+`, `-` | left |
 | Shape update | `with` | left |
