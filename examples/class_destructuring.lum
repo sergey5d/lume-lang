@@ -5,7 +5,7 @@
 # class pair 24 class-pair
 # class skip only class-only
 # class skip 16 class-skip
-# hidden named Sergey Tampa
+# private named Sergey Tampa
 # for named plain Sergey Tampa
 # for named plain Ada London
 # named Sergey Tampa
@@ -35,7 +35,7 @@ class User {
 
 class SecretUser {
     name Str
-    hidden token Str
+    private token Str
     location Str
 
     new(name Str, token Str, location Str) {
@@ -66,7 +66,7 @@ def main() Int {
     println("class skip", skippedClassLeft, skippedClassRight)
 
     let { name as visibleName, location as visibleLocation } = SecretUser("Sergey", "secret", "Tampa")
-    println("hidden named", visibleName, visibleLocation)
+    println("private named", visibleName, visibleLocation)
 
     users = [
         SecretUser("Sergey", "secret-1", "Tampa"),

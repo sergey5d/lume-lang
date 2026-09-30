@@ -2302,7 +2302,7 @@ impl<'a> Interpreter<'a> {
                     .unwrap_or(ir::Type::Unknown);
                 Ok(Value::RuntimeType(self.runtime_type_value_for_ir_type(&ty)))
             }
-            "isHidden" => {
+            "isPrivate" => {
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 Ok(Value::Bool(
                     self.runtime_field_metadata(owner, case_id, slot)
@@ -2875,6 +2875,9 @@ impl<'a> Interpreter<'a> {
         if path[0] == "OS" && path.len() == 3 && matches!(path[1].as_str(), "stdout" | "stderr") {
             return self.invoke_os_method(&path[2], args, span);
         }
+        if path[0] == "Math" && path.len() == 2 {
+            return self.invoke_math_method(&path[1], args, span);
+        }
 
         if path[0] == "Array" && path.len() == 2 {
             let method = path[1].as_str();
@@ -3388,7 +3391,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' has no implicit field constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
+                    "class '{}' has no implicit field constructor because private field '{}' has no initializer; define 'new' to initialize it",
                     ty.name, field.name
                 ),
             ));
@@ -3460,7 +3463,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' has no implicit positional constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
+                    "class '{}' has no implicit positional constructor because private field '{}' has no initializer; define 'new' to initialize it",
                     ty.name, field.name
                 ),
             ));
@@ -3474,7 +3477,7 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' cannot use positional construction because hidden defaulted fields must come after all visible fields",
+                    "class '{}' cannot use positional construction because private defaulted fields must come after all visible fields",
                     ty.name
                 ),
             ));
@@ -4039,6 +4042,36 @@ impl<'a> Interpreter<'a> {
             "println" => self.invoke_print(true, args, span),
             "printf" => self.invoke_printf(args, span),
             _ => Err(self.runtime_error(span, format!("unknown OS method '{}'", method))),
+        }
+    }
+
+    fn invoke_math_method(
+        &mut self,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        if !matches!(method, "min" | "max") || args.len() != 2 {
+            return Err(
+                self.runtime_error(span, format!("Math.{method} expects 2 numeric arguments"))
+            );
+        }
+
+        match (&args[0], &args[1]) {
+            (Value::Int(left), Value::Int(right)) => Ok(Value::Int(if method == "min" {
+                (*left).min(*right)
+            } else {
+                (*left).max(*right)
+            })),
+            (Value::Float(left), Value::Float(right)) => Ok(Value::Float(if method == "min" {
+                left.min(*right)
+            } else {
+                left.max(*right)
+            })),
+            _ => Err(self.runtime_error(
+                span,
+                format!("Math.{method} requires two Int values or two Float values"),
+            )),
         }
     }
 
@@ -6523,7 +6556,7 @@ mod tests {
         let program = lower_inline(
             r#"
             class Counter {
-                hidden var count Int
+                private var count Int
 
 
                 new(count Int) {
@@ -6846,7 +6879,7 @@ mod tests {
         let program = lower_inline(
             r#"
             class Vec {
-                hidden var items Array[Int]
+                private var items Array[Int]
 
 
                 new(left Int, right Int) {
@@ -6920,9 +6953,9 @@ mod tests {
         let program = lower_inline(
             r#"
             class OrderManager {
-                hidden map Map[Int, Str] = Map()
-                hidden var currentTick Int = 0
-                hidden queue [Str] = []
+                private map Map[Int, Str] = Map()
+                private var currentTick Int = 0
+                private queue [Str] = []
 
 
                 def current() Int = this.currentTick
@@ -7043,7 +7076,7 @@ mod tests {
             r#"
             class SecretUser {
                 name Str
-                hidden token Str
+                private token Str
                 location Str
 
 

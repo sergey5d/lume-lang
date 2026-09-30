@@ -3,7 +3,7 @@
 # class 7
 # anonymous 11
 
-type Point = shape {
+shape Point {
     x Int
     y Int
 }

@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-hidden interface ArrayApi[T] with Iterable[T] {
+private interface ArrayApi[T] with Iterable[T] {
     def at(index Int) Option[T]
     def setAt(index Int, value T) Result[T, InvalidIndex]
 

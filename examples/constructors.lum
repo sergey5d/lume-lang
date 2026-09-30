@@ -28,8 +28,8 @@
 
 class Profile {
     name Str = "unknown"
-    hidden var visits Int = 0
-    hidden var active Bool = false
+    private var visits Int = 0
+    private var active Bool = false
 
     new(name Str, visits Int) {
         this.name = name
@@ -48,7 +48,7 @@ class Profile {
 }
 
 class Stock {
-    hidden count Int = 5
+    private count Int = 5
 
     new(count Int) {
         this.count = count
@@ -59,7 +59,7 @@ class Stock {
 
 
 class Slots {
-    hidden var items Array[Int]
+    private var items Array[Int]
 
     new(left Int, right Int) {
         this.items = Array(left, right)

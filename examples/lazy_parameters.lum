@@ -5,7 +5,7 @@
 # 2
 
 class Counter {
-    hidden var value Int = 0
+    private var value Int = 0
 
     def next() Int {
         this.value := this.value + 1

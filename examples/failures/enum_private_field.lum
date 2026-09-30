@@ -1,7 +1,7 @@
 # invalid_enum_field at .*: enum 'Token' cannot declare private field 'secret'
 
 enum Token {
-    hidden secret Str
+    private secret Str
 
     case Ident {
         value Str

@@ -92,7 +92,7 @@ fn parses_top_level_bindings() {
     let result = parse(
         r#"
 seed Int = 1
-hidden internalSeed Int = 0
+private internalSeed Int = 0
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -898,7 +898,7 @@ fn parses_class_members() {
     let result = parse(
         r#"
 class Counter {
-    hidden var count Int
+    private var count Int
 
     new(count Int) {
         this.count = count
@@ -1284,7 +1284,7 @@ fn parses_named_object_with_body_methods() {
     let result = parse(
         r#"
 object Counter {
-    hidden value = 0
+    private value = 0
 
     def next() Int = this.value + 1
 }
@@ -1330,7 +1330,7 @@ fn parses_methods_in_named_object_body() {
     let result = parse(
         r#"
 object Counter {
-    hidden value = 0
+    private value = 0
 
     def next() Int = 1
 }
@@ -1617,7 +1617,7 @@ fn rejects_question_field_placeholder() {
     let result = parse(
         r#"
 class Box {
-    hidden label Str = ?
+    private label Str = ?
 }
 "#,
     );
@@ -2563,7 +2563,7 @@ fn parses_equals_before_assignment_statement_callable_body() {
     let result = parse(
         r#"
 class Counter {
-    hidden var value Int = 0
+    private var value Int = 0
 
     def reset() Unit =
         this.value := 0
@@ -5292,16 +5292,25 @@ type Companion = Pet
 }
 
 #[test]
-fn parses_shape_prefixed_type_expressions_and_named_shape_long_form() {
+fn parses_explicit_and_short_anonymous_shape_types_as_the_same_type_form() {
     let result = parse(
         r#"
-type Session = shape {
-    position Str
-    start Int
+type ExplicitSession = shape {
+    position Str,
+    start Int,
+    end Int
+}
+
+type ShortSession = {
+    position Str,
+    start Int,
     end Int
 }
 
 def project(value shape { position Str, start Int }) shape { position Str } =
+    shape { position: value.position }
+
+def projectShort(value { position Str, start Int }) { position Str } =
     shape { position: value.position }
 "#,
     );
@@ -5309,13 +5318,21 @@ def project(value shape { position Str, start Int }) shape { position Str } =
     let program = result.program.expect("program");
     assert!(matches!(
         &program.items[0],
-        Item::Type(TypeDecl {
-            kind: TypeKind::Record,
+        Item::TypeAlias(TypeAliasDecl {
             name,
+            target: TypeRef::Record { fields, .. },
             ..
-        }) if name == "Session"
+        }) if name == "ExplicitSession" && fields.len() == 3
     ));
-    let Item::Function(project) = &program.items[1] else {
+    assert!(matches!(
+        &program.items[1],
+        Item::TypeAlias(TypeAliasDecl {
+            name,
+            target: TypeRef::Record { fields, .. },
+            ..
+        }) if name == "ShortSession" && fields.len() == 3
+    ));
+    let Item::Function(project) = &program.items[2] else {
         panic!("expected project function");
     };
     assert!(matches!(
@@ -5326,10 +5343,21 @@ def project(value shape { position Str, start Int }) shape { position Str } =
         project.return_type,
         Some(TypeRef::Record { ref fields, .. }) if fields.len() == 1
     ));
+    let Item::Function(project_short) = &program.items[3] else {
+        panic!("expected short project function");
+    };
+    assert!(matches!(
+        project_short.params[0].ty,
+        Some(TypeRef::Record { ref fields, .. }) if fields.len() == 2
+    ));
+    assert!(matches!(
+        project_short.return_type,
+        Some(TypeRef::Record { ref fields, .. }) if fields.len() == 1
+    ));
 }
 
 #[test]
-fn parses_long_form_type_declarations_for_all_supported_kinds() {
+fn parses_type_equals_forms_for_all_supported_kinds() {
     let result = parse(
         r#"
 type A = class {
@@ -5356,15 +5384,30 @@ type E = object {
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
-    let expected = [
-        ("A", TypeKind::Class),
-        ("B", TypeKind::Record),
-        ("C", TypeKind::Interface),
-        ("D", TypeKind::Annotation),
-        ("E", TypeKind::Object),
+    assert_eq!(program.items.len(), 5);
+    assert!(matches!(
+        &program.items[0],
+        Item::Type(TypeDecl {
+            name,
+            kind: TypeKind::Class,
+            ..
+        }) if name == "A"
+    ));
+    assert!(matches!(
+        &program.items[1],
+        Item::TypeAlias(TypeAliasDecl {
+            name,
+            target: TypeRef::Record { fields, .. },
+            ..
+        }) if name == "B" && fields.len() == 1
+    ));
+    let expected_named = [
+        (2, "C", TypeKind::Interface),
+        (3, "D", TypeKind::Annotation),
+        (4, "E", TypeKind::Object),
     ];
-    assert_eq!(program.items.len(), expected.len());
-    for (item, (expected_name, expected_kind)) in program.items.iter().zip(expected) {
+    for (index, expected_name, expected_kind) in expected_named {
+        let item = &program.items[index];
         assert!(
             matches!(
                 item,

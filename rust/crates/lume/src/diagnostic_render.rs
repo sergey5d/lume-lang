@@ -123,7 +123,7 @@ mod tests {
             "constructor is not available",
             Span::new(7, 28, LineColumn::new(1, 8), LineColumn::new(1, 29)),
         )
-        .with_label("field construction is hidden")
+        .with_label("field construction is private")
         .with_note("User declares a private primary constructor")
         .with_help("use User.create(name = \"Ada\")");
 
@@ -135,7 +135,7 @@ mod tests {
 
         assert_eq!(
             rendered,
-            "error[E0312]: constructor is not available\n  --> app.lum:1:8\n  |\n1 | user = User { name: \"Ada\" }\n  |        ^^^^^^^^^^^^^^^^^^^^^ field construction is hidden\n   |\n   = note: User declares a private primary constructor\n   = help: use User.create(name = \"Ada\")"
+            "error[E0312]: constructor is not available\n  --> app.lum:1:8\n  |\n1 | user = User { name: \"Ada\" }\n  |        ^^^^^^^^^^^^^^^^^^^^^ field construction is private\n   |\n   = note: User declares a private primary constructor\n   = help: use User.create(name = \"Ada\")"
         );
     }
 

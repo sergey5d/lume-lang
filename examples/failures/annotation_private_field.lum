@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*annotation 'Route' cannot declare private field 'path'.*
+
+annotation Route {
+    private path Str
+}

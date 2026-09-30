@@ -1,0 +1,31 @@
+# EXPECT:
+# aliases hello hello
+# named 10
+
+type ExplicitResult = shape { x Str }
+type ShortResult = { x Str }
+
+def explicitResult() shape { x Str } =
+    shape { x: "hello" }
+
+def shortResult() { x Str } =
+    shape { x: "hello" }
+
+def toExplicit(value ShortResult) ExplicitResult = value
+
+def toShort(value ExplicitResult) ShortResult = value
+
+shape NamedResult {
+    x Int
+
+    def doubled() Int = this.x * 2
+}
+
+def main() Unit {
+    explicit ExplicitResult = toExplicit(shortResult())
+    short ShortResult = toShort(explicitResult())
+    println("aliases", explicit.x, short.x)
+
+    named NamedResult = NamedResult { x: 5 }
+    println("named", named.doubled())
+}

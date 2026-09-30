@@ -48,7 +48,7 @@ shape HttpError {
     contentType Str = "application/json"
 }
 
-hidden class JavalinBackend {
+private class JavalinBackend {
     app Javalin
     port Int
 
@@ -182,8 +182,8 @@ hidden class JavalinBackend {
     }
 }
 
-hidden class JavalinHttpContext with HttpContext {
-    hidden raw JavalinRawContext
+private class JavalinHttpContext with HttpContext {
+    private raw JavalinRawContext
 
     new(raw JavalinRawContext) {
         this.raw = raw

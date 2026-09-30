@@ -1,6 +1,6 @@
 module lume/db
 
 # Root facade for the DB package. Public API declarations live in DbApi.lum;
-# hidden JDBC-backed implementations live in DbImpl.lum.
+# Private JDBC-backed implementations live in DbImpl.lum.
 use DbApi/*
 use DbImpl/*

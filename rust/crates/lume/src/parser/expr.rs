@@ -701,7 +701,7 @@ impl<'a> Parser<'a> {
         matches!(
             parser.tokens.get(lookahead).map(|token| token.kind),
             Some(TokenKind::At)
-                | Some(TokenKind::Keyword(Keyword::Hidden))
+                | Some(TokenKind::Keyword(Keyword::Private))
                 | Some(TokenKind::Keyword(Keyword::Def))
         ) || self.starts_local_callable_decl_at(lookahead)
     }

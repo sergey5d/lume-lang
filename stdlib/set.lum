@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-hidden interface SetApi[T] with Iterable[T] {
+private interface SetApi[T] with Iterable[T] {
     def add(value T) Set[T]
     def addAll(values Iterable[T]) Set[T]
     def iterator() Iterator[T]

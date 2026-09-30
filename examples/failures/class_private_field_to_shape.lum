@@ -2,7 +2,7 @@
 # cannot assign value of type 'Secret' to binding 'leak' of type 'Leak'
 
 class Secret {
-    hidden token Str = "hidden"
+    private token Str = "hidden"
 }
 
 shape Leak {

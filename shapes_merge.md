@@ -92,7 +92,7 @@ Rules:
 - every field in the update must already exist on `a`
 - an update cannot add fields
 - replacement values must be assignable to the existing field types
-- hidden fields are not updateable through this surface
+- private fields are not updateable through this surface
 - the result preserves the source's static shape
 - the source value is not mutated; the expression produces an updated value
 

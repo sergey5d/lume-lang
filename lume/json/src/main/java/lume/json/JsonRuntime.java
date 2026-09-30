@@ -207,7 +207,7 @@ public final class JsonRuntime {
     private static List<EncodedField> buildEncoderFields(LumeType type) {
         var out = new ArrayList<EncodedField>();
         for (LumeField field : type.fields().asJava()) {
-            if (field.isHidden() || field.hasAnnotation("JsonIgnore")) {
+            if (field.isPrivate() || field.hasAnnotation("JsonIgnore")) {
                 continue;
             }
             out.add(new EncodedField(jsonFieldName(field), field));
@@ -375,7 +375,7 @@ public final class JsonRuntime {
         }
 
         var fields = targetType.fields().asJava().stream()
-                .filter(field -> !field.isHidden())
+                .filter(field -> !field.isPrivate())
                 .toList();
         var args = new Object[fields.size()];
         var packageName = packageName(targetType);

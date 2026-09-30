@@ -371,7 +371,7 @@ classType ClassType[User] = typeOf[User].asClass() !
 fields = classType.fields()
 let Some { value as nameField } = classType.field("name") else panic("expected name field")
 println(nameField.fieldType().name() !)
-println(nameField.isHidden())
+println(nameField.isPrivate())
 
 enumType EnumType[Status] = typeOf[Status].asEnum() !
 let Some { value as pendingCase } = enumType.case("Pending") else panic("expected Pending case")
@@ -400,7 +400,7 @@ Rules:
 - `typeOf[T]` is a built-in type metadata operator, not an index operation
 - `runtimeType` is available as a read-only synthetic field on values
 - `TypeKind` includes `Class`, `Shape`, `Enum`, `Interface`, `Object`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
-- field, method, parameter, and declared-union alternative metadata are runtime values with methods such as `name()`, `fieldType()`, `isHidden()`, `params()`, and `returnType()`
+- field, method, parameter, and declared-union alternative metadata are runtime values with methods such as `name()`, `fieldType()`, `isPrivate()`, `params()`, and `returnType()`
 - annotation lookup is typed and reified: use `metadata.hasAnnotation[Route]()` and `metadata.annotation[Route]()`
 - reflective construction is supported for class and named shape metadata through `construct(args...)`
 - reflective declared-union alternative construction is supported through the compatibility API `EnumCase.construct(args...)`
@@ -464,6 +464,15 @@ OS.stderr.println("oops")
 ```
 
 `OS.stdout` and `OS.stderr` implement `Printer`.
+
+`Math.min` and `Math.max` select the smaller or larger of two values. Both
+arguments must be the same numeric type; overloads are available for `Int` and
+`Float`, and the result preserves that type:
+
+```txt
+smaller Int = Math.min(8, 3)
+larger Float = Math.max(1.5, 2.25)
+```
 
 `panic(...)` and `assert(...)` are prelude functions, not `OS` methods:
 
@@ -626,14 +635,14 @@ Top-level forms:
 - `type`
 - `ext TypeName`
 - `name Type = expr`
-- `hidden def`
-- `hidden name Type = expr`
-- `hidden annotation`
-- `hidden interface`
-- `hidden class`
-- `hidden shape`
-- `hidden object`
-- `hidden type`
+- `private def`
+- `private name Type = expr`
+- `private annotation`
+- `private interface`
+- `private class`
+- `private shape`
+- `private object`
+- `private type`
 
 Examples:
 
@@ -658,7 +667,7 @@ shape Point {
     y Int
 }
 
-hidden shape InternalPoint {
+private shape InternalPoint {
     x Int
     y Int
 }
@@ -699,7 +708,7 @@ Top-level immutable bindings are also supported:
 
 ```txt
 seed Int = 1
-hidden internalSeed Int = 0
+private internalSeed Int = 0
 ```
 
 Top-level mutable bindings are not allowed. Mutable module state must live
@@ -709,21 +718,21 @@ Fields without initializers are only valid in class-like field declarations:
 
 ```txt
 class Box {
-    hidden var cached Int
-    hidden label Str
+    private var cached Int
+    private label Str
 }
 ```
 
-`hidden` fields in classes and named objects may infer their type from an initializer:
+`private` fields in classes and named objects may infer their type from an initializer:
 
 ```txt
 class Box {
-    hidden count = 0
-    hidden var hits = 0
+    private count = 0
+    private var hits = 0
 }
 
 object Greeter {
-    hidden hello = "Hello"
+    private hello = "Hello"
 }
 ```
 
@@ -889,7 +898,7 @@ Use `{ ...point, ...dot, x: point.x }` to resolve only `x`, or
 shape, or anonymous shape. `patch` must be a statically known shape-like value.
 Every visible field in `patch` must already exist on `base`, and each patch
 field type must be assignable to the corresponding base field type. The result
-keeps the same class/shape view as `base`. Hidden fields are not updated through
+keeps the same class/shape view as `base`. Private fields are not updated through
 `with`, and the source value is not mutated.
 
 ## Construction
@@ -983,25 +992,29 @@ def explicit(user shape { name Str, age Int }) shape { name Str } =
 ```
 
 The `shape` prefix is optional for an anonymous shape type. `{ name Str }` and
-`shape { name Str }` denote the same structural type.
+`shape { name Str }` normalize to the same structural type. The explicit form
+is recommended in public function signatures because it keeps the return type
+visually distinct from the function body.
 
-Every named type declaration has a short form and an equivalent `type` form:
+Anonymous shape aliases may use either spelling:
 
 ```txt
-class A { ... }       # type A = class { ... }
-shape B { ... }       # type B = shape { ... }
-interface C { ... }   # type C = interface { ... }
-annotation D { ... }  # type D = annotation { ... }
-object E { ... }      # type E = object { ... }
+type Result = shape { x Str }
 ```
 
-The long form creates the same named declaration as the short form; it is not a
-transparent alias. It therefore supports the same fields, methods, generic
-parameters, and `with` interfaces. For example, a long-form shape remains
-constructible and may contain methods:
+or equivalently:
 
 ```txt
-type Session = shape {
+type Result = { x Str }
+```
+
+Both declarations are transparent aliases for the same anonymous structural
+shape. Neither declaration introduces a named shape.
+
+A named shape uses a shape declaration:
+
+```txt
+shape Session {
     start Int
     end Int
 
@@ -1011,9 +1024,25 @@ type Session = shape {
 session = Session(10, 20)
 ```
 
+Named declarations for the other declaration kinds retain equivalent short and
+`type` forms:
+
+```txt
+class A { ... }       # type A = class { ... }
+interface C { ... }   # type C = interface { ... }
+annotation D { ... }  # type D = annotation { ... }
+object E { ... }      # type E = object { ... }
+```
+
+The long form creates the same named declaration as the short form; it is not a
+transparent alias. It therefore supports the same fields, methods, generic
+parameters, and `with` interfaces. Shapes are deliberately excluded from this
+long-form rule so `type Name = shape { ... }` always means a transparent alias.
+
 After `type Name =`, a declaration kind immediately followed by `{` or `with`
-starts a long-form declaration. A named `class`, `shape`, or `object` after the
-kind remains an inline union member, as in
+starts a long-form declaration, except for `shape { ... }`, which is an
+anonymous structural type. A named `class`, `shape`, or `object` after the kind
+remains an inline union member, as in
 `type Outcome = class Success { value Str } | object Cancelled {}`.
 
 Anonymous shape positional construction uses `shape(...)`. It is contextual:
@@ -1145,13 +1174,13 @@ Implicit field construction rules:
 - construction braces check the synthesized visible-field shape
 - visible fields without initializers are required
 - visible fields with initializers are optional
-- hidden fields are excluded from the synthesized constructor inputs
-- hidden fields without initializers suppress implicit field constructors; define `new` to initialize them
+- private fields are excluded from the synthesized constructor inputs
+- private fields without initializers suppress implicit field constructors; define `new` to initialize them
 - `Type {}` works when the synthesized field-construction shape has no required fields
 - positional construction follows declared visible-field order
 - positional construction may omit only a trailing suffix of visible fields that all have initializers
 - positional construction never skips a defaulted visible field to reach a later required visible field
-- positional construction is rejected when a hidden initialized field appears before a later visible field
+- positional construction is rejected when a private initialized field appears before a later visible field
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
 
@@ -1207,7 +1236,7 @@ Shape conversion rules:
 - class-to-shape is allowed through visible fields
 - shape-to-interface follows the shape's explicit `with Interface` bounds
 - class-to-interface-through-shape is not automatic; assign the class value to an explicit shape view first
-- hidden class fields are not visible to shape conversion
+- private class fields are not visible to shape conversion
 - shape-to-class is not implicit; use a class constructor
 - tuple-to-shape and tuple-to-class are not allowed; use `shape(...)`, named shape construction, or class constructors
 - ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
@@ -1652,7 +1681,7 @@ the class body.
 - positional construction fills a prefix of constructor parameters and may omit only trailing parameters that all have defaults
 - positional construction never skips a defaulted parameter to reach a later required parameter
 - constructor parameters may end with one variadic vector parameter such as `items [Str] vararg`
-- `hidden new(...) { body }` declares a private constructor
+- `private new(...) { body }` declares a private constructor
 - each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
 - `this(...)` inside a constructor delegates positionally to another constructor of the same class
 - `this { field: value }` inside a constructor delegates with construction fields to another constructor of the same class
@@ -3580,7 +3609,7 @@ That means:
 - field order on the left does not matter
 - partial destructuring is allowed by omission
 - local aliases use `as`
-- hidden fields cannot be named
+- private fields cannot be named
 - `_` is not needed; just leave fields out
 
 Examples:
@@ -3812,15 +3841,15 @@ size = "hello"
 
 Supported today:
 
-- `hidden` on top-level `def`
-- `hidden` on top-level immutable bindings
-- `hidden` on top-level `interface`
-- `hidden` on top-level `class` / `shape` / `object` / `type`
-- `hidden` on fields
-- `hidden` on methods
+- `private` on top-level `def`
+- `private` on top-level immutable bindings
+- `private` on top-level `interface`
+- `private` on top-level `class` / `shape` / `object` / `type`
+- `private` on fields
+- `private` on methods
 
 Default visibility is public. There is no `public` keyword.
-Use `hidden` for private top-level functions, constants, types, fields, and methods.
+Use `private` for private top-level functions, constants, types, fields, and methods.
 Top-level mutable bindings are not allowed; mutable module state must live inside
 named objects, class instances, or function locals.
 

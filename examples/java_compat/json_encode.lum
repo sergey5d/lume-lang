@@ -13,7 +13,7 @@ class User {
     @JsonIgnore
     temporaryNote Str = "skip me"
 
-    hidden token Str = "secret"
+    private token Str = "secret"
 }
 
 def main() Unit {

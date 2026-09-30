@@ -9,7 +9,7 @@ class Label {
 
 class SecretName {
     name Str
-    hidden secret Str = "hidden"
+    private secret Str = "hidden"
 }
 
 def main() Unit {

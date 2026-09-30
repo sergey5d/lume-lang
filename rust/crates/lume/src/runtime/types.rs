@@ -223,7 +223,7 @@ impl RuntimeProgram {
                 name: field.name.clone(),
                 ty: field.ty.clone(),
                 mutable: field.mutable,
-                hidden: field.visibility == crate::ast::Visibility::Hidden,
+                hidden: field.visibility == crate::ast::Visibility::Private,
                 has_initializer: field.has_initializer,
                 initializer: field.initializer.clone(),
             })

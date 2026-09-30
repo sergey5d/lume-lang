@@ -8,8 +8,8 @@ class Person with Named, Aged {
     age Int
     city Str
 
-    hidden var archived Bool = false
-    hidden var internalScore Int = 0
+    private var archived Bool = false
+    private var internalScore Int = 0
 
     new(fullName Str, age Int, city Str) {
         parts = fullName.split(" ")

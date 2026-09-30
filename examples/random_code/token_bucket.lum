@@ -9,10 +9,10 @@
 # A token bucket stores available allowance as tokens.
 # Time adds tokens back up to the bucket capacity, and each request spends them.
 class TokenBucket {
-    hidden capacity Int
-    hidden refillPerTick Int
-    hidden var tokens Int = 0
-    hidden var lastTick Int = 0
+    private capacity Int
+    private refillPerTick Int
+    private var tokens Int = 0
+    private var lastTick Int = 0
 
     new(capacity Int, refillPerTick Int) {
         this.capacity = capacity

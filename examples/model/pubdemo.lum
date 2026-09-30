@@ -2,11 +2,11 @@
 module pubdemo
 
 prefix Str = "hello"
-hidden secret Str = "shh"
+private secret Str = "shh"
 
-hidden class SecretBox {
+private class SecretBox {
     value Str
 }
 
 def greet(name Str) Str = prefix + ", " + name
-hidden def whisper() Str = secret
+private def whisper() Str = secret

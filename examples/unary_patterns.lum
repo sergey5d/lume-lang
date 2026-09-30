@@ -11,7 +11,7 @@
 # box some 8
 # worker Wren
 # brace 9
-# hidden 11
+# private 11
 # tagged 13
 # marker ignored
 # marker bound
@@ -54,7 +54,7 @@ class Worker {
 
 class SecretBox {
     value Int
-    hidden secret Str
+    private secret Str
 
     new(value Int, secret Str) {
         this.value = value
@@ -143,7 +143,7 @@ def main() Int {
     }
 
     match SecretBox(11, "secret") {
-        case SecretBox(value) => println("hidden", value)
+        case SecretBox(value) => println("private", value)
     }
 
     tagged Tagged = Tagged.Named(13)

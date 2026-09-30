@@ -11,13 +11,13 @@ class User {
 
     age Int
 
-    hidden token Str = "secret"
+    private token Str = "secret"
 }
 
 text Str = Json.stringify(User { name: "Ada", age: 42 })
 ```
 
-Hidden fields are not serialized. `@JsonName` can rename a visible field and
+Private fields are not serialized. `@JsonName` can rename a visible field and
 `@JsonIgnore` can omit one explicitly. The language-facing entry points are
 declared in Lume: `annotation JsonName`, `annotation JsonIgnore`, `JsonField`,
 `JsonValue`, and `object Json`. Low-level escaping, collection traversal, and

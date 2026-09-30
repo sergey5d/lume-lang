@@ -9,10 +9,10 @@
 # A leaky bucket keeps a running fill level.
 # Requests add water to the bucket, and time drains it at a fixed rate.
 class LeakyBucket {
-    hidden capacity Int
-    hidden leakPerTick Int
-    hidden var level Int = 0
-    hidden var lastTick Int = 0
+    private capacity Int
+    private leakPerTick Int
+    private var level Int = 0
+    private var lastTick Int = 0
 
     new(capacity Int, leakPerTick Int) {
         this.capacity = capacity

@@ -2,7 +2,7 @@
 # assign_immutable at .*: cannot reassign immutable field 'count'
 
 class Counter {
-    hidden count Int
+    private count Int
 
     new(count Int) {
         this.count = count

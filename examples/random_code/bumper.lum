@@ -1,7 +1,7 @@
 module bumper
 
 class Counter {
-    hidden var count Int
+    private var count Int
 
     new(count Int) {
         this.count = count

@@ -70,7 +70,7 @@ pub struct TypeAliasDecl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Default,
-    Hidden,
+    Private,
 }
 
 /// The surface category of a type declaration.

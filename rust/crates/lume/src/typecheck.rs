@@ -1392,11 +1392,11 @@ impl<'a> Checker<'a> {
             match member {
                 TypeMember::Field(field) => {
                     if decl.kind == TypeKind::Annotation {
-                        if field.visibility == Visibility::Hidden {
+                        if field.visibility == Visibility::Private {
                             self.add_error(
                                 "invalid_annotation_field",
                                 format!(
-                                    "annotation '{}' cannot declare hidden field '{}'",
+                                    "annotation '{}' cannot declare private field '{}'",
                                     decl.name, field.name
                                 ),
                                 field.span,
@@ -1414,11 +1414,11 @@ impl<'a> Checker<'a> {
                         }
                     }
                     if decl.kind == TypeKind::Record {
-                        if field.visibility == Visibility::Hidden {
+                        if field.visibility == Visibility::Private {
                             self.add_error(
                                 "invalid_shape_field",
                                 format!(
-                                    "shape '{}' cannot declare hidden field '{}'",
+                                    "shape '{}' cannot declare private field '{}'",
                                     decl.name, field.name
                                 ),
                                 field.span,
@@ -1436,7 +1436,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     if decl.kind == TypeKind::Enum {
-                        if field.visibility == Visibility::Hidden {
+                        if field.visibility == Visibility::Private {
                             self.add_error(
                                 "invalid_enum_field",
                                 format!(
@@ -1481,11 +1481,12 @@ impl<'a> Checker<'a> {
                 }
                 TypeMember::Case(case) => {
                     for field in &case.fields {
-                        if case.kind == TypeKind::Record && field.visibility == Visibility::Hidden {
+                        if case.kind == TypeKind::Record && field.visibility == Visibility::Private
+                        {
                             self.add_error(
                                 "invalid_shape_field",
                                 format!(
-                                    "shape union variant '{}' cannot declare hidden field '{}'",
+                                    "shape union variant '{}' cannot declare private field '{}'",
                                     case.name, field.name
                                 ),
                                 field.span,
@@ -1501,7 +1502,7 @@ impl<'a> Checker<'a> {
                                 field.span,
                             );
                         }
-                        if case.kind == TypeKind::Enum && field.visibility == Visibility::Hidden {
+                        if case.kind == TypeKind::Enum && field.visibility == Visibility::Private {
                             self.add_error(
                                 "invalid_enum_case_field",
                                 format!(
@@ -3795,7 +3796,7 @@ impl<'a> Checker<'a> {
                 if hidden {
                     self.add_error(
                         "invalid_destructure",
-                        format!("cannot destructure hidden field '{}'", field_name),
+                        format!("cannot destructure private field '{}'", field_name),
                         binding.span,
                     );
                     return Ty::Unknown;
@@ -5279,7 +5280,7 @@ impl<'a> Checker<'a> {
                 name: field.name.clone(),
                 ty: ty.clone(),
                 mutable: false,
-                hidden: field.visibility == Visibility::Hidden,
+                hidden: field.visibility == Visibility::Private,
                 has_initializer: true,
                 variadic: false,
             });
@@ -6393,7 +6394,7 @@ impl<'a> Checker<'a> {
             let can_access_hidden = self.can_access_hidden_constructor(sig);
             let visible = overloads
                 .iter()
-                .filter(|ctor| ctor.visibility != Visibility::Hidden || can_access_hidden)
+                .filter(|ctor| ctor.visibility != Visibility::Private || can_access_hidden)
                 .cloned()
                 .collect::<Vec<_>>();
             self.diagnose_ambiguous_shape_context_call(&visible, args, span);
@@ -6414,7 +6415,7 @@ impl<'a> Checker<'a> {
             }
             let hidden = overloads
                 .iter()
-                .filter(|ctor| ctor.visibility == Visibility::Hidden && !can_access_hidden)
+                .filter(|ctor| ctor.visibility == Visibility::Private && !can_access_hidden)
                 .cloned()
                 .collect::<Vec<_>>();
             if self.choose_overload(&hidden, args).is_some() {
@@ -8546,7 +8547,7 @@ impl<'a> Checker<'a> {
             sig.methods.get(name).is_some_and(|methods| {
                 methods
                     .iter()
-                    .any(|method| method.visibility == Visibility::Hidden)
+                    .any(|method| method.visibility == Visibility::Private)
             })
         })
     }
@@ -8591,7 +8592,7 @@ impl<'a> Checker<'a> {
         self.add_error(
             "invalid_extension_access",
             format!(
-                "extension method cannot access hidden {member_kind} '{member_name}'; extension methods can access only visible members of '{target_name}'"
+                "extension method cannot access private {member_kind} '{member_name}'; extension methods can access only visible members of '{target_name}'"
             ),
             span,
         );
@@ -9314,7 +9315,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' has no implicit field constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
+                    "{} '{}' has no implicit field constructor because private field '{}' has no initializer; define 'new' to initialize it",
                     type_kind_label(sig.kind),
                     sig.name,
                     field.name
@@ -9435,7 +9436,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' has no implicit positional constructor because hidden field '{}' has no initializer; define 'new' to initialize it",
+                    "{} '{}' has no implicit positional constructor because private field '{}' has no initializer; define 'new' to initialize it",
                     type_kind_label(sig.kind),
                     sig.name,
                     field.name
@@ -9453,7 +9454,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' cannot use positional construction because hidden defaulted fields must come after all visible fields",
+                    "{} '{}' cannot use positional construction because private defaulted fields must come after all visible fields",
                     type_kind_label(sig.kind),
                     sig.name
                 ),
@@ -11397,7 +11398,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                     .or_else(|| field.initializer.as_ref().and_then(infer_literal_type))
                     .unwrap_or(Ty::Unknown),
                 mutable: field.mutable,
-                hidden: field.visibility == Visibility::Hidden,
+                hidden: field.visibility == Visibility::Private,
                 has_initializer: field.initializer.is_some(),
                 variadic: false,
             }),
@@ -11422,7 +11423,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                         name: field.name.clone(),
                         ty: enum_case_field_sig_ty(field, &fields, &owner_params),
                         mutable: field.mutable,
-                        hidden: field.visibility == Visibility::Hidden,
+                        hidden: field.visibility == Visibility::Private,
                         has_initializer: field.initializer.is_some(),
                         variadic: false,
                     })
@@ -13027,7 +13028,7 @@ ext Route {
         let program = parse_inline(
             r#"
 class User {
-    hidden token Str = "secret"
+    private token Str = "secret"
     name Str
 }
 
@@ -13054,7 +13055,7 @@ ext User {
 class User {
     name Str
 
-    hidden def secret() Str = this.name
+    private def secret() Str = this.name
 }
 
 ext User {
@@ -13095,9 +13096,9 @@ def main() Unit {
         let program = parse_inline(
             r#"
 class OrderManager {
-    hidden map Map[Int, Str] = Map()
-    hidden var currentTick Int = 0
-    hidden queue [Str] = []
+    private map Map[Int, Str] = Map()
+    private var currentTick Int = 0
+    private queue [Str] = []
 }
 
 def main() Unit {
@@ -13115,7 +13116,7 @@ def main() Unit {
             r#"
 class SecretUser {
     name Str
-    hidden token Str
+    private token Str
 }
 
 def main() Unit {
@@ -13128,7 +13129,7 @@ def main() Unit {
         assert!(
             result.diagnostics.iter().any(|diag| {
                 diag.message.contains(
-                    "no implicit field constructor because hidden field 'token' has no initializer",
+                    "no implicit field constructor because private field 'token' has no initializer",
                 )
             }),
             "{:#?}",
@@ -13137,7 +13138,7 @@ def main() Unit {
         assert!(
             result.diagnostics.iter().any(|diag| {
                 diag.message.contains(
-                    "no implicit positional constructor because hidden field 'token' has no initializer",
+                    "no implicit positional constructor because private field 'token' has no initializer",
                 )
             }),
             "{:#?}",
@@ -13151,7 +13152,7 @@ def main() Unit {
             r#"
 class SecretUser {
     name Str
-    hidden token Str
+    private token Str
 
     new(name Str) {
         this.name = name
@@ -13175,7 +13176,7 @@ def main() Unit {
             r#"
 class SecretUser {
     name Str
-    hidden token Str
+    private token Str
 
     new(name Str) {
         this.name = name
@@ -13203,7 +13204,7 @@ class User {
     name Str
     age Int
     city Str = "NYC"
-    hidden score Int = 5
+    private score Int = 5
 
     def scoreValue() Int = this.score
 }
@@ -13458,7 +13459,7 @@ def main() Int {
         let program = parse_inline(
             r#"
 class Cache {
-    hidden var values [Str : Int] = []
+    private var values [Str : Int] = []
 
     new() {}
 
@@ -13626,7 +13627,7 @@ def health() Str = "ok"
         let program = parse_inline(
             r#"
 annotation Route {
-    hidden path Str
+    private path Str
     var method Str = "GET"
 }
 "#,
@@ -13637,7 +13638,7 @@ annotation Route {
                 .diagnostics
                 .iter()
                 .any(|diag| diag.code == "invalid_annotation_field"
-                    && diag.message.contains("hidden field 'path'")),
+                    && diag.message.contains("private field 'path'")),
             "{:#?}",
             result.diagnostics
         );
@@ -14054,7 +14055,7 @@ def main() Unit {
 class User {
     name Str
 
-    hidden new(name Str) {
+    private new(name Str) {
         this.name = name
     }
 }
@@ -14078,7 +14079,7 @@ def main() Unit {
         assert_eq!(diagnostic.message, "constructor is not available");
         assert_eq!(
             diagnostic.label.as_deref(),
-            Some("field construction is hidden")
+            Some("field construction is private")
         );
         assert_eq!(
             diagnostic.notes,
@@ -14092,7 +14093,7 @@ def main() Unit {
         let program = parse_inline(
             r#"
 class Counter {
-    hidden var count Int = 0
+    private var count Int = 0
     name Str = "unknown"
 
     new(count Int, name Str) {
@@ -14116,7 +14117,7 @@ def main() Unit {
         let program = parse_inline(
             r#"
 class Counter {
-    hidden var count Int = 0
+    private var count Int = 0
 
     new(count Int) {
         this.count := count
@@ -14408,7 +14409,7 @@ def main() Unit {
             r#"
 class Broken {
     name Str
-    hidden score Int = 5
+    private score Int = 5
     age Int
 }
 
@@ -14421,7 +14422,7 @@ def main() Unit {
         assert!(
             result.diagnostics.iter().any(|diag| diag
                 .message
-                .contains("hidden defaulted fields must come after all visible fields")),
+                .contains("private defaulted fields must come after all visible fields")),
             "{:#?}",
             result.diagnostics
         );
@@ -14549,7 +14550,7 @@ def main() Str {
             r#"
 class SecretUser {
     name Str
-    hidden token Str
+    private token Str
     location Str
 
     new(name Str, token Str, location Str) {
@@ -16659,10 +16660,10 @@ def main() Unit {
     }
 
     #[test]
-    fn treats_type_equals_shape_as_named_shape_declaration() {
+    fn treats_explicit_and_short_anonymous_shape_aliases_as_equivalent() {
         let program = parse_inline(
             r#"
-type Session = shape {
+shape Session {
     position Str
     start Int
     end Int
@@ -16670,13 +16671,21 @@ type Session = shape {
     def duration() Int = this.end - this.start
 }
 
-def project(value shape { position Str, start Int }) shape { position Str } =
+type ExplicitView = shape { position Str }
+type ShortView = { position Str }
+
+def project(value shape { position Str, start Int }) ExplicitView =
     shape { position: value.position }
+
+def toShort(value ExplicitView) ShortView = value
+def toExplicit(value ShortView) ExplicitView = value
 
 def main() Unit {
     session Session = Session("engineer", 10, 30)
-    view shape { position Str } = project(session)
-    println(view.position, session.duration())
+    explicit ExplicitView = project(session)
+    short ShortView = toShort(explicit)
+    roundTrip ExplicitView = toExplicit(short)
+    println(roundTrip.position, session.duration())
 }
 "#,
         );

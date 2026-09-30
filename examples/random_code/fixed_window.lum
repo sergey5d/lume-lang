@@ -8,9 +8,9 @@ class Window {
 
 class FixedWindowRateLimiter {
 
-    hidden map [Str: Window] = []
-    hidden windowSize Int
-    hidden limit Int
+    private map [Str: Window] = []
+    private windowSize Int
+    private limit Int
 
     new(windowSize Int, limit Int) = {
         this.windowSize = windowSize

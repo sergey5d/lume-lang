@@ -2,14 +2,14 @@
 #
 # Class declaration with storage, constructors, and behavior in one body.
 
-hidden class Person with Named, Aged {
+private class Person with Named, Aged {
 
     firstName Str
     lastName Str
     age Int
     city Str
 
-    hidden var archived Bool
+    private var archived Bool
     var internalScore Int = 1
 
     new(firstName Str, lastName Str) {
@@ -20,7 +20,7 @@ hidden class Person with Named, Aged {
         this.archived = false
     }
 
-    hidden def calc() Int {
+    private def calc() Int {
         this.firstName.size() + this.lastName.size()
     }
 

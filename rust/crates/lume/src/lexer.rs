@@ -19,7 +19,7 @@ pub enum Keyword {
     False,
     Fn,
     For,
-    Hidden,
+    Private,
     If,
     Interface,
     Is,
@@ -315,6 +315,14 @@ impl<'a> Lexer<'a> {
             self.lex_string_from(start);
             return;
         }
+        if lexeme == "hidden" {
+            self.error(
+                "removed_hidden_keyword",
+                "visibility keyword 'hidden' was removed; use 'private'",
+                start,
+                self.mark(),
+            );
+        }
         let kind = match lexeme.as_str() {
             "annotation" => TokenKind::Keyword(Keyword::Annotation),
             "as" => TokenKind::Keyword(Keyword::As),
@@ -330,7 +338,7 @@ impl<'a> Lexer<'a> {
             "false" => TokenKind::Keyword(Keyword::False),
             "fn" => TokenKind::Keyword(Keyword::Fn),
             "for" => TokenKind::Keyword(Keyword::For),
-            "hidden" => TokenKind::Keyword(Keyword::Hidden),
+            "hidden" | "private" => TokenKind::Keyword(Keyword::Private),
             "if" => TokenKind::Keyword(Keyword::If),
             "use" => TokenKind::Keyword(Keyword::Use),
             "interface" => TokenKind::Keyword(Keyword::Interface),
@@ -661,7 +669,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name }\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name }\nprivate token Str\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -669,6 +677,7 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::As)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Ext)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Fn)));
+        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Private)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Reified)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Type)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
@@ -685,6 +694,15 @@ mod tests {
                 .iter()
                 .any(|token| token.kind == TokenKind::String && token.lexeme == "raw\"$name\\n\"")
         );
+    }
+
+    #[test]
+    fn rejects_removed_hidden_visibility_keyword() {
+        let result = lex(&source("hidden value Str = \"old\"\n"));
+        assert!(result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "removed_hidden_keyword"
+                && diagnostic.message.contains("use 'private'")
+        }));
     }
 
     #[test]

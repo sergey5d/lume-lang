@@ -567,7 +567,7 @@ impl<'a> Lowerer<'a> {
     ) -> (ir::FunctionId, ir::LocalId) {
         let id = self.declare_function(
             "__field_init",
-            ast::Visibility::Hidden,
+            ast::Visibility::Private,
             &[],
             &[],
             &[],
@@ -655,7 +655,7 @@ impl<'a> Lowerer<'a> {
             ir::FunctionKind::Synthetic,
             ir::Type::Unit,
         );
-        init.visibility = ast::Visibility::Hidden;
+        init.visibility = ast::Visibility::Private;
         let init_id = self.program.add_function(init);
         self.program.set_global_init(init_id);
 
@@ -1547,7 +1547,7 @@ impl<'a> FunctionLowerer<'a> {
     ) -> ir::RValue {
         let type_name = crate::source::anonymous_object_type_name(span);
         let mut ty = ir::TypeDef::new(ast::TypeKind::Object, type_name.clone());
-        ty.visibility = ast::Visibility::Hidden;
+        ty.visibility = ast::Visibility::Private;
         ty.span = Some(span);
         ty.fields = fields
             .iter()
@@ -3735,7 +3735,7 @@ impl<'a> FunctionLowerer<'a> {
         };
         ty.fields
             .iter()
-            .find(|field| field.visibility != ast::Visibility::Hidden && field.name == field_name)
+            .find(|field| field.visibility != ast::Visibility::Private && field.name == field_name)
             .map(|field| substitute_ir_type(&field.ty, &subst))
             .unwrap_or(ir::Type::Unknown)
     }
@@ -4039,7 +4039,7 @@ impl<'a> FunctionLowerer<'a> {
         let visible_fields = ty
             .fields
             .iter()
-            .filter(|field| field.visibility != ast::Visibility::Hidden)
+            .filter(|field| field.visibility != ast::Visibility::Private)
             .collect::<Vec<_>>();
         if visible_fields.len() != arity {
             return None;
@@ -4069,7 +4069,7 @@ impl<'a> FunctionLowerer<'a> {
             ir::Type::named(type_name.clone()),
             ty.fields
                 .iter()
-                .filter(|field| field.visibility != ast::Visibility::Hidden)
+                .filter(|field| field.visibility != ast::Visibility::Private)
                 .map(|field| field.name.clone())
                 .collect(),
         ))
@@ -5126,7 +5126,7 @@ impl<'a> FunctionLowerer<'a> {
                 Some(
                     ty.fields
                         .iter()
-                        .filter(|field| field.visibility != ast::Visibility::Hidden)
+                        .filter(|field| field.visibility != ast::Visibility::Private)
                         .map(|field| ir::NamedType {
                             name: field.name.clone(),
                             ty: substitute_ir_type(&field.ty, &subst),
@@ -5523,6 +5523,18 @@ impl<'a> FunctionLowerer<'a> {
         let Expr::Member { receiver, name, .. } = callee else {
             return None;
         };
+        if matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "Math")
+            && matches!(name.as_str(), "min" | "max")
+            && args.len() == 2
+        {
+            let left = self.infer_expr_type_with_overrides(&args[0].value, overrides);
+            let right = self.infer_expr_type_with_overrides(&args[1].value, overrides);
+            return match (&left, &right) {
+                (ir::Type::Int, ir::Type::Int) => Some(ir::Type::Int),
+                (ir::Type::Float, ir::Type::Float) => Some(ir::Type::Float),
+                _ => Some(ir::Type::Unknown),
+            };
+        }
         let receiver_ty = self.infer_expr_type_with_overrides(receiver, overrides);
         let ir::Type::Named {
             name: type_name,
@@ -6636,7 +6648,7 @@ impl<'a> FunctionLowerer<'a> {
         Some(
             ty.fields
                 .iter()
-                .filter(|field| field.visibility != ast::Visibility::Hidden)
+                .filter(|field| field.visibility != ast::Visibility::Private)
                 .map(|field| {
                     (
                         field.name.clone(),
@@ -6757,7 +6769,7 @@ impl<'a> FunctionLowerer<'a> {
                     shape
                         .fields
                         .iter()
-                        .filter(|field| field.visibility != ast::Visibility::Hidden)
+                        .filter(|field| field.visibility != ast::Visibility::Private)
                         .map(|field| ir::NamedType {
                             name: field.name.clone(),
                             ty: substitute_ir_type(&field.ty, &subst),
@@ -7155,7 +7167,7 @@ impl<'a> FunctionLowerer<'a> {
             let names = ty
                 .fields
                 .iter()
-                .filter(|field| field.visibility != ast::Visibility::Hidden)
+                .filter(|field| field.visibility != ast::Visibility::Private)
                 .map(|field| field.name.clone())
                 .collect::<Vec<_>>();
             if arrange_named_call_args(&names, args).is_some() || args.len() == names.len() {
@@ -8650,7 +8662,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: Vec::new(),
             ret: Box::new(ir_exact_runtime_type(ir::Type::Unknown)),
         }),
-        ("Field", "isHidden") => Some(ir::Type::Function {
+        ("Field", "isPrivate") => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir::Type::Bool),
         }),
@@ -9467,7 +9479,8 @@ fn declared_type_exists(program: &ir::Program, name: &str) -> bool {
 fn runtime_callable_root_name(name: &str) -> bool {
     matches!(
         name,
-        "OS" | "Range"
+        "OS" | "Math"
+            | "Range"
             | "Vector"
             | "LinkedList"
             | "Array"

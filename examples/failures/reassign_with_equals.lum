@@ -2,7 +2,7 @@
 # use ':=' for reassignment; '=' is only for bindings and constructor initialization
 
 class Counter {
-    hidden var count Int = 0
+    private var count Int = 0
 
     def bump() Unit {
         this.count = 1

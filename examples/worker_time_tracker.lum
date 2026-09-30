@@ -17,7 +17,7 @@ class WorkerInfo {
 }
 
 class WorkerTimeTracker {
-    hidden workers [Str: WorkerInfo] = []
+    private workers [Str: WorkerInfo] = []
 
     def addWorker(workerId Str, position Str, compensation Int) Bool {
         if workers.contains(workerId) {

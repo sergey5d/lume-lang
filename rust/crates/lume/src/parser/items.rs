@@ -198,8 +198,8 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_visibility(&mut self) -> Visibility {
-        if self.match_keyword(Keyword::Hidden) {
-            Visibility::Hidden
+        if self.match_keyword(Keyword::Private) {
+            Visibility::Private
         } else {
             Visibility::Default
         }
@@ -217,7 +217,6 @@ impl<'a> Parser<'a> {
         let inline_type_decl_kind = match self.current_kind() {
             TokenKind::Keyword(Keyword::Annotation) => Some(TypeKind::Annotation),
             TokenKind::Keyword(Keyword::Class) => Some(TypeKind::Class),
-            TokenKind::Keyword(Keyword::Shape) => Some(TypeKind::Record),
             TokenKind::Keyword(Keyword::Object) => Some(TypeKind::Object),
             TokenKind::Keyword(Keyword::Interface) => Some(TypeKind::Interface),
             _ => None,
@@ -260,12 +259,26 @@ impl<'a> Parser<'a> {
                 )
                 .map(Item::Type);
         }
+        let starts_anonymous_shape_alias = if self.at_keyword(Keyword::Shape) {
+            let mut lookahead = self.index + 1;
+            while self
+                .tokens
+                .get(lookahead)
+                .is_some_and(|token| token.kind == TokenKind::Newline)
+            {
+                lookahead += 1;
+            }
+            self.tokens
+                .get(lookahead)
+                .is_some_and(|token| token.kind == TokenKind::LBrace)
+        } else {
+            false
+        };
         if matches!(
             self.current_kind(),
-            TokenKind::Keyword(Keyword::Class)
-                | TokenKind::Keyword(Keyword::Shape)
-                | TokenKind::Keyword(Keyword::Object)
-        ) {
+            TokenKind::Keyword(Keyword::Class) | TokenKind::Keyword(Keyword::Object)
+        ) || (self.at_keyword(Keyword::Shape) && !starts_anonymous_shape_alias)
+        {
             return self.parse_inline_union_decl(visibility, name, generic_clause, start);
         }
         if !generic_clause.params.is_empty() || !generic_clause.conditions.is_empty() {

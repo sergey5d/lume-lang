@@ -300,10 +300,10 @@ Open questions:
 ### Named Object Factory Questions
 
 - whether same-named `object` declarations should act as privileged factory companions
-- whether singleton factory methods should ever get hidden-field access to class internals
+- whether singleton factory methods should ever get private-field access to class internals
 
 Leaning:
-- named-object factory methods are useful as ordinary namespaced helpers, but hidden-field companion privileges should be a separate deliberate decision
+- named-object factory methods are useful as ordinary namespaced helpers, but private-field companion privileges should be a separate deliberate decision
 
 ## Suggested Priority Order
 

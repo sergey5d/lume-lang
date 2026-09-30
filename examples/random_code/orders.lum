@@ -10,9 +10,9 @@ class Order {
 }
 
 class OrderManager {
-    hidden map [Int: Order] = []
-    hidden var currentTick Int = 0
-    hidden queue [Order] = []
+    private map [Int: Order] = []
+    private var currentTick Int = 0
+    private queue [Order] = []
 
     def parseOrder(str Str) Order? {
 

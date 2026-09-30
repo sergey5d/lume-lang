@@ -5,7 +5,7 @@
 # 3
 
 class Vec {
-    hidden var items Array[Int]
+    private var items Array[Int]
 
     new(left Int, right Int) {
         this.items = Array(left, right)

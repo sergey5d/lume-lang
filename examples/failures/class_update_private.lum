@@ -3,7 +3,7 @@
 
 class SecretAmount {
     amount Int
-    hidden secret Str = "hidden"
+    private secret Str = "hidden"
 }
 
 def main() Unit {

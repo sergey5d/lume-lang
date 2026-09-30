@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*shape 'SecretPoint' cannot declare private field 'x'.*
+
+shape SecretPoint {
+    private x Int
+    y Int
+}

@@ -3,8 +3,8 @@ module lume/db
 use DbApi/{BoundExec, Database, Exec, Query, Row, RowQuery, Transaction}
 use lume/db/{DbError, JdbcDatabase, JdbcRow, JdbcRowDecoder, JdbcRunner, JdbcTransaction}
 
-hidden object JdbcRowDecoderCache {
-    hidden var decoders Map[Str, JdbcRowDecoder] = Map()
+private object JdbcRowDecoderCache {
+    private var decoders Map[Str, JdbcRowDecoder] = Map()
 
     def decoder(targetType Type[_]) Result[JdbcRowDecoder, DbError] {
         key Str = this.key(targetType)
@@ -24,8 +24,8 @@ hidden object JdbcRowDecoderCache {
 }
 
 
-hidden class JdbcRowImpl with Row {
-    hidden backend JdbcRow
+private class JdbcRowImpl with Row {
+    private backend JdbcRow
 
     new(backend JdbcRow) {
         this.backend = backend
@@ -66,10 +66,10 @@ hidden class JdbcRowImpl with Row {
 }
 
 
-hidden class JdbcQuery with Query {
-    hidden runner JdbcRunner
-    hidden sql Str
-    hidden values [Any]
+private class JdbcQuery with Query {
+    private runner JdbcRunner
+    private sql Str
+    private values [Any]
 
     new(runner JdbcRunner, sql Str, values [Any] = []) {
         this.runner = runner
@@ -144,10 +144,10 @@ hidden class JdbcQuery with Query {
 }
 
 
-hidden class JdbcRowQuery with RowQuery {
-    hidden runner JdbcRunner
-    hidden sql Str
-    hidden values [Any]
+private class JdbcRowQuery with RowQuery {
+    private runner JdbcRunner
+    private sql Str
+    private values [Any]
 
     new(runner JdbcRunner, sql Str, values [Any] = []) {
         this.runner = runner
@@ -215,9 +215,9 @@ hidden class JdbcRowQuery with RowQuery {
 }
 
 
-hidden class JdbcExec with Exec {
-    hidden runner JdbcRunner
-    hidden sql Str
+private class JdbcExec with Exec {
+    private runner JdbcRunner
+    private sql Str
 
     new(runner JdbcRunner, sql Str) {
         this.runner = runner
@@ -230,10 +230,10 @@ hidden class JdbcExec with Exec {
 }
 
 
-hidden class JdbcBoundExec with BoundExec {
-    hidden runner JdbcRunner
-    hidden sql Str
-    hidden values [Any]
+private class JdbcBoundExec with BoundExec {
+    private runner JdbcRunner
+    private sql Str
+    private values [Any]
 
     new(runner JdbcRunner, sql Str, values [Any] = []) {
         this.runner = runner
@@ -245,8 +245,8 @@ hidden class JdbcBoundExec with BoundExec {
 }
 
 
-hidden class JdbcTransactionImpl with Transaction {
-    hidden backend JdbcTransaction
+private class JdbcTransactionImpl with Transaction {
+    private backend JdbcTransaction
 
     new(backend JdbcTransaction) {
         this.backend = backend
@@ -268,8 +268,8 @@ hidden class JdbcTransactionImpl with Transaction {
 }
 
 
-hidden class JdbcDatabaseImpl with Database {
-    hidden backend JdbcDatabase
+private class JdbcDatabaseImpl with Database {
+    private backend JdbcDatabase
 
     new(backend JdbcDatabase) {
         this.backend = backend

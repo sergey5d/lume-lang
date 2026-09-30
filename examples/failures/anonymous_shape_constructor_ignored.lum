@@ -3,7 +3,7 @@
 
 class SecretBadge {
     name Str
-    hidden code Int
+    private code Int
 
     new(name Str) {
         this.name = name

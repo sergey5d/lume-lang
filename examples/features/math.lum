@@ -1,0 +1,8 @@
+# EXPECT:
+# -3 8
+# 1.25 7.5
+
+def main() Unit {
+    println(Math.min(-3, 8), Math.max(-3, 8))
+    println(Math.min(1.25, 7.5), Math.max(1.25, 7.5))
+}

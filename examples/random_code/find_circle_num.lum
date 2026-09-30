@@ -8,7 +8,7 @@
 # 0
 
 class DisjointSet {
-    hidden var arr Array[Int]
+    private var arr Array[Int]
 
     new(size Int) {
         this.arr = Array.generate(size, i => i)

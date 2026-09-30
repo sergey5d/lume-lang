@@ -1,8 +1,8 @@
 # EXPECT:
 # brace fields Sammy 15 NYC
 # positional Ben 12 Paris
-# positional hidden Liam 8 5
-# positional hidden-third Ada 4 7
+# positional private Liam 8 5
+# positional private-third Ada 4 7
 # ctor alt 6 5
 # ctor manual 5 Bobby
 
@@ -10,7 +10,7 @@
 # - classes without explicit `new` support brace field construction and positional parentheses
 # - positional construction follows visible field order
 # - trailing visible defaults may be omitted
-# - hidden defaulted fields may trail visible fields and stay out of the shape
+# - private defaulted fields may trail visible fields and stay out of the shape
 # - explicit `new` supports brace field construction and positional parentheses
 # - constructor defaults may appear anywhere, but positional calls never skip over them
 
@@ -18,16 +18,16 @@ class Profile {
     name Str
     age Int
     city Str = "NYC"
-    hidden score Int = 5
+    private score Int = 5
 
     def scoreValue() Int = this.score
 }
 
 
-class HiddenTail {
+class PrivateTail {
     name Str
     level Int
-    hidden bonus Int = 7
+    private bonus Int = 7
 
     def bonusValue() Int = this.bonus
 }
@@ -37,7 +37,7 @@ class A {
     age Int
     name Str
 
-    hidden var malnutritioned Bool = false
+    private var malnutritioned Bool = false
 
     new(age Int, name Str) {
         this.age = age
@@ -53,11 +53,11 @@ class A {
 
 
 class B {
-    hidden age Int
-    hidden name Str
-    hidden var malnutritioned Bool = false
-    hidden var unassigned Float
-    hidden questionable Int
+    private age Int
+    private name Str
+    private var malnutritioned Bool = false
+    private var unassigned Float
+    private questionable Int
 
     new(age Int, name Str = "Bobby") {
         this.age = age
@@ -78,8 +78,8 @@ def main() Unit {
         age: 15
     }
     positional Profile = Profile("Ben", 12, "Paris")
-    hiddenDefault Profile = Profile("Liam", 8)
-    hiddenThird HiddenTail = HiddenTail("Ada", 4)
+    privateDefault Profile = Profile("Liam", 8)
+    privateThird PrivateTail = PrivateTail("Ada", 4)
 
     aFromAlt A = A { maturity: 21 }
     bManual B = B(5)
@@ -87,16 +87,16 @@ def main() Unit {
     println("brace fields", named.name, named.age, named.city)
     println("positional", positional.name, positional.age, positional.city)
     println(
-        "positional hidden",
-        hiddenDefault.name,
-        hiddenDefault.age,
-        hiddenDefault.scoreValue()
+        "positional private",
+        privateDefault.name,
+        privateDefault.age,
+        privateDefault.scoreValue()
     )
     println(
-        "positional hidden-third",
-        hiddenThird.name,
-        hiddenThird.level,
-        hiddenThird.bonusValue()
+        "positional private-third",
+        privateThird.name,
+        privateThird.level,
+        privateThird.bonusValue()
     )
     println("ctor alt", aFromAlt.trueAge(), aFromAlt.trueName())
     println("ctor manual", bManual.trueAge(), bManual.trueName())

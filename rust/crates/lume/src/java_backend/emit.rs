@@ -696,7 +696,7 @@ fn push_union_variant(
 
 fn java_type_visibility(ty: &ir::TypeDef) -> &'static str {
     match ty.visibility {
-        ast::Visibility::Hidden => "",
+        ast::Visibility::Private => "",
         ast::Visibility::Default => "public ",
     }
 }
@@ -1150,7 +1150,7 @@ fn type_field_array_expr(
                 java_string_literal(&field.name),
                 type_value_expr_with_params(&field.ty, names, type_params),
                 annotation_array_expr(&field.annotations),
-                matches!(field.visibility, Visibility::Hidden)
+                matches!(field.visibility, Visibility::Private)
             )
         })
         .collect::<Vec<_>>()
@@ -5427,7 +5427,10 @@ impl<'a> SourceBodyEmitter<'a> {
                     None
                 })?;
                 if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some()
-                    && !matches!(receiver_ty, ir::Type::Named { .. } | ir::Type::Tuple(_))
+                    && !matches!(
+                        receiver_ty,
+                        ir::Type::Named { .. } | ir::Type::Tuple(_) | ir::Type::Record(_)
+                    )
                 {
                     eprintln!(
                         "readable java has unsupported receiver type for member '{name}' in '{}': {receiver_ty:?}, expr={expr:?}",
@@ -5438,6 +5441,14 @@ impl<'a> SourceBodyEmitter<'a> {
                     ir::Type::Tuple(_) => {
                         let accessor = tuple_accessor_name(name)?;
                         Some(format!("{receiver_expr}.{accessor}()"))
+                    }
+                    ir::Type::Record(fields) => {
+                        let field = fields.iter().find(|field| field.name == *name)?;
+                        Some(format!(
+                            "(({}) ((lume.core.LumeShape) {receiver_expr}).get({}))",
+                            self.names.value_type(&field.ty),
+                            java_string_literal(name)
+                        ))
                     }
                     ir::Type::Named {
                         name: type_name, ..
@@ -5997,7 +6008,7 @@ impl<'a> SourceBodyEmitter<'a> {
         let source_fields = source_def
             .fields
             .iter()
-            .filter(|field| field.visibility != Visibility::Hidden)
+            .filter(|field| field.visibility != Visibility::Private)
             .map(|field| {
                 (
                     field.name.as_str(),
@@ -6008,7 +6019,7 @@ impl<'a> SourceBodyEmitter<'a> {
         let target_fields = target_def
             .fields
             .iter()
-            .filter(|field| field.visibility != Visibility::Hidden)
+            .filter(|field| field.visibility != Visibility::Private)
             .collect::<Vec<_>>();
         if target_fields.len() != source_fields.len()
             || target_fields.iter().any(|field| {
@@ -6241,6 +6252,31 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
         expected: &ir::Type,
     ) -> Option<String> {
+        if let ir::Type::Record(expected_fields) = expected {
+            let mut parts = Vec::with_capacity(expected_fields.len() * 2);
+            if fields.is_empty() && !values.is_empty() {
+                if values.len() != expected_fields.len() {
+                    return None;
+                }
+                for (field, value) in expected_fields.iter().zip(values) {
+                    parts.push(java_string_literal(&field.name));
+                    parts.push(self.emit_expr_against(value, bindings, &field.ty)?);
+                }
+            } else {
+                if fields.iter().any(|field| field.name.is_none()) {
+                    return None;
+                }
+                for field in expected_fields {
+                    let value = fields
+                        .iter()
+                        .find(|value| value.name.as_deref() == Some(field.name.as_str()))?;
+                    parts.push(java_string_literal(&field.name));
+                    parts.push(self.emit_expr_against(&value.value, bindings, &field.ty)?);
+                }
+            }
+            return Some(format!("lume.core.LumeShape.of({})", parts.join(", ")));
+        }
+
         let ir::Type::Named { name, args } = expected else {
             if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
                 eprintln!(
@@ -6507,6 +6543,17 @@ impl<'a> SourceBodyEmitter<'a> {
                 ))
             }
             core::Expr::Member { receiver, name, .. }
+                if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "Math")
+                    && matches!(name.as_str(), "min" | "max")
+                    && args.len() == 2 =>
+            {
+                let args = args
+                    .iter()
+                    .map(|arg| self.emit_call_arg(arg, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                Some(format!("java.lang.Math.{name}({})", args.join(", ")))
+            }
+            core::Expr::Member { receiver, name, .. }
                 if name == "iterator"
                     && args.is_empty()
                     && matches!(
@@ -6754,6 +6801,13 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             [owner] if owner == "Range" && emitted.len() == 2 => {
                 Some(format!("new lume.core.Range({joined})"))
+            }
+            [owner, method]
+                if owner == "Math"
+                    && matches!(method.as_str(), "min" | "max")
+                    && emitted.len() == 2 =>
+            {
+                Some(format!("java.lang.Math.{method}({joined})"))
             }
             [owner] if self.names.is_java_type(owner) => Some(format!(
                 "new {}{}({joined})",
@@ -8348,7 +8402,7 @@ impl<'a> JavaIrSupport<'a> {
         let params = ty
             .fields
             .iter()
-            .filter(|field| field.visibility != Visibility::Hidden)
+            .filter(|field| field.visibility != Visibility::Private)
             .map(|field| JavaParamSpec {
                 ty: field.ty.clone(),
                 variadic: false,
@@ -8493,6 +8547,11 @@ impl<'a> JavaIrSupport<'a> {
                     name: "Option".to_string(),
                     args: vec![ir::Type::Float],
                 })
+            }
+            [owner, method]
+                if owner == "Math" && matches!(method.as_str(), "min" | "max") && arg_len == 2 =>
+            {
+                Some(ir::Type::Unknown)
             }
             [owner] if self.names.is_java_type(owner) || self.is_lume_constructible_type(owner) => {
                 Some(ir::Type::Named {

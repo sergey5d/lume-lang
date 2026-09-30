@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*visibility keyword 'hidden' was removed; use 'private'.*
+
+hidden value Str = "old"

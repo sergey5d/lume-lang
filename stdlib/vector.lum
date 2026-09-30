@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-hidden interface VectorApi[T] with Iterable[T] {
+private interface VectorApi[T] with Iterable[T] {
     def append(value T) Vector[T]
     def add(value T) Vector[T]
     def addAll(values Iterable[T]) Vector[T]

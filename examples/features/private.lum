@@ -1,8 +1,8 @@
 # EXPECT:
-# hidden secret
+# private secret
 
 class SecretBox {
-    hidden value Str = "secret"
+    private value Str = "secret"
 
     def reveal() Str =
         this.value
@@ -10,5 +10,5 @@ class SecretBox {
 
 def main() Unit {
     box SecretBox = SecretBox {}
-    println("hidden", box.reveal())
+    println("private", box.reveal())
 }

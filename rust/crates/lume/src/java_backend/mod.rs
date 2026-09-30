@@ -2420,7 +2420,7 @@ mod tests {
             r#"
 module demo/app
 
-type Point = shape {
+shape Point {
     x Int
     y Int
 }
@@ -4173,6 +4173,59 @@ def report(value Int) Unit {
     }
 
     #[test]
+    fn readable_java_emits_builtin_math_calls() {
+        let temp = temp_path("lume-java-readable-math");
+        let source = temp.join("math.lum");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/math
+
+def main() Unit {
+    println(Math.min(-3, 8), Math.max(-3, 8))
+    println(Math.min(1.25, 7.5), Math.max(1.25, 7.5))
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module =
+            fs::read_to_string(out.join("demo/math/MathModule.java")).expect("read module Java");
+        assert!(module.contains("Math.min((-3L), 8L)"), "{module}");
+        assert!(module.contains("Math.max((-3L), 8L)"), "{module}");
+        assert!(module.contains("Math.min(1.25, 7.5)"), "{module}");
+        assert!(module.contains("Math.max(1.25, 7.5)"), "{module}");
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated Java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.math.MathMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("Java stdout utf8"),
+            "-3 8\n1.25 7.5\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn readable_java_emits_typed_source_expressions() {
         let temp = temp_path("lume-java-readable-source-expressions");
         let source = temp.join("expressions.lum");
@@ -5282,6 +5335,8 @@ type Companion = Pet
 type Pet = Cat | Dog
 type Names = [Str]
 type Labeler = fn(Str) Str
+type ExplicitView = shape { name Str }
+type ShortView = { name Str }
 
 def describe(value Companion) Str = match value {
     case Cat { name } => "cat " + name
@@ -5289,6 +5344,9 @@ def describe(value Companion) Str = match value {
 }
 
 def widen(value Pet) Bird | Dog | Cat = value
+
+def explicitView() ExplicitView = shape { name: "Milo" }
+def shortView(value ExplicitView) ShortView = value
 
 def main() Unit {
     pet Companion = Cat("Milo")
@@ -5303,6 +5361,7 @@ def main() Unit {
         case Dog { name } => name
         case Bird { name } => name
     })
+    println(shortView(explicitView()).name)
 }
 "#,
         )
@@ -5338,7 +5397,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "cat Milo\nname Milo\nMilo\n"
+            "cat Milo\nname Milo\nMilo\nMilo\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -5879,7 +5938,7 @@ def concrete() Str = Cache.reifiedLabel[Int]()
 module demo/object_field_init
 
 object Cache {
-    hidden var values Map[Str, Str] = Map()
+    private var values Map[Str, Str] = Map()
 
     def remember(key Str, value Str) Unit {
         updated Map[Str, Str] = this.values.put(key, value)
@@ -6276,7 +6335,7 @@ def emptyMap() [Str : Int] = []
 def mapSize(values [Str : Int]) Int = values.size()
 
 class Cache {
-    hidden var values [Str : Int] = []
+    private var values [Str : Int] = []
 
     new() {}
 

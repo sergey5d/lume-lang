@@ -14,7 +14,7 @@ type A = class with C {
     def label() Str = this.value
 }
 
-type B = shape {
+shape B {
     value Int
 
     def doubled() Int = this.value * 2

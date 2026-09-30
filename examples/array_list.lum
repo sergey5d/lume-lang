@@ -6,9 +6,9 @@
 # ArrayList[Int](5) and ArrayListIterator[T] { ... } are supported.
 
 class ArrayListIterator[T] with Iterator[T] {
-    hidden var items [T]
-    hidden var limit Int
-    hidden var index Int = 0
+    private var items [T]
+    private var limit Int
+    private var index Int = 0
 
     new(items [T], limit Int) {
         this.items = items
@@ -26,8 +26,8 @@ class ArrayListIterator[T] with Iterator[T] {
 
 
 class ArrayList[T] with Iterable[T] {
-    hidden var items [T]
-    hidden var count Int = 0
+    private var items [T]
+    private var count Int = 0
 
     new(capacity Int) {
         this.items = []

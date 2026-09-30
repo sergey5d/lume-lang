@@ -207,7 +207,7 @@ impl AmbientRegistry {
         let mut registry = AmbientRegistry::default();
         for value in [
             "Vector", "Map", "Int", "Bool", "Rune", "Float", "Str", "Unit", "Never", "print",
-            "println", "printf", "panic", "assert", "ensure", "identity",
+            "println", "printf", "panic", "assert", "ensure", "identity", "Math",
         ] {
             registry.values.insert(value.to_string());
         }
@@ -232,7 +232,7 @@ impl AmbientRegistry {
             let program = parse_program_from_path(&path)?;
             let decls = collect_top_level_decls(&program);
             for (name, decl) in &decls.functions {
-                if decl.visibility != Visibility::Hidden {
+                if decl.visibility != Visibility::Private {
                     registry.values.insert(name.clone());
                 }
             }
@@ -732,7 +732,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
     let decls = collect_top_level_decls(&module.program);
     let mut out = Vec::new();
     for (name, decl) in decls.functions {
-        if decl.visibility != Visibility::Hidden || same_module {
+        if decl.visibility != Visibility::Private || same_module {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -744,7 +744,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
         if symbol.mutable {
             continue;
         }
-        if symbol.visibility == Visibility::Hidden && !same_module {
+        if symbol.visibility == Visibility::Private && !same_module {
             continue;
         }
         out.push(ImportSymbol {
@@ -754,7 +754,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
         });
     }
     for (name, info) in decls.types {
-        if info.visibility != Visibility::Hidden || same_module {
+        if info.visibility != Visibility::Private || same_module {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -763,7 +763,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
         }
     }
     for (name, info) in decls.objects {
-        if info.visibility != Visibility::Hidden || same_module {
+        if info.visibility != Visibility::Private || same_module {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -772,7 +772,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
         }
     }
     for (name, alias) in decls.aliases {
-        if alias.visibility != Visibility::Hidden || same_module {
+        if alias.visibility != Visibility::Private || same_module {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -792,12 +792,12 @@ fn exported_object_members(
     let Some(info) = decls.objects.get(object_name) else {
         return Vec::new();
     };
-    if info.visibility == Visibility::Hidden && !same_module {
+    if info.visibility == Visibility::Private && !same_module {
         return Vec::new();
     }
     let mut out = Vec::new();
     for (name, method) in &info.methods {
-        if method.visibility != Visibility::Hidden || same_module {
+        if method.visibility != Visibility::Private || same_module {
             out.push(ImportSymbol {
                 name: name.clone(),
                 alias: None,
@@ -815,7 +815,7 @@ fn resolve_imported_symbol(
 ) -> Option<ImportedSymbol> {
     let decls = collect_top_level_decls(&module.program);
     if let Some(decl) = decls.functions.get(name) {
-        if decl.visibility != Visibility::Hidden || same_module {
+        if decl.visibility != Visibility::Private || same_module {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -825,7 +825,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(symbol) = decls.globals.get(name) {
-        if !symbol.mutable && (symbol.visibility != Visibility::Hidden || same_module) {
+        if !symbol.mutable && (symbol.visibility != Visibility::Private || same_module) {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -835,7 +835,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(info) = decls.types.get(name) {
-        if info.visibility != Visibility::Hidden || same_module {
+        if info.visibility != Visibility::Private || same_module {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -849,7 +849,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(info) = decls.objects.get(name) {
-        if info.visibility != Visibility::Hidden || same_module {
+        if info.visibility != Visibility::Private || same_module {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -859,7 +859,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(alias) = decls.aliases.get(name) {
-        if alias.visibility != Visibility::Hidden || same_module {
+        if alias.visibility != Visibility::Private || same_module {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -879,11 +879,11 @@ fn resolve_imported_object_member(
 ) -> Option<ImportedSymbol> {
     let decls = collect_top_level_decls(&module.program);
     let info = decls.objects.get(object_name)?;
-    if info.visibility == Visibility::Hidden && !same_module {
+    if info.visibility == Visibility::Private && !same_module {
         return None;
     }
     let method = info.methods.get(member_name)?;
-    if method.visibility == Visibility::Hidden && !same_module {
+    if method.visibility == Visibility::Private && !same_module {
         return None;
     }
     Some(ImportedSymbol {
@@ -1143,30 +1143,30 @@ impl<'a> Resolver<'a> {
                     .functions
                     .into_iter()
                     .filter_map(|(name, decl)| {
-                        (decl.visibility != Visibility::Hidden).then_some((name, decl.span))
+                        (decl.visibility != Visibility::Private).then_some((name, decl.span))
                     })
                     .collect(),
                 globals: decls
                     .globals
                     .into_iter()
                     .filter(|(_, symbol)| {
-                        !symbol.mutable && symbol.visibility != Visibility::Hidden
+                        !symbol.mutable && symbol.visibility != Visibility::Private
                     })
                     .collect(),
                 types: decls
                     .types
                     .into_iter()
-                    .filter(|(_, info)| info.visibility != Visibility::Hidden)
+                    .filter(|(_, info)| info.visibility != Visibility::Private)
                     .collect(),
                 objects: decls
                     .objects
                     .into_iter()
-                    .filter(|(_, info)| info.visibility != Visibility::Hidden)
+                    .filter(|(_, info)| info.visibility != Visibility::Private)
                     .collect(),
                 aliases: decls
                     .aliases
                     .into_iter()
-                    .filter(|(_, info)| info.visibility != Visibility::Hidden)
+                    .filter(|(_, info)| info.visibility != Visibility::Private)
                     .collect(),
             };
             self.modules_by_alias.insert(alias.clone(), namespace);
@@ -1542,7 +1542,7 @@ impl<'a> Resolver<'a> {
                 info.kind,
                 info.fields
                     .iter()
-                    .filter(|field| field.visibility != Visibility::Hidden)
+                    .filter(|field| field.visibility != Visibility::Private)
                     .map(|field| field.name),
             );
         } else {

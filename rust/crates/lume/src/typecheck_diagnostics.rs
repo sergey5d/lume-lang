@@ -10,7 +10,7 @@ pub(crate) fn hidden_field_constructor(
         "constructor is not available",
         span,
     )
-    .with_label("field construction is hidden")
+    .with_label("field construction is private")
     .with_note(format!(
         "{class_name} declares a private primary constructor"
     ));

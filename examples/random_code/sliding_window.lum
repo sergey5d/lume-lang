@@ -15,9 +15,9 @@ shape WindowRequest {
 }
 
 class SlidingWindowLimiter {
-    hidden capacity Int
-    hidden windowSize Int
-    hidden accepted LinkedList[WindowRequest]
+    private capacity Int
+    private windowSize Int
+    private accepted LinkedList[WindowRequest]
 
     new(capacity Int, windowSize Int) {
         this.capacity = capacity

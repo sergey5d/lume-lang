@@ -21,10 +21,10 @@ class Location {
 }
 
 class Cursor {
-    hidden term Str
-    hidden documents [Str]
-    hidden var current Location
-    hidden var valid Bool = false
+    private term Str
+    private documents [Str]
+    private var current Location
+    private var valid Bool = false
 
     new(term Str, documents [Str]) {
         this.term = term

@@ -5,8 +5,8 @@
 # 0
 
 class CounterBox {
-    hidden count = 1
-    hidden var hits = 0
+    private count = 1
+    private var hits = 0
 
     def bump() Unit {
         this.hits += this.count
@@ -17,7 +17,7 @@ class CounterBox {
 
 
 object Greeter {
-    hidden hello = "Hello"
+    private hello = "Hello"
 
     def greet(times Int) Str = this.hello + " " + times
 }
