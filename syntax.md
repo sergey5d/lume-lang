@@ -637,13 +637,21 @@ Top-level forms:
 - `ext TypeName`
 - `name Type = expr`
 - `private def`
+- `internal def`
 - `private name Type = expr`
+- `internal name Type = expr`
 - `private annotation`
+- `internal annotation`
 - `private interface`
+- `internal interface`
 - `private class`
+- `internal class`
 - `private shape`
+- `internal shape`
 - `private object`
+- `internal object`
 - `private type`
+- `internal type`
 
 Examples:
 
@@ -724,12 +732,13 @@ class Box {
 }
 ```
 
-`private` fields in classes and named objects may infer their type from an initializer:
+`private` and `internal` fields in classes and named objects may infer their
+type from an initializer:
 
 ```txt
 class Box {
     private count = 0
-    private var hits = 0
+    internal var hits = 0
 }
 
 object Greeter {
@@ -1190,17 +1199,18 @@ bad Article = Article("Intro")
 
 Implicit field construction rules:
 
-- if a class has no explicit `new`, the compiler synthesizes constructor inputs from visible fields
+- if a class has no explicit `new`, the compiler synthesizes constructor inputs from fields accessible at the call site
 - construction braces check the synthesized visible-field shape
-- visible fields without initializers are required
-- visible fields with initializers are optional
-- private fields are excluded from the synthesized constructor inputs
-- private fields without initializers suppress implicit field constructors; define `new` to initialize them
+- accessible fields without initializers are required
+- accessible fields with initializers are optional
+- `internal` fields participate in synthesized constructor inputs only within the declaring module
+- `private` fields participate only while constructing from within the declaring type
+- an inaccessible `private` or `internal` field without an initializer suppresses implicit field construction at that call site; define `new` to initialize it
 - `Type {}` works when the synthesized field-construction shape has no required fields
 - positional construction follows declared visible-field order
 - positional construction may omit only a trailing suffix of visible fields that all have initializers
 - positional construction never skips a defaulted visible field to reach a later required visible field
-- positional construction is rejected when a private initialized field appears before a later visible field
+- positional construction is rejected when an inaccessible initialized field appears before a later accessible field
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
 
@@ -1256,7 +1266,7 @@ Shape conversion rules:
 - class-to-shape is allowed through visible fields
 - shape-to-interface follows the shape's explicit `with Interface` bounds
 - class-to-interface-through-shape is not automatic; assign the class value to an explicit shape view first
-- private class fields are not visible to shape conversion
+- class fields inaccessible at the conversion site are not visible to shape conversion
 - shape-to-class is not implicit; use a class constructor
 - tuple-to-shape and tuple-to-class are not allowed; use `shape(...)`, named shape construction, or class constructors
 - ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
@@ -1701,6 +1711,7 @@ the class body.
 - positional construction fills a prefix of constructor parameters and may omit only trailing parameters that all have defaults
 - positional construction never skips a defaulted parameter to reach a later required parameter
 - constructor parameters may end with one variadic vector parameter such as `items [Str] vararg`
+- `internal new(...) { body }` declares a constructor callable only from the same module
 - `private new(...) { body }` declares a private constructor
 - each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
 - `this(...)` inside a constructor delegates positionally to another constructor of the same class
@@ -3629,7 +3640,7 @@ That means:
 - field order on the left does not matter
 - partial destructuring is allowed by omission
 - local aliases use `as`
-- private fields cannot be named
+- fields inaccessible at the destructuring site cannot be named
 - `_` is not needed; just leave fields out
 
 Examples:
@@ -3861,15 +3872,26 @@ size = "hello"
 
 Supported today:
 
+- `internal` on top-level declarations, immutable bindings, fields, methods, and constructors
 - `private` on top-level `def`
 - `private` on top-level immutable bindings
 - `private` on top-level `interface`
 - `private` on top-level `class` / `shape` / `object` / `type`
 - `private` on fields
 - `private` on methods
+- `private` on constructors
 
 Default visibility is public. There is no `public` keyword.
-Use `private` for private top-level functions, constants, types, fields, and methods.
+Use `internal` for declarations and members shared by files with the same
+`module` name. Other modules cannot import an internal top-level declaration or
+access an internal member.
+
+Use `private` for declarations local to their source file and for members local
+to their declaring type. A class method may access private members on another
+instance of the same class; extension methods cannot access private members.
+
+Shape and annotation fields are always public structural data, so they cannot
+be `internal` or `private`.
 Top-level mutable bindings are not allowed; mutable module state must live inside
 named objects, class instances, or function locals.
 

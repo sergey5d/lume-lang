@@ -18,6 +18,7 @@ pub enum Keyword {
     False,
     Fn,
     For,
+    Internal,
     Private,
     If,
     Interface,
@@ -336,6 +337,7 @@ impl<'a> Lexer<'a> {
             "false" => TokenKind::Keyword(Keyword::False),
             "fn" => TokenKind::Keyword(Keyword::Fn),
             "for" => TokenKind::Keyword(Keyword::For),
+            "internal" => TokenKind::Keyword(Keyword::Internal),
             "hidden" | "private" => TokenKind::Keyword(Keyword::Private),
             "if" => TokenKind::Keyword(Keyword::If),
             "use" => TokenKind::Keyword(Keyword::Use),
@@ -675,7 +677,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name }\nprivate token Str\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name }\nprivate token Str\ninternal cache Str\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -683,6 +685,7 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::As)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Ext)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Fn)));
+        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Internal)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Private)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Reified)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Type)));

@@ -696,8 +696,16 @@ fn push_union_variant(
 
 fn java_type_visibility(ty: &ir::TypeDef) -> &'static str {
     match ty.visibility {
-        ast::Visibility::Private => "",
+        ast::Visibility::Private | ast::Visibility::Internal => "",
         ast::Visibility::Default => "public ",
+    }
+}
+
+fn java_member_visibility(visibility: Visibility) -> &'static str {
+    match visibility {
+        Visibility::Default => "public ",
+        Visibility::Internal => "",
+        Visibility::Private => "private ",
     }
 }
 
@@ -983,6 +991,7 @@ fn annotate_java_lines(out: &mut String, start: usize, source_line: usize) {
 fn push_fields(out: &mut String, ty: &ir::TypeDef, names: &JavaNames) {
     for field in &ty.fields {
         out.push_str("    ");
+        out.push_str(java_member_visibility(field.visibility));
         out.push_str(&names.value_type(&field.ty));
         out.push(' ');
         out.push_str(&java_member_name(&field.name));
@@ -1150,7 +1159,7 @@ fn type_field_array_expr(
                 java_string_literal(&field.name),
                 type_value_expr_with_params(&field.ty, names, type_params),
                 annotation_array_expr(&field.annotations),
-                matches!(field.visibility, Visibility::Private)
+                !matches!(field.visibility, Visibility::Default)
             )
         })
         .collect::<Vec<_>>()
@@ -1163,7 +1172,7 @@ fn type_method_array_expr(bundle: &BackendBundle, ty: &ir::TypeDef, names: &Java
         .methods
         .iter()
         .filter_map(|method_id| bundle.ir.function(*method_id))
-        .filter(|method| method.name != "new")
+        .filter(|method| method.name != "new" && method.visibility == Visibility::Default)
         .map(|method| method_descriptor_expr(ty, method, names))
         .collect::<Vec<_>>()
         .join(", ");
@@ -1526,7 +1535,7 @@ fn push_instance_methods(
         out.push_str("    ");
         match shell {
             MethodShell::DefaultBody => out.push_str("default "),
-            MethodShell::StubBody => out.push_str("public "),
+            MethodShell::StubBody => out.push_str(java_member_visibility(function.visibility)),
             MethodShell::Abstract => {}
         }
         push_function_signature(out, function, names);
@@ -1556,7 +1565,11 @@ fn push_instance_methods(
                 push_function_body(out, bundle, function, names);
                 let prefix = match shell {
                     MethodShell::DefaultBody => "    default ",
-                    MethodShell::StubBody => "    public ",
+                    MethodShell::StubBody => match function.visibility {
+                        Visibility::Default => "    public ",
+                        Visibility::Internal => "    ",
+                        Visibility::Private => "    private ",
+                    },
                     MethodShell::Abstract => unreachable!(),
                 };
                 let has_fixed_overload = variadic_fixed_arity(function).is_some_and(|arity| {
@@ -7962,7 +7975,8 @@ fn push_explicit_class_constructor(
     names: &JavaNames,
 ) {
     out.push('\n');
-    out.push_str("    public ");
+    out.push_str("    ");
+    out.push_str(java_member_visibility(function.visibility));
     out.push_str(&java_type_name(&ty.name));
     out.push('(');
     out.push_str(&java_param_list(function, names, true));

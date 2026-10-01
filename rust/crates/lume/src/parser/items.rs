@@ -197,7 +197,9 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_visibility(&mut self) -> Visibility {
-        if self.match_keyword(Keyword::Private) {
+        if self.match_keyword(Keyword::Internal) {
+            Visibility::Internal
+        } else if self.match_keyword(Keyword::Private) {
             Visibility::Private
         } else {
             Visibility::Default

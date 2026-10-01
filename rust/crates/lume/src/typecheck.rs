@@ -423,6 +423,7 @@ struct FieldSig {
     name: String,
     ty: Ty,
     mutable: bool,
+    visibility: Visibility,
     hidden: bool,
     has_initializer: bool,
     variadic: bool,
@@ -439,6 +440,7 @@ struct EnumCaseSig {
 struct TypeSig {
     kind: TypeKind,
     name: String,
+    module_id: String,
     type_params: Vec<String>,
     generic_conditions: Vec<GenericConditionSig>,
     with_bounds: Vec<Ty>,
@@ -661,10 +663,19 @@ fn expand_aliases_in_ty(
     }
 }
 
+fn module_identity(path: &Path, program: &Program) -> String {
+    program
+        .module
+        .as_ref()
+        .map(|module| module.name.clone())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
 #[derive(Debug, Clone, Default)]
 struct ModuleInfo {
     path: PathBuf,
     display_path: String,
+    module_id: String,
     program: Program,
     imports: HashMap<String, PathBuf>,
     symbol_imports: HashMap<String, ImportedSymbol>,
@@ -682,6 +693,7 @@ impl ModuleInfo {
         let mut info = Self {
             path: module.path.clone(),
             display_path: module.display_path.clone(),
+            module_id: module_identity(&module.path, &module.program),
             program: module.program.clone(),
             imports: module.imports.clone(),
             symbol_imports: module.symbol_imports.clone(),
@@ -698,8 +710,10 @@ impl ModuleInfo {
     }
 
     fn from_program(display_path: &str, program: &Program) -> Self {
+        let path = PathBuf::from(display_path);
         let mut info = Self {
-            path: PathBuf::from(display_path),
+            module_id: module_identity(&path, program),
+            path,
             display_path: display_path.to_string(),
             program: program.clone(),
             imports: HashMap::new(),
@@ -736,7 +750,8 @@ impl ModuleInfo {
                         .push(function_sig_from_function(function, &[]));
                 }
                 Item::Type(decl) => {
-                    let sig = type_sig_from_decl(decl);
+                    let mut sig = type_sig_from_decl(decl);
+                    sig.module_id = self.module_id.clone();
                     if decl.kind == TypeKind::Object {
                         self.objects.insert(decl.name.clone(), sig);
                     } else {
@@ -854,11 +869,23 @@ impl AmbientInfo {
             }
             let program = parse_program_from_path(&path)?;
             let module = ModuleInfo::from_program(&path.display().to_string(), &program);
-            ambient.functions.extend(module.functions.clone());
+            for (name, overloads) in module.functions.clone() {
+                let visible = overloads
+                    .into_iter()
+                    .filter(|function| function.visibility == Visibility::Default)
+                    .collect::<Vec<_>>();
+                if !visible.is_empty() {
+                    ambient.functions.insert(name, visible);
+                }
+            }
             for (target, methods) in module.extensions.clone() {
                 let target_methods = ambient.extensions.entry(target).or_default();
                 for (name, overloads) in methods {
-                    target_methods.entry(name).or_default().extend(overloads);
+                    target_methods.entry(name).or_default().extend(
+                        overloads
+                            .into_iter()
+                            .filter(|method| method.visibility == Visibility::Default),
+                    );
                 }
             }
             for (name, sig) in module.types {
@@ -898,6 +925,14 @@ fn type_kind_label(kind: TypeKind) -> &'static str {
     }
 }
 
+fn visibility_label(visibility: Visibility) -> &'static str {
+    match visibility {
+        Visibility::Default => "public",
+        Visibility::Internal => "internal",
+        Visibility::Private => "private",
+    }
+}
+
 fn custom_constructor_error(sig: &TypeSig) -> String {
     match sig.kind {
         TypeKind::Annotation => format!(
@@ -931,6 +966,7 @@ fn builtin_extension_type_sig(name: &str) -> Option<TypeSig> {
     Some(TypeSig {
         kind: TypeKind::Class,
         name: name.to_string(),
+        module_id: "<builtin>".to_string(),
         type_params: Vec::new(),
         generic_conditions: Vec::new(),
         with_bounds: Vec::new(),
@@ -1384,12 +1420,14 @@ impl<'a> Checker<'a> {
             match member {
                 TypeMember::Field(field) => {
                     if decl.kind == TypeKind::Annotation {
-                        if field.visibility == Visibility::Private {
+                        if field.visibility != Visibility::Default {
                             self.add_error(
                                 "invalid_annotation_field",
                                 format!(
-                                    "annotation '{}' cannot declare private field '{}'",
-                                    decl.name, field.name
+                                    "annotation '{}' cannot declare {} field '{}'; annotation fields are public metadata",
+                                    decl.name,
+                                    visibility_label(field.visibility),
+                                    field.name
                                 ),
                                 field.span,
                             );
@@ -1406,12 +1444,14 @@ impl<'a> Checker<'a> {
                         }
                     }
                     if decl.kind == TypeKind::Record {
-                        if field.visibility == Visibility::Private {
+                        if field.visibility != Visibility::Default {
                             self.add_error(
                                 "invalid_shape_field",
                                 format!(
-                                    "shape '{}' cannot declare private field '{}'",
-                                    decl.name, field.name
+                                    "shape '{}' cannot declare {} field '{}'; shape fields are public structural data",
+                                    decl.name,
+                                    visibility_label(field.visibility),
+                                    field.name
                                 ),
                                 field.span,
                             );
@@ -1451,13 +1491,15 @@ impl<'a> Checker<'a> {
                 }
                 TypeMember::Case(case) => {
                     for field in &case.fields {
-                        if case.kind == TypeKind::Record && field.visibility == Visibility::Private
+                        if case.kind == TypeKind::Record && field.visibility != Visibility::Default
                         {
                             self.add_error(
                                 "invalid_shape_field",
                                 format!(
-                                    "shape union variant '{}' cannot declare private field '{}'",
-                                    case.name, field.name
+                                    "shape union variant '{}' cannot declare {} field '{}'; shape fields are public structural data",
+                                    case.name,
+                                    visibility_label(field.visibility),
+                                    field.name
                                 ),
                                 field.span,
                             );
@@ -2571,7 +2613,7 @@ impl<'a> Checker<'a> {
                 Some(
                     sig.fields
                         .iter()
-                        .filter(|field| !field.hidden)
+                        .filter(|field| self.can_access_field(&sig, field))
                         .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
                         .collect(),
                 )
@@ -2661,7 +2703,7 @@ impl<'a> Checker<'a> {
                 Some(
                     sig.fields
                         .iter()
-                        .filter(|field| !field.hidden)
+                        .filter(|field| self.can_access_field(&sig, field))
                         .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
                         .collect(),
                 )
@@ -3731,7 +3773,7 @@ impl<'a> Checker<'a> {
                         binding.span,
                     );
                 }
-                let Some((field_ty, hidden)) = field_map.get(&field_name).cloned() else {
+                let Some((field_ty, inaccessible)) = field_map.get(&field_name).cloned() else {
                     self.add_error(
                         "invalid_destructure",
                         format!(
@@ -3743,10 +3785,14 @@ impl<'a> Checker<'a> {
                     );
                     return Ty::Unknown;
                 };
-                if hidden {
+                if let Some(visibility) = inaccessible {
                     self.add_error(
                         "invalid_destructure",
-                        format!("cannot destructure private field '{}'", field_name),
+                        format!(
+                            "cannot destructure {} field '{}' from this scope",
+                            visibility_label(visibility),
+                            field_name
+                        ),
                         binding.span,
                     );
                     return Ty::Unknown;
@@ -3756,18 +3802,24 @@ impl<'a> Checker<'a> {
             .collect()
     }
 
-    fn destructure_record_fields(&self, ty: &Ty) -> Option<Vec<(String, Ty, bool)>> {
+    fn destructure_record_fields(&self, ty: &Ty) -> Option<Vec<(String, Ty, Option<Visibility>)>> {
         match ty {
             Ty::Record(fields) => Some(
                 fields
                     .iter()
-                    .map(|(name, ty)| (name.clone(), ty.clone(), false))
+                    .map(|(name, ty)| (name.clone(), ty.clone(), None))
                     .collect(),
             ),
             Ty::Named(name, _) => self.lookup_any_type(name).map(|sig| {
                 sig.fields
                     .iter()
-                    .map(|field| (field.name.clone(), field.ty.clone(), field.hidden))
+                    .map(|field| {
+                        (
+                            field.name.clone(),
+                            field.ty.clone(),
+                            (!self.can_access_field(&sig, field)).then_some(field.visibility),
+                        )
+                    })
                     .collect()
             }),
             _ => None,
@@ -3822,7 +3874,7 @@ impl<'a> Checker<'a> {
                 .map(|sig| {
                     sig.fields
                         .iter()
-                        .filter(|field| !field.hidden)
+                        .filter(|field| self.can_access_field(&sig, field))
                         .map(|field| field.ty.clone())
                         .collect()
                 })
@@ -3951,6 +4003,9 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let receiver_ty = self.check_expr(receiver);
+                if self.reject_inaccessible_member(&receiver_ty, name, *span) {
+                    return Ty::Unknown;
+                }
                 if let Some(field) = self.field_sig_for_member(&receiver_ty, name) {
                     if self.extension_this_hidden_field(receiver, &receiver_ty, name) {
                         self.add_extension_hidden_access_error("field", name, *span);
@@ -4325,6 +4380,9 @@ impl<'a> Checker<'a> {
                 if let Some(ty) = self.module_member_value_type(expr) {
                     return ty;
                 }
+                if self.reject_inaccessible_static_member(receiver, name, *span) {
+                    return Ty::Unknown;
+                }
                 if let Some(ty) = self.static_member_value_type(receiver, name, expected) {
                     return ty;
                 }
@@ -4338,6 +4396,9 @@ impl<'a> Checker<'a> {
                 }
                 if self.extension_this_hidden_method(receiver, &receiver_ty, name) {
                     self.add_extension_hidden_access_error("method", name, *span);
+                    return Ty::Unknown;
+                }
+                if self.reject_inaccessible_member(&receiver_ty, name, *span) {
                     return Ty::Unknown;
                 }
                 self.member_type(&receiver_ty, name).unwrap_or_else(|| {
@@ -5037,6 +5098,26 @@ impl<'a> Checker<'a> {
         if self.check_extension_hidden_method_call(callee, &normalized_args) {
             return Ty::Unknown;
         }
+        if let Expr::Member {
+            receiver,
+            name,
+            span: member_span,
+        } = callee
+        {
+            if self.reject_inaccessible_static_member(receiver, name, *member_span) {
+                for arg in &normalized_args {
+                    self.check_expr(&arg.value);
+                }
+                return Ty::Unknown;
+            }
+            let receiver_ty = self.probe_expr_type(receiver);
+            if self.reject_inaccessible_member(&receiver_ty, name, *member_span) {
+                for arg in &normalized_args {
+                    self.check_expr(&arg.value);
+                }
+                return Ty::Unknown;
+            }
+        }
         if let Some(ty) = self.try_check_constructor_call(
             callee,
             &normalized_args,
@@ -5230,6 +5311,7 @@ impl<'a> Checker<'a> {
                 name: field.name.clone(),
                 ty: ty.clone(),
                 mutable: false,
+                visibility: field.visibility,
                 hidden: field.visibility == Visibility::Private,
                 has_initializer: true,
                 variadic: false,
@@ -5248,6 +5330,7 @@ impl<'a> Checker<'a> {
         let sig = TypeSig {
             kind: TypeKind::Object,
             name: name.clone(),
+            module_id: self.module.module_id.clone(),
             type_params: Vec::new(),
             generic_conditions: Vec::new(),
             with_bounds: Vec::new(),
@@ -6048,6 +6131,7 @@ impl<'a> Checker<'a> {
                             name: name.clone(),
                             ty: ty.clone(),
                             mutable: false,
+                            visibility: Visibility::Default,
                             hidden: false,
                             has_initializer: false,
                             variadic: false,
@@ -6358,10 +6442,9 @@ impl<'a> Checker<'a> {
         }
 
         if let Some(overloads) = constructor_overloads {
-            let can_access_hidden = self.can_access_hidden_constructor(sig);
             let visible = overloads
                 .iter()
-                .filter(|ctor| ctor.visibility != Visibility::Private || can_access_hidden)
+                .filter(|ctor| self.can_access_constructor(sig, ctor.visibility))
                 .cloned()
                 .collect::<Vec<_>>();
             self.diagnose_ambiguous_shape_context_call(&visible, args, span);
@@ -6382,7 +6465,10 @@ impl<'a> Checker<'a> {
             }
             let hidden = overloads
                 .iter()
-                .filter(|ctor| ctor.visibility == Visibility::Private && !can_access_hidden)
+                .filter(|ctor| {
+                    ctor.visibility == Visibility::Private
+                        && !self.can_access_constructor(sig, ctor.visibility)
+                })
                 .cloned()
                 .collect::<Vec<_>>();
             if self.choose_overload(&hidden, args).is_some() {
@@ -6391,6 +6477,25 @@ impl<'a> Checker<'a> {
                     .push(typecheck_diagnostics::hidden_field_constructor(
                         span, &sig.name, help,
                     ));
+                return ret;
+            }
+            let internal = overloads
+                .iter()
+                .filter(|ctor| {
+                    ctor.visibility == Visibility::Internal
+                        && !self.can_access_constructor(sig, ctor.visibility)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if self.choose_overload(&internal, args).is_some() {
+                self.add_error(
+                    "inaccessible_constructor",
+                    format!(
+                        "constructor for '{}' is internal and can be called only from module '{}'",
+                        sig.name, sig.module_id
+                    ),
+                    span,
+                );
                 return ret;
             }
             self.add_error(
@@ -6650,6 +6755,7 @@ impl<'a> Checker<'a> {
                 name: param.name.clone(),
                 ty: substitute_type(&param.ty, &subst),
                 mutable: param.mutable,
+                visibility: param.visibility,
                 hidden: param.hidden,
                 has_initializer: param.has_initializer,
                 variadic: param.variadic,
@@ -7994,7 +8100,7 @@ impl<'a> Checker<'a> {
         let fields = sig
             .fields
             .iter()
-            .filter(|field| !field.hidden)
+            .filter(|field| self.can_access_field(&sig, field))
             .map(|field| field.ty.clone())
             .collect();
         Some((ty, fields))
@@ -8027,7 +8133,7 @@ impl<'a> Checker<'a> {
                         scrutinee.clone(),
                         sig.fields
                             .iter()
-                            .filter(|field| !field.hidden)
+                            .filter(|field| self.can_access_field(&sig, field))
                             .map(|field| {
                                 (
                                     field.name.clone(),
@@ -8088,7 +8194,7 @@ impl<'a> Checker<'a> {
         let fields = sig
             .fields
             .iter()
-            .filter(|field| !field.hidden)
+            .filter(|field| self.can_access_field(&sig, field))
             .map(|field| {
                 (
                     field.name.clone(),
@@ -8483,6 +8589,126 @@ impl<'a> Checker<'a> {
         sig.fields.iter().find(|field| field.name == name).cloned()
     }
 
+    fn can_access_member_visibility(
+        &self,
+        owner_name: &str,
+        owner_module: &str,
+        visibility: Visibility,
+    ) -> bool {
+        match visibility {
+            Visibility::Default => true,
+            Visibility::Internal => self.module.module_id == owner_module,
+            Visibility::Private => {
+                self.current_extension_target.is_none()
+                    && self.current_owner.as_ref().is_some_and(|owner| {
+                        owner.name == owner_name && owner.module_id == owner_module
+                    })
+            }
+        }
+    }
+
+    fn declared_member_access(
+        &self,
+        sig: &TypeSig,
+        name: &str,
+        seen: &mut HashSet<String>,
+    ) -> Option<(&'static str, Visibility, String, String)> {
+        let key = format!("{}::{}", sig.module_id, sig.name);
+        if !seen.insert(key) {
+            return None;
+        }
+        if let Some(field) = sig.fields.iter().find(|field| field.name == name) {
+            return Some((
+                "field",
+                field.visibility,
+                sig.name.clone(),
+                sig.module_id.clone(),
+            ));
+        }
+        if let Some(methods) = sig.methods.get(name) {
+            let visibility = methods
+                .first()
+                .map(|method| method.visibility)
+                .unwrap_or(Visibility::Default);
+            return Some((
+                "method",
+                visibility,
+                sig.name.clone(),
+                sig.module_id.clone(),
+            ));
+        }
+        for bound in &sig.with_bounds {
+            let Ty::Named(bound_name, _) = bound else {
+                continue;
+            };
+            let Some(bound_sig) = self.lookup_any_type(bound_name) else {
+                continue;
+            };
+            if let Some(access) = self.declared_member_access(&bound_sig, name, seen) {
+                return Some(access);
+            }
+        }
+        None
+    }
+
+    fn inaccessible_member(
+        &self,
+        receiver: &Ty,
+        name: &str,
+    ) -> Option<(&'static str, Visibility, String)> {
+        let Ty::Named(type_name, _) = receiver else {
+            return None;
+        };
+        let sig = self.lookup_any_type(type_name)?;
+        let (kind, visibility, owner_name, owner_module) =
+            self.declared_member_access(&sig, name, &mut HashSet::new())?;
+        (!self.can_access_member_visibility(&owner_name, &owner_module, visibility))
+            .then_some((kind, visibility, owner_name))
+    }
+
+    fn reject_inaccessible_member(
+        &mut self,
+        receiver: &Ty,
+        name: &str,
+        span: crate::source::Span,
+    ) -> bool {
+        let Some((kind, visibility, owner)) = self.inaccessible_member(receiver, name) else {
+            return false;
+        };
+        let scope = match visibility {
+            Visibility::Internal => "declaring module",
+            Visibility::Private => "declaring type",
+            Visibility::Default => return false,
+        };
+        self.add_error(
+            "inaccessible_member",
+            format!(
+                "cannot access {visibility_name} {kind} '{name}' on '{owner}'; it is accessible only from the {scope}",
+                visibility_name = visibility_label(visibility),
+            ),
+            span,
+        );
+        true
+    }
+
+    fn reject_inaccessible_static_member(
+        &mut self,
+        receiver: &Expr,
+        name: &str,
+        span: crate::source::Span,
+    ) -> bool {
+        let Expr::Identifier {
+            name: type_name, ..
+        } = receiver
+        else {
+            return false;
+        };
+        let Some(sig) = self.lookup_any_object(type_name) else {
+            return false;
+        };
+        self.reject_inaccessible_member(&Ty::Named(sig.name, Vec::new()), name, span)
+    }
+
     fn extension_this_hidden_field(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> bool {
         if !matches!(receiver, Expr::Identifier { name: receiver_name, .. } if receiver_name == "this")
         {
@@ -8685,10 +8911,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn can_access_hidden_constructor(&self, owner: &TypeSig) -> bool {
-        self.current_owner
-            .as_ref()
-            .is_some_and(|current| current.name == owner.name)
+    fn can_access_constructor(&self, owner: &TypeSig, visibility: Visibility) -> bool {
+        self.can_access_member_visibility(&owner.name, &owner.module_id, visibility)
+    }
+
+    fn can_access_field(&self, owner: &TypeSig, field: &FieldSig) -> bool {
+        self.can_access_member_visibility(&owner.name, &owner.module_id, field.visibility)
     }
 
     fn member_method_sigs(&self, receiver: &Ty, name: &str) -> Option<Vec<FunctionSig>> {
@@ -8924,11 +9152,11 @@ impl<'a> Checker<'a> {
     }
 
     fn lookup_implicit_field(&self, name: &str) -> Option<FieldSig> {
-        self.current_owner
-            .as_ref()?
+        let owner = self.current_owner.as_ref()?;
+        owner
             .fields
             .iter()
-            .find(|field| field.name == name)
+            .find(|field| field.name == name && self.can_access_field(owner, field))
             .cloned()
     }
 
@@ -9282,14 +9510,15 @@ impl<'a> Checker<'a> {
         if let Some(field) = sig
             .fields
             .iter()
-            .find(|field| field.hidden && !field.has_initializer)
+            .find(|field| !self.can_access_field(sig, field) && !field.has_initializer)
         {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' has no implicit field constructor because private field '{}' has no initializer; define 'new' to initialize it",
+                    "{} '{}' has no implicit field constructor because {} field '{}' has no initializer; define 'new' to initialize it",
                     type_kind_label(sig.kind),
                     sig.name,
+                    visibility_label(field.visibility),
                     field.name
                 ),
                 span,
@@ -9300,7 +9529,7 @@ impl<'a> Checker<'a> {
         let visible_fields = sig
             .fields
             .iter()
-            .filter(|field| !field.hidden)
+            .filter(|field| self.can_access_field(sig, field))
             .collect::<Vec<_>>();
 
         let required_visible = visible_fields
@@ -9403,14 +9632,15 @@ impl<'a> Checker<'a> {
         if let Some(field) = sig
             .fields
             .iter()
-            .find(|field| field.hidden && !field.has_initializer)
+            .find(|field| !self.can_access_field(sig, field) && !field.has_initializer)
         {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' has no implicit positional constructor because private field '{}' has no initializer; define 'new' to initialize it",
+                    "{} '{}' has no implicit positional constructor because {} field '{}' has no initializer; define 'new' to initialize it",
                     type_kind_label(sig.kind),
                     sig.name,
+                    visibility_label(field.visibility),
                     field.name
                 ),
                 span,
@@ -9418,17 +9648,21 @@ impl<'a> Checker<'a> {
             return materialize_type(ret);
         }
 
-        if sig.fields.iter().enumerate().any(|(index, field)| {
-            field.hidden
+        if let Some(field) = sig.fields.iter().enumerate().find_map(|(index, field)| {
+            (!self.can_access_field(sig, field)
                 && field.has_initializer
-                && sig.fields[index + 1..].iter().any(|later| !later.hidden)
+                && sig.fields[index + 1..]
+                    .iter()
+                    .any(|later| self.can_access_field(sig, later)))
+            .then_some(field)
         }) {
             self.add_error(
                 "no_matching_overload",
                 format!(
-                    "{} '{}' cannot use positional construction because private defaulted fields must come after all visible fields",
+                    "{} '{}' cannot use positional construction because {} defaulted fields must come after all visible fields",
                     type_kind_label(sig.kind),
-                    sig.name
+                    sig.name,
+                    visibility_label(field.visibility)
                 ),
                 span,
             );
@@ -9438,7 +9672,7 @@ impl<'a> Checker<'a> {
         let params = sig
             .fields
             .iter()
-            .filter(|field| !field.hidden)
+            .filter(|field| self.can_access_field(sig, field))
             .cloned()
             .collect::<Vec<_>>();
         self.check_constructor_signature(&params, ret, args, span)
@@ -10170,7 +10404,7 @@ impl<'a> Checker<'a> {
                 Some(
                     sig.fields
                         .iter()
-                        .filter(|field| !field.hidden)
+                        .filter(|field| self.can_access_field(&sig, field))
                         .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
                         .collect(),
                 )
@@ -10188,6 +10422,7 @@ impl<'a> Checker<'a> {
                         name: name.clone(),
                         ty: ty.clone(),
                         mutable: false,
+                        visibility: Visibility::Default,
                         hidden: false,
                         has_initializer: false,
                         variadic: false,
@@ -10208,11 +10443,12 @@ impl<'a> Checker<'a> {
                 Some(
                     sig.fields
                         .iter()
-                        .filter(|field| !field.hidden)
+                        .filter(|field| self.can_access_field(&sig, field))
                         .map(|field| FieldSig {
                             name: field.name.clone(),
                             ty: substitute_type(&field.ty, &subst),
                             mutable: field.mutable,
+                            visibility: field.visibility,
                             hidden: field.hidden,
                             has_initializer: field.has_initializer,
                             variadic: field.variadic,
@@ -10494,6 +10730,7 @@ fn constructor_field_sigs_from_params(params: &[ParamSig]) -> Vec<FieldSig> {
             name: param.name.clone(),
             ty: param.ty.clone(),
             mutable: false,
+            visibility: Visibility::Default,
             hidden: false,
             has_initializer: param.has_initializer,
             variadic: param.variadic,
@@ -11378,6 +11615,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                     .or_else(|| field.initializer.as_ref().and_then(infer_literal_type))
                     .unwrap_or(Ty::Unknown),
                 mutable: field.mutable,
+                visibility: field.visibility,
                 hidden: field.visibility == Visibility::Private,
                 has_initializer: field.initializer.is_some(),
                 variadic: false,
@@ -11403,6 +11641,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                         name: field.name.clone(),
                         ty: enum_case_field_sig_ty(field, &fields, &owner_params),
                         mutable: field.mutable,
+                        visibility: field.visibility,
                         hidden: field.visibility == Visibility::Private,
                         has_initializer: field.initializer.is_some(),
                         variadic: false,
@@ -11429,6 +11668,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
     TypeSig {
         kind: decl.kind,
         name: decl.name.clone(),
+        module_id: String::new(),
         type_params: decl
             .type_params
             .iter()
@@ -12940,6 +13180,94 @@ def main() Int {
         let result =
             check_path(workspace_root().join("examples/import_forms.lum")).expect("typecheck");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_internal_members_across_files_in_the_same_module() {
+        let temp = workspace_root().join("rust/target/typecheck-internal-same-module-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("support.lum"),
+            r#"
+module shared
+
+class Box {
+    internal var value Int = 1
+
+    internal def increment() Unit = this.value += 1
+}
+
+internal def moduleValue() Int = 7
+"#,
+        )
+        .expect("write support");
+        let source = temp.join("main.lum");
+        fs::write(
+            &source,
+            r#"
+module shared
+
+use support/{Box, moduleValue}
+
+def main() Int {
+    box = Box {}
+    box.increment()
+    box.value := box.value + moduleValue()
+    box.value
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = check_path(&source).expect("typecheck");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn rejects_internal_members_from_another_module() {
+        let temp = workspace_root().join("rust/target/typecheck-internal-cross-module-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("model.lum"),
+            r#"
+module model
+
+class Box {
+    internal var value Int = 1
+
+    internal def increment() Unit = this.value += 1
+}
+"#,
+        )
+        .expect("write model");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+module app
+
+use model/{Box}
+
+def main() Unit {
+    box = Box {}
+    box.increment()
+    box.value := 3
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = check_path(&source).expect("typecheck");
+        let inaccessible = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.diagnostic.code == "inaccessible_member")
+            .count();
+        assert_eq!(inaccessible, 2, "{:#?}", result.diagnostics);
+        let _ = fs::remove_dir_all(&temp);
     }
 
     #[test]

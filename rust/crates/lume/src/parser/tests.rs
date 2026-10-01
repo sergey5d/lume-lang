@@ -109,6 +109,35 @@ private internalSeed Int = 0
 }
 
 #[test]
+fn parses_internal_declarations_and_members() {
+    let result = parse(
+        r#"
+internal seed Int = 1
+
+internal class Counter {
+    internal var value Int = 0
+    internal def increment() Unit = this.value += 1
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Statement(Stmt::Binding(seed)) = &program.items[0] else {
+        panic!("expected internal binding")
+    };
+    assert_eq!(seed.visibility, Visibility::Internal);
+    let Item::Type(counter) = &program.items[1] else {
+        panic!("expected internal class")
+    };
+    assert_eq!(counter.visibility, Visibility::Internal);
+    assert!(counter.members.iter().all(|member| match member {
+        TypeMember::Field(field) => field.visibility == Visibility::Internal,
+        TypeMember::Method(method) => method.visibility == Visibility::Internal,
+        TypeMember::Case(_) => false,
+    }));
+}
+
+#[test]
 fn rejects_top_level_mutable_bindings() {
     let result = parse(
         r#"

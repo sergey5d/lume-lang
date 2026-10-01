@@ -580,6 +580,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Object) => "OBJECT",
             TokenKind::Keyword(Keyword::Interface) => "INTERFACE",
             TokenKind::Keyword(Keyword::Ext) => "EXT",
+            TokenKind::Keyword(Keyword::Internal) => "INTERNAL",
             TokenKind::Keyword(Keyword::Private) => "PRIVATE",
             TokenKind::Keyword(Keyword::Var) => "VAR",
             TokenKind::LBrace => "{",

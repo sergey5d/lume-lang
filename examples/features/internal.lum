@@ -1,0 +1,19 @@
+module internal_visibility
+
+# Internal declarations and members are shared by files in this module, but
+# they are not visible to other modules.
+internal def moduleGreeting() Str = "hello"
+
+class Counter {
+    internal var value Int = 0
+
+    internal def increment() Unit = this.value += 1
+
+    def current() Int = this.value
+}
+
+def main() Unit {
+    counter = Counter {}
+    counter.increment()
+    println(moduleGreeting(), counter.current())
+}

@@ -70,6 +70,7 @@ pub struct TypeAliasDecl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Default,
+    Internal,
     Private,
 }
 

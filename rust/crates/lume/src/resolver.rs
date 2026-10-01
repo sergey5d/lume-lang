@@ -232,24 +232,33 @@ impl AmbientRegistry {
             let program = parse_program_from_path(&path)?;
             let decls = collect_top_level_decls(&program);
             for (name, decl) in &decls.functions {
-                if decl.visibility != Visibility::Private {
+                if decl.visibility == Visibility::Default {
                     registry.values.insert(name.clone());
                 }
             }
             for (name, info) in decls.types {
-                registry.values.insert(name.clone());
-                registry.types.insert(name.clone(), info.clone());
-                if info.kind == TypeKind::Enum {
-                    for case in info.enum_cases.keys() {
-                        registry.values.insert(case.clone());
+                if info.visibility == Visibility::Default {
+                    registry.values.insert(name.clone());
+                    if info.kind == TypeKind::Enum {
+                        for case in info.enum_cases.keys() {
+                            registry.values.insert(case.clone());
+                        }
                     }
                 }
+                registry.types.insert(name.clone(), info.clone());
             }
             for (name, info) in decls.objects {
-                registry.values.insert(name.clone());
+                if info.visibility == Visibility::Default {
+                    registry.values.insert(name.clone());
+                }
                 registry.types.insert(name, info);
             }
-            registry.aliases.extend(decls.aliases);
+            registry.aliases.extend(
+                decls
+                    .aliases
+                    .into_iter()
+                    .filter(|(_, alias)| alias.visibility == Visibility::Default),
+            );
         }
 
         Ok(registry)
@@ -728,11 +737,19 @@ pub(crate) fn collect_module_order(
     out.push(root.to_path_buf());
 }
 
+fn visibility_is_importable(visibility: Visibility, same_module: bool) -> bool {
+    match visibility {
+        Visibility::Default => true,
+        Visibility::Internal => same_module,
+        Visibility::Private => false,
+    }
+}
+
 fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbol> {
     let decls = collect_top_level_decls(&module.program);
     let mut out = Vec::new();
     for (name, decl) in decls.functions {
-        if decl.visibility != Visibility::Private || same_module {
+        if visibility_is_importable(decl.visibility, same_module) {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -744,7 +761,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
         if symbol.mutable {
             continue;
         }
-        if symbol.visibility == Visibility::Private && !same_module {
+        if !visibility_is_importable(symbol.visibility, same_module) {
             continue;
         }
         out.push(ImportSymbol {
@@ -754,7 +771,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
         });
     }
     for (name, info) in decls.types {
-        if info.visibility != Visibility::Private || same_module {
+        if visibility_is_importable(info.visibility, same_module) {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -763,7 +780,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
         }
     }
     for (name, info) in decls.objects {
-        if info.visibility != Visibility::Private || same_module {
+        if visibility_is_importable(info.visibility, same_module) {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -772,7 +789,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
         }
     }
     for (name, alias) in decls.aliases {
-        if alias.visibility != Visibility::Private || same_module {
+        if visibility_is_importable(alias.visibility, same_module) {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -792,12 +809,12 @@ fn exported_object_members(
     let Some(info) = decls.objects.get(object_name) else {
         return Vec::new();
     };
-    if info.visibility == Visibility::Private && !same_module {
+    if !visibility_is_importable(info.visibility, same_module) {
         return Vec::new();
     }
     let mut out = Vec::new();
     for (name, method) in &info.methods {
-        if method.visibility != Visibility::Private || same_module {
+        if visibility_is_importable(method.visibility, same_module) {
             out.push(ImportSymbol {
                 name: name.clone(),
                 alias: None,
@@ -815,7 +832,7 @@ fn resolve_imported_symbol(
 ) -> Option<ImportedSymbol> {
     let decls = collect_top_level_decls(&module.program);
     if let Some(decl) = decls.functions.get(name) {
-        if decl.visibility != Visibility::Private || same_module {
+        if visibility_is_importable(decl.visibility, same_module) {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -825,7 +842,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(symbol) = decls.globals.get(name) {
-        if !symbol.mutable && (symbol.visibility != Visibility::Private || same_module) {
+        if !symbol.mutable && visibility_is_importable(symbol.visibility, same_module) {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -835,7 +852,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(info) = decls.types.get(name) {
-        if info.visibility != Visibility::Private || same_module {
+        if visibility_is_importable(info.visibility, same_module) {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -849,7 +866,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(info) = decls.objects.get(name) {
-        if info.visibility != Visibility::Private || same_module {
+        if visibility_is_importable(info.visibility, same_module) {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -859,7 +876,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(alias) = decls.aliases.get(name) {
-        if alias.visibility != Visibility::Private || same_module {
+        if visibility_is_importable(alias.visibility, same_module) {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -879,11 +896,11 @@ fn resolve_imported_object_member(
 ) -> Option<ImportedSymbol> {
     let decls = collect_top_level_decls(&module.program);
     let info = decls.objects.get(object_name)?;
-    if info.visibility == Visibility::Private && !same_module {
+    if !visibility_is_importable(info.visibility, same_module) {
         return None;
     }
     let method = info.methods.get(member_name)?;
-    if method.visibility == Visibility::Private && !same_module {
+    if !visibility_is_importable(method.visibility, same_module) {
         return None;
     }
     Some(ImportedSymbol {
@@ -1137,36 +1154,44 @@ impl<'a> Resolver<'a> {
             let Some(module) = self.modules.get(module_path) else {
                 continue;
             };
+            let same_module = self.module.program.module.as_ref().is_some_and(|current| {
+                module
+                    .program
+                    .module
+                    .as_ref()
+                    .is_some_and(|imported| imported.name == current.name)
+            });
             let decls = collect_top_level_decls(&module.program);
             let namespace = ModuleNamespace {
                 functions: decls
                     .functions
                     .into_iter()
                     .filter_map(|(name, decl)| {
-                        (decl.visibility != Visibility::Private).then_some((name, decl.span))
+                        visibility_is_importable(decl.visibility, same_module)
+                            .then_some((name, decl.span))
                     })
                     .collect(),
                 globals: decls
                     .globals
                     .into_iter()
                     .filter(|(_, symbol)| {
-                        !symbol.mutable && symbol.visibility != Visibility::Private
+                        !symbol.mutable && visibility_is_importable(symbol.visibility, same_module)
                     })
                     .collect(),
                 types: decls
                     .types
                     .into_iter()
-                    .filter(|(_, info)| info.visibility != Visibility::Private)
+                    .filter(|(_, info)| visibility_is_importable(info.visibility, same_module))
                     .collect(),
                 objects: decls
                     .objects
                     .into_iter()
-                    .filter(|(_, info)| info.visibility != Visibility::Private)
+                    .filter(|(_, info)| visibility_is_importable(info.visibility, same_module))
                     .collect(),
                 aliases: decls
                     .aliases
                     .into_iter()
-                    .filter(|(_, info)| info.visibility != Visibility::Private)
+                    .filter(|(_, info)| visibility_is_importable(info.visibility, same_module))
                     .collect(),
             };
             self.modules_by_alias.insert(alias.clone(), namespace);
@@ -3227,6 +3252,53 @@ class Adder {
             .expect("resolve");
 
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn internal_symbols_are_importable_only_within_the_declared_module() {
+        let temp = workspace_root().join("rust/target/resolver-internal-visibility-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("support.lum"),
+            r#"
+module shared
+
+internal def answer() Int = 42
+"#,
+        )
+        .expect("write support");
+
+        let same_module = temp.join("same.lum");
+        fs::write(
+            &same_module,
+            r#"
+module shared
+use support/{answer}
+def main() Int = answer()
+"#,
+        )
+        .expect("write same-module source");
+        let result = resolve_path(&same_module).expect("resolve same module");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let other_module = temp.join("other.lum");
+        fs::write(
+            &other_module,
+            r#"
+module app
+use support/{answer}
+def main() Int = answer()
+"#,
+        )
+        .expect("write cross-module source");
+        let error = resolve_path(&other_module).expect_err("internal import must be rejected");
+        assert!(
+            error.contains("no visible symbol 'answer'"),
+            "unexpected error: {error}"
+        );
+
         let _ = fs::remove_dir_all(&temp);
     }
 
