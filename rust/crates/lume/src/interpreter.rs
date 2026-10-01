@@ -584,9 +584,7 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
         | ast::Expr::Bool { .. }
         | ast::Expr::Unit { .. } => {}
         ast::Expr::Spread { value, .. } => rewrite_expr_for_runtime(value, module, graph),
-        ast::Expr::ListLiteral { items, .. }
-        | ast::Expr::TupleLiteral { items, .. }
-        | ast::Expr::ShapeLiteral { items, .. } => {
+        ast::Expr::ListLiteral { items, .. } | ast::Expr::TupleLiteral { items, .. } => {
             for item in items {
                 rewrite_expr_for_runtime(item, module, graph);
             }
@@ -603,6 +601,11 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
             }
             if let Some(path) = rewritten_expr_path(module, callee) {
                 *callee = Box::new(expr_from_path(path, *span));
+            }
+        }
+        ast::Expr::ContextualNew { args, .. } => {
+            for arg in args {
+                rewrite_expr_for_runtime(&mut arg.value, module, graph);
             }
         }
         ast::Expr::Member {
@@ -653,8 +656,14 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
             }
         }
         ast::Expr::AnonymousObject {
-            fields, methods, ..
+            interfaces,
+            fields,
+            methods,
+            ..
         } => {
+            for interface in interfaces {
+                rewrite_type_ref_for_runtime(interface, module);
+            }
             for field in fields {
                 if let Some(ty) = &mut field.ty {
                     rewrite_type_ref_for_runtime(ty, module);

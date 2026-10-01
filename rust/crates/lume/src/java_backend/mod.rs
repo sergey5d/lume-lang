@@ -3493,6 +3493,105 @@ def handler(offset Int) Handler = object with Handler {
     }
 
     #[test]
+    fn generated_java_runs_contextual_new_and_behavioral_shapes() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping contextual construction test because a JDK tool is unavailable");
+            return;
+        }
+
+        let temp = temp_path("lume-java-contextual-new");
+        let source = temp.join("contextual_new.lum");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/contextual_new
+
+shape Point {
+    x Int
+    y Int
+}
+
+type Position = Point
+
+class Worker {
+    name Str
+    age Int
+}
+
+interface Printable {
+    def print() Str
+}
+
+def main() Unit {
+    point Point = new { x: 10, y: 20 }
+    worker Worker = new("Ada", 42)
+    position Position = new(3, 4)
+    base = 10
+    printable Printable = shape with Printable {
+        x: base
+        y: 12
+
+        def print() Str = "${x}:${y}"
+    }
+
+    println(point.x + point.y)
+    println(worker.name, worker.age)
+    println(position.x + position.y)
+    println(printable.print())
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/contextual_new/Contextual_newModule.java"))
+            .expect("read module Java");
+        assert!(
+            module.contains("Point point = new Point(10L, 20L)"),
+            "{module}"
+        );
+        assert!(
+            module.contains("Worker worker = new Worker(\"Ada\", 42L)"),
+            "{module}"
+        );
+        assert!(
+            module.contains("private final Long __field_x = base"),
+            "{module}"
+        );
+        assert!(
+            module.contains("private final Long __field_y = 12L"),
+            "{module}"
+        );
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated Java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.contextual_new.Contextual_newMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("Java stdout utf8"),
+            "30\nAda 42\n7\n10:12\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn readable_java_keeps_block_lambdas_structured() {
         let temp = temp_path("lume-java-readable-block-lambda");
         let source = temp.join("block_lambda.lum");

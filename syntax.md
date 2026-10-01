@@ -943,6 +943,28 @@ user User = User("Ada", 10)
 maybe = Some(5)
 ```
 
+When an existing concrete target is known from context, `new` may omit the
+type name:
+
+```txt
+point Point = new {
+    x: 10
+    y: 20
+}
+
+worker Worker = new("Ada", 42)
+```
+
+`new { ... }` supplies named construction inputs and `new(...)` supplies
+positional construction inputs. The expected type must resolve to exactly one
+already-declared class or named shape. An alias is accepted only when it
+resolves to one of those constructible types.
+
+Contextual `new` is rejected when there is no expected type, or when the
+expected type is an anonymous shape, interface, `Any`, union, or unconstrained
+type parameter. It supplies constructor inputs only; fields, methods, and
+interface clauses cannot be declared inside `new`.
+
 Braces are also the field construction form for declared-union payload alternatives:
 
 ```txt
@@ -973,6 +995,22 @@ explicitUser = shape {
 The explicit form is useful where several brace forms appear together. It also
 provides the unambiguous empty anonymous shape `shape {}`; bare `{}` remains an
 empty block expression.
+
+Anonymous structural data may synthesize behavior by declaring interfaces and
+methods directly:
+
+```txt
+value = shape with Printable {
+    x: 10
+
+    def print() Unit = println(x)
+}
+```
+
+`shape with Interface { ... }` synthesizes an anonymous structural type with
+fields and behavior. `object { ... }` and `object with Interface { ... }`
+synthesize anonymous nominal object implementations. These forms determine
+their own concrete type; they are not constructor calls.
 
 Anonymous shape fields may infer their type from the initializer:
 
@@ -1014,9 +1052,8 @@ type ShortResult = { x Str }
 Both are transparent aliases for the same anonymous structural shape; neither
 introduces a named shape.
 
-An anonymous-shape alias may be used as a positional constructor name. This is
-syntax sugar for contextual `shape(...)`; the result remains an anonymous
-structural shape:
+An anonymous-shape alias may be used as an explicit positional constructor
+name. The result remains an anonymous structural shape:
 
 ```txt
 type Session = shape {
@@ -1074,31 +1111,10 @@ starts a long-form declaration for `class`, `interface`, `annotation`, and
 union member, as in
 `type Outcome = class Success { value Str } | object Cancelled {}`.
 
-Anonymous shape positional construction uses `shape(...)`. It is contextual:
-the expected type must be an anonymous shape type, and values map to fields in
-the written field order:
-
-```txt
-user { name Str, age Int } = shape("Ada", 10)
-
-def makeUser() { name Str, age Int } {
-    return shape("Ada", 10)
-}
-
-describe(shape("Cara", 14))
-```
-
-Without an expected anonymous-shape type, field names are unknown, so
-`shape(...)` is rejected:
-
-```txt
-user = shape("Ada", 10)      # invalid
-```
-
-An overloaded call cannot provide the required expected type unless the overload
-set selects one anonymous-shape parameter unambiguously. If multiple overloads
-could accept the same `shape(...)` values with different field names, bind an
-intermediate anonymous shape first.
+`shape(...)` is not a construction form. Anonymous structural values use named
+fields with `{ ... }` or `shape { ... }`. Positional construction must name an
+existing target, such as `Point(...)` or an anonymous-shape alias such as
+`Session(...)`.
 
 Tuples do not construct shapes or classes. Classes must name their constructor
 target:
@@ -1153,12 +1169,15 @@ General construction rules:
 - constructor parentheses accept positional arguments only; use braces for construction fields
 - function and method calls may still use named arguments in parentheses
 - `Type { value }` is not valid; use `Type(value)` only when the type supports positional construction
-- anonymous shapes use `{ field: value }` or `shape { field: value }` for field construction and `shape(...)` for contextual positional construction
+- anonymous shapes use `{ field: value }` or `shape { field: value }`; `shape(...)` is not supported
 - runtime-backed collection classes such as `Vector`, `Map`, `Array`, `LinkedList`, and `Set` use normal class construction; `Range(...)` is a stdlib factory
 - `Type { ... }` resolves through the available explicit `new(...)` declaration or implicit field-construction inputs
 - `Type(...)` resolves through explicit class `new(...)`, implicit visible-field construction, named shape positional construction, or an intrinsic collection form
+- `new { ... }` and `new(...)` resolve through the exact constructible type supplied by context
+- contextual `new` accepts only classes, named shapes, or aliases to those types
+- contextual `new` does not synthesize fields, methods, interfaces, or anonymous implementations
 - class construction is nominal and constructor-gated; shape construction is structural
-- tuple values cannot construct classes or shapes; write `shape(...)`, `Point(...)`, `User(...)`, or construction fields
+- tuple values cannot construct classes or shapes; write `Point(...)`, `User(...)`, or construction fields
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
 
 Explicit constructor rules:
@@ -1224,6 +1243,7 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 shape { field: value }           # explicit anonymous shape literal
 shape { field }                  # explicit anonymous shape with a punned field
 shape {}                         # explicit empty anonymous shape literal
+shape with Interface { field: value; def method() Type = value } # anonymous structural implementation
 { expr }                         # block expression
 Type { field: value }            # brace field construction or union payload
 Type { field }                   # brace construction with a punned field
@@ -1231,7 +1251,8 @@ call { x => ... }                # trailing lambda
 object { field Type = value; def method() Type = value } # anonymous object
 object with Interface, Other { def method() Type = value } # anonymous interface implementation
 new(field Type)                  # constructor declaration
-shape(value, other)              # contextual anonymous-shape positional construction
+new(value, other)                # contextual positional construction
+new { field: value }             # contextual named construction
 ```
 
 Single-expression braces such as `{ value }` are block expressions, not anonymous shapes. To construct an anonymous shape, use construction fields with `:`. Bare `{}` is an empty block; use `shape {}` for an empty anonymous shape.
@@ -1259,16 +1280,13 @@ Shape conversion rules:
 - extra fields are allowed when passing a value to a narrower shape
 - missing fields are rejected
 - defaults are not part of the shape syntax
-- `shape(...)` may construct anonymous shapes only when the expected type is an anonymous shape
-- `shape(...)` values map to anonymous-shape fields in written field order
-- `shape(...)` argument count must exactly match the anonymous-shape field count
 - shape-to-shape assignment is structural by field names and field types
 - class-to-shape is allowed through visible fields
 - shape-to-interface follows the shape's explicit `with Interface` bounds
 - class-to-interface-through-shape is not automatic; assign the class value to an explicit shape view first
 - class fields inaccessible at the conversion site are not visible to shape conversion
 - shape-to-class is not implicit; use a class constructor
-- tuple-to-shape and tuple-to-class are not allowed; use `shape(...)`, named shape construction, or class constructors
+- tuple-to-shape and tuple-to-class are not allowed; use named shape construction, class constructors, or anonymous construction fields
 - ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
 - `shape { ... }` is exactly the explicit spelling of an anonymous shape literal and accepts the same typed fields and spreads as bare field braces
 - construction fields inside braces use `field: value`; bare `field` is shorthand for `field: field`
@@ -1388,15 +1406,16 @@ class Pixel {
     y Int
 }
 
-point Point = Point(1, 2)           # named shape positional construction
-anon { x Int, y Int } = shape(1, 2) # anonymous shape positional construction
+point Point = Point(1, 2)              # explicit named-shape construction
+contextual Point = new(1, 2)           # contextual named-shape construction
+anon = shape { x: 1, y: 2 }            # anonymous structural construction
 fromClass Point = Pixel { x: 1, y: 2 } # class -> shape
-named Point = { x: 1, y: 2 }        # anonymous shape -> named shape
+named Point = { x: 1, y: 2 }           # anonymous shape -> named shape
 
-user User = ("Ada", 10)             # invalid: tuple -> class
-point Point = (1, 2)                # invalid: tuple -> named shape
-named Point = shape(1, 2)           # invalid: use Point(1, 2)
-anon = shape(1, 2)                  # invalid: expected shape fields are unknown
+user User = ("Ada", 10)                # invalid: tuple -> class
+point Point = (1, 2)                   # invalid: tuple -> named shape
+anon { x Int, y Int } = new(1, 2)      # invalid: new cannot target an anonymous shape
+unknown = new(1, 2)                    # invalid: no concrete expected target
 user User = { name: "Ada", age: 10 } # invalid: shape -> class
 ```
 
@@ -1718,7 +1737,8 @@ the class body.
 - `this { field: value }` inside a constructor delegates with construction fields to another constructor of the same class
 - delegating constructors use expression bodies, for example `new(label Str) = this { name: label }`
 - direct and indirect constructor-delegation cycles are rejected
-- `new(...)` only declares constructors; it is not a constructor-delegation call
+- in a class declaration, `new(...)` declares a constructor; in expression position, `new(...)` performs contextual construction
+- contextual `new(...)` is not constructor delegation; use `this(...)` or `this { ... }` to delegate
 - class call sites use braces for construction fields, for example `Person { name: "Ada", age: 10 }`
 - class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
 - `this` is the instance receiver
@@ -2085,11 +2105,21 @@ Rules:
 - fields and methods are statically typed and use ordinary member access
 - `this.field` and unqualified `field` are both available inside methods
 
-To create an anonymous interface implementation, use `object with`:
+To create an anonymous nominal interface implementation, use `object with`:
 
 ```txt
 greeter Greeter = object with Greeter {
     def greet() Str = "hello"
+}
+```
+
+To synthesize anonymous structural data with behavior, use `shape with`:
+
+```txt
+printable Printable = shape with Printable {
+    value: "hello"
+
+    def print() Unit = println(value)
 }
 ```
 
@@ -2127,8 +2157,9 @@ value = object with Readable, Writable {
 }
 ```
 
-Anonymous implementations always start with `object with`. Repeating the
-keyword, such as `object with Readable with Writable`, is invalid; write
+Anonymous nominal implementations start with `object with`; anonymous
+structural implementations start with `shape with`. Repeating `with`, such as
+`object with Readable with Writable`, is invalid; write
 `object with Readable, Writable` instead.
 
 Interfaces may also provide default methods by attaching a body:

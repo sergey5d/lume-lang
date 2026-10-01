@@ -1,5 +1,7 @@
 # EXPECT:
-# class box
+# kind box
+# kind another box
+# kind box #3
 
 class KeywordBox {
     value Str
@@ -7,5 +9,11 @@ class KeywordBox {
 
 def main() Unit {
     box KeywordBox = KeywordBox { value: "box" }
-    println("class", box.value)
+    println("kind", box.value)
+    anotherBox KeywordBox = KeywordBox("another box")
+    println("kind", anotherBox.value)
+
+    value = "box #3"
+    box3 KeywordBox = KeywordBox { value }
+    println("kind", box3.value)
 }

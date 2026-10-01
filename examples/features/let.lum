@@ -25,17 +25,17 @@ def pairwise(left Int?, right Str?) { count Int, label Str } {
         return { count: 0, label: "no-left" }
     }
     let Some(label) = right else {
-        return shape(count, "no-right")
+        return shape { count, label: "no-right" }
     }
 
     let {
         Some(groupedCount) = left
         Some(groupedLabel) = right
     } else {
-        return shape(count, label)
+        return shape { count, label }
     }
 
-    shape(groupedCount, groupedLabel)
+    { count: groupedCount, label: groupedLabel }
 }
 
 def sumBoth(left Int?, right Int?) Result[Int, Str] {

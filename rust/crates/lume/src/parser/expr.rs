@@ -744,6 +744,187 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_anonymous_shape_body(
+        &mut self,
+        start: Span,
+        interfaces: Vec<TypeRef>,
+    ) -> Option<Expr> {
+        self.consume(
+            TokenKind::LBrace,
+            "expected '{' after anonymous shape interface list",
+        )?;
+        self.skip_newlines();
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        let mut method_seen = false;
+        let mut member_names = Vec::<(String, Span)>::new();
+
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            let annotations = self.parse_annotations()?;
+            let visibility = self.parse_visibility();
+            if self.at_keyword(Keyword::Def) || self.starts_callable_decl() {
+                method_seen = true;
+                let method = self.parse_method_decl(annotations, visibility, false)?;
+                if method.name == "new" {
+                    self.diagnostics.push(Diagnostic::error(
+                        "invalid_anonymous_shape_constructor",
+                        "anonymous shapes cannot declare constructors; initialize fields in the shape body",
+                        method.span,
+                    ));
+                }
+                if let Some((_, previous)) =
+                    member_names.iter().find(|(name, _)| name == &method.name)
+                {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "duplicate_shape_member",
+                            format!("duplicate anonymous shape member '{}'", method.name),
+                            method.span,
+                        )
+                        .with_note(format!(
+                            "the first '{}' member is at line {}",
+                            method.name, previous.start_pos.line
+                        )),
+                    );
+                } else {
+                    member_names.push((method.name.clone(), method.span));
+                }
+                methods.push(method);
+                self.skip_newlines();
+                continue;
+            }
+
+            let (name, name_span) =
+                self.expect_data_name("expected anonymous shape field or method")?;
+            let mut ty = None;
+            let initializer = if self.match_token(TokenKind::Colon) {
+                self.parse_expr()?
+            } else if self.at(TokenKind::Comma)
+                || self.at(TokenKind::Newline)
+                || self.at(TokenKind::RBrace)
+            {
+                Expr::Identifier {
+                    name: name.clone(),
+                    span: name_span,
+                }
+            } else if self.can_start_type_ref() {
+                ty = Some(self.parse_type_ref()?);
+                self.consume(
+                    TokenKind::Colon,
+                    "expected ':' before anonymous shape field initializer",
+                )?;
+                self.parse_expr()?
+            } else {
+                self.error_at_current(
+                    "unexpected_token",
+                    "expected ': value' or a punned anonymous shape field",
+                );
+                return None;
+            };
+            let field_span = name_span.cover(initializer.span());
+            if method_seen {
+                self.diagnostics.push(Diagnostic::error(
+                    "invalid_member_order",
+                    format!(
+                        "anonymous shape field '{}' must appear before methods",
+                        name
+                    ),
+                    field_span,
+                ));
+            }
+            if let Some((_, previous)) = member_names.iter().find(|(member, _)| member == &name) {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "duplicate_shape_member",
+                        format!("duplicate anonymous shape member '{}'", name),
+                        field_span,
+                    )
+                    .with_note(format!(
+                        "the first '{}' member is at line {}",
+                        name, previous.start_pos.line
+                    )),
+                );
+            } else {
+                member_names.push((name.clone(), field_span));
+            }
+            fields.push(FieldDecl {
+                annotations,
+                visibility,
+                mutable: false,
+                name,
+                ty,
+                initializer: Some(initializer),
+                span: field_span,
+            });
+
+            let separated_by_comma = self.match_token(TokenKind::Comma);
+            let separated_by_newline = if separated_by_comma {
+                false
+            } else {
+                self.match_token(TokenKind::Newline)
+            };
+            self.skip_newlines();
+            if !separated_by_comma
+                && !separated_by_newline
+                && !self.at(TokenKind::RBrace)
+                && !self.at(TokenKind::Eof)
+            {
+                self.error_at_current(
+                    "unexpected_token",
+                    "expected ',' or newline between anonymous shape members",
+                );
+                return None;
+            }
+        }
+
+        let end = self.consume(TokenKind::RBrace, "expected '}' after anonymous shape body")?;
+        Some(Expr::AnonymousObject {
+            kind: TypeKind::Record,
+            interfaces,
+            fields,
+            methods,
+            span: start.cover(end),
+        })
+    }
+
+    fn parse_contextual_new_expr(&mut self) -> Option<Expr> {
+        let start = self.current_span();
+        self.advance();
+        if self.match_token(TokenKind::LParen) {
+            let args = self.with_trailing_block_calls_allowed(|parser| parser.parse_call_args())?;
+            let end = self.consume(TokenKind::RParen, "expected ')' after constructor inputs")?;
+            return Some(Expr::ContextualNew {
+                args,
+                uses_brace_syntax: false,
+                span: start.cover(end),
+            });
+        }
+        if self.match_token(TokenKind::LBrace) {
+            let record = self.with_trailing_block_calls_allowed(|parser| {
+                parser.finish_brace_record_literal_expr(start)
+            })?;
+            let Expr::RecordLiteral { span, .. } = &record else {
+                unreachable!("brace construction parses as a record literal")
+            };
+            let span = *span;
+            return Some(Expr::ContextualNew {
+                args: vec![CallArg {
+                    name: None,
+                    ty: None,
+                    value: record,
+                    span,
+                }],
+                uses_brace_syntax: true,
+                span,
+            });
+        }
+        self.error_at_current(
+            "expected_expression",
+            "contextual construction uses 'new(...)' or 'new { ... }'",
+        );
+        None
+    }
+
     fn parse_object_expr(&mut self) -> Option<Expr> {
         let start = self.consume_keyword(Keyword::Object, "expected 'object'")?;
         if self.match_keyword(Keyword::With) {
@@ -838,6 +1019,8 @@ impl<'a> Parser<'a> {
             "expected '}' after anonymous object body",
         )?;
         Some(Expr::AnonymousObject {
+            kind: TypeKind::Object,
+            interfaces: Vec::new(),
             fields,
             methods,
             span: start.cover(end),
@@ -1744,6 +1927,13 @@ impl<'a> Parser<'a> {
         if self.at_keyword(Keyword::Object) {
             return self.with_trailing_block_calls_allowed(|parser| parser.parse_object_expr());
         }
+        if self.at(TokenKind::Identifier)
+            && self.current().lexeme == "new"
+            && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::LBrace))
+        {
+            return self
+                .with_trailing_block_calls_allowed(|parser| parser.parse_contextual_new_expr());
+        }
         if self.can_start_type_ref() && self.is_removed_interface_led_expr_start() {
             return self.parse_removed_interface_led_expr();
         }
@@ -1803,23 +1993,20 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Keyword(Keyword::Shape) => {
                 let start = self.consume_keyword(Keyword::Shape, "expected 'shape'")?;
+                if self.match_keyword(Keyword::With) {
+                    let interfaces = self.parse_interface_ref_list_after_with()?;
+                    return self.parse_anonymous_shape_body(start, interfaces);
+                }
                 if self.match_token(TokenKind::LParen) {
-                    let args =
+                    let _args =
                         self.with_trailing_block_calls_allowed(|parser| parser.parse_call_args())?;
                     let end = self.consume(TokenKind::RParen, "expected ')' after shape values")?;
-                    let mut items = Vec::new();
-                    for arg in args {
-                        if arg.name.is_some() || arg.ty.is_some() {
-                            self.diagnostics.push(Diagnostic::error(
-                                "invalid_shape_positional_argument",
-                                "shape(...) accepts positional values only; use '{ field: value }' for named anonymous shape construction",
-                                arg.span,
-                            ));
-                        }
-                        items.push(arg.value);
-                    }
-                    return Some(Expr::ShapeLiteral {
-                        items,
+                    self.diagnostics.push(Diagnostic::error(
+                        "removed_positional_shape_construction",
+                        "positional 'shape(...)' construction has been removed; use 'shape { field: value }' or a named shape constructor",
+                        start.cover(end),
+                    ));
+                    return Some(Expr::Unit {
                         span: start.cover(end),
                     });
                 }
@@ -1830,7 +2017,7 @@ impl<'a> Parser<'a> {
                 }
                 self.error_at_current(
                     "unexpected_token",
-                    "anonymous shape construction uses 'shape { field: value }' or positional 'shape(...)'",
+                    "anonymous shape construction uses 'shape { field: value }' or 'shape with Interface { ... }'",
                 );
                 None
             }

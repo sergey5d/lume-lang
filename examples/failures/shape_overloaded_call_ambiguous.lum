@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*shape\(\.\.\.\) in an overloaded call needs a unique expected anonymous shape type.*
+# .*positional 'shape\(\.\.\.\)' construction has been removed.*
 
 class Label {
     value Str

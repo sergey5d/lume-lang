@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*shape\(\.\.\.\) constructs anonymous shapes only; use 'Point\(\.\.\.\)' for named shape construction.*
+# .*positional 'shape\(\.\.\.\)' construction has been removed.*
 
 shape Point {
     x Int

@@ -1,6 +1,11 @@
 # FAIL_REGEX:
-# shape field 'y' expects 'Str' but got 'Int'
+# .*field 'y' in shape 'Point'.*expects 'Str'.*
+
+shape Point {
+    x Int
+    y Str
+}
 
 def main() Unit {
-    point { x Int, y Str } = shape(4, 5)
+    point Point = new { x: 4, y: 5 }
 }

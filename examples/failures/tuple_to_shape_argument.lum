@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*tuple values cannot construct anonymous shape; use shape\(\.\.\.\) with an expected anonymous shape type.*
+# .*tuple values cannot construct anonymous shapes; use named fields.*
 
 def describe(user { name Str, age Int }) Str =
     user.name + " " + user.age

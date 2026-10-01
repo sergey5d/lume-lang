@@ -1355,7 +1355,7 @@ impl<'a> Resolver<'a> {
             Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => items
                 .iter()
                 .all(|item| self.is_annotation_static_value(item)),
-            Expr::ShapeLiteral { .. } => false,
+            Expr::ContextualNew { .. } => false,
             Expr::RecordLiteral { fields, values, .. } => {
                 fields
                     .iter()
@@ -2029,9 +2029,7 @@ impl<'a> Resolver<'a> {
             | Expr::Bool { .. }
             | Expr::Unit { .. } => {}
             Expr::Spread { value, .. } => self.resolve_expr(value),
-            Expr::ListLiteral { items, .. }
-            | Expr::TupleLiteral { items, .. }
-            | Expr::ShapeLiteral { items, .. } => {
+            Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
                 for item in items {
                     self.resolve_expr(item);
                 }
@@ -2046,6 +2044,11 @@ impl<'a> Resolver<'a> {
                 if !skip_init && !skip_any_widening && !self.is_implicit_method_call(callee) {
                     self.resolve_expr(callee);
                 }
+                for arg in args {
+                    self.resolve_expr(&arg.value);
+                }
+            }
+            Expr::ContextualNew { args, .. } => {
                 for arg in args {
                     self.resolve_expr(&arg.value);
                 }
@@ -2113,8 +2116,15 @@ impl<'a> Resolver<'a> {
                 }
             }
             Expr::AnonymousObject {
-                fields, methods, ..
+                kind,
+                interfaces,
+                fields,
+                methods,
+                ..
             } => {
+                for interface in interfaces {
+                    self.resolve_type_ref(Some(interface));
+                }
                 for field in fields {
                     self.resolve_annotations(&field.annotations);
                     self.resolve_type_ref(field.ty.as_ref());
@@ -2123,10 +2133,7 @@ impl<'a> Resolver<'a> {
                     }
                 }
                 self.push_scope();
-                self.push_field_hints(
-                    TypeKind::Object,
-                    fields.iter().map(|field| field.name.as_str()),
-                );
+                self.push_field_hints(*kind, fields.iter().map(|field| field.name.as_str()));
                 self.push_method_hints(methods.iter().map(|method| method.name.as_str()));
                 for method in methods {
                     self.resolve_method(method);

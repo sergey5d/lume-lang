@@ -1885,6 +1885,59 @@ fn parses_shape_literal_forms() {
 }
 
 #[test]
+fn parses_contextual_new_forms() {
+    assert!(matches!(
+        parse_expr_only("new(\"Ada\", 42)"),
+        Expr::ContextualNew {
+            uses_brace_syntax: false,
+            ref args,
+            ..
+        } if args.len() == 2
+    ));
+
+    assert!(matches!(
+        parse_expr_only("new { x: 10, y: 20 }"),
+        Expr::ContextualNew {
+            uses_brace_syntax: true,
+            ref args,
+            ..
+        } if matches!(args.as_slice(), [CallArg { value: Expr::RecordLiteral { fields, .. }, .. }] if fields.len() == 2)
+    ));
+}
+
+#[test]
+fn parses_shape_with_interfaces_fields_and_methods() {
+    let expr = parse_expr_only(
+        r#"shape with Printable {
+    x: 10
+
+    def print() Str = x.toStr()
+}"#,
+    );
+    assert!(matches!(
+        expr,
+        Expr::AnonymousObject {
+            kind: TypeKind::Record,
+            ref interfaces,
+            ref fields,
+            ref methods,
+            ..
+        } if interfaces.len() == 1 && fields.len() == 1 && methods.len() == 1
+    ));
+}
+
+#[test]
+fn rejects_removed_positional_shape_construction() {
+    let result = parse("def main() Unit = shape(1, 2)\n");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == "removed_positional_shape_construction" })
+    );
+}
+
+#[test]
 fn parses_bracket_map_literal_as_map_construction() {
     match parse_expr_only(r#"["fixed": 1, dynamicKey: 2, makeKey(): 3, (x, y): 4]"#) {
         Expr::Call {

@@ -179,10 +179,6 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             items: items.iter().map(desugar_expr).collect(),
             span: *span,
         },
-        ast::Expr::ShapeLiteral { items, span } => core::Expr::ShapeLiteral {
-            items: items.iter().map(desugar_expr).collect(),
-            span: *span,
-        },
         ast::Expr::Call {
             callee,
             args,
@@ -196,6 +192,25 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             };
             core::Expr::Call {
                 callee: Box::new(desugar_expr(callee)),
+                args: args
+                    .iter()
+                    .map(|arg| desugar_call_arg(arg, style))
+                    .collect(),
+                style,
+                span: *span,
+            }
+        }
+        ast::Expr::ContextualNew {
+            args,
+            uses_brace_syntax,
+            span,
+        } => {
+            let style = if *uses_brace_syntax {
+                core::CallStyle::Brace
+            } else {
+                core::CallStyle::Paren
+            };
+            core::Expr::ContextualNew {
                 args: args
                     .iter()
                     .map(|arg| desugar_call_arg(arg, style))
@@ -258,10 +273,14 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             span: *span,
         },
         ast::Expr::AnonymousObject {
+            kind,
+            interfaces,
             fields,
             methods,
             span,
         } => core::Expr::AnonymousObject {
+            kind: *kind,
+            interfaces: interfaces.clone(),
             fields: fields
                 .iter()
                 .map(|field| core::FieldDecl {

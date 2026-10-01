@@ -32,7 +32,8 @@ Construction is its own idea:
 - `new(name Type, other Type = default)` declares the inputs accepted by a class constructor.
 - `Type { field: value }` fills constructor inputs by field name.
 - `Type(value)` fills explicit constructors, implicit visible-field constructors, or named shape fields by declaration order.
-- `shape(value)` fills an expected anonymous shape by field order.
+- `new { field: value }` and `new(value)` construct an existing class or named shape inferred from the expected type.
+- `{ field: value }` and `shape { field: value }` synthesize anonymous structural data; positional `shape(...)` construction is not supported.
 - If a class has no explicit `new`, the compiler synthesizes field construction
   from visible fields.
 

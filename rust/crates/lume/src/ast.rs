@@ -644,12 +644,13 @@ pub enum Expr {
         items: Vec<Expr>,
         span: Span,
     },
-    ShapeLiteral {
-        items: Vec<Expr>,
-        span: Span,
-    },
     Call {
         callee: Box<Expr>,
+        args: Vec<CallArg>,
+        uses_brace_syntax: bool,
+        span: Span,
+    },
+    ContextualNew {
         args: Vec<CallArg>,
         uses_brace_syntax: bool,
         span: Span,
@@ -680,6 +681,8 @@ pub enum Expr {
         span: Span,
     },
     AnonymousObject {
+        kind: TypeKind,
+        interfaces: Vec<TypeRef>,
         fields: Vec<FieldDecl>,
         methods: Vec<MethodDecl>,
         span: Span,
@@ -767,8 +770,8 @@ impl Expr {
             | Expr::Spread { span, .. }
             | Expr::ListLiteral { span, .. }
             | Expr::TupleLiteral { span, .. }
-            | Expr::ShapeLiteral { span, .. }
             | Expr::Call { span, .. }
+            | Expr::ContextualNew { span, .. }
             | Expr::Member { span, .. }
             | Expr::Index { span, .. }
             | Expr::RecordUpdate { span, .. }

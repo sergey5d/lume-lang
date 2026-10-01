@@ -710,7 +710,7 @@ fn java_member_visibility(visibility: Visibility) -> &'static str {
 }
 
 fn is_anonymous_object_type(ty: &ir::TypeDef) -> bool {
-    ty.kind == TypeKind::Object && ty.name.starts_with("__LumeObject_")
+    ty.name.starts_with("__LumeObject_")
 }
 
 fn java_implements_clause(ty: &ir::TypeDef, names: &JavaNames) -> String {
@@ -5577,7 +5577,10 @@ impl<'a> SourceBodyEmitter<'a> {
             {
                 self.emit_lambda_expr(params, body, *span, bindings, None)
             }
-            core::Expr::AnonymousObject { .. } => {
+            core::Expr::AnonymousObject {
+                fields: source_fields,
+                ..
+            } => {
                 let ty = self.expr_type(expr, bindings).or_else(|| {
                     if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
                         eprintln!(
@@ -5613,8 +5616,35 @@ impl<'a> SourceBodyEmitter<'a> {
                     }
                     None
                 })?;
+                let ir::Type::Named { name, .. } = &ty else {
+                    return None;
+                };
+                let type_def = self.bundle.ir.types.iter().find(|item| item.name == *name)?;
+                let mut field_bindings = bindings.clone();
+                let mut field_initializers = Vec::with_capacity(source_fields.len());
+                for field in source_fields {
+                    let initializer = field.initializer.as_ref()?;
+                    let field_def = type_def
+                        .fields
+                        .iter()
+                        .find(|item| item.name == field.name)?;
+                    field_initializers.push(self.emit_expr_against(
+                        initializer,
+                        &field_bindings,
+                        &field_def.ty,
+                    )?);
+                    field_bindings.insert(
+                        field.name.clone(),
+                        format!("__field_{}", java_member_name(&field.name)),
+                    );
+                }
                 JavaIrSupport::new(self.bundle, self.function, self.names)
-                    .emit_anonymous_object(lowered.0, lowered.1, lowered.2, None)
+                    .emit_anonymous_object(
+                        lowered.0,
+                        lowered.1,
+                        lowered.2,
+                        Some(&field_initializers),
+                    )
                     .or_else(|| {
                         if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
                             eprintln!(
@@ -5625,6 +5655,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         None
                     })
             }
+            core::Expr::ContextualNew { .. } => None,
             core::Expr::AnonymousInterface { interfaces, .. } => {
                 let interface_types = interfaces.iter().map(type_ref_to_ir).collect::<Vec<_>>();
                 let lowered = self.function.blocks.iter().find_map(|block| {
@@ -6241,6 +6272,23 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             core::Expr::RecordLiteral { fields, values, .. } => {
                 self.emit_record_literal_against(fields, values, bindings, expected)
+            }
+            core::Expr::ContextualNew {
+                args, style, span, ..
+            } => {
+                let ir::Type::Named { name, .. } = expected else {
+                    return None;
+                };
+                let call = core::Expr::Call {
+                    callee: Box::new(core::Expr::Identifier {
+                        name: name.clone(),
+                        span: *span,
+                    }),
+                    args: args.clone(),
+                    style: *style,
+                    span: *span,
+                };
+                self.emit_expr(&call, bindings)
             }
             _ => self.emit_expr(expr, bindings),
         }
@@ -10048,7 +10096,8 @@ fn find_source_call_arg(
             return Some(arg);
         }
         match &arg.value {
-            core::Expr::RecordLiteral { fields, .. } => find_source_call_arg(fields, span),
+            core::Expr::RecordLiteral { fields, .. }
+            | core::Expr::ContextualNew { args: fields, .. } => find_source_call_arg(fields, span),
             _ => None,
         }
     })

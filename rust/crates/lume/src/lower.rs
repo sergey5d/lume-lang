@@ -1540,14 +1540,20 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_anonymous_object_rvalue(
         &mut self,
+        kind: ast::TypeKind,
+        interfaces: &[TypeRef],
         fields: &[core::FieldDecl],
         methods: &[MethodDecl],
         span: Span,
     ) -> ir::RValue {
         let type_name = crate::source::anonymous_object_type_name(span);
-        let mut ty = ir::TypeDef::new(ast::TypeKind::Object, type_name.clone());
+        let mut ty = ir::TypeDef::new(kind, type_name.clone());
         ty.visibility = ast::Visibility::Private;
         ty.span = Some(span);
+        ty.with_bounds = interfaces
+            .iter()
+            .map(|interface| lower_type_ref_with_aliases(interface, self.type_aliases))
+            .collect();
         ty.fields = fields
             .iter()
             .map(|field| ir::Field {
@@ -4188,8 +4194,8 @@ impl<'a> FunctionLowerer<'a> {
                 span,
             } => self.lower_extract_or_expr(value, fallback, *span, Some(expected)),
             Expr::Call { .. }
+            | Expr::ContextualNew { .. }
             | Expr::RecordLiteral { .. }
-            | Expr::ShapeLiteral { .. }
             | Expr::Lambda { .. }
             | Expr::AnonymousObject { .. }
             | Expr::Unary {
@@ -4306,13 +4312,13 @@ impl<'a> FunctionLowerer<'a> {
             }
             Expr::ListLiteral { .. }
             | Expr::TupleLiteral { .. }
-            | Expr::ShapeLiteral { .. }
             | Expr::RecordLiteral { .. }
             | Expr::AnonymousInterface { .. }
             | Expr::AnonymousObject { .. }
             | Expr::Unary { .. }
             | Expr::Binary { .. }
             | Expr::Call { .. }
+            | Expr::ContextualNew { .. }
             | Expr::Member { .. }
             | Expr::Index { .. }
             | Expr::RecordUpdate { .. }
@@ -4708,7 +4714,7 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|item| self.infer_expr_type_with_overrides(item, overrides))
                     .collect(),
             ),
-            Expr::ShapeLiteral { .. } => ir::Type::Unknown,
+            Expr::ContextualNew { .. } => ir::Type::Unknown,
             Expr::RecordLiteral { fields, values, .. } => {
                 if fields.is_empty() && !values.is_empty() {
                     return ir::Type::Tuple(
@@ -5965,7 +5971,6 @@ impl<'a> FunctionLowerer<'a> {
             Expr::TupleLiteral { items, .. } => Some(ir::RValue::Tuple(
                 items.iter().map(|item| self.lower_expr(item)).collect(),
             )),
-            Expr::ShapeLiteral { items, .. } => self.lower_shape_literal(items, expected),
             Expr::RecordLiteral { fields, values, .. } => {
                 if let Some(expected) = expected {
                     if let Some(value) =
@@ -6161,6 +6166,25 @@ impl<'a> FunctionLowerer<'a> {
                     structural: call_uses_structural_record_arg(&normalized_args, *style),
                 })
             }
+            Expr::ContextualNew { args, style, span } => {
+                let Some(ir::Type::Named { name, .. }) = expected else {
+                    self.invariant(
+                        "contextual 'new' should have an expected named class or shape before lowering",
+                        *span,
+                    );
+                    return Some(ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit)));
+                };
+                let call = Expr::Call {
+                    callee: Box::new(Expr::Identifier {
+                        name: name.clone(),
+                        span: *span,
+                    }),
+                    args: args.clone(),
+                    style: *style,
+                    span: *span,
+                };
+                self.lower_rvalue_with_expected(&call, expected)
+            }
             Expr::Member { receiver, name, .. } => Some(ir::RValue::Field {
                 base: self.lower_expr(receiver),
                 name: name.clone(),
@@ -6205,10 +6229,14 @@ impl<'a> FunctionLowerer<'a> {
                 ..
             } => Some(self.lower_anonymous_interface_rvalue(interfaces, methods)),
             Expr::AnonymousObject {
+                kind,
+                interfaces,
                 fields,
                 methods,
                 span,
-            } => Some(self.lower_anonymous_object_rvalue(fields, methods, *span)),
+            } => {
+                Some(self.lower_anonymous_object_rvalue(*kind, interfaces, fields, methods, *span))
+            }
             Expr::RecordUpdate {
                 receiver, patch, ..
             } => Some(ir::RValue::RecordUpdate {
@@ -6704,29 +6732,6 @@ impl<'a> FunctionLowerer<'a> {
             ty: expected.clone(),
             fields: lowered_fields,
         })
-    }
-
-    fn lower_shape_literal(
-        &mut self,
-        items: &[Expr],
-        expected: Option<&ir::Type>,
-    ) -> Option<ir::RValue> {
-        let Some(ir::Type::Record(fields)) = expected else {
-            return Some(ir::RValue::Tuple(
-                items.iter().map(|item| self.lower_expr(item)).collect(),
-            ));
-        };
-
-        Some(ir::RValue::Record(
-            fields
-                .iter()
-                .zip(items.iter())
-                .map(|(field, item)| ir::NamedOperand {
-                    name: field.name.clone(),
-                    value: self.lower_expr_with_expected(item, Some(&field.ty)),
-                })
-                .collect(),
-        ))
     }
 
     fn anonymous_shape_alias_fields(&self, callee: &Expr) -> Option<Vec<ir::NamedType>> {
