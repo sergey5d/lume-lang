@@ -1002,14 +1002,19 @@ class User {
 }
 
 #[test]
-fn parses_enum_as_an_ordinary_identifier() {
-    let result = parse("enum Int = 5\n");
+fn parses_removed_keywords_as_ordinary_identifiers() {
+    let result = parse("enum Int = 5\npartial Int = 6\n");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
     assert!(matches!(
         &program.items[0],
         Item::Statement(Stmt::Binding(binding))
             if binding.bindings.len() == 1 && binding.bindings[0].name == "enum"
+    ));
+    assert!(matches!(
+        &program.items[1],
+        Item::Statement(Stmt::Binding(binding))
+            if binding.bindings.len() == 1 && binding.bindings[0].name == "partial"
     ));
 }
 
@@ -2424,8 +2429,9 @@ def run(flag Bool) Unit {
         case false => 20
     } - 1
     rightIf = 1 + if flag { 2 } else { 3 }
-    partialValue = partial match flag {
-        case true => 10
+    optionMatch = match flag {
+        case true => Some(10)
+        case false => None
     } == Some(10)
     yielded = for item <- [1] yield { item } + [2]
 }
@@ -2459,7 +2465,7 @@ def run(flag Bool) Unit {
             left,
             op: BinaryOp::Sub,
             ..
-        } if matches!(left.as_ref(), Expr::Match { partial: false, .. })
+        } if matches!(left.as_ref(), Expr::Match { .. })
     ));
     assert!(matches!(
         binding_value(2),
@@ -2475,7 +2481,7 @@ def run(flag Bool) Unit {
             left,
             op: BinaryOp::Eq,
             ..
-        } if matches!(left.as_ref(), Expr::Match { partial: true, .. })
+        } if matches!(left.as_ref(), Expr::Match { .. })
     ));
     assert!(matches!(
         binding_value(4),
@@ -3615,21 +3621,17 @@ def run() Int = match {
 }
 
 #[test]
-fn rejects_partial_match_without_value() {
+fn rejects_removed_partial_match_syntax() {
     let result = parse(
         r#"
-def run() Option[Int] = partial match {
-    case Some(value) => value
+def run(value Bool) Int = partial match value {
+    case true => 1
 }
 "#,
     );
     assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "missing_match_value"),
-        "{:#?}",
-        result.diagnostics
+        !result.diagnostics.is_empty(),
+        "partial match must be rejected"
     );
 }
 

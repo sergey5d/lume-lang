@@ -1006,7 +1006,6 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     Stmt::Match(match_stmt) => {
                         tail = Some(self.lower_match_expr_with_expected(
-                            match_stmt.partial,
                             &match_stmt.value,
                             &match_stmt.cases,
                             match_stmt.span,
@@ -3034,7 +3033,6 @@ impl<'a> FunctionLowerer<'a> {
                 body_block,
                 fail_block,
                 None,
-                false,
                 join_block,
                 stmt.span,
                 None,
@@ -3050,28 +3048,22 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_match_expr(
         &mut self,
-        partial: bool,
         value: &Expr,
         cases: &[core::MatchCase],
         span: Span,
     ) -> ir::Operand {
-        self.lower_match_expr_with_expected(partial, value, cases, span, None)
+        self.lower_match_expr_with_expected(value, cases, span, None)
     }
 
     fn lower_match_expr_with_expected(
         &mut self,
-        partial: bool,
         value: &Expr,
         cases: &[core::MatchCase],
         span: Span,
         expected: Option<&ir::Type>,
     ) -> ir::Operand {
         let scrutinee = self.lower_expr(value);
-        let result = self.add_temp(if partial {
-            ir::Type::option(ir::Type::Unknown)
-        } else {
-            expected.cloned().unwrap_or(ir::Type::Unknown)
-        });
+        let result = self.add_temp(expected.cloned().unwrap_or(ir::Type::Unknown));
         let join_block = self.add_block();
         self.current_block = self.current_block.or(Some(self.function().entry));
 
@@ -3084,7 +3076,6 @@ impl<'a> FunctionLowerer<'a> {
                 body_block,
                 fail_block,
                 Some(result),
-                partial,
                 join_block,
                 span,
                 expected,
@@ -3093,18 +3084,11 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         if let Some(block) = self.current_block_mut() {
-            let default_value = if partial {
-                ir::RValue::NamedValue {
-                    path: vec!["None".to_string()],
-                }
-            } else {
-                ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit))
-            };
             block.push(ir::Statement {
                 span: Some(span),
                 kind: ir::StatementKind::Assign {
                     target: ir::Place::Local(result),
-                    value: default_value,
+                    value: ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit)),
                 },
             });
             block.set_terminator(ir::Terminator::goto(join_block));
@@ -3121,7 +3105,6 @@ impl<'a> FunctionLowerer<'a> {
         body_block: ir::BlockId,
         fail_block: ir::BlockId,
         result_target: Option<ir::LocalId>,
-        partial: bool,
         join_block: ir::BlockId,
         span: Span,
         expected: Option<&ir::Type>,
@@ -3171,7 +3154,7 @@ impl<'a> FunctionLowerer<'a> {
                     let value = self
                         .lower_block_value_with_expected(block, expected)
                         .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
-                    self.assign_match_result(target, value, partial, span);
+                    self.assign_match_result(target, value, span);
                 } else {
                     self.lower_block_statements(block);
                 }
@@ -3179,7 +3162,7 @@ impl<'a> FunctionLowerer<'a> {
             MatchCaseBody::Expr(expr) => {
                 let value = self.lower_expr_with_expected(expr, expected);
                 if let Some(target) = result_target {
-                    self.assign_match_result(target, value, partial, span);
+                    self.assign_match_result(target, value, span);
                 } else {
                     self.push_statement(ir::Statement {
                         span: Some(case.span),
@@ -3196,29 +3179,12 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn assign_match_result(
-        &mut self,
-        target: ir::LocalId,
-        value: ir::Operand,
-        partial: bool,
-        span: Span,
-    ) {
-        let rvalue = if partial {
-            ir::RValue::Call {
-                callee: ir::Callee::Named {
-                    path: vec!["Some".to_string()],
-                },
-                args: vec![value],
-                structural: false,
-            }
-        } else {
-            ir::RValue::Use(value)
-        };
+    fn assign_match_result(&mut self, target: ir::LocalId, value: ir::Operand, span: Span) {
         self.push_statement(ir::Statement {
             span: Some(span),
             kind: ir::StatementKind::Assign {
                 target: ir::Place::Local(target),
-                value: rvalue,
+                value: ir::RValue::Use(value),
             },
         });
     }
@@ -4198,12 +4164,9 @@ impl<'a> FunctionLowerer<'a> {
             Expr::ListLiteral { items, span } if list_literal_has_spread(items) => {
                 self.lower_spread_list_literal(items, *span)
             }
-            Expr::Match {
-                partial,
-                value,
-                cases,
-                span,
-            } => self.lower_match_expr_with_expected(*partial, value, cases, *span, Some(expected)),
+            Expr::Match { value, cases, span } => {
+                self.lower_match_expr_with_expected(value, cases, *span, Some(expected))
+            }
             Expr::Block { body, .. } => self
                 .lower_block_value_with_expected(body, Some(expected))
                 .unwrap_or(ir::Operand::Const(ir::Constant::Unit)),
@@ -4329,12 +4292,7 @@ impl<'a> FunctionLowerer<'a> {
             Expr::Break { span } => self.lower_break_control_expr(*span),
             Expr::Continue { span } => self.lower_continue_control_expr(*span),
             Expr::Block { body, .. } => self.lower_block_expr(body),
-            Expr::Match {
-                partial,
-                value,
-                cases,
-                span,
-            } => self.lower_match_expr(*partial, value, cases, *span),
+            Expr::Match { value, cases, span } => self.lower_match_expr(value, cases, *span),
             Expr::ForYield {
                 bindings,
                 yield_body,

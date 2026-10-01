@@ -38,7 +38,7 @@ Construction is its own idea:
 
 Control flow is expression-friendly but still explicit:
 
-- `match` is exhaustive; `partial match` returns `Option`.
+- `match` is exhaustive; optional results are expressed explicitly with `Some` and `None`.
 - `let` and `if let` are pattern-oriented binding forms;
   `assert(...)` handles boolean assertions.
 - `try`, pattern bindings, `??`, and explicit `map`/`flatMap` calls handle

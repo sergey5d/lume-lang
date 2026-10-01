@@ -188,7 +188,6 @@ pub enum ElseBranch {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchStmt {
-    pub partial: bool,
     pub value: Expr,
     pub cases: Vec<MatchCase>,
     pub span: Span,
@@ -403,7 +402,6 @@ pub enum Expr {
         span: Span,
     },
     Match {
-        partial: bool,
         value: Box<Expr>,
         cases: Vec<MatchCase>,
         span: Span,

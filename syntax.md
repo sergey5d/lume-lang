@@ -2007,14 +2007,6 @@ options.map(value => match value {
 })
 ```
 
-The same idea applies to `partial match`:
-
-```txt
-options.map(value => partial match value {
-    case SomeX { value as x } => x + 1
-})
-```
-
 Nested blocks are also valid expressions:
 
 ```txt
@@ -3140,8 +3132,9 @@ Refutable `let ... else`, reassignment, mutation, and expression statements are
 not clause forms. Put that logic in the body or use helpers such as `filterMap`:
 
 ```txt
-result = items.filterMap(item => partial match item {
-    case Some { value } => value
+result = items.filterMap(item => match item {
+    case Some(value) => Some(value)
+    case None => None
 })
 ```
 
@@ -3316,35 +3309,28 @@ result = match values {
 }
 ```
 
-Partial match expression form:
+`match` is always exhaustive; there is no separate partial-match form. Optional
+results are ordinary values and must be expressed explicitly:
 
 ```txt
-result Option[Int] = partial match value {
-    case SomeX { value as x } => x
+result Int? = match value {
+    case SomeX { value as x } => Some(x)
+    case OptionX.NoneX => None
 }
 ```
 
-Partial match statement form executes the matching case if one exists and does
-nothing when no case matches:
+To perform work for only one case, cover the remaining values explicitly:
 
 ```txt
-partial match value {
+match value {
     case SomeX { value as x } => println(x)
+    case _ => ()
 }
 ```
 
-Partial mapped through an explicit lambda:
+`match` always requires an explicit value and a block of cases: `match value { ... }`.
 
-```txt
-values.map(value => partial match value {
-    case SomeX { value as x } => x + 1
-})
-```
-
-`match` and `partial match` always require an explicit value and a block of cases.
-`match value { ... }`.
-
-Every `match` and `partial match` branch must start with `case`.
+Every `match` branch must start with `case`.
 
 Every case must have an explicit body after `=>`: an expression, `()` for Unit, or a block such as `{}`.
 
@@ -3358,8 +3344,6 @@ match value {
     case Other { message } => println(message)
 }
 ```
-
-If no case matches, `partial match` returns `None`.
 
 Supported pattern families:
 
@@ -3390,8 +3374,7 @@ Generic arguments inside runtime type patterns are intentionally rejected for no
 Rules:
 
 - declared-union exhaustiveness is checked
-- expression `partial match` skips exhaustiveness checking and wraps the result in `Option[...]`
-- statement `partial match` skips exhaustiveness checking and does nothing when no case matches
+- every `match` must be exhaustive; use a wildcard case when all remaining values share one result
 - a bare case-head identifier is a named zero-payload case or singleton, never
   a new local binding; use `_ as value` to bind an otherwise unrestricted value
 - object alternatives use their bare name; `Alternative()` is invalid
@@ -3723,7 +3706,7 @@ Expression precedence, from highest to lowest:
 | Boolean OR | `||` | left |
 | Extract or fallback | `??` | right |
 
-Value-producing `if / else`, `match`, `partial match`, and `for ... yield` are
+Value-producing `if / else`, `match`, and `for ... yield` are
 primary expressions. After the control-flow expression closes, surrounding
 postfix and infix parsing continues normally, and these forms may also appear as
 operator operands:

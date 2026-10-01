@@ -2950,14 +2950,8 @@ impl<'a> Checker<'a> {
             self.pop_scope();
             result = join_types(&result, &ty);
         }
-        if !stmt.partial {
-            self.check_match_exhaustiveness(&value_ty, &stmt.cases, stmt.span);
-        }
-        if stmt.partial {
-            Ty::option(result)
-        } else {
-            result
-        }
+        self.check_match_exhaustiveness(&value_ty, &stmt.cases, stmt.span);
+        result
     }
 
     fn check_stmt(&mut self, statement: &Stmt) -> Ty {
@@ -3244,11 +3238,9 @@ impl<'a> Checker<'a> {
     }
 
     fn match_stmt_guarantees_control_exit(&self, stmt: &MatchStmt) -> bool {
-        !stmt.partial
-            && stmt
-                .cases
-                .iter()
-                .all(|case| self.match_case_body_guarantees_control_exit(&case.body))
+        stmt.cases
+            .iter()
+            .all(|case| self.match_case_body_guarantees_control_exit(&case.body))
     }
 
     fn match_case_body_guarantees_control_exit(&self, body: &MatchCaseBody) -> bool {
@@ -4818,27 +4810,15 @@ impl<'a> Checker<'a> {
                 join_types(&then_ty, &else_ty)
             }
             Expr::Block { body, .. } => self.check_block_against(body, expected),
-            Expr::Match {
-                partial,
-                value,
-                cases,
-                span,
-            } => {
+            Expr::Match { value, cases, span } => {
                 let value_ty = self.check_expr(value);
                 let mut result = Ty::Unknown;
-                let case_expected = if *partial {
-                    self.unwrap_inner_type(expected)
-                } else {
-                    expected.clone()
-                };
                 for case in cases {
-                    let current = self.check_match_case_against(case, &value_ty, &case_expected);
+                    let current = self.check_match_case_against(case, &value_ty, expected);
                     result = join_types(&result, &current);
                 }
-                if !*partial {
-                    self.check_match_exhaustiveness(&value_ty, cases, *span);
-                }
-                if *partial { Ty::option(result) } else { result }
+                self.check_match_exhaustiveness(&value_ty, cases, *span);
+                result
             }
             Expr::ForYield {
                 bindings,

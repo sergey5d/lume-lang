@@ -51,8 +51,7 @@ impl<'a> Parser<'a> {
                 let function = self.parse_function_decl(Vec::new(), Visibility::Default)?;
                 Some(Stmt::LocalFunction(function))
             }
-            TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt(false).map(Stmt::Match),
-            TokenKind::Keyword(Keyword::Partial) => self.parse_match_stmt(true).map(Stmt::Match),
+            TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt().map(Stmt::Match),
             TokenKind::Keyword(Keyword::Let) => {
                 let checkpoint = self.checkpoint();
                 if let Some(expr) = self.try_parse_lambda_expr() {
@@ -850,22 +849,15 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub(super) fn parse_match_stmt(&mut self, partial: bool) -> Option<MatchStmt> {
-        let start = if partial {
-            let start = self.consume_keyword(Keyword::Partial, "expected 'partial'")?;
-            self.consume_keyword(Keyword::Match, "expected 'match' after 'partial'")?;
-            start
-        } else {
-            self.consume_keyword(Keyword::Match, "expected 'match'")?
-        };
+    pub(super) fn parse_match_stmt(&mut self) -> Option<MatchStmt> {
+        let start = self.consume_keyword(Keyword::Match, "expected 'match'")?;
         if self.at(TokenKind::LBrace) {
-            self.error_missing_match_value(partial);
+            self.error_missing_match_value();
             return None;
         }
         let value = self.parse_expr_without_trailing_block_call()?;
         let (cases, end) = self.parse_match_cases()?;
         Some(MatchStmt {
-            partial,
             value,
             cases,
             span: start.cover(end),

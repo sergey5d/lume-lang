@@ -114,7 +114,7 @@ It supports:
 
 - top-level globals and entry functions (`main` by default, then `run`)
 - user-defined classes/objects and declared unions with methods
-- `if`, `while`, `match`, `partial`, `for`, `for ... yield`, `defer`,
+- `if`, `while`, `match`, `for`, `for ... yield`, `defer`,
   `return`, `break`, and `continue`
 - `try` propagation and `expect` assertions over `Option`, `Result`, and `Either`
 - builtin constructors and helpers like `Range`, `Vector`, `Array`, `Some`, `None`,

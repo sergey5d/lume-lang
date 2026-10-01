@@ -71,13 +71,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(super) fn error_missing_match_value(&mut self, partial: bool) {
-        let message = if partial {
-            "partial match requires a value before '{'; use 'partial match value { ... }'"
-        } else {
-            "match requires a value before '{'; use 'match value { ... }'"
-        };
-        self.error_at_current("missing_match_value", message);
+    pub(super) fn error_missing_match_value(&mut self) {
+        self.error_at_current(
+            "missing_match_value",
+            "match requires a value before '{'; use 'match value { ... }'",
+        );
     }
 
     pub(super) fn expect_identifier(&mut self, message: &'static str) -> Option<(String, Span)> {
@@ -567,7 +565,6 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::If) => "IF",
             TokenKind::Keyword(Keyword::Else) => "ELSE",
             TokenKind::Keyword(Keyword::Match) => "MATCH",
-            TokenKind::Keyword(Keyword::Partial) => "PARTIAL",
             TokenKind::Keyword(Keyword::Reified) => "REIFIED",
             TokenKind::Keyword(Keyword::Fn) => "FN",
             TokenKind::Keyword(Keyword::For) => "FOR",

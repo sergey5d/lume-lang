@@ -1,7 +1,7 @@
 # Match Proposal
 
-This note captures the current `match` direction and the remaining polish after
-guards, nested patterns, and `partial` landed.
+This note captures the current exhaustive `match` direction and the remaining
+polish after guards and nested patterns landed.
 
 ## Current Surface
 
@@ -80,18 +80,7 @@ Current target:
 - obvious structural unreachable detection first
 - no deep guard reasoning initially
 
-### 3. Partial-Match Story
-
-`partial` exists, so the main open question is whether that is the final shape.
-
-Open questions:
-
-- is `partial` the final partial-match syntax?
-- should partial matching get better fallback ergonomics?
-
-This is more about language-shape polish than basic capability.
-
-### 4. Pattern-Lambda / Collection Ergonomics
+### 3. Pattern-Lambda / Collection Ergonomics
 
 This is a smaller refinement, but still useful.
 
@@ -115,7 +104,7 @@ list.map(match {
 
 This should come after the core `match` model is finished.
 
-### 5. Exhaustiveness Depth
+### 4. Exhaustiveness Depth
 
 Declared-union exhaustiveness already exists in a basic form.
 
@@ -137,7 +126,6 @@ If we want `match` to feel finished, the best order is probably:
 1. unreachable-case detection
 2. better missing-case reporting
 3. generic-aware extraction policy
-4. partial-match polish
-5. pattern-lambda sugar
+4. pattern-lambda sugar
 
 That order gives the biggest practical readability gains first while keeping syntax churn lower.

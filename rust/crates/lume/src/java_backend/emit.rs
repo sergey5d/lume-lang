@@ -3257,11 +3257,7 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             if !has_fallback {
                 out.push_str(indent);
-                if statement.partial {
-                    out.push_str("    default -> {}\n");
-                } else {
-                    out.push_str("    default -> throw new IllegalStateException(\"non-exhaustive Lume match\");\n");
-                }
+                out.push_str("    default -> throw new IllegalStateException(\"non-exhaustive Lume match\");\n");
             }
             out.push_str(indent);
             out.push_str("}\n");
@@ -3335,16 +3331,12 @@ impl<'a> SourceBodyEmitter<'a> {
         if statement.cases.is_empty() {
             return None;
         }
-        if statement.partial {
-            out.push_str("\n");
-        } else {
-            out.push_str("else {\n");
-            out.push_str(&format!(
-                "{indent}    throw new IllegalStateException(\"non-exhaustive Lume match\");\n"
-            ));
-            out.push_str(indent);
-            out.push_str("}\n");
-        }
+        out.push_str("else {\n");
+        out.push_str(&format!(
+            "{indent}    throw new IllegalStateException(\"non-exhaustive Lume match\");\n"
+        ));
+        out.push_str(indent);
+        out.push_str("}\n");
         Some(())
     }
 
@@ -4051,12 +4043,9 @@ impl<'a> SourceBodyEmitter<'a> {
                 bindings,
                 binding_types,
             ),
-            core::Expr::Match {
-                partial: false,
-                value,
-                cases,
-                span,
-            } => self.emit_match_return(out, value, cases, *span, indent, bindings, binding_types),
+            core::Expr::Match { value, cases, span } => {
+                self.emit_match_return(out, value, cases, *span, indent, bindings, binding_types)
+            }
             _ => {
                 out.push_str(indent);
                 let source_ty = self
@@ -5762,7 +5751,6 @@ impl<'a> SourceBodyEmitter<'a> {
                 }
             },
             core::Expr::Match {
-                partial: false,
                 value,
                 cases,
                 span,

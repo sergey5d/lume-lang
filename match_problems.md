@@ -1,7 +1,7 @@
 # Match Problems
 
-This note captures the main remaining work for `match` after nested patterns,
-guards, `partial`, and generic type-pattern erasure landed.
+This note captures the main remaining work for exhaustive `match` after nested
+patterns, guards, and generic type-pattern erasure landed.
 
 ## 1. Unreachable-Case Detection
 
@@ -68,7 +68,7 @@ This is not a correctness blocker, but it is still open ergonomics work.
 The main user-facing match story is now:
 
 - `match` is exhaustive / total
-- `partial` is the partial form and returns `Option[...]`
+- optional results use explicit `Some` / `None` branches
 - guards are supported on top-level cases
 - nested union, tuple, class, and shape patterns are supported
 - unary named data may use `Type(pattern)`; multi-field named data uses braces

@@ -338,7 +338,7 @@ Move expression parsing last.
 Why:
 
 - this is the highest-coupling area
-- it depends on body helpers, lambdas, call parsing, partial/match shorthand, and postfix behavior
+- it depends on body helpers, lambdas, call parsing, match shorthand, and postfix behavior
 
 ## Implementation Notes
 
@@ -411,7 +411,7 @@ Touches:
 
 - call args
 - shape updates
-- match/partial shorthand
+- match shorthand
 - trailing block behavior
 
 Mitigation:

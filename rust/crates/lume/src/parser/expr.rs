@@ -197,28 +197,18 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub(super) fn parse_match_expr_after_keyword(
-        &mut self,
-        start: Span,
-        partial: bool,
-    ) -> Option<Expr> {
+    pub(super) fn parse_match_expr_after_keyword(&mut self, start: Span) -> Option<Expr> {
         if self.at(TokenKind::LBrace) {
-            self.error_missing_match_value(partial);
+            self.error_missing_match_value();
             return None;
         }
         let value = self.parse_expr_without_trailing_block_call()?;
         let (cases, end) = self.parse_match_cases()?;
         Some(Expr::Match {
-            partial,
             value: Box::new(value),
             cases,
             span: start.cover(end),
         })
-    }
-
-    fn parse_partial_match_expr_after_partial(&mut self, start: Span) -> Option<Expr> {
-        self.consume_keyword(Keyword::Match, "expected 'match' after 'partial'")?;
-        self.parse_match_expr_after_keyword(start, true)
     }
 
     pub(super) fn parse_for_yield_expr_after_start(&mut self, start: Span) -> Option<Expr> {
@@ -1850,11 +1840,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Keyword(Keyword::Match) => {
                 let start = self.consume_keyword(Keyword::Match, "expected 'match'")?;
-                self.parse_match_expr_after_keyword(start, false)
-            }
-            TokenKind::Keyword(Keyword::Partial) => {
-                let start = self.consume_keyword(Keyword::Partial, "expected 'partial'")?;
-                self.parse_partial_match_expr_after_partial(start)
+                self.parse_match_expr_after_keyword(start)
             }
             TokenKind::Keyword(Keyword::For) => {
                 let start = self.consume_keyword(Keyword::For, "expected 'for'")?;

@@ -28,7 +28,6 @@ pub enum Keyword {
     Module,
     Object,
     Override,
-    Partial,
     Return,
     Reified,
     Shape,
@@ -347,7 +346,6 @@ impl<'a> Lexer<'a> {
             "match" => TokenKind::Keyword(Keyword::Match),
             "module" => TokenKind::Keyword(Keyword::Module),
             "override" => TokenKind::Keyword(Keyword::Override),
-            "partial" => TokenKind::Keyword(Keyword::Partial),
             "return" => TokenKind::Keyword(Keyword::Return),
             "reified" => TokenKind::Keyword(Keyword::Reified),
             "shape" => TokenKind::Keyword(Keyword::Shape),
@@ -607,11 +605,17 @@ mod tests {
     }
 
     #[test]
-    fn treats_removed_enum_keyword_as_an_identifier() {
-        let result = lex(&source("enum Int = 1\n"));
+    fn treats_removed_keywords_as_identifiers() {
+        let result = lex(&source("enum Int = 1\npartial Int = 2\n"));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(result.tokens[0].kind, TokenKind::Identifier);
         assert_eq!(result.tokens[0].lexeme, "enum");
+        assert!(
+            result
+                .tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Identifier && token.lexeme == "partial")
+        );
     }
 
     #[test]

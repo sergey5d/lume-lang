@@ -1,7 +1,0 @@
-# FAIL_REGEX:
-# .*partial match requires a value before '\{'; use 'partial match value \{ \.\.\. \}'.*
-
-def main() Int? =
-    partial match {
-        case Some(value) => value
-    }

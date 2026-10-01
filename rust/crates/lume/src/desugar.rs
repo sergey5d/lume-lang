@@ -97,7 +97,6 @@ pub fn desugar_stmt(stmt: &ast::Stmt) -> core::Stmt {
             span: stmt.span,
         }),
         ast::Stmt::Match(stmt) => core::Stmt::Match(core::MatchStmt {
-            partial: stmt.partial,
             value: desugar_expr(&stmt.value),
             cases: stmt.cases.iter().map(desugar_match_case).collect(),
             span: stmt.span,
@@ -340,13 +339,7 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             body: desugar_block(body),
             span: *span,
         },
-        ast::Expr::Match {
-            partial,
-            value,
-            cases,
-            span,
-        } => core::Expr::Match {
-            partial: *partial,
+        ast::Expr::Match { value, cases, span } => core::Expr::Match {
             value: Box::new(desugar_expr(value)),
             cases: cases.iter().map(desugar_match_case).collect(),
             span: *span,

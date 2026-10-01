@@ -157,18 +157,6 @@
     "keywords": {
       "patterns": [
         {
-          "name": "meta.match.partial.lume",
-          "match": "\\b(partial)(\\s+)(match)\\b",
-          "captures": {
-            "1": {
-              "name": "keyword.control.lume"
-            },
-            "3": {
-              "name": "keyword.control.lume"
-            }
-          }
-        },
-        {
           "name": "keyword.control.lume",
           "match": "\\b(?:if|else|for|while|yield|match|return|break|continue|is|try|defer)\\b"
         },

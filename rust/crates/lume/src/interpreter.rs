@@ -7688,7 +7688,7 @@ $name
     }
 
     #[test]
-    fn runs_match_patterns_for_shapes_classes_and_partial_unions() {
+    fn runs_match_patterns_for_shapes_classes_and_unions() {
         let program = lower_inline(
             r#"
             class Amount {
@@ -7709,8 +7709,9 @@ $name
                 amount Amount = Amount(42, "hello")
                 pair PairBox = PairBox(5, 9)
                 values [MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3)]
-                partialMapped Vector[Option[Int]] = values.map(value => partial match value {
-                    case SomeX { value as x } => x + 1
+                mapped Vector[Option[Int]] = values.map(value => match value {
+                    case SomeX { value as x } => Some(x + 1)
+                    case NoneX => None
                 })
 
                 OS.println(match amount {
@@ -7719,8 +7720,8 @@ $name
                 OS.println(match pair {
                     case PairBox { left, right } => left + right
                 })
-                let Some { value as first } = partialMapped.at(0) else return ()
-                let Some { value as second } = partialMapped.at(1) else return ()
+                let Some { value as first } = mapped.at(0) else return ()
+                let Some { value as second } = mapped.at(1) else return ()
                 OS.println(first.getOr(0))
                 OS.println(second.isEmpty())
             }

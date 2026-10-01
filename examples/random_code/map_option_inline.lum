@@ -14,8 +14,9 @@ def main() Unit {
         MaybeInt.SomeX(6)
     ]
 
-    extracted [Int?] = values.map(value => partial match value {
-        case SomeX(x) => x * 10
+    extracted [Int?] = values.map(value => match value {
+        case SomeX(x) => Some(x * 10)
+        case NoneX => None
     })
 
     first = extracted.at(0) ?? return ()

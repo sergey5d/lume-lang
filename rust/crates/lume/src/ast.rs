@@ -420,10 +420,9 @@ pub enum ElseBranch {
     Block(Block),
 }
 
-/// A `match` or `partial` statement.
+/// A `match` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchStmt {
-    pub partial: bool,
     pub value: Expr,
     pub cases: Vec<MatchCase>,
     pub span: Span,
@@ -521,7 +520,7 @@ pub struct ExprStmt {
     pub span: Span,
 }
 
-/// A pattern used by `match`, `partial`, and related destructuring forms.
+/// A pattern used by `match` and related destructuring forms.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Wildcard {
@@ -735,7 +734,6 @@ pub enum Expr {
         span: Span,
     },
     Match {
-        partial: bool,
         value: Box<Expr>,
         cases: Vec<MatchCase>,
         span: Span,

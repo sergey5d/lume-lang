@@ -12,10 +12,9 @@ def expandPage(page [MaybeInt]) [Int] {
     extracted [Int] = []
 
     page.forEach { maybeValue =>
-        parsed Int? = partial match maybeValue {
-           case SomeX { value as x } if x > 0 => {
-                x * 10
-            }
+        parsed Int? = match maybeValue {
+            case SomeX { value as x } if x > 0 => Some(x * 10)
+            case _ => None
         }
 
         if parsed.isSet() {
