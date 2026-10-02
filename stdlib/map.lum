@@ -16,9 +16,10 @@ private interface MapApi[K with Hashed[K], V] with Iterable[(K, V)] {
     def forEach(f fn(K, V) Unit)
     def get(key K) Option[V]
     def contains(key K) Bool
-    def size() Int
+    def size Int
     def clear() Unit
     def entries() [(K, V)]
+    def keys() [K]
     def values() [V]
 }
 

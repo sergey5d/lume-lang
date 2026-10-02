@@ -11,7 +11,7 @@ class TreeNode {
 }
 
 def chooseNode(left TreeNode?, right TreeNode?) TreeNode? =
-    if !left.isEmpty() { left } else { right }
+    if !left.isEmpty { left } else { right }
 
 def find(
     node TreeNode?,
@@ -28,11 +28,11 @@ def find(
     var currentFoundP = foundPNode
     var currentFoundQ = foundQNode
 
-    if currentFoundP.isEmpty() && current.val == valP {
+    if currentFoundP.isEmpty && current.val == valP {
         currentFoundP := Some(current)
     }
 
-    if currentFoundQ.isEmpty() && current.val == valQ {
+    if currentFoundQ.isEmpty && current.val == valQ {
         currentFoundQ := Some(current)
     }
 
@@ -47,7 +47,7 @@ def find(
         mergedP = chooseNode(leftResult.foundP, rightResult.foundP)
         mergedQ = chooseNode(leftResult.foundQ, rightResult.foundQ)
 
-        if !mergedP.isEmpty() && !mergedQ.isEmpty() && mergedAncestor.isEmpty() && foundPNode.isEmpty() && foundQNode.isEmpty() {
+        if !mergedP.isEmpty && !mergedQ.isEmpty && mergedAncestor.isEmpty && foundPNode.isEmpty && foundQNode.isEmpty {
             mergedAncestor := Some(current)
         }
 
@@ -96,5 +96,5 @@ def main() Unit {
     println("lca ${ancestor.val}")
     println("found p ${foundP.val}")
     println("found q ${foundQ.val}")
-    println("missing ${missing.isEmpty()}")
+    println("missing ${missing.isEmpty}")
 }

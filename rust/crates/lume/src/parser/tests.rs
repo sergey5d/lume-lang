@@ -1696,6 +1696,18 @@ fn parses_shape_literal_forms() {
         other => panic!("expected field-punned anonymous shape literal, got {other:#?}"),
     }
 
+    match parse_expr_only("shape { source.name, source.age }") {
+        Expr::RecordLiteral { fields, values, .. } => {
+            assert!(values.is_empty());
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name.as_deref(), Some("name"));
+            assert!(matches!(fields[0].value, Expr::Member { ref name, .. } if name == "name"));
+            assert_eq!(fields[1].name.as_deref(), Some("age"));
+            assert!(matches!(fields[1].value, Expr::Member { ref name, .. } if name == "age"));
+        }
+        other => panic!("expected member-punned anonymous shape literal, got {other:#?}"),
+    }
+
     match parse_expr_only("shape {}") {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(fields.is_empty());
@@ -1735,19 +1747,6 @@ fn parses_shape_literal_forms() {
         }
         other => panic!("expected tuple literal, got {other:#?}"),
     }
-
-    let file = SourceFile::new("test.lum", r#""a": 1"#);
-    let lexed = lex(&file);
-    let mut parser = Parser::new(&lexed.tokens);
-    let _ = parser.parse_expr().expect("expression");
-    assert!(
-        parser
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "removed_pair_expression"),
-        "expected removed pair expression diagnostic, got {:#?}",
-        parser.diagnostics
-    );
 
     match parse_expr_only(r#"{ entry: ("a", 1) }"#) {
         Expr::RecordLiteral { fields, values, .. } => {
@@ -2057,43 +2056,15 @@ fn rejects_mixed_list_and_map_literal_entries() {
 }
 
 #[test]
-fn rejects_chained_removed_pair_expression() {
-    let result = parse(
-        r#"
-def main() Unit {
-    value = "a": 1: true
-}
-"#,
-    );
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "removed_pair_expression"),
-        "{:#?}",
-        result.diagnostics
-    );
-}
-
-#[test]
-fn rejects_removed_pair_field_initializer() {
-    let result = parse(
-        r#"
-def main() Unit {
-    holder = Holder {
-        entry: "a": 1
+fn colon_outside_supported_syntax_uses_normal_parser_errors() {
+    for source in [
+        r#"def main() Unit { entries = Map("a": 1) }"#,
+        r#"def main() Unit { value = "a": 1: true }"#,
+        r#"def main() Unit { holder = Holder { entry: "a": 1 } }"#,
+    ] {
+        let result = parse(source);
+        assert!(!result.diagnostics.is_empty(), "{source}");
     }
-}
-"#,
-    );
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "removed_pair_expression"),
-        "{:#?}",
-        result.diagnostics
-    );
 }
 
 #[test]
@@ -2244,14 +2215,7 @@ fn rejects_removed_shape_merge_operator() {
 #[test]
 fn rejects_shape_field_after_parallel_block_binding() {
     let result = parse(r#"def run() Unit = { amount = 42, label: "x" }"#);
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "removed_pair_expression"),
-        "{:#?}",
-        result.diagnostics
-    );
+    assert!(!result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]
@@ -5084,6 +5048,41 @@ fn parses_single_runtime_type_test() {
 }
 
 #[test]
+fn parses_negative_runtime_type_test_as_negated_is() {
+    let expr = parse_expr_only("value is not Str");
+    assert!(matches!(
+        expr,
+        Expr::Unary {
+            op: UnaryOp::Not,
+            expr,
+            ..
+        } if matches!(expr.as_ref(), Expr::Is { .. })
+    ));
+}
+
+#[test]
+fn keeps_not_contextual_to_runtime_type_tests() {
+    let expr = parse_expr_only("not");
+    assert!(matches!(
+        expr,
+        Expr::Identifier { name, .. } if name == "not"
+    ));
+}
+
+#[test]
+fn rejects_value_expression_after_is_not() {
+    let result = parse("def main(value Any) Bool = value is not 5\n");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("expected type name")),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_reference_identity_operators() {
     let equal = parse_expr_only("left === right");
     assert!(matches!(
@@ -5248,6 +5247,28 @@ ext Outcome {
         vec![TypeKind::Class, TypeKind::Record, TypeKind::Object]
     );
     assert!(matches!(&program.items[1], Item::Extension(_)));
+}
+
+#[test]
+fn parses_shared_interface_bounds_on_declared_unions() {
+    let result = parse(
+        r#"
+type Maybe[T] with Iterable[T] =
+    class Present { value T }
+    | object Missing {}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Type(maybe) = &program.items[0] else {
+        panic!("expected declared union type");
+    };
+    assert!(matches!(
+        maybe.with_bounds.as_slice(),
+        [TypeRef::Named { name, args, .. }]
+            if name == "Iterable"
+                && matches!(args.as_slice(), [TypeRef::Named { name, .. }] if name == "T")
+    ));
 }
 
 #[test]
@@ -5505,4 +5526,93 @@ fn parses_vector_slice_syntax_as_slice_calls() {
             "{source}"
         );
     }
+}
+
+#[test]
+fn parses_multiple_explicit_generic_call_arguments() {
+    let expr = parse_expr_only("Map[Str, Int]()");
+    let Expr::Call { callee, args, .. } = expr else {
+        panic!("expected generic constructor call");
+    };
+    assert!(args.is_empty());
+    assert!(matches!(
+        callee.as_ref(),
+        Expr::Index { receiver, index, .. }
+            if matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "Map")
+                && matches!(index.as_ref(), Expr::TupleLiteral { items, .. } if items.len() == 2)
+    ));
+}
+
+#[test]
+fn parses_getter_methods_without_parameter_lists() {
+    let result = parse(
+        r#"
+interface Sized {
+    def size Int
+}
+
+class Box {
+    values [Int]
+
+    def size Int = this.values.size()
+    def items [Int] = this.values
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Type(interface) = &program.items[0] else {
+        panic!("expected interface");
+    };
+    let TypeMember::Method(interface_getter) = &interface.members[0] else {
+        panic!("expected interface getter");
+    };
+    assert!(interface_getter.getter);
+    assert!(interface_getter.params.is_empty());
+
+    let Item::Type(class) = &program.items[1] else {
+        panic!("expected class");
+    };
+    let getters = class
+        .members
+        .iter()
+        .filter_map(|member| match member {
+            TypeMember::Method(method) => Some(method),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(getters.len(), 2);
+    assert!(getters.iter().all(|method| method.getter));
+    assert!(matches!(
+        getters[1].return_type,
+        Some(TypeRef::Named { ref name, ref args, .. }) if name == "Vector" && args.len() == 1
+    ));
+}
+
+#[test]
+fn rejects_generic_getters_and_getters_without_return_types() {
+    let result = parse(
+        r#"
+class Invalid {
+    def generic[T] T = panic("no")
+    def missing = 1
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "generic_getter"),
+        "{:#?}",
+        result.diagnostics
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "getter_return_type_required"),
+        "{:#?}",
+        result.diagnostics
+    );
 }

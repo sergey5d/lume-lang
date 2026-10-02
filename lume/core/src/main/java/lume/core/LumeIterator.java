@@ -2,7 +2,7 @@ package lume.core;
 
 import java.util.Iterator;
 
-public final class LumeIterator<T> {
+public final class LumeIterator<T> implements Iterator<T> {
     private final Iterator<?> iterator;
 
     private LumeIterator(Iterator<?> iterator) {
@@ -38,11 +38,13 @@ public final class LumeIterator<T> {
         throw new IllegalArgumentException("value is not iterable: " + source);
     }
 
+    @Override
     public boolean hasNext() {
         return iterator.hasNext();
     }
 
     @SuppressWarnings("unchecked")
+    @Override
     public T next() {
         return (T) iterator.next();
     }

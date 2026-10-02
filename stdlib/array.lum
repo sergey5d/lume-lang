@@ -6,8 +6,8 @@ private interface ArrayApi[T] with Iterable[T] {
     def at(index Int) Option[T]
     def setAt(index Int, value T) Result[T, InvalidIndex]
 
-    def first() Option[T]
-    def last() Option[T]
+    def first Option[T]
+    def last Option[T]
 
     def clone() Array[T]
 
@@ -27,7 +27,7 @@ private interface ArrayApi[T] with Iterable[T] {
     def zip[X](other Array[X]) Array[(T, X)]
     def zipWithIndex() Array[(T, Int)]
 
-    def size() Int
+    def size Int
 }
 
 class Array[T] with ArrayApi[T] {

@@ -213,6 +213,11 @@ impl<'a> Parser<'a> {
         )?;
         let (name, _) = self.expect_identifier("expected type alias name")?;
         let generic_clause = self.parse_generic_clause()?;
+        let union_with_bounds = if self.match_keyword(Keyword::With) {
+            self.parse_interface_ref_list_after_with()?
+        } else {
+            Vec::new()
+        };
         self.consume(TokenKind::Eq, "expected '=' after type alias name")?;
         self.skip_newlines();
         let inline_type_decl_kind = match self.current_kind() {
@@ -237,6 +242,12 @@ impl<'a> Parser<'a> {
             )
         });
         if let Some(kind) = inline_type_decl_kind {
+            if !union_with_bounds.is_empty() {
+                self.error_at_current(
+                    "invalid_type_alias_bound",
+                    "long-form declarations place interface bounds after the declaration kind, for example 'type A = class with Printable { ... }'",
+                );
+            }
             self.advance();
             let with_bounds = if self.match_keyword(Keyword::With) {
                 self.parse_interface_ref_list_after_with()?
@@ -280,7 +291,19 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Class) | TokenKind::Keyword(Keyword::Object)
         ) || (self.at_keyword(Keyword::Shape) && !starts_prefixed_anonymous_shape_alias)
         {
-            return self.parse_inline_union_decl(visibility, name, generic_clause, start);
+            return self.parse_inline_union_decl(
+                visibility,
+                name,
+                generic_clause,
+                union_with_bounds,
+                start,
+            );
+        }
+        if !union_with_bounds.is_empty() {
+            self.error_at_current(
+                "invalid_type_alias_bound",
+                "interface bounds on 'type' require an inline declared union",
+            );
         }
         if !generic_clause.params.is_empty() || !generic_clause.conditions.is_empty() {
             self.error_at_current(
@@ -314,6 +337,7 @@ impl<'a> Parser<'a> {
         visibility: Visibility,
         name: String,
         generic_clause: ParsedGenericClause,
+        with_bounds: Vec<TypeRef>,
         start: Span,
     ) -> Option<Item> {
         let mut members = Vec::new();
@@ -407,7 +431,7 @@ impl<'a> Parser<'a> {
             name,
             type_params: generic_clause.params,
             type_conditions: generic_clause.conditions,
-            with_bounds: Vec::new(),
+            with_bounds,
             members,
             span: start.cover(end),
         }))
@@ -828,6 +852,7 @@ impl<'a> Parser<'a> {
             annotations,
             visibility,
             name,
+            getter: false,
             type_params: Vec::new(),
             type_conditions: Vec::new(),
             params,
@@ -951,13 +976,52 @@ impl<'a> Parser<'a> {
             span
         };
         let (name, _) = self.parse_callable_name("expected method name")?;
-        let generic_clause = self.parse_generic_clause()?;
-        let params = self.parse_param_list()?;
+        let generic_checkpoint = self.checkpoint();
+        let candidate_generic_clause = self.parse_generic_clause()?;
+        let generic_is_method_clause = !candidate_generic_clause.params.is_empty()
+            || !candidate_generic_clause.conditions.is_empty();
+        let generic_is_followed_by_params = self.at(TokenKind::LParen);
+        let generic_is_followed_by_getter_return = generic_is_method_clause
+            && !self.callable_body_starts_here()
+            && self.can_start_type_ref();
+        let generic_clause =
+            if generic_is_followed_by_params || generic_is_followed_by_getter_return {
+                candidate_generic_clause
+            } else {
+                self.restore(generic_checkpoint);
+                ParsedGenericClause::default()
+            };
+        let getter = !self.at(TokenKind::LParen);
+        let params = if getter {
+            Vec::new()
+        } else {
+            self.parse_param_list()?
+        };
         let return_type = if self.callable_body_starts_here() {
             None
         } else {
             self.parse_optional_return_type()
         };
+        if getter && return_type.is_none() {
+            self.diagnostics.push(Diagnostic::error(
+                "getter_return_type_required",
+                format!(
+                    "getter '{}' requires an explicit return type; write `def {} Type = ...`",
+                    name, name
+                ),
+                self.current_span(),
+            ));
+        }
+        if getter && (!generic_clause.params.is_empty() || !generic_clause.conditions.is_empty()) {
+            self.diagnostics.push(Diagnostic::error(
+                "generic_getter",
+                format!(
+                    "getter '{}' cannot declare type parameters or generic conditions",
+                    name
+                ),
+                start,
+            ));
+        }
         let body = if self.at(TokenKind::LBrace) || self.at(TokenKind::Eq) {
             Some(self.parse_callable_body()?)
         } else if allow_signature_only {
@@ -975,6 +1039,7 @@ impl<'a> Parser<'a> {
             annotations,
             visibility,
             name,
+            getter,
             type_params: generic_clause.params,
             type_conditions: generic_clause.conditions,
             params,

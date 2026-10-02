@@ -26,7 +26,7 @@ def minInt(left Int, right Int) Int {
 def totalFruit(fruits [Int]) Int {
     var maxFruits Int = 0
     var count Int = 0
-    len Int = fruits.size()
+    len Int = fruits.size
     var i Int = 0
 
     while i < len {

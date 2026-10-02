@@ -1,17 +1,17 @@
 # PRELUDE_SKIP
 # INTERPRETER
 
-type Option[T] =
+type Option[T] with Iterable[T] =
     class Some { value T }
     | object None {}
 
 ext Option[T] {
-    def isSet() Bool = match this {
+    def isSet Bool = match this {
         case Some { value: _ } => true
         case Option.None => false
     }
 
-    def isEmpty() Bool = !this.isSet()
+    def isEmpty Bool = !this.isSet
 
     def getOr(defaultValue => T) T = match this {
         case Some { value } => value
@@ -41,5 +41,10 @@ ext Option[T] {
     def flatMap[X](f fn(T) Option[X]) Option[X] = match this {
         case Some { value } => f(value)
         case Option.None => None
+    }
+
+    def iterator() Iterator[T] = match this {
+        case Some { value } => [value].iterator()
+        case Option.None => Vector[T]().iterator()
     }
 }

@@ -15,7 +15,7 @@ private interface SetApi[T] with Iterable[T] {
     def forAll(f fn(T) Bool) Bool
     def forEach(f fn(T) Unit)
     def contains(value T) Bool
-    def size() Int
+    def size Int
 }
 
 class Set[T] with SetApi[T] {

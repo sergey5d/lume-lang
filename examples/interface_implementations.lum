@@ -60,5 +60,5 @@ def main() Unit {
     println("ref", a.hello())
 
     routeType = typeOf[Route]
-    println("annotation", routeType.kind())
+    println("annotation", routeType.kind)
 }

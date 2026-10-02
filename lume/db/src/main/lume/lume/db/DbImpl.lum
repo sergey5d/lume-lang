@@ -20,7 +20,7 @@ private object JdbcRowDecoderCache {
     }
 
     def key(targetType Type[_]) Str =
-        targetType.qualifiedName().getOr(targetType.name().getOr("<anonymous>"))
+        targetType.qualifiedName.getOr(targetType.name.getOr("<anonymous>"))
 }
 
 
@@ -159,7 +159,7 @@ private class JdbcRowQuery with RowQuery {
 
     def row() Result[Option[Row], DbError] {
         rows [Row] = try JdbcQuery(this.runner, this.sql, this.values).rows()
-        count Int = rows.size()
+        count Int = rows.size
 
         if count == 0 {
             Ok(None)
@@ -196,7 +196,7 @@ private class JdbcRowQuery with RowQuery {
 
     def decodeOne[reified T]() Result[Option[T], DbError] {
         jdbcRows [JdbcRow] = try this.runner.query(this.sql, this.values)
-        count Int = jdbcRows.size()
+        count Int = jdbcRows.size
 
         if count == 0 {
             Ok(None)

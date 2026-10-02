@@ -3411,33 +3411,13 @@ impl<'a> Interpreter<'a> {
             .iter()
             .filter(|field| !field.hidden)
             .collect::<Vec<_>>();
-        let required_visible = visible_fields
-            .iter()
-            .filter(|field| !field.has_initializer)
-            .count();
-        if values.len() < required_visible || values.len() > visible_fields.len() {
-            return Err(self.runtime_error(
-                span,
-                format!(
-                    "class '{}' requires construction fields that match the visible class shape",
-                    ty.name
-                ),
-            ));
-        }
-
         let mut aggregate = match instance {
             Value::Aggregate(value) => value.borrow_mut(),
             _ => unreachable!(),
         };
         for (name, value) in values {
             let Some(field) = visible_fields.iter().find(|field| field.name == *name) else {
-                return Err(self.runtime_error(
-                    span,
-                    format!(
-                        "class '{}' requires construction fields that match the visible class shape",
-                        ty.name
-                    ),
-                ));
+                continue;
             };
             aggregate.fields[field.slot.0] = self.coerce_value_to_type(value.clone(), &field.ty);
         }
@@ -4791,7 +4771,12 @@ impl<'a> Interpreter<'a> {
         best
     }
 
-    fn get_member(&self, base: Value, name: &str, span: Option<Span>) -> Result<Value, Diagnostic> {
+    fn get_member(
+        &mut self,
+        base: Value,
+        name: &str,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
         if name == "runtimeType" {
             return Ok(Value::RuntimeType(self.runtime_type_value_for_value(&base)));
         }
@@ -4804,29 +4789,25 @@ impl<'a> Interpreter<'a> {
                 {
                     return Ok(Value::Aggregate(aggregate.clone()));
                 }
-                let aggregate = aggregate.borrow();
-                self.aggregate_field_value(&aggregate, name).ok_or_else(|| {
-                    self.runtime_error(
-                        span,
-                        if let Some(case_name) = &aggregate.case_name {
-                            format!(
-                                "variant '{}.{}' has no field '{}'",
-                                aggregate.type_name, case_name, name
-                            )
-                        } else {
-                            format!("value '{}' has no field '{}'", aggregate.type_name, name)
-                        },
-                    )
-                })
+                let field = {
+                    let aggregate_ref = aggregate.borrow();
+                    self.aggregate_field_value(&aggregate_ref, name)
+                };
+                if let Some(field) = field {
+                    return Ok(field);
+                }
+                self.invoke_method(Value::Aggregate(aggregate), name, Vec::new(), span)
             }
-            Value::Record(fields) => lookup_named_field(&fields.borrow(), name)
-                .ok_or_else(|| self.runtime_error(span, format!("shape has no field '{}'", name))),
+            Value::Record(fields) => {
+                let field = lookup_named_field(&fields.borrow(), name);
+                if let Some(field) = field {
+                    return Ok(field);
+                }
+                self.invoke_method(Value::Record(fields), name, Vec::new(), span)
+            }
             Value::Tuple(items) => tuple_member(&items, name)
                 .ok_or_else(|| self.runtime_error(span, format!("tuple has no member '{}'", name))),
-            _ => Err(self.runtime_error(
-                span,
-                format!("cannot access field '{}' on {}", name, base.render()),
-            )),
+            other => self.invoke_method(other, name, Vec::new(), span),
         }
     }
 
@@ -5717,7 +5698,7 @@ fn iterator_values(
 pub(crate) fn iterable_values(
     value: Value,
     span: Option<Span>,
-    in_: &Interpreter<'_>,
+    in_: &mut Interpreter<'_>,
 ) -> Result<Vec<Value>, Diagnostic> {
     match value {
         Value::List(items) => {
@@ -5739,10 +5720,19 @@ pub(crate) fn iterable_values(
                 ]))
             })
             .collect(),
-        other => Err(in_.runtime_error(
-            span,
-            format!("expected iterable value, got {}", other.render()),
-        )),
+        other => {
+            let rendered = other.render();
+            let iterator = in_.iter_init(other, span).map_err(|_| {
+                in_.runtime_error(span, format!("expected iterable value, got {rendered}"))
+            })?;
+            let Value::Iterator(iterator) = iterator else {
+                return Err(in_.runtime_error(
+                    span,
+                    format!("iterator() must return Iterator, got {}", iterator.render()),
+                ));
+            };
+            iterator_values(&iterator, span, in_)
+        }
     }
 }
 
@@ -6595,6 +6585,29 @@ mod tests {
     }
 
     #[test]
+    fn runs_getter_methods_through_member_access() {
+        let program = lower_inline(
+            r#"
+            class Counter {
+                value Int
+
+                def doubled Int = this.value * 2
+                def quadrupled Int = doubled * 2
+            }
+
+            def run() Int {
+                counter Counter = Counter(6)
+                return counter.quadrupled
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.return_value.as_deref(), Some("24"));
+    }
+
+    #[test]
     fn runs_reference_identity_operators() {
         let program = lower_inline(
             r#"
@@ -6864,7 +6877,7 @@ mod tests {
                     this.segments = segments
                 }
 
-                def size() Int = this.segments.size()
+                def size() Int = this.segments.size
 
                 def firstOr(value Str) Str = this.segments.at(0).getOr(value)
 }
@@ -6881,6 +6894,81 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.return_value.as_deref(), Some("0:3:usr"));
+    }
+
+    #[test]
+    fn runs_explicit_and_contextual_generic_construction() {
+        let program = lower_inline(
+            r#"
+            class Box[T] {
+                value T
+
+                new(value T) {
+                    this.value = value
+                }
+            }
+
+            def main() Unit {
+                set Set[Str] = Set()
+                map Map[Str, Int] = Map[Str, Int]()
+                inferred = Box("hello")
+                contextual Box[Str] = new("world")
+
+                set.add("Ada")
+                println(set.size, map.size, inferred.value, contextual.value)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "1 0 hello world\n");
+    }
+
+    #[test]
+    fn runs_contextual_shape_projection_inside_generic_map() {
+        let program = lower_inline(
+            r#"
+            shape StoredRollup {
+                total Int
+                label Str
+                internalId Int
+            }
+
+            shape Rollup {
+                total Int
+                label Str
+            }
+
+            def source() StoredRollup? = Some(StoredRollup {
+                total: 7
+                label: "week"
+                internalId: 99
+            })
+
+            def named() Rollup? = source().map(r => Rollup { ...r })
+            def explicitShape() Rollup? = source().map(r => shape { ...r })
+            def implicitShape() Rollup? = source().map(r => { ...r })
+            def contextualNew() Rollup? = source().map(r => new { ...r })
+            def namedMembers() Rollup? = source().map(r => Rollup { r.total, r.label })
+            def explicitShapeMembers() Rollup? = source().map(r => shape { r.total, r.label })
+            def contextualNewMembers() Rollup? = source().map(r => new { r.total, r.label })
+
+            def main() Unit {
+                println(named()!.total)
+                println(explicitShape()!.total)
+                println(implicitShape()!.total)
+                println(contextualNew()!.total)
+                println(namedMembers()!.total)
+                println(explicitShapeMembers()!.total)
+                println(contextualNewMembers()!.total)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "7\n7\n7\n7\n7\n7\n7\n");
     }
 
     #[test]
@@ -6909,13 +6997,13 @@ mod tests {
 
                 seen = Set(1, 2)
                 seen.add(3)
-                OS.println(seen.size())
+                OS.println(seen.size)
 
                 pairs = ["a": 1]
                 pairs.put("b", 2)
                 pairs["a"] += 6
                 pairs["a"] -= 2
-                OS.println(pairs.size())
+                OS.println(pairs.size)
                 OS.println(pairs["a"]!)
 
                 left Vec = Vec(5, 6)
@@ -6968,8 +7056,8 @@ mod tests {
 
 
                 def current() Int = this.currentTick
-                def queued() Int = this.queue.size()
-                def entries() Int = this.map.size()
+                def queued() Int = this.queue.size
+                def entries() Int = this.map.size
 }
 
 
@@ -7017,7 +7105,7 @@ mod tests {
         let program = lower_inline(
             r#"
             def countItems(items [Int]) Option[Int] {
-                count = try Some(items.size())
+                count = try Some(items.size)
                 Some(count)
             }
 
@@ -7134,7 +7222,7 @@ mod tests {
                 ok = Ok(9)
                 err = Err("missing")
                 OS.println("some", some.getOr(0))
-                OS.println("none", none.isEmpty())
+                OS.println("none", none.isEmpty)
                 OS.println("ok", ok.getOr(0))
                 OS.println("err", err.getError())
             }
@@ -7209,7 +7297,7 @@ $name
 
                 OS.println(first)
                 OS.println(second)
-                OS.println(missing.isEmpty())
+                OS.println(missing.isEmpty)
             }
             "#,
         );
@@ -7234,10 +7322,10 @@ $name
                 more.add(3)
                 more.addAll([2, 4, 4])
 
-                OS.println("base", base.size(), base.at(1).getOr(0))
-                OS.println("grown", grown.size(), grown.at(4).getOr(0))
-                OS.println("seen", seen.size(), seen.contains(3))
-                OS.println("more", more.size(), more.contains(4))
+                OS.println("base", base.size, base.at(1).getOr(0))
+                OS.println("grown", grown.size, grown.at(4).getOr(0))
+                OS.println("seen", seen.size, seen.contains(3))
+                OS.println("more", more.size, more.contains(4))
             }
             "#,
         );
@@ -7341,10 +7429,10 @@ $name
                 values [Int] = [1, 2]
                 mapped = values.map { value => value + 5 }
 
-                OS.println(mappedEmpty.size())
+                OS.println(mappedEmpty.size)
                 OS.println(mapped.at(0).getOr(0))
                 OS.println(mapped.at(1).getOr(0))
-                OS.println(mapped.size())
+                OS.println(mapped.size)
             }
             "#,
         );
@@ -7582,7 +7670,7 @@ $name
                 noneInt = OptionX.NoneX
 
                 OS.println("reddish", black.isReddish())
-                OS.println("defined", someInt.isDefined())
+                OS.println("defined", someInt.isDefined)
                 OS.println("none", noneInt == OptionX.NoneX)
             }
             "#,
@@ -7665,10 +7753,10 @@ $name
                 let Some { value as parsedInt } = Int.parse("7") else panic("expected int")
                 OS.println(parsedFloat + 0.8)
                 OS.println(parsedInt + 1)
-                OS.println(Float.parse("oops").isEmpty())
-                OS.println(Int.parse("nope").isEmpty())
+                OS.println(Float.parse("oops").isEmpty)
+                OS.println(Int.parse("nope").isEmpty)
                 OS.println(values.makeStr("-"))
-                OS.println(values.nonEmpty())
+                OS.println(values.nonEmpty)
             }
             "#,
         );
@@ -7686,7 +7774,7 @@ $name
                 someValue = Option.when(true, 7)
                 noValue = Option.when(false, 7)
                 OS.println(someValue !)
-                OS.println(noValue.isEmpty())
+                OS.println(noValue.isEmpty)
             }
             "#,
         );
@@ -7732,7 +7820,7 @@ $name
                 let Some { value as first } = mapped.at(0) else return ()
                 let Some { value as second } = mapped.at(1) else return ()
                 OS.println(first.getOr(0))
-                OS.println(second.isEmpty())
+                OS.println(second.isEmpty)
             }
             "#,
         );
@@ -7811,7 +7899,7 @@ $name
             r#"
             class Portfolio {
                 assets [Str] = ["btc", "usd"]
-                assetCount Int = this.assets.size()
+                assetCount Int = this.assets.size
                 total Int
 
 
@@ -7925,7 +8013,7 @@ $name
                 }
 
                 unknown Any = "lume"
-                if true && unknown is Str && unknown.size() == 4 {
+                if true && unknown is Str && unknown.size == 4 {
                     OS.println(unknown)
                 }
             }
@@ -8069,8 +8157,8 @@ $name
             r#"
             def main() Unit {
                 split = "BTC-USD-5.0".split("-")
-                assert(split.size() == 3)
-                assert(split.size() == 3, "split should have 3 parts")
+                assert(split.size == 3)
+                assert(split.size == 3, "split should have 3 parts")
                 OS.println("ok")
             }
             "#,
@@ -8106,19 +8194,39 @@ $name
         let program = lower_inline(
             r#"
             def main() Unit {
-                split = "1234, BUY, 10, NEW".split("\s*,\s*")
-                assert(split.size() == 4)
+                split Vector[Str] = "  1234, BUY, 10, NEW  ".trim().split("\s*,\s*")
+                split.add("DONE")
+                assert(split.size == 5)
                 OS.println(split[0])
                 OS.println(split[1])
                 OS.println(split[2])
                 OS.println(split[3])
+                OS.println(split[4])
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "1234\nBUY\n10\nNEW\n");
+        assert_eq!(run.output, "1234\nBUY\n10\nNEW\nDONE\n");
+    }
+
+    #[test]
+    fn runs_string_empty_checks() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                OS.println("".isEmpty)
+                OS.println("lume".nonEmpty)
+                OS.println("".nonEmpty)
+                OS.println("lume".isEmpty)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "true\ntrue\nfalse\nfalse\n");
     }
 
     #[test]

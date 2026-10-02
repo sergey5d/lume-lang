@@ -20,7 +20,7 @@ def returnOnMissing(values [Int?]) Str {
         value = maybe ?? return "missing"
         value * 2
     }
-    "complete " + doubled.size()
+    "complete " + doubled.size
 }
 
 def continueOnMissing(values [Int?]) [Int] =

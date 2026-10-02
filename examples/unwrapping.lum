@@ -26,8 +26,8 @@ def plusOneEither(value Either[Str, Int]) Either[Str, Int] {
 def twoEithers(value Either[Str, Int], value2 Either[Str, Str]) Either[Str, Int] {
     item = try value
     str = try value2
-    size = try value2.map((s Str) => s.size())
-    return Right(item + str.size() / 2 + size)
+    size = try value2.map((s Str) => s.size)
+    return Right(item + str.size / 2 + size)
 }
 
 def main() {
@@ -35,7 +35,7 @@ def main() {
     optionNone = plusOneOption(None)
 
     println("option some ${optionSome.getOr(0)}")
-    println("option none ${optionNone.isEmpty()}")
+    println("option none ${optionNone.isEmpty}")
 
     resultOk = plusOneResult(Ok(6))
     resultErr = plusOneResult(Err("bad"))

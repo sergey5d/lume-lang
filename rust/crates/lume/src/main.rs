@@ -265,20 +265,23 @@ fn exit_with_path_diagnostics(diagnostics: &[LocatedDiagnostic]) -> ExitCode {
 }
 
 fn print_source_diagnostics(file: &SourceFile, diagnostics: &[Diagnostic]) {
-    for diagnostic in diagnostics {
-        print_diagnostic(&file.name, Some(&file.text), diagnostic);
+    let rendered = diagnostics
+        .iter()
+        .map(|diagnostic| render_diagnostic(&file.name, Some(&file.text), diagnostic))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if !rendered.is_empty() {
+        eprintln!("{rendered}");
     }
 }
 
 fn print_path_diagnostics(diagnostics: &[LocatedDiagnostic]) {
-    for located in diagnostics {
-        eprintln!(
-            "{}",
-            render_path_diagnostic(Path::new(&located.path), &located.diagnostic)
-        );
+    let rendered = diagnostics
+        .iter()
+        .map(|located| render_path_diagnostic(Path::new(&located.path), &located.diagnostic))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if !rendered.is_empty() {
+        eprintln!("{rendered}");
     }
-}
-
-fn print_diagnostic(path: &str, source: Option<&str>, diagnostic: &Diagnostic) {
-    eprintln!("{}", render_diagnostic(path, source, diagnostic));
 }

@@ -61,7 +61,7 @@ def main() Int {
         println("combo " + combo)
     }
 
-    println("combo size " + combos.size())
+    println("combo size " + combos.size)
 
     pairs [(Int, Int)] = [(1, 2), (3, 4)]
     for let (left, right) <- pairs {

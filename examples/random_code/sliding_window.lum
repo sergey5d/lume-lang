@@ -29,7 +29,7 @@ class SlidingWindowLimiter {
         # Keep only requests whose timestamp still belongs to the active window.
         windowStart = now - this.windowSize
 
-        while !this.accepted.isEmpty() {
+        while !this.accepted.isEmpty {
             request = this.accepted.at(0) !
             if request.time <= windowStart {
                 this.accepted.removeFirst()

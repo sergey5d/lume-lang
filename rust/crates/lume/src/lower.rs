@@ -555,6 +555,7 @@ impl<'a> Lowerer<'a> {
             Some((String::from("this"), ir::Type::named(owner_name))),
             method.span,
         );
+        self.program.functions[id.0].getter = method.getter;
         let this_local = self.program.functions[id.0].locals[0].id;
         (id, this_local)
     }
@@ -1522,6 +1523,9 @@ impl<'a> FunctionLowerer<'a> {
                 ) else {
                     unreachable!("anonymous interface methods lower to closures")
                 };
+                if let Some(function) = self.program.function_mut(function) {
+                    function.getter = method.getter;
+                }
                 ir::AnonymousInterfaceMethod {
                     name: method.name.clone(),
                     function,
@@ -1616,6 +1620,7 @@ impl<'a> FunctionLowerer<'a> {
             );
             function.annotations = lower_annotations(&method.annotations);
             function.visibility = method.visibility;
+            function.getter = method.getter;
             function.type_params = method
                 .type_params
                 .iter()
@@ -4235,6 +4240,36 @@ impl<'a> FunctionLowerer<'a> {
                     if let Some(place) = self.lookup_implicit_field_place(name) {
                         return ir::Operand::Copy(Box::new(place));
                     }
+                    if let Some((getter, subst)) = self
+                        .lookup_scoped_type("this")
+                        .or_else(|| {
+                            self.capture_sources
+                                .get("this")
+                                .map(|source| source.ty.clone())
+                        })
+                        .and_then(|this_ty| self.getter_function_for_type(&this_ty, name))
+                    {
+                        let return_ty = self
+                            .program
+                            .function(getter)
+                            .map(|function| substitute_ir_type(&function.return_ty, &subst))
+                            .unwrap_or(ir::Type::Unknown);
+                        let receiver = self
+                            .lookup_scoped_or_captured_value("this")
+                            .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
+                        return self.emit_temp_from_rvalue(
+                            ir::RValue::Call {
+                                callee: ir::Callee::Method {
+                                    receiver,
+                                    method: name.clone(),
+                                },
+                                args: Vec::new(),
+                                structural: false,
+                            },
+                            return_ty,
+                            Some(*span),
+                        );
+                    }
                     if let Some(place) = self.lookup_global_place(name) {
                         return ir::Operand::Copy(Box::new(place));
                     }
@@ -4679,6 +4714,7 @@ impl<'a> FunctionLowerer<'a> {
                 .lookup_override_type(name, overrides)
                 .or_else(|| self.lookup_scoped_type(name))
                 .or_else(|| self.lookup_implicit_field_type(name))
+                .or_else(|| self.lookup_implicit_getter_type(name))
                 .or_else(|| self.lookup_global_type(name))
                 .or_else(|| self.lookup_function_type(name))
                 .or_else(|| self.lookup_bare_enum_case_type(name))
@@ -4910,7 +4946,7 @@ impl<'a> FunctionLowerer<'a> {
         if let Some(fields) = self.anonymous_shape_alias_fields(callee) {
             return ir::Type::Record(fields);
         }
-        if let Some(ty) = self.infer_constructor_call_type(callee) {
+        if let Some(ty) = self.infer_constructor_call_type(callee, &normalized_args, overrides) {
             return ty;
         }
         if let Some(ty) = self.infer_member_call_type(callee, &normalized_args, overrides) {
@@ -5120,12 +5156,98 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn infer_constructor_call_type(&self, callee: &Expr) -> Option<ir::Type> {
+    fn infer_constructor_call_type(
+        &self,
+        callee: &Expr,
+        args: &[core::CallArg],
+        overrides: &[(String, ir::Type)],
+    ) -> Option<ir::Type> {
+        let (callee, explicit_type_args) = self.split_generic_call_callee(callee);
         let path = expr_path(callee)?;
-        if path.len() == 1 && declared_type_exists(self.program, &path[0]) {
+        if path.len() == 1
+            && (declared_type_exists(self.program, &path[0])
+                || runtime_collection_constructor_name(&path[0]))
+        {
+            let name = &path[0];
+            let type_params = self
+                .program
+                .types
+                .iter()
+                .find(|ty| ty.name == *name)
+                .map(|ty| ty.type_params.clone())
+                .unwrap_or_else(|| {
+                    if name == "Map" {
+                        vec!["K".to_string(), "V".to_string()]
+                    } else {
+                        vec!["T".to_string()]
+                    }
+                });
+            let mut subst = type_params
+                .iter()
+                .cloned()
+                .zip(explicit_type_args)
+                .collect::<HashMap<_, _>>();
+
+            if subst.is_empty()
+                && matches!(name.as_str(), "Vector" | "LinkedList" | "Array" | "Set")
+            {
+                let mut item = ir::Type::Unknown;
+                for arg in args {
+                    item = join_ir_types(
+                        item,
+                        self.infer_expr_type_with_overrides(&arg.value, overrides),
+                    );
+                }
+                if !matches!(item, ir::Type::Unknown)
+                    && let Some(param) = type_params.first()
+                {
+                    subst.insert(param.clone(), item);
+                }
+            } else if subst.is_empty() && name == "Map" {
+                let mut key = ir::Type::Unknown;
+                let mut value = ir::Type::Unknown;
+                for arg in args {
+                    if let ir::Type::Tuple(items) =
+                        self.infer_expr_type_with_overrides(&arg.value, overrides)
+                        && items.len() == 2
+                    {
+                        key = join_ir_types(key, items[0].clone());
+                        value = join_ir_types(value, items[1].clone());
+                    }
+                }
+                if let Some(param) = type_params.first()
+                    && !matches!(key, ir::Type::Unknown)
+                {
+                    subst.insert(param.clone(), key);
+                }
+                if let Some(param) = type_params.get(1)
+                    && !matches!(value, ir::Type::Unknown)
+                {
+                    subst.insert(param.clone(), value);
+                }
+            } else if subst.is_empty()
+                && let Some(ty) = self.program.types.iter().find(|ty| ty.name == *name)
+            {
+                if let Some(constructor) = ty.methods.iter().find_map(|method_id| {
+                    let function = self.program.function(*method_id)?;
+                    (function.name == "new" && method_call_arity_score(function, args).is_some())
+                        .then_some(*method_id)
+                }) {
+                    self.infer_function_call_subst(constructor, args, &mut subst);
+                } else {
+                    for (field, arg) in ty.fields.iter().zip(args) {
+                        let actual = self.infer_expr_type_with_overrides(&arg.value, overrides);
+                        infer_ir_type_subst(&field.ty, &actual, &mut subst);
+                    }
+                }
+            }
+
             return Some(ir::Type::Named {
-                name: path[0].clone(),
-                args: Vec::new(),
+                name: name.clone(),
+                args: type_params
+                    .iter()
+                    .map(|param| subst.get(param).cloned().unwrap_or(ir::Type::Unknown))
+                    .collect(),
             });
         }
         self.lookup_enum_case_type_by_path(&path)
@@ -5374,6 +5496,92 @@ impl<'a> FunctionLowerer<'a> {
             .map(|field| substitute_ir_type(&field.ty, &subst))
     }
 
+    fn lookup_implicit_getter_type(&self, name: &str) -> Option<ir::Type> {
+        let this_ty = if let Some(this_local) = self.this_local {
+            self.function().locals.get(this_local.0)?.ty.clone()
+        } else {
+            self.capture_sources.get("this")?.ty.clone()
+        };
+        let (function, subst) = self.getter_function_for_type(&this_ty, name)?;
+        let function = self.program.function(function)?;
+        Some(substitute_ir_type(&function.return_ty, &subst))
+    }
+
+    fn getter_function_for_type(
+        &self,
+        receiver: &ir::Type,
+        name: &str,
+    ) -> Option<(ir::FunctionId, HashMap<String, ir::Type>)> {
+        match receiver {
+            ir::Type::Named {
+                name: type_name,
+                args,
+            } => {
+                if let Some((owner_name, _)) = enum_case_view_parts(type_name) {
+                    return self.getter_function_for_type(
+                        &ir::Type::Named {
+                            name: owner_name.to_string(),
+                            args: args.clone(),
+                        },
+                        name,
+                    );
+                }
+                let ty = self.program.types.iter().find(|ty| ty.name == *type_name)?;
+                if ty.fields.iter().any(|field| field.name == name) {
+                    return None;
+                }
+                let function = self.find_method_function(ty, name)?;
+                self.program
+                    .function(function)
+                    .is_some_and(|function| function.getter)
+                    .then(|| (function, ir_type_subst(ty, args)))
+            }
+            ir::Type::TypeParam(param) => self
+                .generic_bounds_for_type_param(param)
+                .into_iter()
+                .find_map(|bound| self.getter_function_for_type(&bound, name)),
+            _ => None,
+        }
+    }
+
+    fn is_getter_member_for_type(&self, receiver: &ir::Type, name: &str) -> bool {
+        self.getter_function_for_type(receiver, name).is_some()
+            || builtin_getter_type(receiver, name).is_some()
+            || (is_known_getter_name(name) && !self.type_has_data_field(receiver, name))
+    }
+
+    fn type_has_data_field(&self, receiver: &ir::Type, name: &str) -> bool {
+        match receiver {
+            ir::Type::Named {
+                name: type_name, ..
+            } => {
+                if let Some((owner_name, case_name)) = enum_case_view_parts(type_name) {
+                    return self
+                        .program
+                        .types
+                        .iter()
+                        .find(|ty| ty.name == owner_name)
+                        .is_some_and(|ty| {
+                            ty.enum_cases
+                                .iter()
+                                .find(|case| case.name == case_name)
+                                .is_some_and(|case| {
+                                    case.fields.iter().any(|field| field.name == name)
+                                })
+                                || ty.fields.iter().any(|field| field.name == name)
+                        });
+                }
+                self.program
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == *type_name)
+                    .is_some_and(|ty| ty.fields.iter().any(|field| field.name == name))
+            }
+            ir::Type::Record(fields) => fields.iter().any(|field| field.name == name),
+            _ => false,
+        }
+    }
+
     fn infer_member_type(&self, receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         match receiver {
             ir::Type::Named {
@@ -5419,6 +5627,16 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 if let Some(function) = self.find_method_function(ty, name) {
                     let method_ty = self.function_type_with_subst(function, &subst)?;
+                    if self
+                        .program
+                        .function(function)
+                        .is_some_and(|function| function.getter)
+                    {
+                        let ir::Type::Function { ret, .. } = method_ty else {
+                            return None;
+                        };
+                        return Some(*ret);
+                    }
                     if function_type_returns_unknown(&method_ty) {
                         if let Some(fallback) = builtin_member_type(receiver, name) {
                             return Some(fallback);
@@ -5464,7 +5682,19 @@ impl<'a> FunctionLowerer<'a> {
         })?;
         let subst = ir_type_subst(ty, args);
         let function = self.find_method_function(ty, name)?;
-        self.function_type_with_subst(function, &subst)
+        let method_ty = self.function_type_with_subst(function, &subst)?;
+        if self
+            .program
+            .function(function)
+            .is_some_and(|function| function.getter)
+        {
+            let ir::Type::Function { ret, .. } = method_ty else {
+                return None;
+            };
+            Some(*ret)
+        } else {
+            Some(method_ty)
+        }
     }
 
     fn is_callable_reference_expr(&self, expr: &Expr) -> bool {
@@ -5511,8 +5741,15 @@ impl<'a> FunctionLowerer<'a> {
             return None;
         }
         let subst = ir_type_subst(ty, &args);
-        self.find_method_function(ty, name)
-            .and_then(|function| self.function_type_with_subst(function, &subst))
+        let function = self.find_method_function(ty, name)?;
+        if self
+            .program
+            .function(function)
+            .is_some_and(|function| function.getter)
+        {
+            return None;
+        }
+        self.function_type_with_subst(function, &subst)
     }
 
     fn callable_reference_receiver_type_def(
@@ -5641,6 +5878,14 @@ impl<'a> FunctionLowerer<'a> {
                     let ir::Type::Function { ret, .. } = mapped else {
                         return Some(ir::Type::Unknown);
                     };
+                    if type_name == "Vector" {
+                        let mapped_item =
+                            known_iterable_ir_item_type(&ret).unwrap_or(ir::Type::Unknown);
+                        return Some(ir::Type::Named {
+                            name: "Vector".to_string(),
+                            args: vec![mapped_item],
+                        });
+                    }
                     return Some(*ret);
                 }
                 _ => {}
@@ -6110,7 +6355,12 @@ impl<'a> FunctionLowerer<'a> {
                     && (self
                         .reified_call_target(candidate_callee, &candidate_normalized_args)
                         .is_some()
-                        || self.is_builtin_reified_metadata_call(candidate_callee));
+                        || self.is_builtin_reified_metadata_call(candidate_callee)
+                        || expr_path(candidate_callee).is_some_and(|path| {
+                            path.len() == 1
+                                && (declared_type_exists(self.program, &path[0])
+                                    || runtime_collection_constructor_name(&path[0]))
+                        }));
                 let (call_callee, explicit_type_args, normalized_args) = if use_generic_callee {
                     (
                         candidate_callee,
@@ -6185,10 +6435,24 @@ impl<'a> FunctionLowerer<'a> {
                 };
                 self.lower_rvalue_with_expected(&call, expected)
             }
-            Expr::Member { receiver, name, .. } => Some(ir::RValue::Field {
-                base: self.lower_expr(receiver),
-                name: name.clone(),
-            }),
+            Expr::Member { receiver, name, .. } => {
+                let receiver_ty = self.infer_expr_type(receiver);
+                if self.is_getter_member_for_type(&receiver_ty, name) {
+                    Some(ir::RValue::Call {
+                        callee: ir::Callee::Method {
+                            receiver: self.lower_expr(receiver),
+                            method: name.clone(),
+                        },
+                        args: Vec::new(),
+                        structural: false,
+                    })
+                } else {
+                    Some(ir::RValue::Field {
+                        base: self.lower_expr(receiver),
+                        name: name.clone(),
+                    })
+                }
+            }
             Expr::Index {
                 receiver, index, ..
             } => Some(ir::RValue::Index {
@@ -6479,7 +6743,13 @@ impl<'a> FunctionLowerer<'a> {
                     .copied()
                     .or_else(|| self.current_owner_method(name, ordered_args))
                 {
-                    return self.function_expected_arg_specs(id, &HashMap::new());
+                    let mut subst = HashMap::new();
+                    if let Some(expected) = expected
+                        && let Some(function) = self.program.function(id)
+                    {
+                        infer_ir_type_subst(&function.return_ty, expected, &mut subst);
+                    }
+                    return self.function_expected_arg_specs(id, &subst);
                 }
             }
             Expr::Member { receiver, name, .. } => {
@@ -6515,9 +6785,14 @@ impl<'a> FunctionLowerer<'a> {
                         }
                     }
                 }
-                if let Some((id, subst)) =
+                if let Some((id, mut subst)) =
                     self.method_expected_arg_target(&receiver_ty, name, ordered_args)
                 {
+                    if let Some(expected) = expected
+                        && let Some(function) = self.program.function(id)
+                    {
+                        infer_ir_type_subst(&function.return_ty, expected, &mut subst);
+                    }
                     return self.function_expected_arg_specs(id, &subst);
                 }
                 if let Some(specs) = builtin_member_expected_arg_specs(&receiver_ty, name, expected)
@@ -6698,18 +6973,38 @@ impl<'a> FunctionLowerer<'a> {
         values: &[Expr],
         expected: &ir::Type,
     ) -> Option<ir::RValue> {
-        if !values.is_empty() || fields.iter().any(|field| field.name.is_none()) {
+        if !values.is_empty() {
             return None;
         }
         let expected_fields = self.named_construct_fields(expected)?;
-        if fields.iter().any(|field| {
-            field
-                .name
-                .as_ref()
-                .is_some_and(|name| !expected_fields.iter().any(|expected| expected.0 == *name))
-        }) {
+        if fields
+            .iter()
+            .filter(|field| field.name.is_some())
+            .any(|field| {
+                field
+                    .name
+                    .as_ref()
+                    .is_some_and(|name| !expected_fields.iter().any(|expected| expected.0 == *name))
+            })
+        {
             return None;
         }
+
+        let spread_sources = fields
+            .iter()
+            .filter_map(|field| {
+                let Expr::Spread {
+                    value,
+                    override_existing,
+                    ..
+                } = &field.value
+                else {
+                    return None;
+                };
+                let source_fields = self.shape_equality_fields(&self.infer_expr_type(value))?;
+                Some((source_fields, self.lower_expr(value), *override_existing))
+            })
+            .collect::<Vec<_>>();
 
         let mut lowered_fields = Vec::new();
         for (name, ty, has_initializer, initializer) in expected_fields {
@@ -6720,6 +7015,15 @@ impl<'a> FunctionLowerer<'a> {
                     .is_some_and(|field_name| field_name == &name)
             }) {
                 self.lower_expr_with_expected(&field.value, Some(&ty))
+            } else if let Some((_, source, _)) = spread_sources
+                .iter()
+                .rev()
+                .find(|(source_fields, _, _)| source_fields.iter().any(|field| field.name == name))
+            {
+                ir::Operand::Copy(Box::new(ir::Place::Field {
+                    base: Box::new(source.clone()),
+                    name: name.clone(),
+                }))
             } else if has_initializer {
                 ir::Operand::Const(initializer.unwrap_or_else(|| default_constant_for_type(&ty)))
             } else {
@@ -8253,6 +8557,7 @@ fn known_iterable_ir_item_type(ty: &ir::Type) -> Option<ir::Type> {
                 || name == "Iterator"
                 || name == "Array"
                 || name == "LinkedList"
+                || name == "Option"
                 || name == "Set")
                 && args.len() == 1 =>
         {
@@ -8497,6 +8802,9 @@ fn result_db_error_type(value_ty: ir::Type) -> ir::Type {
 
 fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
     if let Some(ty) = universal_member_type(name) {
+        return Some(ty);
+    }
+    if let Some(ty) = builtin_getter_type(receiver, name) {
         return Some(ty);
     }
 
@@ -8914,8 +9222,87 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                 args[1].clone(),
             ]))),
         }),
+        ("Map", "keys") if args.len() == 2 => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::list(args[0].clone())),
+        }),
         _ => None,
     }
+}
+
+fn builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
+    if matches!(receiver, ir::Type::Str) {
+        return match name {
+            "size" => Some(ir::Type::Int),
+            "isEmpty" | "nonEmpty" => Some(ir::Type::Bool),
+            _ => None,
+        };
+    }
+
+    let ir::Type::Named {
+        name: type_name,
+        args,
+    } = receiver
+    else {
+        return None;
+    };
+    let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
+
+    match (type_name.as_str(), name) {
+        ("Str", "size") => Some(ir::Type::Int),
+        ("Str", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
+        ("Option", "isSet" | "isDefined" | "isSuccess" | "isEmpty")
+        | ("Result", "isOk" | "isSuccess" | "isErr")
+        | ("Either", "isLeft" | "isRight" | "isSuccess") => Some(ir::Type::Bool),
+        ("Vector" | "LinkedList" | "Array", "head" | "first" | "last") => {
+            Some(ir::Type::option(item))
+        }
+        ("Vector" | "LinkedList" | "Array" | "Set" | "Map", "size") => Some(ir::Type::Int),
+        ("Vector" | "LinkedList", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
+        ("Type", "name" | "qualifiedName")
+        | (
+            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
+            | "AnnotationType",
+            "name" | "qualifiedName",
+        ) => Some(ir::Type::option(ir::Type::Str)),
+        ("Type", "kind")
+        | (
+            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
+            | "AnnotationType",
+            "kind",
+        ) => Some(ir::Type::named("TypeKind")),
+        ("AnnotationValue", "name") | ("Field" | "Method" | "Param" | "EnumCase", "name") => {
+            Some(ir::Type::Str)
+        }
+        ("ClassType" | "ShapeType" | "ObjectType" | "AnnotationType", "fields")
+        | ("EnumCase", "fields") => Some(ir::Type::list(ir::Type::named("Field"))),
+        ("ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType", "methods") => {
+            Some(ir::Type::list(ir::Type::named("Method")))
+        }
+        ("Method", "params") => Some(ir::Type::list(ir::Type::named("Param"))),
+        ("EnumType", "cases") => Some(ir::Type::list(ir::Type::named("EnumCase"))),
+        ("Field", "fieldType") | ("Method", "returnType") | ("Param", "paramType") => {
+            Some(ir_exact_runtime_type(ir::Type::Unknown))
+        }
+        ("Field", "isPrivate") => Some(ir::Type::Bool),
+        _ => None,
+    }
+}
+
+fn is_known_getter_name(name: &str) -> bool {
+    matches!(
+        name,
+        "hasNext"
+            | "isSet"
+            | "isDefined"
+            | "isSuccess"
+            | "isEmpty"
+            | "nonEmpty"
+            | "isOk"
+            | "isErr"
+            | "isLeft"
+            | "isRight"
+    )
 }
 
 fn is_annotated_metadata_type(ty: &ir::Type) -> bool {

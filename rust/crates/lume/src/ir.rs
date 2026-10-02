@@ -235,6 +235,9 @@ pub struct Function {
     pub visibility: Visibility,
     pub kind: FunctionKind,
     pub name: String,
+    /// Source-level getter methods remain ordinary zero-argument functions in
+    /// the runtime IR, but member reads lower to calls when this flag is set.
+    pub getter: bool,
     pub type_params: Vec<String>,
     pub reified_type_params: Vec<String>,
     pub generic_conditions: Vec<GenericCondition>,
@@ -258,6 +261,7 @@ impl Function {
             visibility: Visibility::Default,
             kind,
             name: name.into(),
+            getter: false,
             type_params: Vec::new(),
             reified_type_params: Vec::new(),
             generic_conditions: Vec::new(),

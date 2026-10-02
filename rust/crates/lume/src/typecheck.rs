@@ -261,7 +261,11 @@ impl Ty {
                     .map(Ty::describe)
                     .collect::<Vec<_>>()
                     .join(", "),
-                ret.describe()
+                if matches!(ret.as_ref(), Ty::Union(_)) {
+                    format!("({})", ret.describe())
+                } else {
+                    ret.describe()
+                }
             ),
             Ty::TypeParam(name) => name.clone(),
         }
@@ -323,6 +327,7 @@ struct FunctionSig {
     ret: Ty,
     visibility: Visibility,
     has_body: bool,
+    getter: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -369,6 +374,7 @@ fn hash_method_sig() -> FunctionSig {
         ret: Ty::int(),
         visibility: Visibility::Default,
         has_body: true,
+        getter: false,
     }
 }
 
@@ -382,6 +388,7 @@ fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
             ret: Ty::str(),
             visibility: Visibility::Default,
             has_body: true,
+            getter: false,
         },
         "equals" => FunctionSig {
             type_params: Vec::new(),
@@ -397,6 +404,7 @@ fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
             ret: Ty::bool(),
             visibility: Visibility::Default,
             has_body: true,
+            getter: false,
         },
         "sameValue" => FunctionSig {
             type_params: Vec::new(),
@@ -412,6 +420,7 @@ fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
             ret: Ty::bool(),
             visibility: Visibility::Default,
             has_body: true,
+            getter: false,
         },
         _ => return None,
     };
@@ -1195,6 +1204,7 @@ struct Checker<'a> {
     current_return: Ty,
     current_owner: Option<TypeSig>,
     current_method: Option<String>,
+    current_getter: bool,
     current_extension_target: Option<String>,
     callable_depth: usize,
     loop_depth: usize,
@@ -1216,6 +1226,7 @@ impl<'a> Checker<'a> {
             current_return: Ty::Unknown,
             current_owner: None,
             current_method: None,
+            current_getter: false,
             current_extension_target: None,
             callable_depth: 0,
             loop_depth: 0,
@@ -1865,9 +1876,20 @@ impl<'a> Checker<'a> {
         let previous_return = self.current_return.clone();
         let previous_owner = self.current_owner.clone();
         let previous_method = self.current_method.clone();
+        let previous_getter = self.current_getter;
         let previous_defer_depth = self.defer_depth;
         let previous_callable_depth = self.callable_depth;
         self.push_ast_type_params(&method.type_params, &method.type_conditions);
+        if method.getter && (!method.type_params.is_empty() || !method.type_conditions.is_empty()) {
+            self.add_error(
+                "generic_getter",
+                format!(
+                    "getter '{}' cannot declare type parameters or generic conditions",
+                    method.name
+                ),
+                method.span,
+            );
+        }
         self.validate_generic_clause(&method.type_params, &method.type_conditions);
         if let Some(return_type) = &method.return_type {
             self.validate_type_ref_generic_applications(return_type);
@@ -1887,6 +1909,7 @@ impl<'a> Checker<'a> {
         self.callable_depth += 1;
         self.current_owner = Some(owner.clone());
         self.current_method = Some(method.name.clone());
+        self.current_getter = method.getter;
         self.push_scope();
         self.define_local("this", self.owner_self_ty(owner), false);
         self.check_param_list_rules(&method.params, method.name == "new");
@@ -1927,6 +1950,7 @@ impl<'a> Checker<'a> {
         self.current_return = previous_return;
         self.current_owner = previous_owner;
         self.current_method = previous_method;
+        self.current_getter = previous_getter;
         self.defer_depth = previous_defer_depth;
         self.callable_depth = previous_callable_depth;
     }
@@ -3578,13 +3602,13 @@ impl<'a> Checker<'a> {
         allow_lifted: bool,
         span: crate::source::Span,
     ) -> (Ty, Option<ForYieldFamily>) {
-        if let Some(item_ty) = self.known_iterable_item_type(source_ty) {
-            return (item_ty, Some(ForYieldFamily::Iterable));
-        }
         if allow_lifted {
             if let Some((family, item_ty)) = self.unwrap_known_lifted_type(source_ty) {
                 return (item_ty, Some(family));
             }
+        }
+        if let Some(item_ty) = self.known_iterable_item_type(source_ty) {
+            return (item_ty, Some(ForYieldFamily::Iterable));
         }
         if matches!(source_ty, Ty::Unknown) {
             return (Ty::Unknown, Some(ForYieldFamily::Unknown));
@@ -3884,6 +3908,21 @@ impl<'a> Checker<'a> {
     }
 
     fn check_assignment(&mut self, assignment: &AssignmentStmt) {
+        if self.current_getter {
+            for target in &assignment.targets {
+                if let Some(field_name) = self.getter_mutated_field(target) {
+                    self.add_error(
+                        "getter_mutation",
+                        format!(
+                            "getter '{}' cannot mutate field '{}'; getters may only read class or shape state",
+                            self.current_method.as_deref().unwrap_or("<getter>"),
+                            field_name
+                        ),
+                        target.span(),
+                    );
+                }
+            }
+        }
         let expected_types = assignment
             .targets
             .iter()
@@ -3927,6 +3966,24 @@ impl<'a> Checker<'a> {
                     target.span(),
                 );
             }
+        }
+    }
+
+    fn getter_mutated_field(&self, target: &Expr) -> Option<String> {
+        match target {
+            Expr::Identifier { name, .. }
+                if self.lookup_scoped_value(name).is_none()
+                    && self.lookup_implicit_field(name).is_some() =>
+            {
+                Some(name.clone())
+            }
+            Expr::Member { receiver, name, .. } => {
+                let receiver_ty = self.probe_expr_type(receiver);
+                self.field_sig_for_member(&receiver_ty, name)
+                    .map(|_| name.clone())
+            }
+            Expr::Index { receiver, .. } => self.getter_mutated_field(receiver),
+            _ => None,
         }
     }
 
@@ -4160,6 +4217,7 @@ impl<'a> Checker<'a> {
                 .lookup_scoped_value(name)
                 .map(|value| value.ty)
                 .or_else(|| self.lookup_implicit_field(name).map(|field| field.ty))
+                .or_else(|| self.lookup_implicit_getter(name).map(|getter| getter.ret))
                 .or_else(|| self.lookup_global_value(name).map(|value| value.ty))
                 .or_else(|| self.lookup_function_type(name))
                 .or_else(|| self.lookup_bare_enum_case_value_type(name, expected))
@@ -4190,6 +4248,12 @@ impl<'a> Checker<'a> {
                         }
                         Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
                             Ty::Named(name.clone(), args.iter().map(materialize_type).collect())
+                        }
+                        Ty::Named(name, args) if name == "Iterable" && args.len() == 1 => {
+                            Ty::Named(
+                                "Vector".to_string(),
+                                args.iter().map(materialize_type).collect(),
+                            )
                         }
                         Ty::Unknown => {
                             self.add_error(
@@ -4994,7 +5058,9 @@ impl<'a> Checker<'a> {
         if self.is_builtin_assert_call(callee) {
             return self.check_builtin_assert_call(&normalized_args, span);
         }
-        if let Some(ty) = self.check_builtin_static_method_call(callee, &normalized_args, span) {
+        if let Some(ty) =
+            self.check_builtin_static_method_call(callee, &normalized_args, span, expected)
+        {
             return ty;
         }
         if let Some(ty) = self.check_builtin_static_factory_call(callee, &normalized_args, span) {
@@ -5022,6 +5088,38 @@ impl<'a> Checker<'a> {
                 }
                 return Ty::Unknown;
             }
+            if let Some(getter) = self.member_getter_sig(&receiver_ty, name) {
+                for arg in &normalized_args {
+                    self.check_expr(&arg.value);
+                }
+                self.add_error(
+                    "getter_call_syntax",
+                    format!(
+                        "getter '{}' is accessed without parentheses; write '{}.{}'",
+                        name,
+                        self.describe_member_path(receiver)
+                            .unwrap_or_else(|| "<value>".to_string()),
+                        name
+                    ),
+                    span,
+                );
+                return getter.ret;
+            }
+        } else if let Expr::Identifier { name, .. } = callee
+            && let Some(getter) = self.lookup_implicit_getter(name)
+        {
+            for arg in &normalized_args {
+                self.check_expr(&arg.value);
+            }
+            self.add_error(
+                "getter_call_syntax",
+                format!(
+                    "getter '{}' is accessed without parentheses; write '{}'",
+                    name, name
+                ),
+                span,
+            );
+            return getter.ret;
         }
         if let Some(ty) = self.try_check_constructor_call(
             callee,
@@ -5035,7 +5133,13 @@ impl<'a> Checker<'a> {
         if let Some(selection) =
             self.callable_signature_for_args(callee, &normalized_args, uses_brace_syntax, span)
         {
-            return self.check_callable_selection_call(&selection, callee, &normalized_args, span);
+            return self.check_callable_selection_call(
+                &selection,
+                callee,
+                &normalized_args,
+                span,
+                expected,
+            );
         }
         if let Expr::Index { span, .. } = callee {
             self.add_error(
@@ -5372,6 +5476,8 @@ impl<'a> Checker<'a> {
             uses_brace_syntax,
             structural_record_arg,
             parenthesized_record_arg,
+            expected,
+            &[],
         );
         materialize_type(expected)
     }
@@ -5440,6 +5546,12 @@ impl<'a> Checker<'a> {
         sig.methods
             .get(name)
             .is_some_and(|methods| methods.iter().any(|method| method.has_body))
+            || self
+                .module
+                .extensions
+                .get(&sig.name)
+                .and_then(|methods| methods.get(name))
+                .is_some_and(|methods| methods.iter().any(|method| method.has_body))
     }
 
     fn reject_parenthesized_constructor_fields(
@@ -5516,6 +5628,7 @@ impl<'a> Checker<'a> {
         callee: &Expr,
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
+        expected: &Ty,
     ) -> Option<Ty> {
         let Expr::Member { receiver, name, .. } = callee else {
             return None;
@@ -5601,11 +5714,18 @@ impl<'a> Checker<'a> {
                         format!("Array.generate expects Int length, got '{}'", ty.describe()),
                     );
                 }
+                let expected_item = match expected {
+                    Ty::Named(name, type_args) if name == "Array" && type_args.len() == 1 => {
+                        type_args[0].clone()
+                    }
+                    _ => Ty::Unknown,
+                };
                 let item_ty = args
                     .get(1)
                     .map(|arg| {
-                        let expected = Ty::Function(vec![Ty::int()], Box::new(Ty::Unknown));
-                        let generator_ty = self.check_expr_against(&arg.value, &expected);
+                        let generator =
+                            Ty::Function(vec![Ty::int()], Box::new(expected_item.clone()));
+                        let generator_ty = self.check_expr_against(&arg.value, &generator);
                         match generator_ty {
                             Ty::Function(params, ret) if params.len() == 1 => {
                                 if !matches!(params[0], Ty::Unknown)
@@ -5845,12 +5965,16 @@ impl<'a> Checker<'a> {
         callee: &Expr,
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
+        expected: &Ty,
     ) -> Ty {
-        let subst = self.explicit_type_arg_subst(
+        let mut subst = self.explicit_type_arg_subst(
             &selection.sig.type_params,
             &selection.explicit_type_args,
             span,
         );
+        if !matches!(expected, Ty::Unknown) {
+            infer_type_subst(&selection.sig.ret, expected, &mut subst);
+        }
         let (ret, subst, argument_shape_valid) = self.check_signature_call_with_subst(
             &selection.sig.params,
             &selection.sig.ret,
@@ -6097,6 +6221,24 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
         expected: &Ty,
     ) -> Option<Ty> {
+        let original_callee = callee;
+        let (callee, explicit_type_args) = self.split_generic_call_callee(callee);
+        if matches!(original_callee, Expr::Index { .. })
+            && explicit_type_args.is_empty()
+            && matches!(callee, Expr::Index { receiver, .. }
+                if matches!(receiver.as_ref(), Expr::Identifier { name, .. }
+                    if self.lookup_any_type(name).is_some()))
+        {
+            for arg in args {
+                self.check_expr(call_arg_value_expr(arg));
+            }
+            self.add_error(
+                "invalid_constructor_type_arguments",
+                "generic construction requires all concrete type arguments or none; omit '[...]' to infer them",
+                original_callee.span(),
+            );
+            return Some(Ty::Unknown);
+        }
         let structural_record_arg = call_uses_structural_record_arg(args, uses_brace_syntax);
         let parenthesized_record_arg =
             constructor_uses_parenthesized_record_arg(self, args, uses_brace_syntax);
@@ -6113,6 +6255,8 @@ impl<'a> Checker<'a> {
                                 uses_brace_syntax,
                                 structural_record_arg,
                                 parenthesized_record_arg,
+                                expected,
+                                &explicit_type_args,
                             )
                         });
                     }
@@ -6147,6 +6291,8 @@ impl<'a> Checker<'a> {
                         args,
                         span,
                         uses_brace_syntax,
+                        expected,
+                        &explicit_type_args,
                     ) {
                         return Some(ty);
                     }
@@ -6187,6 +6333,8 @@ impl<'a> Checker<'a> {
                         uses_brace_syntax,
                         structural_record_arg,
                         parenthesized_record_arg,
+                        expected,
+                        &explicit_type_args,
                     ));
                 }
                 if let Some(sig) = self.world.lookup_imported_type(self.module, name) {
@@ -6197,6 +6345,8 @@ impl<'a> Checker<'a> {
                         uses_brace_syntax,
                         structural_record_arg,
                         parenthesized_record_arg,
+                        expected,
+                        &explicit_type_args,
                     ));
                 }
                 if let Some(sig) = self.world.ambient.types.get(name).cloned() {
@@ -6207,6 +6357,8 @@ impl<'a> Checker<'a> {
                         uses_brace_syntax,
                         structural_record_arg,
                         parenthesized_record_arg,
+                        expected,
+                        &explicit_type_args,
                     ));
                 }
                 if let Some(sig) = self.lookup_any_object(name) {
@@ -6217,6 +6369,8 @@ impl<'a> Checker<'a> {
                         uses_brace_syntax,
                         structural_record_arg,
                         parenthesized_record_arg,
+                        expected,
+                        &explicit_type_args,
                     ));
                 }
                 None
@@ -6236,6 +6390,8 @@ impl<'a> Checker<'a> {
                             uses_brace_syntax,
                             structural_record_arg,
                             parenthesized_record_arg,
+                            expected,
+                            &explicit_type_args,
                         ));
                     }
                     if let Some(sig) = module_info.objects.get(&member).cloned() {
@@ -6246,6 +6402,8 @@ impl<'a> Checker<'a> {
                             uses_brace_syntax,
                             structural_record_arg,
                             parenthesized_record_arg,
+                            expected,
+                            &explicit_type_args,
                         ));
                     }
                 }
@@ -6308,20 +6466,46 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
         uses_brace_syntax: bool,
+        expected: &Ty,
+        explicit_type_args: &[Ty],
     ) -> Option<Ty> {
         match name {
-            "Vector" => {
+            "Vector" | "Set" => {
                 self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
-                let mut item = Ty::Unknown;
+                let mut type_args = self.constructor_type_argument_seed(
+                    name,
+                    1,
+                    explicit_type_args,
+                    expected,
+                    span,
+                );
+                let mut item = type_args.pop().unwrap_or(Ty::Unknown);
                 for arg in args {
-                    item = join_types(&item, &self.check_expr(&arg.value));
+                    let actual = if matches!(item, Ty::Unknown) {
+                        self.check_expr(&arg.value)
+                    } else {
+                        self.check_expr_against(&arg.value, &item)
+                    };
+                    if matches!(item, Ty::Unknown) {
+                        item = join_types(&item, &actual);
+                    }
+                }
+                if explicit_type_args.is_empty() {
+                    self.require_inferred_constructor_type_args(name, &[item.clone()], span);
                 }
                 Some(Ty::Named(name.to_string(), vec![item]))
             }
             "Map" => {
                 self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
-                let mut key = Ty::Unknown;
-                let mut value = Ty::Unknown;
+                let mut type_args = self.constructor_type_argument_seed(
+                    name,
+                    2,
+                    explicit_type_args,
+                    expected,
+                    span,
+                );
+                let mut value = type_args.pop().unwrap_or(Ty::Unknown);
+                let mut key = type_args.pop().unwrap_or(Ty::Unknown);
                 for arg in args {
                     if let Expr::Spread { value: spread, .. } = &arg.value {
                         match self.check_expr(spread) {
@@ -6345,8 +6529,38 @@ impl<'a> Checker<'a> {
                     }
                     match self.check_expr(&arg.value) {
                         Ty::Tuple(items) if items.len() == 2 => {
-                            key = join_types(&key, &items[0]);
-                            value = join_types(&value, &items[1]);
+                            if matches!(key, Ty::Unknown) {
+                                key = join_types(&key, &items[0]);
+                            } else {
+                                self.require_assignable(
+                                    &items[0],
+                                    &key,
+                                    arg.span,
+                                    "invalid_argument_type",
+                                    self.diagnostic_type_mismatch_message(
+                                        "map key",
+                                        &items[0],
+                                        "constructor type argument",
+                                        &key,
+                                    ),
+                                );
+                            }
+                            if matches!(value, Ty::Unknown) {
+                                value = join_types(&value, &items[1]);
+                            } else {
+                                self.require_assignable(
+                                    &items[1],
+                                    &value,
+                                    arg.span,
+                                    "invalid_argument_type",
+                                    self.diagnostic_type_mismatch_message(
+                                        "map value",
+                                        &items[1],
+                                        "constructor type argument",
+                                        &value,
+                                    ),
+                                );
+                            }
                         }
                         other => {
                             self.add_error(
@@ -6360,11 +6574,117 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                if explicit_type_args.is_empty() {
+                    self.require_inferred_constructor_type_args(
+                        name,
+                        &[key.clone(), value.clone()],
+                        span,
+                    );
+                }
                 self.require_hashable_map_key(&key, span);
                 Some(Ty::Named("Map".to_string(), vec![key, value]))
             }
             _ => None,
         }
+    }
+
+    fn constructor_type_argument_seed(
+        &mut self,
+        name: &str,
+        arity: usize,
+        explicit_type_args: &[Ty],
+        expected: &Ty,
+        span: crate::source::Span,
+    ) -> Vec<Ty> {
+        if !explicit_type_args.is_empty() {
+            if explicit_type_args.len() != arity {
+                self.add_error(
+                    "invalid_type_argument_count",
+                    format!(
+                        "generic type '{}' expects {} type arguments, got {}",
+                        name,
+                        arity,
+                        explicit_type_args.len()
+                    ),
+                    span,
+                );
+            }
+            if explicit_type_args
+                .iter()
+                .any(|ty| matches!(ty, Ty::Wildcard))
+            {
+                self.add_error(
+                    "invalid_constructor_type_arguments",
+                    "constructor type arguments must be concrete; omit them to request inference",
+                    span,
+                );
+            }
+            return (0..arity)
+                .map(|index| {
+                    explicit_type_args
+                        .get(index)
+                        .cloned()
+                        .unwrap_or(Ty::Unknown)
+                })
+                .collect();
+        }
+
+        if let Ty::Named(expected_name, expected_args) = expected
+            && expected_name == name
+            && expected_args.len() == arity
+        {
+            return expected_args
+                .iter()
+                .map(|ty| {
+                    if matches!(ty, Ty::Wildcard | Ty::Capture(_)) {
+                        Ty::Unknown
+                    } else {
+                        ty.clone()
+                    }
+                })
+                .collect();
+        }
+        vec![Ty::Unknown; arity]
+    }
+
+    fn require_inferred_constructor_type_args(
+        &mut self,
+        name: &str,
+        args: &[Ty],
+        span: crate::source::Span,
+    ) {
+        if args.iter().any(type_contains_unresolved_constructor_type) {
+            self.add_error(
+                "cannot_infer_constructor_type",
+                format!(
+                    "cannot infer type arguments for '{}'; add explicit type arguments or an expected type",
+                    name
+                ),
+                span,
+            );
+        }
+    }
+
+    fn constructor_type_argument_subst(
+        &mut self,
+        sig: &TypeSig,
+        explicit_type_args: &[Ty],
+        expected: &Ty,
+        span: crate::source::Span,
+    ) -> HashMap<String, Ty> {
+        let args = self.constructor_type_argument_seed(
+            &sig.name,
+            sig.type_params.len(),
+            explicit_type_args,
+            expected,
+            span,
+        );
+        sig.type_params
+            .iter()
+            .cloned()
+            .zip(args)
+            .filter(|(_, ty)| !matches!(ty, Ty::Unknown | Ty::Wildcard | Ty::Capture(_)))
+            .collect()
     }
 
     fn require_hashable_map_key(&mut self, key: &Ty, span: crate::source::Span) {
@@ -6392,14 +6712,42 @@ impl<'a> Checker<'a> {
         uses_brace_syntax: bool,
         structural_record_arg: bool,
         parenthesized_record_arg: bool,
+        expected: &Ty,
+        explicit_type_args: &[Ty],
     ) -> Ty {
-        let ret = Ty::Named(
+        let generic_ret = Ty::Named(
             sig.name.clone(),
             sig.type_params
                 .iter()
                 .map(|name| Ty::TypeParam(name.clone()))
                 .collect(),
         );
+        let subst = self.constructor_type_argument_subst(sig, explicit_type_args, expected, span);
+        if explicit_type_args.is_empty()
+            && !sig.type_params.is_empty()
+            && subst.is_empty()
+            && args.is_empty()
+        {
+            self.add_error(
+                "cannot_infer_constructor_type",
+                format!(
+                    "cannot infer type arguments for '{}'; add explicit type arguments or an expected type",
+                    sig.name
+                ),
+                span,
+            );
+        }
+        let ret = substitute_type(&generic_ret, &subst);
+        let mut instantiated_sig = sig.clone();
+        for field in &mut instantiated_sig.fields {
+            field.ty = substitute_type(&field.ty, &subst);
+        }
+        for methods in instantiated_sig.methods.values_mut() {
+            for method in methods {
+                *method = instantiate_function_sig(method.clone(), &subst);
+            }
+        }
+        let sig = &instantiated_sig;
 
         if parenthesized_record_arg {
             self.add_error(
@@ -6467,7 +6815,10 @@ impl<'a> Checker<'a> {
 
         if structural_record_arg {
             if constructor_overloads.is_none() {
-                return self.check_record_constructor_conversion(sig, &ret, &args[0].value, span);
+                let constructed =
+                    self.check_record_constructor_conversion(sig, &ret, &args[0].value, span);
+                self.check_constructed_type_conditions(sig, &constructed, span);
+                return constructed;
             }
         }
 
@@ -6480,7 +6831,9 @@ impl<'a> Checker<'a> {
             self.diagnose_ambiguous_shape_context_call(&visible, args, span);
             if let Some(ctor) = self.choose_overload(&visible, args) {
                 let params = constructor_field_sigs_from_params(&ctor.params);
-                return self.check_constructor_signature(&params, &ret, args, span);
+                let constructed = self.check_constructor_signature(&params, &ret, args, span);
+                self.check_constructed_type_conditions(sig, &constructed, span);
+                return constructed;
             }
             if args.iter().all(|arg| arg.name.is_none()) {
                 for ctor in &visible {
@@ -6554,7 +6907,10 @@ impl<'a> Checker<'a> {
                 );
                 return ret;
             }
-            return self.check_positional_record_constructor_conversion(sig, &ret, args, span);
+            let constructed =
+                self.check_positional_record_constructor_conversion(sig, &ret, args, span);
+            self.check_constructed_type_conditions(sig, &constructed, span);
+            return constructed;
         }
 
         self.add_error(
@@ -6573,6 +6929,30 @@ impl<'a> Checker<'a> {
             span,
         );
         ret
+    }
+
+    fn check_constructed_type_conditions(
+        &mut self,
+        sig: &TypeSig,
+        constructed: &Ty,
+        span: crate::source::Span,
+    ) {
+        if sig.generic_conditions.is_empty() {
+            return;
+        }
+        let Ty::Named(name, args) = constructed else {
+            return;
+        };
+        if name != &sig.name || args.len() != sig.type_params.len() {
+            return;
+        }
+        let subst = sig
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        self.check_call_generic_conditions(&sig.generic_conditions, &subst, span);
     }
 
     fn check_constructor_signature(
@@ -7266,14 +7646,7 @@ impl<'a> Checker<'a> {
 
                 Ty::bool()
             }
-            BinaryOp::Colon => {
-                self.add_error(
-                    "removed_pair_expression",
-                    "':' pair expressions are no longer supported; use '(left, right)' for tuple pairs or '[key: value]' for maps",
-                    span,
-                );
-                Ty::Unknown
-            }
+            BinaryOp::Colon => Ty::Unknown,
         }
     }
 
@@ -8444,6 +8817,10 @@ impl<'a> Checker<'a> {
     }
 
     fn known_iterable_item_type(&self, ty: &Ty) -> Option<Ty> {
+        self.known_iterable_item_type_inner(ty, &mut HashSet::new())
+    }
+
+    fn known_iterable_item_type_inner(&self, ty: &Ty, seen: &mut HashSet<String>) -> Option<Ty> {
         match ty {
             Ty::Named(name, args)
                 if (name == "Vector"
@@ -8460,6 +8837,28 @@ impl<'a> Checker<'a> {
                 Some(Ty::Tuple(vec![args[0].clone(), args[1].clone()]))
             }
             Ty::Named(name, args) if name == "IntRange" && args.is_empty() => Some(Ty::int()),
+            Ty::Named(name, args) => {
+                if !seen.insert(name.clone()) {
+                    return None;
+                }
+                let sig = self.lookup_any_type(name)?;
+                let subst = sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                let item = sig.with_bounds.iter().find_map(|bound| {
+                    let bound = substitute_type(bound, &subst);
+                    self.known_iterable_item_type_inner(&bound, seen)
+                });
+                seen.remove(name);
+                item
+            }
+            Ty::TypeParam(name) => self
+                .type_param_bounds(name)
+                .into_iter()
+                .find_map(|bound| self.known_iterable_item_type_inner(&bound, seen)),
             _ => None,
         }
     }
@@ -8845,10 +9244,14 @@ impl<'a> Checker<'a> {
                     let extension_methods =
                         self.extension_method_sigs_for_named_type(type_name, args, name);
                     if let Some(first) = extension_methods.first() {
-                        return Some(Ty::Function(
-                            first.params.iter().map(|param| param.ty.clone()).collect(),
-                            Box::new(first.ret.clone()),
-                        ));
+                        return Some(if first.getter {
+                            first.ret.clone()
+                        } else {
+                            Ty::Function(
+                                first.params.iter().map(|param| param.ty.clone()).collect(),
+                                Box::new(first.ret.clone()),
+                            )
+                        });
                     }
                     return universal_member_type(name);
                 };
@@ -8866,22 +9269,30 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(methods) = self.method_sigs_for_type(&sig, name) {
                     let first = methods.first()?;
-                    return Some(Ty::Function(
-                        first
-                            .params
-                            .iter()
-                            .map(|param| substitute_type(&param.ty, &subst))
-                            .collect(),
-                        Box::new(substitute_type(&first.ret, &subst)),
-                    ));
+                    return Some(if first.getter {
+                        substitute_type(&first.ret, &subst)
+                    } else {
+                        Ty::Function(
+                            first
+                                .params
+                                .iter()
+                                .map(|param| substitute_type(&param.ty, &subst))
+                                .collect(),
+                            Box::new(substitute_type(&first.ret, &subst)),
+                        )
+                    });
                 }
                 let extension_methods =
                     self.extension_method_sigs_for_named_type(type_name, args, name);
                 if let Some(first) = extension_methods.first() {
-                    return Some(Ty::Function(
-                        first.params.iter().map(|param| param.ty.clone()).collect(),
-                        Box::new(first.ret.clone()),
-                    ));
+                    return Some(if first.getter {
+                        first.ret.clone()
+                    } else {
+                        Ty::Function(
+                            first.params.iter().map(|param| param.ty.clone()).collect(),
+                            Box::new(first.ret.clone()),
+                        )
+                    });
                 }
                 universal_member_type(name)
             }
@@ -8894,10 +9305,14 @@ impl<'a> Checker<'a> {
                 .type_param_method_sigs(param, name)
                 .first()
                 .map(|method| {
-                    Ty::Function(
-                        method.params.iter().map(|param| param.ty.clone()).collect(),
-                        Box::new(method.ret.clone()),
-                    )
+                    if method.getter {
+                        method.ret.clone()
+                    } else {
+                        Ty::Function(
+                            method.params.iter().map(|param| param.ty.clone()).collect(),
+                            Box::new(method.ret.clone()),
+                        )
+                    }
                 })
                 .or_else(|| universal_member_type(name)),
             Ty::Unknown => Some(Ty::Unknown),
@@ -8922,6 +9337,10 @@ impl<'a> Checker<'a> {
                 let Some(sig) = self.lookup_any_type(type_name) else {
                     let extension_methods =
                         self.extension_method_sigs_for_named_type(type_name, args, name);
+                    let extension_methods = extension_methods
+                        .into_iter()
+                        .filter(|method| !method.getter)
+                        .collect::<Vec<_>>();
                     if extension_methods.is_empty() {
                         return universal_method_sigs(name);
                     }
@@ -8930,6 +9349,10 @@ impl<'a> Checker<'a> {
                 let Some(methods) = self.method_sigs_for_type(&sig, name) else {
                     let extension_methods =
                         self.extension_method_sigs_for_named_type(type_name, args, name);
+                    let extension_methods = extension_methods
+                        .into_iter()
+                        .filter(|method| !method.getter)
+                        .collect::<Vec<_>>();
                     if extension_methods.is_empty() {
                         return universal_method_sigs(name);
                     }
@@ -8941,38 +9364,56 @@ impl<'a> Checker<'a> {
                     .cloned()
                     .zip(args.iter().cloned())
                     .collect::<HashMap<_, _>>();
-                Some(
-                    methods
+                let methods = methods
+                    .into_iter()
+                    .filter(|method| !method.getter)
+                    .map(|method| FunctionSig {
+                        type_params: method.type_params,
+                        reified_type_params: method.reified_type_params,
+                        generic_conditions: method
+                            .generic_conditions
+                            .into_iter()
+                            .map(|condition| substitute_generic_condition(&condition, &subst))
+                            .collect(),
+                        params: method
+                            .params
+                            .into_iter()
+                            .map(|param| ParamSig {
+                                name: param.name,
+                                ty: substitute_type(&param.ty, &subst),
+                                variadic: param.variadic,
+                                lazy: param.lazy,
+                                has_initializer: param.has_initializer,
+                            })
+                            .collect(),
+                        ret: substitute_type(&method.ret, &subst),
+                        visibility: method.visibility,
+                        has_body: method.has_body,
+                        getter: method.getter,
+                    })
+                    .collect::<Vec<_>>();
+                if methods.is_empty() {
+                    let extension_methods = self
+                        .extension_method_sigs_for_named_type(type_name, args, name)
                         .into_iter()
-                        .map(|method| FunctionSig {
-                            type_params: method.type_params,
-                            reified_type_params: method.reified_type_params,
-                            generic_conditions: method
-                                .generic_conditions
-                                .into_iter()
-                                .map(|condition| substitute_generic_condition(&condition, &subst))
-                                .collect(),
-                            params: method
-                                .params
-                                .into_iter()
-                                .map(|param| ParamSig {
-                                    name: param.name,
-                                    ty: substitute_type(&param.ty, &subst),
-                                    variadic: param.variadic,
-                                    lazy: param.lazy,
-                                    has_initializer: param.has_initializer,
-                                })
-                                .collect(),
-                            ret: substitute_type(&method.ret, &subst),
-                            visibility: method.visibility,
-                            has_body: method.has_body,
-                        })
-                        .collect(),
-                )
+                        .filter(|method| !method.getter)
+                        .collect::<Vec<_>>();
+                    if extension_methods.is_empty() {
+                        universal_method_sigs(name)
+                    } else {
+                        Some(extension_methods)
+                    }
+                } else {
+                    Some(methods)
+                }
             }
             Ty::Unknown => universal_method_sigs(name),
             Ty::TypeParam(param) => {
-                let methods = self.type_param_method_sigs(param, name);
+                let methods = self
+                    .type_param_method_sigs(param, name)
+                    .into_iter()
+                    .filter(|method| !method.getter)
+                    .collect::<Vec<_>>();
                 if methods.is_empty() {
                     universal_method_sigs(name)
                 } else {
@@ -8980,6 +9421,42 @@ impl<'a> Checker<'a> {
                 }
             }
             _ => universal_method_sigs(name),
+        }
+    }
+
+    fn member_getter_sig(&self, receiver: &Ty, name: &str) -> Option<FunctionSig> {
+        match receiver {
+            Ty::Named(type_name, args) => {
+                if let Some((owner_name, _)) = enum_case_view_parts(type_name) {
+                    return self
+                        .member_getter_sig(&Ty::Named(owner_name.to_string(), args.clone()), name);
+                }
+                if let Some(sig) = self.lookup_any_type(type_name) {
+                    if sig.fields.iter().any(|field| field.name == name) {
+                        return None;
+                    }
+                    let subst = sig
+                        .type_params
+                        .iter()
+                        .cloned()
+                        .zip(args.iter().cloned())
+                        .collect::<HashMap<_, _>>();
+                    if let Some(getter) = self
+                        .method_sigs_for_type(&sig, name)
+                        .and_then(|methods| methods.into_iter().find(|method| method.getter))
+                    {
+                        return Some(instantiate_function_sig(getter, &subst));
+                    }
+                }
+                self.extension_method_sigs_for_named_type(type_name, args, name)
+                    .into_iter()
+                    .find(|method| method.getter)
+            }
+            Ty::TypeParam(param) => self
+                .type_param_method_sigs(param, name)
+                .into_iter()
+                .find(|method| method.getter),
+            _ => None,
         }
     }
 
@@ -9053,6 +9530,7 @@ impl<'a> Checker<'a> {
                 ret: substitute_type(&method.ret, &subst),
                 visibility: method.visibility,
                 has_body: method.has_body,
+                getter: method.getter,
             })
             .collect()
     }
@@ -9152,6 +9630,19 @@ impl<'a> Checker<'a> {
             .iter()
             .find(|field| field.name == name && self.can_access_field(owner, field))
             .cloned()
+    }
+
+    fn lookup_implicit_getter(&self, name: &str) -> Option<FunctionSig> {
+        if self.lookup_scoped_value(name).is_some()
+            || self.lookup_implicit_field(name).is_some()
+            || self.lookup_global_value(name).is_some()
+        {
+            return None;
+        }
+        let owner = self.current_owner.as_ref()?;
+        self.method_sigs_for_type(owner, name)?
+            .into_iter()
+            .find(|method| method.getter)
     }
 
     fn undefined_value_message(&self, name: &str) -> String {
@@ -9422,6 +9913,7 @@ impl<'a> Checker<'a> {
                 .lookup_scoped_value(name)
                 .map(|value| value.ty)
                 .or_else(|| self.lookup_implicit_field(name).map(|field| field.ty))
+                .or_else(|| self.lookup_implicit_getter(name).map(|getter| getter.ret))
                 .or_else(|| self.lookup_global_value(name).map(|value| value.ty))
                 .or_else(|| self.lookup_function_type(name))
                 .or_else(|| self.lookup_named_constructor_type(name))
@@ -9526,29 +10018,27 @@ impl<'a> Checker<'a> {
             .filter(|field| self.can_access_field(sig, field))
             .collect::<Vec<_>>();
 
-        let required_visible = visible_fields
-            .iter()
-            .filter(|field| !field.has_initializer)
-            .count();
-
-        if fields.len() < required_visible || fields.len() > visible_fields.len() {
-            self.add_error(
-                "no_matching_overload",
-                format!(
-                    "{} '{}' brace field construction expects {}..{} visible fields, got {}",
-                    type_kind_label(sig.kind),
-                    sig.name,
-                    required_visible,
-                    visible_fields.len(),
-                    fields.len()
-                ),
-                span,
-            );
-            return materialize_type(ret);
-        }
-
-        for arg in fields {
-            let Some(name) = arg.name.as_deref() else {
+        if sig.kind == TypeKind::Class {
+            let required_visible = visible_fields
+                .iter()
+                .filter(|field| !field.has_initializer)
+                .count();
+            if fields.len() < required_visible || fields.len() > visible_fields.len() {
+                self.add_error(
+                    "no_matching_overload",
+                    format!(
+                        "{} '{}' brace field construction expects {}..{} visible fields, got {}",
+                        type_kind_label(sig.kind),
+                        sig.name,
+                        required_visible,
+                        visible_fields.len(),
+                        fields.len()
+                    ),
+                    span,
+                );
+                return materialize_type(ret);
+            }
+            if fields.iter().any(|field| field.name.is_none()) {
                 self.add_error(
                     "no_matching_overload",
                     format!(
@@ -9559,8 +10049,12 @@ impl<'a> Checker<'a> {
                     span,
                 );
                 return materialize_type(ret);
-            };
-            let Some(field) = visible_fields.iter().find(|field| field.name == name) else {
+            }
+        }
+
+        for arg in fields.iter().filter(|arg| arg.name.is_some()) {
+            let name = arg.name.as_deref().expect("filtered named field");
+            if !visible_fields.iter().any(|field| field.name == name) {
                 self.add_error(
                     "no_matching_overload",
                     format!(
@@ -9572,45 +10066,49 @@ impl<'a> Checker<'a> {
                     arg.span,
                 );
                 return materialize_type(ret);
-            };
-            let actual = self.check_expr_against(&arg.value, &field.ty);
-            if !self.is_assignable(&actual, &field.ty) {
-                self.add_error(
-                    "invalid_argument_type",
-                    format!(
-                        "field '{}' in {} '{}' expects '{}' but got '{}'",
-                        field.name,
-                        type_kind_label(sig.kind),
-                        sig.name,
-                        field.ty.describe(),
-                        actual.describe()
-                    ),
-                    arg.span,
-                );
-                return materialize_type(ret);
             }
         }
 
-        for field in &visible_fields {
-            if field.has_initializer {
-                continue;
-            }
-            if !fields
+        let expected_record = Ty::Record(
+            visible_fields
                 .iter()
-                .any(|arg| arg.name.as_deref() == Some(field.name.as_str()))
-            {
-                self.add_error(
-                    "no_matching_overload",
-                    format!(
-                        "{} '{}' brace field construction is missing required field '{}'",
-                        type_kind_label(sig.kind),
-                        sig.name,
-                        field.name
-                    ),
-                    span,
-                );
-                return materialize_type(ret);
-            }
+                .map(|field| (field.name.clone(), field.ty.clone()))
+                .collect(),
+        );
+        let actual = self.check_expr_against(expr, &expected_record);
+        let actual_fields = self.structural_fields_for_type(&actual).unwrap_or_default();
+
+        for field in &visible_fields {
+            let Some((_, actual_ty)) = actual_fields.iter().find(|(name, _)| name == &field.name)
+            else {
+                if !field.has_initializer {
+                    self.add_error(
+                        "no_matching_overload",
+                        format!(
+                            "{} '{}' brace field construction is missing required field '{}'",
+                            type_kind_label(sig.kind),
+                            sig.name,
+                            field.name
+                        ),
+                        span,
+                    );
+                }
+                continue;
+            };
+            self.require_assignable(
+                actual_ty,
+                &field.ty,
+                span,
+                "invalid_argument_type",
+                format!(
+                    "field '{}' in {} '{}' expects '{}' but got '{}'",
+                    field.name,
+                    type_kind_label(sig.kind),
+                    sig.name,
+                    field.ty.describe(),
+                    actual_ty.describe()
+                ),
+            );
         }
 
         materialize_type(ret)
@@ -9692,7 +10190,12 @@ impl<'a> Checker<'a> {
             return None;
         }
         let owner = self.current_owner.as_ref()?;
-        self.method_sigs_for_type(owner, name)
+        let methods = self
+            .method_sigs_for_type(owner, name)?
+            .into_iter()
+            .filter(|method| !method.getter)
+            .collect::<Vec<_>>();
+        (!methods.is_empty()).then_some(methods)
     }
 
     fn lookup_function_type(&self, name: &str) -> Option<Ty> {
@@ -10607,6 +11110,18 @@ impl<'a> Checker<'a> {
         expected: &Ty,
         seen: &mut HashSet<(String, String)>,
     ) -> bool {
+        if let (
+            Ty::Function(actual_params, actual_ret),
+            Ty::Function(expected_params, expected_ret),
+        ) = (actual, expected)
+        {
+            return actual_params.len() == expected_params.len()
+                && actual_params
+                    .iter()
+                    .zip(expected_params)
+                    .all(|(actual, expected)| self.is_assignable_inner(actual, expected, seen))
+                && self.is_assignable_inner(actual_ret, expected_ret, seen);
+        }
         if let Ty::Union(expected_members) = expected {
             return match actual {
                 Ty::Union(actual_members) => actual_members.iter().all(|actual_member| {
@@ -11483,6 +11998,7 @@ fn function_sig_from_function(
             .unwrap_or(Ty::Unknown),
         visibility: function.visibility,
         has_body: true,
+        getter: false,
     }
 }
 
@@ -11559,6 +12075,7 @@ fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -
             .unwrap_or(Ty::Unknown),
         visibility: method.visibility,
         has_body: method.body.is_some(),
+        getter: method.getter,
     }
 }
 
@@ -12311,6 +12828,7 @@ fn instantiate_function_sig(method: FunctionSig, subst: &HashMap<String, Ty>) ->
         ret: substitute_type(&method.ret, subst),
         visibility: method.visibility,
         has_body: method.has_body,
+        getter: method.getter,
     }
 }
 
@@ -12344,6 +12862,23 @@ fn type_contains_type_param(ty: &Ty) -> bool {
             params.iter().any(type_contains_type_param) || type_contains_type_param(ret)
         }
         Ty::Never | Ty::Unknown => false,
+    }
+}
+
+fn type_contains_unresolved_constructor_type(ty: &Ty) -> bool {
+    match ty {
+        Ty::Unknown | Ty::Wildcard | Ty::Capture(_) => true,
+        Ty::Named(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
+            args.iter().any(type_contains_unresolved_constructor_type)
+        }
+        Ty::Record(fields) => fields
+            .iter()
+            .any(|(_, ty)| type_contains_unresolved_constructor_type(ty)),
+        Ty::Function(params, ret) => {
+            params.iter().any(type_contains_unresolved_constructor_type)
+                || type_contains_unresolved_constructor_type(ret)
+        }
+        Ty::Never | Ty::TypeParam(_) => false,
     }
 }
 
@@ -13686,7 +14221,7 @@ def main() Int {
 def main() Unit {
     items = Vector(1, 2, 3)
     mapped = items.map { item => item + 1 }
-    OS.println(mapped.size())
+    OS.println(mapped.size)
 }
 "#,
         );
@@ -14526,6 +15061,65 @@ def main() Unit {
             }),
             "{:#?}",
             result.diagnostics
+        );
+    }
+
+    #[test]
+    fn member_field_punning_uses_the_terminal_member_name() {
+        let accepted = parse_inline(
+            r#"
+shape StoredRollup {
+    count Int
+    total Int
+    internalId Int
+}
+
+shape Rollup {
+    count Int
+    total Int
+}
+
+def main() Unit {
+    source = StoredRollup { count: 2, total: 7, internalId: 99 }
+    named Rollup = Rollup { source.count, source.total }
+    explicit Rollup = shape { source.count, source.total }
+    contextual Rollup = new { source.count, source.total }
+}
+"#,
+        );
+        let accepted_result = check_program(&accepted);
+        assert!(
+            accepted_result.diagnostics.is_empty(),
+            "{:#?}",
+            accepted_result.diagnostics
+        );
+
+        let rejected = parse_inline(
+            r#"
+shape Source {
+    count Int
+    missing Int
+}
+
+shape Rollup {
+    count Int
+    total Int
+}
+
+def main() Unit {
+    source = Source { count: 2, missing: 7 }
+    value Rollup = Rollup { source.count, source.missing }
+}
+"#,
+        );
+        let rejected_result = check_program(&rejected);
+        assert!(
+            rejected_result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "no_matching_overload"
+                    && diagnostic.message.contains("no visible field 'missing'")
+            }),
+            "{:#?}",
+            rejected_result.diagnostics
         );
     }
 
@@ -15900,7 +16494,7 @@ def main(value) Int {
 	        maybe <- values
 	        let Some { value } = maybe
 	    } yield value
-	    OS.println(mapped.size())
+	    OS.println(mapped.size)
 	}
 	"#,
         );
@@ -16172,8 +16766,8 @@ def main() Unit {
     classType ClassType[User] = declared.asClass() !
     unknownClass ClassType[_] = classType
     enumType EnumType[Status] = typeOf[Status].asEnum() !
-    fieldType Type[_] = (classType.fields().at(0) !).fieldType()
-    OS.println(actual.name() !, unknown.name() !, anyMetadata.kind(), unknownClass.name() !, enumType.name() !, fieldType.name() !)
+    fieldType Type[_] = (classType.fields.at(0) !).fieldType
+    OS.println(actual.name !, unknown.name !, anyMetadata.kind, unknownClass.name !, enumType.name !, fieldType.name !)
 }
 "#,
         );
@@ -16186,7 +16780,7 @@ def main() Unit {
         let program = parse_inline(
             r#"
 def speak(values Vector[_]) Unit {
-    OS.println(values.size())
+    OS.println(values.size)
 }
 
 def intStrMap() Map[Int, Str] = Map()
@@ -16202,7 +16796,7 @@ def main() Unit {
     sameCapture = captured
 
     speak(a)
-    OS.println(a.size(), b.size(), c.size(), first, sameCapture)
+    OS.println(a.size, b.size, c.size, first, sameCapture)
 }
 "#,
         );
@@ -16409,16 +17003,64 @@ def main() Unit {
     fn checks_empty_collection_literal_from_expected_type() {
         let program = parse_inline(
             r#"
-def countMap(values [Str : Int]) Int = values.size()
-def countArray(values [Str]) Int = values.size()
+def countMap(values [Str : Int]) Int = values.size
+def countArray(values [Str]) Int = values.size
 def emptyMap() [Str : Int] = []
 def emptyArray() [Str] = []
 
 def main() Int {
     directMap [Str : Int] = []
     directArray [Str] = []
-    return directMap.size() + directArray.size() + countMap([]) + countArray([]) + emptyMap().size() + emptyArray().size()
+    return directMap.size + directArray.size + countMap([]) + countArray([]) + emptyMap().size + emptyArray().size
 }
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_declared_union_to_implement_iterable_through_shared_extension() {
+        let program = parse_inline(
+            r#"
+type Maybe[T] with Iterable[T] =
+    class Present { value T }
+    | object Missing {}
+
+ext Maybe[T] {
+    def iterator() Iterator[T] = match this {
+        case Present(value) => [value].iterator()
+        case Missing => Vector[T]().iterator()
+    }
+}
+
+def count(values Iterable[Int]) Int = {
+    var result = 0
+    for _ <- values {
+        result += 1
+    }
+    result
+}
+
+def main() Int {
+    present Maybe[Int] = Present(1)
+    missing Maybe[Int] = Missing
+    count(present) + count(missing)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_vector_flat_map_callback_to_return_option() {
+        let program = parse_inline(
+            r#"
+def keepOdd(value Int) Int? = if value % 2 == 1 { Some(value) } else { None }
+
+def main() [Int] =
+    [1, 2, 3].flatMap(value => keepOdd(value))
 "#,
         );
         let result = check_program(&program);
@@ -16440,7 +17082,7 @@ def main() Unit {
     merged [Str : Int] = [...defaults, "two": 2, ...overrides]
     entries [(Str, Int)] = [...merged.entries()]
 
-    println(values.size(), copy.size(), merged.size(), entries.size())
+    println(values.size, copy.size, merged.size, entries.size)
 }
 "#,
         );
@@ -16645,7 +17287,7 @@ def wrongValue() Option[Int] = ^"five"
             r#"
 def textSize(value Any) Int {
     if value is Str {
-        return value.size()
+        return value.size
     }
     0
 }
@@ -16659,18 +17301,18 @@ def textSize(value Any) Int {
     fn narrows_logical_right_operands_and_successful_and_branches() {
         let program = parse_inline(
             r#"
-def hasTextSize(value Any) Bool = value is Str && value.size() == 4
+def hasTextSize(value Any) Bool = value is Str && value.size == 4
 
 def textSize(value Any, enabled Bool) Int {
-    if enabled && value is Str && value.size() == 4 {
-        return value.size()
+    if enabled && value is Str && value.size == 4 {
+        return value.size
     }
     0
 }
 
 def combinedSize(left Any, right Any) Int {
-    if left is Str && right is Str && left.size() > 0 && right.size() > 0 {
-        return left.size() + right.size()
+    if left is Str && right is Str && left.size > 0 && right.size > 0 {
+        return left.size + right.size
     }
     0
 }
@@ -16688,7 +17330,22 @@ def textSize(value Any) Int {
     if !(value is Str) {
         return 0
     }
-    value.size()
+    value.size
+}
+
+def textSizeIsNot(value Any) Int {
+    if value is not Str {
+        return 0
+    }
+    value.size
+}
+
+def textSizeInElse(value Any) Int {
+    if value is not Str {
+        return 0
+    } else {
+        return value.size
+    }
 }
 
 def textSizeWithElse(value Any) Int {
@@ -16696,7 +17353,7 @@ def textSizeWithElse(value Any) Int {
     } else {
         return 0
     }
-    value.size()
+    value.size
 }
 "#,
         );
@@ -16711,7 +17368,7 @@ def textSizeWithElse(value Any) Int {
 def textSize(source Any) Int {
     var value Any = source
     if value is Str {
-        return value.size()
+        return value.size
     }
     0
 }
@@ -16759,6 +17416,89 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn infers_generic_constructor_arguments_from_values_and_expected_types() {
+        let program = parse_inline(
+            r#"
+class Box[T] {
+    value T
+
+    new(value T) {
+        this.value = value
+    }
+}
+
+def main() Unit {
+    explicitSet Set[Str] = Set[Str]()
+    contextualSet Set[Str] = Set()
+    contextualNewSet Set[Str] = new()
+    inferredSet = Set[Str]()
+    anySet Set[Any] = Set[Any]()
+
+    explicitMap Map[Str, Int] = Map[Str, Int]()
+    contextualMap Map[Str, Int] = Map()
+    contextualVector Vector[Int] = Vector()
+
+    expectedBox Box[Str] = Box("hello")
+    inferredBox = Box("world")
+    explicitBox Box[Any] = Box[Any]("wide")
+    contextualNew Box[Str] = new("new")
+
+    println(
+        explicitSet.size,
+        contextualSet.size,
+        contextualNewSet.size,
+        inferredSet.size,
+        anySet.size,
+        explicitMap.size,
+        contextualMap.size,
+        contextualVector.size,
+        expectedBox.value,
+        inferredBox.value,
+        explicitBox.value,
+        contextualNew.value
+    )
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_uninferable_partial_and_wildcard_generic_construction() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    missing = Set()
+    partial = Map[Str]()
+    wildcard = Set[_]()
+}
+"#,
+        );
+        let result = check_program(&program);
+        let codes = result
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>();
+        assert!(
+            codes.contains(&"cannot_infer_constructor_type"),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            codes.contains(&"invalid_type_argument_count"),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            codes.contains(&"invalid_constructor_type_arguments"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -17117,6 +17857,93 @@ def fromEither(value Either[Str, Int]) Int = value.orPanic()
             })
             .count();
         assert_eq!(removed, 3, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_getter_access_as_a_value() {
+        let program = parse_inline(
+            r#"
+interface Named {
+    def label Str
+}
+
+class Item with Named {
+    name Str
+
+    def label Str = this.name
+    def repeated Str = label + this.label
+}
+
+shape Point {
+    x Int
+    y Int
+
+    def total Int = this.x + this.y
+}
+
+def main() Unit {
+    item Item = Item("Ada")
+    point Point = Point(2, 3)
+    label Str = item.label
+    total Int = point.total
+    println(label, total, item.repeated)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_call_syntax_for_getters() {
+        let program = parse_inline(
+            r#"
+class Item {
+    name Str
+    def label Str = this.name
+}
+
+def read(item Item) Str = item.label()
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "getter_call_syntax"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_direct_field_mutation_in_getters() {
+        let program = parse_inline(
+            r#"
+class Counter {
+    var count Int
+    values [Int]
+
+    def incremented Int {
+        this.count += 1
+        this.count
+    }
+
+    def replaced Int {
+        this.values[0] := 2
+        this.values[0]
+    }
+}
+"#,
+        );
+        let result = check_program(&program);
+        let mutations = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "getter_mutation")
+            .count();
+        assert_eq!(mutations, 2, "{:#?}", result.diagnostics);
     }
 
     #[test]

@@ -39,7 +39,7 @@ reddish = black.isReddish()
 someInt = OptionX.SomeX(5)
 noneInt = OptionX.NoneX
 
-someDefined = someInt.isDefined()
+someDefined = someInt.isDefined
 
 def main() Unit {
     println("reddish:", reddish)

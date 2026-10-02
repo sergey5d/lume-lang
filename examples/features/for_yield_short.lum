@@ -12,6 +12,6 @@ def main() Int {
         println("yield " + item)
     }
 
-    println("size " + items.size())
+    println("size " + items.size)
     0
 }

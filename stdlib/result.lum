@@ -6,12 +6,12 @@ type Result[T, E] =
     | class Err { error E }
 
 ext Result[T, E] {
-    def isOk() Bool = match this {
+    def isOk Bool = match this {
         case Ok { value: _ } => true
         case Err { error: _ } => false
     }
 
-    def isErr() Bool = !this.isOk()
+    def isErr Bool = !this.isOk
 
     def getError() E = match this {
         case Ok { value: _ } => panic("Result has no error value")

@@ -41,10 +41,10 @@ def main() Unit {
     ]
 
     size Int = "haha".
-        size()
+        size
 
     leadingSize Int = "haha"
-        .size()
+        .size
 
     matched Int = match 2 {
         case 1 =>
@@ -90,7 +90,7 @@ def main() Unit {
 
     total Int = sum +
         grouped +
-        items.size() +
+        items.size +
         size +
         leadingSize +
         matched +

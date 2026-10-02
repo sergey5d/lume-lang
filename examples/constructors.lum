@@ -98,7 +98,7 @@ class Path {
         this.segments = segments
     }
 
-    def size() Int = this.segments.size()
+    def size() Int = this.segments.size
 
     def firstOr(value Str) Str = this.segments.at(0).getOr(value)
 }

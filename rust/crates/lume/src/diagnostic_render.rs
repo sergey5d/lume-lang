@@ -35,11 +35,15 @@ pub fn render_path_diagnostic(path: &Path, diagnostic: &Diagnostic) -> String {
 pub fn render_path_diagnostics(path: &Path, diagnostics: &[Diagnostic]) -> String {
     let source = fs::read_to_string(path).ok();
     let display = path.display().to_string();
+    render_diagnostics(&display, source.as_deref(), diagnostics)
+}
+
+fn render_diagnostics(path: &str, source: Option<&str>, diagnostics: &[Diagnostic]) -> String {
     diagnostics
         .iter()
-        .map(|diagnostic| render_diagnostic(&display, source.as_deref(), diagnostic))
+        .map(|diagnostic| render_diagnostic(path, source, diagnostic))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n\n")
 }
 
 fn render_header(diagnostic: &Diagnostic) -> String {
@@ -153,5 +157,26 @@ mod tests {
             rendered,
             "error[undefined_name]: undefined name 'value'\n  --> app.lum:1:7\n  |\n1 | print(value)\n  |       ^^^^^ undefined name 'value'"
         );
+    }
+
+    #[test]
+    fn separates_multiple_diagnostics_without_a_trailing_blank_line() {
+        let diagnostics = vec![
+            Diagnostic::error(
+                "first",
+                "first error",
+                Span::new(0, 1, LineColumn::new(1, 1), LineColumn::new(1, 2)),
+            ),
+            Diagnostic::error(
+                "second",
+                "second error",
+                Span::new(2, 3, LineColumn::new(2, 1), LineColumn::new(2, 2)),
+            ),
+        ];
+
+        let rendered = render_diagnostics("app.lum", Some("a\nb\n"), &diagnostics);
+
+        assert!(rendered.contains("first error\n\nerror[second]"));
+        assert!(!rendered.ends_with('\n'));
     }
 }

@@ -139,7 +139,7 @@ def main() Int {
     numbers = [10, 20, 30, 40]
     match numbers {
         case [first, second, ...rest] as list =>
-            println("list rest", first, second, rest.size(), list.size())
+            println("list rest", first, second, rest.size, list.size)
         case _ => ()
     }
 

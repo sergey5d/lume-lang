@@ -3,10 +3,13 @@
 # INTERPRETER
 
 interface Str {
-    def size() Int
+    def size Int
+    def isEmpty Bool
+    def nonEmpty Bool
     def compare(other Str) Int
     def runeAt(index Int) Option[Rune]
     def expectRuneAt(index Int) Rune
-    def split(separator Str) Array[Str]
+    def split(separator Str) Vector[Str]
+    def trim() Str
     def indexOf(part Str) Int
 }

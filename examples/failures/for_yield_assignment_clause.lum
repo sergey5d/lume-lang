@@ -9,5 +9,5 @@ def main() Unit {
         total := item
     } yield item
 
-    println(mapped.size())
+    println(mapped.size)
 }

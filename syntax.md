@@ -134,8 +134,17 @@ Inline union rules:
 - a shape alternative is immutable structural data
 - an object alternative is fieldless and denotes one singleton value
 - alternatives declare data only; shared behavior belongs in `ext UnionName`
+- a declared union may list shared interfaces after its type parameters; the
+  union's same-module extension methods may implement those contracts:
+
+  ```txt
+  type Option[T] with Iterable[T] =
+      class Some { value T }
+      | object None {}
+  ```
+
 - generic parameters belong to the union and are available to every alternative,
-  for example `type Option[T] = class Some { value T } | object None {}`
+  for example `type Option[T] with Iterable[T] = class Some { value T } | object None {}`
 - payload alternatives use their normal construction syntax, while object
   alternatives are referenced by name
 - `match` over a declared union is exhaustive over its alternatives
@@ -176,6 +185,11 @@ Common stdlib/prelude types:
 - `Ordering[T]`
 - `Printer`
 - `OS`
+
+`Option[T]` implements `Iterable[T]`: `Some(value)` iterates once and `None`
+iterates zero times. Consequently, iterable APIs can consume options directly.
+For example, `Vector.flatMap[X](f fn(T) Iterable[X]) Vector[X]` accepts a
+callback returning either a `Vector[X]`, an `Option[X]`, or another iterable.
 
 ## Any Type
 
@@ -297,7 +311,7 @@ captured type can be called, while methods that consume it cannot accept an
 arbitrary concrete value:
 
 ```txt
-a.size()              # allowed
+a.size                # allowed
 a.add(7)              # rejected; add expects the captured element type, not Int
 
 value Any = a[0]      # allowed
@@ -365,18 +379,18 @@ These are reflection API names only; source declarations use `type ... =` with
 Common metadata operations:
 
 ```txt
-println(typeOf[User].name() !)
-println(typeOf[User].kind())
+println(typeOf[User].name !)
+println(typeOf[User].kind)
 
 classType ClassType[User] = typeOf[User].asClass() !
-fields = classType.fields()
+fields = classType.fields
 let Some { value as nameField } = classType.field("name") else panic("expected name field")
-println(nameField.fieldType().name() !)
-println(nameField.isPrivate())
+println(nameField.fieldType.name !)
+println(nameField.isPrivate)
 
 enumType EnumType[Status] = typeOf[Status].asEnum() !
 let Some { value as pendingCase } = enumType.case("Pending") else panic("expected Pending case")
-println(pendingCase.name())
+println(pendingCase.name)
 constructedCase Result[Any, ReflectionError] = pendingCase.construct()
 ```
 
@@ -436,7 +450,12 @@ Rules:
 - `$name` interpolates a simple identifier expression
 - `${...}` interpolates a full expression
 - `\$` inserts a literal dollar sign
-- `Str.size()` returns the string length as `Int`
+- `Str.size` returns the string length as `Int`
+- `Str.isEmpty` reports whether the string contains no characters
+- `Str.nonEmpty` reports whether the string contains at least one character
+- `Str.trim()` removes leading and trailing whitespace
+- `Str.split(separator)` treats `separator` as a regular expression and returns
+  a growable `Vector[Str]`
 
 Raw strings preserve their contents without escapes or interpolation:
 
@@ -840,7 +859,7 @@ copy = values[:]         # values.slice()
 
 `slice()`, `slice(start)`, and `slice(start, end)` return a fresh shallow
 `Vector` and evaluate the receiver once. Bounds must satisfy
-`0 <= start <= end <= values.size()`; an invalid range panics. Slice brackets
+`0 <= start <= end <= values.size`; an invalid range panics. Slice brackets
 are available only on `Vector`; step syntax such as `values[1:5:2]` is not
 supported. At expression start, `[]` remains the contextual empty vector/map
 literal; `[:]` is meaningful only after a `Vector` expression.
@@ -995,6 +1014,37 @@ explicitUser = shape {
 The explicit form is useful where several brace forms appear together. It also
 provides the unambiguous empty anonymous shape `shape {}`; bare `{}` remains an
 empty block expression.
+
+An expected named-shape type can project a wider shape by visible field name.
+This includes expected types flowing through generic callbacks such as
+`Option.map`. Given `StoredRollup` with all `Rollup` fields plus additional
+fields, these forms all construct the same narrower `Rollup` value:
+
+```txt
+def named() Rollup? = source().map(r => Rollup { ...r })
+def explicitShape() Rollup? = source().map(r => shape { ...r })
+def implicitShape() Rollup? = source().map(r => { ...r })
+def contextualNew() Rollup? = source().map(r => new { ...r })
+```
+
+`Rollup { ...r }` names the target directly. The two anonymous-shape forms and
+contextual `new` obtain `Rollup` from the callback's expected return type. In
+each case, required target fields must exist with assignable types; extra
+source fields are discarded rather than copied into the narrower result.
+
+A member expression in a construction entry may infer its field name from the
+final member. This is member-field punning:
+
+```txt
+def selected() Rollup? = source().map(r => Rollup { r.total, r.label })
+```
+
+The example is equivalent to `Rollup { total: r.total, label: r.label }`.
+The inferred names must be valid target fields. This works in named,
+`shape { ... }`, and contextual `new { ... }` construction. Bare braces retain
+their block-versus-shape distinction, so use `shape { r.total, r.label }` when
+an anonymous member-punned shape is needed. Other unlabeled positional
+expressions remain invalid inside braces.
 
 Anonymous structural data may synthesize behavior by declaring interfaces and
 methods directly:
@@ -1463,6 +1513,50 @@ def addWithEquals(left Int, right Int) Int = {
 Callable block bodies may include `=` or omit it. Expression-bodied callables
 still use `=`.
 
+### Getters
+
+A method declared without `()` is a getter. Getters are read through ordinary
+member access and still lower to zero-argument methods at runtime:
+
+```txt
+class Account {
+    name Str
+    balance Int
+
+    def displayName Str = this.name
+
+    def isPositive Bool {
+        current = this.balance
+        current > 0
+    }
+}
+
+account Account = Account("Cash", 25)
+println(account.displayName, account.isPositive)
+```
+
+Inside the declaring type, a getter may also be read through the implicit
+receiver:
+
+```txt
+def summary Str = displayName + ": " + this.balance.toStr()
+```
+
+Getter rules:
+
+- getters require an explicit return type
+- getters have no parameter list and are accessed without parentheses
+- getters cannot declare type parameters or generic conditions
+- getters may declare local bindings
+- direct mutation of class or shape fields is rejected, including indexed
+  mutation rooted in a field
+- `value.getter()` is rejected; write `value.getter`
+
+Getters may be declared by classes, shapes, interfaces, objects, and extension
+blocks. The current compiler enforces direct read-only field access. Proving
+that methods called by a getter are also read-only requires effect tracking and
+is retained as a separate design step.
+
 Generic function:
 
 ```txt
@@ -1567,6 +1661,43 @@ metadata[User]()       # explicit generic call
 entries["a"]           # indexing
 (handlers[key])()      # call an indexed function value
 handlers[key]()        # invalid: parsed as generic call syntax
+```
+
+Generic types follow the same explicit-or-inferred construction rule. A
+constructor invocation may provide every type argument, or omit the complete
+type-argument list and let Lume infer it from constructor arguments and the
+expected type:
+
+```txt
+users Vector[User] = Vector()          # User comes from the expected type
+lookup Map[Str, User] = Map()          # both arguments come from the expected type
+result Result[Int, Error] = Ok(42)     # remaining context determines Error
+box Box[Str] = Box("hello")            # Str agrees with the argument and context
+
+explicitSet = Set[Str]()
+explicitMap = Map[Str, User]()
+inferredBox = Box("hello")
+contextualBox Box[Str] = new("hello")  # new infers the complete target type
+contextualSet Set[Str] = new()
+```
+
+Construction requires all generic arguments or none. Partial application and
+existential placeholders are not constructor inference syntax:
+
+```txt
+Map[Str]()     # invalid: Map requires both K and V
+Set[_]()       # invalid: omit [..] to infer, or provide a concrete type
+Set[]()        # invalid: an explicit type-argument list cannot be empty
+value = Set()  # invalid: neither arguments nor an expected type determine T
+```
+
+An empty generic constructor therefore needs either explicit arguments or an
+expected type. Lume does not infer `Any` as a fallback:
+
+```txt
+names Set[Str] = Set()
+names = Set[Str]()
+anything Set[Any] = Set()
 ```
 
 Function and method parameters may end with one variadic vector parameter. `vararg`
@@ -2349,6 +2480,7 @@ Map construction:
 entries [Str : Int] = ["a": 1, "b": 2]
 empty [Str : Int] = []
 value Option[Int] = entries["a"]
+allKeys [Str] = entries.keys()
 allValues [Int] = entries.values()
 
 totals [Str : Int] = ["Ada": 10]
@@ -2549,21 +2681,32 @@ if let _ Worker = value {
 }
 ```
 
-Runtime type tests use `is`:
+Runtime type tests use `is`; direct negative tests use `is not`:
 
 ```txt
 if value is Str {
-    println(value.size())
+    println(value.size)
+}
+
+if value is not Worker {
+    return "not a worker"
 }
 ```
 
+`not` is contextual after `is`; it is not a second general Boolean-negation
+operator. `value is not Worker` means exactly `!(value is Worker)`. The right
+side is always a type reference, so value comparisons continue to use `!=` and
+reference-identity comparisons use `!==`.
+
 `is` is non-associative. A type test has the grammar
-`comparison ["is" type]`, so chained tests are rejected:
+`comparison ["is" ["not"] type]`, so chained tests are rejected:
 
 ```txt
-value is Str                 # valid
-value is Str is Any          # invalid
-(value is Str) && otherCheck # valid
+value is Str                     # valid
+value is not Worker              # valid
+value is Str is Any              # invalid
+value is not Worker is Any       # invalid
+(value is Str) && otherCheck     # valid
 ```
 
 Inside the successful branch, an immutable local binding or parameter tested
@@ -2573,13 +2716,19 @@ available afterward:
 
 ```txt
 def size(value Any) Int {
-    if !(value is Str) {
+    if value is not Str {
         return 0
     }
 
-    value.size()
+    value.size
 }
 ```
+
+Inside the `else` branch of `value is not Type`, the value is narrowed to
+`Type`. The true branch keeps its original type because Lume does not currently
+represent negative types. The parenthesized `!(value is Type)` spelling remains
+legal and is useful when negating a larger condition, but `is not` is canonical
+for a direct negative type test.
 
 This narrowing is intentionally local and conservative:
 
@@ -2786,8 +2935,8 @@ let {
 Use the runtime/prelude `assert(...)` function for plain boolean assertions:
 
 ```txt
-assert(split.size() == 3)
-assert(split.size() == 3, "split must have 3 parts")
+assert(split.size == 3)
+assert(split.size == 3, "split must have 3 parts")
 ```
 
 The first argument must be `Bool`. When the condition is `false`, `assert`
@@ -3520,8 +3669,8 @@ and list patterns:
 ```txt
 case 42 as value => println(value)
 case "str" as text => println(text)
-case [first, second, third] as list => println(first, list.size())
-case [first, second, ...rest] as list => println(rest.size(), list.size())
+case [first, second, third] as list => println(first, list.size)
+case [first, second, ...rest] as list => println(rest.size, list.size)
 ```
 
 The alias is introduced only when the complete inner pattern succeeds.
@@ -3706,7 +3855,7 @@ Other operators / constructs:
 
 - `.` for member access; `..` has no combined meaning and is rejected rather
   than being treated as one dot
-- `is` for runtime type checks
+- `is` and contextual `is not` for positive and negative runtime type checks
 - `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
 - `??` for extract-or-fallback through `Option`, `Result`, and `Either`
 - `^` for contextual pure injection into `Option`, `Result`, and `Either`
@@ -3731,7 +3880,7 @@ Expression precedence, from highest to lowest:
 | Additive | `+`, `-` | left |
 | Shape update | `with` | left |
 | Comparison | `<`, `<=`, `>`, `>=` | left |
-| Type test | `is` | non-associative |
+| Type test | `is`, `is not` | non-associative |
 | Equality | `==`, `!=`, `===`, `!==` | left |
 | Boolean AND | `&&` | left |
 | Boolean OR | `||` | left |
@@ -3826,7 +3975,7 @@ Newline continuation:
   - extraction/fallback operators: `??`
   - exact shape update introducer: `with`
   - unary prefixes: unary `-`, `!`, `try`
-  - runtime type check keyword: `is`
+  - runtime type check keywords: `is`, and contextual `not` after `is`
   - match arrow: `=>`
   - separators / chaining markers: `,`, `.`
 - Delimited forms allow layout after opening delimiters and after commas, but they do not make leading binary/update operators valid by themselves.
@@ -3876,10 +4025,10 @@ if flag {
 
 ```txt
 size = "hello".
-    size()
+    size
 
 size = "hello"
-    .size()
+    .size
 ```
 
 ## Visibility

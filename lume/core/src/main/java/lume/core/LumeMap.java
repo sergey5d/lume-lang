@@ -84,6 +84,10 @@ public final class LumeMap<K, V> {
         return entries;
     }
 
+    public LumeVector<K> keys() {
+        return LumeVector.from(values.keySet());
+    }
+
     public LumeVector<V> values() {
         return LumeVector.from(values.values());
     }

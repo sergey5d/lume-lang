@@ -9,7 +9,7 @@ class Worker {
 }
 
 def workerLabel(value Any) Str {
-    if !(value is Worker) {
+    if value is not Worker {
         return "not a worker"
     }
 
@@ -20,10 +20,11 @@ def workerLabel(value Any) Str {
 def main() Unit {
     value Any = Worker("Ada")
 
-    if value is Worker {
-        println("is worker")
-    } else {
+    if value is not Worker {
         println("is other")
+    } else {
+        label = value.label()
+        println("is worker")
     }
 
     println(workerLabel(value))

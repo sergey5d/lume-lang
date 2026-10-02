@@ -14,7 +14,7 @@ def canVisitAllRooms(rooms [[Int]]) Bool {
         keys.append(key)
     }
 
-    while keys.size() != 0 {
+    while keys.size != 0 {
 
         key = keys.removeAt(0).getOr(-1)
 
@@ -29,7 +29,7 @@ def canVisitAllRooms(rooms [[Int]]) Bool {
         }
     }
 
-    return seen.size() == rooms.size()
+    return seen.size == rooms.size
 }
 
 def main() Int {

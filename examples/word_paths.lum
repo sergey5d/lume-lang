@@ -5,7 +5,7 @@
 
 def firstLetter(word Str) Rune = word.expectRuneAt(0)
 
-def lastLetter(word Str) Rune = word.expectRuneAt(word.size() - 1)
+def lastLetter(word Str) Rune = word.expectRuneAt(word.size - 1)
 
 def matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], path [Str]) [Str]? {
     for word <- allWords {
@@ -44,11 +44,11 @@ def firstPath(startWord Str, endWord Str, allWords [Str]) [Str]? {
 }
 
 def renderPath(path [Str]) Str {
-    if path.isEmpty() {
+    if path.isEmpty {
         return ""
     }
 
-    first = path.head().getOr("")
+    first = path.head.getOr("")
     rest = path.tail()
     rest.fold(first, (acc, word) => acc + " -> " + word)
 }

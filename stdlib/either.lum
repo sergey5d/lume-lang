@@ -6,12 +6,12 @@ type Either[L, R] =
     | class Right { value R }
 
 ext Either[L, R] {
-    def isLeft() Bool = match this {
+    def isLeft Bool = match this {
        case Left { value: _ } => true
        case Right { value: _ } => false
     }
 
-    def isRight() Bool = !this.isLeft()
+    def isRight Bool = !this.isLeft
 
     def expectRight() R = match this {
        case Left { value: _ } => panic("Either has no right value")

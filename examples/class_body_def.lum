@@ -35,7 +35,7 @@ private class Person with Named, Aged {
     def kind() Str = "person"
 
     private def calc() Int {
-        this.firstName.size() + this.lastName.size()
+        this.firstName.size + this.lastName.size
     }
 
     def fullName() Str = this.firstName + " " + this.lastName

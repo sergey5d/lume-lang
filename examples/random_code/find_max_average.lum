@@ -3,7 +3,7 @@
 # 0
 
 def findMaxAverage(nums Array[Float], k Int) Float {
-    if nums.size() < k {
+    if nums.size < k {
         return -1.
     }
 
@@ -16,7 +16,7 @@ def findMaxAverage(nums Array[Float], k Int) Float {
     }
 
     var maxTotal Float = total
-    numsLen Int = nums.size()
+    numsLen Int = nums.size
 
     for idx <- Range(k, numsLen) {
         total += nums[idx] - nums[idx - k]

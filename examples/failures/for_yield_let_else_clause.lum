@@ -11,5 +11,5 @@ def main() Unit {
         }
     } yield value
 
-    println(mapped.size())
+    println(mapped.size)
 }

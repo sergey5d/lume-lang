@@ -25,13 +25,13 @@ def main() Unit {
     seen = Set(1, 2, 3)
 
     doubled = seen.map(item => item * 2)
-    println("doubled " + doubled.contains(4) + " " + doubled.size())
+    println("doubled " + doubled.contains(4) + " " + doubled.size)
 
     expanded = seen.flatMap(item => Set(item, item + 10))
-    println("expanded " + expanded.contains(12) + " " + expanded.size())
+    println("expanded " + expanded.contains(12) + " " + expanded.size)
 
     filtered = seen.filter(item => item > 1)
-    println("filtered " + filtered.contains(2) + " " + filtered.size())
+    println("filtered " + filtered.contains(2) + " " + filtered.size)
 
     setTotal = seen.fold(0, (acc Int, item Int) => acc + item)
     println("setFold " + setTotal)
@@ -59,7 +59,7 @@ def main() Unit {
     println("expandedValues " + expandedValues.at(0).getOr(0) + " " + expandedValues.at(3).getOr(0))
 
     filteredMap = values.filter((key, value) => value > 1)
-    println("filteredMap " + filteredMap.contains("b") + " " + filteredMap.size())
+    println("filteredMap " + filteredMap.contains("b") + " " + filteredMap.size)
 
     mapTotal = values.fold(0, (acc, key, value) => acc + value)
     println("mapFold " + mapTotal)

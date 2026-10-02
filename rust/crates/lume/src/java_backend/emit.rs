@@ -5240,6 +5240,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 .or_else(|| self.lazy_param_value_reference(name))
                 .or_else(|| self.param_reference(name))
                 .or_else(|| self.implicit_field_reference(name))
+                .or_else(|| self.implicit_getter_reference(name))
                 .or_else(|| {
                     if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
                         let mut visible = bindings.keys().cloned().collect::<Vec<_>>();
@@ -5382,10 +5383,28 @@ impl<'a> SourceBodyEmitter<'a> {
                 "lume.core.LumeRuntime.runtimeTypeOf({})",
                 self.emit_expr(receiver, bindings)?
             )),
+            core::Expr::Member { receiver, name, .. }
+                if matches!(name.as_str(), "size" | "isEmpty" | "nonEmpty")
+                    && self.is_java_string_receiver(receiver, bindings) =>
+            {
+                let receiver = self.emit_receiver_expr(receiver, bindings)?;
+                match name.as_str() {
+                    "size" => Some(format!("((long) ({receiver}).length())")),
+                    "isEmpty" => Some(format!("({receiver}).isEmpty()")),
+                    "nonEmpty" => Some(format!("!({receiver}).isEmpty()")),
+                    _ => unreachable!(),
+                }
+            }
             core::Expr::Member { receiver, name, .. } if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "this") =>
             {
                 let receiver = self.emit_expr(receiver, bindings)?;
                 let member = java_member_name(name);
+                if self.owner.is_some_and(|owner| {
+                    JavaIrSupport::new(self.bundle, self.function, self.names)
+                        .type_has_getter(owner, name)
+                }) {
+                    return Some(format!("{receiver}.{member}()"));
+                }
                 if self
                     .owner
                     .is_some_and(|owner| owner.kind == TypeKind::Record)
@@ -5428,6 +5447,11 @@ impl<'a> SourceBodyEmitter<'a> {
                     }
                     None
                 })?;
+                if JavaIrSupport::new(self.bundle, self.function, self.names)
+                    .type_has_getter_for_receiver(&receiver_ty, name)
+                {
+                    return Some(format!("{receiver_expr}.{member}()"));
+                }
                 if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some()
                     && !matches!(
                         receiver_ty,
@@ -5953,6 +5977,13 @@ impl<'a> SourceBodyEmitter<'a> {
         })
     }
 
+    fn implicit_getter_reference(&self, name: &str) -> Option<String> {
+        let owner = self.owner?;
+        JavaIrSupport::new(self.bundle, self.function, self.names)
+            .type_has_getter(owner, name)
+            .then(|| format!("this.{}()", java_member_name(name)))
+    }
+
     fn emit_equality(
         &self,
         left: &core::Expr,
@@ -6158,7 +6189,7 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             lambda_emitter.emit_inline_block(body, lambda_bindings, lambda_types, true)?
         } else {
-            lambda_emitter.emit_expr(body, &lambda_bindings)?
+            lambda_emitter.emit_expr_against(body, &lambda_bindings, &typed_lambda.return_ty)?
         };
         Some(format!("({}) -> {emitted_body}", java_params.join(", ")))
     }
@@ -6276,6 +6307,15 @@ impl<'a> SourceBodyEmitter<'a> {
             core::Expr::ContextualNew {
                 args, style, span, ..
             } => {
+                if let [
+                    core::CallArg {
+                        value: core::Expr::RecordLiteral { fields, values, .. },
+                        ..
+                    },
+                ] = args.as_slice()
+                {
+                    return self.emit_record_literal_against(fields, values, bindings, expected);
+                }
                 let ir::Type::Named { name, .. } = expected else {
                     return None;
                 };
@@ -6312,15 +6352,28 @@ impl<'a> SourceBodyEmitter<'a> {
                     parts.push(self.emit_expr_against(value, bindings, &field.ty)?);
                 }
             } else {
-                if fields.iter().any(|field| field.name.is_none()) {
-                    return None;
-                }
                 for field in expected_fields {
-                    let value = fields
-                        .iter()
-                        .find(|value| value.name.as_deref() == Some(field.name.as_str()))?;
                     parts.push(java_string_literal(&field.name));
-                    parts.push(self.emit_expr_against(&value.value, bindings, &field.ty)?);
+                    if let Some(value) = fields
+                        .iter()
+                        .find(|value| value.name.as_deref() == Some(field.name.as_str()))
+                    {
+                        parts.push(self.emit_expr_against(&value.value, bindings, &field.ty)?);
+                    } else {
+                        let spread = fields.iter().rev().find_map(|value| {
+                            let core::Expr::Spread { value, .. } = &value.value else {
+                                return None;
+                            };
+                            self.record_spread_has_field(value, &field.name, bindings)
+                                .then_some(value.as_ref())
+                        })?;
+                        parts.push(self.emit_record_spread_field(
+                            spread,
+                            &field.name,
+                            &field.ty,
+                            bindings,
+                        )?);
+                    }
                 }
             }
             return Some(format!("lume.core.LumeShape.of({})", parts.join(", ")));
@@ -6357,9 +6410,6 @@ impl<'a> SourceBodyEmitter<'a> {
                 constructor_args.push(self.emit_expr_against(value, bindings, &field_ty)?);
             }
         } else {
-            if fields.iter().any(|field| field.name.is_none()) {
-                return None;
-            }
             for field in &type_def.fields {
                 let field_ty = substitute_java_emit_type(&field.ty, &substitution);
                 if let Some(value) = fields
@@ -6370,6 +6420,19 @@ impl<'a> SourceBodyEmitter<'a> {
                         &value.value,
                         bindings,
                         &field_ty,
+                    )?);
+                } else if let Some(spread) = fields.iter().rev().find_map(|value| {
+                    let core::Expr::Spread { value, .. } = &value.value else {
+                        return None;
+                    };
+                    self.record_spread_has_field(value, &field.name, bindings)
+                        .then_some(value.as_ref())
+                }) {
+                    constructor_args.push(self.emit_record_spread_field(
+                        spread,
+                        &field.name,
+                        &field_ty,
+                        bindings,
                     )?);
                 } else if let Some(initializer) = &field.initializer {
                     constructor_args.push(java_constant(initializer));
@@ -6389,6 +6452,59 @@ impl<'a> SourceBodyEmitter<'a> {
         ))
     }
 
+    fn record_spread_has_field(
+        &self,
+        value: &core::Expr,
+        field_name: &str,
+        bindings: &HashMap<String, String>,
+    ) -> bool {
+        match self.expr_type(value, bindings) {
+            Some(ir::Type::Record(fields)) => fields.iter().any(|field| field.name == field_name),
+            Some(ir::Type::Named { name, .. }) => self
+                .bundle
+                .ir
+                .types
+                .iter()
+                .find(|ty| ty.name == name)
+                .is_some_and(|ty| {
+                    ty.fields.iter().any(|field| {
+                        field.name == field_name && field.visibility != ast::Visibility::Private
+                    })
+                }),
+            _ => false,
+        }
+    }
+
+    fn emit_record_spread_field(
+        &self,
+        value: &core::Expr,
+        field_name: &str,
+        field_ty: &ir::Type,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let receiver = self.emit_expr(value, bindings)?;
+        let member = java_member_name(field_name);
+        match self.expr_type(value, bindings)? {
+            ir::Type::Record(_) => Some(format!(
+                "(({}) ((lume.core.LumeShape) {receiver}).get({}))",
+                self.names.value_type(field_ty),
+                java_string_literal(field_name)
+            )),
+            ir::Type::Named { name, .. }
+                if self
+                    .bundle
+                    .ir
+                    .types
+                    .iter()
+                    .any(|ty| ty.name == name && ty.kind == TypeKind::Record) =>
+            {
+                Some(format!("({receiver}).{member}()"))
+            }
+            ir::Type::Named { .. } => Some(format!("({receiver}).{member}")),
+            _ => None,
+        }
+    }
+
     fn emit_call(
         &self,
         callee: &core::Expr,
@@ -6397,6 +6513,36 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
         match callee {
+            core::Expr::Identifier {
+                name: callee_name, ..
+            } if matches!(
+                args,
+                [core::CallArg {
+                    value: core::Expr::RecordLiteral { .. },
+                    ..
+                }]
+            ) && matches!(
+                self.source_expr_type(span),
+                Some(ir::Type::Named { ref name, .. }) if name == callee_name
+            ) && self
+                .bundle
+                .ir
+                .types
+                .iter()
+                .any(|ty| ty.name == *callee_name && ty.kind == TypeKind::Record) =>
+            {
+                let [
+                    core::CallArg {
+                        value: core::Expr::RecordLiteral { fields, values, .. },
+                        ..
+                    },
+                ] = args
+                else {
+                    unreachable!()
+                };
+                let expected = self.source_expr_type(span)?;
+                self.emit_record_literal_against(fields, values, bindings, &expected)
+            }
             core::Expr::Index { receiver, .. }
                 if self.source_call(span).is_some_and(|call| {
                     matches!(
@@ -6655,9 +6801,23 @@ impl<'a> SourceBodyEmitter<'a> {
                                 callee.as_ref(),
                                 core::Expr::Identifier { name, .. } if name == "Vector"
                             )
+                                || matches!(
+                                    callee.as_ref(),
+                                    core::Expr::Index { receiver, .. }
+                                        if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "Vector")
+                            )
                     ) =>
             {
-                Some("lume.core.LumeIterator.from(lume.core.LumeVector.of())".to_string())
+                let vector = match self.source_expr_type(receiver.span()) {
+                    Some(ir::Type::Named { name, args }) if name == "Vector" && args.len() == 1 => {
+                        format!(
+                            "lume.core.LumeVector.<{}>of()",
+                            self.names.value_type(&args[0])
+                        )
+                    }
+                    _ => "lume.core.LumeVector.of()".to_string(),
+                };
+                Some(format!("lume.core.LumeIterator.from({vector})"))
             }
             core::Expr::Member { receiver, name, .. }
                 if name == "parse"
@@ -6679,6 +6839,29 @@ impl<'a> SourceBodyEmitter<'a> {
                     "parseFloat"
                 };
                 Some(format!("lume.core.LumeRuntime.{method}({value})"))
+            }
+            core::Expr::Member { receiver, name, .. }
+                if name == "split"
+                    && args.len() == 1
+                    && self.is_java_string_receiver(receiver, bindings) =>
+            {
+                Some(format!(
+                    "lume.core.LumeRuntime.stringSplit({}, {})",
+                    self.emit_receiver_expr(receiver, bindings)?,
+                    self.emit_call_arg(&args[0], bindings)?
+                ))
+            }
+            core::Expr::Member { receiver, name, .. }
+                if matches!(name.as_str(), "isEmpty" | "nonEmpty")
+                    && args.is_empty()
+                    && self.is_java_string_receiver(receiver, bindings) =>
+            {
+                let receiver = self.emit_receiver_expr(receiver, bindings)?;
+                if name == "isEmpty" {
+                    Some(format!("({receiver}).isEmpty()"))
+                } else {
+                    Some(format!("!({receiver}).isEmpty()"))
+                }
             }
             core::Expr::Member { receiver, name, .. } if name == "toStr" && args.is_empty() => {
                 Some(format!(
@@ -6740,7 +6923,15 @@ impl<'a> SourceBodyEmitter<'a> {
                 if let Some(call) = self.source_call(span)
                     && let ir::Callee::Named { path } = &call.callee
                 {
-                    return self.emit_source_named_call(path, args, call, bindings);
+                    let emitted = self.emit_source_named_call(path, args, call, bindings);
+                    if emitted.is_none() && std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                        eprintln!(
+                            "readable java cannot emit named member call '{}': specs={:?}",
+                            path.join("."),
+                            call.param_specs
+                        );
+                    }
+                    return emitted;
                 }
                 if self.source_call(span).is_some_and(|call| {
                     matches!(
@@ -6748,7 +6939,15 @@ impl<'a> SourceBodyEmitter<'a> {
                         ir::Callee::Method { method, .. } if method == name
                     )
                 }) {
-                    return self.emit_resolved_member_call(receiver, name, args, span, bindings);
+                    let emitted =
+                        self.emit_resolved_member_call(receiver, name, args, span, bindings);
+                    if emitted.is_none() && std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                        eprintln!(
+                            "readable java cannot emit resolved member call '{name}': specs={:?}",
+                            self.source_call(span).map(|call| &call.param_specs)
+                        );
+                    }
+                    return emitted;
                 }
                 let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
                 let args = args
@@ -6797,7 +6996,7 @@ impl<'a> SourceBodyEmitter<'a> {
             None
         })?;
         let emitter = JavaIrSupport::new(self.bundle, self.function, self.names);
-        let param_specs = match path {
+        let mut param_specs = match path {
             [owner]
                 if self.names.is_java_type(owner) || emitter.is_lume_constructible_type(owner) =>
             {
@@ -6808,6 +7007,15 @@ impl<'a> SourceBodyEmitter<'a> {
                 .or_else(|| emitter.type_method_param_specs(owner, method, &call.lowered_args)),
             _ => None,
         };
+        if let Some(param_specs) = &mut param_specs {
+            for (spec, source_spec) in param_specs.iter_mut().zip(call.param_specs.iter()) {
+                if let Some(source_spec) = source_spec
+                    && !matches!(source_spec.ty, ir::Type::Unknown)
+                {
+                    spec.ty = source_spec.ty.clone();
+                }
+            }
+        }
         let emitted = match param_specs.as_deref() {
             Some(specs) => {
                 let source_param_count = if call.param_specs.is_empty() {
@@ -7104,7 +7312,25 @@ impl<'a> SourceBodyEmitter<'a> {
             None
         })?;
         let param_specs = JavaIrSupport::new(self.bundle, resolved_function, self.names)
-            .method_param_specs_for_receiver(lowered_receiver, method, &call.lowered_args);
+            .method_param_specs_for_receiver(lowered_receiver, method, &call.lowered_args)
+            .or_else(|| {
+                if call.param_specs.is_empty() {
+                    return None;
+                }
+                call.param_specs
+                    .iter()
+                    .map(|spec| {
+                        let spec = spec.as_ref()?;
+                        Some(JavaParamSpec {
+                            ty: spec.ty.clone(),
+                            variadic: spec.variadic,
+                            lazy: spec.lazy,
+                            default: None,
+                            coercion: None,
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()
+            });
         let Some(mut param_specs) = param_specs else {
             let mut emitted_args = ordered_args
                 .iter()
@@ -7120,6 +7346,13 @@ impl<'a> SourceBodyEmitter<'a> {
                 widen_string_compare,
             ));
         };
+        for (spec, source_spec) in param_specs.iter_mut().zip(call.param_specs.iter()) {
+            if let Some(source_spec) = source_spec
+                && !matches!(source_spec.ty, ir::Type::Unknown)
+            {
+                spec.ty = source_spec.ty.clone();
+            }
+        }
         let source_param_count = if call.param_specs.is_empty() {
             ordered_args.len()
         } else {
@@ -7240,13 +7473,19 @@ impl<'a> SourceBodyEmitter<'a> {
         name: &str,
         bindings: &HashMap<String, String>,
     ) -> bool {
-        name == "compare"
-            && self
-                .expr_type(receiver, bindings)
-                .as_ref()
-                .is_some_and(|ty| {
-                    type_is_named_or_primitive(ty, "Str", |ty| matches!(ty, ir::Type::Str))
-                })
+        name == "compare" && self.is_java_string_receiver(receiver, bindings)
+    }
+
+    fn is_java_string_receiver(
+        &self,
+        receiver: &core::Expr,
+        bindings: &HashMap<String, String>,
+    ) -> bool {
+        self.expr_type(receiver, bindings)
+            .as_ref()
+            .is_some_and(|ty| {
+                type_is_named_or_primitive(ty, "Str", |ty| matches!(ty, ir::Type::Str))
+            })
     }
 
     fn emit_source_arg_for_param_spec(
@@ -7551,6 +7790,13 @@ impl<'a> SourceBodyEmitter<'a> {
                 return Some(local.ty.clone());
             }
         }
+        if let core::Expr::Member { receiver, name, .. } = expr {
+            let receiver_ty = self.expr_type(receiver, bindings)?;
+            let support = JavaIrSupport::new(self.bundle, self.function, self.names);
+            if support.type_has_getter_for_receiver(&receiver_ty, name) {
+                return support.getter_return_type_for_receiver(&receiver_ty, name);
+            }
+        }
         self.bundle
             .ir
             .source_exprs
@@ -7589,8 +7835,10 @@ impl<'a> SourceBodyEmitter<'a> {
                 }
                 core::Expr::Member { receiver, name, .. } => {
                     let receiver_ty = self.expr_type(receiver, bindings)?;
-                    JavaIrSupport::new(self.bundle, self.function, self.names)
+                    let support = JavaIrSupport::new(self.bundle, self.function, self.names);
+                    support
                         .field_type(&receiver_ty, name)
+                        .or_else(|| support.getter_return_type_for_receiver(&receiver_ty, name))
                 }
                 core::Expr::Call { callee, args, .. } => {
                     if let Some(ir::Type::Function { ret, .. }) = self.expr_type(callee, bindings) {
@@ -8729,6 +8977,87 @@ impl<'a> JavaIrSupport<'a> {
         self.bundle.ir.types.iter().find(|ty| ty.name == name)
     }
 
+    fn type_has_getter_for_receiver(&self, receiver: &ir::Type, name: &str) -> bool {
+        if self.receiver_has_field(receiver, name) {
+            return false;
+        }
+        if java_builtin_getter_type(receiver, name).is_some() {
+            return true;
+        }
+        let ir::Type::Named {
+            name: type_name, ..
+        } = receiver
+        else {
+            return false;
+        };
+        self.type_def(type_name)
+            .is_some_and(|ty| self.type_has_getter(ty, name))
+    }
+
+    fn receiver_has_field(&self, receiver: &ir::Type, name: &str) -> bool {
+        match receiver {
+            ir::Type::Named {
+                name: type_name, ..
+            } => self
+                .type_def(type_name)
+                .is_some_and(|ty| ty.fields.iter().any(|field| field.name == name)),
+            ir::Type::Record(fields) => fields.iter().any(|field| field.name == name),
+            _ => false,
+        }
+    }
+
+    fn type_has_getter(&self, ty: &ir::TypeDef, name: &str) -> bool {
+        self.type_has_getter_inner(ty, name, &mut HashSet::new())
+    }
+
+    fn type_has_getter_inner(
+        &self,
+        ty: &ir::TypeDef,
+        name: &str,
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        if !seen.insert(ty.name.clone()) || ty.fields.iter().any(|field| field.name == name) {
+            return false;
+        }
+        if self
+            .functions_named(ty, name)
+            .any(|function| function.getter)
+        {
+            return true;
+        }
+        ty.with_bounds.iter().any(|bound| {
+            let ir::Type::Named { name: bound, .. } = bound else {
+                return false;
+            };
+            self.type_def(bound)
+                .is_some_and(|bound| self.type_has_getter_inner(bound, name, seen))
+        })
+    }
+
+    fn getter_return_type_for_receiver(&self, receiver: &ir::Type, name: &str) -> Option<ir::Type> {
+        if self.receiver_has_field(receiver, name) {
+            return None;
+        }
+        if let Some(ty) = java_builtin_getter_type(receiver, name) {
+            return Some(ty);
+        }
+        let ir::Type::Named {
+            name: type_name,
+            args,
+        } = receiver
+        else {
+            return None;
+        };
+        let ty = self.type_def(type_name)?;
+        if ty.fields.iter().any(|field| field.name == name) {
+            return None;
+        }
+        let function = self
+            .functions_named(ty, name)
+            .find(|function| function.getter)?;
+        Some(self.substitute_receiver_type_args(type_name, args, &function.return_ty))
+    }
+
     fn functions_named<'b>(
         &'b self,
         ty: &'b ir::TypeDef,
@@ -9682,6 +10011,14 @@ fn builtin_method_param_types(
     method: &str,
     arg_len: usize,
 ) -> Option<Vec<ir::Type>> {
+    if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
+        return match (method, arg_len) {
+            ("split" | "indexOf" | "compare", 1) => Some(vec![ir::Type::Str]),
+            ("size" | "trim" | "isEmpty" | "nonEmpty", 0) => Some(Vec::new()),
+            ("runeAt" | "expectRuneAt", 1) => Some(vec![ir::Type::Int]),
+            _ => None,
+        };
+    }
     match receiver {
         ir::Type::Named { name, args }
             if matches!(name.as_str(), "Vector" | "LinkedList" | "Array" | "Set")
@@ -9691,6 +10028,10 @@ fn builtin_method_param_types(
                 ("add", 1) => Some(vec![args[0].clone()]),
                 ("addAll", 1) => Some(vec![receiver.clone()]),
                 ("map", 1) => Some(vec![ir::Type::Function {
+                    params: vec![args[0].clone()],
+                    ret: Box::new(ir::Type::Unknown),
+                }]),
+                ("flatMap", 1) if name == "Vector" => Some(vec![ir::Type::Function {
                     params: vec![args[0].clone()],
                     ret: Box::new(ir::Type::Unknown),
                 }]),
@@ -9740,6 +10081,17 @@ fn builtin_method_return_type(
     method: &str,
     arg_len: usize,
 ) -> Option<ir::Type> {
+    if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
+        return match (method, arg_len) {
+            ("split", 1) => Some(ir::Type::list(ir::Type::Str)),
+            ("trim", 0) => Some(ir::Type::Str),
+            ("isEmpty" | "nonEmpty", 0) => Some(ir::Type::Bool),
+            ("size", 0) | ("indexOf" | "compare", 1) => Some(ir::Type::Int),
+            ("runeAt", 1) => Some(ir::Type::option(ir::Type::named("Rune"))),
+            ("expectRuneAt", 1) => Some(ir::Type::named("Rune")),
+            _ => None,
+        };
+    }
     match receiver {
         ir::Type::Named { name, .. }
             if matches!(
@@ -9822,6 +10174,7 @@ fn builtin_method_return_type(
                     args[0].clone(),
                     args[1].clone(),
                 ]))),
+                ("keys", 0) => Some(ir::Type::list(args[0].clone())),
                 ("values", 0) => Some(ir::Type::list(args[1].clone())),
                 _ => None,
             }
@@ -10501,6 +10854,83 @@ fn sanitize_identifier(name: &str, style: IdentifierStyle) -> String {
         out.push('_');
     }
     out
+}
+
+fn java_builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
+    if matches!(receiver, ir::Type::Unknown) && java_known_getter_name(name) {
+        return Some(ir::Type::Unknown);
+    }
+    if matches!(receiver, ir::Type::Str) {
+        return match name {
+            "size" => Some(ir::Type::Int),
+            "isEmpty" | "nonEmpty" => Some(ir::Type::Bool),
+            _ => None,
+        };
+    }
+
+    let ir::Type::Named {
+        name: type_name,
+        args,
+    } = receiver
+    else {
+        return None;
+    };
+    let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
+    match (type_name.as_str(), name) {
+        ("Str", "size") => Some(ir::Type::Int),
+        ("Str", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
+        ("Option", "isSet" | "isDefined" | "isSuccess" | "isEmpty")
+        | ("Result", "isOk" | "isSuccess" | "isErr")
+        | ("Either", "isLeft" | "isRight" | "isSuccess") => Some(ir::Type::Bool),
+        ("Vector" | "LinkedList" | "Array", "head" | "first" | "last") => {
+            Some(ir::Type::option(item))
+        }
+        ("Vector" | "LinkedList" | "Array" | "Set" | "Map", "size") => Some(ir::Type::Int),
+        ("Vector" | "LinkedList", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
+        ("Type", "name" | "qualifiedName")
+        | (
+            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
+            | "AnnotationType",
+            "name" | "qualifiedName",
+        ) => Some(ir::Type::option(ir::Type::Str)),
+        ("Type", "kind")
+        | (
+            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
+            | "AnnotationType",
+            "kind",
+        ) => Some(ir::Type::named("TypeKind")),
+        ("AnnotationValue", "name") | ("Field" | "Method" | "Param" | "EnumCase", "name") => {
+            Some(ir::Type::Str)
+        }
+        ("ClassType" | "ShapeType" | "ObjectType" | "AnnotationType", "fields")
+        | ("EnumCase", "fields") => Some(ir::Type::list(ir::Type::named("Field"))),
+        ("ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType", "methods") => {
+            Some(ir::Type::list(ir::Type::named("Method")))
+        }
+        ("Method", "params") => Some(ir::Type::list(ir::Type::named("Param"))),
+        ("EnumType", "cases") => Some(ir::Type::list(ir::Type::named("EnumCase"))),
+        ("Field", "fieldType") | ("Method", "returnType") | ("Param", "paramType") => {
+            Some(ir::Type::named("Type"))
+        }
+        ("Field", "isPrivate") => Some(ir::Type::Bool),
+        _ => None,
+    }
+}
+
+fn java_known_getter_name(name: &str) -> bool {
+    matches!(
+        name,
+        "hasNext"
+            | "isSet"
+            | "isDefined"
+            | "isSuccess"
+            | "isEmpty"
+            | "nonEmpty"
+            | "isOk"
+            | "isErr"
+            | "isLeft"
+            | "isRight"
+    )
 }
 
 #[derive(Debug, Clone, Copy)]

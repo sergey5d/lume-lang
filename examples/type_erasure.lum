@@ -4,7 +4,7 @@
 # 0
 
 def acceptUnknownArray(values [_]) Unit {
-    println(values.size())
+    println(values.size)
 }
 
 def same[T](left T, right T) Unit {}
@@ -25,6 +25,6 @@ def main() Unit {
     same(values[0], values[1])
     acceptUnknownArray(values)
 
-    println(keyErased.size())
-    println(fullyErased.size())
+    println(keyErased.size)
+    println(fullyErased.size)
 }

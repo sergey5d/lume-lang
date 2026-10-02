@@ -63,6 +63,10 @@ public final class LumeRuntime {
         }
     }
 
+    public static LumeVector<String> stringSplit(String text, String separator) {
+        return LumeVector.from(Arrays.asList(text.split(separator, -1)));
+    }
+
     public static Boolean extractSuccessIsSet(Object value) {
         if (value instanceof Option<?> option) {
             return option.isDefined();

@@ -46,6 +46,7 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(15, "entries", Vec::new(), map_entries_list),
             builtin_method(16, "clear", Vec::new(), map_clear),
             builtin_method(17, "values", Vec::new(), map_values),
+            builtin_method(18, "keys", Vec::new(), map_keys),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -133,6 +134,24 @@ fn map_values(
             .borrow()
             .iter()
             .map(|(_, value)| interpreter.clone_value(value))
+            .collect(),
+    ))
+}
+
+fn map_keys(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Map.keys expects 0 arguments"));
+    }
+    Ok(Value::list(
+        map_entries(&receiver)
+            .borrow()
+            .iter()
+            .map(|(key, _)| interpreter.clone_value(key))
             .collect(),
     ))
 }

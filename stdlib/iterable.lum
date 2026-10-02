@@ -3,7 +3,7 @@
 # INTERPRETER
 
 interface Iterator[T] {
-    def hasNext() Bool
+    def hasNext Bool
     def next() T
 }
 

@@ -20,6 +20,6 @@ def main() Int {
 		println("combo " + item)
 	}
 
-	println("size " + items.size())
+	println("size " + items.size)
 	0
 }

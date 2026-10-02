@@ -108,6 +108,12 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_lambda_body(&mut self) -> Option<LambdaBody> {
         if self.at(TokenKind::LBrace) {
+            if self.looks_like_brace_record_literal(false) {
+                return self
+                    .parse_brace_record_literal_expr()
+                    .map(Box::new)
+                    .map(LambdaBody::Expr);
+            }
             return self.parse_block().map(LambdaBody::Block);
         }
         self.skip_newlines();
@@ -466,6 +472,19 @@ impl<'a> Parser<'a> {
             },
         }
 
+        fn inferred_field_or_positional(value: Expr) -> RecordEntry {
+            let span = value.span();
+            match &value {
+                Expr::Member { name, .. } => RecordEntry::Field {
+                    name: name.clone(),
+                    ty: None,
+                    value,
+                    span,
+                },
+                _ => RecordEntry::Positional { span },
+            }
+        }
+
         let mut entries = Vec::new();
         self.skip_newlines();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
@@ -533,17 +552,17 @@ impl<'a> Parser<'a> {
                         } else {
                             self.restore(checkpoint);
                             let value = self.parse_expr()?;
-                            RecordEntry::Positional { span: value.span() }
+                            inferred_field_or_positional(value)
                         }
                     } else {
                         self.restore(checkpoint);
                         let value = self.parse_expr()?;
-                        RecordEntry::Positional { span: value.span() }
+                        inferred_field_or_positional(value)
                     }
                 } else {
                     self.restore(checkpoint);
                     let value = self.parse_expr()?;
-                    RecordEntry::Positional { span: value.span() }
+                    inferred_field_or_positional(value)
                 }
             } else {
                 let key_or_value = self.parse_or_expr()?;
@@ -555,9 +574,7 @@ impl<'a> Parser<'a> {
                     ));
                     return None;
                 } else {
-                    RecordEntry::Positional {
-                        span: key_or_value.span(),
-                    }
+                    inferred_field_or_positional(key_or_value)
                 }
             };
             entries.push(entry);
@@ -1092,34 +1109,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub(super) fn parse_colon_expr(&mut self) -> Option<Expr> {
-        let mut expr = self.parse_or_expr()?;
-        loop {
-            let op = if self.match_token(TokenKind::Colon) {
-                self.diagnostics.push(Diagnostic::error(
-                    "removed_pair_expression",
-                    "':' pair expressions are no longer supported; use '(left, right)' for tuple pairs or '[key: value]' for maps",
-                    self.previous_span(),
-                ));
-                BinaryOp::Colon
-            } else {
-                break;
-            };
-            self.skip_newlines();
-            let right = self.parse_or_expr()?;
-            let span = expr.span().cover(right.span());
-            expr = Expr::Binary {
-                left: Box::new(expr),
-                op,
-                right: Box::new(right),
-                span,
-            };
-        }
-        Some(expr)
-    }
-
     pub(super) fn parse_extract_or_expr(&mut self) -> Option<Expr> {
-        let value = self.parse_colon_expr()?;
+        let value = self.parse_or_expr()?;
         if !self.match_token(TokenKind::QuestionQuestion) {
             return Some(value);
         }
@@ -1211,12 +1202,26 @@ impl<'a> Parser<'a> {
         }
 
         self.skip_newlines();
+        let negated = self.at(TokenKind::Identifier) && self.current().lexeme == "not";
+        if negated {
+            self.advance();
+            self.skip_newlines();
+        }
         let target = self.parse_type_ref()?;
         let span = left.span().cover(target.span());
-        let expr = Expr::Is {
+        let type_test = Expr::Is {
             left: Box::new(left),
             target,
             span,
+        };
+        let expr = if negated {
+            Expr::Unary {
+                op: UnaryOp::Not,
+                expr: Box::new(type_test),
+                span,
+            }
+        } else {
+            type_test
         };
 
         while self.match_keyword(Keyword::Is) {
@@ -1227,6 +1232,10 @@ impl<'a> Parser<'a> {
                 operator_span,
             ));
             self.skip_newlines();
+            if self.at(TokenKind::Identifier) && self.current().lexeme == "not" {
+                self.advance();
+                self.skip_newlines();
+            }
             self.parse_type_ref()?;
         }
 
@@ -1537,13 +1546,35 @@ impl<'a> Parser<'a> {
                         span: slice_span,
                     };
                 } else {
-                    let Some(index) = first else {
+                    let Some(mut index) = first else {
                         self.error_at_current(
                             "expected_expression",
                             "expected index expression or ':' in brackets",
                         );
                         return None;
                     };
+                    if self.match_token(TokenKind::Comma) {
+                        let mut items = vec![index];
+                        loop {
+                            self.skip_newlines();
+                            items.push(self.with_trailing_block_calls_allowed(|parser| {
+                                parser.parse_slice_bound()
+                            })?);
+                            self.skip_newlines();
+                            if !self.match_token(TokenKind::Comma) {
+                                break;
+                            }
+                        }
+                        let tuple_span = items
+                            .first()
+                            .map(Expr::span)
+                            .unwrap_or(start)
+                            .cover(items.last().map(Expr::span).unwrap_or(start));
+                        index = Expr::TupleLiteral {
+                            items,
+                            span: tuple_span,
+                        };
+                    }
                     let end = self.consume(TokenKind::RBracket, "expected ']' after index")?;
                     expr = Expr::Index {
                         receiver: Box::new(expr),

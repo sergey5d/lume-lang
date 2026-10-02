@@ -25,6 +25,7 @@ pub fn desugar_method_decl(method: &ast::MethodDecl) -> core::MethodDecl {
         annotations: method.annotations.clone(),
         visibility: method.visibility,
         name: method.name.clone(),
+        getter: method.getter,
         type_params: method.type_params.clone(),
         type_conditions: method.type_conditions.clone(),
         params: method.params.clone(),

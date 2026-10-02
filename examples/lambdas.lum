@@ -60,10 +60,10 @@ def main() Int {
     )
     doubledV5 = seen.map { item => item * 2 }
 
-    println("map 1 " + doubled.contains(4) + " " + doubled.size())
-    println("map 2 " + doubledV2.contains(4) + " " + doubledV2.size())
-    println("map 3 " + doubledV3.contains(4) + " " + doubledV3.size())
-    println("map 4 " + doubledV4.contains(4) + " " + doubledV4.size())
-    println("map 5 " + doubledV5.contains(4) + " " + doubledV5.size())
+    println("map 1 " + doubled.contains(4) + " " + doubled.size)
+    println("map 2 " + doubledV2.contains(4) + " " + doubledV2.size)
+    println("map 3 " + doubledV3.contains(4) + " " + doubledV3.size)
+    println("map 4 " + doubledV4.contains(4) + " " + doubledV4.size)
+    println("map 5 " + doubledV5.contains(4) + " " + doubledV5.size)
     0
 }

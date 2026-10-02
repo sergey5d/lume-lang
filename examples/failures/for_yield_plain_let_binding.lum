@@ -7,5 +7,5 @@ def main() Unit {
         let doubled = item * 2
     } yield doubled
 
-    println(values.size())
+    println(values.size)
 }

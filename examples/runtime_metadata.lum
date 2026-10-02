@@ -26,25 +26,25 @@ def main() Unit {
     declared Type[User] = typeOf[User]
     actual Type[User] = user.runtimeType
 
-    println(declared.name() !)
-    println(actual.qualifiedName() !)
-    println(declared.kind())
+    println(declared.name !)
+    println(actual.qualifiedName !)
+    println(declared.kind)
 
     classType ClassType[User] = declared.asClass() !
-    fields = classType.fields()
-    println(fields.size())
+    fields = classType.fields
+    println(fields.size)
 
     let Some(nameField) = fields.at(0) else panic("expected name field")
     let Some(ageField) = fields.at(1) else panic("expected age field")
 
-    println(nameField.name())
-    println(nameField.fieldType().name() !)
-    println(ageField.fieldType().name() !)
+    println(nameField.name)
+    println(nameField.fieldType.name !)
+    println(ageField.fieldType.name !)
 
-    println(typeOf[Int].kind())
+    println(typeOf[Int].kind)
 
     enumType EnumType[Status] = typeOf[Status].asEnum() !
-    println(enumType.name() !)
-    println(enumType.kind())
-    println(enumType.case("Pending")!.name())
+    println(enumType.name !)
+    println(enumType.kind)
+    println(enumType.case("Pending")!.name)
 }

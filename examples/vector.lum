@@ -51,7 +51,7 @@ def main() Unit {
 
     let Some(zippedPair) = zipped.at(1) else return ()
     let Some(indexedPair) = indexed.at(3) else return ()
-    let Some(head) = items.head() else return ()
+    let Some(head) = items.head else return ()
     let Ok { value as removed } = items.removeAt(1) else return ()
 
     let (zipValue, zipLabel) = zippedPair
@@ -70,9 +70,9 @@ def main() Unit {
     println("at " + items.at(1).getOr(0))
     println("head " + head)
     println("tail " + tailItems.at(0).getOr(0) + " " + tailItems.at(2).getOr(0))
-    println("remove " + removed + " " + items.size())
-    println("size " + items.size())
+    println("remove " + removed + " " + items.size)
+    println("size " + items.size)
 
     spreaded = [0, ...items, 5, ...[6, 7]]
-    println("spread " + spreaded.at(0).getOr(0) + " " + spreaded.at(3).getOr(0) + " " + spreaded.at(6).getOr(0) + " " + spreaded.size())
+    println("spread " + spreaded.at(0).getOr(0) + " " + spreaded.at(3).getOr(0) + " " + spreaded.at(6).getOr(0) + " " + spreaded.size)
 }

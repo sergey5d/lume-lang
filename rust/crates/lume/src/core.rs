@@ -50,6 +50,7 @@ pub struct MethodDecl {
     pub annotations: Vec<Annotation>,
     pub visibility: Visibility,
     pub name: String,
+    pub getter: bool,
     pub type_params: Vec<TypeParam>,
     pub type_conditions: Vec<ast::GenericCondition>,
     pub params: Vec<Param>,

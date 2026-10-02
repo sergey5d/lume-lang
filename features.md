@@ -72,6 +72,36 @@ Related syntax question:
 - if added, decide whether they should mark interface satisfaction, override of a concrete method, or both
 - define diagnostics for accidental signature mismatches even if no marker is added
 
+### Getter Effect Architecture
+
+Current getters reject direct writes to class or shape fields, but the compiler
+does not yet prove that methods called from a getter are read-only. Add effect
+checking before treating getters as transitively read-only.
+
+Proposed model:
+- infer a small effect set for each callable, initially `read`, `write`, `io`,
+  `async`, and `unsafe`; a pure callable has an empty effect set
+- a field read contributes `read`, a field or indexed-field mutation contributes
+  `write`, and a call contributes the callee's effects
+- getters may have only the empty set or `read`; reject any path that can produce
+  `write`, `io`, `async`, or `unsafe`
+- include effects in interface method contracts and function types so calls
+  through interfaces, generic bounds, and callbacks remain checkable
+- implementations and overrides may preserve or narrow a declared effect set,
+  but may not widen it
+- infer mutually recursive callables as a strongly connected component and
+  solve their effects to a fixed point
+- persist inferred public effects in module metadata so imported calls do not
+  require rechecking source
+- treat unannotated Java/external calls conservatively; permit them in getters
+  only when bridge metadata declares an allowed effect contract
+- report the shortest call chain from a getter to the disallowed effect, rather
+  than only flagging the outer call
+
+Possible explicit contract syntax should be settled separately. The checker can
+start with inference and reserve annotations or an `effects` clause for public
+API guarantees once real examples show which spelling is clearest.
+
 ### 6. Function Type Variance
 
 Open checker work:
@@ -186,7 +216,7 @@ Parameter-based inference should also be considered:
 
 ```txt
 def describe[reified A](value A) Str {
-    typeOf[A].qualifiedName() !
+    typeOf[A].qualifiedName !
 }
 
 name = describe(User { name: "Ada" })

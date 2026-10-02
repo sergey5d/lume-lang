@@ -33,5 +33,5 @@ def main() Unit {
 
     seen = Set(1, 2)
     seen.add(3)
-    println(seen.size())
+    println(seen.size)
 }

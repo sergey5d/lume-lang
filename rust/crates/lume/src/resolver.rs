@@ -289,6 +289,7 @@ struct TypeAliasInfo {
 struct DeclSpan {
     visibility: Visibility,
     span: crate::source::Span,
+    getter: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -624,7 +625,7 @@ fn format_path_diagnostics(
         .iter()
         .map(|diagnostic| render_diagnostic(&display, source, diagnostic))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n\n")
 }
 
 fn module_alias(path: &str) -> String {
@@ -921,6 +922,7 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
                     DeclSpan {
                         visibility: function.visibility,
                         span: function.span,
+                        getter: false,
                     },
                 );
             }
@@ -978,6 +980,7 @@ fn summarize_type(decl: &TypeDecl) -> TypeInfo {
                     DeclSpan {
                         visibility: method.visibility,
                         span: method.span,
+                        getter: method.getter,
                     },
                 );
             }
@@ -1018,6 +1021,8 @@ struct Resolver<'a> {
     modules_by_alias: HashMap<String, ModuleNamespace>,
     field_hint_scopes: Vec<FieldHintScope>,
     method_hint_scopes: Vec<HashSet<String>>,
+    getter_hint_scopes: Vec<HashSet<String>>,
+    binding_initializer_names: Vec<HashSet<String>>,
     loop_depth: usize,
     current_constructor: bool,
 }
@@ -1050,6 +1055,8 @@ impl<'a> Resolver<'a> {
             modules_by_alias: HashMap::new(),
             field_hint_scopes: Vec::new(),
             method_hint_scopes: Vec::new(),
+            getter_hint_scopes: Vec::new(),
+            binding_initializer_names: Vec::new(),
             loop_depth: 0,
             current_constructor: false,
         }
@@ -1525,6 +1532,10 @@ impl<'a> Resolver<'a> {
             TypeMember::Method(method) => Some(method.name.as_str()),
             _ => None,
         }));
+        self.push_getter_hints(decl.members.iter().filter_map(|member| match member {
+            TypeMember::Method(method) if method.getter => Some(method.name.as_str()),
+            _ => None,
+        }));
         for member in &decl.members {
             match member {
                 TypeMember::Method(method) => self.resolve_method(method),
@@ -1548,6 +1559,7 @@ impl<'a> Resolver<'a> {
                 TypeMember::Field(_) => {}
             }
         }
+        self.pop_getter_hints();
         self.pop_method_hints();
         self.pop_field_hints();
         self.pop_scope();
@@ -1578,9 +1590,26 @@ impl<'a> Resolver<'a> {
                 .iter()
                 .flat_map(|info| info.methods.keys().map(String::as_str)),
         );
+        self.push_getter_hints(
+            target_fields
+                .iter()
+                .flat_map(|info| {
+                    info.methods
+                        .iter()
+                        .filter_map(|(name, method)| method.getter.then_some(name.as_str()))
+                })
+                .chain(
+                    block
+                        .methods
+                        .iter()
+                        .filter(|method| method.getter)
+                        .map(|method| method.name.as_str()),
+                ),
+        );
         for method in &block.methods {
             self.resolve_method(method);
         }
+        self.pop_getter_hints();
         self.pop_method_hints();
         self.pop_field_hints();
         self.pop_scope();
@@ -1719,9 +1748,17 @@ impl<'a> Resolver<'a> {
     fn resolve_stmt(&mut self, statement: &Stmt) {
         match statement {
             Stmt::Binding(binding) => {
+                self.binding_initializer_names.push(
+                    binding
+                        .bindings
+                        .iter()
+                        .map(|local| local.name.clone())
+                        .collect(),
+                );
                 for value in &binding.values {
                     self.resolve_expr(value);
                 }
+                self.binding_initializer_names.pop();
                 for local in &binding.bindings {
                     self.resolve_type_ref(local.ty.as_ref());
                     self.define_binding(local, "duplicate_binding");
@@ -2015,7 +2052,10 @@ impl<'a> Resolver<'a> {
     fn resolve_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::Identifier { name, span } => {
-                if self.lookup_scoped_value(name).is_some() || self.is_field_hint(name) {
+                if self.lookup_scoped_value(name).is_some()
+                    || self.is_field_hint(name)
+                    || self.is_getter_hint(name)
+                {
                     return;
                 }
                 if !self.is_name_defined(name) {
@@ -2035,13 +2075,40 @@ impl<'a> Resolver<'a> {
                 }
             }
             Expr::Call { callee, args, .. } => {
+                if let Some((receiver, type_args)) = generic_call_callee_parts(callee) {
+                    self.resolve_expr(receiver);
+                    for type_arg in &type_args {
+                        self.resolve_type_ref(Some(type_arg));
+                    }
+                    for arg in args {
+                        self.resolve_expr(&arg.value);
+                    }
+                    return;
+                }
                 let skip_init = matches!(
                     callee.as_ref(),
                     Expr::Identifier { name, .. } if self.current_constructor && name == "new"
                 );
                 let skip_any_widening =
                     matches!(callee.as_ref(), Expr::Identifier { name, .. } if name == "Any");
-                if !skip_init && !skip_any_widening && !self.is_implicit_method_call(callee) {
+                let implicit_method_call = self.is_implicit_method_call(callee);
+                if implicit_method_call {
+                    if let Expr::Identifier { name, span } = callee.as_ref()
+                        && self
+                            .binding_initializer_names
+                            .last()
+                            .is_some_and(|names| names.contains(name))
+                    {
+                        self.add_error(
+                            "shadowing_binding",
+                            format!(
+                                "call '{}()' conflicts with the binding being declared; write 'this.{}()' to call the method",
+                                name, name
+                            ),
+                            *span,
+                        );
+                    }
+                } else if !skip_init && !skip_any_widening {
                     self.resolve_expr(callee);
                 }
                 for arg in args {
@@ -2791,6 +2858,24 @@ impl<'a> Resolver<'a> {
         self.method_hint_scopes.pop();
     }
 
+    fn push_getter_hints<'b>(&mut self, getters: impl Iterator<Item = &'b str>) {
+        self.getter_hint_scopes
+            .push(getters.map(|name| name.to_string()).collect());
+    }
+
+    fn pop_getter_hints(&mut self) {
+        self.getter_hint_scopes.pop();
+    }
+
+    fn is_getter_hint(&self, name: &str) -> bool {
+        !self.is_name_defined(name)
+            && self
+                .getter_hint_scopes
+                .iter()
+                .rev()
+                .any(|scope| scope.contains(name))
+    }
+
     fn is_implicit_method_call(&self, expr: &Expr) -> bool {
         let Expr::Identifier { name, .. } = expr else {
             return false;
@@ -3003,6 +3088,53 @@ impl<'a> Resolver<'a> {
     }
 }
 
+fn generic_call_callee_parts(callee: &Expr) -> Option<(&Expr, Vec<TypeRef>)> {
+    let Expr::Index {
+        receiver, index, ..
+    } = callee
+    else {
+        return None;
+    };
+    Some((receiver.as_ref(), generic_call_type_refs(index)?))
+}
+
+fn generic_call_type_refs(expr: &Expr) -> Option<Vec<TypeRef>> {
+    match expr {
+        Expr::TupleLiteral { items, .. } => items
+            .iter()
+            .map(generic_call_type_ref)
+            .collect::<Option<Vec<_>>>(),
+        _ => Some(vec![generic_call_type_ref(expr)?]),
+    }
+}
+
+fn generic_call_type_ref(expr: &Expr) -> Option<TypeRef> {
+    match expr {
+        Expr::Identifier { name, span } => Some(TypeRef::Named {
+            name: name.clone(),
+            args: Vec::new(),
+            span: *span,
+        }),
+        Expr::Placeholder { span } => Some(TypeRef::Wildcard { span: *span }),
+        Expr::Index {
+            receiver,
+            index,
+            span,
+        } => {
+            let TypeRef::Named { name, .. } = generic_call_type_ref(receiver)? else {
+                return None;
+            };
+            Some(TypeRef::Named {
+                name,
+                args: generic_call_type_refs(index)?,
+                span: *span,
+            })
+        }
+        Expr::Group { inner, .. } => generic_call_type_ref(inner),
+        _ => None,
+    }
+}
+
 fn member_segments(expr: &Expr) -> Option<Vec<String>> {
     match expr {
         Expr::Identifier { name, .. } => Some(vec![name.clone()]),
@@ -3138,6 +3270,48 @@ def main() Int {
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn rejects_binding_initializer_call_that_conflicts_with_method_name() {
+        let program = parse_inline(
+            r#"
+class Tracker {
+    def rollups() [Str] = []
+
+    def allRollups() [Str] {
+        rollups = rollups()
+        rollups
+    }
+}
+"#,
+        );
+        let result = resolve_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "shadowing_binding" && diag.message.contains("this.rollups()")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_binding_initialized_by_explicit_same_named_method() {
+        let program = parse_inline(
+            r#"
+class Tracker {
+    def rollups() [Str] = []
+
+    def allRollups() [Str] {
+        rollups = this.rollups()
+        rollups
+    }
+}
+"#,
+        );
+        let result = resolve_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]
@@ -3345,7 +3519,7 @@ def main() Int = answer()
     }
 
     #[test]
-    fn formats_path_diagnostics_one_per_line() {
+    fn formats_path_diagnostics_with_blank_separators() {
         let diagnostics = vec![
             Diagnostic::error(
                 "first",
@@ -3376,7 +3550,7 @@ def main() Int = answer()
         );
         assert_eq!(
             rendered,
-            "error[first]: one\n  --> /tmp/test.lum:2:3\n  |\n2 | 12345\n  |   ^ one\nerror[second]: two\n  --> /tmp/test.lum:4:5\n  |\n4 | 123456\n  |     ^ two"
+            "error[first]: one\n  --> /tmp/test.lum:2:3\n  |\n2 | 12345\n  |   ^ one\n\nerror[second]: two\n  --> /tmp/test.lum:4:5\n  |\n4 | 123456\n  |     ^ two"
         );
     }
 }

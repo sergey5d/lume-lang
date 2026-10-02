@@ -9,5 +9,5 @@ def main() Unit {
         let Some(value) = maybe
     } yield value
 
-    println(mapped.size())
+    println(mapped.size)
 }

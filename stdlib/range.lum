@@ -16,7 +16,7 @@ class IntRange with Iterable[Int] {
         out [(Int, X)] = []
         right Iterator[X] = other.iterator()
         for left <- this {
-            if !right.hasNext() {
+            if !right.hasNext {
                 return out
             }
             out.append((left, right.next()))
@@ -46,7 +46,7 @@ private class RangeIterator with Iterator[Int] {
         this.step = step
     }
 
-    def hasNext() Bool {
+    def hasNext Bool {
         if this.step > 0 {
             return this.current < this.end
         }

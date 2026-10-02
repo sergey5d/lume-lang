@@ -1,0 +1,29 @@
+# EXPECT:
+# Ada Ada
+# 5
+
+interface Named {
+    def label Str
+}
+
+class Item with Named {
+    name Str
+
+    def label Str = this.name
+    def repeated Str = label + " " + this.label
+}
+
+shape Point {
+    x Int
+    y Int
+
+    def total Int = this.x + this.y
+}
+
+def main() Unit {
+    item Item = Item("Ada")
+    point Point = Point(2, 3)
+
+    println(item.repeated)
+    println(point.total)
+}

@@ -17,7 +17,7 @@ def expandPage(page [MaybeInt]) [Int] {
             case _ => None
         }
 
-        if parsed.isSet() {
+        if parsed.isSet {
             extracted.append(parsed !)
         }
     }
@@ -33,6 +33,6 @@ def main() Unit {
 
     extracted [Int] = pages.flatMap(page => expandPage(page))
 
-    println("count " + extracted.size())
+    println("count " + extracted.size)
     extracted.forEach(item => println("item " + item))
 }

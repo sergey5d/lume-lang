@@ -1,0 +1,40 @@
+shape StoredRollup {
+    total Int
+    label Str
+    internalId Int
+}
+
+shape Rollup {
+    total Int
+    label Str
+}
+
+def source() StoredRollup? = Some(StoredRollup {
+    total: 7
+    label: "week"
+    internalId: 99
+})
+
+def named() Rollup? = source().map(r => Rollup { ...r })
+
+def explicitShape() Rollup? = source().map(r => shape { ...r })
+
+def implicitShape() Rollup? = source().map(r => { ...r })
+
+def contextualNew() Rollup? = source().map(r => new { ...r })
+
+def namedMembers() Rollup? = source().map(r => Rollup { r.total, r.label })
+
+def explicitShapeMembers() Rollup? = source().map(r => shape { r.total, r.label })
+
+def contextualNewMembers() Rollup? = source().map(r => new { r.total, r.label })
+
+def main() Unit {
+    println(named()!.total)
+    println(explicitShape()!.total)
+    println(implicitShape()!.total)
+    println(contextualNew()!.total)
+    println(namedMembers()!.total)
+    println(explicitShapeMembers()!.total)
+    println(contextualNewMembers()!.total)
+}

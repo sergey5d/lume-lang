@@ -1,26 +1,26 @@
 module lume/core
 
-type Option[T] =
+type Option[T] with Iterable[T] =
     class Some { value T }
     | object None {}
 
 ext Option[T] {
-    def isSet() Bool = match this {
+    def isSet Bool = match this {
         case Some { value: _ } => true
         case None => false
     }
 
-    def isDefined() Bool = match this {
+    def isDefined Bool = match this {
         case Some { value: _ } => true
         case None => false
     }
 
-    def isSuccess() Bool = match this {
+    def isSuccess Bool = match this {
         case Some { value: _ } => true
         case None => false
     }
 
-    def isEmpty() Bool = match this {
+    def isEmpty Bool = match this {
         case Some { value: _ } => false
         case None => true
     }
@@ -57,6 +57,6 @@ ext Option[T] {
 
     def iterator() Iterator[T] = match this {
         case Some { value } => [value].iterator()
-        case None => Vector().iterator()
+        case None => Vector[T]().iterator()
     }
 }

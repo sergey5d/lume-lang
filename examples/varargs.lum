@@ -25,7 +25,7 @@ def joinWords(separator Str, words [Str] vararg) Str {
 
 def describeTags(label Str, tags [Str] vararg) Str {
     first = tags.at(0).getOr("none")
-    label + " " + tags.size() + " " + first
+    label + " " + tags.size + " " + first
 }
 
 class Reporter {
@@ -36,7 +36,7 @@ class Reporter {
     }
 
     def line(name Str, tags [Str] vararg) Str {
-        this.prefix + ":" + name + "|" + tags.size() + "|" + joinWords(separator = ",", words = tags)
+        this.prefix + ":" + name + "|" + tags.size + "|" + joinWords(separator = ",", words = tags)
     }
 }
 
@@ -50,7 +50,7 @@ class Path {
         this.segments = segments
     }
 
-    def render() Str = this.label + " " + this.segments.size() + " " + joinWords(separator = "/", words = this.segments)
+    def render() Str = this.label + " " + this.segments.size + " " + joinWords(separator = "/", words = this.segments)
 }
 
 

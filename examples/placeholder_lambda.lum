@@ -18,18 +18,18 @@ def main() Unit {
     mapped = items.map(item => item + 1)
     str Str = "haha"
     words = [str]
-    sizes = words.map(word => word.size())
+    sizes = words.map(word => word.size)
     pairs = [("a", 1), ("bb", 2)]
     pairMapped = pairs.map(pair => {
         let (key, value) = pair
-        key.size() + value
+        key.size + value
     })
     pairIgnored = pairs.map(pair => {
         let (_, value) = pair
         value * 2
     })
     entries = ["a": 1, "bbb": 2]
-    mapMapped = entries.map((key, value) => key.size() + value)
+    mapMapped = entries.map((key, value) => key.size + value)
     tuple4s = [(1, 2, 3, 4), (4, 5, 6, 7)]
     tuple4Mapped = tuple4s.map(tuple => {
         let (first, _, third, _) = tuple

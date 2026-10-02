@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
-public final class LumeVector<T> {
+public final class LumeVector<T> implements Iterable<T> {
     private final ArrayList<T> values;
 
     private LumeVector(ArrayList<T> values) {
@@ -102,6 +102,14 @@ public final class LumeVector<T> {
         return result;
     }
 
+    public <X> LumeVector<X> flatMap(Function<? super T, ?> mapper) {
+        var result = LumeVector.<X>empty();
+        for (var value : values) {
+            result.addAll(mapper.apply(value));
+        }
+        return result;
+    }
+
     public LumeVector<T> filter(Function<? super T, Boolean> predicate) {
         var result = LumeVector.<T>empty();
         for (var value : values) {
@@ -151,6 +159,7 @@ public final class LumeVector<T> {
         return new LumeVector<>(indexed);
     }
 
+    @Override
     public LumeIterator<T> iterator() {
         return LumeIterator.from(this);
     }

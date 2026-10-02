@@ -145,6 +145,9 @@ pub struct MethodDecl {
     pub annotations: Vec<Annotation>,
     pub visibility: Visibility,
     pub name: String,
+    /// True when the method is declared without a parameter list and is read
+    /// through member-access syntax.
+    pub getter: bool,
     pub type_params: Vec<TypeParam>,
     pub type_conditions: Vec<GenericCondition>,
     pub params: Vec<Param>,

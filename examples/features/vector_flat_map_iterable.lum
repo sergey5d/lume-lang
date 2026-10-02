@@ -1,0 +1,14 @@
+# EXPECT:
+# count 2
+# value 10
+# value 30
+
+def keepOdd(value Int) Int? =
+    if value % 2 == 1 { Some(value * 10) } else { None }
+
+def main() Unit {
+    values [Int] = [1, 2, 3, 4].flatMap { value => keepOdd(value) }
+
+    println("count", values.size)
+    values.forEach(value => println("value", value))
+}

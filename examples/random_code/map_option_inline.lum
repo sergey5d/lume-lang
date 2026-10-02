@@ -24,6 +24,6 @@ def main() Unit {
     third = extracted.at(2) ?? return ()
 
     println("first " + first.getOr(0))
-    println("second " + second.isEmpty())
+    println("second " + second.isEmpty)
     println("third " + third.getOr(0))
 }

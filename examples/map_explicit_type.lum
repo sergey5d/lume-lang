@@ -6,7 +6,7 @@
 
 def main() Int {
     empty Map[Str, Int] = Map()
-    println(empty.size())
+    println(empty.size)
 
     explicit Map[Str, Int] = ["one": 1]
     shorthand [Str: Int] = explicit

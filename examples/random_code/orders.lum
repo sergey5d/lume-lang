@@ -18,7 +18,7 @@ class OrderManager {
 
         arr = str.split("\s*,\s*")
 
-        assert(arr.size() == 5)
+        assert(arr.size == 5)
 
         id = try Int.parse(arr[0])
 
@@ -37,7 +37,7 @@ class OrderManager {
     }
 
     def checkQueuedOrders() {
-        while !this.queue.isEmpty() {
+        while !this.queue.isEmpty {
             first = this.queue[0]
             if first.status == "NEW" {
                 if first.lastUpdated - this.currentTick > 5 {
@@ -62,7 +62,7 @@ class OrderManager {
 
         savedOrder = this.map.get(parsedOrder.id)
 
-        if !savedOrder.isSet() {
+        if !savedOrder.isSet {
             this.map.put(parsedOrder.id, parsedOrder)
         }
 

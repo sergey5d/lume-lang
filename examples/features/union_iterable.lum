@@ -1,0 +1,29 @@
+# EXPECT:
+# present 7
+# count 1
+
+type MaybeValue[T] with Iterable[T] =
+    class Present { value T }
+    | object Missing {}
+
+ext MaybeValue[T] {
+    def iterator() Iterator[T] = match this {
+        case Present(value) => [value].iterator()
+        case Missing => Vector[T]().iterator()
+    }
+}
+
+def main() Unit {
+    present MaybeValue[Int] = Present(7)
+    missing MaybeValue[Int] = Missing
+    var count = 0
+
+    for value <- present {
+        println("present", value)
+        count += 1
+    }
+    for _ <- missing {
+        count += 1
+    }
+    println("count", count)
+}

@@ -28,7 +28,7 @@ def dietPlanPerformance(calories [Int], k Int, lower Int, upper Int) Int {
     var start Int = 0
     var points Int = evalPoints(acc, lower, upper)
 
-    while window < calories.size() {
+    while window < calories.size {
         acc += calories[window]
         acc -= calories[start]
         start += 1

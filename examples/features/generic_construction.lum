@@ -1,0 +1,23 @@
+class Box[T] {
+    value T
+
+    new(value T) {
+        this.value = value
+    }
+}
+
+def main() Unit {
+    users Vector[Str] = Vector()
+    lookup Map[Str, Int] = Map()
+    names Set[Str] = Set()
+    contextualSet Set[Str] = new()
+    explicit = Set[Str]()
+    inferred = Box("hello")
+    contextual Box[Str] = new("world")
+
+    users.add("Ada")
+    names.add("Ada")
+
+    println(users[0], lookup.size, names.contains("Ada"))
+    println(inferred.value, contextual.value, explicit.size, contextualSet.size)
+}

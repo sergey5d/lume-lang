@@ -66,7 +66,7 @@ def main() Unit {
     println("some ${some.getOr(0)}")
     println("none ${none.getError()}")
     println("optSome ${optSome.getOr(0)}")
-    println("optNone ${optNone.isEmpty()}")
+    println("optNone ${optNone.isEmpty}")
     println("pair ${pair.count}-${pair.label}")
     println("sum ${sum.getOr(0)}")
     println("sumFail ${sumFail.getError()}")

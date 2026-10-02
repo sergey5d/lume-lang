@@ -16,6 +16,6 @@ def main() Unit = {
     copy = values[:]
     println(copy.makeStr(","))
     copy.add(6)
-    println(values.size())
-    println(copy.size())
+    println(values.size)
+    println(copy.size)
 }

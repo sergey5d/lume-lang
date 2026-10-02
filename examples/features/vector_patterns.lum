@@ -21,19 +21,19 @@ def typedSummary(values [Any]) Str {
 
 def headTail(values [Int]) Str {
     let [head, ...tail] = values else return "empty head"
-    "head " + head + " tail " + tail.size()
+    "head " + head + " tail " + tail.size
 }
 
 def copyAll(values [Int]) Str {
     let [...all] = values
-    "all " + all.size()
+    "all " + all.size
 }
 
 def describe(values [Int]) Str {
     match values {
         case [] => "empty"
         case [only] => "single " + only
-        case [first, second, ...rest] => "many " + (first + second) + " rest " + rest.size()
+        case [first, second, ...rest] => "many " + (first + second) + " rest " + rest.size
     }
 }
 

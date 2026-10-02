@@ -3,5 +3,5 @@
 
 def main() Unit {
     values = [1, ...2]
-    println(values.size())
+    println(values.size)
 }

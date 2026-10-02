@@ -1,0 +1,10 @@
+# EXPECT:
+# alpha beta gamma
+# true true false false
+
+def main() Unit {
+    parts Vector[Str] = "  alpha, beta  ".trim().split("\s*,\s*")
+    parts.add("gamma")
+    println(parts[0], parts[1], parts[2])
+    println("".isEmpty, "lume".nonEmpty, "".nonEmpty, "lume".isEmpty)
+}

@@ -27,6 +27,9 @@ pub(super) fn define() -> RuntimeType {
                 str_expect_rune_at,
             ),
             builtin_method(4, "compare", vec![crate::ir::Type::Str], str_compare),
+            builtin_method(5, "trim", Vec::new(), str_trim),
+            builtin_method(6, "isEmpty", Vec::new(), str_is_empty),
+            builtin_method(7, "nonEmpty", Vec::new(), str_non_empty),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -77,6 +80,36 @@ fn str_size(
     Ok(Value::Int(text.chars().count() as i64))
 }
 
+fn str_is_empty(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!();
+    };
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Str.isEmpty expects 0 arguments"));
+    }
+    Ok(Value::Bool(text.is_empty()))
+}
+
+fn str_non_empty(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!();
+    };
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Str.nonEmpty expects 0 arguments"));
+    }
+    Ok(Value::Bool(!text.is_empty()))
+}
+
 fn str_split(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
@@ -105,6 +138,21 @@ fn str_split(
             .map(|part| Value::String(part.to_string()))
             .collect(),
     ))
+}
+
+fn str_trim(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!();
+    };
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Str.trim expects 0 arguments"));
+    }
+    Ok(Value::String(text.trim().to_string()))
 }
 
 fn str_rune_at(

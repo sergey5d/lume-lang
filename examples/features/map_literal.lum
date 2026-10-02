@@ -9,6 +9,7 @@
 # map spread shared 20
 # map spread size 4
 # map entries 4
+# map keys 4
 # 0
 
 def makeKey() Str = "made"
@@ -42,7 +43,7 @@ def main() Int {
     println("shape key", shapeValue)
 
     empty [Str: Int] = []
-    println("empty", empty.size())
+    println("empty", empty.size)
     empty["ready"] := 5
     let Some(emptyValue) = empty["ready"] else return 1
     println("empty value", emptyValue)
@@ -50,7 +51,7 @@ def main() Int {
     first = [1, 2]
     second = [3, 4]
     spreadVector = [0, ...first, ...second, 5]
-    println("vector spread", spreadVector.size())
+    println("vector spread", spreadVector.size)
 
     defaults [Str: Int] = ["one": 1, "shared": 2]
     overrides [Str: Int] = ["shared": 20, "three": 3]
@@ -58,10 +59,12 @@ def main() Int {
     merged [Str: Int] = [...copied, "two": 2, ...overrides]
     let Some(shared) = merged["shared"] else return 1
     println("map spread shared", shared)
-    println("map spread size", merged.size())
+    println("map spread size", merged.size)
 
     entryList [(Str, Int)] = [...merged.entries()]
-    println("map entries", entryList.size())
+    println("map entries", entryList.size)
+    keyList [Str] = merged.keys()
+    println("map keys", keyList.size)
 
     0
 }

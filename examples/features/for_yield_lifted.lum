@@ -29,7 +29,7 @@ def main() Int {
     println("option " + optionNumber)
 
     optionNone Int? = optionAdd(Some(2), None)
-    println("option none " + optionNone.isEmpty())
+    println("option none " + optionNone.isEmpty)
 
     resultValue Result[Int, Str] = resultAdd(Ok(2), Ok(5))
     let Ok { value as resultNumber } = resultValue else return 1

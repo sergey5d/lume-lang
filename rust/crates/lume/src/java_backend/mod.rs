@@ -853,6 +853,7 @@ fn java_library_method(
         annotations: Vec::new(),
         visibility: Visibility::Default,
         name: name.to_string(),
+        getter: false,
         type_params: callable
             .type_params
             .iter()
@@ -2724,7 +2725,7 @@ def main() Unit {
 
     println((parsedInt !) + 1)
     println((parsedFloat !) + 0.5)
-    println(Int.parse("oops").isEmpty())
+    println(Int.parse("oops").isEmpty)
 }
 "#,
         )
@@ -2779,8 +2780,9 @@ def main() Unit {
     copy [Str : Int] = [...entries]
     merged [Str : Int] = [...copy, "three": 3]
     entryList [(Str, Int)] = [...merged.entries()]
+    keys [Str] = merged.keys()
     empty [Str : Int] = []
-    println(entries.size(), copy.size(), merged.size(), entryList.size(), empty.size())
+    println(entries.size, copy.size, merged.size, entryList.size, keys.size, empty.size)
 }
 "#,
         )
@@ -2795,6 +2797,7 @@ def main() Unit {
         assert!(module.contains("LumeMap.fromParts("));
         assert!(module.contains("new Tuple2<>("));
         assert!(module.contains(".entries()"));
+        assert!(module.contains(".keys()"));
         assert!(module.contains("LumeMap.empty()"));
 
         let _ = fs::remove_dir_all(temp);
@@ -3270,6 +3273,42 @@ def main() Int = twice(3) + choose(true) + sumEven(4) + classify(1)
     }
 
     #[test]
+    fn readable_java_emits_getter_reads_as_zero_argument_calls() {
+        let temp = temp_path("lume-java-readable-getters");
+        let source = temp.join("getters.lum");
+        let out = temp.join("generated");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/getters
+
+class Item {
+    name Str
+
+    def label Str = this.name
+    def repeated Str = label + this.label
+}
+
+def read(item Item) Str = item.repeated
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let item = fs::read_to_string(out.join("demo/getters/Item.java")).expect("read Item");
+        let module =
+            fs::read_to_string(out.join("demo/getters/GettersModule.java")).expect("read module");
+        assert!(item.contains("return (this.label() + this.label());"));
+        assert!(module.contains("return item.repeated();"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn readable_java_keeps_simple_for_loops_structured() {
         let temp = temp_path("lume-java-readable-for-loop");
         let source = temp.join("for_loop.lum");
@@ -3356,11 +3395,11 @@ use java/lang/StringBuilder
 
 def collect(values [Int] vararg) [Int] = values
 
-def forwarded(values [Int]) Int = collect(...values).size()
+def forwarded(values [Int]) Int = collect(...values).size
 
-def direct() Int = collect(1, 2, 3).size()
+def direct() Int = collect(1, 2, 3).size
 
-def typeName[reified T]() Str = typeOf[T].name().getOr("?")
+def typeName[reified T]() Str = typeOf[T].name.getOr("?")
 
 def concreteTypeName() Str = typeName[Int]()
 
@@ -4434,7 +4473,7 @@ module demo/extract
 
 def length(maybe Option[Str]) Int {
     let Some { value as text } = maybe else return 0
-    text.size()
+    text.size
 }
 
 def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
@@ -5125,7 +5164,7 @@ class Worker {
 }
 
 def workerLabel(value Any) Str {
-    if !(value is Worker) {
+    if value is not Worker {
         return "other"
     }
     value.label()
@@ -5250,7 +5289,7 @@ def describePayload(value Payload) Str = match value {
 
 def describeList(values [Int]) Str = match values {
     case [first, second, ...rest] as list =>
-        first.toStr() + " " + second.toStr() + " " + rest.size().toStr() + " " + list.size().toStr()
+        first.toStr() + " " + second.toStr() + " " + rest.size.toStr() + " " + list.size.toStr()
     case _ => "short"
 }
 
@@ -5979,10 +6018,10 @@ module demo/object_reified
 object Cache {
 
     def label(targetType Type[_]) Str =
-        targetType.name().getOr("?")
+        targetType.name.getOr("?")
 
     def reifiedLabel[reified T]() Str =
-        typeOf[T].name().getOr("?")
+        typeOf[T].name.getOr("?")
 }
 
 
@@ -6191,26 +6230,26 @@ def main() Unit {
     declared Type[User] = typeOf[User]
     actual Type[User] = user.runtimeType
 
-    println(declared.name() !)
-    println(actual.qualifiedName() !)
-    println(declared.kind())
+    println(declared.name !)
+    println(actual.qualifiedName !)
+    println(declared.kind)
 
     classType ClassType[User] = declared.asClass() !
-    fields [Field] = classType.fields()
-    println(fields.size())
+    fields [Field] = classType.fields
+    println(fields.size)
 
     nameField Field = fields.at(0) !
     ageField Field = fields.at(1) !
 
-    println(nameField.name())
-    println(nameField.fieldType().name() !)
-    println(ageField.name())
-    println(ageField.fieldType().name() !)
+    println(nameField.name)
+    println(nameField.fieldType.name !)
+    println(ageField.name)
+    println(ageField.fieldType.name !)
 
     enumType EnumType[Status] = typeOf[Status].asEnum() !
-    println(enumType.name() !)
-    println(enumType.kind())
-    println((enumType.case("Pending") !).name())
+    println(enumType.name !)
+    println(enumType.kind)
+    println((enumType.case("Pending") !).name)
 }
 "#,
         )
@@ -6251,6 +6290,175 @@ def main() Unit {
         assert_eq!(
             actual,
             "User\ndemo.metadata.User\nClass\n2\nname\nStr\nage\nInt\nStatus\nEnum\nPending\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_runs_explicit_and_contextual_generic_construction() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!(
+                "skipping Java generic construction test because javac/java is not available"
+            );
+            return;
+        }
+
+        let temp = temp_path("lume-java-generic-construction");
+        let source = temp.join("generic_construction.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/genericconstruct
+
+class Box[T] {
+    value T
+
+    new(value T) {
+        this.value = value
+    }
+}
+
+def main() Unit {
+    set Set[Str] = Set()
+    map Map[Str, Int] = Map[Str, Int]()
+    inferred = Box("hello")
+    contextual Box[Str] = new("world")
+
+    set.add("Ada")
+    println(set.size, map.size, inferred.value, contextual.value)
+}
+"#,
+        )
+        .expect("write source");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let module =
+            fs::read_to_string(out.join("demo/genericconstruct/GenericconstructModule.java"))
+                .expect("read module");
+        assert!(module.contains("LumeSet<String> set = LumeSet.empty()"));
+        assert!(module.contains("LumeMap<String, Long> map = LumeMap.empty()"));
+        assert!(module.contains("Box<String> inferred = new Box<>(\"hello\")"));
+        assert!(module.contains("Box<String> contextual = new Box<>(\"world\")"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.genericconstruct.GenericconstructMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "1 0 hello world\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_runs_contextual_shape_projection_inside_generic_map() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java shape projection test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-contextual-shape-projection");
+        let source = temp.join("shape_projection.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/shapeprojection
+
+shape StoredRollup {
+    total Int
+    label Str
+    internalId Int
+}
+
+shape Rollup {
+    total Int
+    label Str
+}
+
+def source() StoredRollup? = Some(StoredRollup {
+    total: 7
+    label: "week"
+    internalId: 99
+})
+
+def named() Rollup? = source().map(r => Rollup { ...r })
+def explicitShape() Rollup? = source().map(r => shape { ...r })
+def implicitShape() Rollup? = source().map(r => { ...r })
+def contextualNew() Rollup? = source().map(r => new { ...r })
+def namedMembers() Rollup? = source().map(r => Rollup { r.total, r.label })
+def explicitShapeMembers() Rollup? = source().map(r => shape { r.total, r.label })
+def contextualNewMembers() Rollup? = source().map(r => new { r.total, r.label })
+
+def main() Unit {
+    println(named()!.total)
+    println(explicitShape()!.total)
+    println(implicitShape()!.total)
+    println(contextualNew()!.total)
+    println(namedMembers()!.total)
+    println(explicitShapeMembers()!.total)
+    println(contextualNewMembers()!.total)
+}
+"#,
+        )
+        .expect("write source");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+        let module =
+            fs::read_to_string(out.join("demo/shapeprojection/ShapeprojectionModule.java"))
+                .expect("read module");
+        assert_eq!(module.matches("new Rollup(").count(), 7);
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.shapeprojection.ShapeprojectionMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "7\n7\n7\n7\n7\n7\n7\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -6405,6 +6613,77 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_runs_string_split_and_trim() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java string methods test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-string-methods");
+        let source = temp.join("string_methods.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/stringmethods
+
+def main() Unit {
+    parts Vector[Str] = "  alpha, beta  ".trim().split("\s*,\s*")
+    parts.add("gamma")
+    println(parts.size)
+    println(parts[0])
+    println(parts[1])
+    println(parts[2])
+    println("".isEmpty)
+    println("lume".nonEmpty)
+    println("".nonEmpty)
+    println("lume".isEmpty)
+}
+"#,
+        )
+        .expect("write source");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let module = fs::read_to_string(out.join("demo/stringmethods/StringmethodsModule.java"))
+            .expect("read module");
+        assert!(module.contains("LumeRuntime.stringSplit"));
+        assert!(module.contains("LumeVector<String> parts"));
+        assert!(module.contains("(\"\").isEmpty()"));
+        assert!(module.contains("!(\"lume\").isEmpty()"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.stringmethods.StringmethodsMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "3\nalpha\nbeta\ngamma\ntrue\ntrue\nfalse\nfalse\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_supports_inline_constructors_and_map_index_assignment() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java map assignment test because a JDK tool is unavailable");
@@ -6422,7 +6701,7 @@ def main() Unit {
 module demo/mapassignment
 
 def emptyMap() [Str : Int] = []
-def mapSize(values [Str : Int]) Int = values.size()
+def mapSize(values [Str : Int]) Int = values.size
 
 class Cache {
     private var values [Str : Int] = []
@@ -6456,7 +6735,7 @@ def main() Unit {
     println(cache.lookup("answer"))
     cache.reset()
     println(cache.lookup("answer"))
-    println(emptyMap().size())
+    println(emptyMap().size)
     println(mapSize([]))
 }
 "#,
