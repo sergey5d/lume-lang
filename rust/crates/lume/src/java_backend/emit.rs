@@ -1843,6 +1843,7 @@ fn push_variadic_bridge_overload(
 
 #[derive(Debug, Clone)]
 struct JavaParamSpec {
+    name: Option<String>,
     ty: ir::Type,
     variadic: bool,
     lazy: bool,
@@ -1858,6 +1859,7 @@ fn function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
         .filter_map(|(index, param)| {
             let local = function.locals.get(param.0)?;
             Some(JavaParamSpec {
+                name: Some(local.name.clone()),
                 ty: local.ty.clone(),
                 variadic: function.param_variadic.get(index).copied().unwrap_or(false),
                 lazy: function.param_lazy.get(index).copied().unwrap_or(false),
@@ -1877,6 +1879,7 @@ fn source_function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
             let local = function.locals.get(param.0)?;
             (local.name != "this" && !is_reified_type_param_local(&local.name)).then(|| {
                 JavaParamSpec {
+                    name: Some(local.name.clone()),
                     ty: local.ty.clone(),
                     variadic: function.param_variadic.get(index).copied().unwrap_or(false),
                     lazy: function.param_lazy.get(index).copied().unwrap_or(false),
@@ -1892,6 +1895,7 @@ fn param_specs_from_types(params: Vec<ir::Type>) -> Vec<JavaParamSpec> {
     params
         .into_iter()
         .map(|ty| JavaParamSpec {
+            name: None,
             ty,
             variadic: false,
             lazy: false,
@@ -1903,6 +1907,7 @@ fn param_specs_from_types(params: Vec<ir::Type>) -> Vec<JavaParamSpec> {
 
 fn java_param_spec(ty: ir::Type, lazy: bool) -> JavaParamSpec {
     JavaParamSpec {
+        name: None,
         ty,
         variadic: false,
         lazy,
@@ -7239,11 +7244,9 @@ impl<'a> SourceBodyEmitter<'a> {
                 let source_specs = &specs[..specs.len().saturating_sub(metadata_evidence_count)];
                 let mut emitted =
                     self.emit_source_args_for_param_specs(&ordered_args, source_specs, bindings)?;
-                let lowered_evidence_count =
-                    call.lowered_args.len().saturating_sub(ordered_args.len());
                 emitted.extend(self.emit_source_reified_evidence(
                     call,
-                    metadata_evidence_count.max(lowered_evidence_count),
+                    metadata_evidence_count.max(call.reified_arg_count),
                 )?);
                 emitted
             }
@@ -7252,8 +7255,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
-                let evidence_count = call.lowered_args.len().saturating_sub(ordered_args.len());
-                emitted.extend(self.emit_source_reified_evidence(call, evidence_count)?);
+                emitted.extend(self.emit_source_reified_evidence(call, call.reified_arg_count)?);
                 emitted
             }
         };
@@ -7537,10 +7539,11 @@ impl<'a> SourceBodyEmitter<'a> {
                     .map(|spec| {
                         let spec = spec.as_ref()?;
                         Some(JavaParamSpec {
+                            name: spec.name.clone(),
                             ty: spec.ty.clone(),
                             variadic: spec.variadic,
                             lazy: spec.lazy,
-                            default: None,
+                            default: spec.default.clone(),
                             coercion: None,
                         })
                     })
@@ -7551,8 +7554,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 .iter()
                 .map(|arg| self.emit_call_arg(arg, bindings))
                 .collect::<Option<Vec<_>>>()?;
-            let evidence_count = call.lowered_args.len().saturating_sub(ordered_args.len());
-            emitted_args.extend(self.emit_source_reified_evidence(call, evidence_count)?);
+            emitted_args.extend(self.emit_source_reified_evidence(call, call.reified_arg_count)?);
             let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
             return Some(format_java_instance_call(
                 &receiver_expr,
@@ -7574,8 +7576,7 @@ impl<'a> SourceBodyEmitter<'a> {
             call.param_specs.len()
         };
         let metadata_evidence_count = param_specs.len().saturating_sub(source_param_count);
-        let lowered_evidence_count = call.lowered_args.len().saturating_sub(ordered_args.len());
-        let evidence_count = metadata_evidence_count.max(lowered_evidence_count);
+        let evidence_count = metadata_evidence_count.max(call.reified_arg_count);
         if name == "fold"
             && ordered_args.len() == 2
             && let Some(accumulator_ty) = self.expr_type(&ordered_args[0].value, bindings)
@@ -7593,15 +7594,6 @@ impl<'a> SourceBodyEmitter<'a> {
         let source_param_specs =
             &param_specs[..param_specs.len().saturating_sub(metadata_evidence_count)];
         if source_param_specs.is_empty() && !ordered_args.is_empty() {
-            return None;
-        }
-        if !param_specs_accept_arg_len(source_param_specs, ordered_args.len()) {
-            if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
-                eprintln!(
-                    "readable java resolved incompatible parameter specs for member '{name}': specs={param_specs:?}, args={}",
-                    ordered_args.len()
-                );
-            }
             return None;
         }
         if evidence_count == 0
@@ -7794,27 +7786,47 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
     ) -> Option<Vec<String>> {
         let Some(variadic_index) = specs.iter().position(|spec| spec.variadic) else {
-            if args.len() != specs.len() {
-                return None;
+            let mut emitted = Vec::with_capacity(specs.len());
+            let mut arg_index = 0usize;
+            for spec in specs {
+                let arg = args.get(arg_index).copied();
+                let consumes_arg = arg.is_some_and(|arg| {
+                    arg.name.is_none() || spec.name.as_deref() == arg.name.as_deref()
+                });
+                if consumes_arg {
+                    emitted.push(self.emit_source_arg_for_param_spec(
+                        arg.expect("checked source argument"),
+                        bindings,
+                        spec,
+                    )?);
+                    arg_index += 1;
+                } else {
+                    emitted.push(java_constant(spec.default.as_ref()?));
+                }
             }
-            return args
-                .iter()
-                .zip(specs)
-                .map(|(arg, spec)| self.emit_source_arg_for_param_spec(arg, bindings, spec))
-                .collect();
+            return (arg_index == args.len()).then_some(emitted);
         };
-        if args.len() < variadic_index {
-            return None;
-        }
 
-        let mut emitted = args
-            .iter()
-            .take(variadic_index)
-            .zip(specs.iter())
-            .map(|(arg, spec)| self.emit_source_arg_for_param_spec(arg, bindings, spec))
-            .collect::<Option<Vec<_>>>()?;
+        let mut emitted = Vec::with_capacity(specs.len());
+        let mut arg_index = 0usize;
+        for spec in specs.iter().take(variadic_index) {
+            let arg = args.get(arg_index).copied();
+            let consumes_arg = arg.is_some_and(|arg| {
+                arg.name.is_none() || spec.name.as_deref() == arg.name.as_deref()
+            });
+            if consumes_arg {
+                emitted.push(self.emit_source_arg_for_param_spec(
+                    arg.expect("checked source argument"),
+                    bindings,
+                    spec,
+                )?);
+                arg_index += 1;
+            } else {
+                emitted.push(java_constant(spec.default.as_ref()?));
+            }
+        }
         let variadic = specs.get(variadic_index)?;
-        let rest = &args[variadic_index..];
+        let rest = &args[arg_index..];
         if rest.is_empty() {
             emitted.push(
                 variadic
@@ -8499,48 +8511,44 @@ fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &
         .iter()
         .filter(|field| field.visibility == Visibility::Default)
         .collect::<Vec<_>>();
-    out.push('\n');
-    out.push_str("    public ");
-    out.push_str(&name);
-    out.push_str("() {\n");
-    if has_field_init {
-        out.push_str("        this.__lume_field_init();\n");
-    }
-    out.push_str("    }\n");
-    if public_fields.is_empty() {
-        return;
-    }
-
-    out.push('\n');
-    out.push_str("    public ");
-    out.push_str(&name);
-    out.push('(');
-    out.push_str(
-        &public_fields
+    for arity in 0..=public_fields.len() {
+        if public_fields[arity..]
             .iter()
-            .enumerate()
-            .map(|(index, field)| {
-                format!(
-                    "{} {}",
-                    names.value_type(&field.ty),
-                    constructor_param_name(field, index)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", "),
-    );
-    out.push_str(") {\n");
-    if has_field_init {
-        out.push_str("        this.__lume_field_init();\n");
+            .any(|field| !field.has_initializer)
+        {
+            continue;
+        }
+        out.push('\n');
+        out.push_str("    public ");
+        out.push_str(&name);
+        out.push('(');
+        out.push_str(
+            &public_fields[..arity]
+                .iter()
+                .enumerate()
+                .map(|(index, field)| {
+                    format!(
+                        "{} {}",
+                        names.value_type(&field.ty),
+                        constructor_param_name(field, index)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        out.push_str(") {\n");
+        if has_field_init {
+            out.push_str("        this.__lume_field_init();\n");
+        }
+        for (index, field) in public_fields.iter().take(arity).enumerate() {
+            out.push_str("        this.");
+            out.push_str(&java_member_name(&field.name));
+            out.push_str(" = ");
+            out.push_str(&constructor_param_name(field, index));
+            out.push_str(";\n");
+        }
+        out.push_str("    }\n");
     }
-    for (index, field) in public_fields.iter().enumerate() {
-        out.push_str("        this.");
-        out.push_str(&java_member_name(&field.name));
-        out.push_str(" = ");
-        out.push_str(&constructor_param_name(field, index));
-        out.push_str(";\n");
-    }
-    out.push_str("    }\n");
 }
 
 fn constructor_param_name(field: &ir::Field, _index: usize) -> String {
@@ -8958,10 +8966,11 @@ impl<'a> JavaIrSupport<'a> {
                 }
             })
             .map(|field| JavaParamSpec {
+                name: Some(field.name.clone()),
                 ty: field.ty.clone(),
                 variadic: false,
                 lazy: false,
-                default: None,
+                default: field.initializer.clone(),
                 coercion: None,
             })
             .collect::<Vec<_>>();
@@ -8984,6 +8993,7 @@ impl<'a> JavaIrSupport<'a> {
                 if name == "Database" {
                     return self.operand_type(&operands[0]).map(|ty| {
                         vec![JavaParamSpec {
+                            name: None,
                             ty,
                             variadic: false,
                             lazy: false,
@@ -9010,6 +9020,7 @@ impl<'a> JavaIrSupport<'a> {
             params
                 .into_iter()
                 .map(|param| JavaParamSpec {
+                    name: param.name.clone(),
                     ty: self.substitute_receiver_type_args(&name, &args, &param.ty),
                     variadic: param.variadic,
                     lazy: param.lazy,
@@ -9820,6 +9831,7 @@ impl JavaNames {
                     .params
                     .iter()
                     .map(|param| JavaParamSpec {
+                        name: Some(param.name.clone()),
                         ty: param
                             .ty
                             .as_ref()

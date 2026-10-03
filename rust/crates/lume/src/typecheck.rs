@@ -1528,32 +1528,30 @@ impl<'a> Checker<'a> {
     }
 
     fn check_implicit_constructor_contract(&mut self, decl: &TypeDecl) {
-        if decl.kind != TypeKind::Class
-            || decl
-                .members
-                .iter()
-                .any(|member| matches!(member, TypeMember::Method(method) if method.name == "new"))
-        {
-            return;
-        }
+        let has_explicit_constructor = decl
+            .members
+            .iter()
+            .any(|member| matches!(member, TypeMember::Method(method) if method.name == "new"));
 
-        for member in &decl.members {
-            let TypeMember::Field(field) = member else {
-                continue;
-            };
-            if field.visibility == Visibility::Default || field.initializer.is_some() {
-                continue;
+        if decl.kind == TypeKind::Class && !has_explicit_constructor {
+            for member in &decl.members {
+                let TypeMember::Field(field) = member else {
+                    continue;
+                };
+                if field.visibility == Visibility::Default || field.initializer.is_some() {
+                    continue;
+                }
+                self.add_error(
+                    "missing_non_public_field_initializer",
+                    format!(
+                        "class '{}' cannot synthesize an implicit constructor because {} field '{}' has no initializer; add an initializer or declare 'new(...)'",
+                        decl.name,
+                        visibility_label(field.visibility),
+                        field.name
+                    ),
+                    field.span,
+                );
             }
-            self.add_error(
-                "missing_non_public_field_initializer",
-                format!(
-                    "class '{}' cannot synthesize an implicit constructor because {} field '{}' has no initializer; add an initializer or declare 'new(...)'",
-                    decl.name,
-                    visibility_label(field.visibility),
-                    field.name
-                ),
-                field.span,
-            );
         }
     }
 
@@ -2115,7 +2113,6 @@ impl<'a> Checker<'a> {
     }
 
     fn check_param_list_rules(&mut self, params: &[Param], is_constructor: bool) {
-        let mut seen_default = false;
         let mut seen_variadic = false;
         for (index, param) in params.iter().enumerate() {
             if !is_constructor {
@@ -2177,13 +2174,6 @@ impl<'a> Checker<'a> {
                     param.span,
                 );
             }
-            if param.variadic && seen_default && !is_constructor {
-                self.add_error(
-                    "invalid_variadic_param",
-                    "variadic parameter cannot follow defaulted parameters",
-                    param.span,
-                );
-            }
             if param.variadic {
                 let is_list_type = param.ty.as_ref().is_some_and(is_list_type_ref);
                 if !is_list_type {
@@ -2198,15 +2188,6 @@ impl<'a> Checker<'a> {
                     );
                 }
                 seen_variadic = true;
-            }
-            if param.initializer.is_some() {
-                seen_default = true;
-            } else if seen_default && !param.variadic && !is_constructor {
-                self.add_error(
-                    "invalid_constructor_default",
-                    "parameters without defaults cannot follow defaulted parameters",
-                    param.span,
-                );
             }
         }
     }
@@ -6007,7 +5988,7 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
     ) -> Ty {
-        self.check_signature_call_with_subst(params, ret, args, span, HashMap::new())
+        self.check_signature_call_with_subst(params, ret, args, span, HashMap::new(), None)
             .0
     }
 
@@ -6027,12 +6008,14 @@ impl<'a> Checker<'a> {
         if !matches!(expected, Ty::Unknown) {
             infer_type_subst(&selection.sig.ret, expected, &mut subst);
         }
+        let callee_name = callable_name_for_diagnostic(callee);
         let (ret, subst, argument_shape_valid) = self.check_signature_call_with_subst(
             &selection.sig.params,
             &selection.sig.ret,
             args,
             span,
             subst,
+            Some(&callee_name),
         );
         if argument_shape_valid {
             self.check_call_generic_conditions(&selection.sig.generic_conditions, &subst, span);
@@ -6139,6 +6122,7 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
         mut subst: HashMap<String, Ty>,
+        callee_name: Option<&str>,
     ) -> (Ty, HashMap<String, Ty>, bool) {
         let arrangement = arrange_param_args(params, args);
         let min_required = params
@@ -6155,18 +6139,31 @@ impl<'a> Checker<'a> {
             && args.len() >= min_required
             && args.len() <= max_allowed;
         if !argument_shape_valid {
+            let prefix_message = args
+                .iter()
+                .all(|arg| arg.name.is_none())
+                .then(|| {
+                    positional_callable_prefix_message(
+                        callee_name.unwrap_or("callable"),
+                        params,
+                        args.len(),
+                    )
+                })
+                .flatten();
             self.add_error(
                 "invalid_argument_count",
-                format!(
-                    "call expects {}..{} arguments, got {}",
-                    min_required,
-                    if max_allowed == usize::MAX {
-                        "many".to_string()
-                    } else {
-                        max_allowed.to_string()
-                    },
-                    args.len()
-                ),
+                prefix_message.unwrap_or_else(|| {
+                    format!(
+                        "call expects {}..{} arguments, got {}",
+                        min_required,
+                        if max_allowed == usize::MAX {
+                            "many".to_string()
+                        } else {
+                            max_allowed.to_string()
+                        },
+                        args.len()
+                    )
+                }),
                 span,
             );
         }
@@ -11411,35 +11408,93 @@ fn constructor_target_name(ret: &Ty) -> Option<&str> {
     }
 }
 
+struct PositionalPrefixGap {
+    supplied: Option<String>,
+    required: String,
+    defaulted: String,
+}
+
+fn positional_prefix_gap<'a>(
+    inputs: impl IntoIterator<Item = (&'a str, bool, bool)>,
+    arg_count: usize,
+) -> Option<PositionalPrefixGap> {
+    let inputs = inputs.into_iter().collect::<Vec<_>>();
+    if arg_count > inputs.len() {
+        return None;
+    }
+    let (required_index, required) = inputs
+        .iter()
+        .enumerate()
+        .skip(arg_count)
+        .find(|(_, (_, has_default, variadic))| !*has_default && !*variadic)?;
+    let defaulted = inputs[..required_index]
+        .iter()
+        .find(|(_, has_default, _)| *has_default)?;
+    Some(PositionalPrefixGap {
+        supplied: arg_count
+            .checked_sub(1)
+            .and_then(|index| inputs.get(index))
+            .map(|(name, _, _)| (*name).to_string()),
+        required: required.0.to_string(),
+        defaulted: defaulted.0.to_string(),
+    })
+}
+
 fn positional_constructor_prefix_message(
     target_name: &str,
     params: &[FieldSig],
     arg_count: usize,
 ) -> Option<String> {
-    if arg_count > params.len() {
-        return None;
-    }
-    let (required_index, required) = params
-        .iter()
-        .enumerate()
-        .skip(arg_count)
-        .find(|(_, param)| !param.variadic && !param.has_initializer)?;
-    let defaulted_before = params[..required_index]
-        .iter()
-        .filter(|param| param.has_initializer)
-        .map(|param| param.name.clone())
-        .collect::<Vec<_>>();
-    let defaulted = defaulted_before.first()?;
+    let gap = positional_prefix_gap(
+        params
+            .iter()
+            .map(|param| (param.name.as_str(), param.has_initializer, param.variadic)),
+        arg_count,
+    )?;
+    let supplied = gap
+        .supplied
+        .as_deref()
+        .map(|name| format!("the last supplied value initializes construction input '{name}'; "))
+        .unwrap_or_else(|| "no construction inputs are supplied; ".to_string());
     Some(format!(
-        "positional construction for {target_name} with {arg_count} {} leaves required field '{}' unset; positional arguments fill fields in declaration order and do not skip defaulted fields. Use {target_name} {{ {}: ... }} to omit defaulted field '{}', pass all fields positionally in declaration order, or move defaulted fields after required fields.",
+        "positional construction for {target_name} with {arg_count} {} binds a declaration-order prefix: {supplied}required input '{}' remains unset because positional arguments do not skip defaulted input '{}'. Use {target_name} {{ {}: ... }} to omit the defaulted input, or pass the complete positional prefix.",
         if arg_count == 1 {
             "argument"
         } else {
             "arguments"
         },
-        required.name,
-        required.name,
-        defaulted
+        gap.required,
+        gap.defaulted,
+        gap.required,
+    ))
+}
+
+fn positional_callable_prefix_message(
+    callable_name: &str,
+    params: &[ParamSig],
+    arg_count: usize,
+) -> Option<String> {
+    let gap = positional_prefix_gap(
+        params
+            .iter()
+            .map(|param| (param.name.as_str(), param.has_initializer, param.variadic)),
+        arg_count,
+    )?;
+    let supplied = gap
+        .supplied
+        .as_deref()
+        .map(|name| format!("the last supplied value initializes parameter '{name}'; "))
+        .unwrap_or_else(|| "no parameters are supplied; ".to_string());
+    Some(format!(
+        "positional call to {callable_name} with {arg_count} {} binds a declaration-order prefix: {supplied}required parameter '{}' remains unset because positional arguments do not skip defaulted parameter '{}'. Use a named argument such as {callable_name}({} = ...), or pass the complete positional prefix.",
+        if arg_count == 1 {
+            "argument"
+        } else {
+            "arguments"
+        },
+        gap.required,
+        gap.defaulted,
+        gap.required,
     ))
 }
 
@@ -14336,7 +14391,7 @@ def main() Int {
     }
 
     #[test]
-    fn allows_constructor_shapes_with_default_before_required_for_named_or_full_positional_calls() {
+    fn allows_intermingled_defaults_for_constructor_inputs() {
         let program = parse_inline(
             r#"
 class Page {
@@ -14354,12 +14409,27 @@ class Article {
     }
 }
 
+shape Response {
+    status Int = 200
+    body Str
+}
+
+type Outcome =
+    shape Success {
+        code Int = 200
+        message Str
+    }
+    | object Cancelled {}
 
 def main() Unit {
     _ Page = Page("custom body", "Intro")
     _ Page = Page { title: "Intro" }
     _ Article = Article("custom body", "Intro")
     _ Article = Article { title: "Intro" }
+    _ Response = Response(201, "created")
+    _ Response = Response { body: "ok" }
+    _ Outcome = Success(201, "created")
+    _ Outcome = Success { message: "ok" }
 }
 "#,
         );
@@ -14368,28 +14438,76 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_short_positional_construction_that_skips_default_before_required_field() {
+    fn rejects_positional_constructor_prefix_that_leaves_required_input_unset() {
         let program = parse_inline(
             r#"
-class Page {
-    body Str = "body"
-    title Str
+class X1 {
+    a Str = ""
+    b Str
 }
 
-class Article {
-    body Str
-    title Str
-
-    new(body Str = "body", title Str) {
-        this.body = body
-        this.title = title
-    }
+class X3 {
+    a Str
+    b Str = ""
+    c Str
 }
-
 
 def main() Unit {
-    _ Page = Page("Intro")
-    _ Article = Article("Intro")
+    _ X1 = X1("b")
+    _ X3 = X3("a", "c")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(result.diagnostics.len(), 2, "{:#?}", result.diagnostics);
+        assert!(result.diagnostics.iter().all(|diag| {
+            diag.code == "invalid_argument_count"
+                && diag.message.contains("required input")
+                && diag.message.contains("remains unset")
+                && diag.message.contains("declaration-order prefix")
+                && diag.message.contains("do not skip defaulted input")
+        }));
+    }
+
+    #[test]
+    fn allows_named_callable_arguments_to_omit_intermingled_defaults() {
+        let program = parse_inline(
+            r#"
+def connect(protocol Str = "https", host Str, port Int = 443) Str =
+    protocol + "://" + host + ":" + port.toStr()
+
+class Client {
+    def connect(protocol Str = "https", host Str, port Int = 443) Str =
+        protocol + "://" + host + ":" + port.toStr()
+}
+
+def main() Unit {
+    _ Str = connect("http", "example.com")
+    _ Str = connect(host = "example.com")
+    client = Client {}
+    _ Str = client.connect("http", "example.com")
+    _ Str = client.connect(host = "example.com", port = 8443)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_positional_callable_prefix_that_leaves_required_parameter_unset() {
+        let program = parse_inline(
+            r#"
+def connect(protocol Str = "https", host Str, port Int = 443) Str = host
+
+class Client {
+    def connect(protocol Str = "https", host Str, port Int = 443) Str = host
+}
+
+def main() Unit {
+    _ Str = connect("example.com")
+    client = Client {}
+    _ Str = client.connect("example.com")
 }
 "#,
         );
@@ -14398,9 +14516,10 @@ def main() Unit {
         assert!(
             result.diagnostics.iter().all(|diag| {
                 diag.code == "invalid_argument_count"
-                    && diag.message.contains("leaves required field 'title' unset")
-                    && diag.message.contains("do not skip defaulted fields")
-                    && diag.message.contains("{ title: ... }")
+                    && diag
+                        .message
+                        .contains("required parameter 'host' remains unset")
+                    && diag.message.contains("named argument")
             }),
             "{:#?}",
             result.diagnostics
@@ -14959,6 +15078,7 @@ class User {
 def main() Unit {
     _ User = User("Ada")
     _ User = User { age: 12, name: "Ben" }
+    _ User = User { name: "Cara" }
 }
 "#,
         );

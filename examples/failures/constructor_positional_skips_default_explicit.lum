@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# positional construction for Article with 1 argument leaves required field 'title' unset.*
+# .*required input 'title' remains unset because positional arguments do not skip defaulted input 'body'.*
 
 class Article {
     body Str
@@ -10,7 +10,6 @@ class Article {
         this.title = title
     }
 }
-
 
 def main() Unit {
     _ Article = Article("Intro")

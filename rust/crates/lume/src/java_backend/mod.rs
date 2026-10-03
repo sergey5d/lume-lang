@@ -6049,7 +6049,11 @@ def main() Int {
 
         let generated =
             generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
-        assert!(generated.diagnostics.is_empty());
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
 
         let module =
             fs::read_to_string(out.join("demo/runarray/RunarrayModule.java")).expect("read module");
@@ -6215,7 +6219,7 @@ def pending() Option[Status] =
         let module = fs::read_to_string(out.join("demo/result_shape/Result_shapeModule.java"))
             .expect("read module");
         assert!(!module.contains("UnsupportedOperationException"));
-        assert!(module.contains("new HttpResponse(200L"));
+        assert!(module.contains("new HttpResponse(200L, \"ok\""));
         assert!(module.contains("new HttpError(400L"));
         assert!(module.contains("new Option.Some<>(Status.Pending.instance())"));
         assert!(module.contains("\"application/json\""));
@@ -7052,6 +7056,121 @@ def main() Unit {
             String::from_utf8(output.stdout).expect("java stdout utf8"),
             "28\n"
         );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_runs_intermingled_defaults() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java default-prefix test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-default-prefix");
+        let source = temp.join("default_prefix.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/defaultprefix
+
+class X1 {
+    a Str = "A"
+    b Str
+}
+
+class X2 {
+    b Str
+    a Str = "A"
+}
+
+class X3 {
+    a Str
+    b Str = "B"
+    c Str
+}
+
+class X4 {
+    a Str = "A"
+    b Str = "B"
+}
+
+class Article {
+    body Str
+    title Str
+
+    new(body Str = "body", title Str) {
+        this.body = body
+        this.title = title
+    }
+}
+
+class Client {
+    def connect(protocol Str = "https", host Str, port Int = 443) Str =
+        protocol + "://" + host + ":" + port.toStr()
+}
+
+def connect(protocol Str = "https", host Str, port Int = 443) Str =
+    protocol + "://" + host + ":" + port.toStr()
+
+def main() Int {
+    x1 X1 = X1 { b: "one" }
+    x2 X2 = X2("two")
+    x3 X3 = X3 { a: "three", c: "four" }
+    x3Full X3 = X3("five", "six", "seven")
+    x4Empty X4 = X4()
+    x4One X4 = X4("eight")
+    x4Full X4 = X4("nine", "ten")
+    article Article = Article { title: "Intro" }
+    client = Client {}
+    println(x1.a, x1.b)
+    println(x2.b, x2.a)
+    println(x3.a, x3.b, x3.c)
+    println(x3Full.a, x3Full.b, x3Full.c)
+    println(x4Empty.a, x4Empty.b)
+    println(x4One.a, x4One.b)
+    println(x4Full.a, x4Full.b)
+    println(article.body, article.title)
+    println(connect(host = "example.com"))
+    println(client.connect(host = "example.com", port = 8443))
+    0
+}
+"#,
+        )
+        .expect("write source");
+
+        let interpreted = run_path(&source, None).expect("run interpreter");
+        assert!(interpreted.diagnostics.is_empty());
+        let expected = interpreter_stdout(interpreted);
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.defaultprefix.DefaultprefixMain"),
+            "java",
+        );
+        let actual = String::from_utf8(output.stdout).expect("java stdout utf8");
+        assert_eq!(actual, expected);
 
         let _ = fs::remove_dir_all(temp);
     }

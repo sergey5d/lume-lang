@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*required parameter 'host' remains unset because positional arguments do not skip defaulted parameter 'protocol'.*
+
+def connect(protocol Str = "https", host Str, port Int = 443) Str = host
+
+def main() Unit {
+    _ Str = connect("example.com")
+}

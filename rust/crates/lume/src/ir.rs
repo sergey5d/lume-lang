@@ -51,14 +51,17 @@ pub struct SourceCall {
     pub callee: Callee,
     pub lowered_args: Vec<Operand>,
     pub ordered_arg_spans: Vec<Span>,
+    pub reified_arg_count: usize,
     pub param_specs: Vec<Option<SourceCallParamSpec>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceCallParamSpec {
+    pub name: Option<String>,
     pub ty: Type,
     pub lazy: bool,
     pub variadic: bool,
+    pub default: Option<Constant>,
 }
 
 /// Checked expression information retained for source-shaped backends.

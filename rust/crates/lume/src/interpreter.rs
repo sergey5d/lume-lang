@@ -6778,6 +6778,82 @@ mod tests {
     }
 
     #[test]
+    fn runs_intermingled_defaults_with_prefix_and_named_calls() {
+        let program = lower_inline(
+            r#"
+            class X1 {
+                a Str = "A"
+                b Str
+            }
+
+            class X2 {
+                b Str
+                a Str = "A"
+            }
+
+            class X3 {
+                a Str
+                b Str = "B"
+                c Str
+            }
+
+            class X4 {
+                a Str = "A"
+                b Str = "B"
+            }
+
+            class Article {
+                body Str
+                title Str
+
+                new(body Str = "body", title Str) {
+                    this.body = body
+                    this.title = title
+                }
+            }
+
+            class Client {
+                def connect(protocol Str = "https", host Str, port Int = 443) Str =
+                    protocol + "://" + host + ":" + port.toStr()
+            }
+
+            def connect(protocol Str = "https", host Str, port Int = 443) Str =
+                protocol + "://" + host + ":" + port.toStr()
+
+            def main() Unit {
+                x1 X1 = X1 { b: "one" }
+                x2 X2 = X2("two")
+                x3 X3 = X3 { a: "three", c: "four" }
+                x3Full X3 = X3("five", "six", "seven")
+                x4Empty X4 = X4()
+                x4One X4 = X4("eight")
+                x4Full X4 = X4("nine", "ten")
+                article Article = Article { title: "Intro" }
+                client = Client {}
+
+                println(x1.a, x1.b)
+                println(x2.b, x2.a)
+                println(x3.a, x3.b, x3.c)
+                println(x3Full.a, x3Full.b, x3Full.c)
+                println(x4Empty.a, x4Empty.b)
+                println(x4One.a, x4One.b)
+                println(x4Full.a, x4Full.b)
+                println(article.body, article.title)
+                println(connect(host = "example.com"))
+                println(client.connect(host = "example.com", port = 8443))
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "A one\ntwo A\nthree B four\nfive six seven\nA B\neight B\nnine ten\nbody Intro\nhttps://example.com:443\nhttps://example.com:8443\n"
+        );
+    }
+
+    #[test]
     fn runs_variadic_constructor_parameters() {
         let program = lower_inline(
             r#"

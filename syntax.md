@@ -1287,15 +1287,14 @@ General construction rules:
 
 Explicit constructor rules:
 
-- `new(field Type, other Type = default) { ... }` declares explicit constructor inputs with required and defaulted parameters
+- `new(field Type = default, other Type) { ... }` declares explicit constructor inputs; defaults may appear anywhere
 - constructor parameters do not have to be class fields; they are inputs to the constructor body
 - `Type { field: value, other: value }` matches explicit constructor inputs by parameter name
 - `Type(value, otherValue)` fills the same explicit constructor inputs by declaration order
-- constructor parameters may be declared in the author's preferred order; defaults do not have to trail required parameters
 - named construction may omit any constructor parameter that has a default
 - positional construction fills a prefix of constructor parameters in declaration order
-- positional construction may omit only a trailing suffix whose parameters all have defaults
-- positional construction never skips a defaulted parameter to reach a later required parameter
+- a positional call may stop only when every remaining constructor parameter has a default
+- positional arguments never skip an earlier default to initialize a later parameter
 - if any explicit `new` exists, implicit field construction is disabled for that class
 - explicit constructors may use one trailing variadic constructor parameter such as `items [T] vararg`
 - a variadic constructor parameter receives the extra positional arguments as `[T]`
@@ -1317,8 +1316,8 @@ full Article = Article("custom body", "Intro")
 named Article = Article { title: "Intro" }
 custom Article = Article { body: "custom body", title: "Intro" }
 
-# invalid: fills `body`, then leaves required `title` unset
-bad Article = Article("Intro")
+# Invalid: the argument initializes body, leaving title unset.
+# Article("Intro")
 ```
 
 Implicit field construction rules:
@@ -1327,13 +1326,14 @@ Implicit field construction rules:
 - the implicit constructor contract is the same in every module and from every call site
 - public fields without initializers are required constructor inputs
 - public fields with initializers are optional constructor inputs
+- initialized public fields may appear anywhere in the declaration
 - `private` and `internal` fields never become implicit constructor inputs
 - every non-public field must have an initializer when a class relies on implicit construction; otherwise the class must declare `new(...)`
 - construction braces check the synthesized public-field shape
 - `Type {}` works when the public constructor contract has no required inputs
 - positional construction follows declared public-field order
-- positional construction may omit only a trailing suffix of public fields that all have initializers
-- positional construction never skips a defaulted public field to reach a later required public field
+- a positional call may stop only when every remaining public field has an initializer
+- positional arguments never skip an initialized field to initialize a later field
 - the declaration position of initialized non-public fields does not affect positional construction
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
@@ -1833,8 +1833,34 @@ Rules:
 - Only the final parameter may be variadic.
 - A parameter list may contain at most one variadic parameter.
 - A by-name parameter cannot also be variadic.
-- Parameters with defaults must form a trailing suffix.
+- Defaults may appear anywhere in a parameter list.
+- Positional arguments bind a contiguous declaration-order prefix.
+- A positional call may stop only when every remaining parameter has a default.
+- Named calls may omit defaulted parameters anywhere.
+- Positional arguments never skip a parameter.
 - A variadic parameter may have a default vector value, written after `vararg`.
+
+The minimum positional arity is the position of the last required parameter.
+If every parameter has a default, the minimum is zero:
+
+| Declaration | Valid positional arities |
+| --- | --- |
+| `(default, required)` | 2 |
+| `(required, default)` | 1, 2 |
+| `(required, default, required)` | 3 |
+| `(default, default)` | 0, 1, 2 |
+
+```txt
+def connect(protocol Str = "https", host Str, port Int = 443) Connection = ...
+
+connect("https", "example.com")
+connect("https", "example.com", 8443)
+connect(host = "example.com")
+connect(host = "example.com", port = 8443)
+
+# Invalid: the argument initializes protocol, leaving host unset.
+# connect("example.com")
+```
 
 ```txt
 new(segments [Str] vararg = ["tmp"]) {
@@ -1964,11 +1990,12 @@ the class body.
 - `new(...) = expression` declares an expression-bodied constructor
 - shape, union alternative, object, annotation, and interface declarations cannot define custom `new` constructors
 - constructor parameters use `name Type`, with optional defaults such as `age Int = 0`
+- constructor defaults may appear anywhere
 - `Type { field: value }` constructs by matching constructor parameters by field name
 - `Type(value)` constructs by filling constructor parameters positionally by declaration order
 - named construction may omit any constructor parameter with a default
-- positional construction fills a prefix of constructor parameters and may omit only trailing parameters that all have defaults
-- positional construction never skips a defaulted parameter to reach a later required parameter
+- positional construction fills a declaration-order prefix and may stop only when every remaining parameter has a default
+- positional construction never skips an earlier parameter
 - constructor parameters may end with one variadic vector parameter such as `items [Str] vararg`
 - `internal new(...) { body }` declares a constructor callable only from the same module
 - `private new(...) { body }` declares a private constructor
