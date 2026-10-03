@@ -4517,6 +4517,20 @@ impl<'a> Checker<'a> {
                 base
             }
             Expr::RecordLiteral { fields, values, .. } => {
+                if let Ty::Named(name, _) = expected
+                    && self
+                        .lookup_any_type(name)
+                        .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Record))
+                {
+                    let span = expr.span();
+                    let args = [crate::ast::CallArg {
+                        name: None,
+                        ty: None,
+                        value: expr.clone(),
+                        span,
+                    }];
+                    return self.check_contextual_new_expr(&args, true, span, expected);
+                }
                 if !fields.is_empty() {
                     let expected_fields = match expected {
                         Ty::Record(fields) => fields.as_slice(),
@@ -5393,7 +5407,8 @@ impl<'a> Checker<'a> {
             Ty::Unknown
         };
 
-        if (matches!(expected, Ty::Unknown) || expected == &Ty::unit())
+        if !uses_brace_syntax
+            && (matches!(expected, Ty::Unknown) || expected == &Ty::unit())
             && self.current_method.as_deref() == Some("new")
             && self.current_owner.is_some()
         {
@@ -5410,25 +5425,52 @@ impl<'a> Checker<'a> {
             );
         }
 
-        if expected.is_any() {
+        if uses_brace_syntax {
+            let concrete_target = match expected {
+                Ty::Named(name, _) => self
+                    .lookup_any_type(name)
+                    .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Record)),
+                _ => false,
+            };
+            if !concrete_target {
+                let [
+                    crate::ast::CallArg {
+                        value: record @ Expr::RecordLiteral { .. },
+                        ..
+                    },
+                ] = args
+                else {
+                    return reject(
+                        self,
+                        "'new { ... }' requires construction fields".to_string(),
+                    );
+                };
+                let record_expected = if matches!(expected, Ty::Record(_)) {
+                    expected
+                } else {
+                    &Ty::Unknown
+                };
+                return self.check_expr_against(record, record_expected);
+            }
+        } else if expected.is_any() {
             return reject(
                 self,
-                "contextual 'new' cannot target Any; use an explicit concrete constructor"
+                "contextual 'new(...)' cannot target Any; use an explicit concrete constructor"
                     .to_string(),
             );
         }
         let Ty::Named(name, type_args) = expected else {
             let message = match expected {
-                Ty::Unknown => "contextual 'new' requires an expected named class or shape type"
+                Ty::Unknown => "contextual 'new(...)' requires an expected named class or shape type"
                     .to_string(),
-                Ty::Record(_) => "contextual 'new' does not construct anonymous shapes; use '{ ... }' or 'shape { ... }'"
+                Ty::Record(_) => "contextual 'new(...)' does not construct anonymous shapes; use field braces"
                     .to_string(),
-                Ty::Union(_) => "contextual 'new' cannot choose an alternative from a union; use an explicit constructor"
+                Ty::Union(_) => "contextual 'new(...)' cannot choose an alternative from a union; use an explicit constructor"
                     .to_string(),
-                Ty::TypeParam(_) => "contextual 'new' requires an exact declared class or shape, not an unconstrained type parameter"
+                Ty::TypeParam(_) => "contextual 'new(...)' requires an exact declared class or shape, not an unconstrained type parameter"
                     .to_string(),
                 other => format!(
-                    "contextual 'new' requires an expected named class or shape type, got '{}'",
+                    "contextual 'new(...)' requires an expected named class or shape type, got '{}'",
                     other.describe()
                 ),
             };
@@ -7275,6 +7317,53 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
     ) {
+        for contextual_arg in args.iter().filter(|arg| {
+            matches!(
+                &arg.value,
+                Expr::RecordLiteral { .. }
+                    | Expr::ContextualNew {
+                        uses_brace_syntax: true,
+                        ..
+                    }
+            )
+        }) {
+            let mut targets = HashSet::new();
+            for sig in overloads {
+                let arrangement = arrange_param_args(&sig.params, args);
+                if arrangement.overflow > 0 || arrangement.missing_required > 0 {
+                    continue;
+                }
+                for (index, param) in sig.params.iter().enumerate() {
+                    let matches_arg = arrangement
+                        .slots
+                        .get(index)
+                        .into_iter()
+                        .flatten()
+                        .any(|candidate| std::ptr::eq(*candidate, contextual_arg));
+                    if !matches_arg {
+                        continue;
+                    }
+                    let expected =
+                        call_arg_expected_ty_for_arg(param.variadic, &param.ty, contextual_arg);
+                    let Ty::Named(name, _) = &expected else {
+                        continue;
+                    };
+                    if self.lookup_any_type(name).is_some_and(|target| {
+                        matches!(target.kind, TypeKind::Class | TypeKind::Record)
+                    }) {
+                        targets.insert(expected.describe());
+                    }
+                }
+            }
+            if targets.len() > 1 {
+                self.add_error(
+                    "ambiguous_contextual_construction",
+                    "brace construction matches multiple concrete overload targets; name the target explicitly, for example 'User { ... }'",
+                    contextual_arg.span,
+                );
+            }
+        }
+
         let empty_collection_span = args
             .iter()
             .find_map(|arg| empty_collection_literal_span(&arg.value));
@@ -10019,40 +10108,6 @@ impl<'a> Checker<'a> {
                 }
             })
             .collect::<Vec<_>>();
-
-        if sig.kind == TypeKind::Class {
-            let required = constructor_fields
-                .iter()
-                .filter(|field| !field.has_initializer)
-                .count();
-            if fields.len() < required || fields.len() > constructor_fields.len() {
-                self.add_error(
-                    "no_matching_overload",
-                    format!(
-                        "{} '{}' brace field construction expects {}..{} public fields, got {}",
-                        type_kind_label(sig.kind),
-                        sig.name,
-                        required,
-                        constructor_fields.len(),
-                        fields.len()
-                    ),
-                    span,
-                );
-                return materialize_type(ret);
-            }
-            if fields.iter().any(|field| field.name.is_none()) {
-                self.add_error(
-                    "no_matching_overload",
-                    format!(
-                        "{} '{}' requires construction fields that match its public constructor contract",
-                        type_kind_label(sig.kind),
-                        sig.name
-                    ),
-                    span,
-                );
-                return materialize_type(ret);
-            }
-        }
 
         for arg in fields.iter().filter(|arg| arg.name.is_some()) {
             let name = arg.name.as_deref().expect("filtered named field");
@@ -15260,7 +15315,7 @@ def main() Unit {
     y = 5
     named Point = Point { x, y }
     instance ClassPoint = ClassPoint { x, y }
-    anonymous { x Int, y Int } = shape { x, y }
+    anonymous { x Int, y Int } = new { x, y }
     explicit Point = Point { x, y, }
     OS.println(named.x + instance.y + anonymous.x + explicit.y)
 }
@@ -15277,7 +15332,7 @@ def main() Unit {
 def main() Unit {
     x = 4
     y = 5
-    point { x Int, z Int } = shape { x, y }
+    point { x Int, z Int } = new { x, y }
 }
 "#,
         );
@@ -15311,7 +15366,7 @@ shape Rollup {
 def main() Unit {
     source = StoredRollup { count: 2, total: 7, internalId: 99 }
     named Rollup = Rollup { count: source.count, total: source.total }
-    explicit Rollup = shape { count: source.count, total: source.total }
+    explicit Rollup = { count: source.count, total: source.total }
     contextual Rollup = new { count: source.count, total: source.total }
 }
 "#,
@@ -15864,7 +15919,64 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_contextual_new_for_non_constructible_expected_types() {
+    fn allows_field_braces_and_forced_braces_across_contexts() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Int
+}
+
+class User {
+    name Str
+    age Int
+
+    new(name Str, age Int) {
+        this.name = name
+        this.age = age
+    }
+}
+
+shape Rollup {
+    count Int
+    total Int
+}
+
+def makePoint(x Int, y Int) Point = {
+    x: x
+    y: y
+}
+
+def save(user User) Unit = ()
+
+def main() Unit {
+    x = 4
+    y = 5
+    name = "Ada"
+    age = 42
+
+    point Point = { x: 1, y: 2 }
+    punned Point = new { x, y }
+    user User = { name: "Ada", age: 42 }
+    other User = new { name, age }
+    _ Point = makePoint(6, 7)
+    save(new { name: "Ben", age: 30 })
+
+    rollups [Str: Rollup] = []
+    rollups["main"] := new { count: 0, total: 0 }
+
+    anonymous = new { x, y }
+    empty = new {}
+    widened Any = new { x, y }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_parenthesized_contextual_new_for_non_constructible_expected_types() {
         let program = parse_inline(
             r#"
 interface Reader {
@@ -15877,10 +15989,9 @@ class Failure {}
 def generic[T]() T = new()
 
 def main() Unit {
-    reader Reader = new {}
+    reader Reader = new()
     anything Any = new()
     outcome Success | Failure = new()
-    anonymous { x Int } = new { x: 1 }
 }
 "#,
         );
@@ -15890,7 +16001,7 @@ def main() Unit {
             .iter()
             .filter(|diag| diag.code == "invalid_contextual_construction")
             .collect::<Vec<_>>();
-        assert_eq!(diagnostics.len(), 5, "{:#?}", result.diagnostics);
+        assert_eq!(diagnostics.len(), 4, "{:#?}", result.diagnostics);
         assert!(
             diagnostics
                 .iter()
@@ -15901,24 +16012,62 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_shape_with_interface_fields_and_methods() {
+    fn rejects_forced_braces_for_interface_and_union_targets() {
         let program = parse_inline(
             r#"
-interface Printable {
-    def print() Str
+interface Named {
+    def name Str
 }
 
-def main() Unit {
-    value Printable = shape with Printable {
-        x: 10
+class Success { message Str }
+class Failure { message Str }
 
-        def print() Str = x.toStr()
-    }
+def main() Unit {
+    value Named = new { name: "Ada" }
+    result Success | Failure = new { message: "no target" }
 }
 "#,
         );
         let result = check_program(&program);
-        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "invalid_binding_type")
+                .count()
+                >= 2,
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_contextual_braces_that_would_choose_an_overload_target() {
+        let program = parse_inline(
+            r#"
+class User { name Str }
+class Admin { name Str }
+
+class Saver {
+    def save(user User) Unit = ()
+    def save(admin Admin) Unit = ()
+}
+
+def main() Unit {
+    saver = Saver()
+    saver.save(new { name: "Ada" })
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.code == "ambiguous_contextual_construction" }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -18076,7 +18225,7 @@ shape Session {
 type View = { position Str }
 
 def project(value { position Str, start Int }) View =
-    shape { position: value.position }
+    { position: value.position }
 
 def copy(value View) { position Str } = value
 

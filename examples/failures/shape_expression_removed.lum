@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*expression-level 'shape \{ \.\.\. \}' has been removed.*
+
+def main() Unit {
+    value = shape { x: 1 }
+    println(value)
+}

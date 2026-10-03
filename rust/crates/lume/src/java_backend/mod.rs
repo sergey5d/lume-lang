@@ -3692,26 +3692,43 @@ class Worker {
     age Int
 }
 
+class LabeledWorker {
+    name Str
+
+    new(label Str) {
+        this.name = label + "!"
+    }
+}
+
 interface Printable {
     def print() Str
 }
 
 def main() Unit {
-    point Point = new { x: 10, y: 20 }
-    worker Worker = new("Ada", 42)
+    point Point = { x: 10, y: 20 }
+    x = 3
+    y = 4
+    punned Point = new { x, y }
+    worker Worker = { name: "Ada", age: 42 }
+    labeled LabeledWorker = { label: "Ben" }
     position Position = new(3, 4)
+    anonymous = new { x, y }
+    empty = new {}
+    widened Any = new { x, y }
     base = 10
-    printable Printable = shape with Printable {
-        x: base
-        y: 12
+    printable Printable = object with Printable {
+        x Int = base
+        y Int = 12
 
-        def print() Str = "${x}:${y}"
+        def print() Str = "${this.x}:${this.y}"
     }
 
     println(point.x + point.y)
     println(worker.name, worker.age)
+    println(labeled.name)
     println(position.x + position.y)
     println(printable.print())
+    println(punned.x + anonymous.y)
 }
 "#,
         )
@@ -3729,6 +3746,14 @@ def main() Unit {
         );
         assert!(
             module.contains("Worker worker = new Worker(\"Ada\", 42L)"),
+            "{module}"
+        );
+        assert!(
+            module.contains("LabeledWorker labeled = new LabeledWorker(\"Ben\")"),
+            "{module}"
+        );
+        assert!(
+            module.contains("Object anonymous = LumeShape.of"),
             "{module}"
         );
         assert!(
@@ -3756,7 +3781,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("Java stdout utf8"),
-            "30\nAda 42\n7\n10:12\n"
+            "30\nAda 42\nBen!\n7\n10:12\n7\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -5606,7 +5631,7 @@ def describe(value Companion) Str = match value {
 
 def widen(value Pet) Bird | Dog | Cat = value
 
-def view() View = shape { name: "Milo" }
+def view() View = { name: "Milo" }
 def copyView(value View) { name Str } = value
 
 def main() Unit {
@@ -6604,20 +6629,20 @@ def source() StoredRollup? = Some(StoredRollup {
 })
 
 def named() Rollup? = source().map(r => Rollup { ...r })
-def explicitShape() Rollup? = source().map(r => shape { ...r })
+def bareFields() Rollup? = source().map(r => { ...r })
 def implicitShape() Rollup? = source().map(r => { ...r })
 def contextualNew() Rollup? = source().map(r => new { ...r })
 def namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
-def explicitShapeMembers() Rollup? = source().map(r => shape { total: r.total, label: r.label })
+def bareFieldMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
 def contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
 
 def main() Unit {
     println(named()!.total)
-    println(explicitShape()!.total)
+    println(bareFields()!.total)
     println(implicitShape()!.total)
     println(contextualNew()!.total)
     println(namedMembers()!.total)
-    println(explicitShapeMembers()!.total)
+    println(bareFieldMembers()!.total)
     println(contextualNewMembers()!.total)
 }
 "#,

@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*constructor delegation uses `this \{ \.\.\. \}`; `new` only declares constructors.*
+# .*discarded expression has no effect.*
 
 class User {
     name Str

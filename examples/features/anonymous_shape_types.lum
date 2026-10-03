@@ -6,7 +6,7 @@ type ExplicitResult = shape { x Str }
 type ShortResult = { x Str }
 
 def result() { x Str } =
-    shape { x: "hello" }
+    { x: "hello" }
 
 def toExplicit(value ShortResult) ExplicitResult = value
 

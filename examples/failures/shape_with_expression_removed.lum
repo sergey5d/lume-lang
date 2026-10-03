@@ -1,0 +1,13 @@
+# FAIL_REGEX:
+# .*expression-level 'shape with' has been removed.*
+
+interface Printable {
+    def print() Unit
+}
+
+def main() Unit {
+    value = shape with Printable {
+        def print() Unit = ()
+    }
+    value.print()
+}

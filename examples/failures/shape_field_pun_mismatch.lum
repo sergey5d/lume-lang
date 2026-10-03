@@ -4,5 +4,5 @@
 def main() Unit {
     x = 1
     y = 2
-    point { x Int, z Int } = shape { x, y }
+    point { x Int, z Int } = new { x, y }
 }

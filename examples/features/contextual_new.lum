@@ -4,6 +4,7 @@
 # 7
 # x=10
 # hello
+# 9
 
 shape Point {
     x Int
@@ -26,24 +27,31 @@ interface Reader {
 }
 
 def main() Unit {
-    point Point = new {
+    point Point = {
         x: 10
         y: 20
     }
-    worker Worker = new("Ada", 42)
+    x = 4
+    y = 5
+    punned Point = new { x, y }
+    worker Worker = { name: "Ada", age: 42 }
     position Position = new(3, 4)
-    printable Printable = shape with Printable {
-        x: 10
+    printable Printable = object with Printable {
+        x Int = 10
 
-        def print() Str = "x=${x}"
+        def print() Str = "x=${this.x}"
     }
     reader Reader = object with Reader {
         def read() Str = "hello"
     }
+    anonymous = new { x, y }
+    empty = new {}
+    widened Any = new { x, y }
 
     println(point.x + point.y)
     println(worker.name, worker.age)
     println(position.x + position.y)
     println(printable.print())
     println(reader.read())
+    println(anonymous.x + anonymous.y)
 }

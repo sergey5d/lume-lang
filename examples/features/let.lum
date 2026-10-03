@@ -25,14 +25,14 @@ def pairwise(left Int?, right Str?) { count Int, label Str } {
         return { count: 0, label: "no-left" }
     }
     let Some(label) = right else {
-        return shape { count, label: "no-right" }
+        return new { count, label: "no-right" }
     }
 
     let {
         Some(groupedCount) = left
         Some(groupedLabel) = right
     } else {
-        return shape { count, label }
+        return new { count, label }
     }
 
     { count: groupedCount, label: groupedLabel }

@@ -1378,9 +1378,9 @@ fn allows_member_order_with_anonymous_fields_after_methods() {
     def value() Int = this.count
     count Int = 2
 }"#,
-        r#"shape with Value {
+        r#"object with Value {
     def value() Int = this.count
-    count: 2
+    count Int = 2
 }"#,
     ] {
         assert!(matches!(
@@ -1680,42 +1680,6 @@ fn parses_shape_literal_forms() {
         other => panic!("expected named shape literal, got {other:#?}"),
     }
 
-    match parse_expr_only(r#"shape { name: "Ana", age: 10 }"#) {
-        Expr::RecordLiteral { fields, values, .. } => {
-            assert!(values.is_empty());
-            assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].name.as_deref(), Some("name"));
-            assert_eq!(fields[1].name.as_deref(), Some("age"));
-        }
-        other => panic!("expected explicit anonymous shape literal, got {other:#?}"),
-    }
-
-    match parse_expr_only("shape { name, age }") {
-        Expr::RecordLiteral { fields, values, .. } => {
-            assert!(values.is_empty());
-            assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].name.as_deref(), Some("name"));
-            assert!(matches!(
-                &fields[0].value,
-                Expr::Identifier { name, .. } if name == "name"
-            ));
-            assert_eq!(fields[1].name.as_deref(), Some("age"));
-            assert!(matches!(
-                &fields[1].value,
-                Expr::Identifier { name, .. } if name == "age"
-            ));
-        }
-        other => panic!("expected field-punned anonymous shape literal, got {other:#?}"),
-    }
-
-    match parse_expr_only("shape {}") {
-        Expr::RecordLiteral { fields, values, .. } => {
-            assert!(fields.is_empty());
-            assert!(values.is_empty());
-        }
-        other => panic!("expected empty anonymous shape literal, got {other:#?}"),
-    }
-
     match parse_expr_only("(name, age)") {
         Expr::TupleLiteral { items, .. } => {
             assert_eq!(items.len(), 2);
@@ -1746,16 +1710,6 @@ fn parses_shape_literal_forms() {
             assert_eq!(fields[1].name.as_deref(), Some("age"));
         }
         other => panic!("expected spread shape literal, got {other:#?}"),
-    }
-
-    match parse_expr_only(r#"shape { ...base, location: "Tampa" }"#) {
-        Expr::RecordLiteral { fields, values, .. } => {
-            assert!(values.is_empty());
-            assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].name, None);
-            assert_eq!(fields[1].name.as_deref(), Some("location"));
-        }
-        other => panic!("expected explicit spread shape literal, got {other:#?}"),
     }
 
     match parse_expr_only("Person { name: name, age: age }") {
@@ -1867,11 +1821,7 @@ fn parses_shape_literal_forms() {
 
 #[test]
 fn rejects_member_expression_punning() {
-    for source in [
-        "Rollup { source.total }",
-        "shape { source.total }",
-        "new { source.total }",
-    ] {
+    for source in ["Rollup { source.total }", "new { source.total }"] {
         let file = SourceFile::new("test.lum", source);
         let lexed = lex(&file);
         let mut parser = Parser::new(&lexed.tokens);
@@ -1889,11 +1839,7 @@ fn rejects_member_expression_punning() {
 
 #[test]
 fn rejects_typed_anonymous_shape_literal_fields() {
-    for source in [
-        r#"{ name Str: "Ana" }"#,
-        r#"shape { name Str: "Ana" }"#,
-        r#"shape with Printable { name Str: "Ana" }"#,
-    ] {
+    for source in [r#"{ name Str: "Ana" }"#, r#"new { name Str: "Ana" }"#] {
         let file = SourceFile::new("test.lum", source);
         let lexed = lex(&file);
         let mut parser = Parser::new(&lexed.tokens);
@@ -1928,27 +1874,48 @@ fn parses_contextual_new_forms() {
             ..
         } if matches!(args.as_slice(), [CallArg { value: Expr::RecordLiteral { fields, .. }, .. }] if fields.len() == 2)
     ));
+
+    assert!(matches!(
+        parse_expr_only("new { x, y }"),
+        Expr::ContextualNew {
+            uses_brace_syntax: true,
+            ref args,
+            ..
+        } if matches!(args.as_slice(), [CallArg { value: Expr::RecordLiteral { fields, .. }, .. }] if fields.len() == 2)
+    ));
+
+    assert!(matches!(
+        parse_expr_only("new {}"),
+        Expr::ContextualNew {
+            uses_brace_syntax: true,
+            ref args,
+            ..
+        } if matches!(args.as_slice(), [CallArg { value: Expr::RecordLiteral { fields, values, .. }, .. }] if fields.is_empty() && values.is_empty())
+    ));
 }
 
 #[test]
-fn parses_shape_with_interfaces_fields_and_methods() {
-    let expr = parse_expr_only(
-        r#"shape with Printable {
+fn rejects_expression_level_shape_forms() {
+    for source in [
+        r#"def main() Unit = shape { x: 10 }"#,
+        r#"def main() Unit = shape { x }"#,
+        r#"def main() Unit = shape {}"#,
+        r#"def main() Unit = shape with Printable {
     x: 10
 
     def print() Str = x.toStr()
 }"#,
-    );
-    assert!(matches!(
-        expr,
-        Expr::AnonymousObject {
-            kind: TypeKind::Record,
-            ref interfaces,
-            ref fields,
-            ref methods,
-            ..
-        } if interfaces.len() == 1 && fields.len() == 1 && methods.len() == 1
-    ));
+    ] {
+        let result = parse(source);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "removed_shape_expression"),
+            "{source}: {:#?}",
+            result.diagnostics
+        );
+    }
 }
 
 #[test]
@@ -5474,7 +5441,7 @@ type ShortSession = {
 }
 
 def project(value { position Str, start Int }) { position Str } =
-    shape { position: value.position }
+    { position: value.position }
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -5511,8 +5478,8 @@ def project(value { position Str, start Int }) { position Str } =
 #[test]
 fn rejects_shape_prefix_on_anonymous_shape_types() {
     for source in [
-        "value shape { x Str } = shape { x: \"hello\" }",
-        "def value() shape { x Str } = shape { x: \"hello\" }",
+        "value shape { x Str } = { x: \"hello\" }",
+        "def value() shape { x Str } = { x: \"hello\" }",
     ] {
         let result = parse(source);
         assert!(

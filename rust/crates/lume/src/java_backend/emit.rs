@@ -6463,8 +6463,30 @@ impl<'a> SourceBodyEmitter<'a> {
             {
                 Some("lume.core.LumeMap.empty()".to_string())
             }
-            core::Expr::RecordLiteral { fields, values, .. } => {
-                self.emit_record_literal_against(fields, values, bindings, expected)
+            core::Expr::RecordLiteral {
+                fields,
+                values,
+                span,
+            } => {
+                if let Some(emitted) =
+                    self.emit_record_literal_against(fields, values, bindings, expected)
+                {
+                    return Some(emitted);
+                }
+                let ir::Type::Named { name, .. } = expected else {
+                    return None;
+                };
+                let callee = core::Expr::Identifier {
+                    name: name.clone(),
+                    span: *span,
+                };
+                let args = [core::CallArg {
+                    name: None,
+                    ty: None,
+                    value: expr.clone(),
+                    span: *span,
+                }];
+                self.emit_call(&callee, &args, *span, bindings)
             }
             core::Expr::ContextualNew {
                 args, style, span, ..
@@ -6476,7 +6498,27 @@ impl<'a> SourceBodyEmitter<'a> {
                     },
                 ] = args.as_slice()
                 {
-                    return self.emit_record_literal_against(fields, values, bindings, expected);
+                    if let Some(emitted) =
+                        self.emit_record_literal_against(fields, values, bindings, expected)
+                    {
+                        return Some(emitted);
+                    }
+                    let inferred = self
+                        .source_expr_type(*span)
+                        .or_else(|| self.expr_type(&args[0].value, bindings))?;
+                    if let Some(emitted) =
+                        self.emit_record_literal_against(fields, values, bindings, &inferred)
+                    {
+                        return Some(emitted);
+                    }
+                    let ir::Type::Named { name, .. } = expected else {
+                        return None;
+                    };
+                    let callee = core::Expr::Identifier {
+                        name: name.clone(),
+                        span: *span,
+                    };
+                    return self.emit_call(&callee, args, *span, bindings);
                 }
                 let ir::Type::Named { name, .. } = expected else {
                     return None;
@@ -6549,12 +6591,20 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             return None;
         };
-        let type_def = self
-            .bundle
-            .ir
-            .types
-            .iter()
-            .find(|ty| ty.name == *name && ty.kind == TypeKind::Record)?;
+        let type_def =
+            self.bundle.ir.types.iter().find(|ty| {
+                ty.name == *name && matches!(ty.kind, TypeKind::Class | TypeKind::Record)
+            })?;
+        if type_def.kind == TypeKind::Class
+            && type_def.methods.iter().copied().any(|id| {
+                self.bundle
+                    .ir
+                    .function(id)
+                    .is_some_and(|function| function.name == "new")
+            })
+        {
+            return None;
+        }
         let substitution = type_def
             .type_params
             .iter()
@@ -6562,17 +6612,24 @@ impl<'a> SourceBodyEmitter<'a> {
             .zip(args.iter().cloned())
             .collect::<HashMap<_, _>>();
 
-        let mut constructor_args = Vec::with_capacity(type_def.fields.len());
+        let constructor_fields = type_def
+            .fields
+            .iter()
+            .filter(|field| {
+                type_def.kind != TypeKind::Class || field.visibility == ast::Visibility::Default
+            })
+            .collect::<Vec<_>>();
+        let mut constructor_args = Vec::with_capacity(constructor_fields.len());
         if fields.is_empty() && !values.is_empty() {
-            if values.len() != type_def.fields.len() {
+            if values.len() != constructor_fields.len() {
                 return None;
             }
-            for (field, value) in type_def.fields.iter().zip(values) {
+            for (field, value) in constructor_fields.iter().zip(values) {
                 let field_ty = substitute_java_emit_type(&field.ty, &substitution);
                 constructor_args.push(self.emit_expr_against(value, bindings, &field_ty)?);
             }
         } else {
-            for field in &type_def.fields {
+            for field in constructor_fields {
                 let field_ty = substitute_java_emit_type(&field.ty, &substitution);
                 if let Some(value) = fields
                     .iter()

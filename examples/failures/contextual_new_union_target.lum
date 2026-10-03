@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*cannot assign value of type '\{message Str\}' to binding 'value' of type 'Failure \| Success'.*
+
+class Success {
+    message Str
+}
+
+class Failure {
+    message Str
+}
+
+def main() Unit {
+    value Success | Failure = new { message: "unknown" }
+}

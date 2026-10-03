@@ -6859,20 +6859,20 @@ mod tests {
             })
 
             def named() Rollup? = source().map(r => Rollup { ...r })
-            def explicitShape() Rollup? = source().map(r => shape { ...r })
+            def bareFields() Rollup? = source().map(r => { ...r })
             def implicitShape() Rollup? = source().map(r => { ...r })
             def contextualNew() Rollup? = source().map(r => new { ...r })
             def namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
-            def explicitShapeMembers() Rollup? = source().map(r => shape { total: r.total, label: r.label })
+            def bareFieldMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
             def contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
 
             def main() Unit {
                 println(named()!.total)
-                println(explicitShape()!.total)
+                println(bareFields()!.total)
                 println(implicitShape()!.total)
                 println(contextualNew()!.total)
                 println(namedMembers()!.total)
-                println(explicitShapeMembers()!.total)
+                println(bareFieldMembers()!.total)
                 println(contextualNewMembers()!.total)
             }
             "#,

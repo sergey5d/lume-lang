@@ -1,0 +1,20 @@
+# FAIL_REGEX:
+# .*brace construction matches multiple concrete overload targets.*
+
+class User {
+    name Str
+}
+
+class Admin {
+    name Str
+}
+
+class Saver {
+    def save(user User) Unit = ()
+    def save(admin Admin) Unit = ()
+}
+
+def main() Unit {
+    saver = Saver()
+    saver.save(new { name: "Ada" })
+}

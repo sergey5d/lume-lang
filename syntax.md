@@ -942,28 +942,96 @@ updated = account.withBalance(42)
 
 ## Construction
 
-Braces are for construction fields:
+Field braces construct values. Parsing is entirely syntactic:
 
 ```txt
-user = { name: "Ada", age: 10 }
-user User = User { name: "Ada", age: 10 }
+{ field: value }  # construction
+{ ...source }     # construction
+{ value }         # block expression
+{}                # empty block, producing Unit
 ```
 
-A bare identifier in construction braces is field punning: `field` means
-`field: field`. It works for named shape and class construction, and for the
-explicit anonymous-shape form:
+The type checker then applies the construction fields to a unique concrete
+class or named-shape target supplied by context. Without such a target, the
+fields infer an anonymous shape:
 
 ```txt
-point Point = Point { x, y }
-instance ClassPoint = ClassPoint { x, y }
-anonymous { x Int, y Int } = shape { x, y }
-mixed Point3 = Point3 { x, y, z: 10 }
+point Point = {
+    x: 10
+    y: 20
+}
+
+user User = {
+    name: "Ada"
+    age: 42
+}
+
+anonymous = {
+    x: 10
+    y: 20
+}
+
+copy = { ...source }
 ```
 
-Punned fields are matched by name, never by position. For example,
-`value { x Int, z Int } = shape { x, y }` is invalid because the constructed
-shape provides `y`, not `z`. Bare `{ x }` remains a block expression; use
-`shape { x }` when an anonymous shape contains only punned fields.
+Context can flow from a typed binding, return type, indexed assignment, or a
+single known function parameter:
+
+```txt
+def makePoint(x Int, y Int) Point = {
+    x: x
+    y: y
+}
+
+rollups[key] := {
+    count: 0
+    total: 0
+}
+
+save({ name: "Ada", age: 42 })
+```
+
+Field punning is ambiguous inside bare braces because `{ x }` is a block.
+Use `new { ... }` to force construction syntax. A punned field `x` means
+`x: x` and is matched by name, never by position:
+
+```txt
+point Point = new { x, y }
+user User = new { name, age }
+anonymous = new { x, y }
+empty = new {}
+```
+
+`new { ... }` uses a concrete class or named-shape target when context supplies
+exactly one. Otherwise it infers an anonymous shape. An anonymous shape may
+then widen to `Any`, but it does not implicitly implement an interface or pick
+one alternative of a union:
+
+```txt
+value Any = new { x, y }                 # anonymous shape widened to Any
+value Printable = new { x, y }           # invalid
+value Success | Failure = new { message } # invalid: no alternative is chosen
+```
+
+Contextual construction never selects between overloaded concrete targets:
+
+```txt
+class Saver {
+    def save(user User) Unit = ()
+    def save(admin Admin) Unit = ()
+}
+
+saver.save(new { name: "Ada" }) # invalid: ambiguous target
+saver.save(User { name: "Ada" }) # explicit and valid
+```
+
+The target can always be named explicitly. `Type { ... }` is named-field
+construction and supports punning without `new`:
+
+```txt
+point = Point { x, y }
+user = User { name, age }
+```
 
 Parentheses are for positional construction and calls:
 
@@ -972,27 +1040,17 @@ user User = User("Ada", 10)
 maybe = Some(5)
 ```
 
-When an existing concrete target is known from context, `new` may omit the
-type name:
+`new(...)` may omit the type name only when context supplies exactly one
+already-declared class or named shape:
 
 ```txt
-point Point = new {
-    x: 10
-    y: 20
-}
-
 worker Worker = new("Ada", 42)
 ```
 
-`new { ... }` supplies named construction inputs and `new(...)` supplies
-positional construction inputs. The expected type must resolve to exactly one
-already-declared class or named shape. An alias is accepted only when it
-resolves to one of those constructible types.
-
-Contextual `new` is rejected when there is no expected type, or when the
-expected type is an anonymous shape, interface, `Any`, union, or unconstrained
-type parameter. It supplies constructor inputs only; fields, methods, and
-interface clauses cannot be declared inside `new`.
+Unlike `new { ... }`, positional `new(...)` cannot invent field names and does
+not synthesize anonymous shapes. It is rejected without a concrete target and
+cannot target an interface, `Any`, union, anonymous shape, or unconstrained
+type parameter.
 
 Braces are also the field construction form for declared-union payload alternatives:
 
@@ -1006,24 +1064,11 @@ Object alternatives are bare values, not calls:
 none = None
 ```
 
-Anonymous shapes use either bare braces or the explicit `shape` prefix for
-construction fields. The forms are equivalent:
-
-```txt
-user = {
-    name: "Ada"
-    age: 10
-}
-
-explicitUser = shape {
-    name: "Ada"
-    age: 10
-}
-```
-
-The explicit form is useful where several brace forms appear together. It also
-provides the unambiguous empty anonymous shape `shape {}`; bare `{}` remains an
-empty block expression.
+`shape` is not an expression keyword. It remains available for named shape
+declarations, anonymous-shape alias targets, and shape alternatives inside
+declared unions. Expression-level `shape { ... }`, `shape {}`, and
+`shape with Interface { ... }` are invalid. Use field braces, `new { ... }`,
+and `object with Interface { ... }` respectively.
 
 An expected named-shape type can project a wider shape by visible field name.
 This includes expected types flowing through generic callbacks such as
@@ -1032,15 +1077,14 @@ fields, these forms all construct the same narrower `Rollup` value:
 
 ```txt
 def named() Rollup? = source().map(r => Rollup { ...r })
-def explicitShape() Rollup? = source().map(r => shape { ...r })
-def implicitShape() Rollup? = source().map(r => { ...r })
+def fieldBraces() Rollup? = source().map(r => { ...r })
 def contextualNew() Rollup? = source().map(r => new { ...r })
 ```
 
-`Rollup { ...r }` names the target directly. The two anonymous-shape forms and
-contextual `new` obtain `Rollup` from the callback's expected return type. In
-each case, required target fields must exist with assignable types; extra
-source fields are discarded rather than copied into the narrower result.
+`Rollup { ...r }` names the target directly. Bare field braces and contextual
+`new` obtain `Rollup` from the callback's expected return type. In each case,
+required target fields must exist with assignable types; extra source fields
+are discarded rather than copied into the narrower result.
 
 A member expression in a construction entry must have an explicit field label:
 
@@ -1052,26 +1096,24 @@ def selected() Rollup? = source().map(r => Rollup {
 ```
 
 Only bare identifiers support field punning. Forms such as
-`Rollup { r.total }`, `shape { r.total }`, and `new { r.total }` are invalid;
+`Rollup { r.total }` and `new { r.total }` are invalid;
 write `total: r.total`. This keeps the constructed field name explicit when the
 value comes from member access. Other unlabeled expressions also remain invalid
 inside construction braces.
 
-Anonymous structural data may synthesize behavior by declaring interfaces and
-methods directly:
+Anonymous behavior uses `object with`:
 
 ```txt
-value = shape with Printable {
-    x: 10
+value = object with Printable {
+    x Int = 10
 
     def print() Unit = println(x)
 }
 ```
 
-`shape with Interface { ... }` synthesizes an anonymous structural type with
-fields and behavior. `object { ... }` and `object with Interface { ... }`
-synthesize anonymous nominal object implementations. These forms determine
-their own concrete type; they are not constructor calls.
+`object { ... }` and `object with Interface { ... }` synthesize anonymous
+nominal object implementations. These forms determine their own concrete type;
+they are not constructor calls.
 
 Anonymous shape fields may infer their type from the initializer:
 
@@ -1097,7 +1139,7 @@ def describe(user { name Str, age Int }) Str =
     user.name + " is " + user.age
 
 def project(user { name Str, age Int }) { name Str } =
-    shape { name: user.name }
+    { name: user.name }
 ```
 
 Anonymous shape types in parameters, return types, fields, and local bindings
@@ -1172,10 +1214,10 @@ starts a long-form declaration for `class`, `interface`, `annotation`, and
 union member, as in
 `type Outcome = class Success { value Str } | object Cancelled {}`.
 
-`shape(...)` is not a construction form. Anonymous structural values use named
-fields with `{ ... }` or `shape { ... }`. Positional construction must name an
-existing target, such as `Point(...)` or an anonymous-shape alias such as
-`Session(...)`.
+`shape` is not a construction expression. Anonymous structural values use
+labeled/spread field braces or forced `new { ... }`. Positional construction
+must name an existing target, such as `Point(...)` or an anonymous-shape alias
+such as `Session(...)`.
 
 Tuples do not construct shapes or classes. Classes must name their constructor
 target:
@@ -1230,13 +1272,15 @@ General construction rules:
 - constructor parentheses accept positional arguments only; use braces for construction fields
 - function and method calls may still use named arguments in parentheses
 - `Type { value }` is not valid; use `Type(value)` only when the type supports positional construction
-- anonymous shapes use `{ field: value }` or `shape { field: value }`; `shape(...)` is not supported
+- anonymous shapes use labeled/spread field braces or `new { ... }`; expression-level `shape` is not supported
 - runtime-backed collection classes such as `Vector`, `Map`, `Array`, `LinkedList`, and `Set` use normal class construction; `Range(...)` is a stdlib factory
 - `Type { ... }` resolves through the available explicit `new(...)` declaration or implicit field-construction inputs
 - `Type(...)` resolves through explicit class `new(...)`, implicit public-field construction, named shape positional construction, or an intrinsic collection form
-- `new { ... }` and `new(...)` resolve through the exact constructible type supplied by context
-- contextual `new` accepts only classes, named shapes, or aliases to those types
-- contextual `new` does not synthesize fields, methods, interfaces, or anonymous implementations
+- `{ field: value }` and `{ ...source }` use a unique expected class/shape target when available and otherwise infer an anonymous shape
+- `new { ... }` forces construction parsing; it uses a unique expected class/shape target when available and otherwise infers an anonymous shape
+- `new(...)` requires an exact constructible class or named-shape target supplied by context
+- contextual construction never chooses between overloaded concrete targets
+- `new` does not declare fields, methods, or interface implementations
 - class construction is nominal and constructor-gated; shape construction is structural
 - tuple values cannot construct classes or shapes; write `Point(...)`, `User(...)`, or construction fields
 - nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
@@ -1318,12 +1362,10 @@ class SecuredAccount {
 Braces carry several meanings. The parser chooses by the tokens before and inside the braces:
 
 ```txt
-{ field: value }                 # anonymous shape literal
-shape { field: value }           # explicit anonymous shape literal
-shape { field }                  # explicit anonymous shape with a punned field
-shape {}                         # explicit empty anonymous shape literal
-shape with Interface { field: value; def method() Type = value } # anonymous structural implementation
+{ field: value }                 # contextual or anonymous field construction
+{ ...source }                    # anonymous or contextual shape/class construction
 { expr }                         # block expression
+{}                               # empty block expression
 Type { field: value }            # brace field construction or union payload
 Type { field }                   # brace construction with a punned field
 call { x => ... }                # trailing lambda
@@ -1331,10 +1373,14 @@ object { field Type = value; def method() Type = value } # anonymous object
 object with Interface, Other { field Type = value; def method() Type = value } # anonymous object implementing interfaces
 new(field Type)                  # constructor declaration
 new(value, other)                # contextual positional construction
-new { field: value }             # contextual named construction
+new { field: value }             # forced named-field construction
+new { field }                    # forced punned-field construction
+new {}                           # empty anonymous or contextual construction
 ```
 
-Single-expression braces such as `{ value }` are block expressions, not anonymous shapes. To construct an anonymous shape, use construction fields with `:`. Bare `{}` is an empty block; use `shape {}` for an empty anonymous shape.
+Single-expression braces such as `{ value }` are block expressions, not
+anonymous shapes. Use `new { value }` when `value` is a punned field. Bare `{}`
+is an empty block; `new {}` is empty construction.
 
 Brace classification uses the first syntactic entry, not punctuation found
 later in the body. A leading construction field or spread selects an anonymous
@@ -1364,11 +1410,11 @@ Shape conversion rules:
 - shape-to-interface follows the shape's explicit `with Interface` bounds
 - class-to-interface-through-shape is not automatic; assign the class value to an explicit shape view first
 - class fields inaccessible at the conversion site are not visible to shape conversion
-- shape-to-class is not implicit; use a class constructor
+- an already-created shape value does not implicitly become a class; use a class constructor
 - tuple-to-shape and tuple-to-class are not allowed; use named shape construction, class constructors, or anonymous construction fields
 - ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
-- `shape { ... }` is exactly the explicit spelling of an anonymous shape literal and accepts the same construction fields and spreads as bare field braces
 - construction fields inside braces use `field: value`; bare `field` is shorthand for `field: field`
+- bare punned fields require `Type { field }` or `new { field }`; `{ field }` is a block
 - construction fields cannot include a type; put anonymous shape types on declarations and aliases
 - single-expression braces like `{ value }` are still block expressions, not anonymous shapes
 
@@ -1498,15 +1544,16 @@ class Pixel {
 
 point Point = Point(1, 2)              # explicit named-shape construction
 contextual Point = new(1, 2)           # contextual named-shape construction
-anon = shape { x: 1, y: 2 }            # anonymous structural construction
+anon = { x: 1, y: 2 }                  # anonymous structural construction
 fromClass Point = Pixel { x: 1, y: 2 } # class -> shape
-named Point = { x: 1, y: 2 }           # anonymous shape -> named shape
+named Point = { x: 1, y: 2 }           # contextual named-shape construction
 
 user User = ("Ada", 10)                # invalid: tuple -> class
 point Point = (1, 2)                   # invalid: tuple -> named shape
-anon { x Int, y Int } = new(1, 2)      # invalid: new cannot target an anonymous shape
+anon { x Int, y Int } = new(1, 2)      # invalid: positional new cannot target an anonymous shape
 unknown = new(1, 2)                    # invalid: no concrete expected target
-user User = { name: "Ada", age: 10 } # invalid: shape -> class
+user User = { name: "Ada", age: 10 }   # contextual class construction
+empty = new {}                          # empty anonymous shape
 ```
 
 Anonymous shape field types come from the surrounding declaration:
@@ -2312,16 +2359,6 @@ greeter Greeter = object with Greeter {
 immutable fields and methods; `with` only adds the interfaces implemented by
 the synthesized nominal object.
 
-To synthesize anonymous structural data with behavior, use `shape with`:
-
-```txt
-printable Printable = shape with Printable {
-    value: "hello"
-
-    def print() Unit = println(value)
-}
-```
-
 An interface name followed directly by braces is not anonymous implementation
 syntax. `Greeter { ... }` is rejected because interfaces cannot be constructed.
 
@@ -2356,10 +2393,9 @@ value = object with Readable, Writable {
 }
 ```
 
-Anonymous nominal implementations start with `object with`; anonymous
-structural implementations start with `shape with`. Repeating `with`, such as
-`object with Readable with Writable`, is invalid; write
-`object with Readable, Writable` instead.
+Anonymous implementations start with `object with`. Repeating `with`, such as
+`object with Readable with Writable`, is invalid; write `object with Readable,
+Writable` instead. Expression-level `shape with` is not supported.
 
 Interfaces may also provide default methods by attaching a body:
 

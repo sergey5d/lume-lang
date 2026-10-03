@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*cannot assign value of type '\{name Str\}' to binding 'value' of type 'Named'.*
+
+interface Named {
+    def name Str
+}
+
+def main() Unit {
+    value Named = new { name: "Ada" }
+}

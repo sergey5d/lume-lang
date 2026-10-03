@@ -2040,6 +2040,14 @@ impl<'a> Parser<'a> {
                 let start = self.consume_keyword(Keyword::Shape, "expected 'shape'")?;
                 if self.match_keyword(Keyword::With) {
                     let interfaces = self.parse_interface_ref_list_after_with()?;
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "removed_shape_expression",
+                            "expression-level 'shape with' has been removed; use 'object with Interface { ... }' for anonymous behavior",
+                            start.cover(self.current_span()),
+                        )
+                        .with_help("keep 'shape' for declarations and type aliases only"),
+                    );
                     return self.parse_anonymous_shape_body(start, interfaces);
                 }
                 if self.match_token(TokenKind::LParen) {
@@ -2048,7 +2056,7 @@ impl<'a> Parser<'a> {
                     let end = self.consume(TokenKind::RParen, "expected ')' after shape values")?;
                     self.diagnostics.push(Diagnostic::error(
                         "removed_positional_shape_construction",
-                        "positional 'shape(...)' construction has been removed; use 'shape { field: value }' or a named shape constructor",
+                        "positional 'shape(...)' construction has been removed; use field braces or a named shape constructor",
                         start.cover(end),
                     ));
                     return Some(Expr::Unit {
@@ -2056,13 +2064,23 @@ impl<'a> Parser<'a> {
                     });
                 }
                 if self.match_token(TokenKind::LBrace) {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "removed_shape_expression",
+                            "expression-level 'shape { ... }' has been removed; use field braces or 'new { ... }'",
+                            start,
+                        )
+                        .with_help(
+                            "write '{ field: value }' for labeled fields, or 'new { field }' for punning and empty construction",
+                        ),
+                    );
                     return self.with_trailing_block_calls_allowed(|parser| {
                         parser.finish_brace_record_literal_expr(start)
                     });
                 }
                 self.error_at_current(
                     "unexpected_token",
-                    "anonymous shape construction uses 'shape { field: value }' or 'shape with Interface { ... }'",
+                    "'shape' is a declaration/type keyword, not an expression; use '{ field: value }', 'new { ... }', or 'object with Interface { ... }'",
                 );
                 None
             }

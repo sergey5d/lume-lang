@@ -4754,6 +4754,10 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|item| self.infer_expr_type_with_overrides(item, overrides))
                     .collect(),
             ),
+            Expr::ContextualNew { args, style, .. } if *style == core::CallStyle::Brace => args
+                .first()
+                .map(|arg| self.infer_expr_type_with_overrides(&arg.value, overrides))
+                .unwrap_or(ir::Type::Unknown),
             Expr::ContextualNew { .. } => ir::Type::Unknown,
             Expr::RecordLiteral { fields, values, .. } => {
                 if fields.is_empty() && !values.is_empty() {
@@ -6228,6 +6232,34 @@ impl<'a> FunctionLowerer<'a> {
             )),
             Expr::RecordLiteral { fields, values, .. } => {
                 if let Some(expected) = expected {
+                    if let ir::Type::Named { name, .. } = expected
+                        && self.program.types.iter().any(|ty| {
+                            ty.name == *name
+                                && ty.kind == ast::TypeKind::Class
+                                && ty.methods.iter().copied().any(|id| {
+                                    self.program
+                                        .function(id)
+                                        .is_some_and(|function| function.name == "new")
+                                })
+                        })
+                    {
+                        let span = expr.span();
+                        let call = Expr::Call {
+                            callee: Box::new(Expr::Identifier {
+                                name: name.clone(),
+                                span,
+                            }),
+                            args: vec![core::CallArg {
+                                name: None,
+                                ty: None,
+                                value: expr.clone(),
+                                span,
+                            }],
+                            style: core::CallStyle::Brace,
+                            span,
+                        };
+                        return self.lower_rvalue_with_expected(&call, Some(expected));
+                    }
                     if let Some(value) =
                         self.lower_record_literal_as_named_construct(fields, values, expected)
                     {
@@ -6427,9 +6459,27 @@ impl<'a> FunctionLowerer<'a> {
                 })
             }
             Expr::ContextualNew { args, style, span } => {
+                if *style == core::CallStyle::Brace
+                    && expected.is_none_or(|ty| self.named_construct_fields(ty).is_none())
+                {
+                    let [
+                        core::CallArg {
+                            value: record @ Expr::RecordLiteral { .. },
+                            ..
+                        },
+                    ] = args.as_slice()
+                    else {
+                        self.invariant(
+                            "'new { ... }' should contain one record literal before lowering",
+                            *span,
+                        );
+                        return Some(ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit)));
+                    };
+                    return self.lower_rvalue_with_expected(record, expected);
+                }
                 let Some(ir::Type::Named { name, .. }) = expected else {
                     self.invariant(
-                        "contextual 'new' should have an expected named class or shape before lowering",
+                        "contextual 'new(...)' should have an expected named class or shape before lowering",
                         *span,
                     );
                     return Some(ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit)));

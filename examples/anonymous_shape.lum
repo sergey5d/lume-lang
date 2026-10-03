@@ -21,7 +21,7 @@ def makeCounter(base Int) { count Int, next Int } {
 }
 
 def makeUser(name Str, age Int) { name Str, age Int } =
-    shape { name, age }
+    new { name, age }
 
 def main() Unit {
     full = {
@@ -29,11 +29,11 @@ def main() Unit {
         age: 10
         city: "NYC"
     }
-    smaller = shape {
+    smaller = {
         name: "Ben"
         age: 12
     }
-    empty = shape {}
+    empty = new {}
     a = 1
     inferred = {
         count: a
@@ -48,7 +48,7 @@ def main() Unit {
     positional { name Str, age Int } = { name: "Ben", age: 12 }
     name = "Cara"
     age = 14
-    contextual { name Str, age Int } = shape { name, age }
+    contextual { name Str, age Int } = new { name, age }
 
     println(describe(full))
     println(describe(smaller))

@@ -30,15 +30,15 @@ objectValue = object {
     value Int = 3
 }
 
-shapeValue = shape with Doubled {
+objIfaceValue = object with Doubled {
     def doubled() Int = this.value * 2
 
-    value: 4
+    value Int = 4
 }
 
 def main() Unit {
     println(User("Ada").label())
     println(Counter(2).doubled())
     println(objectValue.doubled())
-    println(shapeValue.doubled())
+    println(objIfaceValue.doubled())
 }
