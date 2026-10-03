@@ -560,6 +560,7 @@ pub enum Operand {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Unit,
+    OptionNone,
     Bool(bool),
     Int(i64),
     Float(f64),

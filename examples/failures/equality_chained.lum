@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*equality operator '==' is non-associative; combine separate conditions with '&&' or '\|\|', or use parentheses to make the grouping explicit.*
+
+def main(a Int, b Int, c Int) Bool = a == b == c

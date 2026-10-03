@@ -1,13 +1,6 @@
 use super::types::ParsedGenericClause;
 use super::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TypeBodyOrder {
-    Storage,
-    Constructor,
-    Method,
-}
-
 impl<'a> Parser<'a> {
     pub(super) fn parse_module_decl(&mut self) -> Option<ModuleDecl> {
         let start = self.previous_span();
@@ -526,6 +519,7 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_optional_return_type()
         };
+        let equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
         let body = self.parse_callable_body()?;
         let end = body.span();
         Some(FunctionDecl {
@@ -536,6 +530,7 @@ impl<'a> Parser<'a> {
             type_conditions: generic_clause.conditions,
             params,
             return_type,
+            equals_body,
             body,
             span: start.cover(end),
         })
@@ -614,7 +609,6 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
 
         let mut members = Vec::new();
-        let mut body_order = TypeBodyOrder::Storage;
         let mut invalid_constructors = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             self.skip_newlines();
@@ -632,22 +626,8 @@ impl<'a> Parser<'a> {
                 {
                     let constructor =
                         self.parse_constructor_decl(member_annotations, member_visibility)?;
-                    if body_order == TypeBodyOrder::Method {
-                        self.diagnostics.push(Diagnostic::error(
-                            "invalid_member_order",
-                            format!(
-                                "constructors must appear before methods in {} '{}'; move 'new' above method declarations",
-                                type_kind_name(kind),
-                                name
-                            ),
-                            constructor.span,
-                        ));
-                    }
                     if kind != TypeKind::Class {
                         invalid_constructors.push(constructor.span);
-                    }
-                    if body_order != TypeBodyOrder::Method {
-                        body_order = TypeBodyOrder::Constructor;
                     }
                     members.push(TypeMember::Method(constructor));
                 }
@@ -675,7 +655,6 @@ impl<'a> Parser<'a> {
                             method.span,
                         ));
                     }
-                    body_order = TypeBodyOrder::Method;
                     members.push(TypeMember::Method(method));
                 }
                 _ if self.starts_callable_decl() => {
@@ -702,43 +681,10 @@ impl<'a> Parser<'a> {
                             method.span,
                         ));
                     }
-                    body_order = TypeBodyOrder::Method;
                     members.push(TypeMember::Method(method));
                 }
                 _ => {
                     let field = self.parse_field_decl(member_annotations, member_visibility)?;
-                    if matches!(
-                        kind,
-                        TypeKind::Class | TypeKind::Record | TypeKind::Enum | TypeKind::Object
-                    ) {
-                        match body_order {
-                            TypeBodyOrder::Storage => {}
-                            TypeBodyOrder::Constructor => {
-                                self.diagnostics.push(Diagnostic::error(
-                                    "invalid_member_order",
-                                    format!(
-                                        "storage fields must appear before constructors in {} '{}'; move field '{}' above constructor declarations",
-                                        type_kind_name(kind),
-                                        name,
-                                        field.name
-                                    ),
-                                    field.span,
-                                ));
-                            }
-                            TypeBodyOrder::Method => {
-                                self.diagnostics.push(Diagnostic::error(
-                                    "invalid_member_order",
-                                    format!(
-                                        "storage fields must appear before methods in {} '{}'; move field '{}' above method declarations",
-                                        type_kind_name(kind),
-                                        name,
-                                        field.name
-                                    ),
-                                    field.span,
-                                ));
-                            }
-                        }
-                    }
                     members.push(TypeMember::Field(field));
                 }
             }
@@ -846,6 +792,7 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_constructor_param_list()?
         };
+        let equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
         let body = self.parse_callable_body()?;
         let end = body.span();
         Some(MethodDecl {
@@ -857,6 +804,7 @@ impl<'a> Parser<'a> {
             type_conditions: Vec::new(),
             params,
             return_type: None,
+            equals_body,
             body: Some(body),
             span: start.cover(end),
         })
@@ -1022,6 +970,7 @@ impl<'a> Parser<'a> {
                 start,
             ));
         }
+        let equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
         let body = if self.at(TokenKind::LBrace) || self.at(TokenKind::Eq) {
             Some(self.parse_callable_body()?)
         } else if allow_signature_only {
@@ -1044,6 +993,7 @@ impl<'a> Parser<'a> {
             type_conditions: generic_clause.conditions,
             params,
             return_type,
+            equals_body,
             body,
             span: start.cover(end),
         })
@@ -1132,17 +1082,6 @@ impl<'a> Parser<'a> {
             }
             _ => false,
         }
-    }
-}
-
-fn type_kind_name(kind: TypeKind) -> &'static str {
-    match kind {
-        TypeKind::Annotation => "annotation",
-        TypeKind::Class => "class",
-        TypeKind::Record => "shape",
-        TypeKind::Object => "object",
-        TypeKind::Interface => "interface",
-        TypeKind::Enum => "declared union",
     }
 }
 

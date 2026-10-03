@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*update field 'amount' expects 'Int', got 'Str'.*
 
-class Amount {
+shape Amount {
     amount Int
 }
 

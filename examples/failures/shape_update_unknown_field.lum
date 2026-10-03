@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*update field 'missing' does not exist on left-hand shape.*
 
-class Amount {
+shape Amount {
     amount Int
 }
 

@@ -1054,6 +1054,7 @@ fn lume_default_field_values(fields: &[ir::Field]) -> String {
 fn lume_constant_metadata(value: &ir::Constant) -> Option<String> {
     let (tag, body) = match value {
         ir::Constant::Unit => ("unit", String::new()),
+        ir::Constant::OptionNone => return None,
         ir::Constant::Bool(value) => ("bool", value.to_string()),
         ir::Constant::Int(value) => ("int", value.to_string()),
         ir::Constant::Float(value) => ("float", value.to_string()),
@@ -2050,6 +2051,15 @@ impl<'a> SourceBodyEmitter<'a> {
             let emitted_start = out.len();
             let is_tail = index + 1 == block.statements.len();
             match statement {
+                core::Stmt::PatternBinding(statement) => {
+                    self.emit_pattern_binding_statement(
+                        out,
+                        statement,
+                        indent,
+                        bindings,
+                        binding_types,
+                    )?;
+                }
                 core::Stmt::Binding(binding)
                     if binding.destructure.is_none()
                         && binding.bindings.len() == 1
@@ -2458,6 +2468,86 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             annotate_java_lines(out, emitted_start, statement.span().start_pos.line);
         }
+        Some(())
+    }
+
+    fn emit_pattern_binding_statement(
+        &self,
+        out: &mut String,
+        statement: &core::PatternBindingStmt,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+    ) -> Option<()> {
+        if statement.clauses.is_empty() {
+            return self.emit_irrefutable_pattern_binding(
+                out,
+                &statement.pattern,
+                &statement.value,
+                statement.span.start,
+                indent,
+                bindings,
+                binding_types,
+            );
+        }
+
+        for (index, clause) in statement.clauses.iter().enumerate() {
+            self.emit_irrefutable_pattern_binding(
+                out,
+                &clause.pattern,
+                &clause.value,
+                clause.span.start + index,
+                indent,
+                bindings,
+                binding_types,
+            )?;
+        }
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_irrefutable_pattern_binding(
+        &self,
+        out: &mut String,
+        pattern: &ast::Pattern,
+        value: &core::Expr,
+        source_id: usize,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+    ) -> Option<()> {
+        let value_ty = self.expr_type_with_binding_types(value, bindings, binding_types)?;
+        let temp = self.synthetic_name("pattern", "pattern", source_id);
+        out.push_str(indent);
+        out.push_str(&self.names.value_type(&value_ty));
+        out.push(' ');
+        out.push_str(&temp);
+        out.push_str(" = ");
+        out.push_str(&self.emit_expr_against(value, bindings, &value_ty)?);
+        out.push_str(";\n");
+
+        let matched = self.match_case_pattern(
+            pattern,
+            &temp,
+            &value_ty,
+            source_id,
+            bindings,
+            binding_types,
+        )?;
+        if matched.condition != "true" {
+            out.push_str(indent);
+            out.push_str("if (!(");
+            out.push_str(&matched.condition);
+            out.push_str(")) {\n");
+            out.push_str(indent);
+            out.push_str(
+                "    throw new IllegalStateException(\"irrefutable Lume pattern did not match\");\n",
+            );
+            out.push_str(indent);
+            out.push_str("}\n");
+        }
+        *bindings = matched.bindings;
+        *binding_types = matched.binding_types;
         Some(())
     }
 
@@ -3354,10 +3444,18 @@ impl<'a> SourceBodyEmitter<'a> {
         let [generator] = statement.bindings.as_slice() else {
             return None;
         };
-        if generator.pattern.is_some() || !generator.values.is_empty() {
+        if !generator.values.is_empty() {
             return None;
         }
-        if generator.destructure.is_none() && generator.bindings.len() != 1 {
+        if generator.pattern.is_some()
+            && (generator.destructure.is_some() || !generator.bindings.is_empty())
+        {
+            return None;
+        }
+        if generator.pattern.is_none()
+            && generator.destructure.is_none()
+            && generator.bindings.len() != 1
+        {
             return None;
         }
         let iterable_source = generator.iterable.as_ref()?;
@@ -3388,7 +3486,35 @@ impl<'a> SourceBodyEmitter<'a> {
         let mut body_bindings = bindings.clone();
         let mut body_types = binding_types.clone();
         let mut typed_locals = Vec::new();
-        if let Some(destructure) = generator.destructure {
+        if let Some(pattern) = &generator.pattern {
+            let item = self.synthetic_name("item", "item", generator.span.start);
+            let java_type = self.names.value_type(&item_ty);
+            out.push_str(&format!(
+                "{indent}    {java_type} {item} = ({java_type}) {iterator}.next();\n"
+            ));
+            let matched = self.match_case_pattern(
+                pattern,
+                &item,
+                &item_ty,
+                generator.span.start,
+                &body_bindings,
+                &body_types,
+            )?;
+            if matched.condition != "true" {
+                out.push_str(indent);
+                out.push_str("    if (!(");
+                out.push_str(&matched.condition);
+                out.push_str(")) {\n");
+                out.push_str(indent);
+                out.push_str(
+                    "        throw new IllegalStateException(\"irrefutable Lume pattern did not match\");\n",
+                );
+                out.push_str(indent);
+                out.push_str("    }\n");
+            }
+            body_bindings = matched.bindings;
+            body_types = matched.binding_types;
+        } else if let Some(destructure) = generator.destructure {
             let item = self.synthetic_name("item", "item", generator.span.start);
             let java_type = self.names.value_type(&item_ty);
             out.push_str(&format!(
@@ -4719,22 +4845,16 @@ impl<'a> SourceBodyEmitter<'a> {
             && let Some(owner) = core_enum_case_owner(case_name)
         {
             let arity = if owner == "Option" { 1 } else { 2 };
-            let case_type = format!(
-                "lume.core.{owner}.{}{}",
-                java_type_name(case_name),
-                java_wildcard_type_args(arity)
-            );
             let args = match value_ty {
                 ir::Type::Named { name, args } if name == owner => args.clone(),
                 _ => vec![ir::Type::Unknown; arity],
             };
-            return (
-                format!("(({case_type}) {value})"),
-                ir::Type::Named {
-                    name: format!("{owner}::{case_name}"),
-                    args,
-                },
-            );
+            let alias_ty = ir::Type::Named {
+                name: format!("{owner}::{case_name}"),
+                args,
+            };
+            let case_type = self.names.value_type(&alias_ty);
+            return (format!("(({case_type}) {value})"), alias_ty);
         }
 
         if let Some(type_name) = named_pattern {
@@ -6872,13 +6992,6 @@ impl<'a> SourceBodyEmitter<'a> {
             core::Expr::Member { receiver, name, .. } if name == "equals" && args.len() == 1 => {
                 self.emit_equality(receiver, &args[0].value, bindings, false)
             }
-            core::Expr::Member { receiver, name, .. } if name == "sameValue" && args.len() == 1 => {
-                Some(format!(
-                    "lume.core.LumeRuntime.sameValue({}, {})",
-                    self.emit_expr(receiver, bindings)?,
-                    self.emit_call_arg(&args[0], bindings)?
-                ))
-            }
             core::Expr::Member { receiver, name, .. } if name == "hash" && args.is_empty() => {
                 Some(format!(
                     "lume.core.LumeRuntime.hashValue({})",
@@ -7086,8 +7199,11 @@ impl<'a> SourceBodyEmitter<'a> {
             [owner] if owner == "Set" && emitted.is_empty() => {
                 Some("lume.core.LumeSet.empty()".to_string())
             }
-            [owner] if owner == "Range" && emitted.len() == 2 => {
-                Some(format!("new lume.core.Range({joined})"))
+            [owner] if owner == "Range" && matches!(emitted.len(), 2 | 3) => {
+                Some(format!("new lume.core.IntRange({joined})"))
+            }
+            [owner] if owner == "IntRange" && emitted.len() == 3 => {
+                Some(format!("new lume.core.IntRange({joined})"))
             }
             [owner, method]
                 if owner == "Math"
@@ -8899,8 +9015,12 @@ impl<'a> JavaIrSupport<'a> {
                 name: "Set".to_string(),
                 args: vec![ir::Type::Unknown],
             }),
-            [owner] if owner == "Range" && arg_len == 2 => Some(ir::Type::Named {
-                name: "Range".to_string(),
+            [owner] if owner == "Range" && matches!(arg_len, 2 | 3) => Some(ir::Type::Named {
+                name: "IntRange".to_string(),
+                args: Vec::new(),
+            }),
+            [owner] if owner == "IntRange" && arg_len == 3 => Some(ir::Type::Named {
+                name: "IntRange".to_string(),
                 args: Vec::new(),
             }),
             [owner, method] if owner == "Int" && method == "parse" && arg_len == 1 => {
@@ -9926,6 +10046,7 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "EnumCase" => Some("lume.core.LumeEnumCase".to_string()),
         "ReflectionError" => Some("lume.core.ReflectionError".to_string()),
         "InvalidIndex" => Some("lume.core.InvalidIndex".to_string()),
+        "IntRange" => Some("lume.core.IntRange".to_string()),
         _ => None,
     }
 }
@@ -10193,7 +10314,11 @@ fn iterable_item_type(ty: &ir::Type) -> Option<ir::Type> {
         {
             args.first().cloned()
         }
-        ir::Type::Named { name, args } if name == "Range" && args.is_empty() => Some(ir::Type::Int),
+        ir::Type::Named { name, args }
+            if matches!(name.as_str(), "IntRange" | "Range") && args.is_empty() =>
+        {
+            Some(ir::Type::Int)
+        }
         _ => None,
     }
 }
@@ -10681,6 +10806,7 @@ fn substitute_java_emit_type(ty: &ir::Type, subst: &HashMap<String, ir::Type>) -
 fn java_constant(constant: &ir::Constant) -> String {
     match constant {
         ir::Constant::Unit => "lume.core.LumeUnit.INSTANCE".to_string(),
+        ir::Constant::OptionNone => "lume.core.LumeRuntime.optionNone()".to_string(),
         ir::Constant::Bool(value) => value.to_string(),
         ir::Constant::Int(value) => format!("{value}L"),
         ir::Constant::Float(value) => java_float_literal(*value),
@@ -10699,6 +10825,7 @@ fn java_constant(constant: &ir::Constant) -> String {
 fn constant_type(constant: &ir::Constant) -> ir::Type {
     match constant {
         ir::Constant::Unit => ir::Type::Unit,
+        ir::Constant::OptionNone => ir::Type::option(ir::Type::Unknown),
         ir::Constant::Bool(_) => ir::Type::Bool,
         ir::Constant::Int(_) => ir::Type::Int,
         ir::Constant::Float(_) => ir::Type::Float,

@@ -1,0 +1,44 @@
+# EXPECT:
+# let Ada Ada
+# if Ada Ada
+# while 5 5
+# for Bob Bob
+# yield CaraCara
+# match Ada Ada
+
+class User {
+    name Str
+}
+
+def main() Unit {
+    unknown Any = User("Ada")
+
+    let User { name as letName } as letUser = unknown else return
+    println("let", letName, letUser.name)
+
+    if let User { name as ifName } as ifUser = unknown {
+        println("if", ifName, ifUser.name)
+    }
+
+    current Int? = Some(5)
+    while let Some(value) as some = current {
+        println("while", value, some.value)
+        break
+    }
+
+    users = [User("Bob")]
+    for let User { name as forName } as forUser <- users {
+        println("for", forName, forUser.name)
+    }
+
+    labels = for {
+        let User { name as itemName } as item <- [User("Cara")]
+    } yield itemName + item.name
+    println("yield", labels[0])
+
+    match unknown {
+        case User { name as matchName } as matchUser =>
+            println("match", matchName, matchUser.name)
+        case _ => ()
+    }
+}

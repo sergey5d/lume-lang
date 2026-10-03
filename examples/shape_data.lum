@@ -11,7 +11,7 @@
 # Hop-hop
 # Jump 3 steps
 
-# plain data classes still work well with field-wise updates and destructuring
+# named shapes support field-wise updates, methods, and interface conformance
 
 interface Hopper {
     def hop() Str
@@ -21,7 +21,7 @@ interface Jumper {
     def jump(steps Int) Str
 }
 
-class Amount with Hopper, Jumper {
+shape Amount with Hopper, Jumper {
     amount Int
     description Str
     count Int

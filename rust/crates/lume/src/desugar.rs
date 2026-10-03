@@ -15,6 +15,7 @@ pub fn desugar_function_decl(function: &ast::FunctionDecl) -> core::FunctionDecl
         type_conditions: function.type_conditions.clone(),
         params: function.params.clone(),
         return_type: function.return_type.clone(),
+        equals_body: function.equals_body,
         body: desugar_callable_body(&function.body),
         span: function.span,
     }
@@ -30,6 +31,7 @@ pub fn desugar_method_decl(method: &ast::MethodDecl) -> core::MethodDecl {
         type_conditions: method.type_conditions.clone(),
         params: method.params.clone(),
         return_type: method.return_type.clone(),
+        equals_body: method.equals_body,
         body: method.body.as_ref().map(desugar_callable_body),
         span: method.span,
     }

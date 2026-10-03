@@ -135,6 +135,9 @@ pub struct FunctionDecl {
     pub type_conditions: Vec<GenericCondition>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeRef>,
+    /// Whether the callable body is introduced by `=`. When no return type is
+    /// written, this form infers its result instead of defaulting to `Unit`.
+    pub equals_body: bool,
     pub body: CallableBody,
     pub span: Span,
 }
@@ -152,6 +155,8 @@ pub struct MethodDecl {
     pub type_conditions: Vec<GenericCondition>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeRef>,
+    /// Whether the callable body is introduced by `=`.
+    pub equals_body: bool,
     pub body: Option<CallableBody>,
     pub span: Span,
 }

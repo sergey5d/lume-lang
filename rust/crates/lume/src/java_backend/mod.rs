@@ -878,6 +878,7 @@ fn java_library_method(
             })
             .collect(),
         return_type,
+        equals_body: false,
         body: None,
         span,
     })
@@ -2899,12 +2900,21 @@ shape User {
 
 def main() Unit {
     user User = User { name: "Ada", age: 3 }
-    let { name as userName, age } = user
-    var total Int = age
-    for let { age as nextAge } <- [user] {
-        total += nextAge
+    let User { name as userName, age } as wholeUser = user
+    var total Int = age + wholeUser.age
+    for let User { age as nextAge } as nextUser <- [user] {
+        total += nextAge + nextUser.age
     }
-    println(userName, total)
+    unknown Any = user
+    if let User { age as ifAge } as ifUser = unknown {
+        total += ifAge + ifUser.age
+    }
+    current User? = Some(user)
+    while let Some(nextUser) as some = current {
+        total += nextUser.age + some.value.age
+        break
+    }
+    println(userName, wholeUser.name, total)
 }
 "#,
         )
@@ -2937,7 +2947,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Ada 6\n"
+            "Ada Ada 24\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -3117,6 +3127,68 @@ def main() Unit {
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
             "5\nready\n9\n11\n12\n13\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_infers_equals_block_return_type() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping inferred return Java test because a JDK tool is unavailable");
+            return;
+        }
+
+        let temp = temp_path("lume-java-inferred-return");
+        let source = temp.join("inferred_return.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/inferredreturn
+
+def flag() = {
+    false
+}
+
+def main() Unit {
+    if flag() {
+        println("wrong")
+    } else {
+        println("ok")
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let module = fs::read_to_string(out.join("demo/inferredreturn/InferredreturnModule.java"))
+            .expect("read module");
+        assert!(module.contains("static Boolean flag()"), "{module}");
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.inferredreturn.InferredreturnMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "ok\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -5706,14 +5778,6 @@ def main() Unit {
     right Identified = AlternateEntry(1)
     println(left == right)
 
-    dynamicFirst Any = Any(first)
-    dynamicSame Any = Any(same)
-    dynamicAgain Any = Any(dynamicFirst)
-    dynamicOtherShape Any = reordered
-    println(dynamicFirst.sameValue(dynamicSame))
-    println(dynamicFirst.sameValue(dynamicAgain))
-    println(dynamicFirst.sameValue(dynamicOtherShape))
-
     id = 3
     account = Account { id }
     widenedAccount Any = Any(account)
@@ -5792,7 +5856,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "true\nfalse\nfound\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\n"
+            "true\nfalse\nfound\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -6412,9 +6476,9 @@ def named() Rollup? = source().map(r => Rollup { ...r })
 def explicitShape() Rollup? = source().map(r => shape { ...r })
 def implicitShape() Rollup? = source().map(r => { ...r })
 def contextualNew() Rollup? = source().map(r => new { ...r })
-def namedMembers() Rollup? = source().map(r => Rollup { r.total, r.label })
-def explicitShapeMembers() Rollup? = source().map(r => shape { r.total, r.label })
-def contextualNewMembers() Rollup? = source().map(r => new { r.total, r.label })
+def namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
+def explicitShapeMembers() Rollup? = source().map(r => shape { total: r.total, label: r.label })
+def contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
 
 def main() Unit {
     println(named()!.total)

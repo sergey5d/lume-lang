@@ -1,0 +1,7 @@
+# EXPECT_ERROR:
+# type 'Any' has no field or method 'sameValue'
+
+def main() Unit {
+    unknown Any = 5
+    equal = unknown.sameValue(5)
+}

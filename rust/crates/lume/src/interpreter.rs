@@ -1849,6 +1849,7 @@ impl<'a> Interpreter<'a> {
     fn constant_value(&self, constant: &ir::Constant) -> Value {
         match constant {
             ir::Constant::Unit => Value::Unit,
+            ir::Constant::OptionNone => self.option_none(),
             ir::Constant::Bool(value) => Value::Bool(*value),
             ir::Constant::Int(value) => Value::Int(*value),
             ir::Constant::Float(value) => Value::Float(*value),
@@ -3203,13 +3204,12 @@ impl<'a> Interpreter<'a> {
                 } else {
                     -1
                 };
-                Some(Value::Iterator(Rc::new(RefCell::new(
-                    IteratorState::Range {
-                        current: start,
-                        end,
-                        step,
-                    },
-                ))))
+                self.construct_named_type(
+                    "IntRange",
+                    vec![Value::Int(start), Value::Int(end), Value::Int(step)],
+                    span,
+                    false,
+                )?
             }
             "Vector" | "LinkedList" | "Array" => {
                 Some(Value::List(Rc::new(RefCell::new(args.to_vec()))))
@@ -4326,15 +4326,6 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Some(Value::Bool(values_equal(&receiver, &args[0]))))
             }
-            "sameValue" => {
-                if args.len() != 1 {
-                    return Err(self.runtime_error(
-                        span,
-                        format!("sameValue expects 1 argument, got {}", args.len()),
-                    ));
-                }
-                Ok(Some(Value::Bool(values_same_value(&receiver, &args[0]))))
-            }
             "hash" => {
                 if !args.is_empty() {
                     return Err(self.runtime_error(
@@ -5102,7 +5093,7 @@ impl<'a> Interpreter<'a> {
                 Value::List(_) => name == "Vector" || name == "LinkedList" || name == "Array",
                 Value::Set(_) => name == "Set",
                 Value::Map(_) => name == "Map",
-                Value::Iterator(_) => name == "Iterator" || name == "IntRange",
+                Value::Iterator(_) => name == "Iterator",
                 Value::Aggregate(aggregate) => {
                     let aggregate = aggregate.borrow();
                     if aggregate.kind == crate::ast::TypeKind::Enum {
@@ -5588,7 +5579,7 @@ fn normalize_index(len: usize, index: i64) -> Option<usize> {
     }
 }
 
-fn aggregate_named_field(aggregate: &AggregateValue, name: &str) -> Option<Value> {
+pub(crate) fn aggregate_named_field(aggregate: &AggregateValue, name: &str) -> Option<Value> {
     aggregate
         .field_names
         .iter()
@@ -5819,47 +5810,6 @@ fn structural_shape_fields(value: &Value) -> Option<Vec<(String, Value)>> {
             )
         }
         _ => None,
-    }
-}
-
-fn values_same_value(left: &Value, right: &Value) -> bool {
-    values_share_equality_domain(left, right) && values_equal(left, right)
-}
-
-fn values_share_equality_domain(left: &Value, right: &Value) -> bool {
-    match (left, right) {
-        (Value::Unit, Value::Unit)
-        | (Value::Bool(_), Value::Bool(_))
-        | (Value::Int(_), Value::Int(_))
-        | (Value::Float(_), Value::Float(_))
-        | (Value::String(_), Value::String(_))
-        | (Value::Rune(_), Value::Rune(_))
-        | (Value::Tuple(_), Value::Tuple(_))
-        | (Value::List(_), Value::List(_))
-        | (Value::Set(_), Value::Set(_))
-        | (Value::Map(_), Value::Map(_))
-        | (Value::Iterator(_), Value::Iterator(_))
-        | (Value::Closure(_), Value::Closure(_))
-        | (Value::RuntimeType(_), Value::RuntimeType(_))
-        | (Value::RuntimeField { .. }, Value::RuntimeField { .. })
-        | (Value::RuntimeMethod { .. }, Value::RuntimeMethod { .. })
-        | (Value::RuntimeParam { .. }, Value::RuntimeParam { .. })
-        | (Value::RuntimeEnumCase { .. }, Value::RuntimeEnumCase { .. }) => true,
-        (Value::Record(left), Value::Record(right)) => {
-            let left = left.borrow();
-            let right = right.borrow();
-            left.len() == right.len()
-                && left.iter().zip(right.iter()).all(
-                    |((left_name, left_value), (right_name, right_value))| {
-                        left_name == right_name
-                            && values_share_equality_domain(left_value, right_value)
-                    },
-                )
-        }
-        (Value::Aggregate(left), Value::Aggregate(right)) => {
-            left.borrow().type_name == right.borrow().type_name
-        }
-        _ => false,
     }
 }
 
@@ -6675,7 +6625,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_declared_class_and_dynamic_equality() {
+    fn runs_declared_class_equality_and_any_narrowing() {
         let program = lower_inline(
             r#"
             class Account with Eq[Account] {
@@ -6702,30 +6652,12 @@ mod tests {
                 def equals(other Identified) Bool = this.value == other.code()
             }
 
-            shape Point {
-                x Int
-                y Int
-            }
-
-            shape Position {
-                y Int
-                x Int
-            }
-
             def main() Unit {
                 println(Account(1) == Account(1))
                 println(Account(1) != Account(2))
                 left Identified = Entry(1)
                 right Identified = AlternateEntry(1)
                 println(left == right)
-
-                first Any = Any(Point(1, 2))
-                same Any = Any(Point(1, 2))
-                sameAgain Any = Any(first)
-                otherShape Any = Position(2, 1)
-                println(first.sameValue(same))
-                println(first.sameValue(sameAgain))
-                println(first.sameValue(otherShape))
 
                 account = Account(3)
                 widenedAccount Any = Any(account)
@@ -6738,7 +6670,7 @@ mod tests {
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "true\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\n");
+        assert_eq!(run.output, "true\ntrue\ntrue\ntrue\n");
     }
 
     #[test]
@@ -6790,9 +6722,23 @@ mod tests {
         let program = lower_inline(
             r#"
             def main() Unit {
+                range IntRange = Range(1, 4)
+                OS.println("bounds", range.start, range.end, range.step)
                 var total Int = 0
-                for item <- Range(1, 4) {
+                for item <- range {
                     OS.println("range", item)
+                    total += item
+                }
+                for item <- range {
+                    total += item
+                }
+                descending IntRange = Range(3, 0)
+                OS.println("descending", descending.start, descending.end, descending.step)
+                for item <- descending {
+                    total += item
+                }
+                explicit IntRange = IntRange(0, 2, 1)
+                for item <- explicit {
                     total += item
                 }
                 OS.println("total", total)
@@ -6802,7 +6748,10 @@ mod tests {
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "range 1\nrange 2\nrange 3\ntotal 6\n");
+        assert_eq!(
+            run.output,
+            "bounds 1 4 1\nrange 1\nrange 2\nrange 3\ndescending 3 0 -1\ntotal 19\n"
+        );
         assert_eq!(run.return_value, None);
     }
 
@@ -6841,6 +6790,7 @@ mod tests {
         let program = lower_inline(
             r#"
             def increment(value Int, amount Int = 1) Int = value + amount
+            def isMissing(value Int? = None) Bool = value.isEmpty
 
             class Counter {
                 value Int
@@ -6856,13 +6806,14 @@ mod tests {
                 counter Counter = Counter(10)
                 println(increment(4), increment(4, 3))
                 println(counter.add(), counter.add(5))
+                println(isMissing(), isMissing(Some(1)))
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "5 7\n11 15\n");
+        assert_eq!(run.output, "5 7\n11 15\ntrue false\n");
     }
 
     #[test]
@@ -6950,9 +6901,9 @@ mod tests {
             def explicitShape() Rollup? = source().map(r => shape { ...r })
             def implicitShape() Rollup? = source().map(r => { ...r })
             def contextualNew() Rollup? = source().map(r => new { ...r })
-            def namedMembers() Rollup? = source().map(r => Rollup { r.total, r.label })
-            def explicitShapeMembers() Rollup? = source().map(r => shape { r.total, r.label })
-            def contextualNewMembers() Rollup? = source().map(r => new { r.total, r.label })
+            def namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
+            def explicitShapeMembers() Rollup? = source().map(r => shape { total: r.total, label: r.label })
+            def contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
 
             def main() Unit {
                 println(named()!.total)
@@ -7834,7 +7785,7 @@ $name
     fn runs_global_shape_updates_through_synthetic_initializer() {
         let program = lower_inline(
             r#"
-            class Amount {
+            shape Amount {
                 amount Int
                 description Str
                 count Int

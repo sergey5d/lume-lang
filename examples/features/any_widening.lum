@@ -19,9 +19,15 @@ def main() Unit {
     widenedPoint = Any(point)
     widenedAgain = Any(widenedPoint)
 
-    println(number.sameValue(42))
-    println(widenedPoint.sameValue(point))
-    println(widenedAgain.sameValue(point))
+    if let recovered Int = number {
+        println(recovered == 42)
+    }
+    if let recovered Point = widenedPoint {
+        println(recovered == point)
+    }
+    if let recovered Point = widenedAgain {
+        println(recovered == point)
+    }
 
     printAnything(text)
     printAnything("implicit widening also works")

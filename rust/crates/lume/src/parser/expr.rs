@@ -334,7 +334,7 @@ impl<'a> Parser<'a> {
             return self.parse_for_destructure_clause_tail(bindings, DestructureKind::Tuple, start);
         }
 
-        let pattern = self.parse_non_match_pattern("for-yield let")?;
+        let pattern = self.parse_pattern()?;
         if matches!(&pattern, Pattern::Binding { name, .. } if name != "_")
             && self.at(TokenKind::Eq)
         {
@@ -468,21 +468,27 @@ impl<'a> Parser<'a> {
                 span: Span,
             },
             Positional {
+                value: Expr,
                 span: Span,
             },
         }
 
-        fn inferred_field_or_positional(value: Expr) -> RecordEntry {
+        fn positional_entry(value: Expr) -> RecordEntry {
             let span = value.span();
-            match &value {
-                Expr::Member { name, .. } => RecordEntry::Field {
-                    name: name.clone(),
-                    ty: None,
-                    value,
-                    span,
-                },
-                _ => RecordEntry::Positional { span },
-            }
+            RecordEntry::Positional { value, span }
+        }
+
+        fn member_expression_punning_diagnostic(name: &str, span: Span) -> Diagnostic {
+            Diagnostic::error(
+                "member_expression_punning_removed",
+                format!(
+                    "member expression cannot infer construction field '{name}'; add an explicit field label"
+                ),
+                span,
+            )
+            .with_help(format!(
+                "write '{name}: <expression>', for example '{name}: value.{name}'"
+            ))
         }
 
         let mut entries = Vec::new();
@@ -539,30 +545,42 @@ impl<'a> Parser<'a> {
                         span: name_span,
                     }
                 } else if self.can_start_type_ref() {
-                    let ty = self.parse_type_ref();
-                    if let Some(ty) = ty {
+                    let parsed_ty = self.parse_type_ref();
+                    if parsed_ty.is_some() {
                         if self.match_token(TokenKind::Colon) {
+                            self.diagnostics.push(
+                                Diagnostic::error(
+                                    "typed_literal_field_removed",
+                                    format!(
+                                        "construction field '{name}' cannot declare a type; use '{name}: value'"
+                                    ),
+                                    name_span.cover(self.previous_span()),
+                                )
+                                .with_help(format!(
+                                    "provide the type through context, for example 'value {{ {name} Str }} = {{ {name}: ... }}'"
+                                )),
+                            );
                             let value = self.parse_expr()?;
                             RecordEntry::Field {
                                 name,
-                                ty: Some(ty),
+                                ty: None,
                                 span: name_span.cover(value.span()),
                                 value,
                             }
                         } else {
                             self.restore(checkpoint);
                             let value = self.parse_expr()?;
-                            inferred_field_or_positional(value)
+                            positional_entry(value)
                         }
                     } else {
                         self.restore(checkpoint);
                         let value = self.parse_expr()?;
-                        inferred_field_or_positional(value)
+                        positional_entry(value)
                     }
                 } else {
                     self.restore(checkpoint);
                     let value = self.parse_expr()?;
-                    inferred_field_or_positional(value)
+                    positional_entry(value)
                 }
             } else {
                 let key_or_value = self.parse_or_expr()?;
@@ -574,7 +592,7 @@ impl<'a> Parser<'a> {
                     ));
                     return None;
                 } else {
-                    inferred_field_or_positional(key_or_value)
+                    positional_entry(key_or_value)
                 }
             };
             entries.push(entry);
@@ -640,23 +658,39 @@ impl<'a> Parser<'a> {
                             span,
                         });
                     }
-                    RecordEntry::Positional { span, .. } => {
-                        self.diagnostics.push(Diagnostic::error(
-                            "unexpected_token",
-                            "cannot mix construction fields and positional shape fields",
-                            span,
-                        ));
+                    RecordEntry::Positional { value, span } => {
+                        if let Expr::Member { name, .. } = value {
+                            self.diagnostics
+                                .push(member_expression_punning_diagnostic(&name, span));
+                        } else {
+                            self.diagnostics.push(Diagnostic::error(
+                                "unexpected_token",
+                                "cannot mix construction fields and positional shape fields",
+                                span,
+                            ));
+                        }
                         return None;
                     }
                 }
             }
         } else {
             if !entries.is_empty() {
-                self.diagnostics.push(Diagnostic::error(
-                    "positional_brace_construction",
-                    "braces are for construction fields; use 'Type(...)' for positional constructors",
-                    start.cover(end),
-                ));
+                if let Some((name, span)) = entries.iter().find_map(|entry| match entry {
+                    RecordEntry::Positional {
+                        value: Expr::Member { name, .. },
+                        span,
+                    } => Some((name, *span)),
+                    _ => None,
+                }) {
+                    self.diagnostics
+                        .push(member_expression_punning_diagnostic(name, span));
+                } else {
+                    self.diagnostics.push(Diagnostic::error(
+                        "positional_brace_construction",
+                        "braces are for construction fields; use 'Type(...)' for positional constructors",
+                        start.cover(end),
+                    ));
+                }
                 return None;
             }
         }
@@ -773,14 +807,12 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let mut fields = Vec::new();
         let mut methods = Vec::new();
-        let mut method_seen = false;
         let mut member_names = Vec::<(String, Span)>::new();
 
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let annotations = self.parse_annotations()?;
             let visibility = self.parse_visibility();
             if self.at_keyword(Keyword::Def) || self.starts_callable_decl() {
-                method_seen = true;
                 let method = self.parse_method_decl(annotations, visibility, false)?;
                 if method.name == "new" {
                     self.diagnostics.push(Diagnostic::error(
@@ -813,7 +845,6 @@ impl<'a> Parser<'a> {
 
             let (name, name_span) =
                 self.expect_data_name("expected anonymous shape field or method")?;
-            let mut ty = None;
             let initializer = if self.match_token(TokenKind::Colon) {
                 self.parse_expr()?
             } else if self.at(TokenKind::Comma)
@@ -825,12 +856,28 @@ impl<'a> Parser<'a> {
                     span: name_span,
                 }
             } else if self.can_start_type_ref() {
-                ty = Some(self.parse_type_ref()?);
-                self.consume(
-                    TokenKind::Colon,
-                    "expected ':' before anonymous shape field initializer",
-                )?;
-                self.parse_expr()?
+                self.parse_type_ref()?;
+                if self.match_token(TokenKind::Colon) {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "typed_literal_field_removed",
+                            format!(
+                                "construction field '{name}' cannot declare a type; use '{name}: value'"
+                            ),
+                            name_span.cover(self.previous_span()),
+                        )
+                        .with_help(
+                            "declare the shape type separately and construct its fields with 'field: value'",
+                        ),
+                    );
+                    self.parse_expr()?
+                } else {
+                    self.error_at_current(
+                        "unexpected_token",
+                        "expected ':' after anonymous shape field name",
+                    );
+                    return None;
+                }
             } else {
                 self.error_at_current(
                     "unexpected_token",
@@ -839,16 +886,6 @@ impl<'a> Parser<'a> {
                 return None;
             };
             let field_span = name_span.cover(initializer.span());
-            if method_seen {
-                self.diagnostics.push(Diagnostic::error(
-                    "invalid_member_order",
-                    format!(
-                        "anonymous shape field '{}' must appear before methods",
-                        name
-                    ),
-                    field_span,
-                ));
-            }
             if let Some((_, previous)) = member_names.iter().find(|(member, _)| member == &name) {
                 self.diagnostics.push(
                     Diagnostic::error(
@@ -869,7 +906,7 @@ impl<'a> Parser<'a> {
                 visibility,
                 mutable: false,
                 name,
-                ty,
+                ty: None,
                 initializer: Some(initializer),
                 span: field_span,
             });
@@ -953,14 +990,12 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let mut fields = Vec::new();
         let mut methods = Vec::new();
-        let mut method_seen = false;
         let mut member_names = Vec::<(String, Span)>::new();
 
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let annotations = self.parse_annotations()?;
             let visibility = self.parse_visibility();
             if self.at_keyword(Keyword::Def) || self.starts_callable_decl() {
-                method_seen = true;
                 let method = self.parse_method_decl(annotations, visibility, false)?;
                 if method.name == "new" {
                     self.diagnostics.push(Diagnostic::error(
@@ -989,16 +1024,6 @@ impl<'a> Parser<'a> {
                 methods.push(method);
             } else {
                 let field = self.parse_field_decl(annotations, visibility)?;
-                if method_seen {
-                    self.diagnostics.push(Diagnostic::error(
-                        "invalid_member_order",
-                        format!(
-                            "anonymous object field '{}' must appear before methods",
-                            field.name
-                        ),
-                        field.span,
-                    ));
-                }
                 if field.initializer.is_none() {
                     self.diagnostics.push(Diagnostic::error(
                         "missing_anonymous_object_initializer",
@@ -1140,59 +1165,17 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_equality_expr(&mut self) -> Option<Expr> {
-        let mut expr = self.parse_type_test_expr()?;
-        loop {
-            if self.match_token(TokenKind::EqEq) {
-                self.skip_newlines();
-                let right = self.parse_type_test_expr()?;
-                let span = expr.span().cover(right.span());
-                expr = Expr::Binary {
-                    left: Box::new(expr),
-                    op: BinaryOp::Eq,
-                    right: Box::new(right),
-                    span,
-                };
-                continue;
-            }
-            if self.match_token(TokenKind::NotEq) {
-                self.skip_newlines();
-                let right = self.parse_type_test_expr()?;
-                let span = expr.span().cover(right.span());
-                expr = Expr::Binary {
-                    left: Box::new(expr),
-                    op: BinaryOp::NotEq,
-                    right: Box::new(right),
-                    span,
-                };
-                continue;
-            }
-            if self.match_token(TokenKind::IdentityEq) {
-                self.skip_newlines();
-                let right = self.parse_type_test_expr()?;
-                let span = expr.span().cover(right.span());
-                expr = Expr::Binary {
-                    left: Box::new(expr),
-                    op: BinaryOp::IdentityEq,
-                    right: Box::new(right),
-                    span,
-                };
-                continue;
-            }
-            if self.match_token(TokenKind::IdentityNotEq) {
-                self.skip_newlines();
-                let right = self.parse_type_test_expr()?;
-                let span = expr.span().cover(right.span());
-                expr = Expr::Binary {
-                    left: Box::new(expr),
-                    op: BinaryOp::IdentityNotEq,
-                    right: Box::new(right),
-                    span,
-                };
-                continue;
-            }
-            break;
-        }
-        Some(expr)
+        self.parse_non_associative(
+            |parser| parser.parse_type_test_expr(),
+            &[
+                (TokenKind::EqEq, BinaryOp::Eq),
+                (TokenKind::NotEq, BinaryOp::NotEq),
+                (TokenKind::IdentityEq, BinaryOp::IdentityEq),
+                (TokenKind::IdentityNotEq, BinaryOp::IdentityNotEq),
+            ],
+            "non_associative_equality",
+            "equality",
+        )
     }
 
     pub(super) fn parse_type_test_expr(&mut self) -> Option<Expr> {
@@ -1243,7 +1226,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_comparison_expr(&mut self) -> Option<Expr> {
-        self.parse_left_assoc(
+        self.parse_non_associative(
             |parser| parser.parse_shape_update_expr(),
             &[
                 (TokenKind::Less, BinaryOp::Less),
@@ -1251,6 +1234,8 @@ impl<'a> Parser<'a> {
                 (TokenKind::Greater, BinaryOp::Greater),
                 (TokenKind::GreaterEq, BinaryOp::GreaterEq),
             ],
+            "non_associative_comparison",
+            "comparison",
         )
     }
 
@@ -1321,6 +1306,59 @@ impl<'a> Parser<'a> {
             };
         }
         Some(expr)
+    }
+
+    fn parse_non_associative<F>(
+        &mut self,
+        mut parse_operand: F,
+        operators: &[(TokenKind, BinaryOp)],
+        diagnostic_code: &'static str,
+        operator_family: &'static str,
+    ) -> Option<Expr>
+    where
+        F: FnMut(&mut Self) -> Option<Expr>,
+    {
+        let left = parse_operand(self)?;
+        let Some((op, _, _)) = self.match_binary_operator(operators) else {
+            return Some(left);
+        };
+        self.skip_newlines();
+        let right = parse_operand(self)?;
+        let span = left.span().cover(right.span());
+        let expr = Expr::Binary {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+            span,
+        };
+
+        while let Some((_, operator_span, spelling)) = self.match_binary_operator(operators) {
+            self.diagnostics.push(Diagnostic::error(
+                diagnostic_code,
+                format!(
+                    "{operator_family} operator '{spelling}' is non-associative; combine separate conditions with '&&' or '||', or use parentheses to make the grouping explicit"
+                ),
+                operator_span,
+            ));
+            self.skip_newlines();
+            parse_operand(self)?;
+        }
+
+        Some(expr)
+    }
+
+    fn match_binary_operator(
+        &mut self,
+        operators: &[(TokenKind, BinaryOp)],
+    ) -> Option<(BinaryOp, Span, String)> {
+        for (kind, op) in operators {
+            if self.at(*kind) {
+                let token = self.current().clone();
+                self.advance();
+                return Some((*op, token.span, token.lexeme));
+            }
+        }
+        None
     }
 
     pub(super) fn parse_unary_expr(&mut self) -> Option<Expr> {

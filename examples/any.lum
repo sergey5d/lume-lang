@@ -32,8 +32,12 @@ def main() Unit {
     println("union", light.equals(Green), light.toStr())
 
     marker Any = Marker
-    println("object", marker.sameValue(Marker), marker.toStr())
+    markerMatches = match marker {
+        case Marker => true
+        case _ => false
+    }
+    println("object", markerMatches, marker.toStr())
 
     value Any = 42
-    println("any", value.sameValue(42), value.toStr())
+    println("any", value is Int, value.toStr())
 }

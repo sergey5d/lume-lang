@@ -1,4 +1,5 @@
 mod either_type;
+mod int_range_type;
 mod map_type;
 mod option_type;
 mod result_type;
@@ -62,6 +63,7 @@ pub(super) fn builtin_types() -> Vec<RuntimeType> {
         option_type::define(),
         result_type::define(),
         either_type::define(),
+        int_range_type::define(),
         vector_type::define(),
         set_type::define(),
         map_type::define(),

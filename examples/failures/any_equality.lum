@@ -1,5 +1,5 @@
 # EXPECT_ERROR:
-# use 'sameValue(...)' for strict dynamic equality
+# narrow the value before comparing it
 
 def main() Unit {
     unknown Any = 5

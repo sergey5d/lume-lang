@@ -248,17 +248,20 @@ Universal value operations:
 
 - `value.toStr()` returns a `Str` rendering of the value
 - `value.equals(other)` returns `Bool` and has the same statically typed equality semantics as `value == other`
-- `value.sameValue(other)` performs strict dynamic equality by comparing runtime type witnesses before value equality
 
 `Any` does not support ordinary equality because it erases the static equality
-domain. Narrow it before using `==`, or deliberately use `sameValue`:
+domain. Narrow it before using `==`:
 
 ```txt
 unknown Any = Point(1, 2)
 point = Point(1, 2)
 
-unknown == point          # error
-unknown.sameValue(point)  # true: same runtime type and equal value
+unknown == point # error
+
+equal = match unknown {
+    case other Point => other == point
+    case _ => false
+}
 ```
 
 Reference identity is separate from value equality:
@@ -923,12 +926,19 @@ Use `{ ...point, ...dot, x: point.x }` to resolve only `x`, or
 `{ ...point, override ...dot }` to accept all current and future overlaps from
 `dot`.
 
-`base with patch` updates existing visible fields. `base` must be a class, named
-shape, or anonymous shape. `patch` must be a statically known shape-like value.
-Every visible field in `patch` must already exist on `base`, and each patch
-field type must be assignable to the corresponding base field type. The result
-keeps the same class/shape view as `base`. Private fields are not updated through
-`with`, and the source value is not mutated.
+`base with patch` updates existing fields on a named or anonymous shape.
+`patch` must also be a statically known named or anonymous shape. Every field in
+`patch` must already exist on `base`, and each patch field type must be
+assignable to the corresponding base field type. The result keeps the same
+shape view as `base`, and the source value is not mutated.
+
+Classes do not support `with`. Copying a class implicitly would create unclear
+object-identity, private-state, resource, and constructor-invariant semantics.
+Classes that need copy-style updates should expose an explicit method:
+
+```txt
+updated = account.withBalance(42)
+```
 
 ## Construction
 
@@ -1032,19 +1042,20 @@ contextual `new` obtain `Rollup` from the callback's expected return type. In
 each case, required target fields must exist with assignable types; extra
 source fields are discarded rather than copied into the narrower result.
 
-A member expression in a construction entry may infer its field name from the
-final member. This is member-field punning:
+A member expression in a construction entry must have an explicit field label:
 
 ```txt
-def selected() Rollup? = source().map(r => Rollup { r.total, r.label })
+def selected() Rollup? = source().map(r => Rollup {
+    total: r.total
+    label: r.label
+})
 ```
 
-The example is equivalent to `Rollup { total: r.total, label: r.label }`.
-The inferred names must be valid target fields. This works in named,
-`shape { ... }`, and contextual `new { ... }` construction. Bare braces retain
-their block-versus-shape distinction, so use `shape { r.total, r.label }` when
-an anonymous member-punned shape is needed. Other unlabeled positional
-expressions remain invalid inside braces.
+Only bare identifiers support field punning. Forms such as
+`Rollup { r.total }`, `shape { r.total }`, and `new { r.total }` are invalid;
+write `total: r.total`. This keeps the constructed field name explicit when the
+value comes from member access. Other unlabeled expressions also remain invalid
+inside construction braces.
 
 Anonymous structural data may synthesize behavior by declaring interfaces and
 methods directly:
@@ -1289,7 +1300,6 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 
 ```txt
 { field: value }                 # anonymous shape literal
-{ field Type: value }            # typed anonymous shape literal
 shape { field: value }           # explicit anonymous shape literal
 shape { field }                  # explicit anonymous shape with a punned field
 shape {}                         # explicit empty anonymous shape literal
@@ -1338,9 +1348,9 @@ Shape conversion rules:
 - shape-to-class is not implicit; use a class constructor
 - tuple-to-shape and tuple-to-class are not allowed; use named shape construction, class constructors, or anonymous construction fields
 - ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
-- `shape { ... }` is exactly the explicit spelling of an anonymous shape literal and accepts the same typed fields and spreads as bare field braces
+- `shape { ... }` is exactly the explicit spelling of an anonymous shape literal and accepts the same construction fields and spreads as bare field braces
 - construction fields inside braces use `field: value`; bare `field` is shorthand for `field: field`
-- construction fields may carry an explicit initializer type as `field Type: value`
+- construction fields cannot include a type; put anonymous shape types on declarations and aliases
 - single-expression braces like `{ value }` are still block expressions, not anonymous shapes
 
 Shape equality is structural across shape declarations:
@@ -1367,20 +1377,20 @@ point2d == Point(1, 2) # true after explicit projection
 Other equality domains are nominal. The operands must have the same normalized
 type. Classes may use equality only when they explicitly implement
 `Eq[ClassName]`; interface values require a compatible explicit `Eq` contract.
-Different classes are not directly comparable. `sameValue` returns `false`
-instead of producing a static error when its runtime equality domains differ.
+Different classes are not directly comparable. Values widened to `Any` must be
+narrowed before comparison.
 
-| Operands | `==` / `!=` | `sameValue` |
-| --- | --- | --- |
-| same shape schema | field equality | descriptor match, then field equality |
-| different shape names, same schema | field equality by name | `false`; named descriptors differ |
-| width-compatible shape schemas | error; project explicitly first | `false` |
-| class and shape | error; project explicitly before erasure | `false` |
-| same class with `Eq[Class]` | declared class equality | concrete descriptor, then class equality |
-| different classes | error | `false` |
-| `Any` and a typed value | error | descriptor comparison |
-| `Any` and `Any` | error | descriptor comparison |
-| interface values | requires an explicit compatible `Eq` domain | concrete descriptor comparison |
+| Operands | `==` / `!=` |
+| --- | --- |
+| same shape schema | field equality |
+| different shape names, same schema | field equality by name |
+| width-compatible shape schemas | error; project explicitly first |
+| class and shape | error; project explicitly before erasure |
+| same class with `Eq[Class]` | declared class equality |
+| different classes | error |
+| `Any` and a typed value | error; narrow first |
+| `Any` and `Any` | error; narrow first |
+| interface values | requires an explicit compatible `Eq` domain |
 
 `Hashed[T]` extends `Eq[T]` and declares `hash() Int`. Equal values must return
 the same hash. Every shape derives `Eq` structurally and derives `Hashed[Shape]`
@@ -1469,14 +1479,18 @@ unknown = new(1, 2)                    # invalid: no concrete expected target
 user User = { name: "Ada", age: 10 } # invalid: shape -> class
 ```
 
-Typed anonymous shape fields:
+Anonymous shape field types come from the surrounding declaration:
 
 ```txt
-user = {
-    name Str: "Ada"
-    age Int: 42
+user { name Str, age Int } = {
+    name: "Ada"
+    age: 42
 }
 ```
+
+Construction literals always use `field: value`. The combined
+`field Type: value` form is invalid. Put the anonymous shape type on the
+binding, parameter, or return value, or introduce a named type alias.
 
 ## Functions and Methods
 
@@ -1512,6 +1526,24 @@ def addWithEquals(left Int, right Int) Int = {
 
 Callable block bodies may include `=` or omit it. Expression-bodied callables
 still use `=`.
+
+When the return type is omitted, the body introducer determines the return
+rule:
+
+```txt
+def reset() {
+    this.value := 0
+}                         # implicit Unit
+
+def isMissing(value Int?) = {
+    value is None
+}                         # inferred Bool
+```
+
+A direct `{ ... }` body without a return type is a `Unit` callable, so
+returning a value from it is an error. An `= expression` or `= { ... }` body
+without a return type infers its result type from the body. An explicit return
+type always takes precedence.
 
 ### Getters
 
@@ -1875,10 +1907,10 @@ the class body.
 - `this` is the instance receiver
 - instance fields on classes and named objects may be accessed bare when they are not shadowed
 - use `this.field` when a parameter/local shadows a field, for example `this.age`
-- member order is storage first, constructors next, methods last
-- class, shape, and object bodies list storage fields before behavior
+- member order does not affect validity or semantics
+- canonical formatting places storage fields first, constructors next, and methods last
 - declared-union alternatives contain fields only; put shared methods in `ext UnionName`
-- a class body may declare constructors after its fields and before its methods
+- source code may interleave fields, constructors, and methods; a formatter should restore canonical order
 
 ```txt
 class Person {
@@ -2179,7 +2211,7 @@ Rules:
 - block expressions evaluate to the value of their last statement
 - successive statements in a braced block must be separated by a newline; a
   closing `}` may immediately follow the final statement
-- named function and method block bodies may be written as `def name(...) { ... }` or `def name(...) = { ... }`
+- named function and method block bodies may be written as `def name(...) { ... }` or `def name(...) = { ... }`; without an explicit return type, the direct block returns `Unit` and the equals block infers its result type
 - if you want a block value, the last statement must be value-producing
 - value-producing tail forms include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
@@ -2231,7 +2263,7 @@ Rules:
 
 - every anonymous-object field has an initializer
 - anonymous-object fields are immutable; use a named class for owned mutable state
-- fields appear before methods
+- field and method order does not affect validity; canonical formatting places fields before methods
 - anonymous objects cannot declare `new` constructors
 - fields and methods are statically typed and use ordinary member access
 - `this.field` and unqualified `field` are both available inside methods
@@ -3663,8 +3695,8 @@ Aliasing a unary union-alternative pattern retains that concrete alternative vie
 so the complete alias exposes the matched fields while the nested pattern
 continues to bind or test its payload.
 
-Inside a `match` case, `as` may alias any complete pattern, including literals
-and list patterns:
+At any pattern site, `as` may alias the complete matched value. This includes
+literals and list patterns:
 
 ```txt
 case 42 as value => println(value)
@@ -3674,19 +3706,27 @@ case [first, second, ...rest] as list => println(rest.size, list.size)
 ```
 
 The alias is introduced only when the complete inner pattern succeeds.
-Whole-pattern aliases are deliberately limited to `case` patterns. They are
-not accepted by `let`, `if let`, `while let`, or `for let`:
+The same alias form works in `let`, `if let`, `while let`, `for let`, and
+`match`:
 
 ```txt
-let User { name } as user = value               # invalid
-if let User { name } as user = value { ... }    # invalid
-while let Some(value) as some = current { ... } # invalid
-for let User { name } as user <- users { ... }  # invalid
+let User { name } as user = value else return
+
+if let User { name } as user = value {
+    println(name, user.name)
+}
+
+while let Some(value) as some = current {
+    println(value, some.value)
+}
+
+for let User { name } as user <- users {
+    println(name, user.name)
+}
 ```
 
-Use a `match` when both the selected fields and the complete matched value are
-needed. Field aliases remain available in every record destructuring context,
-for example `let { location as home } = user`.
+Field aliases remain available inside record patterns, for example
+`let { location as home } = user`.
 
 Conceptually, `Some(x)` is `Some { value as x }`, and `Some(User { name })`
 is `Some { value: User { name } }`. The type or case must have exactly one
@@ -3879,12 +3919,26 @@ Expression precedence, from highest to lowest:
 | Multiplicative | `*`, `/`, `%` | left |
 | Additive | `+`, `-` | left |
 | Shape update | `with` | left |
-| Comparison | `<`, `<=`, `>`, `>=` | left |
+| Comparison | `<`, `<=`, `>`, `>=` | non-associative |
 | Type test | `is`, `is not` | non-associative |
-| Equality | `==`, `!=`, `===`, `!==` | left |
+| Equality | `==`, `!=`, `===`, `!==` | non-associative |
 | Boolean AND | `&&` | left |
 | Boolean OR | `||` | left |
 | Extract or fallback | `??` | right |
+
+Comparison, equality, identity equality, and runtime type-test operators cannot
+be chained without parentheses:
+
+```txt
+a < b < c       # invalid
+a == b == c     # invalid
+
+a < b && b < c  # valid
+(a == b) == c   # valid when the operand types permit it
+```
+
+Parenthesized subexpressions start a new comparison level, making unusual but
+intentional Boolean comparisons explicit.
 
 Value-producing `if / else`, `match`, and `for ... yield` are
 primary expressions. After the control-flow expression closes, surrounding
@@ -3981,9 +4035,9 @@ Newline continuation:
 - Delimited forms allow layout after opening delimiters and after commas, but they do not make leading binary/update operators valid by themselves.
 - Binding/function/method `=` may start its expression on the same line or the next indented line.
 - Named function and method declarations require `def` and have three accepted body forms:
-  - `def name(...) { ... }` for block bodies
-  - `def name(...) = { ... }` for block bodies
-  - `def name(...) = expr` for expression bodies
+  - `def name(...) { ... }` for block bodies, with implicit `Unit` when the return type is omitted
+  - `def name(...) = { ... }` for block bodies whose return type is inferred when omitted
+  - `def name(...) = expr` for expression bodies whose return type is inferred when omitted
 - Constructors are the only callable declarations without `def`; they begin with `new` and use the constructor body forms documented above.
 - Inline-body introducers such as `else` and `yield` may take a same-line body without braces; if that body moves to the next line, a `{ ... }` block is required.
 - So this is valid:

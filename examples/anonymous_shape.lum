@@ -63,9 +63,9 @@ def main() Unit {
     println(narrow.name + " " + narrow.age)
     typedCounter { count Int, next Int } = makeCounter(5)
     println(typedCounter.next)
-    typedAnon = {
-        name Str: "Ada"
-        age Int: 42
+    typedAnon { name Str, age Int } = {
+        name: "Ada"
+        age: 42
     }
     println("typed", typedAnon.name, typedAnon.age)
     println(describe(makeUser("Dana", 21)))

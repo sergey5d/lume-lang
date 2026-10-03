@@ -980,7 +980,7 @@ ext User {
 }
 
 #[test]
-fn rejects_class_field_after_method() {
+fn allows_member_order_with_class_field_after_method() {
     let result = parse(
         r#"
 class User {
@@ -989,16 +989,7 @@ class User {
 }
 "#,
     );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_member_order"
-                && diag
-                    .message
-                    .contains("storage fields must appear before methods")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]
@@ -1019,7 +1010,7 @@ fn parses_removed_keywords_as_ordinary_identifiers() {
 }
 
 #[test]
-fn rejects_class_field_after_inline_constructor() {
+fn allows_member_order_with_class_field_after_inline_constructor() {
     let result = parse(
         r#"
 class User {
@@ -1031,20 +1022,11 @@ class User {
 }
 "#,
     );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_member_order"
-                && diag
-                    .message
-                    .contains("storage fields must appear before constructors")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]
-fn rejects_inline_constructor_after_class_method() {
+fn allows_member_order_with_inline_constructor_after_class_method() {
     let result = parse(
         r#"
 class User {
@@ -1056,16 +1038,7 @@ class User {
 }
 "#,
     );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_member_order"
-                && diag
-                    .message
-                    .contains("constructors must appear before methods")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]
@@ -1399,6 +1372,29 @@ value = object {
 }
 
 #[test]
+fn allows_member_order_with_anonymous_fields_after_methods() {
+    for source in [
+        r#"object {
+    def value() Int = this.count
+    count Int = 2
+}"#,
+        r#"shape with Value {
+    def value() Int = this.count
+    count: 2
+}"#,
+    ] {
+        assert!(matches!(
+            parse_expr_only(source),
+            Expr::AnonymousObject {
+                fields,
+                methods,
+                ..
+            } if fields.len() == 1 && methods.len() == 1
+        ));
+    }
+}
+
+#[test]
 fn parses_object_with_interface_as_anonymous_implementation() {
     let result = parse(
         r#"
@@ -1696,42 +1692,12 @@ fn parses_shape_literal_forms() {
         other => panic!("expected field-punned anonymous shape literal, got {other:#?}"),
     }
 
-    match parse_expr_only("shape { source.name, source.age }") {
-        Expr::RecordLiteral { fields, values, .. } => {
-            assert!(values.is_empty());
-            assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].name.as_deref(), Some("name"));
-            assert!(matches!(fields[0].value, Expr::Member { ref name, .. } if name == "name"));
-            assert_eq!(fields[1].name.as_deref(), Some("age"));
-            assert!(matches!(fields[1].value, Expr::Member { ref name, .. } if name == "age"));
-        }
-        other => panic!("expected member-punned anonymous shape literal, got {other:#?}"),
-    }
-
     match parse_expr_only("shape {}") {
         Expr::RecordLiteral { fields, values, .. } => {
             assert!(fields.is_empty());
             assert!(values.is_empty());
         }
         other => panic!("expected empty anonymous shape literal, got {other:#?}"),
-    }
-
-    match parse_expr_only(r#"{ name Str: "Ana", age Int: 10 }"#) {
-        Expr::RecordLiteral { fields, values, .. } => {
-            assert!(values.is_empty());
-            assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].name.as_deref(), Some("name"));
-            assert!(matches!(
-                fields[0].ty,
-                Some(TypeRef::Named { ref name, .. }) if name == "Str"
-            ));
-            assert_eq!(fields[1].name.as_deref(), Some("age"));
-            assert!(matches!(
-                fields[1].ty,
-                Some(TypeRef::Named { ref name, .. }) if name == "Int"
-            ));
-        }
-        other => panic!("expected typed shape literal, got {other:#?}"),
     }
 
     match parse_expr_only("(name, age)") {
@@ -1881,6 +1847,50 @@ fn parses_shape_literal_forms() {
         "expected class(...) rejection, got diagnostics: {:#?}",
         result.diagnostics
     );
+}
+
+#[test]
+fn rejects_member_expression_punning() {
+    for source in [
+        "Rollup { source.total }",
+        "shape { source.total }",
+        "new { source.total }",
+    ] {
+        let file = SourceFile::new("test.lum", source);
+        let lexed = lex(&file);
+        let mut parser = Parser::new(&lexed.tokens);
+        let _ = parser.parse_expr();
+        assert!(
+            parser.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "member_expression_punning_removed"
+                    && diagnostic.message.contains("explicit field label")
+            }),
+            "{source}: {:#?}",
+            parser.diagnostics
+        );
+    }
+}
+
+#[test]
+fn rejects_typed_anonymous_shape_literal_fields() {
+    for source in [
+        r#"{ name Str: "Ana" }"#,
+        r#"shape { name Str: "Ana" }"#,
+        r#"shape with Printable { name Str: "Ana" }"#,
+    ] {
+        let file = SourceFile::new("test.lum", source);
+        let lexed = lex(&file);
+        let mut parser = Parser::new(&lexed.tokens);
+        let _ = parser.parse_expr();
+        assert!(
+            parser.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "typed_literal_field_removed"
+                    && diagnostic.message.contains("cannot declare a type")
+            }),
+            "{source}: {:#?}",
+            parser.diagnostics
+        );
+    }
 }
 
 #[test]
@@ -2592,10 +2602,13 @@ def run() Unit = {
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
     match &program.items[0] {
-        Item::Function(function) => match &function.body {
-            CallableBody::Block(block) => assert_eq!(block.statements.len(), 1),
-            other => panic!("expected block body, got {other:#?}"),
-        },
+        Item::Function(function) => {
+            assert!(function.equals_body);
+            match &function.body {
+                CallableBody::Block(block) => assert_eq!(block.statements.len(), 1),
+                other => panic!("expected block body, got {other:#?}"),
+            }
+        }
         other => panic!("expected function, got {other:#?}"),
     }
 }
@@ -3004,7 +3017,7 @@ def run(status Status) Unit {
 }
 
 #[test]
-fn rejects_whole_pattern_aliases_outside_match_cases() {
+fn parses_whole_pattern_aliases_in_every_pattern_context() {
     let cases = [
         r#"
 class User {
@@ -3062,14 +3075,7 @@ def run(users [User]) [Str] =
 
     for source in cases {
         let result = parse(source);
-        assert!(
-            result.diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "pattern_alias_match_only"
-                    && diagnostic.message.contains("only supported in match cases")
-            }),
-            "{:#?}",
-            result.diagnostics
-        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 }
 
@@ -5114,6 +5120,56 @@ fn rejects_chained_runtime_type_tests() {
         "{:#?}",
         result.diagnostics
     );
+}
+
+#[test]
+fn rejects_chained_comparison_operators() {
+    for expression in ["a < b < c", "a <= b > c", "a >= b <= c"] {
+        let result = parse(&format!(
+            "def test(a Int, b Int, c Int) Bool = {expression}"
+        ));
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "non_associative_comparison"
+                    && diagnostic.message.contains("non-associative")
+            }),
+            "{expression}: {:#?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
+fn rejects_chained_equality_operators() {
+    for expression in ["a == b == c", "a != b == c", "a === b !== c"] {
+        let result = parse(&format!(
+            "def test(a Any, b Any, c Any) Bool = {expression}"
+        ));
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "non_associative_equality"
+                    && diagnostic.message.contains("non-associative")
+            }),
+            "{expression}: {:#?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
+fn allows_separate_or_explicitly_grouped_comparisons() {
+    for source in [
+        "def ordered(a Int, b Int, c Int) Bool = a < b && b < c",
+        "def grouped(a Bool, b Bool, c Bool) Bool = (a == b) == c",
+        "def nested(a Bool, b Bool, c Bool) Bool = a == (b == c)",
+    ] {
+        let result = parse(source);
+        assert!(
+            result.diagnostics.is_empty(),
+            "{source}: {:#?}",
+            result.diagnostics
+        );
+    }
 }
 
 #[test]

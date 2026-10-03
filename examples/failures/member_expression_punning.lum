@@ -1,0 +1,12 @@
+# FAIL_REGEX:
+# .*member expression cannot infer construction field 'total'; add an explicit field label.*
+
+shape Rollup {
+    total Int
+}
+
+def main() Unit {
+    source = Rollup { total: 7 }
+    copy = Rollup { source.total }
+    println(copy.total)
+}

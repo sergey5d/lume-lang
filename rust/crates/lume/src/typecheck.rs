@@ -406,22 +406,6 @@ fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
             has_body: true,
             getter: false,
         },
-        "sameValue" => FunctionSig {
-            type_params: Vec::new(),
-            reified_type_params: Vec::new(),
-            generic_conditions: Vec::new(),
-            params: vec![ParamSig {
-                name: "other".to_string(),
-                ty: Ty::any(),
-                variadic: false,
-                lazy: false,
-                has_initializer: false,
-            }],
-            ret: Ty::bool(),
-            visibility: Visibility::Default,
-            has_body: true,
-            getter: false,
-        },
         _ => return None,
     };
     Some(vec![sig])
@@ -1348,7 +1332,13 @@ impl<'a> Checker<'a> {
             .return_type
             .as_ref()
             .map(|ty| self.ty_from_type_ref(ty))
-            .unwrap_or(Ty::Unknown);
+            .unwrap_or_else(|| {
+                if function.equals_body {
+                    Ty::Unknown
+                } else {
+                    Ty::unit()
+                }
+            });
         self.current_return = expected_return.clone();
         self.defer_depth = 0;
         self.callable_depth += 1;
@@ -1903,7 +1893,13 @@ impl<'a> Checker<'a> {
             .return_type
             .as_ref()
             .map(|ty| self.ty_from_type_ref(ty))
-            .unwrap_or(Ty::Unknown);
+            .unwrap_or_else(|| {
+                if method.equals_body && method.name != "new" {
+                    Ty::Unknown
+                } else {
+                    Ty::unit()
+                }
+            });
         self.current_return = expected_return.clone();
         self.defer_depth = 0;
         self.callable_depth += 1;
@@ -2198,10 +2194,12 @@ impl<'a> Checker<'a> {
                 expected.describe()
             ),
         );
-        if infer_literal_type(initializer).is_none() {
+        let is_none_literal = matches!(initializer, Expr::Identifier { name, .. } if name == "None")
+            && matches!(actual, Ty::Named(ref name, ref args) if name == "Option" && args.len() == 1);
+        if infer_literal_type(initializer).is_none() && !is_none_literal {
             self.add_error(
                 "invalid_constructor_default",
-                "parameter defaults must be literal constants for now",
+                "parameter defaults must be literal constants or None for now",
                 initializer.span(),
             );
         }
@@ -2613,18 +2611,29 @@ impl<'a> Checker<'a> {
                     self.add_error(
                         "invalid_shape_update",
                         format!(
-                            "shape update {role} must be a class, shape, or anonymous shape value, got '{}'",
+                            "shape update {role} must be a named or anonymous shape, got '{}'",
                             ty.describe()
                         ),
                         span,
                     );
                     return None;
                 };
-                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
+                if sig.kind == TypeKind::Class {
                     self.add_error(
                         "invalid_shape_update",
                         format!(
-                            "shape update {role} must be a class, shape, or anonymous shape value, got '{}'",
+                            "shape update does not support class value '{}'; define an explicit copy or update method on the class",
+                            ty.describe()
+                        ),
+                        span,
+                    );
+                    return None;
+                }
+                if sig.kind != TypeKind::Record {
+                    self.add_error(
+                        "invalid_shape_update",
+                        format!(
+                            "shape update {role} must be a named or anonymous shape, got '{}'",
                             ty.describe()
                         ),
                         span,
@@ -2650,7 +2659,7 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "invalid_shape_update",
                     format!(
-                        "shape update {role} must be a class, shape, or anonymous shape value, got '{}'",
+                        "shape update {role} must be a named or anonymous shape, got '{}'",
                         ty.describe()
                     ),
                     span,
@@ -3153,7 +3162,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_let_else_stmt(&mut self, stmt: &crate::ast::LetElseStmt) {
-        if self.current_return == Ty::Unknown {
+        if self.callable_depth == 0 {
             self.add_error(
                 "invalid_let_else",
                 "let else used outside callable body",
@@ -5034,13 +5043,11 @@ impl<'a> Checker<'a> {
             self.normalize_trailing_brace_call_args(callee, args, uses_brace_syntax);
         if let Expr::Member { receiver, name, .. } = callee
             && normalized_args.len() == 1
-            && matches!(name.as_str(), "equals" | "sameValue")
+            && name == "equals"
         {
             let left = self.check_expr(receiver);
             let right = self.check_expr(&normalized_args[0].value);
-            if name == "equals" {
-                self.check_equality_operands(&left, &right, span);
-            }
+            self.check_equality_operands(&left, &right, span);
             return Ty::bool();
         }
         if self.is_builtin_panic_call(callee) {
@@ -5383,7 +5390,7 @@ impl<'a> Checker<'a> {
             Ty::Unknown
         };
 
-        if matches!(expected, Ty::Unknown)
+        if (matches!(expected, Ty::Unknown) || expected == &Ty::unit())
             && self.current_method.as_deref() == Some("new")
             && self.current_owner.is_some()
         {
@@ -7656,9 +7663,9 @@ impl<'a> Checker<'a> {
         }
         if left.is_any() || right.is_any() {
             self.add_error(
-                "dynamic_equality_requires_same_value",
+                "any_equality_not_supported",
                 format!(
-                    "'==' and '!=' do not compare Any values; use 'sameValue(...)' for strict dynamic equality or narrow the value before comparing it (got '{}' and '{}')",
+                    "'==' and '!=' do not compare Any values; narrow the value before comparing it (got '{}' and '{}')",
                     left.describe(),
                     right.describe()
                 ),
@@ -9020,7 +9027,11 @@ impl<'a> Checker<'a> {
         }
         if let Some(methods) = sig.methods.get(name) {
             let visibility = methods
-                .first()
+                .iter()
+                .find(|method| {
+                    self.can_access_member_visibility(&sig.name, &sig.module_id, method.visibility)
+                })
+                .or_else(|| methods.first())
                 .map(|method| method.visibility)
                 .unwrap_or(Visibility::Default);
             return Some((
@@ -9550,7 +9561,19 @@ impl<'a> Checker<'a> {
             return None;
         }
         if let Some(methods) = sig.methods.get(name) {
-            return Some(methods.clone());
+            return Some(
+                methods
+                    .iter()
+                    .filter(|method| {
+                        self.can_access_member_visibility(
+                            &sig.name,
+                            &sig.module_id,
+                            method.visibility,
+                        )
+                    })
+                    .cloned()
+                    .collect(),
+            );
         }
         for bound in &sig.with_bounds {
             let Ty::Named(bound_name, _) = bound else {
@@ -11995,7 +12018,13 @@ fn function_sig_from_function(
             .return_type
             .as_ref()
             .map(|ty| convert_type_ref(ty, &type_params))
-            .unwrap_or(Ty::Unknown),
+            .unwrap_or_else(|| {
+                if function.equals_body {
+                    Ty::Unknown
+                } else {
+                    Ty::unit()
+                }
+            }),
         visibility: function.visibility,
         has_body: true,
         getter: false,
@@ -12072,7 +12101,13 @@ fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -
             .return_type
             .as_ref()
             .map(|ty| convert_type_ref(ty, &type_params))
-            .unwrap_or(Ty::Unknown),
+            .unwrap_or_else(|| {
+                if method.equals_body && method.name != "new" {
+                    Ty::Unknown
+                } else {
+                    Ty::unit()
+                }
+            }),
         visibility: method.visibility,
         has_body: method.body.is_some(),
         getter: method.getter,
@@ -13393,7 +13428,6 @@ def main() Unit {
     unknown Any = 1
     dynamic = unknown == 1
     classValue = Account(1) == Account(1)
-    explicitDynamic = unknown.sameValue(1)
 }
 "#,
         );
@@ -13402,7 +13436,7 @@ def main() Unit {
             result
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code == "dynamic_equality_requires_same_value"),
+                .any(|diagnostic| diagnostic.code == "any_equality_not_supported"),
             "{:#?}",
             result.diagnostics
         );
@@ -13903,6 +13937,25 @@ ext User {
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn selects_public_overload_when_same_named_overload_is_private() {
+        let program = parse_inline(
+            r#"
+class RecordAggregator {
+    private def get_rollup(key Str, range Int?) Int = 2
+    def get_rollup(key Str) Int = 1
+}
+
+def main() Int {
+    aggregator = RecordAggregator {}
+    aggregator.get_rollup("alice")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]
@@ -14994,14 +15047,14 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_typed_anonymous_shape_fields() {
+    fn allows_anonymous_shape_fields_typed_by_context() {
         let program = parse_inline(
             r#"
 def main() Unit {
     value = "Ada"
-    user = {
-        name Str: value
-        age Int: 42
+    user { name Str, age Int } = {
+        name: value
+        age: 42
     }
     typed { name Str, age Int } = user
     OS.println(typed.name)
@@ -15065,7 +15118,7 @@ def main() Unit {
     }
 
     #[test]
-    fn member_field_punning_uses_the_terminal_member_name() {
+    fn accepts_explicit_member_expressions_in_construction_fields() {
         let accepted = parse_inline(
             r#"
 shape StoredRollup {
@@ -15081,9 +15134,9 @@ shape Rollup {
 
 def main() Unit {
     source = StoredRollup { count: 2, total: 7, internalId: 99 }
-    named Rollup = Rollup { source.count, source.total }
-    explicit Rollup = shape { source.count, source.total }
-    contextual Rollup = new { source.count, source.total }
+    named Rollup = Rollup { count: source.count, total: source.total }
+    explicit Rollup = shape { count: source.count, total: source.total }
+    contextual Rollup = new { count: source.count, total: source.total }
 }
 "#,
         );
@@ -15092,34 +15145,6 @@ def main() Unit {
             accepted_result.diagnostics.is_empty(),
             "{:#?}",
             accepted_result.diagnostics
-        );
-
-        let rejected = parse_inline(
-            r#"
-shape Source {
-    count Int
-    missing Int
-}
-
-shape Rollup {
-    count Int
-    total Int
-}
-
-def main() Unit {
-    source = Source { count: 2, missing: 7 }
-    value Rollup = Rollup { source.count, source.missing }
-}
-"#,
-        );
-        let rejected_result = check_program(&rejected);
-        assert!(
-            rejected_result.diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "no_matching_overload"
-                    && diagnostic.message.contains("no visible field 'missing'")
-            }),
-            "{:#?}",
-            rejected_result.diagnostics
         );
     }
 
@@ -15139,6 +15164,61 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_with_updates_for_named_shapes() {
+        let program = parse_inline(
+            r#"
+shape Amount {
+    value Int
+}
+
+def main() Unit {
+    original = Amount(10)
+    updated = original with { value: 42 }
+    value Int = updated.value
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_with_updates_for_class_targets_and_patches() {
+        let program = parse_inline(
+            r#"
+class Amount {
+    value Int
+}
+
+class AmountPatch {
+    value Int
+}
+
+shape ShapeAmount {
+    value Int
+}
+
+def main() Unit {
+    original = Amount(10)
+    invalidTarget = original with { value: 42 }
+
+    shapeValue = ShapeAmount(10)
+    invalidPatch = shapeValue with AmountPatch(42)
+}
+"#,
+        );
+        let result = check_program(&program);
+        for class_name in ["Amount", "AmountPatch"] {
+            assert!(result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_shape_update"
+                    && diagnostic
+                        .message
+                        .contains(&format!("does not support class value '{class_name}'"))
+            }));
+        }
     }
 
     #[test]
@@ -15264,30 +15344,6 @@ def main() Unit {
                 .diagnostics
                 .iter()
                 .any(|diag| diag.code == "duplicate_shape_field"),
-            "{:#?}",
-            result.diagnostics
-        );
-    }
-
-    #[test]
-    fn rejects_typed_anonymous_shape_field_initializer_mismatch() {
-        let program = parse_inline(
-            r#"
-def main() Unit {
-    user = {
-        name Str: 42
-    }
-}
-"#,
-        );
-        let result = check_program(&program);
-        assert!(
-            result.diagnostics.iter().any(|diag| {
-                diag.code == "invalid_field_initializer_type"
-                    && diag.message.contains(
-                        "field 'name' is annotated as 'Str' but initializer has type 'Int'",
-                    )
-            }),
             "{:#?}",
             result.diagnostics
         );
@@ -16179,6 +16235,74 @@ def fail() Never = panic("boom")
 def main(value MaybeInt) Unit {
     let SomeX { value as item } = value else fail()
     OS.println(item)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_let_else_inside_explicitly_typed_local_function() {
+        let program = parse_inline(
+            r#"
+class IntRange {
+    start Int
+    end Int
+}
+
+def contains(range Option[IntRange], value Int) Bool {
+    def outside(candidate Int) Bool {
+        let bounds <- range else return false
+        candidate < bounds.start || candidate > bounds.end
+    }
+
+    !outside(value)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_value_return_inside_implicit_unit_local_function() {
+        let program = parse_inline(
+            r#"
+def contains(range Option[Int], value Int) Bool {
+    def present() {
+        let item <- range else return false
+        item == value
+    }
+
+    true
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_return_type"
+                    && diagnostic
+                        .message
+                        .contains("enclosing callable expects 'Unit'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn infers_return_type_for_equals_block_local_function() {
+        let program = parse_inline(
+            r#"
+def contains(range Option[Int], value Int) Bool {
+    def present() = {
+        let item <- range else return false
+        item == value
+    }
+
+    present()
 }
 "#,
         );

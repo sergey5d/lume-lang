@@ -156,52 +156,11 @@ public final class LumeRuntime {
                 new LumeMethod[] {});
     }
 
-    public static Boolean sameValue(Object left, Object right) {
-        if (left == right) {
-            return true;
-        }
-        if (left == null || right == null || !sameEqualityDomain(left, right)) {
-            return false;
-        }
-        return Objects.equals(left, right);
-    }
-
     public static Long hashValue(Object value) {
         if (value instanceof Hashed<?> hashed) {
             return hashed.hash();
         }
         return (long) Objects.hashCode(value);
-    }
-
-    private static boolean sameEqualityDomain(Object left, Object right) {
-        String leftPrimitive = primitiveEqualityDomain(left);
-        String rightPrimitive = primitiveEqualityDomain(right);
-        if (leftPrimitive != null || rightPrimitive != null) {
-            return Objects.equals(leftPrimitive, rightPrimitive);
-        }
-        if (left instanceof LumeTyped leftTyped && right instanceof LumeTyped rightTyped) {
-            return leftTyped.runtimeType() == rightTyped.runtimeType();
-        }
-        return left.getClass() == right.getClass();
-    }
-
-    private static String primitiveEqualityDomain(Object value) {
-        if (value instanceof String) {
-            return "Str";
-        }
-        if (value instanceof Boolean) {
-            return "Bool";
-        }
-        if (value instanceof Long || value instanceof Integer || value instanceof Short || value instanceof Byte) {
-            return "Int";
-        }
-        if (value instanceof Double || value instanceof Float) {
-            return "Float";
-        }
-        if (value instanceof LumeUnit) {
-            return "Unit";
-        }
-        return null;
     }
 
     public static Object probeSuccessValue(Object value) {

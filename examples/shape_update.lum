@@ -6,7 +6,7 @@
 # equal true
 # not equal true
 
-class Amount {
+shape Amount {
     amount Int
     description Str
 }

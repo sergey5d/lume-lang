@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*shape update does not support class value 'Amount'; define an explicit copy or update method on the class.*
+
+class Amount {
+    amount Int
+}
+
+def main() Unit {
+    value = Amount(10)
+    updated = value with { amount: 42 }
+}

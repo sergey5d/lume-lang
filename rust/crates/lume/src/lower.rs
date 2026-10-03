@@ -212,6 +212,7 @@ impl<'a> Lowerer<'a> {
                         &function.type_conditions,
                         &[],
                         function.return_type.as_ref(),
+                        function.equals_body,
                         ir::FunctionKind::TopLevel,
                         &function.params,
                         None,
@@ -461,6 +462,7 @@ impl<'a> Lowerer<'a> {
         type_conditions: &[ast::GenericCondition],
         owner_type_params: &[String],
         return_type: Option<&TypeRef>,
+        infer_return: bool,
         kind: ir::FunctionKind,
         params: &[core::Param],
         this_local: Option<(String, ir::Type)>,
@@ -482,7 +484,11 @@ impl<'a> Lowerer<'a> {
                 .map(|ty| {
                     lower_type_ref_with_type_params(ty, &available_type_params, &self.type_aliases)
                 })
-                .unwrap_or(ir::Type::Unknown),
+                .unwrap_or(if infer_return {
+                    ir::Type::Unknown
+                } else {
+                    ir::Type::Unit
+                }),
         );
         function.annotations = lower_annotations(annotations);
         function.visibility = visibility;
@@ -521,7 +527,7 @@ impl<'a> Lowerer<'a> {
                 param
                     .initializer
                     .as_ref()
-                    .and_then(|initializer| lower_field_initializer_constant(Some(initializer))),
+                    .and_then(lower_param_default_constant),
             );
             function.set_param_variadic(index, param.variadic);
             function.set_param_lazy(index, param.lazy);
@@ -550,6 +556,7 @@ impl<'a> Lowerer<'a> {
             &method.type_conditions,
             &owner_type_params,
             method.return_type.as_ref(),
+            method.equals_body && method.name != "new",
             ir::FunctionKind::Method { owner },
             &method.params,
             Some((String::from("this"), ir::Type::named(owner_name))),
@@ -578,6 +585,7 @@ impl<'a> Lowerer<'a> {
                 args: Vec::new(),
                 span,
             }),
+            false,
             ir::FunctionKind::Method { owner },
             &[],
             Some((String::from("this"), ir::Type::named(owner_name))),
@@ -972,6 +980,12 @@ impl<'a> FunctionLowerer<'a> {
                 self.lower_block_value_with_expected(block, Some(&return_ty))
             }
         };
+        if matches!(return_ty, ir::Type::Unknown)
+            && let Some(inferred) = result.as_ref().and_then(|value| self.operand_type(value))
+            && !matches!(inferred, ir::Type::Unknown)
+        {
+            self.function_mut().return_ty = inferred;
+        }
         if let Some(block) = self.current_block_mut() {
             block.set_terminator(ir::Terminator {
                 span: Some(span),
@@ -1234,13 +1248,31 @@ impl<'a> FunctionLowerer<'a> {
                     .return_type
                     .as_ref()
                     .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
-                    .unwrap_or(ir::Type::Unknown),
+                    .unwrap_or(if function.equals_body {
+                        ir::Type::Unknown
+                    } else {
+                        ir::Type::Unit
+                    }),
             ),
         };
         let local_id = self.add_local(function.name.clone(), ty, false, ir::LocalKind::Binding);
         self.current_scope().insert(function.name.clone(), local_id);
 
         let closure = self.lower_nested_function_decl(function);
+        if let ir::RValue::Closure {
+            function: function_id,
+            ..
+        } = &closure
+            && let Some(inferred) = self
+                .program
+                .function(*function_id)
+                .map(|nested| nested.return_ty.clone())
+            && let Some(local) = self.function_mut().locals.get_mut(local_id.0)
+            && let ir::Type::Function { ret, .. } = &mut local.ty
+            && matches!(ret.as_ref(), ir::Type::Unknown)
+        {
+            **ret = inferred;
+        }
         self.push_statement(ir::Statement {
             span: Some(function.span),
             kind: ir::StatementKind::Assign {
@@ -1272,7 +1304,11 @@ impl<'a> FunctionLowerer<'a> {
                 .return_type
                 .as_ref()
                 .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
-                .unwrap_or(ir::Type::Unknown),
+                .unwrap_or(if function.equals_body {
+                    ir::Type::Unknown
+                } else {
+                    ir::Type::Unit
+                }),
         );
         nested.span = Some(function.span);
         for (index, param) in function.params.iter().enumerate() {
@@ -5383,7 +5419,20 @@ impl<'a> FunctionLowerer<'a> {
     fn operand_type(&self, operand: &ir::Operand) -> Option<ir::Type> {
         match operand {
             ir::Operand::Copy(place) | ir::Operand::Move(place) => self.place_type(place),
-            ir::Operand::Const(_) => None,
+            ir::Operand::Const(constant) => Some(match constant {
+                ir::Constant::Unit => ir::Type::Unit,
+                ir::Constant::OptionNone => ir::Type::option(ir::Type::Unknown),
+                ir::Constant::Bool(_) => ir::Type::Bool,
+                ir::Constant::Int(_) => ir::Type::Int,
+                ir::Constant::Float(_) => ir::Type::Float,
+                ir::Constant::String(_) => ir::Type::Str,
+                ir::Constant::List(values) => ir::Type::list(
+                    values
+                        .first()
+                        .and_then(|value| self.operand_type(&ir::Operand::Const(value.clone())))
+                        .unwrap_or(ir::Type::Unknown),
+                ),
+            }),
         }
     }
 
@@ -9363,10 +9412,6 @@ fn universal_member_type(name: &str) -> Option<ir::Type> {
             params: vec![ir::Type::named("Any")],
             ret: Box::new(ir::Type::Bool),
         }),
-        "sameValue" => Some(ir::Type::Function {
-            params: vec![ir::Type::named("Any")],
-            ret: Box::new(ir::Type::Bool),
-        }),
         "hash" => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir::Type::Int),
@@ -9859,6 +9904,14 @@ fn lower_field_initializer_constant(initializer: Option<&ast::Expr>) -> Option<i
     }
 }
 
+fn lower_param_default_constant(initializer: &ast::Expr) -> Option<ir::Constant> {
+    match initializer {
+        ast::Expr::Group { inner, .. } => lower_param_default_constant(inner),
+        ast::Expr::Identifier { name, .. } if name == "None" => Some(ir::Constant::OptionNone),
+        other => lower_field_initializer_constant(Some(other)),
+    }
+}
+
 fn default_constant_for_type(ty: &ir::Type) -> ir::Constant {
     match ty {
         ir::Type::Unit => ir::Constant::Unit,
@@ -9988,6 +10041,7 @@ fn runtime_callable_root_name(name: &str) -> bool {
         name,
         "OS" | "Math"
             | "Range"
+            | "IntRange"
             | "Vector"
             | "LinkedList"
             | "Array"
@@ -10695,7 +10749,7 @@ mod tests {
     fn lowers_local_functions_lambdas_and_shape_updates() {
         let program = parse_inline(
             r#"
-            class Amount {
+            shape Amount {
                 amount Int
                 description Str
             }
