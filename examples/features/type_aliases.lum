@@ -12,8 +12,12 @@ type UserId = Int
 type Labeler = fn(UserId) Str
 type Users = [User]
 type Scores = [Str: Int]
-type Profile = { name Str, age Int }
 type Identifier = UserId
+
+shape Profile {
+    name Str
+    age Int
+}
 
 def apply(labeler Labeler, id Identifier) Str = labeler(id)
 
@@ -22,7 +26,7 @@ def main() Unit {
     labeler Labeler = (value Int) => "user " + value
     users Users = [User("Ada")]
     scores Scores = ["Ada": 10]
-    profile Profile = { name: "Ada", age: 42 }
+    profile Profile = Profile { name: "Ada", age: 42 }
 
     println(apply(labeler, id))
     println(users[0].name)

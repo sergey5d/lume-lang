@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*'type Account = class \{ \.\.\. \}' has been removed; declare the class directly.*
+
+type Account = class {
+    name Str
+}

@@ -4946,9 +4946,6 @@ impl<'a> FunctionLowerer<'a> {
         if let Some(ty) = self.infer_builtin_case_call_type(callee, &normalized_args, overrides) {
             return ty;
         }
-        if let Some(fields) = self.anonymous_shape_alias_fields(callee) {
-            return ir::Type::Record(fields);
-        }
         if let Some(ty) = self.infer_constructor_call_type(callee, &normalized_args, overrides) {
             return ty;
         }
@@ -6372,25 +6369,6 @@ impl<'a> FunctionLowerer<'a> {
                         &args[0].value,
                     ));
                 }
-                if let Some(fields) = self.anonymous_shape_alias_fields(callee) {
-                    let ordered_args = self.reorder_call_args(callee, args);
-                    if ordered_args.len() != fields.len() {
-                        self.invariant(
-                            "anonymous shape alias constructor arity should be checked before lowering",
-                            *span,
-                        );
-                    }
-                    return Some(ir::RValue::Record(
-                        fields
-                            .into_iter()
-                            .zip(ordered_args)
-                            .map(|(field, arg)| ir::NamedOperand {
-                                name: field.name,
-                                value: self.lower_expr_with_expected(&arg.value, Some(&field.ty)),
-                            })
-                            .collect(),
-                    ));
-                }
                 let (candidate_callee, candidate_type_args) =
                     self.split_generic_call_callee(callee);
                 let candidate_normalized_args =
@@ -6883,22 +6861,6 @@ impl<'a> FunctionLowerer<'a> {
         ordered_args: &[core::CallArg],
         expected: Option<&ir::Type>,
     ) -> Option<Vec<Option<ExpectedArgSpec>>> {
-        if let Some(fields) = self.anonymous_shape_alias_fields(callee) {
-            return Some(
-                fields
-                    .into_iter()
-                    .map(|field| {
-                        Some(ExpectedArgSpec {
-                            name: Some(field.name),
-                            ty: field.ty,
-                            lazy: false,
-                            variadic: false,
-                            default: None,
-                        })
-                    })
-                    .collect(),
-            );
-        }
         if let Some(fields) =
             expected.and_then(|expected| self.enum_case_expected_arg_types(callee, expected))
         {
@@ -7350,18 +7312,6 @@ impl<'a> FunctionLowerer<'a> {
         })
     }
 
-    fn anonymous_shape_alias_fields(&self, callee: &Expr) -> Option<Vec<ir::NamedType>> {
-        let path = expr_path(callee)?;
-        let [name] = path.as_slice() else {
-            return None;
-        };
-        let target = self.type_aliases.get(name)?;
-        match lower_type_ref_with_aliases(target, self.type_aliases) {
-            ir::Type::Record(fields) => Some(fields),
-            _ => None,
-        }
-    }
-
     fn named_construct_fields(
         &self,
         expected: &ir::Type,
@@ -7758,9 +7708,6 @@ impl<'a> FunctionLowerer<'a> {
                 let name = &path[0];
                 if let Some(id) = self.functions.get(name).copied() {
                     return self.function_param_names(id);
-                }
-                if let Some(fields) = self.anonymous_shape_alias_fields(callee) {
-                    return Some(fields.into_iter().map(|field| field.name).collect());
                 }
                 if let Some(type_def) = self.program.types.iter().find(|ty| {
                     ty.name == *name
@@ -10638,16 +10585,11 @@ mod tests {
     }
 
     #[test]
-    fn lowers_anonymous_shape_alias_constructor_as_record() {
+    fn lowers_anonymous_shape_literal_as_record() {
         let program = parse_inline(
             r#"
-            type Session = shape {
-                start Int
-                end Int
-            }
-
             def main() Int {
-                session Session = Session(10, 30)
+                session { start Int, end Int } = { start: 10, end: 30 }
                 return session.end - session.start
             }
             "#,

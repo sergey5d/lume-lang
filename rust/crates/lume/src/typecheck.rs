@@ -6346,24 +6346,6 @@ impl<'a> Checker<'a> {
                         return Some(ty);
                     }
                 }
-                if let Some(ret) = self.lookup_anonymous_shape_alias_type(name) {
-                    let Ty::Record(fields) = &ret else {
-                        unreachable!("anonymous shape alias lookup returned a non-record type")
-                    };
-                    let params = fields
-                        .iter()
-                        .map(|(name, ty)| FieldSig {
-                            name: name.clone(),
-                            ty: ty.clone(),
-                            mutable: false,
-                            visibility: Visibility::Default,
-                            hidden: false,
-                            has_initializer: false,
-                            variadic: false,
-                        })
-                        .collect::<Vec<_>>();
-                    return Some(self.check_constructor_signature(&params, &ret, args, span));
-                }
                 if let Some(case) = self.world.lookup_enum_case(self.module, name) {
                     return Some(self.check_enum_case_constructor_signature(
                         name,
@@ -10427,14 +10409,6 @@ impl<'a> Checker<'a> {
             .get(name)
             .cloned()
             .map(|target| (PathBuf::from("<ambient>"), target))
-    }
-
-    fn lookup_anonymous_shape_alias_type(&self, name: &str) -> Option<Ty> {
-        let (path, target) = self.lookup_alias_target(Some(self.module), name)?;
-        let owner = self.module_for_alias_path(&path);
-        let mut visiting = vec![(path, name.to_string())];
-        let ty = self.ty_from_type_ref_in_module(&target, owner, &mut visiting);
-        matches!(ty, Ty::Record(_)).then_some(ty)
     }
 
     fn module_for_alias_path(&self, path: &Path) -> Option<&ModuleInfo> {
@@ -18303,7 +18277,6 @@ type UserId = Int
 type Handler = fn(UserId) Str
 type Users = [User]
 type Scores = [Str: Int]
-type Profile = { name Str, age Int }
 type Companion = Pet
 type Pet = Cat | Dog
 
@@ -18315,13 +18288,11 @@ def main() Unit {
     handler Handler = (value Int) => value.toStr()
     users Users = [User("Ada")]
     scores Scores = ["Ada": 10]
-    profile Profile = Profile("Ada", 42)
     pet Companion = Cat()
 
     println(apply(handler, id))
     println(users[0].name)
     println(scores["Ada"]!)
-    println(profile.name)
     _ = companion(pet)
 }
 "#,
@@ -18331,7 +18302,7 @@ def main() Unit {
     }
 
     #[test]
-    fn treats_anonymous_shape_alias_as_transparent() {
+    fn allows_anonymous_shape_types_in_inline_positions() {
         let program = parse_inline(
             r#"
 shape Session {
@@ -18342,16 +18313,14 @@ shape Session {
     def duration() Int = this.end - this.start
 }
 
-type View = { position Str }
-
-def project(value { position Str, start Int }) View =
+def project(value { position Str, start Int }) { position Str } =
     { position: value.position }
 
-def copy(value View) { position Str } = value
+def copy(value { position Str }) { position Str } = value
 
 def main() Unit {
     session Session = Session("engineer", 10, 30)
-    view View = project(session)
+    view { position Str } = project(session)
     copied { position Str } = copy(view)
     println(copied.position, session.duration())
 }

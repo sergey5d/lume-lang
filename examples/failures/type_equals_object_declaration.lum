@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*'type Settings = object \{ \.\.\. \}' has been removed; declare the object directly.*
+
+type Settings = object {
+    name Str = "default"
+}

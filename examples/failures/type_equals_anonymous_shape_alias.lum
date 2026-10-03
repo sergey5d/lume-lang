@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*'type Profile = \{ \.\.\. \}' has been removed; declare a named shape directly.*
+
+type Profile = {
+    name Str
+    age Int
+}

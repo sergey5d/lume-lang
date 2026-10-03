@@ -77,7 +77,6 @@ def display(user ModelUser) Str = user.name
 type UserId = Int
 type Handler = fn(Request) Response
 type Users = [User]
-type Profile = { name Str, age Int }
 type Companion = Pet
 ```
 
@@ -85,6 +84,9 @@ An alias introduces no new nominal type. The alias and its recursively expanded
 target are the same type for assignment, calls, inference, and code generation.
 Aliases may refer to aliases declared before or after them; direct and indirect
 cycles are rejected.
+
+An anonymous shape schema cannot be a `type` alias target. Declare a reusable
+record with `shape Name { ... }`, or keep the anonymous schema inline.
 
 ### Union Types
 
@@ -1065,8 +1067,8 @@ none = None
 ```
 
 `shape` is not an expression keyword. It remains available for named shape
-declarations, anonymous-shape alias targets, and shape alternatives inside
-declared unions. Expression-level `shape { ... }`, `shape {}`, and
+declarations and shape alternatives inside declared unions. Expression-level
+`shape { ... }`, `shape {}`, and
 `shape with Interface { ... }` are invalid. Use field braces, `new { ... }`,
 and `object with Interface { ... }` respectively.
 
@@ -1145,30 +1147,13 @@ def project(user { name Str, age Int }) { name Str } =
 Anonymous shape types in parameters, return types, fields, and local bindings
 use bare braces. The `shape` prefix is not valid in those inline type positions.
 
-Anonymous shape aliases accept either spelling:
+Anonymous shape schemas cannot be named with `type`:
 
 ```txt
-type ExplicitResult = shape { x Str }
-type ShortResult = { x Str }
+type Result = { x Str } # invalid
 ```
 
-Both are transparent aliases for the same anonymous structural shape; neither
-introduces a named shape.
-
-An anonymous-shape alias may be used as an explicit positional constructor
-name. The result remains an anonymous structural shape:
-
-```txt
-type Session = shape {
-    start Int
-    end Int
-}
-
-session Session = Session(10, 20)
-```
-
-Values map to fields in written order and the argument count must match the
-alias fields exactly.
+Use a named shape declaration when the schema needs a reusable name.
 
 A named shape uses a shape declaration:
 
@@ -1183,41 +1168,45 @@ shape Session {
 session = Session(10, 20)
 ```
 
-Named declarations for the other declaration kinds retain equivalent short and
-`type` forms:
+Every named declaration kind has one declaration form:
 
 ```txt
-class A { ... }       # type A = class { ... }
-interface C { ... }   # type C = interface { ... }
-annotation D { ... }  # type D = annotation { ... }
-object E { ... }      # type E = object { ... }
+class A { ... }
+interface B { ... }
+shape C { ... }
+object D { ... }
+annotation E { ... }
 ```
 
-The long form creates the same named declaration as the short form; it is not a
-transparent alias. It therefore supports the same fields, methods, generic
-parameters, and `with` interfaces. Shapes are deliberately excluded from this
-named-declaration long-form rule: use `shape Name { ... }` for a named shape.
-Transparent anonymous-shape aliases accept either equivalent spelling:
+Declaration-valued aliases are not supported. For example, these are invalid:
 
 ```txt
-type Profile = { name Str, age Int }
-type Profile = shape { name Str, age Int }
+type A = class { ... }
+type B = interface { ... }
+type C = shape { ... }
+type D = object { ... }
+type E = annotation { ... }
 ```
 
-The optional `shape` prefix is available only in an anonymous-shape alias
-target. Inline variable, parameter, and return types use bare braces, for
-example `value { name Str }` and `def profile() { name Str }`.
+Use `type` for transparent aliases such as `type UserId = Int`,
+`type Users = [User]`, and `type Handler = fn(Request) Response`.
 
-After `type Name =`, a declaration kind immediately followed by `{` or `with`
-starts a long-form declaration for `class`, `interface`, `annotation`, and
-`object`. A named `class`, `shape`, or `object` after the kind remains an inline
-union member, as in
-`type Outcome = class Success { value Str } | object Cancelled {}`.
+Declaration keywords may follow `=` only as named alternatives of a declared
+union, for example:
+
+```txt
+type Outcome =
+    class Success { value Str }
+    | shape Failure { message Str }
+    | object Cancelled {}
+```
+
+A declared union requires at least two alternatives. Each alternative supplies
+its own name; the union name does not stand in for an omitted alternative name.
 
 `shape` is not a construction expression. Anonymous structural values use
 labeled/spread field braces or forced `new { ... }`. Positional construction
-must name an existing target, such as `Point(...)` or an anonymous-shape alias
-such as `Session(...)`.
+must name an existing target, such as `Point(...)`.
 
 Tuples do not construct shapes or classes. Classes must name their constructor
 target:

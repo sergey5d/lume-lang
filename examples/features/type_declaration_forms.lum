@@ -4,11 +4,11 @@
 # object settings
 # annotation ok
 
-type C = interface {
+interface C {
     def label() Str
 }
 
-type A = class with C {
+class A with C {
     value Str
 
     def label() Str = this.value
@@ -20,11 +20,11 @@ shape B {
     def doubled() Int = this.value * 2
 }
 
-type D = annotation {
+annotation D {
     value Str
 }
 
-type E = object with C {
+object E with C {
     value Str = "settings"
 
     def label() Str = this.value

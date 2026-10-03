@@ -2,15 +2,16 @@
 # aliases hello hello
 # named 10
 
-type ExplicitResult = shape { x Str }
-type ShortResult = { x Str }
+shape Result {
+    x Str
+}
 
 def result() { x Str } =
     { x: "hello" }
 
-def toExplicit(value ShortResult) ExplicitResult = value
+def toResult(value { x Str }) Result = value
 
-def toShort(value ExplicitResult) ShortResult = value
+def toAnonymous(value Result) { x Str } = value
 
 shape NamedResult {
     x Int
@@ -19,9 +20,9 @@ shape NamedResult {
 }
 
 def main() Unit {
-    explicit ExplicitResult = toExplicit(result())
-    short ShortResult = toShort(explicit)
-    println("aliases", explicit.x, short.x)
+    value Result = toResult(result())
+    copy { x Str } = toAnonymous(value)
+    println("aliases", value.x, copy.x)
 
     named NamedResult = NamedResult { x: 5 }
     println("named", named.doubled())

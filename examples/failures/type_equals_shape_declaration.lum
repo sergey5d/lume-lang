@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*'type Point = shape \{ \.\.\. \}' has been removed; declare the shape directly.*
+
+type Point = shape {
+    x Int
+    y Int
+}

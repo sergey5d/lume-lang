@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*'type Reader = interface \{ \.\.\. \}' has been removed; declare the interface directly.*
+
+type Reader = interface {
+    def read() Str
+}

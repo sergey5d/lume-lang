@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*'type Label = annotation \{ \.\.\. \}' has been removed; declare the annotation directly.*
+
+type Label = annotation {
+    value Str
+}

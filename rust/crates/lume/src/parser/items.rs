@@ -213,14 +213,15 @@ impl<'a> Parser<'a> {
         };
         self.consume(TokenKind::Eq, "expected '=' after type alias name")?;
         self.skip_newlines();
-        let inline_type_decl_kind = match self.current_kind() {
-            TokenKind::Keyword(Keyword::Annotation) => Some(TypeKind::Annotation),
-            TokenKind::Keyword(Keyword::Class) => Some(TypeKind::Class),
-            TokenKind::Keyword(Keyword::Object) => Some(TypeKind::Object),
-            TokenKind::Keyword(Keyword::Interface) => Some(TypeKind::Interface),
+        let removed_type_decl_kind = match self.current_kind() {
+            TokenKind::Keyword(Keyword::Annotation) => Some((TypeKind::Annotation, "annotation")),
+            TokenKind::Keyword(Keyword::Class) => Some((TypeKind::Class, "class")),
+            TokenKind::Keyword(Keyword::Object) => Some((TypeKind::Object, "object")),
+            TokenKind::Keyword(Keyword::Interface) => Some((TypeKind::Interface, "interface")),
+            TokenKind::Keyword(Keyword::Shape) => Some((TypeKind::Record, "shape")),
             _ => None,
         };
-        let inline_type_decl_kind = inline_type_decl_kind.filter(|_| {
+        let removed_type_decl_kind = removed_type_decl_kind.filter(|_| {
             let mut lookahead = self.index + 1;
             while self
                 .tokens
@@ -234,11 +235,21 @@ impl<'a> Parser<'a> {
                 Some(TokenKind::LBrace) | Some(TokenKind::Keyword(Keyword::With))
             )
         });
-        if let Some(kind) = inline_type_decl_kind {
+        if let Some((kind, keyword)) = removed_type_decl_kind {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "removed_type_equals_declaration",
+                    format!(
+                        "'type {name} = {keyword} {{ ... }}' has been removed; declare the {keyword} directly"
+                    ),
+                    start.cover(self.current_span()),
+                )
+                .with_help(format!("write '{keyword} {name} {{ ... }}'")),
+            );
             if !union_with_bounds.is_empty() {
                 self.error_at_current(
                     "invalid_type_alias_bound",
-                    "long-form declarations place interface bounds after the declaration kind, for example 'type A = class with Printable { ... }'",
+                    "direct declarations place interface bounds after the type name, for example 'class A with Printable { ... }'",
                 );
             }
             self.advance();
@@ -264,25 +275,10 @@ impl<'a> Parser<'a> {
                 )
                 .map(Item::Type);
         }
-        let starts_prefixed_anonymous_shape_alias = if self.at_keyword(Keyword::Shape) {
-            let mut lookahead = self.index + 1;
-            while self
-                .tokens
-                .get(lookahead)
-                .is_some_and(|token| token.kind == TokenKind::Newline)
-            {
-                lookahead += 1;
-            }
-            self.tokens
-                .get(lookahead)
-                .is_some_and(|token| token.kind == TokenKind::LBrace)
-        } else {
-            false
-        };
         if matches!(
             self.current_kind(),
             TokenKind::Keyword(Keyword::Class) | TokenKind::Keyword(Keyword::Object)
-        ) || (self.at_keyword(Keyword::Shape) && !starts_prefixed_anonymous_shape_alias)
+        ) || self.at_keyword(Keyword::Shape)
         {
             return self.parse_inline_union_decl(
                 visibility,
@@ -304,18 +300,19 @@ impl<'a> Parser<'a> {
                 "generic parameters on 'type' are currently supported only for inline union declarations",
             );
         }
-        let target = if starts_prefixed_anonymous_shape_alias {
-            let shape_span = self.current_span();
-            self.advance();
-            self.skip_newlines();
-            self.consume(
-                TokenKind::LBrace,
-                "expected '{' after 'shape' in type alias",
-            )?;
-            self.finish_anonymous_shape_type_ref(shape_span)?
-        } else {
-            self.parse_type_ref()?
-        };
+        let target = self.parse_type_ref()?;
+        if matches!(target, TypeRef::Record { .. }) {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "removed_anonymous_shape_alias",
+                    format!(
+                        "'type {name} = {{ ... }}' has been removed; declare a named shape directly"
+                    ),
+                    start.cover(target.span()),
+                )
+                .with_help(format!("write 'shape {name} {{ ... }}'")),
+            );
+        }
         let span = start.cover(target.span());
         Some(Item::TypeAlias(TypeAliasDecl {
             visibility,

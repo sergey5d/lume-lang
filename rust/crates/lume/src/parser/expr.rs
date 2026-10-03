@@ -2046,7 +2046,9 @@ impl<'a> Parser<'a> {
                             "expression-level 'shape with' has been removed; use 'object with Interface { ... }' for anonymous behavior",
                             start.cover(self.current_span()),
                         )
-                        .with_help("keep 'shape' for declarations and type aliases only"),
+                        .with_help(
+                            "keep 'shape' for named declarations and declared-union alternatives only",
+                        ),
                     );
                     return self.parse_anonymous_shape_body(start, interfaces);
                 }

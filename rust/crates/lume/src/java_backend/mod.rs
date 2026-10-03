@@ -5618,8 +5618,7 @@ type Companion = Pet
 type Pet = Cat | Dog
 type Names = [Str]
 type Labeler = fn(Str) Str
-type View = { name Str }
-type Span = shape {
+shape Span {
     start Int
     end Int
 }
@@ -5631,8 +5630,8 @@ def describe(value Companion) Str = match value {
 
 def widen(value Pet) Bird | Dog | Cat = value
 
-def view() View = { name: "Milo" }
-def copyView(value View) { name Str } = value
+def view() { name Str } = { name: "Milo" }
+def copyView(value { name Str }) { name Str } = value
 
 def main() Unit {
     pet Companion = Cat("Milo")

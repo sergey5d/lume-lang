@@ -5366,7 +5366,6 @@ type UserId = Int
 type Handler = fn(UserId) Str
 type Users = [Str]
 type Scores = [Str: Int]
-type Profile = { name Str, age Int }
 type Pet = Cat | Dog
 type Companion = Pet
 "#,
@@ -5404,19 +5403,12 @@ type Companion = Pet
     assert!(matches!(
         &program.items[4],
         Item::TypeAlias(TypeAliasDecl {
-            target: TypeRef::Record { fields, .. },
-            ..
-        }) if fields.len() == 2
-    ));
-    assert!(matches!(
-        &program.items[5],
-        Item::TypeAlias(TypeAliasDecl {
             target: TypeRef::Union { members, .. },
             ..
         }) if members.len() == 2
     ));
     assert!(matches!(
-        &program.items[6],
+        &program.items[5],
         Item::TypeAlias(TypeAliasDecl {
             target: TypeRef::Named { name, .. },
             ..
@@ -5425,44 +5417,16 @@ type Companion = Pet
 }
 
 #[test]
-fn parses_anonymous_shape_types_with_bare_braces() {
+fn parses_anonymous_shape_types_in_inline_positions() {
     let result = parse(
         r#"
-type ExplicitSession = shape {
-    position Str
-    start Int
-    end Int
-}
-
-type ShortSession = {
-    position Str,
-    start Int,
-    end Int
-}
-
 def project(value { position Str, start Int }) { position Str } =
     { position: value.position }
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
-    assert!(matches!(
-        &program.items[0],
-        Item::TypeAlias(TypeAliasDecl {
-            name,
-            target: TypeRef::Record { fields, .. },
-            ..
-        }) if name == "ExplicitSession" && fields.len() == 3
-    ));
-    assert!(matches!(
-        &program.items[1],
-        Item::TypeAlias(TypeAliasDecl {
-            name,
-            target: TypeRef::Record { fields, .. },
-            ..
-        }) if name == "ShortSession" && fields.len() == 3
-    ));
-    let Item::Function(project) = &program.items[2] else {
+    let Item::Function(project) = &program.items[0] else {
         panic!("expected project function");
     };
     assert!(matches!(
@@ -5473,6 +5437,22 @@ def project(value { position Str, start Int }) { position Str } =
         project.return_type,
         Some(TypeRef::Record { ref fields, .. }) if fields.len() == 1
     ));
+}
+
+#[test]
+fn rejects_anonymous_shape_type_alias() {
+    let result = parse("type Profile = { name Str, age Int }");
+    assert!(
+        result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "removed_anonymous_shape_alias"
+                && diagnostic
+                    .helps
+                    .iter()
+                    .any(|help| help.contains("shape Profile"))
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
 }
 
 #[test]
@@ -5494,52 +5474,28 @@ fn rejects_shape_prefix_on_anonymous_shape_types() {
 }
 
 #[test]
-fn parses_type_equals_forms_for_named_declaration_kinds() {
-    let result = parse(
-        r#"
-type A = class {
-    value Int
-}
-
-type C = interface {
-    def value() Int
-}
-
-type D = annotation {
-    value Str
-}
-
-type E = object {
-    value Int = 5
-    def get() Int = this.value
-}
-"#,
-    );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    assert_eq!(program.items.len(), 4);
-    assert!(matches!(
-        &program.items[0],
-        Item::Type(TypeDecl {
-            name,
-            kind: TypeKind::Class,
-            ..
-        }) if name == "A"
-    ));
-    let expected_named = [
-        (1, "C", TypeKind::Interface),
-        (2, "D", TypeKind::Annotation),
-        (3, "E", TypeKind::Object),
-    ];
-    for (index, expected_name, expected_kind) in expected_named {
-        let item = &program.items[index];
+fn rejects_type_equals_forms_for_named_declaration_kinds() {
+    for (source, keyword, name) in [
+        ("type A = class { value Int }", "class", "A"),
+        ("type B = interface { def value() Int }", "interface", "B"),
+        ("type C = shape { value Int }", "shape", "C"),
+        ("type D = object { value Int = 5 }", "object", "D"),
+        ("type E = annotation { value Str }", "annotation", "E"),
+    ] {
+        let result = parse(source);
         assert!(
-            matches!(
-                item,
-                Item::Type(TypeDecl { name, kind, .. })
-                    if name == expected_name && *kind == expected_kind
-            ),
-            "expected {expected_name} to be {expected_kind:?}, got {item:?}"
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "removed_type_equals_declaration"
+                    && diagnostic
+                        .message
+                        .contains(&format!("type {name} = {keyword}"))
+                    && diagnostic
+                        .helps
+                        .iter()
+                        .any(|help| help.contains(&format!("{keyword} {name}")))
+            }),
+            "expected removed declaration diagnostic for {source:?}, got {:#?}",
+            result.diagnostics
         );
     }
 }
