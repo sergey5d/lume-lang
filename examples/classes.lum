@@ -8,17 +8,17 @@
 
 # Class construction rules in one place:
 # - classes without explicit `new` support brace field construction and positional parentheses
-# - positional construction follows visible field order
-# - trailing visible defaults may be omitted
-# - private defaulted fields may trail visible fields and stay out of the shape
+# - positional construction follows public field order
+# - trailing public defaults may be omitted
+# - initialized non-public fields stay out of the constructor regardless of position
 # - explicit `new` supports brace field construction and positional parentheses
 # - constructor defaults may appear anywhere, but positional calls never skip over them
 
 class Profile {
     name Str
+    private score Int = 5
     age Int
     city Str = "NYC"
-    private score Int = 5
 
     def scoreValue() Int = this.score
 }

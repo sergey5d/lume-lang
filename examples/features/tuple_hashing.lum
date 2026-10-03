@@ -1,0 +1,29 @@
+# EXPECT:
+# start
+# seven
+
+type LookupKey =
+    class Number { value Int }
+    | object Default {}
+
+def requireEq[T with Eq[T]](value T) Unit = ()
+def requireHash[T with Hashed[T]](value T) Unit = ()
+
+def main() Unit {
+    position = (10, 20)
+    requireEq(position)
+    requireHash(position)
+    _ = position.hash()
+
+    positions [(Int, Int): Str] = [position: "start"]
+    println(positions[(10, 20)]!)
+
+    number LookupKey = LookupKey.Number(7)
+    sameNumber LookupKey = LookupKey.Number(7)
+    requireEq(number)
+    requireHash(number)
+    _ = number.hash()
+
+    labels [LookupKey: Str] = [number: "seven"]
+    println(labels[sameNumber]!)
+}

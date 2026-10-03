@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*map key type '\(MutableReference, Int\)' does not satisfy 'Hashed\[\(MutableReference, Int\)\]'.*
+
+class MutableReference {
+    id Int
+}
+
+def main() Unit {
+    key = (MutableReference(1), 2)
+    _ = [key: "value"]
+}

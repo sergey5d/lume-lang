@@ -1,0 +1,6 @@
+# FAIL_REGEX: missing_non_public_field_initializer.*private field 'token' has no initializer
+
+class SecretUser {
+    name Str
+    private token Str
+}

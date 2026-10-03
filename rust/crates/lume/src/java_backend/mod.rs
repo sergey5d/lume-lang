@@ -3453,6 +3453,46 @@ class Account {
     }
 
     #[test]
+    fn readable_java_implicit_constructor_uses_only_public_fields() {
+        let temp = temp_path("lume-java-stable-implicit-constructor");
+        let source = temp.join("constructor.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/stableconstructor
+
+class Account {
+    owner Str
+    internal region Str = "US"
+    balance Int
+    private cache Int = 7
+}
+
+def account() Account = Account("Ada", 10)
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let account = fs::read_to_string(out.join("demo/stableconstructor/Account.java"))
+            .expect("read class");
+        assert!(
+            account.contains("public Account(String owner, Long balance)"),
+            "{account}"
+        );
+        assert!(account.contains("this.__lume_field_init();"), "{account}");
+        assert!(account.contains("this.owner = owner;"), "{account}");
+        assert!(account.contains("this.balance = balance;"), "{account}");
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn readable_java_emits_variadic_reified_and_primitive_coercion_calls() {
         let temp = temp_path("lume-java-readable-call-boundaries");
         let source = temp.join("calls.lum");
@@ -5877,6 +5917,77 @@ def main() Unit {
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
             "true\nfalse\nfound\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_runs_tuple_and_declared_union_map_keys() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java tuple/union hashing test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-tuple-union-hashing");
+        let source = temp.join("tuple_union_hashing.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/tupleunionhashing
+
+type LookupKey =
+    class Number { value Int }
+    | object Default {}
+
+def main() Unit {
+    positions [(Int, Int): Str] = [(10, 20): "start"]
+    println(positions[(10, 20)]!)
+
+    number LookupKey = LookupKey.Number(7)
+    sameNumber LookupKey = LookupKey.Number(7)
+    labels [LookupKey: Str] = [number: "seven"]
+    println(labels[sameNumber]!)
+}
+"#,
+        )
+        .expect("write source");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let key = fs::read_to_string(out.join("demo/tupleunionhashing/LookupKey.java"))
+            .expect("read generated union");
+        assert!(key.contains("public boolean equals(Object other)"), "{key}");
+        assert!(key.contains("public int hashCode()"), "{key}");
+        assert!(key.contains("Objects.hash(this.value)"), "{key}");
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.tupleunionhashing.TupleunionhashingMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "start\nseven\n"
         );
 
         let _ = fs::remove_dir_all(temp);

@@ -3368,13 +3368,13 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' has no implicit field constructor because private field '{}' has no initializer; define 'new' to initialize it",
+                    "class '{}' has no implicit field constructor because non-public field '{}' has no initializer; define 'new' to initialize it",
                     ty.name, field.name
                 ),
             ));
         }
 
-        let visible_fields = ty
+        let public_fields = ty
             .fields
             .iter()
             .filter(|field| !field.hidden)
@@ -3384,18 +3384,18 @@ impl<'a> Interpreter<'a> {
             _ => unreachable!(),
         };
         for (name, value) in values {
-            let Some(field) = visible_fields.iter().find(|field| field.name == *name) else {
+            let Some(field) = public_fields.iter().find(|field| field.name == *name) else {
                 continue;
             };
             aggregate.fields[field.slot.0] = self.coerce_value_to_type(value.clone(), &field.ty);
         }
 
-        for field in visible_fields {
+        for field in public_fields {
             if !field.has_initializer && !values.iter().any(|(name, _)| *name == field.name) {
                 return Err(self.runtime_error(
                     span,
                     format!(
-                        "class '{}' requires construction fields that match the visible class shape",
+                        "class '{}' requires construction fields that match its public constructor contract",
                         ty.name
                     ),
                 ));
@@ -3420,40 +3420,26 @@ impl<'a> Interpreter<'a> {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' has no implicit positional constructor because private field '{}' has no initializer; define 'new' to initialize it",
+                    "class '{}' has no implicit positional constructor because non-public field '{}' has no initializer; define 'new' to initialize it",
                     ty.name, field.name
                 ),
             ));
         }
 
-        if ty.fields.iter().enumerate().any(|(index, field)| {
-            field.hidden
-                && field.has_initializer
-                && ty.fields[index + 1..].iter().any(|later| !later.hidden)
-        }) {
-            return Err(self.runtime_error(
-                span,
-                format!(
-                    "class '{}' cannot use positional construction because private defaulted fields must come after all visible fields",
-                    ty.name
-                ),
-            ));
-        }
-
-        let visible_fields = ty
+        let public_fields = ty
             .fields
             .iter()
             .filter(|field| !field.hidden)
             .collect::<Vec<_>>();
-        if values.len() > visible_fields.len()
-            || visible_fields[values.len()..]
+        if values.len() > public_fields.len()
+            || public_fields[values.len()..]
                 .iter()
                 .any(|field| !field.has_initializer)
         {
             return Err(self.runtime_error(
                 span,
                 format!(
-                    "class '{}' positional construction must match visible field order and may omit only trailing defaulted fields",
+                    "class '{}' positional construction must match public field order and may omit only trailing defaulted fields",
                     ty.name
                 ),
             ));
@@ -3463,7 +3449,7 @@ impl<'a> Interpreter<'a> {
             Value::Aggregate(value) => value.borrow_mut(),
             _ => unreachable!(),
         };
-        for (value, field) in values.iter().zip(visible_fields.iter()) {
+        for (value, field) in values.iter().zip(public_fields.iter()) {
             aggregate.fields[field.slot.0] = self.coerce_value_to_type(value.clone(), &field.ty);
         }
 
@@ -4331,6 +4317,13 @@ impl<'a> Interpreter<'a> {
             Value::Rune(value) => {
                 "Rune".hash(&mut hasher);
                 value.hash(&mut hasher);
+            }
+            Value::Tuple(items) => {
+                "Tuple".hash(&mut hasher);
+                items.len().hash(&mut hasher);
+                for item in items {
+                    self.hash_value(item, span)?.hash(&mut hasher);
+                }
             }
             Value::Record(fields) => {
                 "shape".hash(&mut hasher);
@@ -6991,6 +6984,34 @@ mod tests {
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.return_value.as_deref(), Some("0"));
         assert!(run.output.is_empty());
+    }
+
+    #[test]
+    fn runs_stable_implicit_constructor_with_interleaved_non_public_fields() {
+        let program = lower_inline(
+            r#"
+            class Account {
+                owner Str
+                internal region Str = "US"
+                balance Int
+                private cache Int = 7
+
+                def label() Str = this.owner + ":" + this.region + ":" + this.balance.toStr()
+                def cacheValue() Int = this.cache
+            }
+
+            def main() Unit {
+                positional = Account("Ada", 10)
+                named = Account { owner: "Ben", balance: 20 }
+                println(positional.label(), positional.cacheValue())
+                println(named.label(), named.cacheValue())
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "Ada:US:10 7\nBen:US:20 7\n");
     }
 
     #[test]

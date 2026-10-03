@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*map key type 'UnsafeKey' does not satisfy 'Hashed\[UnsafeKey\]'.*
+
+class MutableReference {
+    id Int
+}
+
+type UnsafeKey =
+    class Wrapped { value MutableReference }
+    | object Missing {}
+
+def main() Unit {
+    key UnsafeKey = UnsafeKey.Wrapped(MutableReference(1))
+    _ = [key: "value"]
+}

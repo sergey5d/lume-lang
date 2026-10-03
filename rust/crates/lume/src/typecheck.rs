@@ -1520,10 +1520,41 @@ impl<'a> Checker<'a> {
             }
         }
 
+        self.check_implicit_constructor_contract(decl);
         self.check_interface_implementation(&type_sig, decl.span);
         self.check_type_field_initializers(decl, &type_sig);
 
         self.pop_type_params();
+    }
+
+    fn check_implicit_constructor_contract(&mut self, decl: &TypeDecl) {
+        if decl.kind != TypeKind::Class
+            || decl
+                .members
+                .iter()
+                .any(|member| matches!(member, TypeMember::Method(method) if method.name == "new"))
+        {
+            return;
+        }
+
+        for member in &decl.members {
+            let TypeMember::Field(field) = member else {
+                continue;
+            };
+            if field.visibility == Visibility::Default || field.initializer.is_some() {
+                continue;
+            }
+            self.add_error(
+                "missing_non_public_field_initializer",
+                format!(
+                    "class '{}' cannot synthesize an implicit constructor because {} field '{}' has no initializer; add an initializer or declare 'new(...)'",
+                    decl.name,
+                    visibility_label(field.visibility),
+                    field.name
+                ),
+                field.span,
+            );
+        }
     }
 
     fn check_interface_implementation(&mut self, sig: &TypeSig, span: crate::source::Span) {
@@ -7668,36 +7699,16 @@ impl<'a> Checker<'a> {
             return;
         }
 
-        let intrinsic_domain = matches!(
-            left,
-            Ty::Named(name, args)
-                if args.is_empty()
-                    && matches!(
-                        name.as_str(),
-                        "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
-                    )
-        );
-        let requires_contract = !intrinsic_domain
-            && match left {
-                Ty::Named(name, _) => self
-                    .lookup_any_type(name)
-                    .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Interface)),
-                Ty::TypeParam(_) => true,
-                _ => false,
-            };
-        if requires_contract {
-            let equality_contract = Ty::Named("Eq".to_string(), vec![left.clone()]);
-            if !self.is_assignable(left, &equality_contract) {
-                self.add_error(
-                    "missing_equality_contract",
-                    format!(
-                        "type '{}' has no equality contract; declare 'with Eq[{}]' before using '==' or '!='",
-                        left.describe(),
-                        left.describe()
-                    ),
-                    span,
-                );
-            }
+        if !self.is_equality_type(left, &mut HashSet::new()) {
+            self.add_error(
+                "missing_equality_contract",
+                format!(
+                    "type '{}' has no equality contract; every tuple or union member must support Eq, and classes must declare 'with Eq[{}]'",
+                    left.describe(),
+                    left.describe()
+                ),
+                span,
+            );
         }
     }
 
@@ -9988,45 +9999,41 @@ impl<'a> Checker<'a> {
             );
             return materialize_type(ret);
         }
-        if let Some(field) = sig
-            .fields
-            .iter()
-            .find(|field| !self.can_access_field(sig, field) && !field.has_initializer)
+        if sig.kind == TypeKind::Class
+            && sig
+                .fields
+                .iter()
+                .any(|field| field.visibility != Visibility::Default && !field.has_initializer)
         {
-            self.add_error(
-                "no_matching_overload",
-                format!(
-                    "{} '{}' has no implicit field constructor because {} field '{}' has no initializer; define 'new' to initialize it",
-                    type_kind_label(sig.kind),
-                    sig.name,
-                    visibility_label(field.visibility),
-                    field.name
-                ),
-                span,
-            );
             return materialize_type(ret);
         }
 
-        let visible_fields = sig
+        let constructor_fields = sig
             .fields
             .iter()
-            .filter(|field| self.can_access_field(sig, field))
+            .filter(|field| {
+                if sig.kind == TypeKind::Class {
+                    field.visibility == Visibility::Default
+                } else {
+                    self.can_access_field(sig, field)
+                }
+            })
             .collect::<Vec<_>>();
 
         if sig.kind == TypeKind::Class {
-            let required_visible = visible_fields
+            let required = constructor_fields
                 .iter()
                 .filter(|field| !field.has_initializer)
                 .count();
-            if fields.len() < required_visible || fields.len() > visible_fields.len() {
+            if fields.len() < required || fields.len() > constructor_fields.len() {
                 self.add_error(
                     "no_matching_overload",
                     format!(
-                        "{} '{}' brace field construction expects {}..{} visible fields, got {}",
+                        "{} '{}' brace field construction expects {}..{} public fields, got {}",
                         type_kind_label(sig.kind),
                         sig.name,
-                        required_visible,
-                        visible_fields.len(),
+                        required,
+                        constructor_fields.len(),
                         fields.len()
                     ),
                     span,
@@ -10037,7 +10044,7 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "no_matching_overload",
                     format!(
-                        "{} '{}' requires construction fields that match the visible shape",
+                        "{} '{}' requires construction fields that match its public constructor contract",
                         type_kind_label(sig.kind),
                         sig.name
                     ),
@@ -10049,11 +10056,11 @@ impl<'a> Checker<'a> {
 
         for arg in fields.iter().filter(|arg| arg.name.is_some()) {
             let name = arg.name.as_deref().expect("filtered named field");
-            if !visible_fields.iter().any(|field| field.name == name) {
+            if !constructor_fields.iter().any(|field| field.name == name) {
                 self.add_error(
                     "no_matching_overload",
                     format!(
-                        "{} '{}' has no visible field '{}' for brace field construction",
+                        "{} '{}' has no public constructor field '{}'",
                         type_kind_label(sig.kind),
                         sig.name,
                         name
@@ -10065,7 +10072,7 @@ impl<'a> Checker<'a> {
         }
 
         let expected_record = Ty::Record(
-            visible_fields
+            constructor_fields
                 .iter()
                 .map(|field| (field.name.clone(), field.ty.clone()))
                 .collect(),
@@ -10073,7 +10080,7 @@ impl<'a> Checker<'a> {
         let actual = self.check_expr_against(expr, &expected_record);
         let actual_fields = self.structural_fields_for_type(&actual).unwrap_or_default();
 
-        for field in &visible_fields {
+        for field in &constructor_fields {
             let Some((_, actual_ty)) = actual_fields.iter().find(|(name, _)| name == &field.name)
             else {
                 if !field.has_initializer {
@@ -10116,50 +10123,25 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
     ) -> Ty {
-        if let Some(field) = sig
-            .fields
-            .iter()
-            .find(|field| !self.can_access_field(sig, field) && !field.has_initializer)
+        if sig.kind == TypeKind::Class
+            && sig
+                .fields
+                .iter()
+                .any(|field| field.visibility != Visibility::Default && !field.has_initializer)
         {
-            self.add_error(
-                "no_matching_overload",
-                format!(
-                    "{} '{}' has no implicit positional constructor because {} field '{}' has no initializer; define 'new' to initialize it",
-                    type_kind_label(sig.kind),
-                    sig.name,
-                    visibility_label(field.visibility),
-                    field.name
-                ),
-                span,
-            );
-            return materialize_type(ret);
-        }
-
-        if let Some(field) = sig.fields.iter().enumerate().find_map(|(index, field)| {
-            (!self.can_access_field(sig, field)
-                && field.has_initializer
-                && sig.fields[index + 1..]
-                    .iter()
-                    .any(|later| self.can_access_field(sig, later)))
-            .then_some(field)
-        }) {
-            self.add_error(
-                "no_matching_overload",
-                format!(
-                    "{} '{}' cannot use positional construction because {} defaulted fields must come after all visible fields",
-                    type_kind_label(sig.kind),
-                    sig.name,
-                    visibility_label(field.visibility)
-                ),
-                span,
-            );
             return materialize_type(ret);
         }
 
         let params = sig
             .fields
             .iter()
-            .filter(|field| self.can_access_field(sig, field))
+            .filter(|field| {
+                if sig.kind == TypeKind::Class {
+                    field.visibility == Visibility::Default
+                } else {
+                    self.can_access_field(sig, field)
+                }
+            })
             .cloned()
             .collect::<Vec<_>>();
         self.check_constructor_signature(&params, ret, args, span)
@@ -10992,7 +10974,9 @@ impl<'a> Checker<'a> {
     fn implicitly_satisfies_value_bound(&self, actual: &Ty, expected: &Ty) -> bool {
         match expected {
             Ty::Named(name, args) if name == "Eq" && args.len() == 1 => {
-                self.shape_fields_match_exactly(actual, &args[0])
+                (self.generic_types_are_equal(actual, &args[0])
+                    || self.shape_fields_match_exactly(actual, &args[0]))
+                    && self.is_equality_type(actual, &mut HashSet::new())
             }
             Ty::Named(name, args) if name == "Hashed" && args.len() == 1 => {
                 (self.generic_types_are_equal(actual, &args[0])
@@ -11000,6 +10984,51 @@ impl<'a> Checker<'a> {
                     && self.is_hashable_type(actual, &mut HashSet::new())
             }
             _ => false,
+        }
+    }
+
+    fn is_equality_type(&self, ty: &Ty, seen: &mut HashSet<String>) -> bool {
+        match ty {
+            Ty::Named(name, args)
+                if args.is_empty()
+                    && matches!(
+                        name.as_str(),
+                        "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
+                    ) =>
+            {
+                true
+            }
+            Ty::Record(_) => true,
+            Ty::Tuple(items) | Ty::Union(items) => {
+                items.iter().all(|item| self.is_equality_type(item, seen))
+            }
+            Ty::Named(name, _) => {
+                if let Some((owner_name, _)) = enum_case_view_parts(name) {
+                    return self
+                        .lookup_any_type(owner_name)
+                        .is_some_and(|sig| sig.kind == TypeKind::Enum);
+                }
+                let Some(sig) = self.lookup_any_type(name) else {
+                    return false;
+                };
+                match sig.kind {
+                    TypeKind::Record | TypeKind::Enum | TypeKind::Object => true,
+                    TypeKind::Class | TypeKind::Interface => {
+                        self.type_sig_has_equality_bound(&sig, ty, seen)
+                    }
+                    TypeKind::Annotation => false,
+                }
+            }
+            Ty::TypeParam(name) => self.type_param_bounds(name).iter().any(|bound| {
+                matches!(
+                    bound,
+                    Ty::Named(bound_name, args)
+                        if matches!(bound_name.as_str(), "Eq" | "Hashed")
+                            && args.len() == 1
+                            && matches!(&args[0], Ty::TypeParam(bound_param) if bound_param == name)
+                )
+            }),
+            Ty::Unknown | Ty::Wildcard | Ty::Capture(_) | Ty::Never | Ty::Function(_, _) => false,
         }
     }
 
@@ -11017,15 +11046,22 @@ impl<'a> Checker<'a> {
             Ty::Record(fields) => fields
                 .iter()
                 .all(|(_, field_ty)| self.is_hashable_type(field_ty, seen)),
-            Ty::Union(members) => members
-                .iter()
-                .all(|member| self.is_hashable_type(member, seen)),
+            Ty::Tuple(items) | Ty::Union(items) => {
+                items.iter().all(|item| self.is_hashable_type(item, seen))
+            }
             Ty::Named(name, args) => {
+                if let Some((owner_name, case_name)) = enum_case_view_parts(name) {
+                    let Some(sig) = self.lookup_any_type(owner_name) else {
+                        return false;
+                    };
+                    return self.enum_sig_is_hashable(&sig, args, Some(case_name), seen);
+                }
                 let Some(sig) = self.lookup_any_type(name) else {
                     return false;
                 };
                 match sig.kind {
-                    TypeKind::Enum | TypeKind::Object => true,
+                    TypeKind::Enum => self.enum_sig_is_hashable(&sig, args, None, seen),
+                    TypeKind::Object => true,
                     TypeKind::Record => {
                         let key = ty.describe();
                         if !seen.insert(key.clone()) {
@@ -11056,13 +11092,84 @@ impl<'a> Checker<'a> {
                             && matches!(&args[0], Ty::TypeParam(bound_param) if bound_param == name)
                 )
             }),
-            Ty::Unknown
-            | Ty::Wildcard
-            | Ty::Capture(_)
-            | Ty::Never
-            | Ty::Tuple(_)
-            | Ty::Function(_, _) => false,
+            Ty::Unknown | Ty::Wildcard | Ty::Capture(_) | Ty::Never | Ty::Function(_, _) => false,
         }
+    }
+
+    fn enum_sig_is_hashable(
+        &self,
+        sig: &TypeSig,
+        args: &[Ty],
+        case_name: Option<&str>,
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        let key = format!(
+            "union:{}<{}>:{}",
+            sig.name,
+            args.iter().map(Ty::describe).collect::<Vec<_>>().join(","),
+            case_name.unwrap_or("*")
+        );
+        if !seen.insert(key.clone()) {
+            return true;
+        }
+        let subst = sig
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        let shared_fields_hashable = sig
+            .fields
+            .iter()
+            .all(|field| self.is_hashable_type(&substitute_type(&field.ty, &subst), seen));
+        let cases_hashable = match case_name {
+            Some(case_name) => sig.enum_cases.get(case_name).is_some_and(|case| {
+                case.params
+                    .iter()
+                    .all(|field| self.is_hashable_type(&substitute_type(&field.ty, &subst), seen))
+            }),
+            None => sig.enum_cases.values().all(|case| {
+                case.params
+                    .iter()
+                    .all(|field| self.is_hashable_type(&substitute_type(&field.ty, &subst), seen))
+            }),
+        };
+        seen.remove(&key);
+        shared_fields_hashable && cases_hashable
+    }
+
+    fn type_sig_has_equality_bound(
+        &self,
+        sig: &TypeSig,
+        actual: &Ty,
+        seen: &mut HashSet<String>,
+    ) -> bool {
+        let key = format!("equality:{}:{}", sig.name, actual.describe());
+        if !seen.insert(key.clone()) {
+            return false;
+        }
+        let subst = match actual {
+            Ty::Named(_, args) => sig
+                .type_params
+                .iter()
+                .cloned()
+                .zip(args.iter().cloned())
+                .collect::<HashMap<_, _>>(),
+            _ => HashMap::new(),
+        };
+        let found = sig.with_bounds.iter().any(|bound| {
+            let bound = substitute_type(bound, &subst);
+            let Ty::Named(name, args) = &bound else {
+                return false;
+            };
+            if matches!(name.as_str(), "Eq" | "Hashed") {
+                return args.len() == 1 && self.generic_types_are_equal(&args[0], actual);
+            }
+            self.lookup_any_type(name)
+                .is_some_and(|parent| self.type_sig_has_equality_bound(&parent, &bound, seen))
+        });
+        seen.remove(&key);
+        found
     }
 
     fn type_sig_has_hashed_bound(
@@ -13567,6 +13674,75 @@ def main() Unit {
     }
 
     #[test]
+    fn derives_equality_and_hashing_recursively_for_tuples_and_declared_unions() {
+        let program = parse_inline(
+            r#"
+type LookupKey =
+    class Number { value Int }
+    | object Default {}
+
+def requireEq[T with Eq[T]](value T) Unit = ()
+def requireHash[T with Hashed[T]](value T) Unit = ()
+
+def main() Unit {
+    pair = (10, "ten")
+    requireEq(pair)
+    requireHash(pair)
+    _ [(Int, Str): Str] = [pair: "tuple"]
+
+    key LookupKey = LookupKey.Number(10)
+    requireEq(key)
+    requireHash(key)
+    _ = [key: "union"]
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_tuple_and_declared_union_hashing_when_a_payload_is_not_hashable() {
+        let program = parse_inline(
+            r#"
+class MutableReference {
+    id Int
+}
+
+type UnsafeKey =
+    class Wrapped { value MutableReference }
+    | object Missing {}
+
+def requireHash[T with Hashed[T]](value T) Unit = ()
+
+def main() Unit {
+    pair = (MutableReference(1), 2)
+    _ = pair == (MutableReference(1), 2)
+    requireHash(pair)
+
+    key UnsafeKey = UnsafeKey.Wrapped(MutableReference(1))
+    requireHash(key)
+}
+"#,
+        );
+        let result = check_program(&program);
+        let failures = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "generic_bound_not_satisfied")
+            .count();
+        assert_eq!(failures, 2, "{:#?}", result.diagnostics);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "missing_equality_contract"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn rejects_hashed_bound_for_shape_with_non_hashed_class_field() {
         let program = parse_inline(
             r#"
@@ -13795,6 +13971,49 @@ def main() Unit {
     }
 
     #[test]
+    fn keeps_implicit_class_constructor_contract_stable_across_modules() {
+        let temp = workspace_root().join("rust/target/typecheck-stable-constructor-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("model.lum"),
+            r#"
+module model
+
+class Account {
+    owner Str
+    internal region Str = "US"
+    balance Int
+    private cache Int = 0
+}
+
+def localAccount() Account = Account("local", 1)
+"#,
+        )
+        .expect("write model");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+module app
+
+use model/{Account, localAccount}
+
+def main() Unit {
+    _ Account = localAccount()
+    _ Account = Account("external", 2)
+    _ Account = Account { owner: "named", balance: 3 }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = check_path(&source).expect("typecheck");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
     fn checks_bumper_example() {
         let result = check_path(workspace_root().join("examples/random_code/bumper.lum"))
             .expect("typecheck");
@@ -13962,39 +14181,29 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_implicit_constructors_when_hidden_field_lacks_initializer() {
+    fn rejects_implicit_constructor_when_non_public_field_lacks_initializer() {
         let program = parse_inline(
             r#"
 class SecretUser {
     name Str
     private token Str
-}
-
-def main() Unit {
-    _ SecretUser = SecretUser { name: "Ada" }
-    _ SecretUser = SecretUser("Ada")
+    internal region Str
 }
 "#,
         );
         let result = check_program(&program);
-        assert!(
-            result.diagnostics.iter().any(|diag| {
-                diag.message.contains(
-                    "no implicit field constructor because private field 'token' has no initializer",
+        assert!(result.diagnostics.iter().any(|diag| {
+            diag.code == "missing_non_public_field_initializer"
+                && diag.message.contains(
+                    "private field 'token' has no initializer; add an initializer or declare 'new(...)'",
                 )
-            }),
-            "{:#?}",
-            result.diagnostics
-        );
-        assert!(
-            result.diagnostics.iter().any(|diag| {
-                diag.message.contains(
-                    "no implicit positional constructor because private field 'token' has no initializer",
+        }), "{:#?}", result.diagnostics);
+        assert!(result.diagnostics.iter().any(|diag| {
+            diag.code == "missing_non_public_field_initializer"
+                && diag.message.contains(
+                    "internal field 'region' has no initializer; add an initializer or declare 'new(...)'",
                 )
-            }),
-            "{:#?}",
-            result.diagnostics
-        );
+        }), "{:#?}", result.diagnostics);
     }
 
     #[test]
@@ -15317,28 +15526,24 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_positional_construction_when_hidden_default_breaks_visible_order() {
+    fn ignores_initialized_non_public_fields_in_implicit_constructor_order() {
         let program = parse_inline(
             r#"
-class Broken {
+class Account {
     name Str
-    private score Int = 5
+    internal region Str = "US"
     age Int
+    private score Int = 5
 }
 
 def main() Unit {
-    _ Broken = Broken("Ada", 10)
+    _ Account = Account("Ada", 10)
+    _ Account = Account { name: "Ada", age: 10 }
 }
 "#,
         );
         let result = check_program(&program);
-        assert!(
-            result.diagnostics.iter().any(|diag| diag
-                .message
-                .contains("private defaulted fields must come after all visible fields")),
-            "{:#?}",
-            result.diagnostics
-        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]

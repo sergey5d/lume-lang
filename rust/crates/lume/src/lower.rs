@@ -133,11 +133,16 @@ impl<'a> Lowerer<'a> {
                         .map(ir::Type::TypeParam)
                         .collect(),
                 };
-                let hashed = ty
-                    .fields
-                    .iter()
-                    .chain(ty.enum_cases.iter().flat_map(|case| case.fields.iter()))
-                    .all(|field| ir_type_is_hashable(&field.ty, ty, &types, &mut HashSet::new()));
+                let hashed = if ty.kind == ast::TypeKind::Object {
+                    true
+                } else {
+                    ty.fields
+                        .iter()
+                        .chain(ty.enum_cases.iter().flat_map(|case| case.fields.iter()))
+                        .all(|field| {
+                            ir_type_is_hashable(&field.ty, ty, &types, &mut HashSet::new())
+                        })
+                };
                 Some((
                     (!hashed).then(|| ir::Type::Named {
                         name: "Eq".to_string(),
@@ -7069,7 +7074,13 @@ impl<'a> FunctionLowerer<'a> {
         Some(
             ty.fields
                 .iter()
-                .filter(|field| field.visibility != ast::Visibility::Private)
+                .filter(|field| {
+                    if ty.kind == ast::TypeKind::Class {
+                        field.visibility == ast::Visibility::Default
+                    } else {
+                        field.visibility != ast::Visibility::Private
+                    }
+                })
                 .map(|field| {
                     (
                         field.name.clone(),
@@ -7591,7 +7602,13 @@ impl<'a> FunctionLowerer<'a> {
             let names = ty
                 .fields
                 .iter()
-                .filter(|field| field.visibility != ast::Visibility::Private)
+                .filter(|field| {
+                    if ty.kind == ast::TypeKind::Class {
+                        field.visibility == ast::Visibility::Default
+                    } else {
+                        field.visibility != ast::Visibility::Private
+                    }
+                })
                 .map(|field| field.name.clone())
                 .collect::<Vec<_>>();
             if arrange_named_call_args(&names, args).is_some() || args.len() == names.len() {
@@ -9568,15 +9585,25 @@ fn ir_type_is_hashable(
         ir::Type::Record(fields) => fields
             .iter()
             .all(|field| ir_type_is_hashable(&field.ty, owner, types, seen)),
-        ir::Type::Union(members) => members
+        ir::Type::Tuple(items) | ir::Type::Union(items) => items
             .iter()
-            .all(|member| ir_type_is_hashable(member, owner, types, seen)),
+            .all(|item| ir_type_is_hashable(item, owner, types, seen)),
         ir::Type::Named { name, args } => {
+            if let Some((owner_name, case_name)) = enum_case_view_parts(name) {
+                let Some(definition) = types.iter().find(|candidate| candidate.name == owner_name)
+                else {
+                    return false;
+                };
+                return ir_enum_type_is_hashable(definition, args, Some(case_name), types, seen);
+            }
             let Some(definition) = types.iter().find(|candidate| candidate.name == *name) else {
                 return false;
             };
             match definition.kind {
-                ast::TypeKind::Enum | ast::TypeKind::Object => true,
+                ast::TypeKind::Enum => {
+                    ir_enum_type_is_hashable(definition, args, None, types, seen)
+                }
+                ast::TypeKind::Object => true,
                 ast::TypeKind::Record => {
                     let key = format!("{}<{args:?}>", definition.name);
                     if !seen.insert(key.clone()) {
@@ -9599,10 +9626,55 @@ fn ir_type_is_hashable(
                 ast::TypeKind::Annotation | ast::TypeKind::Interface => false,
             }
         }
-        ir::Type::Unknown | ir::Type::Never | ir::Type::Tuple(_) | ir::Type::Function { .. } => {
-            false
-        }
+        ir::Type::Unknown | ir::Type::Never | ir::Type::Function { .. } => false,
     }
+}
+
+fn ir_enum_type_is_hashable(
+    definition: &ir::TypeDef,
+    args: &[ir::Type],
+    case_name: Option<&str>,
+    types: &[ir::TypeDef],
+    seen: &mut HashSet<String>,
+) -> bool {
+    let key = format!(
+        "union:{}<{args:?}>:{}",
+        definition.name,
+        case_name.unwrap_or("*")
+    );
+    if !seen.insert(key.clone()) {
+        return true;
+    }
+    let subst = definition
+        .type_params
+        .iter()
+        .cloned()
+        .zip(args.iter().cloned())
+        .collect::<HashMap<_, _>>();
+    let shared_fields_hashable = definition.fields.iter().all(|field| {
+        let field_ty = substitute_ir_type(&field.ty, &subst);
+        ir_type_is_hashable(&field_ty, definition, types, seen)
+    });
+    let cases_hashable = match case_name {
+        Some(case_name) => definition
+            .enum_cases
+            .iter()
+            .find(|case| case.name == case_name)
+            .is_some_and(|case| {
+                case.fields.iter().all(|field| {
+                    let field_ty = substitute_ir_type(&field.ty, &subst);
+                    ir_type_is_hashable(&field_ty, definition, types, seen)
+                })
+            }),
+        None => definition.enum_cases.iter().all(|case| {
+            case.fields.iter().all(|field| {
+                let field_ty = substitute_ir_type(&field.ty, &subst);
+                ir_type_is_hashable(&field_ty, definition, types, seen)
+            })
+        }),
+    };
+    seen.remove(&key);
+    shared_fields_hashable && cases_hashable
 }
 
 fn ir_type_has_hashed_bound(

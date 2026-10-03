@@ -1233,7 +1233,7 @@ General construction rules:
 - anonymous shapes use `{ field: value }` or `shape { field: value }`; `shape(...)` is not supported
 - runtime-backed collection classes such as `Vector`, `Map`, `Array`, `LinkedList`, and `Set` use normal class construction; `Range(...)` is a stdlib factory
 - `Type { ... }` resolves through the available explicit `new(...)` declaration or implicit field-construction inputs
-- `Type(...)` resolves through explicit class `new(...)`, implicit visible-field construction, named shape positional construction, or an intrinsic collection form
+- `Type(...)` resolves through explicit class `new(...)`, implicit public-field construction, named shape positional construction, or an intrinsic collection form
 - `new { ... }` and `new(...)` resolve through the exact constructible type supplied by context
 - contextual `new` accepts only classes, named shapes, or aliases to those types
 - contextual `new` does not synthesize fields, methods, interfaces, or anonymous implementations
@@ -1279,20 +1279,39 @@ bad Article = Article("Intro")
 
 Implicit field construction rules:
 
-- if a class has no explicit `new`, the compiler synthesizes constructor inputs from fields accessible at the call site
-- construction braces check the synthesized visible-field shape
-- accessible fields without initializers are required
-- accessible fields with initializers are optional
-- `internal` fields participate in synthesized constructor inputs only within the declaring module
-- `private` fields participate only while constructing from within the declaring type
-- an inaccessible `private` or `internal` field without an initializer suppresses implicit field construction at that call site; define `new` to initialize it
-- `Type {}` works when the synthesized field-construction shape has no required fields
-- positional construction follows declared visible-field order
-- positional construction may omit only a trailing suffix of visible fields that all have initializers
-- positional construction never skips a defaulted visible field to reach a later required visible field
-- positional construction is rejected when an inaccessible initialized field appears before a later accessible field
+- if a class has no explicit `new`, the compiler synthesizes one stable constructor contract from its public fields
+- the implicit constructor contract is the same in every module and from every call site
+- public fields without initializers are required constructor inputs
+- public fields with initializers are optional constructor inputs
+- `private` and `internal` fields never become implicit constructor inputs
+- every non-public field must have an initializer when a class relies on implicit construction; otherwise the class must declare `new(...)`
+- construction braces check the synthesized public-field shape
+- `Type {}` works when the public constructor contract has no required inputs
+- positional construction follows declared public-field order
+- positional construction may omit only a trailing suffix of public fields that all have initializers
+- positional construction never skips a defaulted public field to reach a later required public field
+- the declaration position of initialized non-public fields does not affect positional construction
 - mutable vs immutable field differences do not matter for structural shape matching
 - named class values do not structurally convert to other named class values
+
+```txt
+class Account {
+    owner Str
+    internal region Str = "US"
+    balance Int
+    private cache Cache = Cache()
+}
+
+# The same public contract is used inside and outside this module.
+account = Account("Ada", 100)
+
+class SecuredAccount {
+    owner Str
+    private token Str
+}
+
+# Invalid without an explicit `new(...)`: `token` has no initializer.
+```
 
 ## Brace Disambiguation
 
@@ -1410,11 +1429,13 @@ class Map[K with Hashed[K], V] {
 }
 ```
 
-- primitives, declared-union alternatives, and object values are intrinsically hashable
+- primitives and singleton object values are intrinsically hashable
+- a tuple derives `Eq` when every item type satisfies `Eq`, and derives `Hashed` when every item type satisfies `Hashed`
+- a declared union derives `Hashed` only when every shared field and every payload field of every alternative is hashable; zero-payload object alternatives are always safe
 - nested shapes are hashable when their own fields are recursively hashable
 - a class is hashable only when it explicitly implements `Hashed[ClassName]`, including `equals` and `hash`
 - a type parameter is hashable only when it has a `Hashed[T]` bound
-- interfaces, functions, tuples, `Any`, and arbitrary classes do not implicitly satisfy `Hashed`
+- interfaces, functions, `Any`, and arbitrary classes do not implicitly satisfy `Hashed`
 
 ```txt
 class StableId with Hashed[StableId] {
@@ -1432,6 +1453,15 @@ shape CacheKey {
 def cache[T with Hashed[T]](key T) Unit = ()
 
 cache(CacheKey(StableId(1), 2))
+
+pair = (StableId(1), 2)
+cache(pair)
+
+type LookupKey =
+    class Named { value Str }
+    | object Default {}
+
+keys [LookupKey: Int] = [LookupKey.Named("primary"): 1]
 ```
 
 `Map[K, V]` (normally written `[K: V]`) requires `K` to satisfy `Hashed[K]`.

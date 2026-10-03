@@ -664,6 +664,7 @@ fn push_union_variant(
                     names.value_type(&field.ty)
                 ));
             }
+            push_union_class_value_methods(out, case, &case_name, type_param_names);
             out.push_str("    }\n");
         }
         TypeKind::Record | TypeKind::Enum => {
@@ -692,6 +693,62 @@ fn push_union_variant(
         }
         _ => unreachable!("unsupported declared union variant kind"),
     }
+}
+
+fn push_union_class_value_methods(
+    out: &mut String,
+    case: &ir::EnumCase,
+    case_name: &str,
+    type_param_names: &[String],
+) {
+    let pattern_type = if type_param_names.is_empty() {
+        case_name.to_string()
+    } else {
+        format!(
+            "{}<{}>",
+            case_name,
+            std::iter::repeat_n("?", type_param_names.len())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    out.push_str("\n        @Override\n");
+    out.push_str("        public boolean equals(Object other) {\n");
+    out.push_str("            if (this == other) return true;\n");
+    out.push_str(&format!(
+        "            if (!(other instanceof {pattern_type} that)) return false;\n"
+    ));
+    if case.fields.is_empty() {
+        out.push_str("            return true;\n");
+    } else {
+        out.push_str("            return ");
+        for (index, field) in case.fields.iter().enumerate() {
+            if index > 0 {
+                out.push_str("\n                && ");
+            }
+            let field_name = java_member_name(&field.name);
+            out.push_str(&format!(
+                "java.util.Objects.equals(this.{field_name}, that.{field_name})"
+            ));
+        }
+        out.push_str(";\n");
+    }
+    out.push_str("        }\n");
+
+    let mut fields = case.fields.iter().collect::<Vec<_>>();
+    fields.sort_by(|left, right| left.name.cmp(&right.name));
+    out.push_str("\n        @Override\n");
+    out.push_str("        public int hashCode() {\n");
+    out.push_str("            return java.util.Objects.hash(");
+    out.push_str(
+        &fields
+            .iter()
+            .map(|field| format!("this.{}", java_member_name(&field.name)))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    out.push_str(");\n");
+    out.push_str("        }\n");
 }
 
 fn java_type_visibility(ty: &ir::TypeDef) -> &'static str {
@@ -8380,6 +8437,11 @@ fn push_explicit_class_constructor(
 fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &JavaNames) {
     let name = java_type_name(&ty.name);
     let has_field_init = ty.field_init.is_some();
+    let public_fields = ty
+        .fields
+        .iter()
+        .filter(|field| field.visibility == Visibility::Default)
+        .collect::<Vec<_>>();
     out.push('\n');
     out.push_str("    public ");
     out.push_str(&name);
@@ -8388,7 +8450,7 @@ fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &
         out.push_str("        this.__lume_field_init();\n");
     }
     out.push_str("    }\n");
-    if ty.fields.is_empty() {
+    if public_fields.is_empty() {
         return;
     }
 
@@ -8397,7 +8459,7 @@ fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &
     out.push_str(&name);
     out.push('(');
     out.push_str(
-        &ty.fields
+        &public_fields
             .iter()
             .enumerate()
             .map(|(index, field)| {
@@ -8414,7 +8476,7 @@ fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &
     if has_field_init {
         out.push_str("        this.__lume_field_init();\n");
     }
-    for (index, field) in ty.fields.iter().enumerate() {
+    for (index, field) in public_fields.iter().enumerate() {
         out.push_str("        this.");
         out.push_str(&java_member_name(&field.name));
         out.push_str(" = ");
@@ -8831,7 +8893,13 @@ impl<'a> JavaIrSupport<'a> {
         let params = ty
             .fields
             .iter()
-            .filter(|field| field.visibility != Visibility::Private)
+            .filter(|field| {
+                if ty.kind == TypeKind::Class {
+                    field.visibility == Visibility::Default
+                } else {
+                    field.visibility != Visibility::Private
+                }
+            })
             .map(|field| JavaParamSpec {
                 ty: field.ty.clone(),
                 variadic: false,
