@@ -1309,7 +1309,7 @@ Type { field: value }            # brace field construction or union payload
 Type { field }                   # brace construction with a punned field
 call { x => ... }                # trailing lambda
 object { field Type = value; def method() Type = value } # anonymous object
-object with Interface, Other { def method() Type = value } # anonymous interface implementation
+object with Interface, Other { field Type = value; def method() Type = value } # anonymous object implementing interfaces
 new(field Type)                  # constructor declaration
 new(value, other)                # contextual positional construction
 new { field: value }             # contextual named construction
@@ -2272,9 +2272,15 @@ To create an anonymous nominal interface implementation, use `object with`:
 
 ```txt
 greeter Greeter = object with Greeter {
-    def greet() Str = "hello"
+    greeting Str = "hello"
+
+    def greet() Str = greeting
 }
 ```
+
+`object` and `object with` use the same body grammar. Both accept initialized
+immutable fields and methods; `with` only adds the interfaces implemented by
+the synthesized nominal object.
 
 To synthesize anonymous structural data with behavior, use `shape with`:
 

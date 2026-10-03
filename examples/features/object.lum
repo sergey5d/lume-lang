@@ -33,8 +33,11 @@ def main() Unit = {
     println(value.doubled())
 
     greeter Greeter = object with Greeter, Described {
-        def greet() Str = "welcome"
-        def name() Str = "example"
+        greeting Str = "welcome"
+        description Str = "example"
+
+        def greet() Str = greeting
+        def name() Str = description
     }
     println(greeter.greet())
 

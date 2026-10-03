@@ -2170,18 +2170,6 @@ impl<'a> Resolver<'a> {
                     self.resolve_expr(value);
                 }
             }
-            Expr::AnonymousInterface {
-                interfaces,
-                methods,
-                ..
-            } => {
-                for interface in interfaces {
-                    self.resolve_type_ref(Some(interface));
-                }
-                for method in methods {
-                    self.resolve_method(method);
-                }
-            }
             Expr::AnonymousObject {
                 kind,
                 interfaces,

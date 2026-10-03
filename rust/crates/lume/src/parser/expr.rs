@@ -760,39 +760,7 @@ impl<'a> Parser<'a> {
             "anonymous interface implementations start with 'object with'; write 'object with Interface { ... }' or 'object with Interface, Other { ... }'",
             start.cover(self.current_span()),
         ));
-        self.parse_anonymous_interface_body(start, interfaces)
-    }
-
-    fn parse_anonymous_interface_body(
-        &mut self,
-        start: Span,
-        interfaces: Vec<TypeRef>,
-    ) -> Option<Expr> {
-        self.consume(
-            TokenKind::LBrace,
-            "expected '{' after anonymous interface list",
-        )?;
-        self.skip_newlines();
-        let mut methods = Vec::new();
-        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let annotations = self.parse_annotations()?;
-            let visibility = self.parse_visibility();
-            if !self.at_keyword(Keyword::Def) && !self.starts_callable_decl() {
-                self.error_at_current("unexpected_token", "expected anonymous interface member");
-                return None;
-            }
-            methods.push(self.parse_method_decl(annotations, visibility, false)?);
-            self.skip_newlines();
-        }
-        let end = self.consume(
-            TokenKind::RBrace,
-            "expected '}' after anonymous interface body",
-        )?;
-        Some(Expr::AnonymousInterface {
-            interfaces,
-            methods,
-            span: start.cover(end),
-        })
+        self.parse_anonymous_object_body(start, interfaces)
     }
 
     fn parse_anonymous_shape_body(
@@ -981,11 +949,19 @@ impl<'a> Parser<'a> {
 
     fn parse_object_expr(&mut self) -> Option<Expr> {
         let start = self.consume_keyword(Keyword::Object, "expected 'object'")?;
-        if self.match_keyword(Keyword::With) {
-            let interfaces = self.parse_interface_ref_list_after_with()?;
-            return self.parse_anonymous_interface_body(start, interfaces);
-        }
+        let interfaces = if self.match_keyword(Keyword::With) {
+            self.parse_interface_ref_list_after_with()?
+        } else {
+            Vec::new()
+        };
+        self.parse_anonymous_object_body(start, interfaces)
+    }
 
+    fn parse_anonymous_object_body(
+        &mut self,
+        start: Span,
+        interfaces: Vec<TypeRef>,
+    ) -> Option<Expr> {
         self.consume(TokenKind::LBrace, "expected '{' after 'object'")?;
         self.skip_newlines();
         let mut fields = Vec::new();
@@ -1062,7 +1038,7 @@ impl<'a> Parser<'a> {
         )?;
         Some(Expr::AnonymousObject {
             kind: TypeKind::Object,
-            interfaces: Vec::new(),
+            interfaces,
             fields,
             methods,
             span: start.cover(end),

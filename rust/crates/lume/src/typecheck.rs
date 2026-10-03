@@ -2301,9 +2301,7 @@ impl<'a> Checker<'a> {
                     self.check_field_initializer_expr(value, owner, initialized_fields);
                 }
             }
-            Expr::AnonymousInterface { .. }
-            | Expr::AnonymousObject { .. }
-            | Expr::Lambda { .. } => {}
+            Expr::AnonymousObject { .. } | Expr::Lambda { .. } => {}
             Expr::Try { value, .. }
             | Expr::Unary { expr: value, .. }
             | Expr::Group { inner: value, .. } => {
@@ -4648,11 +4646,6 @@ impl<'a> Checker<'a> {
                     Ty::Record(Vec::new())
                 }
             }
-            Expr::AnonymousInterface {
-                interfaces,
-                methods,
-                span,
-            } => self.check_anonymous_interface_expr(interfaces, methods, *span, expected),
             Expr::AnonymousObject {
                 kind,
                 interfaces,
@@ -5222,27 +5215,6 @@ impl<'a> Checker<'a> {
         }
 
         Ty::any()
-    }
-
-    fn check_anonymous_interface_expr(
-        &mut self,
-        interfaces: &[TypeRef],
-        methods: &[MethodDecl],
-        span: crate::source::Span,
-        expected: &Ty,
-    ) -> Ty {
-        let mut result_tys = self.validate_anonymous_interfaces(interfaces, methods, span);
-
-        if result_tys
-            .iter()
-            .any(|interface_ty| self.is_assignable(interface_ty, expected))
-        {
-            expected.clone()
-        } else if result_tys.len() == 1 {
-            result_tys.pop().unwrap_or(Ty::Unknown)
-        } else {
-            Ty::Unknown
-        }
     }
 
     fn validate_anonymous_interfaces(
@@ -11608,11 +11580,8 @@ fn loop_control_targeting_current_loop_in_expr(expr: &Expr) -> Option<LoopContro
                         .find_map(loop_control_targeting_current_loop_in_expr)
                 })
         }),
-        // Nested callables and anonymous interface methods are separate
-        // control-flow boundaries.
-        Expr::Lambda { .. } | Expr::AnonymousInterface { .. } | Expr::AnonymousObject { .. } => {
-            None
-        }
+        // Nested callables and anonymous object methods are separate control-flow boundaries.
+        Expr::Lambda { .. } | Expr::AnonymousObject { .. } => None,
         Expr::Identifier { .. }
         | Expr::Placeholder { .. }
         | Expr::Integer { .. }
@@ -11752,9 +11721,7 @@ fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Sp
             })
             .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(yield_body)),
         // Nested callables have their own control-flow boundary.
-        Expr::Lambda { .. } | Expr::AnonymousInterface { .. } | Expr::AnonymousObject { .. } => {
-            None
-        }
+        Expr::Lambda { .. } | Expr::AnonymousObject { .. } => None,
         Expr::Group { inner, .. } => lazy_arg_forbidden_control_flow_span(inner),
         Expr::Identifier { .. }
         | Expr::Placeholder { .. }

@@ -643,18 +643,6 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
                 rewrite_expr_for_runtime(value, module, graph);
             }
         }
-        ast::Expr::AnonymousInterface {
-            interfaces,
-            methods,
-            ..
-        } => {
-            for interface in interfaces {
-                rewrite_type_ref_for_runtime(interface, module);
-            }
-            for method in methods {
-                rewrite_method_for_runtime(method, module, graph);
-            }
-        }
         ast::Expr::AnonymousObject {
             interfaces,
             fields,
@@ -1735,26 +1723,6 @@ impl<'a> Interpreter<'a> {
                     .collect::<Result<Vec<_>, Diagnostic>>()?,
             )))),
             ir::RValue::RecordSpread(parts) => self.record_spread_value(frame, parts, span),
-            ir::RValue::AnonymousInterface { methods, .. } => {
-                Ok(Value::Record(Rc::new(RefCell::new(
-                    methods
-                        .iter()
-                        .map(|method| {
-                            Ok((
-                                method.name.clone(),
-                                Value::Closure(Rc::new(ClosureValue {
-                                    function: method.function,
-                                    captures: method
-                                        .captures
-                                        .iter()
-                                        .map(|capture| self.eval_operand_ref(frame, capture, span))
-                                        .collect::<Result<Vec<_>, _>>()?,
-                                })),
-                            ))
-                        })
-                        .collect::<Result<Vec<_>, Diagnostic>>()?,
-                ))))
-            }
             ir::RValue::AnonymousObject {
                 fields, methods, ..
             } => {
@@ -8200,7 +8168,7 @@ $name
     }
 
     #[test]
-    fn runs_anonymous_interface_methods() {
+    fn runs_anonymous_object_interface_methods() {
         let program = lower_inline(
             r#"
             interface Reader {
@@ -8213,12 +8181,16 @@ $name
 
             def main() Unit {
                 handler = object with Reader, Closer {
-                    def read() Str = "x"
+                    source Str = "x"
+
+                    def read() Str = source
                     def close() Unit = OS.println("closed")
                 }
 
-                soloReader = object with Reader {
-                    def read() Str = "solo"
+                soloReader Reader = object with Reader {
+                    source Str = "solo"
+
+                    def read() Str = source
                 }
 
                 OS.println(handler.read())

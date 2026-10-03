@@ -5520,8 +5520,10 @@ impl<'a> SourceBodyEmitter<'a> {
                 let receiver = self.emit_expr(receiver, bindings)?;
                 let member = java_member_name(name);
                 if self.owner.is_some_and(|owner| {
-                    JavaIrSupport::new(self.bundle, self.function, self.names)
-                        .type_has_getter(owner, name)
+                    (is_anonymous_object_type(owner)
+                        && owner.fields.iter().any(|field| field.name == *name))
+                        || JavaIrSupport::new(self.bundle, self.function, self.names)
+                            .type_has_getter(owner, name)
                 }) {
                     return Some(format!("{receiver}.{member}()"));
                 }
@@ -5800,27 +5802,6 @@ impl<'a> SourceBodyEmitter<'a> {
                     })
             }
             core::Expr::ContextualNew { .. } => None,
-            core::Expr::AnonymousInterface { interfaces, .. } => {
-                let interface_types = interfaces.iter().map(type_ref_to_ir).collect::<Vec<_>>();
-                let lowered = self.function.blocks.iter().find_map(|block| {
-                    block.statements.iter().find_map(|statement| {
-                        let ir::StatementKind::Assign {
-                            value:
-                                ir::RValue::AnonymousInterface {
-                                    interfaces,
-                                    methods,
-                                },
-                            ..
-                        } = &statement.kind
-                        else {
-                            return None;
-                        };
-                        (interfaces == &interface_types).then_some((interfaces, methods))
-                    })
-                })?;
-                JavaIrSupport::new(self.bundle, self.function, self.names)
-                    .emit_anonymous_interface(lowered.0, lowered.1)
-            }
             core::Expr::ExtractOr {
                 value,
                 fallback,
@@ -6090,11 +6071,15 @@ impl<'a> SourceBodyEmitter<'a> {
         let owner = self.owner?;
         owner.fields.iter().find(|field| field.name == name)?;
         let member = java_member_name(name);
-        Some(if matches!(owner.kind, TypeKind::Record | TypeKind::Enum) {
-            format!("this.{member}()")
-        } else {
-            format!("this.{member}")
-        })
+        Some(
+            if matches!(owner.kind, TypeKind::Record | TypeKind::Enum)
+                || is_anonymous_object_type(owner)
+            {
+                format!("this.{member}()")
+            } else {
+                format!("this.{member}")
+            },
+        )
     }
 
     fn implicit_getter_reference(&self, name: &str) -> Option<String> {
@@ -8553,50 +8538,11 @@ impl<'a> JavaIrSupport<'a> {
             .is_some_and(|ty| ty.kind == TypeKind::Object)
     }
 
-    fn emit_anonymous_interface(
-        &self,
-        interfaces: &[ir::Type],
-        methods: &[ir::AnonymousInterfaceMethod],
-    ) -> Option<String> {
-        let target = interfaces.first()?;
-        let ir::Type::Named { name, .. } = target else {
-            return None;
-        };
-        if interfaces.len() != 1 {
-            return None;
-        }
-
-        let mut out = String::new();
-        out.push_str("new ");
-        out.push_str(&self.names.named_type(name));
-        out.push_str("() {\n");
-
-        for method in methods {
-            let function = self.bundle.ir.function(method.function)?;
-            let capture_overrides =
-                self.push_anonymous_interface_capture_fields(&mut out, method, function, None)?;
-
-            out.push_str("        @Override\n");
-            out.push_str("        public ");
-            push_function_signature_named(&mut out, function, self.names, &method.name);
-            let body = structured_source_function_body_with_local_overrides(
-                self.bundle,
-                function,
-                self.names,
-                &capture_overrides,
-            )?;
-            out.push_str(&body);
-        }
-
-        out.push_str("    }");
-        Some(out)
-    }
-
     fn emit_anonymous_object(
         &self,
         ty: &ir::Type,
         fields: &[ir::NamedOperand],
-        methods: &[ir::AnonymousInterfaceMethod],
+        methods: &[ir::AnonymousObjectMethod],
         field_initializers: Option<&[String]>,
     ) -> Option<String> {
         let ir::Type::Named { name, .. } = ty else {
@@ -8655,7 +8601,7 @@ impl<'a> JavaIrSupport<'a> {
     fn push_anonymous_interface_capture_fields(
         &self,
         out: &mut String,
-        method: &ir::AnonymousInterfaceMethod,
+        method: &ir::AnonymousObjectMethod,
         function: &ir::Function,
         capture_initializers: Option<&[String]>,
     ) -> Option<HashMap<ir::LocalId, String>> {
@@ -9450,9 +9396,6 @@ impl<'a> JavaIrSupport<'a> {
                     name: "Vector".to_string(),
                     args: vec![element_ty],
                 })
-            }
-            ir::RValue::AnonymousInterface { interfaces, .. } if interfaces.len() == 1 => {
-                interfaces.first().cloned()
             }
             ir::RValue::AnonymousObject { ty, .. } => Some(ty.clone()),
             ir::RValue::Cast { ty, .. } => Some(ty.clone()),

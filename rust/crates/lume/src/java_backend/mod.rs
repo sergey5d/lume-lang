@@ -3562,7 +3562,7 @@ def cached(values Map[Str, Int], key Str) Int {
     }
 
     #[test]
-    fn readable_java_keeps_anonymous_interface_methods_structured() {
+    fn readable_java_keeps_anonymous_object_methods_structured() {
         let temp = temp_path("lume-java-readable-anonymous-interface");
         let source = temp.join("anonymous_interface.lum");
         let out = temp.join("out");
@@ -3577,11 +3577,13 @@ interface Handler {
 }
 
 def handler(offset Int) Handler = object with Handler {
+    source Int = offset
+
     def handle(value Int) Int {
         if value > 0 {
-            return value + offset
+            return value + source
         }
-        offset
+        source
     }
 }
 "#,
@@ -3595,10 +3597,28 @@ def handler(offset Int) Handler = object with Handler {
         let module =
             fs::read_to_string(out.join("demo/anonymousinterface/AnonymousinterfaceModule.java"))
                 .expect("read module");
-        assert!(module.contains("new Handler()"), "{module}");
+        assert!(module.contains("new __LumeObject_"), "{module}");
+        assert!(
+            module.contains("private final Long __field_source = offset;"),
+            "{module}"
+        );
         assert!(module.contains("if ((value > 0L))"), "{module}");
-        assert!(module.contains("return (value + __capture_"), "{module}");
+        assert!(
+            module.contains("return (value + this.source());"),
+            "{module}"
+        );
         assert!(!module.contains("__block"), "{module}");
+
+        if command_available("javac") {
+            let classes = temp.join("classes");
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).expect("collect generated Java");
+            fs::create_dir_all(&classes).expect("create classes dir");
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac",
+            );
+        }
 
         let _ = fs::remove_dir_all(temp);
     }

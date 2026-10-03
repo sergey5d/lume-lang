@@ -346,11 +346,6 @@ pub enum Expr {
         values: Vec<Expr>,
         span: Span,
     },
-    AnonymousInterface {
-        interfaces: Vec<TypeRef>,
-        methods: Vec<MethodDecl>,
-        span: Span,
-    },
     AnonymousObject {
         kind: ast::TypeKind,
         interfaces: Vec<TypeRef>,
@@ -443,7 +438,6 @@ impl Expr {
             | Expr::Index { span, .. }
             | Expr::RecordUpdate { span, .. }
             | Expr::RecordLiteral { span, .. }
-            | Expr::AnonymousInterface { span, .. }
             | Expr::AnonymousObject { span, .. }
             | Expr::Try { span, .. }
             | Expr::ExtractOr { span, .. }

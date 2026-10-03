@@ -1542,42 +1542,6 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn lower_anonymous_interface_rvalue(
-        &mut self,
-        interfaces: &[TypeRef],
-        methods: &[MethodDecl],
-    ) -> ir::RValue {
-        let methods = methods
-            .iter()
-            .map(|method| {
-                let ir::RValue::Closure { function, captures } = self.lower_callable_closure(
-                    &method.name,
-                    &method.params,
-                    method.return_type.as_ref(),
-                    method.body.as_ref(),
-                    method.span,
-                ) else {
-                    unreachable!("anonymous interface methods lower to closures")
-                };
-                if let Some(function) = self.program.function_mut(function) {
-                    function.getter = method.getter;
-                }
-                ir::AnonymousInterfaceMethod {
-                    name: method.name.clone(),
-                    function,
-                    captures,
-                }
-            })
-            .collect();
-        ir::RValue::AnonymousInterface {
-            interfaces: interfaces
-                .iter()
-                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
-                .collect(),
-            methods,
-        }
-    }
-
     fn lower_anonymous_object_rvalue(
         &mut self,
         kind: ast::TypeKind,
@@ -1758,7 +1722,7 @@ impl<'a> FunctionLowerer<'a> {
                 }
                 lowerer.finish_closure_captures()
             };
-            lowered_methods.push(ir::AnonymousInterfaceMethod {
+            lowered_methods.push(ir::AnonymousObjectMethod {
                 name: method.name.clone(),
                 function: function_id,
                 captures,
@@ -4384,7 +4348,6 @@ impl<'a> FunctionLowerer<'a> {
             Expr::ListLiteral { .. }
             | Expr::TupleLiteral { .. }
             | Expr::RecordLiteral { .. }
-            | Expr::AnonymousInterface { .. }
             | Expr::AnonymousObject { .. }
             | Expr::Unary { .. }
             | Expr::Binary { .. }
@@ -4930,13 +4893,6 @@ impl<'a> FunctionLowerer<'a> {
             }
             Expr::Block { body, .. } => self.infer_block_type_with_overrides(body, overrides),
             Expr::Return { .. } | Expr::Break { .. } | Expr::Continue { .. } => ir::Type::Never,
-            Expr::AnonymousInterface { interfaces, .. } => {
-                if interfaces.len() == 1 {
-                    lower_type_ref_with_aliases(&interfaces[0], &self.type_aliases)
-                } else {
-                    ir::Type::Unknown
-                }
-            }
             Expr::AnonymousObject { span, .. } => {
                 ir::Type::named(crate::source::anonymous_object_type_name(*span))
             }
@@ -6536,11 +6492,6 @@ impl<'a> FunctionLowerer<'a> {
                     expected_return,
                 ))
             }
-            Expr::AnonymousInterface {
-                interfaces,
-                methods,
-                ..
-            } => Some(self.lower_anonymous_interface_rvalue(interfaces, methods)),
             Expr::AnonymousObject {
                 kind,
                 interfaces,

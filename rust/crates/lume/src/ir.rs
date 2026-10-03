@@ -629,14 +629,10 @@ pub enum RValue {
     List(Vec<Operand>),
     Record(Vec<NamedOperand>),
     RecordSpread(Vec<RecordSpreadPart>),
-    AnonymousInterface {
-        interfaces: Vec<Type>,
-        methods: Vec<AnonymousInterfaceMethod>,
-    },
     AnonymousObject {
         ty: Type,
         fields: Vec<NamedOperand>,
-        methods: Vec<AnonymousInterfaceMethod>,
+        methods: Vec<AnonymousObjectMethod>,
     },
     RecordUpdate {
         base: Operand,
@@ -693,9 +689,9 @@ pub enum RecordSpreadPart {
     Field(NamedOperand),
 }
 
-/// Lowered method body for an anonymous interface implementation.
+/// Lowered method body for an anonymous object.
 #[derive(Debug, Clone, PartialEq)]
-pub struct AnonymousInterfaceMethod {
+pub struct AnonymousObjectMethod {
     pub name: String,
     pub function: FunctionId,
     pub captures: Vec<Operand>,

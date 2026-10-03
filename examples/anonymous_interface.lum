@@ -13,12 +13,16 @@ interface Closer {
 
 def main() Unit {
     handler = object with Reader, Closer {
-        def read() Str = "x"
+        source Str = "x"
+
+        def read() Str = source
         def close() Unit = println("closed")
     }
 
-    soloReader = object with Reader {
-        def read() Str = "solo"
+    soloReader Reader = object with Reader {
+        source Str = "solo"
+
+        def read() Str = source
     }
 
     println(handler.read())

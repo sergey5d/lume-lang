@@ -266,15 +266,6 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             values: values.iter().map(desugar_expr).collect(),
             span: *span,
         },
-        ast::Expr::AnonymousInterface {
-            interfaces,
-            methods,
-            span,
-        } => core::Expr::AnonymousInterface {
-            interfaces: interfaces.clone(),
-            methods: methods.iter().map(desugar_method_decl).collect(),
-            span: *span,
-        },
         ast::Expr::AnonymousObject {
             kind,
             interfaces,

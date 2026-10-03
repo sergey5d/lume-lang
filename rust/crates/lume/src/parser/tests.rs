@@ -1395,7 +1395,7 @@ fn allows_member_order_with_anonymous_fields_after_methods() {
 }
 
 #[test]
-fn parses_object_with_interface_as_anonymous_implementation() {
+fn parses_object_with_fields_and_interface_methods() {
     let result = parse(
         r#"
 interface Greeter {
@@ -1403,7 +1403,9 @@ interface Greeter {
 }
 
 greeter Greeter = object with Greeter {
-    def greet() Str = "hello"
+    source Str = "hello"
+
+    def greet() Str = source
 }
 "#,
     );
@@ -1414,8 +1416,13 @@ greeter Greeter = object with Greeter {
     };
     assert!(matches!(
         &binding.values[0],
-        Expr::AnonymousInterface { interfaces, methods, .. }
-            if interfaces.len() == 1 && methods.len() == 1
+        Expr::AnonymousObject {
+            kind: TypeKind::Object,
+            interfaces,
+            fields,
+            methods,
+            ..
+        } if interfaces.len() == 1 && fields.len() == 1 && methods.len() == 1
     ));
 }
 
@@ -1436,8 +1443,13 @@ marker Marker = object with Marker {}
     };
     assert!(matches!(
         &binding.values[0],
-        Expr::AnonymousInterface { interfaces, methods, .. }
-            if interfaces.len() == 1 && methods.is_empty()
+        Expr::AnonymousObject {
+            kind: TypeKind::Object,
+            interfaces,
+            fields,
+            methods,
+            ..
+        } if interfaces.len() == 1 && fields.is_empty() && methods.is_empty()
     ));
 }
 
@@ -1471,7 +1483,11 @@ objectValue = object with First, Second {
     };
     assert!(matches!(
         &object_binding.values[0],
-        Expr::AnonymousInterface { interfaces, .. } if interfaces.len() == 2
+        Expr::AnonymousObject {
+            kind: TypeKind::Object,
+            interfaces,
+            ..
+        } if interfaces.len() == 2
     ));
 }
 
