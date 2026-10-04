@@ -133,7 +133,7 @@ Inline union rules:
 - a declared union contains at least two alternatives
 - alternatives use `class`, `shape`, or `object`
 - a class alternative has nominal class semantics
-- a shape alternative is immutable structural data
+- a shape alternative has structural shape semantics with read-only field bindings
 - an object alternative is fieldless and denotes one singleton value
 - alternatives declare data only; shared behavior belongs in `ext UnionName`
 - a declared union may list shared interfaces after its type parameters; the
@@ -1015,6 +1015,15 @@ value Printable = new { x, y }           # invalid
 value Success | Failure = new { message } # invalid: no alternative is chosen
 ```
 
+`new` may remain explicit even when labeled fields already make construction
+unambiguous. Both forms are valid and have the same construction semantics; a
+formatter may prefer the shorter first form:
+
+```txt
+point Point = { x: 1, y: 2 }
+point Point = new { x: 1, y: 2 }
+```
+
 Contextual construction never selects between overloaded concrete targets:
 
 ```txt
@@ -1033,6 +1042,17 @@ construction and supports punning without `new`:
 ```txt
 point = Point { x, y }
 user = User { name, age }
+```
+
+Contextual class construction applies only to the fresh brace construction
+expression. Assigning an already-created structural value remains ordinary
+assignment and never invokes a class constructor:
+
+```txt
+user User = { name: "Ada" } # valid: constructs User
+
+data = { name: "Ada" }
+user User = data             # invalid: a shape does not become a class
 ```
 
 Parentheses are for positional construction and calls:
@@ -1087,6 +1107,21 @@ def contextualNew() Rollup? = source().map(r => new { ...r })
 `new` obtain `Rollup` from the callback's expected return type. In each case,
 required target fields must exist with assignable types; extra source fields
 are discarded rather than copied into the narrower result.
+
+Width projection applies to fields supplied by a spread or by assignment from
+an existing structural value. Every explicit construction entry must name an
+accepted field or constructor input, so likely misspellings are rejected:
+
+```txt
+larger = { x: 1, y: 2, yy: 3 }
+point Point = { ...larger }       # valid: `yy` is projected away
+
+point Point = {
+    x: 1
+    y: 2
+    yy: 3                         # invalid: no `yy` construction input
+}
+```
 
 A member expression in a construction entry must have an explicit field label:
 
@@ -1231,6 +1266,22 @@ Named shapes are data-only structural field views:
 - brace field construction uses `ShapeName { field: value }`
 - positional construction uses `ShapeName(...)`
 
+Shapes are shallowly immutable: their field bindings cannot be replaced, but a
+value reached through a field keeps its own mutability rules. Read-only fields
+do not imply deeply immutable values or pure methods:
+
+```txt
+shape Batch {
+    items [Int]
+}
+
+batch Batch = Batch([1])
+otherItems = [2]
+
+batch.items := otherItems # error: `items` is a read-only field
+batch.items.add(42)        # valid: Vector remains mutable
+```
+
 ```txt
 shape Point {
     x Int
@@ -1324,7 +1375,7 @@ Implicit field construction rules:
 - a positional call may stop only when every remaining public field has an initializer
 - positional arguments never skip an initialized field to initialize a later field
 - the declaration position of initialized non-public fields does not affect positional construction
-- mutable vs immutable field differences do not matter for structural shape matching
+- whether a source class field is mutable or read-only does not affect structural shape matching
 - named class values do not structurally convert to other named class values
 
 ```txt
@@ -1472,6 +1523,11 @@ class Map[K with Hashed[K], V] {
 - a type parameter is hashable only when it has a `Hashed[T]` bound
 - interfaces, functions, `Any`, and arbitrary classes do not implicitly satisfy `Hashed`
 
+Hash derivation is separate from shallow field immutability. It establishes
+that each field type supplies compatible equality and hashing operations; it
+does not freeze reachable values or guarantee that user-defined mutable hashed
+objects retain the same hash after mutation.
+
 ```txt
 class StableId with Hashed[StableId] {
     value Int
@@ -1613,8 +1669,35 @@ type always takes precedence.
 
 ### Getters
 
-A method declared without `()` is a getter. Getters are read through ordinary
-member access and still lower to zero-argument methods at runtime:
+A method declared without an adjacent `()` parameter list is a getter. In
+callable declarations, whitespace before `(` is meaningful: an adjacent `(`
+starts method parameters, while a separated parenthesized type is the getter's
+return type:
+
+```txt
+def coordinates() (Int, Int) = (x, y)  # method returning a tuple
+def coordinates (Int, Int) = (x, y)    # getter returning a tuple
+
+def values() [Int] = items             # method returning a vector
+def values [Int] = items               # getter returning a vector
+
+def callback() fn() Int = action       # method returning a function
+def callback fn() Int = action         # getter returning a function
+```
+
+Function and method parameter lists must touch the callable name, or the final
+`]` of a generic clause:
+
+```txt
+def calculate(input Int) Int = input
+def convert[T](input T) T = input
+
+def calculate (input Int) Int = input  # error: remove the space before `(`
+def convert[T] (input T) T = input     # error: remove the space before `(`
+```
+
+Getters are read through ordinary member access and still lower to
+zero-argument methods at runtime:
 
 ```txt
 class Account {
@@ -1652,8 +1735,22 @@ Getter rules:
 
 Getters may be declared by classes, shapes, interfaces, objects, and extension
 blocks. The current compiler enforces direct read-only field access. Proving
-that methods called by a getter are also read-only requires effect tracking and
-is retained as a separate design step.
+that a getter is transitively read-only requires following aliases, called
+methods, callbacks, interface dispatch, and foreign calls. That is a separate
+effect-analysis subsystem, not a local scan for assignment statements. Effect
+information can remain compiler-internal initially; user-facing effect syntax
+is a separate design decision.
+
+Calling a function returned by a getter remains ordinary expression
+composition:
+
+```txt
+class Factory {
+    def creator fn() Int = () => 42
+}
+
+answer = Factory().creator() # read `creator`, then call the returned function
+```
 
 Generic function:
 
@@ -2185,21 +2282,24 @@ mapper = item =>
         1
 ```
 
-Multiple statements require an explicit block. This keeps lambda scope
-brace-delimited:
+To put multiple statements inside the lambda, use an explicit block. Lambda
+scope is determined by tokens and braces, never by indentation:
 
 ```txt
-# invalid
+# `next` belongs to the enclosing block despite the misleading indentation.
 mapper = item =>
-    next = item + 1
-    next * 2
+    item + 1
+    next = 2
 
-# valid
+# Both statements belong to the lambda.
 mapper = item => {
     next = item + 1
     next * 2
 }
 ```
+
+A formatter may correct suspicious indentation, but indentation alone does not
+change scope or make a program invalid.
 
 Trailing lambda call syntax is also allowed when passing a lambda as an argument. The trailing brace body must contain an explicit lambda head with `=>`, and that lambda head must start on the same line as the opening `{`:
 
@@ -2477,6 +2577,24 @@ Named arguments:
 ```txt
 format(prefix = "item", value = 5)
 ```
+
+Explicit argument expressions are evaluated exactly once in written source
+order. Their resulting values are then bound to parameters by position or name.
+For a member call, the receiver is evaluated before any argument expression:
+
+```txt
+combine(second = mark(2), first = mark(1))
+# evaluates mark(2), then mark(1), then calls combine(firstValue, secondValue)
+
+makeService().send(makeRequest())
+# evaluates makeService(), then makeRequest(), then invokes send
+```
+
+Named and contextual construction follow the same rule: supplied field
+expressions evaluate in written order, even though their values are placed into
+constructor inputs or shape fields in declaration order. Defaults are supplied
+after explicit arguments have been evaluated. By-name parameters remain lazy;
+their expressions evaluate only when the callee reads them.
 
 Methods are called explicitly:
 
@@ -3812,6 +3930,33 @@ for let User { name } as user <- users {
     println(name, user.name)
 }
 ```
+
+Every pattern position uses this same grammar, including tuple and record
+patterns. The surrounding construct determines whether the pattern may fail:
+
+```txt
+let (left, right) as pair = source
+
+let (Some(value), label) = pair else return
+
+if let (Some(value), label) = pair {
+    println(value, label)
+}
+
+for let (left, right) as pair <- pairs {
+    println(left + right, pair)
+}
+
+values = for {
+    let (left, right) as pair <- pairs
+} yield left + right + pair[0]
+```
+
+`let pattern = value` requires an irrefutable pattern. Adding `else` handles
+a refutable pattern. `if let` permits refutable branching, while `for let`
+requires the pattern to be irrefutable for every generated element. `match`
+permits refutable patterns and checks coverage where the matched type is
+closed.
 
 Field aliases remain available inside record patterns, for example
 `let { location as home } = user`.

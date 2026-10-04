@@ -4,6 +4,7 @@ pub mod core;
 pub mod desugar;
 pub mod diagnostic;
 pub mod diagnostic_render;
+pub mod formatter;
 pub mod interpreter;
 pub mod ir;
 pub mod java_backend;
@@ -20,6 +21,7 @@ pub use backend::{BackendBundle, BackendBundleResult, BackendDescriptors, build_
 pub use desugar::{desugar_block, desugar_callable_body, desugar_expr, desugar_function_decl};
 pub use diagnostic::{Diagnostic, Severity};
 pub use diagnostic_render::{render_diagnostic, render_path_diagnostic, render_path_diagnostics};
+pub use formatter::{FormatResult, format_source};
 pub use interpreter::{
     PathRunResult, RunResult, run_path, run_program, run_program_entry, run_program_specs,
     test_path,

@@ -70,6 +70,7 @@ From the repository root:
 ```bash
 cargo run --manifest-path rust/Cargo.toml -p lume -- tokens examples/os.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- parse examples/random_code/bumper.lum
+cargo run --manifest-path rust/Cargo.toml -p lume -- fmt examples/random_code/bumper.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- check examples/import_forms.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- run examples/range.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- gen examples/range.lum --out build/generated/lume
@@ -79,6 +80,9 @@ cargo run --manifest-path rust/Cargo.toml -p lume -- gen examples/range.lum --ou
 reported as compilation diagnostics instead of producing partial Java output.
 
 The `tokens` command prints the token stream with spans.
+
+The `fmt` command validates and formats one source file in place. It preserves
+comments and multiline string contents and does not overwrite invalid source.
 
 The `parse` command lexes, parses, and pretty-prints the AST for the requested
 file. Right now it covers:

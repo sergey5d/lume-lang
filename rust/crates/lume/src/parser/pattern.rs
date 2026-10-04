@@ -508,8 +508,22 @@ impl<'a> Parser<'a> {
         let mut fields = Vec::new();
         let mut names = std::collections::HashSet::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::At) {
+                self.error_at_current(
+                    "unexpected_token",
+                    "brace destructuring uses 'field', 'field Type', 'field as local', or 'field Type as local'; use 'field: pattern' for nested matching; '@field' is unsupported",
+                );
+                return None;
+            }
             let (name, name_span) =
                 self.expect_data_name("expected field name in record pattern")?;
+            if name == "_" {
+                self.error_at_current(
+                    "unexpected_token",
+                    "brace destructuring matches by field name; omit fields you do not need",
+                );
+                return None;
+            }
             let pattern = if self.match_keyword(Keyword::As) {
                 let (binding, binding_span) =
                     self.expect_binding_name("expected binding name after 'as'")?;
@@ -519,6 +533,19 @@ impl<'a> Parser<'a> {
                 }
             } else if self.match_token(TokenKind::Colon) {
                 self.parse_pattern_at_depth(depth + 1)?
+            } else if self.binding_type_starts_on_same_line(name_span) && self.can_start_type_ref()
+            {
+                let target = self.parse_pattern_type_ref()?;
+                let (binding, end) = if self.match_keyword(Keyword::As) {
+                    self.expect_binding_name("expected binding name after 'as'")?
+                } else {
+                    (name.clone(), target.span())
+                };
+                Pattern::Type {
+                    name: Some(binding),
+                    span: name_span.cover(end),
+                    target,
+                }
             } else {
                 Pattern::Binding {
                     name: name.clone(),

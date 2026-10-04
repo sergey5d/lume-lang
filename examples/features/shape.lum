@@ -2,10 +2,15 @@
 # shape 3
 # class 7
 # anonymous 11
+# batch 2
 
 shape Point {
     x Int
     y Int
+}
+
+shape Batch {
+    items [Int]
 }
 
 class ClassPoint {
@@ -30,4 +35,8 @@ def main() Unit {
 
     anonymous = makeAnonymousPoint(5, 6)
     println("anonymous", anonymous.x + anonymous.y)
+
+    batch Batch = Batch([1])
+    batch.items.add(42)
+    println("batch", batch.items.size)
 }

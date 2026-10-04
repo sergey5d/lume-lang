@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# assign_immutable at .*: cannot reassign read-only field 'items'
+
+shape Batch {
+    items [Int]
+}
+
+def main() Unit {
+    batch Batch = Batch([1])
+    batch.items := [2]
+}

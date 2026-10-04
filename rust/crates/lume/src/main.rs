@@ -1,8 +1,9 @@
 use std::{env, fs, path::Path, process::ExitCode};
 
 use lume::{
-    Diagnostic, JavaBackendOptions, LocatedDiagnostic, SourceFile, check_path, generate_java_path,
-    lex, parse_program, render_diagnostic, render_path_diagnostic, run_path, test_path,
+    Diagnostic, JavaBackendOptions, LocatedDiagnostic, SourceFile, check_path, format_source,
+    generate_java_path, lex, parse_program, render_diagnostic, render_path_diagnostic, run_path,
+    test_path,
 };
 
 fn main() -> ExitCode {
@@ -15,6 +16,7 @@ fn main() -> ExitCode {
     match command.as_str() {
         "tokens" => tokens_command(&mut args),
         "parse" => parse_command(&mut args),
+        "fmt" => fmt_command(&mut args),
         "check" => check_command(&mut args),
         "run" => run_command(&mut args),
         "test" => test_command(&mut args),
@@ -77,6 +79,36 @@ fn parse_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
         }
         None => ExitCode::from(1),
     }
+}
+
+fn fmt_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
+    let path = match read_path_arg(args, "fmt") {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+    if let Some(argument) = args.next() {
+        eprintln!("unexpected argument '{argument}' for 'fmt'");
+        print_usage();
+        return ExitCode::from(2);
+    }
+
+    let file = match read_source_path(path.clone()) {
+        Ok(file) => file,
+        Err(code) => return code,
+    };
+    let result = format_source(&file);
+    if result.has_errors() {
+        print_source_diagnostics(&file, &result.diagnostics);
+        return ExitCode::from(1);
+    }
+
+    if result.text != file.text
+        && let Err(err) = fs::write(&path, result.text)
+    {
+        eprintln!("write {path}: {err}");
+        return ExitCode::from(1);
+    }
+    ExitCode::SUCCESS
 }
 
 fn check_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
@@ -174,6 +206,7 @@ fn print_usage() {
     eprintln!("usage:");
     eprintln!("  lume tokens <file>");
     eprintln!("  lume parse <file>");
+    eprintln!("  lume fmt <file>");
     eprintln!("  lume check <file>");
     eprintln!("  lume run <file> [entry]");
     eprintln!("  lume test <file>");

@@ -3353,8 +3353,12 @@ impl<'a> Checker<'a> {
     fn for_pattern_is_irrefutable(&self, pattern: &Pattern, scrutinee: &Ty) -> bool {
         match pattern {
             Pattern::Wildcard { .. } | Pattern::Binding { .. } => true,
-            Pattern::Extract { .. } | Pattern::Literal { .. } | Pattern::Type { .. } => false,
+            Pattern::Extract { .. } | Pattern::Literal { .. } => false,
             Pattern::Alias { inner, .. } => self.for_pattern_is_irrefutable(inner, scrutinee),
+            Pattern::Type { target, .. } => {
+                !matches!(scrutinee, Ty::Unknown)
+                    && self.is_assignable(scrutinee, &self.ty_from_type_ref(target))
+            }
             Pattern::Tuple { elements, .. } => match scrutinee {
                 Ty::Tuple(items) if items.len() == elements.len() => elements
                     .iter()
@@ -4043,7 +4047,7 @@ impl<'a> Checker<'a> {
                     } else if !field.mutable {
                         self.add_error(
                             "assign_immutable",
-                            format!("cannot reassign immutable field '{}'", name),
+                            format!("cannot reassign read-only field '{}'", name),
                             *span,
                         );
                     }
@@ -4101,7 +4105,7 @@ impl<'a> Checker<'a> {
                     } else if !field.mutable {
                         self.add_error(
                             "assign_immutable",
-                            format!("cannot reassign immutable field '{}'", name),
+                            format!("cannot reassign read-only field '{}'", name),
                             *span,
                         );
                     }
@@ -5115,37 +5119,41 @@ impl<'a> Checker<'a> {
                 return Ty::Unknown;
             }
             if let Some(getter) = self.member_getter_sig(&receiver_ty, name) {
+                if !matches!(&getter.ret, Ty::Function(_, _)) {
+                    for arg in &normalized_args {
+                        self.check_expr(&arg.value);
+                    }
+                    self.add_error(
+                        "getter_call_syntax",
+                        format!(
+                            "getter '{}' is accessed without parentheses; write '{}.{}'",
+                            name,
+                            self.describe_member_path(receiver)
+                                .unwrap_or_else(|| "<value>".to_string()),
+                            name
+                        ),
+                        span,
+                    );
+                    return getter.ret;
+                }
+            }
+        } else if let Expr::Identifier { name, .. } = callee
+            && let Some(getter) = self.lookup_implicit_getter(name)
+        {
+            if !matches!(&getter.ret, Ty::Function(_, _)) {
                 for arg in &normalized_args {
                     self.check_expr(&arg.value);
                 }
                 self.add_error(
                     "getter_call_syntax",
                     format!(
-                        "getter '{}' is accessed without parentheses; write '{}.{}'",
-                        name,
-                        self.describe_member_path(receiver)
-                            .unwrap_or_else(|| "<value>".to_string()),
-                        name
+                        "getter '{}' is accessed without parentheses; write '{}'",
+                        name, name
                     ),
                     span,
                 );
                 return getter.ret;
             }
-        } else if let Expr::Identifier { name, .. } = callee
-            && let Some(getter) = self.lookup_implicit_getter(name)
-        {
-            for arg in &normalized_args {
-                self.check_expr(&arg.value);
-            }
-            self.add_error(
-                "getter_call_syntax",
-                format!(
-                    "getter '{}' is accessed without parentheses; write '{}'",
-                    name, name
-                ),
-                span,
-            );
-            return getter.ret;
         }
         if let Some(ty) = self.try_check_constructor_call(
             callee,
@@ -15511,6 +15519,35 @@ def main() Unit {
     }
 
     #[test]
+    fn shape_fields_are_shallowly_read_only() {
+        let program = parse_inline(
+            r#"
+shape Batch {
+    items [Int]
+}
+
+def main() Unit {
+    batch Batch = Batch([1])
+    batch.items.add(42)
+    batch.items := [3]
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(result.diagnostics.len(), 1, "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "assign_immutable"
+                    && diagnostic
+                        .message
+                        .contains("cannot reassign read-only field 'items'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn rejects_with_updates_for_class_targets_and_patches() {
         let program = parse_inline(
             r#"
@@ -15763,7 +15800,7 @@ def main() Unit {
                 diag.code == "invalid_destructure"
                     && diag
                         .message
-                        .contains("tuple destructuring requires a tuple value")
+                        .contains("tuple pattern requires a tuple value")
             }),
             "{:#?}",
             result.diagnostics
@@ -15856,10 +15893,8 @@ def main() Unit {
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diag| {
-                diag.code == "invalid_destructure"
-                    && diag
-                        .message
-                        .contains("does not have a field named 'missing'")
+                diag.code == "unknown_pattern_field"
+                    && diag.message.contains("has no visible field 'missing'")
             }),
             "{:#?}",
             result.diagnostics
@@ -16062,6 +16097,97 @@ def main() Unit {
     anonymous = new { x, y }
     empty = new {}
     widened Any = new { x, y }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn distinguishes_fresh_class_construction_from_existing_shape_assignment() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+def main() Unit {
+    fresh User = { name: "Ada" }
+    data = { name: "Grace" }
+    existing User = data
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(result.diagnostics.len(), 1, "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_binding_type"
+                    && diagnostic
+                        .message
+                        .contains("cannot assign value of type '{name Str}'")
+                    && diagnostic
+                        .message
+                        .contains("to binding 'existing' of type 'User'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_wider_construction_spreads_but_rejects_extra_explicit_fields() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    larger = { x: 1, y: 2, yy: 3 }
+    projected Point = { ...larger }
+    forcedProjection Point = new { ...larger }
+
+    typo Point = { x: 1, y: 2, yy: 3 }
+    forcedTypo Point = new { x: 1, y: 2, yy: 3 }
+}
+"#,
+        );
+        let result = check_program(&program);
+        let unknown_fields = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code == "no_matching_overload"
+                    && diagnostic
+                        .message
+                        .contains("has no public constructor field 'yy'")
+            })
+            .count();
+        assert_eq!(unknown_fields, 2, "{:#?}", result.diagnostics);
+        assert_eq!(result.diagnostics.len(), 2, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_optional_new_on_unambiguous_labeled_construction() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Int
+}
+
+class User {
+    name Str
+}
+
+def main() Unit {
+    point Point = { x: 1, y: 2 }
+    explicitPoint Point = new { x: 3, y: 4 }
+    user User = { name: "Ada" }
+    explicitUser User = new { name: "Grace" }
 }
 "#,
         );
@@ -18449,6 +18575,22 @@ def read(item Item) Str = item.label()
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn allows_calling_function_values_returned_by_getters() {
+        let program = parse_inline(
+            r#"
+class Factory {
+    def creator fn(Int) Int = (value Int) => value + 1
+    def implicitCall Int = creator(4)
+}
+
+def read(factory Factory) Int = factory.creator(5)
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]

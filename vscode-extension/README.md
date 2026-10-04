@@ -1,11 +1,38 @@
 # Lume VS Code Extension
 
-This is a minimal VS Code extension that adds:
+This VS Code extension adds:
 
 - `.lum` file association
 - line comments with `#`
 - bracket / auto-close rules
 - TextMate-based syntax highlighting for Lume
+- document formatting through `lume fmt`
+
+## Format Lume source
+
+Install `lume` on your `PATH`, open a `.lum` file, and run **Format Document**
+or **Lume: Format Document** from the Command Palette. The formatter operates
+on the current editor contents, including unsaved changes, and applies the
+result as an editor change that can be undone normally.
+
+To use a compiler at another location, configure its path:
+
+```json
+{
+  "lume.formatter.path": "/absolute/path/to/lume"
+}
+```
+
+Formatting on save uses the standard VS Code settings:
+
+```json
+{
+  "[lume]": {
+    "editor.defaultFormatter": "sergeyd.lume-syntax",
+    "editor.formatOnSave": true
+  }
+}
+```
 
 ## Install locally
 
@@ -16,7 +43,7 @@ cd vscode-extension
 ./install.sh
 ```
 
-The script packages the extension as `lume-syntax-0.0.1.vsix` and installs it
+The script packages the extension as `lume-syntax-0.0.2.vsix` and installs it
 with the first VS Code-compatible CLI it finds: `code`, `cursor`, or `codium`.
 It uses `npx @vscode/vsce`, so Node/npm must be available.
 
@@ -36,8 +63,8 @@ Manual install also works:
 
 ```sh
 cd vscode-extension
-npx --yes @vscode/vsce package --allow-missing-repository --out lume-syntax-0.0.1.vsix
-code --install-extension "$(pwd)/lume-syntax-0.0.1.vsix" --force
+npx --yes @vscode/vsce package --allow-missing-repository --out lume-syntax-0.0.2.vsix
+code --install-extension "$(pwd)/lume-syntax-0.0.2.vsix" --force
 ```
 
 Or use the UI:
@@ -57,10 +84,7 @@ For development, the easiest path is:
 
 ## Notes
 
-This extension is intentionally lightweight:
+This extension remains intentionally lightweight:
 
 - no language server
-- no formatter
 - no semantic analysis
-
-It is just syntax support for now.

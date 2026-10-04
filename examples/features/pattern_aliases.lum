@@ -4,10 +4,18 @@
 # while 5 5
 # for Bob Bob
 # yield CaraCara
+# tuple 10 20 10 20
+# tuple yield 4 10
+# nested 7 -1
 # match Ada Ada
 
 class User {
     name Str
+}
+
+def nestedTuple(pair (Int?, Str)) Int {
+    let (Some(value), label) = pair else return -1
+    value + label.size
 }
 
 def main() Unit {
@@ -35,6 +43,16 @@ def main() Unit {
         let User { name as itemName } as item <- [User("Cara")]
     } yield itemName + item.name
     println("yield", labels[0])
+
+    let (left, right) as pair = (10, 20)
+    println("tuple", left, right, pair[0], pair[1])
+
+    sums = for {
+        let (x, y) as item <- [(1, 2), (3, 4)]
+    } yield x + y + item[0]
+    println("tuple yield", sums[0], sums[1])
+    missing Int? = None
+    println("nested", nestedTuple((Some(5), "ok")), nestedTuple((missing, "no")))
 
     match unknown {
         case User { name as matchName } as matchUser =>

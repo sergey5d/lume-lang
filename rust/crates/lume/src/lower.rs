@@ -5744,6 +5744,9 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn is_bound_method_reference(&self, receiver: &Expr, name: &str) -> bool {
+        if self.is_getter_member_for_type(&self.infer_expr_type(receiver), name) {
+            return false;
+        }
         self.callable_reference_member_type(receiver, name)
             .is_some()
     }
@@ -6398,6 +6401,9 @@ impl<'a> FunctionLowerer<'a> {
                 };
                 let expected_args =
                     self.call_expected_arg_specs(call_callee, &normalized_args, expected);
+                // Evaluate the callee (including a method receiver) before any explicit
+                // arguments. Argument binding order is handled separately below.
+                let lowered_callee = self.lower_callee(call_callee);
                 let (ordered_args, mut lowered_args) = expected_args
                     .as_deref()
                     .and_then(|specs| self.lower_call_args_with_defaults(&normalized_args, specs))
@@ -6405,10 +6411,13 @@ impl<'a> FunctionLowerer<'a> {
                         let ordered = self
                             .reorder_call_args(call_callee, &normalized_args)
                             .into_iter()
-                            .cloned()
                             .collect::<Vec<_>>();
-                        let lowered =
-                            self.lower_call_args_with_spread(&ordered, expected_args.as_deref());
+                        let lowered = self.lower_reordered_call_args_with_spread(
+                            &normalized_args,
+                            &ordered,
+                            expected_args.as_deref(),
+                        );
+                        let ordered = ordered.into_iter().cloned().collect::<Vec<_>>();
                         (ordered, lowered)
                     });
                 let reified_args = self.reified_call_evidence_args(
@@ -6421,7 +6430,6 @@ impl<'a> FunctionLowerer<'a> {
                 let reified_arg_count = reified_args.len() + builtin_reified_args.len();
                 lowered_args.extend(reified_args);
                 lowered_args.extend(builtin_reified_args);
-                let lowered_callee = self.lower_callee(call_callee);
                 self.program.source_calls.push(ir::SourceCall {
                     function: self.function_id,
                     span: *span,
@@ -6579,97 +6587,147 @@ impl<'a> FunctionLowerer<'a> {
         self.lower_expr_with_expected(value, Some(&expected.ty))
     }
 
-    fn lower_call_args_with_spread(
+    fn lower_reordered_call_args_with_spread(
         &mut self,
-        args: &[core::CallArg],
+        source_args: &[core::CallArg],
+        ordered_args: &[&core::CallArg],
         expected: Option<&[Option<ExpectedArgSpec>]>,
     ) -> Vec<ir::Operand> {
-        let Some(expected) = expected else {
-            return args
-                .iter()
-                .map(|arg| self.lower_call_arg(arg, None))
-                .collect();
-        };
-        let Some(variadic_index) = expected
+        let ordered_positions = source_args
             .iter()
-            .position(|spec| spec.as_ref().is_some_and(|spec| spec.variadic))
-        else {
-            return args
+            .map(|source| {
+                ordered_args
+                    .iter()
+                    .position(|ordered| std::ptr::eq(source, *ordered))
+            })
+            .collect::<Vec<_>>();
+        let variadic_index = expected.and_then(|specs| {
+            specs
                 .iter()
-                .enumerate()
-                .map(|(index, arg)| {
-                    self.lower_call_arg(arg, expected.get(index).and_then(Option::as_ref))
-                })
-                .collect();
-        };
-        if !args
+                .position(|spec| spec.as_ref().is_some_and(|spec| spec.variadic))
+        });
+        let variadic_spec = variadic_index.and_then(|index| {
+            expected
+                .and_then(|specs| specs.get(index))
+                .and_then(Option::as_ref)
+                .cloned()
+        });
+        let variadic_sources = ordered_positions
             .iter()
-            .skip(variadic_index)
-            .any(|arg| matches!(arg.value, Expr::Spread { .. }))
-        {
-            return args
+            .enumerate()
+            .filter_map(|(source_index, position)| {
+                position
+                    .is_some_and(|position| {
+                        variadic_index.is_some_and(|variadic| position >= variadic)
+                    })
+                    .then_some(source_index)
+            })
+            .collect::<Vec<_>>();
+        let pack_variadic = variadic_index.is_some()
+            && variadic_sources
                 .iter()
-                .enumerate()
-                .map(|(index, arg)| {
-                    self.lower_call_arg(arg, expected.get(index).and_then(Option::as_ref))
-                })
-                .collect();
+                .any(|index| matches!(source_args[*index].value, Expr::Spread { .. }));
+        let variadic_is_named_value = variadic_sources.len() == 1
+            && source_args
+                .get(variadic_sources[0])
+                .is_some_and(|arg| arg.name.is_some());
+        let element_ty = variadic_spec
+            .as_ref()
+            .map(|spec| match &spec.ty {
+                ir::Type::Named { name, args } if name == "Vector" && args.len() == 1 => {
+                    args[0].clone()
+                }
+                _ => ir::Type::Unknown,
+            })
+            .unwrap_or(ir::Type::Unknown);
+        let element_spec = ExpectedArgSpec {
+            name: None,
+            ty: element_ty.clone(),
+            lazy: false,
+            variadic: false,
+            default: None,
+        };
+        let mut lowered_by_source = vec![None; source_args.len()];
+        let mut packed_variadic = None;
+
+        for (source_index, arg) in source_args.iter().enumerate() {
+            let position = ordered_positions[source_index];
+            let is_variadic = position.is_some_and(|position| {
+                variadic_index.is_some_and(|variadic| position >= variadic)
+            });
+            if pack_variadic && is_variadic {
+                let list = *packed_variadic.get_or_insert_with(|| {
+                    let list = self.add_temp(
+                        variadic_spec
+                            .as_ref()
+                            .map(|spec| spec.ty.clone())
+                            .unwrap_or_else(|| ir::Type::list(ir::Type::Unknown)),
+                    );
+                    self.push_statement(ir::Statement {
+                        span: Some(arg.span),
+                        kind: ir::StatementKind::Assign {
+                            target: ir::Place::Local(list),
+                            value: ir::RValue::List(Vec::new()),
+                        },
+                    });
+                    list
+                });
+                let (intrinsic, value, span) = match &arg.value {
+                    Expr::Spread { value, span, .. } => {
+                        (ir::Intrinsic::ListExtend, self.lower_expr(value), *span)
+                    }
+                    _ => (
+                        ir::Intrinsic::ListAppend,
+                        self.lower_expr_with_expected(&arg.value, Some(&element_ty)),
+                        arg.span,
+                    ),
+                };
+                self.push_statement(ir::Statement {
+                    span: Some(span),
+                    kind: ir::StatementKind::Assign {
+                        target: ir::Place::Local(list),
+                        value: ir::RValue::Call {
+                            callee: ir::Callee::Intrinsic(intrinsic),
+                            args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(list))), value],
+                            structural: false,
+                        },
+                    },
+                });
+                continue;
+            }
+
+            let spec = if is_variadic && !variadic_is_named_value {
+                Some(&element_spec)
+            } else {
+                position
+                    .and_then(|position| expected.and_then(|specs| specs.get(position)))
+                    .and_then(Option::as_ref)
+            };
+            lowered_by_source[source_index] = Some(self.lower_call_arg(arg, spec));
         }
 
         let mut out = Vec::new();
-        for (index, arg) in args.iter().take(variadic_index).enumerate() {
-            out.push(self.lower_call_arg(arg, expected.get(index).and_then(Option::as_ref)));
-        }
-
-        let variadic_spec = expected
-            .get(variadic_index)
-            .and_then(Option::as_ref)
-            .cloned()
-            .unwrap_or(ExpectedArgSpec {
-                name: None,
-                ty: ir::Type::list(ir::Type::Unknown),
-                lazy: false,
-                variadic: true,
-                default: None,
-            });
-        let element_ty = match &variadic_spec.ty {
-            ir::Type::Named { name, args } if name == "Vector" && args.len() == 1 => {
-                args[0].clone()
-            }
-            _ => ir::Type::Unknown,
-        };
-        let list = self.add_temp(variadic_spec.ty.clone());
-        self.push_statement(ir::Statement {
-            span: args.get(variadic_index).map(|arg| arg.span),
-            kind: ir::StatementKind::Assign {
-                target: ir::Place::Local(list),
-                value: ir::RValue::List(Vec::new()),
-            },
-        });
-        for arg in args.iter().skip(variadic_index) {
-            let (intrinsic, value, span) = match &arg.value {
-                Expr::Spread { value, span, .. } => {
-                    (ir::Intrinsic::ListExtend, self.lower_expr(value), *span)
+        let mut emitted_packed_variadic = false;
+        for (position, arg) in ordered_args.iter().enumerate() {
+            if pack_variadic && variadic_index.is_some_and(|variadic| position >= variadic) {
+                if !emitted_packed_variadic {
+                    let list =
+                        packed_variadic.expect("variadic source initialized its packed list");
+                    out.push(ir::Operand::Copy(Box::new(ir::Place::Local(list))));
+                    emitted_packed_variadic = true;
                 }
-                _ => (
-                    ir::Intrinsic::ListAppend,
-                    self.lower_expr_with_expected(&arg.value, Some(&element_ty)),
-                    arg.span,
-                ),
-            };
-            self.push_statement(ir::Statement {
-                span: Some(span),
-                kind: ir::StatementKind::Assign {
-                    target: ir::Place::Local(list),
-                    value: ir::RValue::Call {
-                        callee: ir::Callee::Intrinsic(intrinsic),
-                        args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(list))), value],
-                        structural: false,
-                    },
-                },
-            });
+                continue;
+            }
+            let source_index = source_args
+                .iter()
+                .position(|source| std::ptr::eq(source, *arg))
+                .expect("ordered call argument came from the source call");
+            out.push(
+                lowered_by_source[source_index]
+                    .clone()
+                    .expect("source call argument was lowered"),
+            );
         }
-        out.push(ir::Operand::Copy(Box::new(ir::Place::Local(list))));
         out
     }
 
@@ -6679,10 +6737,11 @@ impl<'a> FunctionLowerer<'a> {
         expected: &[Option<ExpectedArgSpec>],
     ) -> Option<(Vec<core::CallArg>, Vec<ir::Operand>)> {
         let specs = expected.iter().cloned().collect::<Option<Vec<_>>>()?;
-        let mut slots = vec![Vec::<&core::CallArg>::new(); specs.len()];
+        let mut slots = vec![Vec::<usize>::new(); specs.len()];
+        let mut assigned_specs = vec![None; args.len()];
         let mut positional_index = 0usize;
 
-        for arg in args {
+        for (source_index, arg) in args.iter().enumerate() {
             if let Some(name) = &arg.name {
                 let index = specs
                     .iter()
@@ -6690,7 +6749,8 @@ impl<'a> FunctionLowerer<'a> {
                 if !slots[index].is_empty() {
                     return None;
                 }
-                slots[index].push(arg);
+                slots[index].push(source_index);
+                assigned_specs[source_index] = Some(index);
                 continue;
             }
 
@@ -6703,9 +6763,11 @@ impl<'a> FunctionLowerer<'a> {
             if specs.last().is_some_and(|spec| spec.variadic)
                 && positional_index >= specs.len().saturating_sub(1)
             {
-                slots.last_mut()?.push(arg);
+                slots.last_mut()?.push(source_index);
+                assigned_specs[source_index] = Some(specs.len().saturating_sub(1));
             } else if positional_index < specs.len() {
-                slots[positional_index].push(arg);
+                slots[positional_index].push(source_index);
+                assigned_specs[source_index] = Some(positional_index);
                 positional_index += 1;
             } else {
                 return None;
@@ -6714,94 +6776,112 @@ impl<'a> FunctionLowerer<'a> {
 
         let ordered_args = slots
             .iter()
-            .flat_map(|slot| slot.iter().copied().cloned())
+            .flat_map(|slot| slot.iter().map(|index| args[*index].clone()))
             .collect::<Vec<_>>();
+        let variadic_index = specs.iter().position(|spec| spec.variadic);
+        let variadic_sources = variadic_index
+            .map(|index| slots[index].clone())
+            .unwrap_or_default();
+        let pack_variadic = variadic_index.is_some()
+            && variadic_sources
+                .iter()
+                .any(|index| matches!(args[*index].value, Expr::Spread { .. }));
+        let variadic_is_named_value =
+            variadic_sources.len() == 1 && args[variadic_sources[0]].name.is_some();
+        let element_ty = variadic_index
+            .map(|index| match &specs[index].ty {
+                ir::Type::Named { name, args } if name == "Vector" && args.len() == 1 => {
+                    args[0].clone()
+                }
+                _ => ir::Type::Unknown,
+            })
+            .unwrap_or(ir::Type::Unknown);
+        let element_spec = ExpectedArgSpec {
+            name: None,
+            ty: element_ty.clone(),
+            lazy: false,
+            variadic: false,
+            default: None,
+        };
+        let mut lowered_by_source = vec![None; args.len()];
+        let mut packed_variadic = None;
+
+        for (source_index, arg) in args.iter().enumerate() {
+            let spec_index = assigned_specs[source_index]?;
+            if Some(spec_index) == variadic_index && pack_variadic {
+                let list = *packed_variadic.get_or_insert_with(|| {
+                    let list = self.add_temp(specs[spec_index].ty.clone());
+                    self.push_statement(ir::Statement {
+                        span: Some(arg.span),
+                        kind: ir::StatementKind::Assign {
+                            target: ir::Place::Local(list),
+                            value: ir::RValue::List(Vec::new()),
+                        },
+                    });
+                    list
+                });
+                let (intrinsic, value, span) = match &arg.value {
+                    Expr::Spread { value, span, .. } => {
+                        (ir::Intrinsic::ListExtend, self.lower_expr(value), *span)
+                    }
+                    _ => (
+                        ir::Intrinsic::ListAppend,
+                        self.lower_expr_with_expected(&arg.value, Some(&element_ty)),
+                        arg.span,
+                    ),
+                };
+                self.push_statement(ir::Statement {
+                    span: Some(span),
+                    kind: ir::StatementKind::Assign {
+                        target: ir::Place::Local(list),
+                        value: ir::RValue::Call {
+                            callee: ir::Callee::Intrinsic(intrinsic),
+                            args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(list))), value],
+                            structural: false,
+                        },
+                    },
+                });
+                continue;
+            }
+            let spec = if Some(spec_index) == variadic_index && !variadic_is_named_value {
+                &element_spec
+            } else {
+                &specs[spec_index]
+            };
+            lowered_by_source[source_index] = Some(self.lower_call_arg(arg, Some(spec)));
+        }
+
         let mut lowered = Vec::new();
-        for (slot, spec) in slots.into_iter().zip(specs.iter()) {
+        for (index, (slot, spec)) in slots.into_iter().zip(specs.iter()).enumerate() {
             if spec.variadic {
-                self.lower_variadic_call_slot(&slot, spec, &mut lowered)?;
+                if slot.is_empty() {
+                    continue;
+                }
+                if pack_variadic {
+                    let list =
+                        packed_variadic.expect("variadic source initialized its packed list");
+                    lowered.push(ir::Operand::Copy(Box::new(ir::Place::Local(list))));
+                } else {
+                    lowered.extend(slot.into_iter().map(|source_index| {
+                        lowered_by_source[source_index]
+                            .clone()
+                            .expect("variadic source argument was lowered")
+                    }));
+                }
                 continue;
             }
             match slot.as_slice() {
-                [arg] => lowered.push(self.lower_call_arg(arg, Some(spec))),
+                [source_index] => lowered.push(
+                    lowered_by_source[*source_index]
+                        .clone()
+                        .expect("source call argument was lowered"),
+                ),
                 [] => lowered.push(ir::Operand::Const(spec.default.clone()?)),
                 _ => return None,
             }
+            debug_assert_ne!(Some(index), variadic_index);
         }
         Some((ordered_args, lowered))
-    }
-
-    fn lower_variadic_call_slot(
-        &mut self,
-        args: &[&core::CallArg],
-        spec: &ExpectedArgSpec,
-        out: &mut Vec<ir::Operand>,
-    ) -> Option<()> {
-        if args.is_empty() {
-            return Some(());
-        }
-        if args.len() == 1 && args[0].name.is_some() {
-            out.push(self.lower_call_arg(args[0], Some(spec)));
-            return Some(());
-        }
-
-        let element_ty = match &spec.ty {
-            ir::Type::Named { name, args } if name == "Vector" && args.len() == 1 => {
-                args[0].clone()
-            }
-            _ => ir::Type::Unknown,
-        };
-        if !args
-            .iter()
-            .any(|arg| matches!(arg.value, Expr::Spread { .. }))
-        {
-            let element_spec = ExpectedArgSpec {
-                name: None,
-                ty: element_ty,
-                lazy: false,
-                variadic: false,
-                default: None,
-            };
-            out.extend(
-                args.iter()
-                    .map(|arg| self.lower_call_arg(arg, Some(&element_spec))),
-            );
-            return Some(());
-        }
-
-        let list = self.add_temp(spec.ty.clone());
-        self.push_statement(ir::Statement {
-            span: args.first().map(|arg| arg.span),
-            kind: ir::StatementKind::Assign {
-                target: ir::Place::Local(list),
-                value: ir::RValue::List(Vec::new()),
-            },
-        });
-        for arg in args {
-            let (intrinsic, value, span) = match &arg.value {
-                Expr::Spread { value, span, .. } => {
-                    (ir::Intrinsic::ListExtend, self.lower_expr(value), *span)
-                }
-                _ => (
-                    ir::Intrinsic::ListAppend,
-                    self.lower_expr_with_expected(&arg.value, Some(&element_ty)),
-                    arg.span,
-                ),
-            };
-            self.push_statement(ir::Statement {
-                span: Some(span),
-                kind: ir::StatementKind::Assign {
-                    target: ir::Place::Local(list),
-                    value: ir::RValue::Call {
-                        callee: ir::Callee::Intrinsic(intrinsic),
-                        args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(list))), value],
-                        structural: false,
-                    },
-                },
-            });
-        }
-        out.push(ir::Operand::Copy(Box::new(ir::Place::Local(list))));
-        Some(())
     }
 
     fn lazy_forward_operand(&mut self, expr: &Expr) -> Option<ir::Operand> {
@@ -7264,35 +7344,54 @@ impl<'a> FunctionLowerer<'a> {
             return None;
         }
 
-        let spread_sources = fields
-            .iter()
-            .filter_map(|field| {
-                let Expr::Spread {
-                    value,
-                    override_existing,
-                    ..
-                } = &field.value
-                else {
-                    return None;
-                };
-                let source_fields = self.shape_equality_fields(&self.infer_expr_type(value))?;
-                Some((source_fields, self.lower_expr(value), *override_existing))
-            })
-            .collect::<Vec<_>>();
+        // Evaluate every supplied field and spread once in literal order. The
+        // target's declaration order only controls where those values are stored.
+        let mut explicit_fields = Vec::new();
+        let mut spread_sources = Vec::new();
+        for (source_index, field) in fields.iter().enumerate() {
+            if let Some(name) = &field.name {
+                let ty = expected_fields
+                    .iter()
+                    .find(|expected| expected.0 == *name)
+                    .map(|expected| &expected.1)?;
+                explicit_fields.push((
+                    source_index,
+                    name.clone(),
+                    self.lower_expr_with_expected(&field.value, Some(ty)),
+                ));
+                continue;
+            }
+            let Expr::Spread {
+                value,
+                override_existing,
+                ..
+            } = &field.value
+            else {
+                return None;
+            };
+            let source_fields = self.shape_equality_fields(&self.infer_expr_type(value))?;
+            spread_sources.push((
+                source_index,
+                source_fields,
+                self.lower_expr(value),
+                *override_existing,
+            ));
+        }
 
         let mut lowered_fields = Vec::new();
         for (name, ty, has_initializer, initializer) in expected_fields {
-            let value = if let Some(field) = fields.iter().find(|field| {
-                field
-                    .name
-                    .as_ref()
-                    .is_some_and(|field_name| field_name == &name)
-            }) {
-                self.lower_expr_with_expected(&field.value, Some(&ty))
-            } else if let Some((_, source, _)) = spread_sources
+            let value = if let Some((_, _, value)) = explicit_fields
                 .iter()
-                .rev()
-                .find(|(source_fields, _, _)| source_fields.iter().any(|field| field.name == name))
+                .find(|(_, field_name, _)| field_name == &name)
+            {
+                value.clone()
+            } else if let Some((_, _, source, _)) =
+                spread_sources
+                    .iter()
+                    .rev()
+                    .find(|(_, source_fields, _, _)| {
+                        source_fields.iter().any(|field| field.name == name)
+                    })
             {
                 ir::Operand::Copy(Box::new(ir::Place::Field {
                     base: Box::new(source.clone()),
@@ -7529,6 +7628,12 @@ impl<'a> FunctionLowerer<'a> {
                 if let Some(value) = self.lookup_value(name) {
                     return ir::Callee::Indirect(value);
                 }
+                if matches!(
+                    self.lookup_implicit_getter_type(name),
+                    Some(ir::Type::Function { .. })
+                ) {
+                    return ir::Callee::Indirect(self.lower_expr(callee));
+                }
                 if let Some(method) = self.lower_implicit_method_callee(name) {
                     return method;
                 }
@@ -7547,6 +7652,12 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         if let Expr::Member { receiver, name, .. } = callee {
+            let receiver_ty = self.infer_expr_type(receiver);
+            if self.is_getter_member_for_type(&receiver_ty, name)
+                && matches!(self.infer_expr_type(callee), ir::Type::Function { .. })
+            {
+                return ir::Callee::Indirect(self.lower_expr(callee));
+            }
             return ir::Callee::Method {
                 receiver: self.lower_expr(receiver),
                 method: name.clone(),

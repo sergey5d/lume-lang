@@ -1,3 +1,4 @@
+use super::support::spans_touch;
 use super::types::ParsedGenericClause;
 use super::*;
 
@@ -508,8 +509,32 @@ impl<'a> Parser<'a> {
             );
             span
         };
-        let (name, _) = self.parse_callable_name("expected function name")?;
+        let (name, name_span) = self.parse_callable_name("expected function name")?;
+        let generic_start = self.index;
         let generic_clause = self.parse_generic_clause()?;
+        let has_generic_clause = self.index > generic_start;
+        let head_end = if has_generic_clause {
+            self.previous_span()
+        } else {
+            name_span
+        };
+        if self.at(TokenKind::LParen) && !spans_touch(head_end, self.current_span()) {
+            self.diagnostics.push(Diagnostic::error(
+                "callable_parameter_spacing",
+                if has_generic_clause {
+                    format!(
+                        "function parameter list must immediately follow the generic parameter list for '{}'; remove the space before '('",
+                        name
+                    )
+                } else {
+                    format!(
+                        "function parameter list must immediately follow '{}'; remove the space before '('",
+                        name
+                    )
+                },
+                self.current_span(),
+            ));
+        }
         let params = self.parse_param_list()?;
         let return_type = if self.callable_body_starts_here() {
             None
@@ -920,7 +945,7 @@ impl<'a> Parser<'a> {
             );
             span
         };
-        let (name, _) = self.parse_callable_name("expected method name")?;
+        let (name, name_span) = self.parse_callable_name("expected method name")?;
         let generic_checkpoint = self.checkpoint();
         let candidate_generic_clause = self.parse_generic_clause()?;
         let generic_is_method_clause = !candidate_generic_clause.params.is_empty()
@@ -936,7 +961,35 @@ impl<'a> Parser<'a> {
                 self.restore(generic_checkpoint);
                 ParsedGenericClause::default()
             };
-        let getter = !self.at(TokenKind::LParen);
+        let has_generic_clause = self.index > generic_checkpoint.index;
+        let head_end = if has_generic_clause {
+            self.previous_span()
+        } else {
+            name_span
+        };
+        let params_touch_head =
+            self.at(TokenKind::LParen) && spans_touch(head_end, self.current_span());
+        let parenthesized_getter_return = self.at(TokenKind::LParen)
+            && !params_touch_head
+            && self.looks_like_parenthesized_getter_return(allow_signature_only);
+        let getter = !self.at(TokenKind::LParen) || parenthesized_getter_return;
+        if self.at(TokenKind::LParen) && !params_touch_head && !parenthesized_getter_return {
+            self.diagnostics.push(Diagnostic::error(
+                "callable_parameter_spacing",
+                if has_generic_clause {
+                    format!(
+                        "method parameter list must immediately follow the generic parameter list for '{}'; remove the space before '('",
+                        name
+                    )
+                } else {
+                    format!(
+                        "method parameter list must immediately follow '{}'; remove the space before '('",
+                        name
+                    )
+                },
+                self.current_span(),
+            ));
+        }
         let params = if getter {
             Vec::new()
         } else {
@@ -994,6 +1047,31 @@ impl<'a> Parser<'a> {
             body,
             span: start.cover(end),
         })
+    }
+
+    fn looks_like_parenthesized_getter_return(&self, allow_signature_only: bool) -> bool {
+        let mut parser = Parser {
+            tokens: self.tokens,
+            index: self.index,
+            diagnostics: Vec::new(),
+            allow_trailing_block_call: self.allow_trailing_block_call,
+        };
+        let Some(return_type) = parser.parse_type_ref() else {
+            return false;
+        };
+        if !parser.diagnostics.is_empty()
+            || matches!(return_type, TypeRef::Tuple { ref fields, .. } if fields.is_empty())
+        {
+            return false;
+        }
+        if matches!(parser.current_kind(), TokenKind::Eq | TokenKind::LBrace) {
+            return true;
+        }
+        allow_signature_only
+            && matches!(
+                parser.current_kind(),
+                TokenKind::Newline | TokenKind::RBrace | TokenKind::Eof
+            )
     }
 
     pub(super) fn parse_field_decl(

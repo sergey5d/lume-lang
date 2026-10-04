@@ -1,6 +1,8 @@
 # EXPECT:
 # Ada Ada
 # 5
+# 2 3
+# 42
 
 interface Named {
     def label Str
@@ -18,12 +20,21 @@ shape Point {
     y Int
 
     def total Int = this.x + this.y
+    def coordinates (Int, Int) = (this.x, this.y)
+}
+
+class Factory {
+    def creator fn() Int = () => 42
 }
 
 def main() Unit {
     item Item = Item("Ada")
     point Point = Point(2, 3)
+    factory Factory = Factory()
+    coordinates = point.coordinates
 
     println(item.repeated)
     println(point.total)
+    println(coordinates[0], coordinates[1])
+    println(factory.creator())
 }

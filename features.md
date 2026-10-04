@@ -76,7 +76,9 @@ Related syntax question:
 
 Current getters reject direct writes to class or shape fields, but the compiler
 does not yet prove that methods called from a getter are read-only. Add effect
-checking before treating getters as transitively read-only.
+checking before treating getters as transitively read-only. This analysis must
+follow aliases, called methods, callbacks, interface dispatch, and foreign
+calls; it is a compiler subsystem rather than a scan for assignment syntax.
 
 Proposed model:
 - infer a small effect set for each callable, initially `read`, `write`, `io`,
@@ -98,9 +100,9 @@ Proposed model:
 - report the shortest call chain from a getter to the disallowed effect, rather
   than only flagging the outer call
 
-Possible explicit contract syntax should be settled separately. The checker can
-start with inference and reserve annotations or an `effects` clause for public
-API guarantees once real examples show which spelling is clearest.
+Keep inferred effect information internal initially. Possible explicit contract
+syntax should be settled separately; reserve annotations or an `effects` clause
+for public API guarantees once real examples show which spelling is clearest.
 
 ### 6. Function Type Variance
 

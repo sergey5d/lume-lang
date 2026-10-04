@@ -2120,6 +2120,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         indent,
                         bindings,
                         binding_types,
+                        used_locals,
                     )?;
                 }
                 core::Stmt::Binding(binding)
@@ -2540,6 +2541,7 @@ impl<'a> SourceBodyEmitter<'a> {
         indent: &str,
         bindings: &mut HashMap<String, String>,
         binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
     ) -> Option<()> {
         if statement.clauses.is_empty() {
             return self.emit_irrefutable_pattern_binding(
@@ -2550,6 +2552,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 indent,
                 bindings,
                 binding_types,
+                used_locals,
             );
         }
 
@@ -2562,6 +2565,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 indent,
                 bindings,
                 binding_types,
+                used_locals,
             )?;
         }
         Some(())
@@ -2577,16 +2581,35 @@ impl<'a> SourceBodyEmitter<'a> {
         indent: &str,
         bindings: &mut HashMap<String, String>,
         binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
     ) -> Option<()> {
-        let value_ty = self.expr_type_with_binding_types(value, bindings, binding_types)?;
+        let value_ty = self
+            .expr_type_with_binding_types(value, bindings, binding_types)
+            .or_else(|| self.pattern_declared_type(pattern))?;
         let temp = self.synthetic_name("pattern", "pattern", source_id);
         out.push_str(indent);
         out.push_str(&self.names.value_type(&value_ty));
         out.push(' ');
         out.push_str(&temp);
-        out.push_str(" = ");
-        out.push_str(&self.emit_expr_against(value, bindings, &value_ty)?);
-        out.push_str(";\n");
+        if matches!(value, core::Expr::If { .. }) {
+            out.push_str(" = ");
+            out.push_str(&java_default_value(&value_ty));
+            out.push_str(";\n");
+            self.emit_assigning_expr(
+                out,
+                &temp,
+                &value_ty,
+                value,
+                indent,
+                bindings,
+                binding_types,
+                used_locals,
+            )?;
+        } else {
+            out.push_str(" = ");
+            out.push_str(&self.emit_expr_against(value, bindings, &value_ty)?);
+            out.push_str(";\n");
+        }
 
         let matched = self.match_case_pattern(
             pattern,
@@ -2611,6 +2634,29 @@ impl<'a> SourceBodyEmitter<'a> {
         *bindings = matched.bindings;
         *binding_types = matched.binding_types;
         Some(())
+    }
+
+    fn pattern_declared_type(&self, pattern: &ast::Pattern) -> Option<ir::Type> {
+        match pattern {
+            ast::Pattern::Alias { inner, .. } | ast::Pattern::Extract { inner, .. } => {
+                self.pattern_declared_type(inner)
+            }
+            ast::Pattern::Type { target, .. } => Some(type_ref_to_ir(target)),
+            ast::Pattern::Tuple { elements, .. } => elements
+                .iter()
+                .map(|element| self.pattern_declared_type(element))
+                .collect::<Option<Vec<_>>>()
+                .map(ir::Type::Tuple),
+            ast::Pattern::Record { path, .. } | ast::Pattern::Constructor { path, .. }
+                if !path.is_empty() =>
+            {
+                Some(ir::Type::Named {
+                    name: path.join("."),
+                    args: Vec::new(),
+                })
+            }
+            _ => None,
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4575,11 +4621,20 @@ impl<'a> SourceBodyEmitter<'a> {
                 let mut bindings = parent_bindings.clone();
                 let mut binding_types = parent_binding_types.clone();
                 if let Some(name) = name.as_ref().filter(|name| name.as_str() != "_") {
-                    bindings.insert(name.clone(), format!("(({java_type}) {value})"));
-                    binding_types.insert(name.clone(), target);
+                    let binding = if target == *value_ty {
+                        value.to_string()
+                    } else {
+                        format!("(({java_type}) {value})")
+                    };
+                    bindings.insert(name.clone(), binding);
+                    binding_types.insert(name.clone(), target.clone());
                 }
                 Some(MatchedCase {
-                    condition: format!("{value} instanceof {raw_java_type}"),
+                    condition: if target == *value_ty {
+                        "true".to_string()
+                    } else {
+                        format!("{value} instanceof {raw_java_type}")
+                    },
                     bindings,
                     binding_types,
                 })
@@ -4718,6 +4773,43 @@ impl<'a> SourceBodyEmitter<'a> {
                     binding_types,
                 })
             }
+            ast::Pattern::Tuple { elements, .. } => {
+                let ir::Type::Tuple(items) = value_ty else {
+                    return None;
+                };
+                if elements.len() != items.len() {
+                    return None;
+                }
+                let mut matched = MatchedCase {
+                    condition: "true".to_string(),
+                    bindings: parent_bindings.clone(),
+                    binding_types: parent_binding_types.clone(),
+                };
+                for (tuple_index, (element, item_ty)) in
+                    elements.iter().zip(items.iter()).enumerate()
+                {
+                    let accessor = tuple_accessor_name(&format!("_{}", tuple_index + 1))?;
+                    let access = format!("({value}).{accessor}()");
+                    let nested = self.match_case_pattern(
+                        element,
+                        &access,
+                        item_ty,
+                        index + tuple_index + 1,
+                        &matched.bindings,
+                        &matched.binding_types,
+                    )?;
+                    if nested.condition != "true" {
+                        matched.condition = if matched.condition == "true" {
+                            nested.condition
+                        } else {
+                            format!("({}) && ({})", matched.condition, nested.condition)
+                        };
+                    }
+                    matched.bindings = nested.bindings;
+                    matched.binding_types = nested.binding_types;
+                }
+                Some(matched)
+            }
             ast::Pattern::List { elements, rest, .. } => self.list_pattern_match(
                 elements,
                 rest.as_ref(),
@@ -4727,7 +4819,6 @@ impl<'a> SourceBodyEmitter<'a> {
                 parent_bindings,
                 parent_binding_types,
             ),
-            _ => None,
         }
     }
 
@@ -5607,6 +5698,13 @@ impl<'a> SourceBodyEmitter<'a> {
                     if emitter.enum_case(owner_name, name).is_some() {
                         return emitter.emit_enum_case_call(owner_name, name, &[]);
                     }
+                }
+                if let Some(receiver_ty) = self.expr_type(receiver, bindings)
+                    && JavaIrSupport::new(self.bundle, self.function, self.names)
+                        .type_has_getter_for_receiver(&receiver_ty, name)
+                {
+                    let receiver = self.emit_expr(receiver, bindings)?;
+                    return Some(format!("{receiver}.{}()", java_member_name(name)));
                 }
                 if matches!(
                     self.expr_type(expr, bindings),
@@ -6550,6 +6648,152 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
         expected: &ir::Type,
     ) -> Option<String> {
+        if let Some(wrapped) =
+            self.emit_reordered_record_literal(fields, values, bindings, expected)
+        {
+            return Some(wrapped);
+        }
+        self.emit_record_literal_against_direct(fields, values, bindings, expected)
+    }
+
+    fn emit_reordered_record_literal(
+        &self,
+        fields: &[core::CallArg],
+        values: &[core::Expr],
+        bindings: &HashMap<String, String>,
+        expected: &ir::Type,
+    ) -> Option<String> {
+        if fields.is_empty() || !values.is_empty() {
+            return None;
+        }
+        let target_fields = match expected {
+            ir::Type::Record(fields) => fields
+                .iter()
+                .map(|field| (field.name.clone(), field.ty.clone()))
+                .collect::<Vec<_>>(),
+            ir::Type::Named { name, args } => {
+                let type_def = self.bundle.ir.types.iter().find(|ty| {
+                    ty.name == *name
+                        && matches!(ty.kind, TypeKind::Class | TypeKind::Record)
+                        && !(ty.kind == TypeKind::Class
+                            && ty.methods.iter().copied().any(|id| {
+                                self.bundle
+                                    .ir
+                                    .function(id)
+                                    .is_some_and(|function| function.name == "new")
+                            }))
+                })?;
+                let substitution = type_def
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                type_def
+                    .fields
+                    .iter()
+                    .filter(|field| {
+                        type_def.kind != TypeKind::Class
+                            || field.visibility == ast::Visibility::Default
+                    })
+                    .map(|field| {
+                        (
+                            field.name.clone(),
+                            substitute_java_emit_type(&field.ty, &substitution),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            }
+            _ => return None,
+        };
+        let source_positions = fields
+            .iter()
+            .filter_map(|field| {
+                field
+                    .name
+                    .as_ref()
+                    .and_then(|name| target_fields.iter().position(|(target, _)| target == name))
+            })
+            .collect::<Vec<_>>();
+        let has_spread = fields
+            .iter()
+            .any(|field| matches!(field.value, core::Expr::Spread { .. }));
+        if !has_spread && source_positions.windows(2).all(|pair| pair[0] < pair[1]) {
+            return None;
+        }
+
+        let mut rewritten_bindings = bindings.clone();
+        let mut rewritten_fields = fields.to_vec();
+        let mut preamble = Vec::new();
+        for (index, field) in fields.iter().enumerate() {
+            let source_id = field.span.start;
+            let argument_name = self.synthetic_name("recordArgument", "argument", source_id);
+            match &field.value {
+                core::Expr::Spread {
+                    value,
+                    override_existing,
+                    span,
+                } => {
+                    let source_ty = self.expr_type(value, bindings)?;
+                    preamble.push(format!(
+                        "{} {argument_name} = {};",
+                        self.names.value_type(&source_ty),
+                        self.emit_expr_against(value, bindings, &source_ty)?
+                    ));
+                    rewritten_fields[index].value = core::Expr::Spread {
+                        value: Box::new(core::Expr::Identifier {
+                            name: argument_name.clone(),
+                            span: value.span(),
+                        }),
+                        override_existing: *override_existing,
+                        span: *span,
+                    };
+                }
+                value => {
+                    let name = field.name.as_ref()?;
+                    let field_ty = target_fields
+                        .iter()
+                        .find(|(target, _)| target == name)
+                        .map(|(_, ty)| ty)?;
+                    preamble.push(format!(
+                        "{} {argument_name} = {};",
+                        self.names.value_type(field_ty),
+                        self.emit_expr_against(value, bindings, field_ty)?
+                    ));
+                    rewritten_fields[index].value = core::Expr::Identifier {
+                        name: argument_name.clone(),
+                        span: value.span(),
+                    };
+                }
+            }
+            rewritten_bindings.insert(argument_name.clone(), argument_name);
+        }
+        let construction = self.emit_record_literal_against_direct(
+            &rewritten_fields,
+            values,
+            &rewritten_bindings,
+            expected,
+        )?;
+        let mut body = preamble.join(" ");
+        if !body.is_empty() {
+            body.push(' ');
+        }
+        body.push_str("return ");
+        body.push_str(&construction);
+        body.push(';');
+        Some(format!(
+            "((java.util.function.Supplier<{}>) () -> {{ {body} }}).get()",
+            self.names.value_type(expected)
+        ))
+    }
+
+    fn emit_record_literal_against_direct(
+        &self,
+        fields: &[core::CallArg],
+        values: &[core::Expr],
+        bindings: &HashMap<String, String>,
+        expected: &ir::Type,
+    ) -> Option<String> {
         if let ir::Type::Record(expected_fields) = expected {
             let mut parts = Vec::with_capacity(expected_fields.len() * 2);
             if fields.is_empty() && !values.is_empty() {
@@ -6736,6 +6980,190 @@ impl<'a> SourceBodyEmitter<'a> {
         span: crate::source::Span,
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
+        if let core::Expr::Identifier { name, .. } = callee
+            && let [
+                core::CallArg {
+                    value: core::Expr::RecordLiteral { fields, values, .. },
+                    ..
+                },
+            ] = args
+            && values.is_empty()
+            && fields.iter().all(|field| field.name.is_some())
+            && self.bundle.ir.types.iter().any(|ty| {
+                ty.name == *name
+                    && ty.kind == TypeKind::Class
+                    && ty.methods.iter().copied().any(|id| {
+                        self.bundle
+                            .ir
+                            .function(id)
+                            .is_some_and(|function| function.name == "new")
+                    })
+            })
+        {
+            return self.emit_call(callee, fields, span, bindings);
+        }
+        if let Some(wrapped) = self.emit_reordered_call(callee, args, span, bindings) {
+            return Some(wrapped);
+        }
+        self.emit_call_direct(callee, args, span, bindings)
+    }
+
+    fn emit_reordered_call(
+        &self,
+        callee: &core::Expr,
+        args: &[core::CallArg],
+        span: crate::source::Span,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let call = self.source_call(span)?;
+        if args.len() != call.ordered_arg_spans.len() {
+            return None;
+        }
+        let source_spans = args.iter().map(|arg| arg.span).collect::<Vec<_>>();
+        if source_spans == call.ordered_arg_spans {
+            return None;
+        }
+        let ordered_positions = source_spans
+            .iter()
+            .map(|source| {
+                call.ordered_arg_spans
+                    .iter()
+                    .position(|ordered| ordered == source)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let variadic_index = call
+            .param_specs
+            .iter()
+            .position(|spec| spec.as_ref().is_some_and(|spec| spec.variadic));
+        let source_specs = ordered_positions
+            .iter()
+            .map(|position| {
+                call.param_specs
+                    .get(*position)
+                    .or_else(|| {
+                        variadic_index
+                            .filter(|variadic| position >= variadic)
+                            .and_then(|variadic| call.param_specs.get(variadic))
+                    })?
+                    .as_ref()
+            })
+            .collect::<Option<Vec<_>>>()?;
+
+        let mut rewritten_bindings = bindings.clone();
+        let mut rewritten_args = args.to_vec();
+        let mut preamble = Vec::new();
+        let rewritten_callee = if let core::Expr::Member {
+            receiver,
+            name,
+            span: member_span,
+        } = callee
+        {
+            let receiver_ty = self.expr_type(receiver, bindings)?;
+            let receiver_name = self.synthetic_name("callReceiver", "receiver", span.start);
+            preamble.push(format!(
+                "{} {receiver_name} = {};",
+                self.names.value_type(&receiver_ty),
+                self.emit_receiver_expr(receiver, bindings)?
+            ));
+            rewritten_bindings.insert(receiver_name.clone(), receiver_name.clone());
+            core::Expr::Member {
+                receiver: Box::new(core::Expr::Identifier {
+                    name: receiver_name,
+                    span: receiver.span(),
+                }),
+                name: name.clone(),
+                span: *member_span,
+            }
+        } else {
+            callee.clone()
+        };
+
+        for (index, (arg, spec)) in args.iter().zip(source_specs).enumerate() {
+            // By-name expressions are evaluated by the callee, not while the
+            // call site prepares its eager arguments.
+            if spec.lazy {
+                continue;
+            }
+            let argument_name = self.synthetic_name("callArgument", "argument", arg.span.start);
+            let (value_expr, argument_ty) = if spec.variadic
+                && arg.name.is_none()
+                && !matches!(arg.value, core::Expr::Spread { .. })
+            {
+                (&arg.value, variadic_element_type(&spec.ty)?.clone())
+            } else if let core::Expr::Spread { value, .. } = &arg.value {
+                (value.as_ref(), spec.ty.clone())
+            } else {
+                (&arg.value, spec.ty.clone())
+            };
+            let value = self.emit_expr_against(value_expr, bindings, &argument_ty)?;
+            preamble.push(format!(
+                "{} {argument_name} = {value};",
+                self.names.value_type(&argument_ty)
+            ));
+            rewritten_bindings.insert(argument_name.clone(), argument_name.clone());
+            let identifier = core::Expr::Identifier {
+                name: argument_name,
+                span: value_expr.span(),
+            };
+            rewritten_args[index].value = match &arg.value {
+                core::Expr::Spread {
+                    override_existing,
+                    span,
+                    ..
+                } => core::Expr::Spread {
+                    value: Box::new(identifier),
+                    override_existing: *override_existing,
+                    span: *span,
+                },
+                _ => identifier,
+            };
+        }
+
+        let call = self.emit_call_direct(
+            &rewritten_callee,
+            &rewritten_args,
+            span,
+            &rewritten_bindings,
+        )?;
+        let result_ty = self.source_expr_type(span)?;
+        let mut body = preamble.join(" ");
+        if !body.is_empty() {
+            body.push(' ');
+        }
+        if matches!(result_ty, ir::Type::Unit)
+            || matches!(&result_ty, ir::Type::Named { name, args } if name == "Unit" && args.is_empty())
+        {
+            body.push_str(&call);
+            body.push_str("; return lume.core.LumeUnit.INSTANCE;");
+        } else {
+            body.push_str("return ");
+            body.push_str(&call);
+            body.push(';');
+        }
+        Some(format!(
+            "((java.util.function.Supplier<{}>) () -> {{ {body} }}).get()",
+            self.names.value_type(&result_ty)
+        ))
+    }
+
+    fn emit_call_direct(
+        &self,
+        callee: &core::Expr,
+        args: &[core::CallArg],
+        span: crate::source::Span,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        if self
+            .source_call(span)
+            .is_some_and(|call| matches!(call.callee, ir::Callee::Indirect(_)))
+        {
+            let target = self.emit_expr(callee, bindings)?;
+            let args = args
+                .iter()
+                .map(|arg| self.emit_call_arg(arg, bindings))
+                .collect::<Option<Vec<_>>>()?;
+            return emit_functional_call(&target, &args);
+        }
         match callee {
             core::Expr::Identifier {
                 name: callee_name, ..
@@ -6748,12 +7176,17 @@ impl<'a> SourceBodyEmitter<'a> {
             ) && matches!(
                 self.source_expr_type(span),
                 Some(ir::Type::Named { ref name, .. }) if name == callee_name
-            ) && self
-                .bundle
-                .ir
-                .types
-                .iter()
-                .any(|ty| ty.name == *callee_name && ty.kind == TypeKind::Record) =>
+            ) && self.bundle.ir.types.iter().any(|ty| {
+                ty.name == *callee_name
+                    && (ty.kind == TypeKind::Record
+                        || (ty.kind == TypeKind::Class
+                            && !ty.methods.iter().copied().any(|id| {
+                                self.bundle
+                                    .ir
+                                    .function(id)
+                                    .is_some_and(|function| function.name == "new")
+                            })))
+            }) =>
             {
                 let [
                     core::CallArg {
@@ -6777,7 +7210,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     )
                 }) =>
             {
-                self.emit_call(receiver, args, span, bindings)
+                self.emit_call_direct(receiver, args, span, bindings)
             }
             core::Expr::Identifier { name, .. } if name == "Any" && args.len() == 1 => {
                 self.emit_call_arg(&args[0], bindings)

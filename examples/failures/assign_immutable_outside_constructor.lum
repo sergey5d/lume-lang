@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# assign_immutable at .*: cannot reassign immutable field 'count'
+# assign_immutable at .*: cannot reassign read-only field 'count'
 
 class Counter {
     private count Int

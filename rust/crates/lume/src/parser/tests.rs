@@ -552,12 +552,12 @@ def run(rows Vector[(Int, Int)]) Unit {
             CallableBody::Block(block) => match &block.statements[0] {
                 Stmt::For(for_stmt) => {
                     assert_eq!(for_stmt.bindings.len(), 1);
-                    assert_eq!(
-                        for_stmt.bindings[0].destructure,
-                        Some(DestructureKind::Tuple)
-                    );
-                    assert_eq!(for_stmt.bindings[0].bindings[0].name, "value");
-                    assert_eq!(for_stmt.bindings[0].bindings[1].name, "idx");
+                    assert_eq!(for_stmt.bindings[0].destructure, None);
+                    assert!(for_stmt.bindings[0].bindings.is_empty());
+                    assert!(matches!(
+                        &for_stmt.bindings[0].pattern,
+                        Some(Pattern::Tuple { elements, .. }) if elements.len() == 2
+                    ));
                 }
                 other => panic!("expected for stmt, got {other:#?}"),
             },
@@ -586,12 +586,13 @@ def run(users Vector[User]) Unit {
             CallableBody::Block(block) => match &block.statements[0] {
                 Stmt::For(for_stmt) => {
                     assert_eq!(for_stmt.bindings.len(), 1);
-                    assert_eq!(
-                        for_stmt.bindings[0].destructure,
-                        Some(DestructureKind::Record)
-                    );
-                    assert_eq!(for_stmt.bindings[0].bindings[0].name, "name");
-                    assert_eq!(for_stmt.bindings[0].bindings[1].name, "age");
+                    assert_eq!(for_stmt.bindings[0].destructure, None);
+                    assert!(for_stmt.bindings[0].bindings.is_empty());
+                    assert!(matches!(
+                        &for_stmt.bindings[0].pattern,
+                        Some(Pattern::Record { path, fields, .. })
+                            if path.is_empty() && fields.len() == 2
+                    ));
                 }
                 other => panic!("expected for stmt, got {other:#?}"),
             },
@@ -813,10 +814,17 @@ def run(pairs Vector[(Int, Int)], users Vector[User]) [Int] {
                         assert_eq!(bindings.len(), 5);
                         assert_eq!(bindings[0].bindings[0].name, "pair");
                         assert_eq!(bindings[0].destructure, None);
-                        assert_eq!(bindings[1].destructure, Some(DestructureKind::Tuple));
+                        assert!(matches!(
+                            &bindings[1].pattern,
+                            Some(Pattern::Tuple { elements, .. }) if elements.len() == 2
+                        ));
                         assert_eq!(bindings[2].bindings[0].name, "sum");
                         assert_eq!(bindings[3].bindings[0].name, "user");
-                        assert_eq!(bindings[4].destructure, Some(DestructureKind::Record));
+                        assert!(matches!(
+                            &bindings[4].pattern,
+                            Some(Pattern::Record { path, fields, .. })
+                                if path.is_empty() && fields.len() == 2
+                        ));
                     }
                     other => panic!("expected for-yield expression, got {other:#?}"),
                 },
@@ -849,9 +857,16 @@ def run(pairs Vector[(Int, Int)], users Vector[User]) [Int] {
                 Stmt::Binding(binding) => match &binding.values[0] {
                     Expr::ForYield { bindings, .. } => {
                         assert_eq!(bindings.len(), 2);
-                        assert_eq!(bindings[0].destructure, Some(DestructureKind::Tuple));
+                        assert!(matches!(
+                            &bindings[0].pattern,
+                            Some(Pattern::Tuple { elements, .. }) if elements.len() == 2
+                        ));
                         assert!(bindings[0].iterable.is_some());
-                        assert_eq!(bindings[1].destructure, Some(DestructureKind::Record));
+                        assert!(matches!(
+                            &bindings[1].pattern,
+                            Some(Pattern::Record { path, fields, .. })
+                                if path.is_empty() && fields.len() == 1
+                        ));
                         assert!(bindings[1].iterable.is_some());
                     }
                     other => panic!("expected for-yield expression, got {other:#?}"),
@@ -2260,15 +2275,17 @@ def run(box Box) Int {
     match &program.items[0] {
         Item::Function(function) => match &function.body {
             CallableBody::Block(block) => match &block.statements[0] {
-                Stmt::Binding(binding) => {
-                    assert_eq!(binding.destructure, Some(DestructureKind::Record));
-                    assert_eq!(binding.bindings.len(), 2);
-                    assert_eq!(binding.bindings[0].name, "value");
-                    assert_eq!(binding.bindings[0].field_name.as_deref(), Some("value"));
-                    assert_eq!(binding.bindings[1].name, "label");
-                    assert_eq!(binding.bindings[1].field_name.as_deref(), Some("label"));
+                Stmt::PatternBinding(binding) => {
+                    assert!(matches!(
+                        &binding.pattern,
+                        Pattern::Record { path, fields, .. }
+                            if path.is_empty()
+                                && fields.len() == 2
+                                && matches!(&fields[0].pattern, Pattern::Type { name: Some(name), .. } if name == "value")
+                                && matches!(&fields[1].pattern, Pattern::Type { name: Some(name), .. } if name == "label")
+                    ));
                 }
-                other => panic!("expected binding, got {other:#?}"),
+                other => panic!("expected pattern binding, got {other:#?}"),
             },
             other => panic!("expected block body, got {other:#?}"),
         },
@@ -2291,18 +2308,26 @@ def run(user User) Str {
     match &program.items[0] {
         Item::Function(function) => match &function.body {
             CallableBody::Block(block) => match &block.statements[0] {
-                Stmt::Binding(binding) => {
-                    assert_eq!(binding.destructure, Some(DestructureKind::Record));
-                    assert_eq!(binding.bindings.len(), 3);
-                    assert_eq!(binding.bindings[0].name, "name");
-                    assert_eq!(binding.bindings[0].field_name.as_deref(), Some("name"));
-                    assert_eq!(binding.bindings[1].name, "loc");
-                    assert_eq!(binding.bindings[1].field_name.as_deref(), Some("location"));
-                    assert!(binding.bindings[1].ty.is_some());
-                    assert_eq!(binding.bindings[2].name, "skipped");
-                    assert_eq!(binding.bindings[2].field_name.as_deref(), Some("country"));
+                Stmt::PatternBinding(binding) => {
+                    let Pattern::Record { path, fields, .. } = &binding.pattern else {
+                        panic!("expected record pattern, got {:#?}", binding.pattern);
+                    };
+                    assert!(path.is_empty());
+                    assert_eq!(fields.len(), 3);
+                    assert!(matches!(
+                        &fields[0].pattern,
+                        Pattern::Binding { name, .. } if name == "name"
+                    ));
+                    assert!(matches!(
+                        &fields[1].pattern,
+                        Pattern::Type { name: Some(name), .. } if name == "loc"
+                    ));
+                    assert!(matches!(
+                        &fields[2].pattern,
+                        Pattern::Binding { name, .. } if name == "skipped"
+                    ));
                 }
-                other => panic!("expected binding, got {other:#?}"),
+                other => panic!("expected pattern binding, got {other:#?}"),
             },
             other => panic!("expected block body, got {other:#?}"),
         },
@@ -3060,6 +3085,43 @@ def run(users [User]) [Str] =
         let result = parse(source);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
+}
+
+#[test]
+fn composes_tuple_patterns_with_aliases_and_refutable_elements() {
+    let result = parse(
+        r#"
+def run(pair (Int?, Str), pairs [(Int, Int)]) [Int] {
+    let (left, right) as whole = (10, 20)
+    let (Some(value), label) = pair else return []
+    return for {
+        let (x, y) as item <- pairs
+    } yield x + y + item[0] + value + label.size
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function");
+    };
+    let CallableBody::Block(block) = &function.body else {
+        panic!("expected block body");
+    };
+    assert!(matches!(
+        &block.statements[0],
+        Stmt::PatternBinding(PatternBindingStmt {
+            pattern: Pattern::Alias { inner, name, .. },
+            ..
+        }) if name == "whole" && matches!(inner.as_ref(), Pattern::Tuple { .. })
+    ));
+    assert!(matches!(
+        &block.statements[1],
+        Stmt::LetElse(LetElseStmt {
+            pattern: Pattern::Tuple { elements, .. },
+            ..
+        }) if matches!(&elements[0], Pattern::Constructor { .. })
+    ));
 }
 
 #[test]
@@ -3826,24 +3888,43 @@ def main() Unit {
 }
 
 #[test]
-fn rejects_standalone_lambda_body_with_multiple_statements_without_block() {
-    let result = parse(
+fn lambda_indentation_does_not_extend_its_body() {
+    for source in [
         r#"
-def main() Unit {
-    mapper = x =>
-        next = x + 1
-        next * 2
+def calculate() Int {
+    mapper fn(Int) Int = value =>
+        value + 1
+    next = 2
+    mapper(next)
 }
 "#,
-    );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "lambda_body_requires_braces"
-                && diag.message.contains("one statement or expression")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
+        r#"
+def calculate() Int {
+    mapper fn(Int) Int = value =>
+        value + 1
+        next = 2
+    mapper(next)
+}
+"#,
+    ] {
+        let result = parse(source);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let program = result.program.expect("program");
+        let Item::Function(function) = &program.items[0] else {
+            panic!("expected function");
+        };
+        let CallableBody::Block(block) = &function.body else {
+            panic!("expected block body");
+        };
+        assert_eq!(block.statements.len(), 3);
+        assert!(matches!(
+            &block.statements[0],
+            Stmt::Binding(binding)
+                if matches!(&binding.values[0], Expr::Lambda { body: LambdaBody::Expr(_), .. })
+        ));
+        assert!(matches!(&block.statements[1], Stmt::Binding(_)));
+        assert!(matches!(&block.statements[2], Stmt::Expr(_)));
+    }
 }
 
 #[test]
@@ -5582,6 +5663,84 @@ class Box {
         getters[1].return_type,
         Some(TypeRef::Named { ref name, ref args, .. }) if name == "Vector" && args.len() == 1
     ));
+}
+
+#[test]
+fn distinguishes_methods_from_parenthesized_getter_return_types_by_spacing() {
+    let result = parse(
+        r#"
+interface Positioned {
+    def coordinates (Int, Int)
+}
+
+class Accessors {
+    def coordinates() (Int, Int) = (1, 2)
+    def coordinateValue (Int, Int) = (1, 2)
+    def values() [Int] = [1]
+    def valueList [Int] = [1]
+    def callback() fn() Int = () => 41
+    def callbackValue fn() Int = () => 42
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+
+    let Item::Type(interface) = &program.items[0] else {
+        panic!("expected interface");
+    };
+    let TypeMember::Method(interface_getter) = &interface.members[0] else {
+        panic!("expected interface getter");
+    };
+    assert!(interface_getter.getter);
+    assert!(matches!(
+        interface_getter.return_type,
+        Some(TypeRef::Tuple { ref fields, .. }) if fields.len() == 2
+    ));
+
+    let Item::Type(class) = &program.items[1] else {
+        panic!("expected class");
+    };
+    let methods = class
+        .members
+        .iter()
+        .filter_map(|member| match member {
+            TypeMember::Method(method) => Some(method),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(methods.len(), 6);
+    assert!(!methods[0].getter);
+    assert!(methods[1].getter);
+    assert!(!methods[2].getter);
+    assert!(methods[3].getter);
+    assert!(!methods[4].getter);
+    assert!(methods[5].getter);
+}
+
+#[test]
+fn rejects_whitespace_before_function_and_method_parameter_lists() {
+    let result = parse(
+        r#"
+def calculate (input Int) Int = input
+def identity[T] (input T) T = input
+
+class Invalid {
+    def calculate (input Int) Int = input
+    def convert[T] () T = panic("missing")
+}
+"#,
+    );
+    let spacing = result
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "callable_parameter_spacing")
+        .collect::<Vec<_>>();
+    assert_eq!(spacing.len(), 4, "{:#?}", result.diagnostics);
+    assert!(spacing[0].message.contains("function parameter list"));
+    assert!(spacing[1].message.contains("generic parameter list"));
+    assert!(spacing[2].message.contains("method parameter list"));
+    assert!(spacing[3].message.contains("generic parameter list"));
 }
 
 #[test]

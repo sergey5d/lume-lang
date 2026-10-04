@@ -18,8 +18,9 @@ Lume separates the main concepts deliberately:
 
 - `class` is the nominal runtime type: it owns identity, fields, visibility, and
   class construction.
-- `shape` is structural data: visible read-only fields that can be matched,
-  passed, and converted by field compatibility.
+- `shape` is structural data with visible, shallowly read-only field bindings:
+  fields cannot be replaced, while referenced values retain their own
+  mutability rules.
 - `type Name = class ... | shape ... | object ...` declares a closed union of
   alternatives, while a standalone named `object` declares one shared object
   value with optional fields and methods. `object { ... }` creates an anonymous
@@ -55,6 +56,7 @@ Run the CLI from the repository root:
 
 ```bash
 cargo run --manifest-path rust/Cargo.toml -p lume -- parse examples/constructors.lum
+cargo run --manifest-path rust/Cargo.toml -p lume -- fmt examples/constructors.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- check examples/random_code/asset_prices.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- run examples/range.lum
 ```

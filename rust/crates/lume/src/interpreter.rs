@@ -6519,6 +6519,27 @@ mod tests {
     }
 
     #[test]
+    fn runs_function_values_returned_by_getters() {
+        let program = lower_inline(
+            r#"
+            class Factory {
+                def creator fn(Int) Int = (value Int) => value + 1
+                def implicitCall Int = creator(4)
+            }
+
+            def run() Int {
+                factory Factory = Factory()
+                return factory.creator(5) + factory.implicitCall
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.return_value.as_deref(), Some("11"));
+    }
+
+    #[test]
     fn runs_reference_identity_operators() {
         let program = lower_inline(
             r#"
@@ -6775,6 +6796,140 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "5 7\n11 15\ntrue false\n");
+    }
+
+    #[test]
+    fn evaluates_receivers_and_explicit_arguments_in_source_order() {
+        let program = lower_inline(
+            r#"
+            class Recorder {
+                values [Int] = []
+
+                def mark(value Int) Int {
+                    this.values.add(value)
+                    value
+                }
+            }
+
+            class Pair {
+                first Int
+                second Int
+            }
+
+            class ExplicitPair {
+                first Int
+                second Int
+
+                new(first Int, second Int) {
+                    this.first = first
+                    this.second = second
+                }
+            }
+
+            class Service {
+                recorder Recorder
+
+                def send(request Int) Int {
+                    this.recorder.mark(3)
+                    request
+                }
+
+                def combine(first Int, second Int) Int {
+                    this.recorder.mark(4)
+                    first * 10 + second
+                }
+            }
+
+            class Harness {
+                recorder Recorder
+
+                def makeService() Service {
+                    this.recorder.mark(1)
+                    Service(this.recorder)
+                }
+
+                def makeRequest() Int = this.recorder.mark(2)
+            }
+
+            def combine(first Int, second Int) Int = first * 10 + second
+
+            def collect(prefix Int, values [Int] vararg) Int =
+                prefix + values.fold(0, (sum, value) => sum + value)
+
+            def keep(first Int, second => Int) Int = first
+
+            def main() Unit {
+                callRecorder = Recorder {}
+                combined = combine(
+                    second = callRecorder.mark(2),
+                    first = callRecorder.mark(1)
+                )
+                println(combined, callRecorder.values[0], callRecorder.values[1])
+
+                explicitRecorder = Recorder {}
+                explicit Pair = Pair {
+                    second: explicitRecorder.mark(2)
+                    first: explicitRecorder.mark(1)
+                }
+                println(explicit.first, explicit.second,
+                    explicitRecorder.values[0], explicitRecorder.values[1])
+
+                contextualRecorder = Recorder {}
+                contextual Pair = {
+                    second: contextualRecorder.mark(2)
+                    first: contextualRecorder.mark(1)
+                }
+                println(contextual.first, contextual.second,
+                    contextualRecorder.values[0], contextualRecorder.values[1])
+
+                constructorRecorder = Recorder {}
+                constructed ExplicitPair = ExplicitPair {
+                    second: constructorRecorder.mark(2)
+                    first: constructorRecorder.mark(1)
+                }
+                println(constructed.first, constructed.second,
+                    constructorRecorder.values[0], constructorRecorder.values[1])
+
+                receiverRecorder = Recorder {}
+                harness = Harness(receiverRecorder)
+                sent = harness.makeService().send(harness.makeRequest())
+                println(sent, receiverRecorder.values[0], receiverRecorder.values[1],
+                    receiverRecorder.values[2])
+
+                namedReceiverRecorder = Recorder {}
+                namedHarness = Harness(namedReceiverRecorder)
+                namedResult = namedHarness.makeService().combine(
+                    second = namedHarness.makeRequest(),
+                    first = namedReceiverRecorder.mark(3)
+                )
+                println(namedResult, namedReceiverRecorder.values[0],
+                    namedReceiverRecorder.values[1], namedReceiverRecorder.values[2],
+                    namedReceiverRecorder.values[3])
+
+                variadicRecorder = Recorder {}
+                variadicResult = collect(
+                    values = [variadicRecorder.mark(2), variadicRecorder.mark(3)],
+                    prefix = variadicRecorder.mark(1)
+                )
+                println(variadicResult, variadicRecorder.values[0],
+                    variadicRecorder.values[1], variadicRecorder.values[2])
+
+                lazyRecorder = Recorder {}
+                lazyResult = keep(
+                    second = panic("must remain lazy"),
+                    first = lazyRecorder.mark(1)
+                )
+                println(lazyResult, lazyRecorder.values[0])
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "12 2 1\n1 2 2 1\n1 2 2 1\n1 2 2 1\n2 1 2 3\n32 1 2 3 4\n6 2 3 1\n1 1\n"
+        );
     }
 
     #[test]

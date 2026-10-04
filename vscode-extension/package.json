@@ -1,15 +1,21 @@
 {
   "name": "lume-syntax",
-  "displayName": "Lume Syntax",
-  "description": "Syntax highlighting and language configuration for Lume.",
-  "version": "0.0.1",
+  "displayName": "Lume",
+  "description": "Syntax highlighting, language configuration, and source formatting for Lume.",
+  "version": "0.0.2",
   "publisher": "sergeyd",
   "license": "UNLICENSED",
+  "main": "./extension.js",
   "engines": {
     "vscode": "^1.85.0"
   },
+  "activationEvents": [
+    "onLanguage:lume",
+    "onCommand:lume.formatDocument"
+  ],
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Formatters"
   ],
   "contributes": {
     "languages": [
@@ -31,6 +37,28 @@
         "scopeName": "source.lume",
         "path": "./syntaxes/lume.tmLanguage.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "lume.formatDocument",
+        "title": "Format Document",
+        "category": "Lume",
+        "enablement": "editorLangId == lume"
+      }
+    ],
+    "configuration": {
+      "title": "Lume",
+      "properties": {
+        "lume.formatter.path": {
+          "type": "string",
+          "default": "lume",
+          "scope": "resource",
+          "description": "Path to the Lume executable used for source formatting."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "check": "node --check extension.js && node --check formatter.js"
   }
 }

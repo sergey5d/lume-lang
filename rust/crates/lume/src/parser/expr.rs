@@ -125,7 +125,6 @@ impl<'a> Parser<'a> {
             );
             return None;
         };
-        self.diagnose_extra_lambda_body_unit(first.span());
         Some(Self::lambda_body_from_stmt(first))
     }
 
@@ -138,33 +137,6 @@ impl<'a> Parser<'a> {
             statements: vec![stmt],
             span,
         })
-    }
-
-    fn diagnose_extra_lambda_body_unit(&mut self, body_span: Span) {
-        let checkpoint = self.checkpoint();
-        if self.at(TokenKind::Newline) {
-            self.skip_newlines();
-        }
-        let current_span = self.current_span();
-        let diagnostic_span = if !self.at(TokenKind::RParen)
-            && !self.at(TokenKind::RBrace)
-            && !self.at(TokenKind::Comma)
-            && !self.at(TokenKind::Eof)
-            && current_span.start_pos.line > body_span.end_pos.line
-            && current_span.start_pos.column >= body_span.start_pos.column
-        {
-            Some(body_span.cover(current_span))
-        } else {
-            None
-        };
-        self.restore(checkpoint);
-        if let Some(span) = diagnostic_span {
-            self.diagnostics.push(Diagnostic::error(
-                "lambda_body_requires_braces",
-                "lambda body accepts one statement or expression; use '{ ... }' for multiple statements",
-                span,
-            ));
-        }
     }
 
     pub(super) fn parse_if_expr(&mut self, start: Span) -> Option<Expr> {
@@ -310,30 +282,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_for_let_clause(&mut self) -> Option<ForBinding> {
-        if self.at(TokenKind::LBrace) && self.is_brace_destructuring_binding_start() {
-            let start = self.consume(TokenKind::LBrace, "expected '{' after 'let'")?;
-            let bindings = self.parse_brace_destructure_binding_list(false)?;
-            self.consume(
-                TokenKind::RBrace,
-                "expected '}' after destructuring bindings",
-            )?;
-            return self.parse_for_destructure_clause_tail(
-                bindings,
-                DestructureKind::Record,
-                start,
-            );
-        }
-
-        if self.match_token(TokenKind::LParen) {
-            let start = self.previous_span();
-            let bindings = self.parse_tuple_binding_list(false)?;
-            self.consume(
-                TokenKind::RParen,
-                "expected ')' after destructuring bindings",
-            )?;
-            return self.parse_for_destructure_clause_tail(bindings, DestructureKind::Tuple, start);
-        }
-
         let pattern = self.parse_pattern()?;
         if matches!(&pattern, Pattern::Binding { name, .. } if name != "_")
             && self.at(TokenKind::Eq)
@@ -367,38 +315,6 @@ impl<'a> Parser<'a> {
             iterable: None,
             values: vec![value],
             span,
-        })
-    }
-
-    fn parse_for_destructure_clause_tail(
-        &mut self,
-        bindings: Vec<Binding>,
-        destructure: DestructureKind,
-        start: Span,
-    ) -> Option<ForBinding> {
-        if self.match_token(TokenKind::LeftArrow) {
-            let iterable = self.parse_expr_without_trailing_block_call()?;
-            let end = iterable.span();
-            return Some(ForBinding {
-                bindings,
-                destructure: Some(destructure),
-                pattern: None,
-                iterable: Some(iterable),
-                values: Vec::new(),
-                span: start.cover(end),
-            });
-        }
-
-        self.consume_for_let_equals()?;
-        let value = self.parse_for_let_value()?;
-        let end = value.span();
-        Some(ForBinding {
-            bindings,
-            destructure: Some(destructure),
-            pattern: None,
-            iterable: None,
-            values: vec![value],
-            span: start.cover(end),
         })
     }
 

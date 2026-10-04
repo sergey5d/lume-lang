@@ -3349,6 +3349,7 @@ def main() Int = twice(3) + choose(true) + sumEven(4) + classify(1)
         let temp = temp_path("lume-java-readable-getters");
         let source = temp.join("getters.lum");
         let out = temp.join("generated");
+        let classes = temp.join("classes");
         fs::create_dir_all(&temp).expect("create temp dir");
         fs::write(
             &source,
@@ -3362,7 +3363,16 @@ class Item {
     def repeated Str = label + this.label
 }
 
+class Factory {
+    def creator fn(Int) Int = (value Int) => value + 1
+}
+
 def read(item Item) Str = item.repeated
+
+def main() Unit {
+    println(read(Item("Ada")))
+    println(Factory().creator(5))
+}
 "#,
         )
         .expect("write source");
@@ -3376,6 +3386,27 @@ def read(item Item) Str = item.repeated
             fs::read_to_string(out.join("demo/getters/GettersModule.java")).expect("read module");
         assert!(item.contains("return (this.label() + this.label());"));
         assert!(module.contains("return item.repeated();"));
+
+        if command_available("javac") && command_available("java") {
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).expect("collect generated Java");
+            fs::create_dir_all(&classes).expect("create classes dir");
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg("demo.getters.GettersMain"),
+                "java",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).expect("Java stdout utf8"),
+                "AdaAda\n6\n"
+            );
+        }
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -4576,7 +4607,12 @@ def petName(value Pet) Str = match value {
         let module = fs::read_to_string(out.join("demo/expressions/ExpressionsModule.java"))
             .expect("read module Java");
         assert!(module.contains("return point.x();"), "{module}");
-        assert!(module.contains("return new Point(1L, 2L);"), "{module}");
+        assert!(module.contains("Long __argument1 = 2L;"), "{module}");
+        assert!(module.contains("Long __argument2 = 1L;"), "{module}");
+        assert!(
+            module.contains("return new Point(__argument2, __argument1);"),
+            "{module}"
+        );
         assert!(
             module.contains("LumeRuntime.indexValue(values, index)"),
             "{module}"
@@ -7166,6 +7202,180 @@ def main() Int {
                 .arg("-cp")
                 .arg(&classes)
                 .arg("demo.defaultprefix.DefaultprefixMain"),
+            "java",
+        );
+        let actual = String::from_utf8(output.stdout).expect("java stdout utf8");
+        assert_eq!(actual, expected);
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_preserves_source_evaluation_order_for_named_arguments() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java argument-order test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-argument-order");
+        let source = temp.join("argument_order.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/argumentorder
+
+class Recorder {
+    values [Int] = []
+
+    def mark(value Int) Int {
+        this.values.add(value)
+        value
+    }
+}
+
+class Pair {
+    first Int
+    second Int
+}
+
+class ExplicitPair {
+    first Int
+    second Int
+
+    new(first Int, second Int) {
+        this.first = first
+        this.second = second
+    }
+}
+
+class Service {
+    recorder Recorder
+
+    def send(request Int) Int {
+        this.recorder.mark(3)
+        request
+    }
+
+    def combine(first Int, second Int) Int {
+        this.recorder.mark(4)
+        first * 10 + second
+    }
+}
+
+class Harness {
+    recorder Recorder
+
+    def makeService() Service {
+        this.recorder.mark(1)
+        Service(this.recorder)
+    }
+
+    def makeRequest() Int = this.recorder.mark(2)
+}
+
+def combine(first Int, second Int) Int = first * 10 + second
+
+def collect(prefix Int, values [Int] vararg) Int =
+    prefix + values.fold(0, (sum, value) => sum + value)
+
+def keep(first Int, second => Int) Int = first
+
+def main() Int {
+    callRecorder = Recorder {}
+    combined = combine(
+        second = callRecorder.mark(2),
+        first = callRecorder.mark(1)
+    )
+    println(combined, callRecorder.values[0], callRecorder.values[1])
+
+    explicitRecorder = Recorder {}
+    explicit Pair = Pair {
+        second: explicitRecorder.mark(2)
+        first: explicitRecorder.mark(1)
+    }
+    println(explicit.first, explicit.second,
+        explicitRecorder.values[0], explicitRecorder.values[1])
+
+    contextualRecorder = Recorder {}
+    contextual Pair = {
+        second: contextualRecorder.mark(2)
+        first: contextualRecorder.mark(1)
+    }
+    println(contextual.first, contextual.second,
+        contextualRecorder.values[0], contextualRecorder.values[1])
+
+    constructorRecorder = Recorder {}
+    constructed ExplicitPair = ExplicitPair {
+        second: constructorRecorder.mark(2)
+        first: constructorRecorder.mark(1)
+    }
+    println(constructed.first, constructed.second,
+        constructorRecorder.values[0], constructorRecorder.values[1])
+
+    receiverRecorder = Recorder {}
+    harness = Harness(receiverRecorder)
+    sent = harness.makeService().send(harness.makeRequest())
+    println(sent, receiverRecorder.values[0], receiverRecorder.values[1],
+        receiverRecorder.values[2])
+
+    namedReceiverRecorder = Recorder {}
+    namedHarness = Harness(namedReceiverRecorder)
+    namedResult = namedHarness.makeService().combine(
+        second = namedHarness.makeRequest(),
+        first = namedReceiverRecorder.mark(3)
+    )
+    println(namedResult, namedReceiverRecorder.values[0],
+        namedReceiverRecorder.values[1], namedReceiverRecorder.values[2],
+        namedReceiverRecorder.values[3])
+
+    variadicRecorder = Recorder {}
+    variadicResult = collect(
+        values = [variadicRecorder.mark(2), variadicRecorder.mark(3)],
+        prefix = variadicRecorder.mark(1)
+    )
+    println(variadicResult, variadicRecorder.values[0],
+        variadicRecorder.values[1], variadicRecorder.values[2])
+
+    lazyRecorder = Recorder {}
+    lazyResult = keep(
+        second = panic("must remain lazy"),
+        first = lazyRecorder.mark(1)
+    )
+    println(lazyResult, lazyRecorder.values[0])
+    0
+}
+"#,
+        )
+        .expect("write source");
+
+        let interpreted = run_path(&source, None).expect("run interpreter");
+        assert!(interpreted.diagnostics.is_empty());
+        let expected = interpreter_stdout(interpreted);
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.argumentorder.ArgumentorderMain"),
             "java",
         );
         let actual = String::from_utf8(output.stdout).expect("java stdout utf8");

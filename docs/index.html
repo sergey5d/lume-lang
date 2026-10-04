@@ -87,7 +87,7 @@ def loadUser(id Int) Result[UserView, DbError] = {
           <div class="grid">
             <article class="card">
               <h3>Classes and shapes</h3>
-              <p>Classes are nominal runtime entities. Shapes are structural, read-only field views. Classes can expose public fields as shapes without becoming structurally interchangeable classes.</p>
+              <p>Classes are nominal runtime entities. Shapes are structural views with shallowly read-only field bindings; referenced values retain their own mutability rules. Classes can expose public fields as shapes without becoming structurally interchangeable classes.</p>
             </article>
             <article class="card">
               <h3>Explicit failure</h3>

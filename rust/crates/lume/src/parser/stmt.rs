@@ -183,31 +183,6 @@ impl<'a> Parser<'a> {
         let start = self.consume_keyword(Keyword::Let, "expected 'let'")?;
 
         if self.at(TokenKind::LBrace) {
-            if self.is_brace_destructuring_binding_start() {
-                self.consume(TokenKind::LBrace, "expected '{' after 'let'")?;
-                let bindings = self.parse_brace_destructure_binding_list(false)?;
-                self.consume(
-                    TokenKind::RBrace,
-                    "expected '}' after destructuring bindings",
-                )?;
-                self.consume(TokenKind::Eq, "expected '=' after destructuring bindings")?;
-                let values = self.parse_expr_list()?;
-                if values.len() != 1 {
-                    self.error_at_current(
-                        "unexpected_token",
-                        "destructuring bindings require a single initializer expression",
-                    );
-                    return None;
-                }
-                let end = values.last().map(Expr::span).unwrap_or(start);
-                return Some(Stmt::Binding(BindingStmt {
-                    visibility: Visibility::Default,
-                    bindings,
-                    values,
-                    destructure: Some(DestructureKind::Record),
-                    span: start.cover(end),
-                }));
-            }
             if self.is_headless_record_pattern_assignment_start() {
                 return self.parse_single_let_pattern_stmt(start);
             }
@@ -242,82 +217,18 @@ impl<'a> Parser<'a> {
             }));
         }
 
-        if self.match_token(TokenKind::LParen) {
-            let bindings = self.parse_tuple_binding_list(false)?;
-            self.consume(
-                TokenKind::RParen,
-                "expected ')' after destructuring bindings",
-            )?;
-            self.consume(TokenKind::Eq, "expected '=' after destructuring bindings")?;
-            let values = self.parse_expr_list()?;
-            if values.len() != 1 {
-                self.error_at_current(
-                    "unexpected_token",
-                    "destructuring bindings require a single initializer expression",
-                );
-                return None;
-            }
-            let end = values.last().map(Expr::span).unwrap_or(start);
-            return Some(Stmt::Binding(BindingStmt {
-                visibility: Visibility::Default,
-                bindings,
-                values,
-                destructure: Some(DestructureKind::Tuple),
-                span: start.cover(end),
-            }));
-        }
-
-        let checkpoint = self.checkpoint();
-        if self.is_binding_start()
-            && !(self.at(TokenKind::Identifier)
-                && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::Dot)))
-        {
-            if let Some(bindings) = self.parse_binding_list(false) {
-                if self.match_token(TokenKind::Eq) {
-                    if bindings.len() == 1 && bindings[0].ty.is_none() {
-                        self.error_at_current(
-                            "plain_let_binding",
-                            "plain 'let name = value' is not supported; use 'name = value' for ordinary bindings, or use 'let' for destructuring/pattern matching",
-                        );
-                        return None;
-                    }
-                    let values = self.parse_expr_list()?;
-                    if self.match_keyword(Keyword::Else) {
-                        if bindings.len() == 1 && bindings[0].ty.is_some() && values.len() == 1 {
-                        } else {
-                            self.error_at_current(
-                                "unexpected_token",
-                                "plain 'let name = value' bindings do not support 'else'; use a refutable pattern like 'let Some(name) = value else { ... }'",
-                            );
-                            return None;
-                        }
-                    } else {
-                        if bindings.len() > 1 && values.len() == 1 {
-                            self.error_at_current(
-                                "unexpected_token",
-                                "destructuring bindings require 'let (...) = value' or 'let { ... } = value'",
-                            );
-                            return None;
-                        }
-                        let end = values.last().map(Expr::span).unwrap_or(start);
-                        return Some(Stmt::Binding(BindingStmt {
-                            visibility: Visibility::Default,
-                            bindings,
-                            values,
-                            destructure: None,
-                            span: start.cover(end),
-                        }));
-                    }
-                }
-            }
-        }
-        self.restore(checkpoint);
-
         self.parse_single_let_pattern_stmt(start)
     }
 
     fn parse_single_let_pattern_stmt(&mut self, start: Span) -> Option<Stmt> {
         let (pattern, operator) = self.parse_refutable_pattern_head("let")?;
+        if operator == "=" && matches!(&pattern, Pattern::Binding { name, .. } if name != "_") {
+            self.error_at_current(
+                "plain_let_binding",
+                "plain 'let name = value' is not supported; use 'name = value' for ordinary bindings, or use 'let' for destructuring/pattern matching",
+            );
+            return None;
+        }
         if operator != "=" && self.at(TokenKind::Newline) {
             self.error_at_current(
                 "expected_expression",
@@ -564,103 +475,59 @@ impl<'a> Parser<'a> {
         self.at(TokenKind::Identifier)
     }
 
-    pub(super) fn is_brace_destructuring_binding_start(&self) -> bool {
-        if !self.at(TokenKind::LBrace) {
-            return false;
-        }
-        let mut parser = Parser {
-            tokens: self.tokens,
-            index: self.index,
-            diagnostics: Vec::new(),
-            allow_trailing_block_call: self.allow_trailing_block_call,
-        };
-        if !parser.match_token(TokenKind::LBrace) {
-            return false;
-        }
-        if parser.at(TokenKind::At) || parser.is_placeholder_identifier() {
-            return true;
-        }
-        if !parser.at(TokenKind::Identifier) {
-            return false;
-        }
-        if parser.parse_brace_destructure_binding_list(false).is_none() {
-            return false;
-        }
-        parser.match_token(TokenKind::RBrace)
-            && (parser.at(TokenKind::Eq) || parser.at(TokenKind::LeftArrow))
-    }
-
     fn is_headless_record_pattern_assignment_start(&self) -> bool {
         if !self.at(TokenKind::LBrace) {
             return false;
         }
-        let mut parser = Parser {
-            tokens: self.tokens,
-            index: self.index,
-            diagnostics: Vec::new(),
-            allow_trailing_block_call: self.allow_trailing_block_call,
-        };
+        let mut index = self.index;
+        let mut depth = 0usize;
+        loop {
+            let Some(token) = self.tokens.get(index) else {
+                return false;
+            };
+            match token.kind {
+                TokenKind::LBrace => depth += 1,
+                TokenKind::RBrace => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        index += 1;
+                        break;
+                    }
+                }
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+            index += 1;
+        }
+        while self
+            .tokens
+            .get(index)
+            .is_some_and(|token| token.kind == TokenKind::Newline)
+        {
+            index += 1;
+        }
+        if self
+            .tokens
+            .get(index)
+            .is_some_and(|token| token.kind == TokenKind::Keyword(Keyword::As))
+        {
+            index += 1;
+            if !self
+                .tokens
+                .get(index)
+                .is_some_and(|token| token.kind == TokenKind::Identifier)
+            {
+                return false;
+            }
+            index += 1;
+        }
         matches!(
-            parser.parse_pattern(),
-            Some(Pattern::Record { path, .. }) if path.is_empty()
-        ) && (parser.at(TokenKind::Eq) || parser.at(TokenKind::LeftArrow))
+            self.tokens.get(index).map(|token| token.kind),
+            Some(TokenKind::Eq | TokenKind::LeftArrow)
+        )
     }
 
     pub(super) fn parse_for_let_generator_head(&mut self) -> Option<ForBinding> {
-        if self.at(TokenKind::LBrace) && self.is_brace_destructuring_binding_start() {
-            let start = self.consume(TokenKind::LBrace, "expected '{' after 'let'")?;
-            let bindings = self.parse_brace_destructure_binding_list(false)?;
-            self.consume(
-                TokenKind::RBrace,
-                "expected '}' after destructuring bindings",
-            )?;
-            self.consume_for_generator_arrow()?;
-            if self.at(TokenKind::Newline) {
-                self.error_at_current(
-                    "expected_expression",
-                    "expected expression on same line after \"<-\"",
-                );
-                return None;
-            }
-            let iterable = self.parse_expr_without_trailing_block_call()?;
-            let end = iterable.span();
-            return Some(ForBinding {
-                bindings,
-                destructure: Some(DestructureKind::Record),
-                pattern: None,
-                iterable: Some(iterable),
-                values: Vec::new(),
-                span: start.cover(end),
-            });
-        }
-
-        if self.match_token(TokenKind::LParen) {
-            let start = self.previous_span();
-            let bindings = self.parse_tuple_binding_list(false)?;
-            self.consume(
-                TokenKind::RParen,
-                "expected ')' after destructuring bindings",
-            )?;
-            self.consume_for_generator_arrow()?;
-            if self.at(TokenKind::Newline) {
-                self.error_at_current(
-                    "expected_expression",
-                    "expected expression on same line after \"<-\"",
-                );
-                return None;
-            }
-            let iterable = self.parse_expr_without_trailing_block_call()?;
-            let end = iterable.span();
-            return Some(ForBinding {
-                bindings,
-                destructure: Some(DestructureKind::Tuple),
-                pattern: None,
-                iterable: Some(iterable),
-                values: Vec::new(),
-                span: start.cover(end),
-            });
-        }
-
         let pattern = self.parse_pattern()?;
         self.consume_for_generator_arrow()?;
         if self.at(TokenKind::Newline) {

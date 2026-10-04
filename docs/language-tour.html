@@ -64,7 +64,7 @@ retries := retries - 1</code></pre>
         <p>Local bindings cannot silently shadow parameters, fields, or another live local. Field access can be qualified with <code>this</code> when a parameter has the same name.</p>
 
         <h2 id="data-model">Classes, shapes, unions, and objects</h2>
-        <p>A <code>class</code> is nominal: construction and class-to-class assignment depend on its declared identity. A <code>shape</code> is structural data with public immutable fields. A declared union closes over class, shape, and object alternatives, while a standalone named <code>object</code> declares one shared object value.</p>
+        <p>A <code>class</code> is nominal: construction and class-to-class assignment depend on its declared identity. A <code>shape</code> is structural data with public, read-only field bindings. Shape immutability is shallow: referenced values retain their own mutability rules. A declared union closes over class, shape, and object alternatives, while a standalone named <code>object</code> declares one shared object value.</p>
         <pre><code>shape Location {
     city Str
     country Str

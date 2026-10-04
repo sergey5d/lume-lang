@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*shape 'Point' has no public constructor field 'yy'.*
+
+shape Point {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    point Point = {
+        x: 1
+        y: 2
+        yy: 3
+    }
+}
