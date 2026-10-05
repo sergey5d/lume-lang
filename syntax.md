@@ -268,21 +268,52 @@ equal = match unknown {
 }
 ```
 
-Reference identity is separate from value equality:
+Strict equality adds a concrete-type restriction to ordinary equality:
 
 ```txt
-alias = value
-copy = Box(value.field)
+interface Identified with Eq[Identified] {
+    def id Int
+}
 
-value === alias # true: both names reference the same instance
-value === copy  # false: copy is a different instance
-value !== copy  # true
+left Identified = DatabaseRecord(7)
+crossType Identified = CachedRecord(7)
+sameType Identified = DatabaseRecord(7)
+different Identified = DatabaseRecord(8)
+
+left == crossType   # true: Eq[Identified] considers them equal
+left === crossType  # false: different concrete classes
+left === sameType   # true: same concrete class and Eq[Identified] says equal
+left !== different  # true: same concrete class but unequal values
 ```
 
-`===` and `!==` do not call `equals`. They accept compatible class, object, or
-concrete collection reference types. Primitives, shapes, declared unions, interfaces,
-`Any`, and lifted wrappers such as `Option[T]` are not identity operands; unwrap
-or narrow to a concrete reference type first.
+`===` means `sameConcreteType(left, right) && (left == right)`. `!==` is the
+negation of that complete relation. Both operators use exactly the equality
+contract selected for `==`; they do not select a concrete class's separate
+contract or compare all stored fields.
+
+For classes and declared-union payloads, concrete type identity is nominal. For
+shapes it is the complete structural schema: field names and normalized field
+types must match, while declaration name and field order do not matter. The
+operands must otherwise satisfy the same static equality-domain rules as `==`.
+In particular, interface operands require an `Eq[Interface]` contract visible
+through the interface, and `Any` operands must be narrowed first.
+
+Reference identity is explicit instance metadata rather than an equality
+operator:
+
+```txt
+first = DatabaseRecord(7)
+alias = first
+separate = DatabaseRecord(7)
+
+first.referenceId == alias.referenceId    # true
+first.referenceId == separate.referenceId # false, even though `first === separate`
+```
+
+`referenceId` returns an opaque `ReferenceId`. Two such values compare equal if
+and only if they identify the same instance. `ReferenceId` has built-in stable
+equality and hashing, so it may be used in sets and as a map key. The token
+retains a strong reference to its instance.
 
 ## Wildcard Capture
 
@@ -364,6 +395,28 @@ Every value also has a synthetic `runtimeType` field:
 user User = User { name: "Ada", age: 42 }
 actual Type[User] = user.runtimeType
 ```
+
+Reference-bearing values also expose a synthetic `referenceId` field:
+
+```txt
+first = User(7)
+alias = first
+separate = User(7)
+
+id ReferenceId = first.referenceId
+first.referenceId == alias.referenceId    # true
+first.referenceId == separate.referenceId # false
+```
+
+`referenceId` is available on classes, objects, and concrete identity-bearing
+collections. It is not available on primitives, tuples, shapes, declared-union
+values, or unconstrained interface values. Narrow an interface value to a
+reference-bearing concrete type before reading it.
+
+Like `runtimeType`, `referenceId` is synthetic read-only metadata. It cannot be
+declared, assigned, supplied to a constructor, reflected as a stored field, or
+included implicitly by a spread. It participates in a shape only when included
+under an explicit field label.
 
 Runtime metadata types are generic over the represented type:
 
@@ -3066,8 +3119,8 @@ if value is not Worker {
 
 `not` is contextual after `is`; it is not a second general Boolean-negation
 operator. `value is not Worker` means exactly `!(value is Worker)`. The right
-side is always a type reference, so value comparisons continue to use `!=` and
-reference-identity comparisons use `!==`.
+side is always a type reference, so value comparisons continue to use `!=` or
+`!==`; reference identity compares the operands' `referenceId` values.
 
 `is` is non-associative. A type test has the grammar
 `comparison ["is" ["not"] type]`, so chained tests are rejected:
@@ -3469,7 +3522,7 @@ Each postfix `!` extracts exactly one layer, so `nested!!` means
 two forms, and `!maybeReady!` means `!(maybeReady!)`.
 
 `!=` and `!==` remain indivisible binary operators. Therefore
-`maybe!==expected` is identity inequality, while extraction followed by
+`maybe!==expected` is strict inequality, while extraction followed by
 equality is written `maybe! == expected`. The formatter places spaces around
 binary operators.
 
@@ -4276,8 +4329,8 @@ Comparison:
 
 - `==`
 - `!=`
-- `===` (reference identity)
-- `!==` (reference non-identity)
+- `===` (same concrete type and value equality)
+- `!==` (different concrete type or value inequality)
 - `<`
 - `<=`
 - `>`
@@ -4324,7 +4377,7 @@ Expression precedence, from highest to lowest:
 | Boolean OR | `||` | left |
 | Extract or fallback | `??` | right |
 
-Comparison, equality, identity equality, and runtime type-test operators cannot
+Comparison, equality, strict equality, and runtime type-test operators cannot
 be chained without parentheses:
 
 ```txt
@@ -4413,7 +4466,8 @@ Current operator overloading constraints:
   - equality operators: `==`, `!=`, `===`, `!==`
   - symbolic collection/custom forms: `:+`, `:-`, `++`, `--`, `::`
 - Comparison operators are intended to work through `Ordering[T]` rather than custom operator declarations.
-- Value equality is intended to work through `Eq[T]`; reference identity is intrinsic and cannot be overloaded.
+- `==`, `!=`, `===`, and `!==` use the applicable `Eq[T]` contract and cannot be overloaded independently; `===` and `!==` additionally test concrete type.
+- Reference identity is expressed by equality between opaque `referenceId` values; `ReferenceId` equality and hashing cannot be overloaded.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
 - `:` is brace-entry syntax only, not an overloadable operator.
 - The spellings `:+`, `:-`, `++`, `--`, and `::` are removed from the language surface and currently produce `unsupported_operator` lexer diagnostics.

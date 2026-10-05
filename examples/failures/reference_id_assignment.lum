@@ -1,0 +1,11 @@
+# EXPECT_ERROR:
+# .*'referenceId' is read-only synthetic metadata and cannot be assigned.*
+
+class User {
+    id Int
+}
+
+def main() Unit {
+    user = User(7)
+    user.referenceId := user.referenceId
+}

@@ -1,0 +1,17 @@
+# EXPECT_ERROR:
+# .*'referenceId' is available only on class, object, or concrete collection values; 'Named' is not reference-bearing.*
+
+interface Named {
+    def name Str
+}
+
+class User with Named {
+    value Str
+
+    def name Str = this.value
+}
+
+def main() Unit {
+    value Named = User("Ada")
+    id = value.referenceId
+}

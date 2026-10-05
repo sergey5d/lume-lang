@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*equality requires the same static equality domain; 'FirstBox' and 'SecondBox' are different types.*
+
+class FirstBox with Eq[FirstBox] {
+    def equals(other FirstBox) Bool = true
+}
+
+class SecondBox with Eq[SecondBox] {
+    def equals(other SecondBox) Bool = true
+}
+
+def main() Unit {
+    same = FirstBox {} === SecondBox {}
+}

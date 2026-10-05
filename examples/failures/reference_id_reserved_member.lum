@@ -1,0 +1,6 @@
+# EXPECT_ERROR:
+# .*'referenceId' is synthetic instance metadata and cannot be declared as a stored field.*
+
+class Invalid {
+    referenceId Str
+}

@@ -1,0 +1,7 @@
+# EXPECT_ERROR:
+# .*'referenceId' is available only on class, object, or concrete collection values; 'Int' is not reference-bearing.*
+
+def main() Unit {
+    value = 1
+    id = value.referenceId
+}

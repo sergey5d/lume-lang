@@ -4930,6 +4930,9 @@ impl<'a> FunctionLowerer<'a> {
                     let receiver_ty = self.infer_expr_type_with_overrides(receiver, overrides);
                     return ir_value_runtime_type(receiver_ty);
                 }
+                if name == "referenceId" {
+                    return ir::Type::named("ReferenceId");
+                }
                 let receiver_ty = self.infer_expr_type_with_overrides(receiver, overrides);
                 self.infer_member_type(&receiver_ty, name)
                     .unwrap_or(ir::Type::Unknown)
@@ -4990,8 +4993,8 @@ impl<'a> FunctionLowerer<'a> {
                     | AstBinaryOp::GreaterEq
                     | AstBinaryOp::Eq
                     | AstBinaryOp::NotEq
-                    | AstBinaryOp::IdentityEq
-                    | AstBinaryOp::IdentityNotEq => ir::Type::Bool,
+                    | AstBinaryOp::StrictEq
+                    | AstBinaryOp::StrictNotEq => ir::Type::Bool,
                     AstBinaryOp::Add
                         if matches!(&left, ir::Type::Str) || matches!(&right, ir::Type::Str) =>
                     {
@@ -8499,8 +8502,8 @@ fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
         AstBinaryOp::And => Some(ir::BinaryOp::And),
         AstBinaryOp::Eq => Some(ir::BinaryOp::Eq),
         AstBinaryOp::NotEq => Some(ir::BinaryOp::NotEq),
-        AstBinaryOp::IdentityEq => Some(ir::BinaryOp::IdentityEq),
-        AstBinaryOp::IdentityNotEq => Some(ir::BinaryOp::IdentityNotEq),
+        AstBinaryOp::StrictEq => Some(ir::BinaryOp::StrictEq),
+        AstBinaryOp::StrictNotEq => Some(ir::BinaryOp::StrictNotEq),
         AstBinaryOp::Less => Some(ir::BinaryOp::Less),
         AstBinaryOp::LessEq => Some(ir::BinaryOp::LessEq),
         AstBinaryOp::Greater => Some(ir::BinaryOp::Greater),

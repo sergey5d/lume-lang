@@ -80,8 +80,8 @@ pub enum TokenKind {
     ColonAssign,
     EqEq,
     NotEq,
-    IdentityEq,
-    IdentityNotEq,
+    StrictEq,
+    StrictNotEq,
     LessEq,
     GreaterEq,
     PlusEq,
@@ -432,7 +432,7 @@ impl<'a> Lexer<'a> {
             '=' if self.take('>') => Some(TokenKind::FatArrow),
             '=' if self.take('=') => {
                 if self.take('=') {
-                    Some(TokenKind::IdentityEq)
+                    Some(TokenKind::StrictEq)
                 } else {
                     Some(TokenKind::EqEq)
                 }
@@ -440,7 +440,7 @@ impl<'a> Lexer<'a> {
             '=' => Some(TokenKind::Eq),
             '!' if self.take('=') => {
                 if self.take('=') {
-                    Some(TokenKind::IdentityNotEq)
+                    Some(TokenKind::StrictNotEq)
                 } else {
                     Some(TokenKind::NotEq)
                 }
@@ -786,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_identity_inequality_distinct_from_postfix_extraction() {
+    fn keeps_strict_inequality_distinct_from_postfix_extraction() {
         let result = lex(&source(
             "unwrapped = maybe! == expected\ndifferent = maybe!==expected\n",
         ));
@@ -801,11 +801,11 @@ mod tests {
                 .windows(2)
                 .any(|pair| { pair == [TokenKind::Bang, TokenKind::EqEq] })
         );
-        assert!(kinds.contains(&TokenKind::IdentityNotEq));
+        assert!(kinds.contains(&TokenKind::StrictNotEq));
     }
 
     #[test]
-    fn lexes_identity_operators_as_atomic_tokens() {
+    fn lexes_strict_equality_operators_as_atomic_tokens() {
         let result = lex(&source(
             "same = left === right\ndifferent = left !== other\n",
         ));
@@ -815,8 +815,8 @@ mod tests {
             .iter()
             .map(|token| token.kind)
             .collect::<Vec<_>>();
-        assert!(kinds.contains(&TokenKind::IdentityEq));
-        assert!(kinds.contains(&TokenKind::IdentityNotEq));
+        assert!(kinds.contains(&TokenKind::StrictEq));
+        assert!(kinds.contains(&TokenKind::StrictNotEq));
     }
 
     #[test]

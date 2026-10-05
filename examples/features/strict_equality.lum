@@ -1,0 +1,42 @@
+# EXPECT:
+# ordinary cross-type true
+# strict cross-type false
+# strict same-type true
+# strict different-value false
+# alias reference true
+# separate reference false
+
+interface Identified with Eq[Identified] {
+    def id Int
+}
+
+class DatabaseRecord with Identified {
+    recordId Int
+
+    def id Int = this.recordId
+    def equals(other Identified) Bool = this.id == other.id
+}
+
+class CachedRecord with Identified {
+    recordId Int
+
+    def id Int = this.recordId
+    def equals(other Identified) Bool = this.id == other.id
+}
+
+def main() Unit {
+    firstRecord = DatabaseRecord(7)
+    sameTypeRecord = DatabaseRecord(7)
+    first Identified = firstRecord
+    crossType Identified = CachedRecord(7)
+    sameType Identified = sameTypeRecord
+    differentValue Identified = DatabaseRecord(8)
+    alias = firstRecord
+
+    println("ordinary cross-type", first == crossType)
+    println("strict cross-type", first === crossType)
+    println("strict same-type", first === sameType)
+    println("strict different-value", first === differentValue)
+    println("alias reference", firstRecord.referenceId == alias.referenceId)
+    println("separate reference", firstRecord.referenceId == sameTypeRecord.referenceId)
+}

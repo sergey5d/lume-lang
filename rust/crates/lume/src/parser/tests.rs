@@ -5272,12 +5272,12 @@ fn rejects_value_expression_after_is_not() {
 }
 
 #[test]
-fn parses_reference_identity_operators() {
+fn parses_strict_equality_operators() {
     let equal = parse_expr_only("left === right");
     assert!(matches!(
         equal,
         Expr::Binary {
-            op: BinaryOp::IdentityEq,
+            op: BinaryOp::StrictEq,
             ..
         }
     ));
@@ -5286,7 +5286,7 @@ fn parses_reference_identity_operators() {
     assert!(matches!(
         not_equal,
         Expr::Binary {
-            op: BinaryOp::IdentityNotEq,
+            op: BinaryOp::StrictNotEq,
             ..
         }
     ));

@@ -388,8 +388,8 @@ impl<'a> Parser<'a> {
                                         | TokenKind::OrOr
                                         | TokenKind::EqEq
                                         | TokenKind::NotEq
-                                        | TokenKind::IdentityEq
-                                        | TokenKind::IdentityNotEq
+                                        | TokenKind::StrictEq
+                                        | TokenKind::StrictNotEq
                                         | TokenKind::Less
                                         | TokenKind::LessEq
                                         | TokenKind::Greater

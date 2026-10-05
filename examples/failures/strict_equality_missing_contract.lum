@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*type 'Box' has no equality contract.*
+
+class Box {
+    value Int
+}
+
+def main() Unit {
+    same = Box(1) === Box(1)
+}

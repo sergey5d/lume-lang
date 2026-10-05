@@ -1,0 +1,14 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
+
+# Opaque identity token returned by the synthetic `referenceId` member.
+class ReferenceId with Hashed[ReferenceId] {
+    private new() {}
+
+    def equals(other ReferenceId) Bool =
+        panic("ReferenceId equality is provided by the active runtime")
+
+    def hash() Int =
+        panic("ReferenceId hashing is provided by the active runtime")
+}

@@ -1,0 +1,39 @@
+# EXPECT:
+# semantic equality true
+# strict equality true
+# separate references false
+# alias references true
+# repeated reads true
+# set contains alias true
+# set contains separate false
+# collection alias true
+# collection copy false
+
+class User with Eq[User] {
+    id Int
+
+    def equals(other User) Bool = this.id == other.id
+}
+
+def main() Unit {
+    first = User(7)
+    second = User(7)
+    alias = first
+
+    println("semantic equality", first == second)
+    println("strict equality", first === second)
+    println("separate references", first.referenceId == second.referenceId)
+    println("alias references", first.referenceId == alias.referenceId)
+    println("repeated reads", first.referenceId == first.referenceId)
+
+    visited Set[ReferenceId] = Set()
+    visited.add(first.referenceId)
+    println("set contains alias", visited.contains(alias.referenceId))
+    println("set contains separate", visited.contains(second.referenceId))
+
+    values = [1, 2]
+    valuesAlias = values
+    valuesCopy = [1, 2]
+    println("collection alias", values.referenceId == valuesAlias.referenceId)
+    println("collection copy", values.referenceId == valuesCopy.referenceId)
+}

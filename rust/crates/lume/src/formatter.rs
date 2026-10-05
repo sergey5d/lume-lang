@@ -318,8 +318,8 @@ fn ends_with_continuation(kind: TokenKind) -> bool {
             | TokenKind::ColonAssign
             | TokenKind::EqEq
             | TokenKind::NotEq
-            | TokenKind::IdentityEq
-            | TokenKind::IdentityNotEq
+            | TokenKind::StrictEq
+            | TokenKind::StrictNotEq
             | TokenKind::Less
             | TokenKind::LessEq
             | TokenKind::Greater

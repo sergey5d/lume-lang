@@ -5566,34 +5566,44 @@ def main() Unit {
     }
 
     #[test]
-    fn generated_java_runs_reference_identity_operators() {
+    fn generated_java_runs_strict_equality_and_reference_ids() {
         if !command_available("javac") || !command_available("java") {
-            eprintln!("skipping Java identity test because javac/java is not available");
+            eprintln!("skipping Java strict equality test because javac/java is not available");
             return;
         }
 
-        let temp = temp_path("lume-java-reference-identity");
-        let source = temp.join("identity.lum");
+        let temp = temp_path("lume-java-strict-equality");
+        let source = temp.join("equality.lum");
         let out = temp.join("out");
         let classes = temp.join("classes");
         fs::create_dir_all(&temp).expect("create temp dir");
         fs::write(
             &source,
             r#"
-module demo/identity
+module demo/equality
 
-class Box {
+class Box with Eq[Box] {
     value Int
+
+    def equals(other Box) Bool = this.value == other.value
 }
 
 def main() Unit {
     first = Box(1)
     alias = first
     separate = Box(1)
+    different = Box(2)
 
     println(first === alias)
     println(first === separate)
-    println(first !== separate)
+    println(first !== different)
+    println(first.referenceId == alias.referenceId)
+    println(first.referenceId == separate.referenceId)
+
+    visited Set[ReferenceId] = Set()
+    visited.add(first.referenceId)
+    println(visited.contains(alias.referenceId))
+    println(visited.contains(separate.referenceId))
 }
 "#,
         )
@@ -5603,9 +5613,9 @@ def main() Unit {
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 
         let module =
-            fs::read_to_string(out.join("demo/identity/IdentityModule.java")).expect("read module");
-        assert!(module.contains(" == "));
-        assert!(module.contains(" != "));
+            fs::read_to_string(out.join("demo/equality/EqualityModule.java")).expect("read module");
+        assert!(module.contains("LumeRuntime.strictEquals"));
+        assert!(module.contains("LumeRuntime.referenceIdOf"));
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -5619,12 +5629,12 @@ def main() Unit {
             Command::new("java")
                 .arg("-cp")
                 .arg(&classes)
-                .arg("demo.identity.IdentityMain"),
+                .arg("demo.equality.EqualityMain"),
             "java",
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "true\nfalse\ntrue\n"
+            "true\ntrue\ntrue\ntrue\nfalse\ntrue\nfalse\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -5898,6 +5908,8 @@ def main() Unit {
     println(first == reordered)
     println(reordered == first)
     println(first.equals(reordered))
+    println(first === reordered)
+    println(Point(1, "one") === ReorderedPoint("one", 1))
 
     println(Marker {} == Marker {})
 
@@ -5905,7 +5917,10 @@ def main() Unit {
     println(Account(1) != Account(2))
     left Identified = Entry(1)
     right Identified = AlternateEntry(1)
+    sameClass Identified = Entry(1)
     println(left == right)
+    println(left === right)
+    println(left === sameClass)
 
     id = 3
     account = Account { id }
@@ -5985,7 +6000,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "true\nfalse\nfound\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+            "true\nfalse\nfound\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\n"
         );
 
         let _ = fs::remove_dir_all(temp);

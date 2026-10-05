@@ -200,6 +200,20 @@ public final class LumeRuntime {
         return (long) Objects.hashCode(value);
     }
 
+    public static Boolean strictEquals(Object left, Object right) {
+        if (left == null || right == null || left.getClass() != right.getClass()) {
+            return false;
+        }
+        return Objects.equals(left, right);
+    }
+
+    public static ReferenceId referenceIdOf(Object value) {
+        if (value == null) {
+            throw new LumePanic("referenceId is not available on null");
+        }
+        return new ReferenceId(value);
+    }
+
     public static Object probeSuccessValue(Object value) {
         if (value instanceof Option.Some<?> some) {
             return some.value();

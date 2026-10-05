@@ -30,7 +30,7 @@ def deleteDuplicates2(head ListNode?) ListNode? {
             current := candidate
         }
 
-        if current === groupStart {
+        if current.referenceId == groupStart.referenceId {
             tail.next := Some(current)
             tail := current
         }

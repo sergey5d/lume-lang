@@ -1,0 +1,10 @@
+# EXPECT_ERROR:
+# .*'referenceId' is available only on class, object, or concrete collection values; 'Point' is not reference-bearing.*
+
+shape Point {
+    x Int
+}
+
+def main() Unit {
+    id = Point(1).referenceId
+}

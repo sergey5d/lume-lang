@@ -1600,18 +1600,40 @@ impl<'a> Checker<'a> {
         for member in &decl.members {
             match member {
                 TypeMember::Field(field) => {
+                    if field.name == "referenceId" {
+                        self.add_error(
+                            "reserved_synthetic_member",
+                            "'referenceId' is synthetic instance metadata and cannot be declared as a stored field",
+                            field.span,
+                        );
+                    }
                     if let Some(ty) = &field.ty {
                         self.validate_type_ref_generic_applications(ty);
                     }
                 }
                 TypeMember::Case(case) => {
                     for field in &case.fields {
+                        if field.name == "referenceId" {
+                            self.add_error(
+                                "reserved_synthetic_member",
+                                "'referenceId' is synthetic instance metadata and cannot be declared as a stored field",
+                                field.span,
+                            );
+                        }
                         if let Some(ty) = &field.ty {
                             self.validate_type_ref_generic_applications(ty);
                         }
                     }
                 }
-                TypeMember::Method(_) => {}
+                TypeMember::Method(method) => {
+                    if method.name == "referenceId" {
+                        self.add_error(
+                            "reserved_synthetic_member",
+                            "'referenceId' is synthetic instance metadata and cannot be declared as a method or getter",
+                            method.span,
+                        );
+                    }
+                }
             }
         }
 
@@ -4277,6 +4299,17 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let receiver_ty = self.check_expr(receiver);
+                if name == "referenceId" {
+                    let ty = self.check_reference_id_access(&receiver_ty, *span);
+                    if !matches!(ty, Ty::Unknown) {
+                        self.add_error(
+                            "assign_synthetic_member",
+                            "'referenceId' is read-only synthetic metadata and cannot be assigned",
+                            *span,
+                        );
+                    }
+                    return ty;
+                }
                 if self.reject_inaccessible_member(&receiver_ty, name, *span) {
                     return Ty::Unknown;
                 }
@@ -4590,6 +4623,9 @@ impl<'a> Checker<'a> {
                 let receiver_ty = self.check_expr(receiver);
                 if name == "runtimeType" {
                     return Ty::value_runtime_type(receiver_ty);
+                }
+                if name == "referenceId" {
+                    return self.check_reference_id_access(&receiver_ty, *span);
                 }
                 if self.extension_this_hidden_field(receiver, &receiver_ty, name) {
                     self.add_extension_hidden_access_error("field", name, *span);
@@ -7909,37 +7945,8 @@ impl<'a> Checker<'a> {
                 }
                 Ty::bool()
             }
-            BinaryOp::IdentityEq | BinaryOp::IdentityNotEq => {
-                let left_is_reference = self.is_identity_reference_type(left);
-                let right_is_reference = self.is_identity_reference_type(right);
-                let unknown = matches!(left, Ty::Unknown) || matches!(right, Ty::Unknown);
-
-                if !unknown && (!left_is_reference || !right_is_reference) {
-                    self.add_error(
-                        "invalid_identity_operand",
-                        format!(
-                            "identity operators require class, object, or concrete collection references; got '{}' and '{}'",
-                            left.describe(),
-                            right.describe()
-                        ),
-                        span,
-                    );
-                } else if left_is_reference
-                    && right_is_reference
-                    && !self.is_assignable(left, right)
-                    && !self.is_assignable(right, left)
-                {
-                    self.add_error(
-                        "incompatible_identity_operands",
-                        format!(
-                            "identity comparison requires compatible reference types; '{}' and '{}' cannot reference the same instance",
-                            left.describe(),
-                            right.describe()
-                        ),
-                        span,
-                    );
-                }
-
+            BinaryOp::StrictEq | BinaryOp::StrictNotEq => {
+                self.check_equality_operands(left, right, span);
                 Ty::bool()
             }
             BinaryOp::Colon => Ty::Unknown,
@@ -8073,18 +8080,36 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn is_identity_reference_type(&self, ty: &Ty) -> bool {
+    fn supports_reference_id(&self, ty: &Ty) -> bool {
         let Ty::Named(name, _) = ty else {
             return false;
         };
         if matches!(
             name.as_str(),
-            "Any" | "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
+            "Any" | "Bool" | "Float" | "Int" | "ReferenceId" | "Rune" | "Str" | "Unit"
         ) {
             return false;
         }
         self.lookup_any_type(name)
             .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Object))
+    }
+
+    fn check_reference_id_access(&mut self, receiver: &Ty, span: crate::source::Span) -> Ty {
+        if matches!(receiver, Ty::Unknown) {
+            return Ty::Unknown;
+        }
+        if self.supports_reference_id(receiver) {
+            return Ty::named("ReferenceId");
+        }
+        self.add_error(
+            "invalid_reference_id_receiver",
+            format!(
+                "'referenceId' is available only on class, object, or concrete collection values; '{}' is not reference-bearing",
+                receiver.describe()
+            ),
+            span,
+        );
+        Ty::Unknown
     }
 
     fn check_else_expr_branch_against_with_narrowings(
@@ -10212,6 +10237,12 @@ impl<'a> Checker<'a> {
                 let receiver_ty = self.probe_expr_type(receiver);
                 if name == "runtimeType" {
                     return Ty::value_runtime_type(receiver_ty);
+                }
+                if name == "referenceId" {
+                    return self
+                        .supports_reference_id(&receiver_ty)
+                        .then(|| Ty::named("ReferenceId"))
+                        .unwrap_or(Ty::Unknown);
                 }
                 self.member_type(&receiver_ty, name).unwrap_or(Ty::Unknown)
             }
@@ -13633,30 +13664,59 @@ def main() Int {
     }
 
     #[test]
-    fn allows_identity_comparison_for_reference_types() {
+    fn allows_strict_equality_and_reference_ids() {
         let program = parse_inline(
             r#"
-class Box {
+class Box with Eq[Box] {
     value Int
+
+    def equals(other Box) Bool = this.value == other.value
 }
 
 object Shared {
 }
 
+interface Identified with Eq[Identified] {
+    def code() Int
+}
+
+class Entry with Identified {
+    value Int
+
+    def code() Int = this.value
+    def equals(other Identified) Bool = this.value == other.code()
+}
+
+class AlternateEntry with Identified {
+    value Int
+
+    def code() Int = this.value
+    def equals(other Identified) Bool = this.value == other.code()
+}
+
+shape Point {
+    x Int
+}
+
 def main() Unit {
     first = Box(1)
     alias = first
-    same = first === alias
-    different = first !== Box(1)
+    sameValueAndType = first === Box(1)
+    differentValue = first !== Box(2)
+    sameInstance = first.referenceId == alias.referenceId
 
     values = [1, 2]
     valuesAlias = values
-    sameVector = values === valuesAlias
+    sameVectorReference = values.referenceId == valuesAlias.referenceId
     sameObject = Shared === Shared
+    objectReference ReferenceId = Shared.referenceId
 
-    anonymous = object { label Str = "value" }
-    anonymousAlias = anonymous
-    sameAnonymous = anonymous === anonymousAlias
+    left Identified = Entry(1)
+    right Identified = AlternateEntry(1)
+    interfaceStrict = left === right
+
+    sameInt = 1 === 1
+    sameShape = Point(1) === Point(1)
 }
 "#,
         );
@@ -13665,11 +13725,11 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_identity_comparison_for_value_and_interface_types() {
+    fn strict_equality_requires_an_equality_contract_and_same_domain() {
         let program = parse_inline(
             r#"
-shape Point {
-    x Int
+class Box {
+    value Int
 }
 
 interface Named {
@@ -13681,14 +13741,21 @@ class Person with Named {
     def name() Str = this.label
 }
 
+shape Point {
+    x Int
+}
+
 def main() Unit {
-    intIdentity = 1 === 1
-    shapeIdentity = Point { x: 1 } === Point { x: 1 }
-    option Option[Person] = Some(Person("Ada"))
-    optionIdentity = option === option
+    missingClassContract = Box(1) === Box(1)
     left Named = Person("Ada")
     right Named = left
-    interfaceIdentity = left === right
+    missingInterfaceContract = left === right
+    unknown Any = Any(Box(1))
+    anyStrict = unknown === unknown
+    number = 1
+    invalidPrimitiveReference = number.referenceId
+    invalidShapeReference = Point(1).referenceId
+    invalidInterfaceReference = left.referenceId
 }
 "#,
         );
@@ -13697,22 +13764,38 @@ def main() Unit {
             result
                 .diagnostics
                 .iter()
-                .filter(|diagnostic| diagnostic.code == "invalid_identity_operand")
+                .filter(|diagnostic| diagnostic.code == "missing_equality_contract")
                 .count(),
-            4,
+            2,
             "{:#?}",
             result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.code == "any_equality_not_supported" })
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "invalid_reference_id_receiver")
+                .count()
+                == 3
         );
     }
 
     #[test]
-    fn rejects_identity_comparison_between_unrelated_classes() {
+    fn rejects_strict_equality_between_unrelated_equality_domains() {
         let program = parse_inline(
             r#"
-class FirstBox {
+class FirstBox with Eq[FirstBox] {
+    def equals(other FirstBox) Bool = true
 }
 
-class SecondBox {
+class SecondBox with Eq[SecondBox] {
+    def equals(other SecondBox) Bool = true
 }
 
 def main() Unit {
@@ -13725,7 +13808,7 @@ def main() Unit {
             result
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code == "incompatible_identity_operands"),
+                .any(|diagnostic| diagnostic.code == "incompatible_equality_operands"),
             "{:#?}",
             result.diagnostics
         );

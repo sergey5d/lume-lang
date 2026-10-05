@@ -1,0 +1,6 @@
+# EXPECT_ERROR:
+# .*constructor 'ReferenceId' is not accessible.*
+
+def main() Unit {
+    id = ReferenceId()
+}

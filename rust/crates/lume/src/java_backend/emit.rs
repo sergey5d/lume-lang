@@ -5682,6 +5682,10 @@ impl<'a> SourceBodyEmitter<'a> {
                 "lume.core.LumeRuntime.runtimeTypeOf({})",
                 self.emit_expr(receiver, bindings)?
             )),
+            core::Expr::Member { receiver, name, .. } if name == "referenceId" => Some(format!(
+                "lume.core.LumeRuntime.referenceIdOf({})",
+                self.emit_expr(receiver, bindings)?
+            )),
             core::Expr::Member { receiver, name, .. }
                 if matches!(name.as_str(), "size" | "isEmpty" | "nonEmpty")
                     && self.is_java_string_receiver(receiver, bindings) =>
@@ -6066,16 +6070,12 @@ impl<'a> SourceBodyEmitter<'a> {
             } => match op {
                 ast::BinaryOp::Eq => self.emit_equality(left, right, bindings, false),
                 ast::BinaryOp::NotEq => self.emit_equality(left, right, bindings, true),
-                ast::BinaryOp::IdentityEq => Some(format!(
-                    "({} == {})",
-                    self.emit_expr(left, bindings)?,
-                    self.emit_expr(right, bindings)?
-                )),
-                ast::BinaryOp::IdentityNotEq => Some(format!(
-                    "({} != {})",
-                    self.emit_expr(left, bindings)?,
-                    self.emit_expr(right, bindings)?
-                )),
+                ast::BinaryOp::StrictEq => {
+                    self.emit_strict_equality(left, right, bindings, false)
+                }
+                ast::BinaryOp::StrictNotEq => {
+                    self.emit_strict_equality(left, right, bindings, true)
+                }
                 ast::BinaryOp::Colon => None,
                 _ => {
                     let left = self.emit_expr(left, bindings)?;
@@ -6095,8 +6095,8 @@ impl<'a> SourceBodyEmitter<'a> {
                         ast::BinaryOp::Colon
                         | ast::BinaryOp::Eq
                         | ast::BinaryOp::NotEq
-                        | ast::BinaryOp::IdentityEq
-                        | ast::BinaryOp::IdentityNotEq => unreachable!(),
+                        | ast::BinaryOp::StrictEq
+                        | ast::BinaryOp::StrictNotEq => unreachable!(),
                     };
                     Some(format!("({left} {operator} {right})"))
                 }
@@ -6323,6 +6323,44 @@ impl<'a> SourceBodyEmitter<'a> {
         })
     }
 
+    fn emit_strict_equality(
+        &self,
+        left: &core::Expr,
+        right: &core::Expr,
+        bindings: &HashMap<String, String>,
+        negated: bool,
+    ) -> Option<String> {
+        let left_ty = self.expr_type(left, bindings)?;
+        let right_ty = self.expr_type(right, bindings)?;
+        if self.is_shape_type(&left_ty) && self.is_shape_type(&right_ty) {
+            return self.emit_equality(left, right, bindings, negated);
+        }
+
+        let strict = format!(
+            "lume.core.LumeRuntime.strictEquals({}, {})",
+            self.emit_expr(left, bindings)?,
+            self.emit_expr(right, bindings)?
+        );
+        Some(if negated {
+            format!("!{strict}")
+        } else {
+            strict
+        })
+    }
+
+    fn is_shape_type(&self, ty: &ir::Type) -> bool {
+        match ty {
+            ir::Type::Record(_) => true,
+            ir::Type::Named { name, .. } => self
+                .bundle
+                .ir
+                .types
+                .iter()
+                .any(|candidate| candidate.name == *name && candidate.kind == TypeKind::Record),
+            _ => false,
+        }
+    }
+
     fn emit_shape_equality_projection(
         &self,
         target: &ir::Type,
@@ -6330,9 +6368,6 @@ impl<'a> SourceBodyEmitter<'a> {
         source_ty: &ir::Type,
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
-        if !matches!(source, core::Expr::Identifier { .. }) {
-            return None;
-        }
         let ir::Type::Named {
             name: target_name,
             args: target_args,
@@ -6397,15 +6432,30 @@ impl<'a> SourceBodyEmitter<'a> {
         }
 
         let source_expr = self.emit_expr(source, bindings)?;
+        let source_local = self.synthetic_name("shapeEquality", "shape", source.span().start);
+        let access_base = if matches!(source, core::Expr::Identifier { .. }) {
+            source_expr.clone()
+        } else {
+            source_local.clone()
+        };
         let args = target_fields
             .iter()
-            .map(|field| format!("{source_expr}.{}()", java_member_name(&field.name)))
+            .map(|field| format!("{access_base}.{}()", java_member_name(&field.name)))
             .collect::<Vec<_>>()
             .join(", ");
         let generic = (!target_args.is_empty()).then_some("<>").unwrap_or("");
-        Some(format!(
+        let projected = format!(
             "new {}{generic}({args})",
             self.names.named_type(target_name)
+        );
+        if matches!(source, core::Expr::Identifier { .. }) {
+            return Some(projected);
+        }
+
+        Some(format!(
+            "((java.util.function.Supplier<{}>) () -> {{ {} {source_local} = {source_expr}; return {projected}; }}).get()",
+            self.names.value_type(target),
+            self.names.value_type(source_ty)
         ))
     }
 
@@ -10073,8 +10123,8 @@ impl<'a> JavaIrSupport<'a> {
         match op {
             ir::BinaryOp::Eq
             | ir::BinaryOp::NotEq
-            | ir::BinaryOp::IdentityEq
-            | ir::BinaryOp::IdentityNotEq
+            | ir::BinaryOp::StrictEq
+            | ir::BinaryOp::StrictNotEq
             | ir::BinaryOp::Less
             | ir::BinaryOp::LessEq
             | ir::BinaryOp::Greater
@@ -10622,6 +10672,7 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Param" => Some("lume.core.LumeParam".to_string()),
         "EnumCase" => Some("lume.core.LumeEnumCase".to_string()),
         "ReflectionError" => Some("lume.core.ReflectionError".to_string()),
+        "ReferenceId" => Some("lume.core.ReferenceId".to_string()),
         "InvalidIndex" => Some("lume.core.InvalidIndex".to_string()),
         "IntRange" => Some("lume.core.IntRange".to_string()),
         _ => None,

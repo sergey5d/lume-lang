@@ -1064,8 +1064,8 @@ impl<'a> Parser<'a> {
             &[
                 (TokenKind::EqEq, BinaryOp::Eq),
                 (TokenKind::NotEq, BinaryOp::NotEq),
-                (TokenKind::IdentityEq, BinaryOp::IdentityEq),
-                (TokenKind::IdentityNotEq, BinaryOp::IdentityNotEq),
+                (TokenKind::StrictEq, BinaryOp::StrictEq),
+                (TokenKind::StrictNotEq, BinaryOp::StrictNotEq),
             ],
             "non_associative_equality",
             "equality",

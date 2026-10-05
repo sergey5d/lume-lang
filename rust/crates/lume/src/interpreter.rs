@@ -889,6 +889,7 @@ pub(crate) enum Value {
     Aggregate(Rc<RefCell<AggregateValue>>),
     Iterator(Rc<RefCell<IteratorState>>),
     Closure(Rc<ClosureValue>),
+    ReferenceId(ReferenceIdValue),
     RuntimeType(RuntimeTypeValue),
     RuntimeField {
         owner: runtime::RuntimeTypeId,
@@ -921,6 +922,11 @@ pub(crate) enum RuntimeTypeValue {
     },
     AnonymousShape(Vec<ir::NamedType>),
     Unknown,
+}
+
+#[derive(Clone)]
+pub(crate) struct ReferenceIdValue {
+    target: Box<Value>,
 }
 
 impl Value {
@@ -1051,6 +1057,7 @@ impl Value {
             }
             Value::Iterator(_) => "<iterator>".to_string(),
             Value::Closure(_) => "<closure>".to_string(),
+            Value::ReferenceId(_) => "<reference>".to_string(),
             Value::RuntimeType(runtime_type) => format!("type {}", runtime_type.render()),
             Value::RuntimeField { .. } => "<field>".to_string(),
             Value::RuntimeMethod { .. } => "<method>".to_string(),
@@ -2049,6 +2056,9 @@ impl<'a> Interpreter<'a> {
                 params: Vec::new(),
                 ret: Box::new(ir::Type::Unknown),
             },
+            Value::ReferenceId(_) => {
+                self.runtime_type_value_for_ir_type(&ir::Type::named("ReferenceId"))
+            }
             Value::RuntimeType(_) => self.runtime_type_value_for_ir_type(&ir::Type::Named {
                 name: "Type".to_string(),
                 args: vec![ir::Type::named("Any")],
@@ -2095,6 +2105,9 @@ impl<'a> Interpreter<'a> {
             Value::Map(_) => self
                 .runtime
                 .type_id_by_name_kind("Map", crate::ast::TypeKind::Class),
+            Value::ReferenceId(_) => self
+                .runtime
+                .type_id_by_name_kind("ReferenceId", crate::ast::TypeKind::Class),
             Value::String(_) => self
                 .runtime
                 .type_id_by_name_kind("Str", crate::ast::TypeKind::Class),
@@ -4396,6 +4409,9 @@ impl<'a> Interpreter<'a> {
         }
 
         match (left, right) {
+            (Value::ReferenceId(lhs), Value::ReferenceId(rhs)) => {
+                Ok(values_identical(&lhs.target, &rhs.target))
+            }
             (Value::Unit, Value::Unit) => Ok(true),
             (Value::Bool(lhs), Value::Bool(rhs)) => Ok(lhs == rhs),
             (Value::Int(lhs), Value::Int(rhs)) => Ok(lhs == rhs),
@@ -4486,6 +4502,79 @@ impl<'a> Interpreter<'a> {
                 Ok(true)
             }
             _ => Ok(false),
+        }
+    }
+
+    fn values_have_same_concrete_type(&self, left: &Value, right: &Value) -> bool {
+        if let (Value::Aggregate(left_value), Value::Aggregate(right_value)) = (left, right) {
+            let left_value = left_value.borrow();
+            let right_value = right_value.borrow();
+            if left_value.kind == ast::TypeKind::Record
+                && right_value.kind == ast::TypeKind::Record
+                && let (Some(left_id), Some(right_id)) =
+                    (left_value.runtime_type_id, right_value.runtime_type_id)
+                && let (Some(left_ty), Some(right_ty)) = (
+                    self.runtime.type_by_id(left_id),
+                    self.runtime.type_by_id(right_id),
+                )
+            {
+                let mut left_fields = left_ty
+                    .fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.ty.clone()))
+                    .collect::<Vec<_>>();
+                let mut right_fields = right_ty
+                    .fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.ty.clone()))
+                    .collect::<Vec<_>>();
+                left_fields.sort_by(|left, right| left.0.cmp(&right.0));
+                right_fields.sort_by(|left, right| left.0.cmp(&right.0));
+                return left_fields == right_fields;
+            }
+        }
+
+        let left_shape = structural_shape_fields(left);
+        let right_shape = structural_shape_fields(right);
+        match (left_shape, right_shape) {
+            (Some(left_fields), Some(right_fields)) => {
+                let mut left_names = left_fields
+                    .into_iter()
+                    .map(|(name, _)| name)
+                    .collect::<Vec<_>>();
+                let mut right_names = right_fields
+                    .into_iter()
+                    .map(|(name, _)| name)
+                    .collect::<Vec<_>>();
+                left_names.sort();
+                right_names.sort();
+                return left_names == right_names;
+            }
+            (Some(_), None) | (None, Some(_)) => return false,
+            (None, None) => {}
+        }
+
+        match (left, right) {
+            (Value::ReferenceId(_), Value::ReferenceId(_))
+            | (Value::Unit, Value::Unit)
+            | (Value::Bool(_), Value::Bool(_))
+            | (Value::Int(_), Value::Int(_))
+            | (Value::Float(_), Value::Float(_))
+            | (Value::String(_), Value::String(_))
+            | (Value::Rune(_), Value::Rune(_))
+            | (Value::List(_), Value::List(_))
+            | (Value::Set(_), Value::Set(_))
+            | (Value::Map(_), Value::Map(_)) => true,
+            (Value::Tuple(left_items), Value::Tuple(right_items)) => {
+                left_items.len() == right_items.len()
+            }
+            (Value::Aggregate(left_value), Value::Aggregate(right_value)) => {
+                let left_value = left_value.borrow();
+                let right_value = right_value.borrow();
+                left_value.type_name == right_value.type_name
+                    && left_value.case_name == right_value.case_name
+            }
+            _ => false,
         }
     }
 
@@ -4580,6 +4669,12 @@ impl<'a> Interpreter<'a> {
             Value::Rune(value) => {
                 "Rune".hash(&mut hasher);
                 value.hash(&mut hasher);
+            }
+            Value::ReferenceId(reference) => {
+                "ReferenceId".hash(&mut hasher);
+                reference_identity_address(&reference.target)
+                    .expect("ReferenceId always retains a reference-bearing value")
+                    .hash(&mut hasher);
             }
             Value::Tuple(items) => {
                 "Tuple".hash(&mut hasher);
@@ -4995,6 +5090,17 @@ impl<'a> Interpreter<'a> {
         if name == "runtimeType" {
             return Ok(Value::RuntimeType(self.runtime_type_value_for_value(&base)));
         }
+        if name == "referenceId" {
+            if reference_identity_address(&base).is_none() {
+                return Err(self.runtime_error(
+                    span,
+                    format!("referenceId is not available on {}", base.render()),
+                ));
+            }
+            return Ok(Value::ReferenceId(ReferenceIdValue {
+                target: Box::new(base),
+            }));
+        }
 
         match base {
             Value::Aggregate(aggregate) => {
@@ -5241,15 +5347,21 @@ impl<'a> Interpreter<'a> {
                 self.ensure_observable_value(&right, span, "equality comparison")?;
                 Ok(Value::Bool(!self.values_equal(&left, &right, span)?))
             }
-            ir::BinaryOp::IdentityEq => {
-                self.ensure_observable_value(&left, span, "identity comparison")?;
-                self.ensure_observable_value(&right, span, "identity comparison")?;
-                Ok(Value::Bool(values_identical(&left, &right)))
+            ir::BinaryOp::StrictEq => {
+                self.ensure_observable_value(&left, span, "strict equality comparison")?;
+                self.ensure_observable_value(&right, span, "strict equality comparison")?;
+                Ok(Value::Bool(
+                    self.values_have_same_concrete_type(&left, &right)
+                        && self.values_equal(&left, &right, span)?,
+                ))
             }
-            ir::BinaryOp::IdentityNotEq => {
-                self.ensure_observable_value(&left, span, "identity comparison")?;
-                self.ensure_observable_value(&right, span, "identity comparison")?;
-                Ok(Value::Bool(!values_identical(&left, &right)))
+            ir::BinaryOp::StrictNotEq => {
+                self.ensure_observable_value(&left, span, "strict equality comparison")?;
+                self.ensure_observable_value(&right, span, "strict equality comparison")?;
+                Ok(Value::Bool(
+                    !self.values_have_same_concrete_type(&left, &right)
+                        || !self.values_equal(&left, &right, span)?,
+                ))
             }
             ir::BinaryOp::Less => compare_binary(
                 left,
@@ -5372,6 +5484,7 @@ impl<'a> Interpreter<'a> {
                 Value::RuntimeMethod { .. } => name == "Method" || name == "Annotated",
                 Value::RuntimeParam { .. } => name == "Param",
                 Value::RuntimeEnumCase { .. } => name == "EnumCase" || name == "Annotated",
+                Value::ReferenceId(_) => name == "ReferenceId",
                 other => self
                     .runtime
                     .type_by_name_kind(name, crate::ast::TypeKind::Record)
@@ -5971,8 +6084,20 @@ fn values_identical(left: &Value, right: &Value) -> bool {
         (Value::List(lhs), Value::List(rhs)) => Rc::ptr_eq(lhs, rhs),
         (Value::Set(lhs), Value::Set(rhs)) => Rc::ptr_eq(lhs, rhs),
         (Value::Map(lhs), Value::Map(rhs)) => Rc::ptr_eq(lhs, rhs),
+        (Value::Record(lhs), Value::Record(rhs)) => Rc::ptr_eq(lhs, rhs),
         (Value::Aggregate(lhs), Value::Aggregate(rhs)) => Rc::ptr_eq(lhs, rhs),
         _ => false,
+    }
+}
+
+fn reference_identity_address(value: &Value) -> Option<usize> {
+    match value {
+        Value::List(value) => Some(Rc::as_ptr(value) as usize),
+        Value::Set(value) => Some(Rc::as_ptr(value) as usize),
+        Value::Map(value) => Some(Rc::as_ptr(value) as usize),
+        Value::Record(value) => Some(Rc::as_ptr(value) as usize),
+        Value::Aggregate(value) => Some(Rc::as_ptr(value) as usize),
+        _ => None,
     }
 }
 
@@ -6874,33 +6999,46 @@ mod tests {
     }
 
     #[test]
-    fn runs_reference_identity_operators() {
+    fn runs_strict_equality_and_reference_ids() {
         let program = lower_inline(
             r#"
-            class Box {
+            class Box with Eq[Box] {
                 value Int
+
+                def equals(other Box) Bool = this.value == other.value
             }
 
             def main() Unit {
                 first = Box(1)
                 alias = first
                 separate = Box(1)
+                different = Box(2)
                 values = [1, 2]
                 valuesAlias = values
                 valuesCopy = [1, 2]
 
                 OS.println(first === alias)
                 OS.println(first === separate)
-                OS.println(first !== separate)
-                OS.println(values === valuesAlias)
-                OS.println(values === valuesCopy)
+                OS.println(first !== different)
+                OS.println(first.referenceId == alias.referenceId)
+                OS.println(first.referenceId == separate.referenceId)
+                OS.println(values.referenceId == valuesAlias.referenceId)
+                OS.println(values.referenceId == valuesCopy.referenceId)
+
+                visited Set[ReferenceId] = Set()
+                visited.add(first.referenceId)
+                OS.println(visited.contains(alias.referenceId))
+                OS.println(visited.contains(separate.referenceId))
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "true\nfalse\ntrue\ntrue\nfalse\n");
+        assert_eq!(
+            run.output,
+            "true\ntrue\ntrue\ntrue\nfalse\ntrue\nfalse\ntrue\nfalse\n"
+        );
     }
 
     #[test]
@@ -6927,6 +7065,8 @@ mod tests {
                 println(point == different)
                 println(same == point)
                 println(point.equals(same))
+                println(point === same)
+                println(point !== different)
 
                 leftAnonymous { x Int, label Str } = { x: 1, label: "one" }
                 rightAnonymous { label Str, x Int } = { label: "one", x: 1 }
@@ -6937,7 +7077,10 @@ mod tests {
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "true\nfalse\nfalse\ntrue\ntrue\ntrue\n");
+        assert_eq!(
+            run.output,
+            "true\nfalse\nfalse\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+        );
     }
 
     #[test]
@@ -6973,7 +7116,12 @@ mod tests {
                 println(Account(1) != Account(2))
                 left Identified = Entry(1)
                 right Identified = AlternateEntry(1)
+                sameClass Identified = Entry(1)
+                different Identified = Entry(2)
                 println(left == right)
+                println(left === right)
+                println(left === sameClass)
+                println(left !== different)
 
                 account = Account(3)
                 widenedAccount Any = Any(account)
@@ -6986,7 +7134,7 @@ mod tests {
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "true\ntrue\ntrue\ntrue\n");
+        assert_eq!(run.output, "true\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\n");
     }
 
     #[test]
