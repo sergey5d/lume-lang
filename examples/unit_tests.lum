@@ -14,7 +14,7 @@ class PrimitiveSpec with Spec {
         "lume".shouldBe("lume")
         1.5.shouldBe(1.5)
 
-        first Rune = "rune".expectRuneAt(0)
+        first Rune = "rune".runeAt(0)!
         first.shouldBe(first)
     }
 }

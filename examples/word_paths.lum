@@ -3,9 +3,9 @@
 
 # "First" means first successful path in `allWords` order.
 
-def firstLetter(word Str) Rune = word.expectRuneAt(0)
+def firstLetter(word Str) Rune = word.runeAt(0)!
 
-def lastLetter(word Str) Rune = word.expectRuneAt(word.size - 1)
+def lastLetter(word Str) Rune = word.runeAt(word.size - 1)!
 
 def matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], path [Str]) [Str]? {
     for word <- allWords {

@@ -16,7 +16,7 @@ class OrderManager {
 
     def parseOrder(str Str) Order? {
 
-        arr = str.split("\s*,\s*")
+        arr = str.splitRegex("\s*,\s*")
 
         assert(arr.size == 5)
 

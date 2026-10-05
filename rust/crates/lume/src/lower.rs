@@ -181,6 +181,7 @@ impl<'a> Lowerer<'a> {
             .iter()
             .map(|ty| ty.name.clone())
             .collect::<HashSet<_>>();
+        let aliases = self.type_aliases.clone();
         let owners = self
             .program
             .types
@@ -192,33 +193,33 @@ impl<'a> Lowerer<'a> {
             let method_ids = self.program.types[index].methods.clone();
             let ty = &mut self.program.types[index];
             for bound in &mut ty.with_bounds {
-                canonicalize_nested_ir_type(bound, owner, &names);
+                canonicalize_nested_ir_type(bound, owner, &names, &aliases);
             }
             for field in &mut ty.fields {
-                canonicalize_nested_ir_type(&mut field.ty, owner, &names);
+                canonicalize_nested_ir_type(&mut field.ty, owner, &names, &aliases);
             }
             for case in &mut ty.enum_cases {
                 for field in &mut case.fields {
-                    canonicalize_nested_ir_type(&mut field.ty, owner, &names);
+                    canonicalize_nested_ir_type(&mut field.ty, owner, &names, &aliases);
                 }
             }
             for method_id in method_ids {
                 let Some(method) = self.program.function_mut(method_id) else {
                     continue;
                 };
-                canonicalize_nested_ir_type(&mut method.return_ty, owner, &names);
+                canonicalize_nested_ir_type(&mut method.return_ty, owner, &names, &aliases);
                 for local in &mut method.locals {
-                    canonicalize_nested_ir_type(&mut local.ty, owner, &names);
+                    canonicalize_nested_ir_type(&mut local.ty, owner, &names, &aliases);
                 }
                 for condition in &mut method.generic_conditions {
                     match condition {
                         ir::GenericCondition::Bound { subject, bound } => {
-                            canonicalize_nested_ir_type(subject, owner, &names);
-                            canonicalize_nested_ir_type(bound, owner, &names);
+                            canonicalize_nested_ir_type(subject, owner, &names, &aliases);
+                            canonicalize_nested_ir_type(bound, owner, &names, &aliases);
                         }
                         ir::GenericCondition::Equal { left, right } => {
-                            canonicalize_nested_ir_type(left, owner, &names);
-                            canonicalize_nested_ir_type(right, owner, &names);
+                            canonicalize_nested_ir_type(left, owner, &names, &aliases);
+                            canonicalize_nested_ir_type(right, owner, &names, &aliases);
                         }
                     }
                 }
@@ -1001,6 +1002,25 @@ impl<'a> FunctionLowerer<'a> {
         lexical_nested_ir_name(&owner, &path[0], &names)
     }
 
+    fn canonical_enum_case_path(&self, path: &[String]) -> Vec<String> {
+        let Some((case_name, owner_path)) = path.split_last() else {
+            return Vec::new();
+        };
+        let Some(owner_name) = self.canonical_declared_type_path(owner_path) else {
+            return path.to_vec();
+        };
+        let is_case = self.program.types.iter().any(|ty| {
+            ty.kind == ast::TypeKind::Enum
+                && ty.name == owner_name
+                && ty.enum_cases.iter().any(|case| case.name == *case_name)
+        });
+        if is_case {
+            vec![owner_name, case_name.clone()]
+        } else {
+            path.to_vec()
+        }
+    }
+
     fn lower_type_ref(&self, reference: &TypeRef) -> ir::Type {
         let mut ty = lower_type_ref_with_aliases(reference, self.type_aliases);
         if let Some(owner) = self.lexical_owner_name() {
@@ -1010,7 +1030,7 @@ impl<'a> FunctionLowerer<'a> {
                 .iter()
                 .map(|ty| ty.name.clone())
                 .collect::<HashSet<_>>();
-            canonicalize_nested_ir_type(&mut ty, &owner, &names);
+            canonicalize_nested_ir_type(&mut ty, &owner, &names, self.type_aliases);
         }
         ty
     }
@@ -5263,7 +5283,7 @@ impl<'a> FunctionLowerer<'a> {
         overrides: &[(String, ir::Type)],
     ) -> Option<ir::Type> {
         let (callee, explicit_type_args) = self.split_generic_call_callee(callee);
-        let path = expr_path(callee)?;
+        let path = self.canonical_enum_case_path(&expr_path(callee)?);
         let declared_name = self.canonical_declared_type_path(&path);
         if declared_name.is_some()
             || (path.len() == 1 && runtime_collection_constructor_name(&path[0]))
@@ -5564,6 +5584,7 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lookup_enum_case_type_by_path(&self, path: &[String]) -> Option<ir::Type> {
+        let path = self.canonical_enum_case_path(path);
         let matches = self
             .program
             .types
@@ -6321,6 +6342,7 @@ impl<'a> FunctionLowerer<'a> {
             }
         }
         if let Some(path) = expr_path(expr) {
+            let path = self.canonical_enum_case_path(&path);
             if path.len() > 1 && is_named_runtime_value_path(self.program, &path) {
                 let path = self
                     .canonical_declared_type_path(&path)
@@ -7391,7 +7413,7 @@ impl<'a> FunctionLowerer<'a> {
         else {
             return None;
         };
-        let path = expr_path(callee)?;
+        let path = self.canonical_enum_case_path(&expr_path(callee)?);
         let case_name = match path.as_slice() {
             [case] => case,
             [owner, case] if owner == expected_name => case,
@@ -7714,6 +7736,7 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_callee(&mut self, callee: &Expr) -> ir::Callee {
         if let Some(path) = expr_path(callee) {
+            let path = self.canonical_enum_case_path(&path);
             if let Some(name) = self.canonical_declared_type_path(&path) {
                 return ir::Callee::Named { path: vec![name] };
             }
@@ -7896,6 +7919,7 @@ impl<'a> FunctionLowerer<'a> {
         let Some(path) = expr_path(callee) else {
             return false;
         };
+        let path = self.canonical_enum_case_path(&path);
         match path.as_slice() {
             [case_name] => self.program.types.iter().any(|ty| {
                 ty.kind == ast::TypeKind::Enum
@@ -8497,11 +8521,64 @@ fn lower_type_ref_with_aliases(
     lower_type_ref_inner(reference, type_aliases, &mut HashSet::new())
 }
 
-fn canonicalize_nested_ir_type(ty: &mut ir::Type, owner: &str, names: &HashSet<String>) {
+fn canonicalize_nested_ir_type(
+    ty: &mut ir::Type,
+    owner: &str,
+    names: &HashSet<String>,
+    aliases: &HashMap<String, TypeRef>,
+) {
+    let alias_names = aliases.keys().cloned().collect::<HashSet<_>>();
+    canonicalize_nested_ir_type_with_aliases(
+        ty,
+        owner,
+        names,
+        aliases,
+        &alias_names,
+        &mut HashSet::new(),
+    );
+}
+
+fn canonicalize_nested_ir_type_with_aliases(
+    ty: &mut ir::Type,
+    owner: &str,
+    names: &HashSet<String>,
+    aliases: &HashMap<String, TypeRef>,
+    alias_names: &HashSet<String>,
+    visiting: &mut HashSet<String>,
+) {
     match ty {
         ir::Type::Named { name, args } => {
-            for arg in args {
-                canonicalize_nested_ir_type(arg, owner, names);
+            for arg in args.iter_mut() {
+                canonicalize_nested_ir_type_with_aliases(
+                    arg,
+                    owner,
+                    names,
+                    aliases,
+                    alias_names,
+                    visiting,
+                );
+            }
+            if args.is_empty()
+                && let Some(alias_name) = lexical_nested_ir_name(owner, name, alias_names)
+                && visiting.insert(alias_name.clone())
+            {
+                let target = aliases.get(&alias_name).expect("known nested type alias");
+                let mut lowered = lower_type_ref_with_aliases(target, aliases);
+                let alias_owner = alias_name
+                    .rsplit_once('.')
+                    .map(|(parent, _)| parent)
+                    .unwrap_or(owner);
+                canonicalize_nested_ir_type_with_aliases(
+                    &mut lowered,
+                    alias_owner,
+                    names,
+                    aliases,
+                    alias_names,
+                    visiting,
+                );
+                visiting.remove(&alias_name);
+                *ty = lowered;
+                return;
             }
             if let Some(canonical) = lexical_nested_ir_name(owner, name, names) {
                 *name = canonical;
@@ -8509,19 +8586,47 @@ fn canonicalize_nested_ir_type(ty: &mut ir::Type, owner: &str, names: &HashSet<S
         }
         ir::Type::Union(members) | ir::Type::Tuple(members) => {
             for member in members {
-                canonicalize_nested_ir_type(member, owner, names);
+                canonicalize_nested_ir_type_with_aliases(
+                    member,
+                    owner,
+                    names,
+                    aliases,
+                    alias_names,
+                    visiting,
+                );
             }
         }
         ir::Type::Record(fields) => {
             for field in fields {
-                canonicalize_nested_ir_type(&mut field.ty, owner, names);
+                canonicalize_nested_ir_type_with_aliases(
+                    &mut field.ty,
+                    owner,
+                    names,
+                    aliases,
+                    alias_names,
+                    visiting,
+                );
             }
         }
         ir::Type::Function { params, ret } => {
             for param in params {
-                canonicalize_nested_ir_type(param, owner, names);
+                canonicalize_nested_ir_type_with_aliases(
+                    param,
+                    owner,
+                    names,
+                    aliases,
+                    alias_names,
+                    visiting,
+                );
             }
-            canonicalize_nested_ir_type(ret, owner, names);
+            canonicalize_nested_ir_type_with_aliases(
+                ret,
+                owner,
+                names,
+                aliases,
+                alias_names,
+                visiting,
+            );
         }
         ir::Type::Unknown
         | ir::Type::Never
@@ -9643,13 +9748,6 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         ("Method", "returnType") => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir_exact_runtime_type(ir::Type::Unknown)),
-        }),
-        ("Method", "invoke") => Some(ir::Type::Function {
-            params: vec![
-                ir::Type::named("Any"),
-                ir::Type::list(ir::Type::named("Any")),
-            ],
-            ret: Box::new(ir::Type::named("Any")),
         }),
         ("Method", "call") => Some(ir::Type::Function {
             params: vec![

@@ -1,6 +1,7 @@
 package lume.core;
 
 import java.lang.reflect.InvocationTargetException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -64,7 +65,43 @@ public final class LumeRuntime {
     }
 
     public static LumeVector<String> stringSplit(String text, String separator) {
-        return LumeVector.from(Arrays.asList(text.split(separator, -1)));
+        var parts = new ArrayList<String>();
+        if (separator.isEmpty()) {
+            parts.add("");
+            text.codePoints().forEach(codePoint -> parts.add(new String(Character.toChars(codePoint))));
+            parts.add("");
+            return LumeVector.from(parts);
+        }
+
+        int start = 0;
+        int next;
+        while ((next = text.indexOf(separator, start)) >= 0) {
+            parts.add(text.substring(start, next));
+            start = next + separator.length();
+        }
+        parts.add(text.substring(start));
+        return LumeVector.from(parts);
+    }
+
+    public static LumeVector<String> stringSplitRegex(String text, String pattern) {
+        return LumeVector.from(Arrays.asList(text.split(pattern, -1)));
+    }
+
+    public static Long stringSize(String text) {
+        return (long) text.codePointCount(0, text.length());
+    }
+
+    public static Option<Integer> stringRuneAt(String text, Long index) {
+        if (index < 0 || index > Integer.MAX_VALUE) {
+            return optionNone();
+        }
+        int scalarIndex = index.intValue();
+        int size = text.codePointCount(0, text.length());
+        if (scalarIndex >= size) {
+            return optionNone();
+        }
+        int offset = text.offsetByCodePoints(0, scalarIndex);
+        return optionSome(text.codePointAt(offset));
     }
 
     public static Boolean extractSuccessIsSet(Object value) {

@@ -1418,85 +1418,139 @@ impl<'a> Interpreter<'a> {
             frame.locals[param.0] = coerced;
         }
 
-        let mut block_id = function.entry;
-        loop {
-            let block = function.block(block_id).cloned().ok_or_else(|| {
-                self.runtime_error(span, format!("unknown block id {}", block_id.0))
-            })?;
-            for statement in block.statements {
-                self.exec_statement(&mut frame, statement)?;
-            }
-
-            match block.terminator.kind {
-                ir::TerminatorKind::Goto(target) => block_id = target,
-                ir::TerminatorKind::Branch {
-                    condition,
-                    then_block,
-                    else_block,
-                } => {
-                    if self
-                        .eval_operand(&frame, &condition, block.terminator.span)?
-                        .as_bool(self, block.terminator.span, "branch condition")?
-                    {
-                        block_id = then_block;
-                    } else {
-                        block_id = else_block;
-                    }
+        let execution = (|| -> Result<Value, Diagnostic> {
+            let mut block_id = function.entry;
+            loop {
+                let block = function.block(block_id).cloned().ok_or_else(|| {
+                    self.runtime_error(span, format!("unknown block id {}", block_id.0))
+                })?;
+                for statement in block.statements {
+                    self.exec_statement(&mut frame, statement)?;
                 }
-                ir::TerminatorKind::Switch {
-                    scrutinee,
-                    arms,
-                    default,
-                } => {
-                    let scrutinee = self.eval_operand(&frame, &scrutinee, block.terminator.span)?;
-                    let mut matched = None;
-                    for arm in arms {
-                        if self.switch_matches(&scrutinee, &arm.value) {
-                            matched = Some(arm.target);
-                            break;
+
+                match block.terminator.kind {
+                    ir::TerminatorKind::Goto(target) => block_id = target,
+                    ir::TerminatorKind::Branch {
+                        condition,
+                        then_block,
+                        else_block,
+                    } => {
+                        if self
+                            .eval_operand(&frame, &condition, block.terminator.span)?
+                            .as_bool(self, block.terminator.span, "branch condition")?
+                        {
+                            block_id = then_block;
+                        } else {
+                            block_id = else_block;
                         }
                     }
-                    block_id = matched.unwrap_or(default);
-                }
-                ir::TerminatorKind::Return(value) => {
-                    let returned = value
-                        .map(|operand| self.eval_operand(&frame, &operand, block.terminator.span))
-                        .transpose()?
-                        .unwrap_or(Value::Unit);
-                    while let Some(deferred) = frame.defers.pop() {
-                        let _ = self.call_function(
-                            deferred.function,
-                            None,
-                            Some(deferred.captures.clone()),
-                            Vec::new(),
-                            block.terminator.span,
-                        )?;
-                    }
-                    if function.name == "new" {
-                        if let (Some(Value::Aggregate(receiver)), Value::Aggregate(result)) =
-                            (frame.locals.first().cloned(), returned.clone())
-                        {
-                            let result = result.borrow();
-                            let mut receiver = receiver.borrow_mut();
-                            if receiver.type_name == result.type_name
-                                && receiver.case_name == result.case_name
-                            {
-                                receiver.fields = result.fields.clone();
-                                receiver.field_names = result.field_names.clone();
-                                return Ok(Value::Unit);
+                    ir::TerminatorKind::Switch {
+                        scrutinee,
+                        arms,
+                        default,
+                    } => {
+                        let scrutinee =
+                            self.eval_operand(&frame, &scrutinee, block.terminator.span)?;
+                        let mut matched = None;
+                        for arm in arms {
+                            if self.switch_matches(&scrutinee, &arm.value) {
+                                matched = Some(arm.target);
+                                break;
                             }
                         }
+                        block_id = matched.unwrap_or(default);
                     }
-                    return Ok(self.coerce_value_to_type(returned, &function.return_ty));
+                    ir::TerminatorKind::Return(value) => {
+                        return value
+                            .map(|operand| {
+                                self.eval_operand(&frame, &operand, block.terminator.span)
+                            })
+                            .transpose()
+                            .map(|value| value.unwrap_or(Value::Unit));
+                    }
+                    ir::TerminatorKind::Unreachable => {
+                        return Err(self.runtime_error(
+                            block.terminator.span,
+                            format!("entered unreachable block in '{}'", function.name),
+                        ));
+                    }
                 }
-                ir::TerminatorKind::Unreachable => {
-                    return Err(self.runtime_error(
-                        block.terminator.span,
-                        format!("entered unreachable block in '{}'", function.name),
-                    ));
+            }
+        })();
+
+        let returned = self.finish_callable_exit(&mut frame, execution, span)?;
+        if function.name == "new" {
+            if let (Some(Value::Aggregate(receiver)), Value::Aggregate(result)) =
+                (frame.locals.first().cloned(), returned.clone())
+            {
+                let result = result.borrow();
+                let mut receiver = receiver.borrow_mut();
+                if receiver.type_name == result.type_name && receiver.case_name == result.case_name
+                {
+                    receiver.fields = result.fields.clone();
+                    receiver.field_names = result.field_names.clone();
+                    return Ok(Value::Unit);
                 }
             }
         }
+        Ok(self.coerce_value_to_type(returned, &function.return_ty))
+    }
+
+    fn finish_callable_exit(
+        &mut self,
+        frame: &mut Frame,
+        execution: Result<Value, Diagnostic>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let mut cleanup_failures = Vec::new();
+        while let Some(deferred) = frame.defers.pop() {
+            if let Err(diagnostic) = self.call_function(
+                deferred.function,
+                None,
+                Some(deferred.captures.clone()),
+                Vec::new(),
+                span,
+            ) {
+                cleanup_failures.push(diagnostic);
+            }
+        }
+
+        match execution {
+            Err(mut primary) => {
+                for cleanup_failure in cleanup_failures {
+                    Self::attach_cleanup_failure(&mut primary, cleanup_failure);
+                }
+                Err(primary)
+            }
+            Ok(value) => {
+                let mut cleanup_failures = cleanup_failures.into_iter();
+                let Some(mut primary) = cleanup_failures.next() else {
+                    return Ok(value);
+                };
+                primary
+                    .notes
+                    .push("error occurred while running deferred cleanup".to_string());
+                for cleanup_failure in cleanup_failures {
+                    Self::attach_cleanup_failure(&mut primary, cleanup_failure);
+                }
+                Err(primary)
+            }
+        }
+    }
+
+    fn attach_cleanup_failure(primary: &mut Diagnostic, cleanup_failure: Diagnostic) {
+        primary.notes.push(format!(
+            "deferred cleanup also failed at {}:{}: {}",
+            cleanup_failure.span.start_pos.line,
+            cleanup_failure.span.start_pos.column,
+            cleanup_failure.message
+        ));
+        primary.notes.extend(
+            cleanup_failure
+                .notes
+                .into_iter()
+                .map(|note| format!("deferred cleanup note: {note}")),
+        );
     }
 
     fn exec_statement(
@@ -2701,10 +2755,10 @@ impl<'a> Interpreter<'a> {
                 let index = self.eval_operand_ref(frame, index, span)?;
                 if let Value::Map(entries) = &base {
                     self.ensure_observable_value(&index, span, "map lookup key")?;
-                    let current = entries
-                        .borrow()
-                        .iter()
-                        .find(|(key, _)| values_equal(key, &index))
+                    let entries = entries.borrow().clone();
+                    let current = self
+                        .map_key_index(&entries, &index, span)?
+                        .and_then(|position| entries.get(position))
                         .map(|(_, value)| value.clone());
                     return current.ok_or_else(|| {
                         self.runtime_error(
@@ -2950,7 +3004,7 @@ impl<'a> Interpreter<'a> {
                 ));
             }
             let values = iterable_values(args[0].clone(), span, self)?;
-            return Ok(Value::set(unique_values(values)));
+            return Ok(Value::set(self.unique_values(values, span)?));
         }
 
         if path[0] == "Int" && path.len() == 2 && path[1] == "parse" {
@@ -3182,9 +3236,9 @@ impl<'a> Interpreter<'a> {
             "Vector" | "LinkedList" | "Array" => {
                 Some(Value::List(Rc::new(RefCell::new(args.to_vec()))))
             }
-            "Set" => Some(Value::Set(Rc::new(RefCell::new(unique_values(
-                args.to_vec(),
-            ))))),
+            "Set" => Some(Value::Set(Rc::new(RefCell::new(
+                self.unique_values(args.to_vec(), span)?,
+            )))),
             "Map" => {
                 let entries = map_entries_from_tuple_values(args.to_vec(), span, self)?;
                 Some(Value::Map(Rc::new(RefCell::new(entries))))
@@ -3320,16 +3374,6 @@ impl<'a> Interpreter<'a> {
                     ));
                 }
             }
-        }
-
-        if matches!(args.as_slice(), [Value::Record(_)]) {
-            return Err(self.runtime_error(
-                span,
-                format!(
-                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use construction fields in braces or positional values directly",
-                    type_name
-                ),
-            ));
         }
 
         if let Some(init) = self.find_method_overload_for_kind(type_name, ty.kind, "new", &args) {
@@ -4278,7 +4322,9 @@ impl<'a> Interpreter<'a> {
                         format!("equals expects 1 argument, got {}", args.len()),
                     ));
                 }
-                Ok(Some(Value::Bool(values_equal(&receiver, &args[0]))))
+                Ok(Some(Value::Bool(
+                    self.values_equal(&receiver, &args[0], span)?,
+                )))
             }
             "hash" => {
                 if !args.is_empty() {
@@ -4291,6 +4337,223 @@ impl<'a> Interpreter<'a> {
             }
             _ => Ok(None),
         }
+    }
+
+    pub(crate) fn values_equal(
+        &mut self,
+        left: &Value,
+        right: &Value,
+        span: Option<Span>,
+    ) -> Result<bool, Diagnostic> {
+        if let Value::Aggregate(aggregate) = left {
+            let (type_name, kind) = {
+                let aggregate = aggregate.borrow();
+                (aggregate.type_name.clone(), aggregate.kind)
+            };
+            if kind == crate::ast::TypeKind::Class {
+                let Some(function) = self.find_method_overload_for_kind(
+                    &type_name,
+                    kind,
+                    "equals",
+                    &[right.clone()],
+                ) else {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("class '{type_name}' does not implement equals(other)"),
+                    ));
+                };
+                return match self.call_function(
+                    function,
+                    Some(left.clone()),
+                    None,
+                    vec![right.clone()],
+                    span,
+                )? {
+                    Value::Bool(equal) => Ok(equal),
+                    other => Err(self.runtime_error(
+                        span,
+                        format!("equals(other) must return Bool, got {}", other.render()),
+                    )),
+                };
+            }
+        }
+
+        if let (Some(mut lhs), Some(mut rhs)) = (
+            structural_shape_fields(left),
+            structural_shape_fields(right),
+        ) {
+            lhs.sort_by(|left, right| left.0.cmp(&right.0));
+            rhs.sort_by(|left, right| left.0.cmp(&right.0));
+            if lhs.len() != rhs.len() {
+                return Ok(false);
+            }
+            for ((left_name, left_value), (right_name, right_value)) in lhs.iter().zip(rhs.iter()) {
+                if left_name != right_name || !self.values_equal(left_value, right_value, span)? {
+                    return Ok(false);
+                }
+            }
+            return Ok(true);
+        }
+
+        match (left, right) {
+            (Value::Unit, Value::Unit) => Ok(true),
+            (Value::Bool(lhs), Value::Bool(rhs)) => Ok(lhs == rhs),
+            (Value::Int(lhs), Value::Int(rhs)) => Ok(lhs == rhs),
+            (Value::Float(lhs), Value::Float(rhs)) => Ok(lhs == rhs),
+            (Value::String(lhs), Value::String(rhs)) => Ok(lhs == rhs),
+            (Value::Rune(lhs), Value::Rune(rhs)) => Ok(lhs == rhs),
+            (Value::Tuple(lhs), Value::Tuple(rhs)) => {
+                if lhs.len() != rhs.len() {
+                    return Ok(false);
+                }
+                for (lhs, rhs) in lhs.iter().zip(rhs) {
+                    if !self.values_equal(lhs, rhs, span)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            (Value::List(lhs), Value::List(rhs)) => {
+                let lhs = lhs.borrow().clone();
+                let rhs = rhs.borrow().clone();
+                if lhs.len() != rhs.len() {
+                    return Ok(false);
+                }
+                for (lhs, rhs) in lhs.iter().zip(rhs.iter()) {
+                    if !self.values_equal(lhs, rhs, span)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            (Value::Set(lhs), Value::Set(rhs)) => {
+                let lhs = lhs.borrow().clone();
+                let rhs = rhs.borrow().clone();
+                if lhs.len() != rhs.len() {
+                    return Ok(false);
+                }
+                for (lhs, rhs) in lhs.iter().zip(rhs.iter()) {
+                    if !self.values_equal(lhs, rhs, span)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            (Value::Map(lhs), Value::Map(rhs)) => {
+                let lhs = lhs.borrow().clone();
+                let rhs = rhs.borrow().clone();
+                if lhs.len() != rhs.len() {
+                    return Ok(false);
+                }
+                for ((left_key, left_value), (right_key, right_value)) in lhs.iter().zip(rhs.iter())
+                {
+                    if !self.values_equal(left_key, right_key, span)?
+                        || !self.values_equal(left_value, right_value, span)?
+                    {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            (Value::Aggregate(lhs), Value::Aggregate(rhs)) => {
+                let (left_type, left_case, left_fields) = {
+                    let lhs = lhs.borrow();
+                    (
+                        lhs.type_name.clone(),
+                        lhs.case_name.clone(),
+                        lhs.fields.clone(),
+                    )
+                };
+                let (right_type, right_case, right_fields) = {
+                    let rhs = rhs.borrow();
+                    (
+                        rhs.type_name.clone(),
+                        rhs.case_name.clone(),
+                        rhs.fields.clone(),
+                    )
+                };
+                if left_type != right_type
+                    || left_case != right_case
+                    || left_fields.len() != right_fields.len()
+                {
+                    return Ok(false);
+                }
+                for (lhs, rhs) in left_fields.iter().zip(right_fields.iter()) {
+                    if !self.values_equal(lhs, rhs, span)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    pub(crate) fn value_index(
+        &mut self,
+        values: &[Value],
+        needle: &Value,
+        span: Option<Span>,
+    ) -> Result<Option<usize>, Diagnostic> {
+        for (index, value) in values.iter().enumerate() {
+            if self.values_equal(value, needle, span)? {
+                return Ok(Some(index));
+            }
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn map_key_index(
+        &mut self,
+        entries: &[(Value, Value)],
+        needle: &Value,
+        span: Option<Span>,
+    ) -> Result<Option<usize>, Diagnostic> {
+        for (index, (key, _)) in entries.iter().enumerate() {
+            if self.values_equal(key, needle, span)? {
+                return Ok(Some(index));
+            }
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn push_unique(
+        &mut self,
+        items: &mut Vec<Value>,
+        value: Value,
+        span: Option<Span>,
+    ) -> Result<(), Diagnostic> {
+        if self.value_index(items, &value, span)?.is_none() {
+            items.push(value);
+        }
+        Ok(())
+    }
+
+    fn unique_values(
+        &mut self,
+        items: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Vec<Value>, Diagnostic> {
+        let mut out = Vec::new();
+        for value in items {
+            self.push_unique(&mut out, value, span)?;
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn map_put_entry(
+        &mut self,
+        entries: &mut Vec<(Value, Value)>,
+        key: Value,
+        value: Value,
+        span: Option<Span>,
+    ) -> Result<(), Diagnostic> {
+        if let Some(position) = self.map_key_index(entries, &key, span)? {
+            entries[position].1 = value;
+        } else {
+            entries.push((key, value));
+        }
+        Ok(())
     }
 
     fn hash_value(&mut self, value: &Value, span: Option<Span>) -> Result<i64, Diagnostic> {
@@ -4837,14 +5100,14 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         if let Value::Map(entries) = base {
             self.ensure_observable_value(&index, span, "map lookup key")?;
-            let mut value = None;
-            for (key, entry_value) in entries.borrow().iter() {
+            let entries = entries.borrow().clone();
+            for (key, _) in &entries {
                 self.ensure_observable_value(key, span, "map lookup key")?;
-                if values_equal(key, &index) {
-                    value = Some(entry_value.clone());
-                    break;
-                }
             }
+            let value = self
+                .map_key_index(&entries, &index, span)?
+                .and_then(|position| entries.get(position))
+                .map(|(_, value)| value.clone());
             return Ok(match value {
                 Some(value) => self.option_some(value),
                 None => self.option_none(),
@@ -4883,7 +5146,14 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<(), Diagnostic> {
         if let Value::Map(entries) = base {
-            map_put_entry(&mut entries.borrow_mut(), index, value);
+            let snapshot = entries.borrow().clone();
+            let existing = self.map_key_index(&snapshot, &index, span)?;
+            let mut entries = entries.borrow_mut();
+            if let Some(position) = existing {
+                entries[position].1 = value;
+            } else {
+                entries.push((index, value));
+            }
             return Ok(());
         }
         let index = index.as_int(self, span, "index")?;
@@ -4913,7 +5183,7 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         match op {
             ir::UnaryOp::Neg => match operand {
-                Value::Int(value) => Ok(Value::Int(-value)),
+                Value::Int(value) => Ok(Value::Int(value.wrapping_neg())),
                 Value::Float(value) => Ok(Value::Float(-value)),
                 other => self.invoke_method(other, "-", Vec::new(), span),
             },
@@ -4930,7 +5200,7 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         match op {
             ir::BinaryOp::Add => match (&left, &right) {
-                (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs + rhs)),
+                (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs.wrapping_add(*rhs))),
                 (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs + rhs)),
                 (Value::Int(lhs), Value::Float(rhs)) => Ok(Value::Float(*lhs as f64 + rhs)),
                 (Value::Float(lhs), Value::Int(rhs)) => Ok(Value::Float(lhs + *rhs as f64)),
@@ -4946,7 +5216,7 @@ impl<'a> Interpreter<'a> {
                 right,
                 span,
                 "-",
-                |lhs, rhs| lhs - rhs,
+                i64::wrapping_sub,
                 |lhs, rhs| lhs - rhs,
                 self,
             ),
@@ -4955,32 +5225,21 @@ impl<'a> Interpreter<'a> {
                 right,
                 span,
                 "*",
-                |lhs, rhs| lhs * rhs,
+                i64::wrapping_mul,
                 |lhs, rhs| lhs * rhs,
                 self,
             ),
-            ir::BinaryOp::Div => numeric_binary_or_method(
-                left,
-                right,
-                span,
-                "/",
-                |lhs, rhs| lhs / rhs,
-                |lhs, rhs| lhs / rhs,
-                self,
-            ),
-            ir::BinaryOp::Mod => match (left, right) {
-                (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs % rhs)),
-                (left, right) => self.invoke_method(left, "%", vec![right], span),
-            },
+            ir::BinaryOp::Div => numeric_division_or_method(left, right, span, self),
+            ir::BinaryOp::Mod => numeric_remainder_or_method(left, right, span, self),
             ir::BinaryOp::Eq => {
                 self.ensure_observable_value(&left, span, "equality comparison")?;
                 self.ensure_observable_value(&right, span, "equality comparison")?;
-                Ok(Value::Bool(values_equal(&left, &right)))
+                Ok(Value::Bool(self.values_equal(&left, &right, span)?))
             }
             ir::BinaryOp::NotEq => {
                 self.ensure_observable_value(&left, span, "equality comparison")?;
                 self.ensure_observable_value(&right, span, "equality comparison")?;
-                Ok(Value::Bool(!values_equal(&left, &right)))
+                Ok(Value::Bool(!self.values_equal(&left, &right, span)?))
             }
             ir::BinaryOp::IdentityEq => {
                 self.ensure_observable_value(&left, span, "identity comparison")?;
@@ -4992,12 +5251,38 @@ impl<'a> Interpreter<'a> {
                 self.ensure_observable_value(&right, span, "identity comparison")?;
                 Ok(Value::Bool(!values_identical(&left, &right)))
             }
-            ir::BinaryOp::Less => compare_binary(left, right, span, |lhs, rhs| lhs < rhs, self),
-            ir::BinaryOp::LessEq => compare_binary(left, right, span, |lhs, rhs| lhs <= rhs, self),
-            ir::BinaryOp::Greater => compare_binary(left, right, span, |lhs, rhs| lhs > rhs, self),
-            ir::BinaryOp::GreaterEq => {
-                compare_binary(left, right, span, |lhs, rhs| lhs >= rhs, self)
-            }
+            ir::BinaryOp::Less => compare_binary(
+                left,
+                right,
+                span,
+                |lhs, rhs| lhs < rhs,
+                |lhs, rhs| lhs < rhs,
+                self,
+            ),
+            ir::BinaryOp::LessEq => compare_binary(
+                left,
+                right,
+                span,
+                |lhs, rhs| lhs <= rhs,
+                |lhs, rhs| lhs <= rhs,
+                self,
+            ),
+            ir::BinaryOp::Greater => compare_binary(
+                left,
+                right,
+                span,
+                |lhs, rhs| lhs > rhs,
+                |lhs, rhs| lhs > rhs,
+                self,
+            ),
+            ir::BinaryOp::GreaterEq => compare_binary(
+                left,
+                right,
+                span,
+                |lhs, rhs| lhs >= rhs,
+                |lhs, rhs| lhs >= rhs,
+                self,
+            ),
             ir::BinaryOp::And => Ok(Value::Bool(
                 left.as_bool(self, span, "left side of &&")?
                     && right.as_bool(self, span, "right side of &&")?,
@@ -5561,45 +5846,20 @@ fn pattern_field_value(value: &Value, name: &str) -> Option<Value> {
     }
 }
 
-pub(crate) fn push_unique(items: &mut Vec<Value>, value: Value) {
-    if !items.iter().any(|existing| values_equal(existing, &value)) {
-        items.push(value);
-    }
-}
-
-pub(crate) fn unique_values(items: Vec<Value>) -> Vec<Value> {
-    let mut out = Vec::new();
-    for value in items {
-        push_unique(&mut out, value);
-    }
-    out
-}
-
-pub(crate) fn map_put_entry(entries: &mut Vec<(Value, Value)>, key: Value, value: Value) {
-    if let Some((_, slot)) = entries
-        .iter_mut()
-        .find(|(existing, _)| values_equal(existing, &key))
-    {
-        *slot = value;
-    } else {
-        entries.push((key, value));
-    }
-}
-
 fn map_entries_from_tuple_values(
     values: Vec<Value>,
     span: Option<Span>,
-    in_: &Interpreter<'_>,
+    in_: &mut Interpreter<'_>,
 ) -> Result<Vec<(Value, Value)>, Diagnostic> {
     let mut entries = Vec::new();
     for value in values {
         match value {
             Value::Tuple(items) if items.len() == 2 => {
-                map_put_entry(&mut entries, items[0].clone(), items[1].clone());
+                in_.map_put_entry(&mut entries, items[0].clone(), items[1].clone(), span)?;
             }
             Value::Map(spread) => {
                 for (key, value) in spread.borrow().iter() {
-                    map_put_entry(&mut entries, key.clone(), value.clone());
+                    in_.map_put_entry(&mut entries, key.clone(), value.clone(), span)?;
                 }
             }
             _ => {
@@ -5688,74 +5948,6 @@ pub(crate) fn iterable_values(
     }
 }
 
-pub(crate) fn values_equal(left: &Value, right: &Value) -> bool {
-    if let (Some(mut lhs), Some(mut rhs)) = (
-        structural_shape_fields(left),
-        structural_shape_fields(right),
-    ) {
-        lhs.sort_by(|left, right| left.0.cmp(&right.0));
-        rhs.sort_by(|left, right| left.0.cmp(&right.0));
-        return lhs.len() == rhs.len()
-            && lhs.iter().zip(rhs.iter()).all(
-                |((left_name, left_value), (right_name, right_value))| {
-                    left_name == right_name && values_equal(left_value, right_value)
-                },
-            );
-    }
-
-    match (left, right) {
-        (Value::Unit, Value::Unit) => true,
-        (Value::Bool(lhs), Value::Bool(rhs)) => lhs == rhs,
-        (Value::Int(lhs), Value::Int(rhs)) => lhs == rhs,
-        (Value::Float(lhs), Value::Float(rhs)) => lhs == rhs,
-        (Value::String(lhs), Value::String(rhs)) => lhs == rhs,
-        (Value::Rune(lhs), Value::Rune(rhs)) => lhs == rhs,
-        (Value::Tuple(lhs), Value::Tuple(rhs)) => {
-            lhs.len() == rhs.len() && lhs.iter().zip(rhs).all(|(lhs, rhs)| values_equal(lhs, rhs))
-        }
-        (Value::List(lhs), Value::List(rhs)) => {
-            let lhs = lhs.borrow();
-            let rhs = rhs.borrow();
-            lhs.len() == rhs.len()
-                && lhs
-                    .iter()
-                    .zip(rhs.iter())
-                    .all(|(lhs, rhs)| values_equal(lhs, rhs))
-        }
-        (Value::Set(lhs), Value::Set(rhs)) => {
-            let lhs = lhs.borrow();
-            let rhs = rhs.borrow();
-            lhs.len() == rhs.len()
-                && lhs
-                    .iter()
-                    .zip(rhs.iter())
-                    .all(|(lhs, rhs)| values_equal(lhs, rhs))
-        }
-        (Value::Map(lhs), Value::Map(rhs)) => {
-            let lhs = lhs.borrow();
-            let rhs = rhs.borrow();
-            lhs.len() == rhs.len()
-                && lhs
-                    .iter()
-                    .zip(rhs.iter())
-                    .all(|((lk, lv), (rk, rv))| values_equal(lk, rk) && values_equal(lv, rv))
-        }
-        (Value::Aggregate(lhs), Value::Aggregate(rhs)) => {
-            let lhs = lhs.borrow();
-            let rhs = rhs.borrow();
-            lhs.type_name == rhs.type_name
-                && lhs.case_name == rhs.case_name
-                && lhs.fields.len() == rhs.fields.len()
-                && lhs
-                    .fields
-                    .iter()
-                    .zip(rhs.fields.iter())
-                    .all(|(lv, rv)| values_equal(lv, rv))
-        }
-        _ => false,
-    }
-}
-
 fn structural_shape_fields(value: &Value) -> Option<Vec<(String, Value)>> {
     match value {
         Value::Record(fields) => Some(fields.borrow().clone()),
@@ -5808,17 +6000,72 @@ fn numeric_binary_or_method(
     }
 }
 
+fn numeric_division_or_method(
+    left: Value,
+    right: Value,
+    span: Option<Span>,
+    in_: &mut Interpreter<'_>,
+) -> Result<Value, Diagnostic> {
+    match (left.clone(), right.clone()) {
+        (Value::Int(_), Value::Int(0)) => Err(in_.runtime_error(span, "integer division by zero")),
+        (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs.wrapping_div(rhs))),
+        (lhs, rhs)
+            if matches!(lhs, Value::Float(_) | Value::Int(_))
+                && matches!(rhs, Value::Float(_) | Value::Int(_)) =>
+        {
+            Ok(Value::Float(
+                lhs.as_number(in_, span, "numeric division")?
+                    / rhs.as_number(in_, span, "numeric division")?,
+            ))
+        }
+        _ => in_.invoke_method(left, "/", vec![right], span),
+    }
+}
+
+fn numeric_remainder_or_method(
+    left: Value,
+    right: Value,
+    span: Option<Span>,
+    in_: &mut Interpreter<'_>,
+) -> Result<Value, Diagnostic> {
+    match (left.clone(), right.clone()) {
+        (Value::Int(_), Value::Int(0)) => Err(in_.runtime_error(span, "integer remainder by zero")),
+        (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs.wrapping_rem(rhs))),
+        (lhs, rhs)
+            if matches!(lhs, Value::Float(_) | Value::Int(_))
+                && matches!(rhs, Value::Float(_) | Value::Int(_)) =>
+        {
+            Ok(Value::Float(
+                lhs.as_number(in_, span, "numeric remainder")?
+                    % rhs.as_number(in_, span, "numeric remainder")?,
+            ))
+        }
+        _ => in_.invoke_method(left, "%", vec![right], span),
+    }
+}
+
 fn compare_binary(
     left: Value,
     right: Value,
     span: Option<Span>,
-    op: impl FnOnce(f64, f64) -> bool,
+    int_op: impl FnOnce(i64, i64) -> bool,
+    float_op: impl FnOnce(f64, f64) -> bool,
     in_: &Interpreter<'_>,
 ) -> Result<Value, Diagnostic> {
-    Ok(Value::Bool(op(
-        left.as_number(in_, span, "comparison")?,
-        right.as_number(in_, span, "comparison")?,
-    )))
+    match (left, right) {
+        (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Bool(int_op(lhs, rhs))),
+        (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Bool(float_op(lhs, rhs))),
+        (Value::Int(lhs), Value::Float(rhs)) => Ok(Value::Bool(float_op(lhs as f64, rhs))),
+        (Value::Float(lhs), Value::Int(rhs)) => Ok(Value::Bool(float_op(lhs, rhs as f64))),
+        (left, right) => Err(in_.runtime_error(
+            span,
+            format!(
+                "comparison expects numeric values, got {} and {}",
+                left.render(),
+                right.render()
+            ),
+        )),
+    }
 }
 
 fn default_span() -> Span {
@@ -6555,6 +6802,34 @@ mod tests {
     }
 
     #[test]
+    fn runs_nested_type_aliases_and_declared_unions() {
+        let program = lower_inline(
+            r#"
+            class Parser {
+                type Text = Str
+                type Outcome =
+                    class Parsed { text Text }
+                    | object Empty {}
+
+                def parse(text Text) Outcome = Outcome.Parsed(text)
+            }
+
+            def run() Str {
+                outcome Parser.Outcome = Parser().parse("ok")
+                return match outcome {
+                    case Parsed { text } => text
+                    case Empty => "empty"
+                }
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.return_value.as_deref(), Some("ok"));
+    }
+
+    #[test]
     fn runs_getter_methods_through_member_access() {
         let program = lower_inline(
             r#"
@@ -6715,6 +6990,66 @@ mod tests {
     }
 
     #[test]
+    fn uses_declared_class_equality_in_collections_and_nested_values() {
+        let program = lower_inline(
+            r#"
+            class Key with Hashed[Key] {
+                id Int
+                note Str
+
+                def equals(other Key) Bool = this.id == other.id
+                def hash() Int = this.id
+            }
+
+            shape WrappedKey {
+                key Key
+            }
+
+            type KeyChoice =
+                shape Chosen { key Key }
+                | object Missing {}
+
+            def main() Unit {
+                left = Key(1, "left")
+                right = Key(1, "right")
+
+                keys Set[Key] = Set()
+                keys.add(left)
+                keys.add(right)
+
+                lookup [Key: Str] = []
+                lookup[left] := "found"
+
+                wrappedLeft = WrappedKey(left)
+                wrappedRight = WrappedKey(right)
+                wrappedKeys Set[WrappedKey] = Set()
+                wrappedKeys.add(wrappedLeft)
+                wrappedKeys.add(wrappedRight)
+
+                wrappedLookup [WrappedKey: Str] = []
+                wrappedLookup[wrappedLeft] := "wrapped"
+
+                chosenLeft KeyChoice = Chosen(left)
+                chosenRight KeyChoice = Chosen(right)
+
+                println(left == right)
+                println(keys.size)
+                println(lookup[right] ?? "missing")
+                println(wrappedLeft == wrappedRight)
+                println((left, 2) == (right, 2))
+                println(chosenLeft == chosenRight)
+                println(wrappedKeys.size)
+                println(wrappedLookup[wrappedRight] ?? "missing")
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "true\n1\nfound\ntrue\ntrue\ntrue\n1\nwrapped\n");
+    }
+
+    #[test]
     fn runs_local_extension_methods() {
         let program = lower_inline(
             r#"
@@ -6824,6 +7159,45 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "Ada 0\nBen 12\n");
+    }
+
+    #[test]
+    fn passes_shape_values_as_ordinary_positional_constructor_arguments() {
+        let program = lower_inline(
+            r#"
+            class Holder {
+                payload { x Int }
+            }
+
+            class ExplicitHolder {
+                payload { x Int }
+
+                new(payload { x Int }) {
+                    this.payload = payload
+                }
+            }
+
+            def main() Unit {
+                payload = { x: 7 }
+
+                implicitFromValue = Holder(payload)
+                implicitFromLiteral = Holder({ x: 8 })
+                explicitFromValue = ExplicitHolder(payload)
+                explicitFromLiteral = ExplicitHolder({ x: 9 })
+                named = Holder { payload }
+
+                println(implicitFromValue.payload.x)
+                println(implicitFromLiteral.payload.x)
+                println(explicitFromValue.payload.x)
+                println(explicitFromLiteral.payload.x)
+                println(named.payload.x)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "7\n8\n7\n9\n7\n");
     }
 
     #[test]
@@ -7217,7 +7591,7 @@ mod tests {
                 bools = Array.ofBool(1)
                 strs = Array.ofStr(1)
                 runes = Array.ofRune(1)
-                nul Rune = "\0".expectRuneAt(0)
+                nul Rune = "\0".runeAt(0)!
                 OS.println(ints[0], floats[0], bools[0], strs[0], runes[0] == nul)
             }
             "#,
@@ -7227,6 +7601,67 @@ mod tests {
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "5\n3\n2\n5\n8\n-5\n0 0.0 false  true\n");
         assert_eq!(run.return_value, None);
+    }
+
+    #[test]
+    fn preserves_integer_precision_and_defined_numeric_edge_behavior() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                low Int = 9007199254740992
+                high Int = 9007199254740993
+
+                println(low < high)
+                println(high > low)
+                println(high <= low)
+
+                maximum Int = 9223372036854775807
+                minimum = maximum + 1
+                println(minimum)
+                println(minimum / -1)
+                println(minimum % -1)
+
+                println(1.0 / 0.0 > 0.0)
+                println(0.0 / 0.0 < 0.0)
+                println(5.5 % 2.0)
+
+                # Mixed comparisons widen Int to Float, so precision may be lost.
+                println(high > 9007199254740992.0)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "true\ntrue\nfalse\n-9223372036854775808\n-9223372036854775808\n0\ntrue\nfalse\n1.5\nfalse\n"
+        );
+    }
+
+    #[test]
+    fn reports_integer_division_and_remainder_by_zero() {
+        for (expression, expected) in [
+            ("1 / 0", "integer division by zero"),
+            ("1 % 0", "integer remainder by zero"),
+        ] {
+            let program = lower_inline(&format!(
+                r#"
+                def main() Unit {{
+                    println({expression})
+                }}
+                "#
+            ));
+
+            let run = run_program(&program);
+            assert!(
+                run.diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.message.contains(expected)),
+                "expected '{expected}', got {:#?}",
+                run.diagnostics
+            );
+        }
     }
 
     #[test]
@@ -7521,20 +7956,22 @@ $name
             r#"
             def main() Unit {
                 word Str = "apple"
-                first Rune = word.expectRuneAt(0)
+                first Rune = word.runeAt(0)!
                 let second <- word.runeAt(1) else panic("expected second rune")
                 missing = word.runeAt(9)
 
                 OS.println(first)
                 OS.println(second)
                 OS.println(missing.isEmpty)
+                OS.println("😀a".size)
+                OS.println("😀a".runeAt(1)!)
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "a\np\ntrue\n");
+        assert_eq!(run.output, "a\np\ntrue\n2\na\n");
     }
 
     #[test]
@@ -8424,7 +8861,12 @@ $name
         let program = lower_inline(
             r#"
             def main() Unit {
-                split Vector[Str] = "  1234, BUY, 10, NEW  ".trim().split("\s*,\s*")
+                literal Vector[Str] = "a.b".split(".")
+                assert(literal.size == 2)
+                assert(literal[0] == "a")
+                assert(literal[1] == "b")
+
+                split Vector[Str] = "  1234, BUY, 10, NEW  ".trim().splitRegex("\s*,\s*")
                 split.add("DONE")
                 assert(split.size == 5)
                 OS.println(split[0])
@@ -8636,6 +9078,30 @@ $name
     }
 
     #[test]
+    fn runs_defer_before_propagating_lifted_failure() {
+        let program = lower_inline(
+            r#"
+            def fail() Result[Int, Str] = Err("failure")
+
+            def load() Result[Int, Str] {
+                defer OS.println("cleanup")
+                value = try fail()
+                Ok(value)
+            }
+
+            def main() Unit {
+                result Result[Int, Str] = load()
+                OS.println(result is Err)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "cleanup\ntrue\n");
+    }
+
+    #[test]
     fn runs_defer_as_lambda_bound() {
         let program = lower_inline(
             r#"
@@ -8656,6 +9122,63 @@ $name
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "inside\nlambda\nafter\nmain\n");
+    }
+
+    #[test]
+    fn runs_all_defers_during_runtime_error_unwinding_and_preserves_primary_error() {
+        let program = lower_inline(
+            r#"
+            def failCleanup() Unit {
+                OS.println("failing cleanup")
+                panic("cleanup failure")
+            }
+
+            def main() Unit {
+                defer OS.println("outer cleanup")
+                defer failCleanup()
+                defer OS.println("inner cleanup")
+                panic("body failure")
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert_eq!(run.diagnostics.len(), 1);
+        assert!(run.diagnostics[0].message.contains("body failure"));
+        assert!(
+            run.diagnostics[0]
+                .notes
+                .iter()
+                .any(|note| note.contains("cleanup failure"))
+        );
+        assert_eq!(
+            run.output,
+            "inner cleanup\nfailing cleanup\nouter cleanup\n"
+        );
+    }
+
+    #[test]
+    fn reports_cleanup_failure_after_attempting_remaining_defers() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                defer OS.println("outer cleanup")
+                defer panic("cleanup failure")
+                defer OS.println("inner cleanup")
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert_eq!(run.diagnostics.len(), 1);
+        assert!(run.diagnostics[0].message.contains("cleanup failure"));
+        assert!(
+            run.diagnostics[0]
+                .notes
+                .iter()
+                .any(|note| note.contains("deferred cleanup"))
+        );
+        assert_eq!(run.output, "inner cleanup\nouter cleanup\n");
     }
 
     #[test]

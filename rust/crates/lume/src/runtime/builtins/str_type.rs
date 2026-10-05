@@ -20,16 +20,11 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(0, "size", Vec::new(), str_size),
             builtin_method(1, "split", vec![crate::ir::Type::Str], str_split),
             builtin_method(2, "runeAt", vec![crate::ir::Type::Int], str_rune_at),
-            builtin_method(
-                3,
-                "expectRuneAt",
-                vec![crate::ir::Type::Int],
-                str_expect_rune_at,
-            ),
-            builtin_method(4, "compare", vec![crate::ir::Type::Str], str_compare),
-            builtin_method(5, "trim", Vec::new(), str_trim),
-            builtin_method(6, "isEmpty", Vec::new(), str_is_empty),
-            builtin_method(7, "nonEmpty", Vec::new(), str_non_empty),
+            builtin_method(3, "compare", vec![crate::ir::Type::Str], str_compare),
+            builtin_method(4, "trim", Vec::new(), str_trim),
+            builtin_method(5, "isEmpty", Vec::new(), str_is_empty),
+            builtin_method(6, "nonEmpty", Vec::new(), str_non_empty),
+            builtin_method(7, "splitRegex", vec![crate::ir::Type::Str], str_split_regex),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -126,14 +121,37 @@ fn str_split(
         Value::String(value) => value.clone(),
         _ => return Err(interpreter.runtime_error(span, "Str.split separator must be Str")),
     };
-    let pattern = Regex::new(&separator).map_err(|err| {
+    Ok(Value::list(
+        text.split(&separator)
+            .map(|part| Value::String(part.to_string()))
+            .collect(),
+    ))
+}
+
+fn str_split_regex(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!();
+    };
+    let [pattern] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Str.splitRegex expects 1 argument"));
+    };
+    let pattern = match pattern {
+        Value::String(value) => value.clone(),
+        _ => return Err(interpreter.runtime_error(span, "Str.splitRegex pattern must be Str")),
+    };
+    let regex = Regex::new(&pattern).map_err(|err| {
         interpreter.runtime_error(
             span,
-            format!("Str.split invalid regex '{}': {err}", separator),
+            format!("Str.splitRegex invalid regex '{}': {err}", pattern),
         )
     })?;
     Ok(Value::list(
-        pattern
+        regex
             .split(&text)
             .map(|part| Value::String(part.to_string()))
             .collect(),
@@ -172,26 +190,4 @@ fn str_rune_at(
         Some(value) => interpreter.option_some(Value::Rune(value)),
         None => interpreter.option_none(),
     })
-}
-
-fn str_expect_rune_at(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    let Value::String(text) = receiver else {
-        unreachable!();
-    };
-    let [index] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "Str.expectRuneAt expects 1 argument"));
-    };
-    let index = index.as_int(interpreter, span, "Str.expectRuneAt index")?;
-    match string_rune_at(&text, index) {
-        Some(value) => Ok(Value::Rune(value)),
-        None => Err(interpreter.runtime_error(
-            span,
-            format!("Str.expectRuneAt index {} out of bounds", index),
-        )),
-    }
 }

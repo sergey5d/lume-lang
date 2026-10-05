@@ -84,6 +84,7 @@ impl<'a> Parser<'a> {
                 items.push(item);
                 self.nested_items.sort_by_key(|item| match item {
                     Item::Type(decl) => decl.name.matches('.').count(),
+                    Item::TypeAlias(alias) => alias.name.matches('.').count(),
                     _ => 0,
                 });
                 items.append(&mut self.nested_items);

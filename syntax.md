@@ -71,7 +71,9 @@ def display(user ModelUser) Str = user.name
 
 ### Type Aliases
 
-`type` introduces a transparent name for any type expression:
+`type` introduces a transparent name for supported non-declaration type
+expressions such as primitives, named types, functions, collections, and
+unions:
 
 ```txt
 type UserId = Int
@@ -411,16 +413,21 @@ let Some { value as greetMethod } = classType.method("greet") else panic("expect
 greeting Result[Any, ReflectionError] = greetMethod.call(user)
 ```
 
-`Method.invoke(receiver, args...)` is also available as the direct invocation
-form and returns `Any`; it may panic if the method is not invokable or the call
-fails. Prefer `call` when failures should stay in the value model.
+Use postfix extraction when reflective failure should panic instead of remaining
+in the value model:
+
+```txt
+greeting Any = greetMethod.call(user) !
+```
 
 Rules:
 
 - `typeOf[T]` is a built-in type metadata operator, not an index operation
 - `runtimeType` is available as a read-only synthetic field on values
 - `TypeKind` includes `Class`, `Shape`, `Enum`, `Interface`, `Object`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
-- field, method, parameter, and declared-union alternative metadata are runtime values with methods such as `name()`, `fieldType()`, `isPrivate()`, `params()`, and `returnType()`
+- field, method, parameter, and declared-union alternative metadata are runtime
+  values; their read-only metadata uses getters such as `name`, `fieldType`,
+  `isPrivate`, `params`, and `returnType`
 - annotation lookup is typed and reified: use `metadata.hasAnnotation[Route]()` and `metadata.annotation[Route]()`
 - reflective construction is supported for class and named shape metadata through `construct(args...)`
 - reflective declared-union alternative construction is supported through the compatibility API `EnumCase.construct(args...)`
@@ -455,12 +462,18 @@ Rules:
 - `$name` interpolates a simple identifier expression
 - `${...}` interpolates a full expression
 - `\$` inserts a literal dollar sign
-- `Str.size` returns the string length as `Int`
+- `Str.size` returns the number of Unicode scalar values as `Int`; it does not
+  count UTF-8 bytes or UTF-16 code units
+- `Str.runeAt(index)` uses a zero-based Unicode-scalar index and returns `None`
+  when `index` is negative or outside the string; use `runeAt(index) !` for
+  assertive extraction
 - `Str.isEmpty` reports whether the string contains no characters
 - `Str.nonEmpty` reports whether the string contains at least one character
 - `Str.trim()` removes leading and trailing whitespace
-- `Str.split(separator)` treats `separator` as a regular expression and returns
-  a growable `Vector[Str]`
+- `Str.split(separator)` treats `separator` as literal text and returns a
+  growable `Vector[Str]`
+- `Str.splitRegex(pattern)` explicitly interprets `pattern` as a regular
+  expression and returns a growable `Vector[Str]`
 
 Raw strings preserve their contents without escapes or interpolation:
 
@@ -721,8 +734,9 @@ type OptionX[T] =
 
 ### Nested Declarations
 
-Named `class`, `shape`, `interface`, `object`, and `annotation` declarations may
-appear inside any other named declaration of those kinds:
+Named `class`, `shape`, `interface`, `object`, and `annotation` declarations,
+as well as `type` aliases and declared unions, may appear inside any other
+named declaration of those kinds:
 
 ```txt
 class Parser {
@@ -746,12 +760,20 @@ class Parser {
     annotation Rule {
         name Str
     }
+
+    type Offset = Int
+
+    type Outcome =
+        class Parsed { text Str }
+        | object Empty {}
 }
 ```
 
 Inside the enclosing declaration, use the short name such as `Position`.
-Outside it, use the qualified name such as `Parser.Position`. Normal visibility
-rules still apply.
+Outside it, use the qualified name such as `Parser.Position` or
+`Parser.Outcome`. Normal visibility rules still apply. Visibility is
+transitive through the declaration path: a public child of a private or
+internal parent does not bypass that parent's visibility.
 
 Nesting is lexical organization only. A nested declaration:
 
@@ -762,8 +784,9 @@ Nesting is lexical organization only. A nested declaration:
 - retains its ordinary semantics; in particular, a nested named `object` is one
   singleton rather than one value per enclosing instance
 
-Named declarations are not allowed in functions, methods, constructors,
-getters, lambdas, or nested executable blocks:
+Named declarations, including `type` aliases and declared unions, are not
+allowed in functions, methods, constructors, getters, lambdas, or nested
+executable blocks:
 
 ```txt
 def process() Unit {
@@ -1000,6 +1023,11 @@ updated = account.withBalance(42)
 
 ## Construction
 
+This section defines target selection and brace interpretation for every
+construction expression. Constructor declarations later in the reference
+define which inputs a class accepts, but do not create a second expression
+model.
+
 Field braces construct values. Parsing is entirely syntactic:
 
 ```txt
@@ -1048,6 +1076,31 @@ rollups[key] := {
 
 save({ name: "Ada", age: 42 })
 ```
+
+Expected constructor-input types also flow into nested construction. The inner
+target therefore does not need to be written when its enclosing input
+determines exactly one concrete class or named shape:
+
+```txt
+class Person {
+    name Str
+    age Int
+}
+
+class Team {
+    leader Person
+}
+
+team Team = Team {
+    leader: {
+        name: "Ada"
+        age: 10
+    }
+}
+```
+
+Write the inner target explicitly only when context does not determine it or
+when overload resolution would otherwise have to choose a target.
 
 Field punning is ambiguous inside bare braces because `{ x }` is a block.
 Use `new { ... }` to force construction syntax. A punned field `x` means
@@ -1098,6 +1151,9 @@ construction and supports punning without `new`:
 ```txt
 point = Point { x, y }
 user = User { name, age }
+
+point = Point { x }          # valid: punned identifier means `x: x`
+point = Point { makeX() }    # invalid: arbitrary expressions need a field label
 ```
 
 Contextual class construction applies only to the fresh brace construction
@@ -1129,6 +1185,10 @@ Unlike `new { ... }`, positional `new(...)` cannot invent field names and does
 not synthesize anonymous shapes. It is rejected without a concrete target and
 cannot target an interface, `Any`, union, anonymous shape, or unconstrained
 type parameter.
+
+A class constructor target must therefore be uniquely determined, but it does
+not have to be written at the construction site. `User { ... }` names it
+explicitly; `user User = { ... }` obtains it from the expected type.
 
 Braces are also the field construction form for declared-union payload alternatives:
 
@@ -1297,20 +1357,22 @@ its own name; the union name does not stand in for an omitted alternative name.
 
 `shape` is not a construction expression. Anonymous structural values use
 labeled/spread field braces or forced `new { ... }`. Positional construction
-must name an existing target, such as `Point(...)`.
+requires an existing concrete target, written as `Point(...)` or supplied by a
+unique expected type to `new(...)`.
 
-Tuples do not construct shapes or classes. Classes must name their constructor
-target:
+Tuples do not construct shapes or classes. Class construction follows the
+target-selection rules in [Construction](#construction): its target must be uniquely
+determined, but does not have to be written at the construction site.
 
 ```txt
-user User = User { name: "Ada", age: 10 }
+user User = { name: "Ada", age: 10 }
 person Person = Person("Ben", 12, "NYC")
-profile MixedProfile = MixedProfile {
+profile MixedProfile = {
     name: "Liam"
     age: 8
 }
-tail HiddenTail = HiddenTail("Ada", 4)
-settings Settings = Settings {}
+tail HiddenTail = new("Ada", 4)
+settings Settings = new {}
 ```
 
 Named shapes are data-only structural field views:
@@ -1360,26 +1422,22 @@ named = Point { x: 3, y: 4 }
 positional Point = Point(5, 6)
 ```
 
-Construction rules:
+Class and shape call sites use the authoritative expression model in
+[Construction](#construction). Runtime-backed collections such as `Vector`, `Map`, `Array`,
+`LinkedList`, and `Set` use ordinary class construction; `Range(...)` is a
+stdlib factory. The rules below define class constructor contracts rather than
+a separate construction-expression model.
 
-General construction rules:
+```txt
+class Holder {
+    payload { x Int }
+}
 
-- a constructor declaration lists the inputs accepted by construction
-- constructor parentheses accept positional arguments only; use braces for construction fields
-- function and method calls may still use named arguments in parentheses
-- `Type { value }` is not valid; use `Type(value)` only when the type supports positional construction
-- anonymous shapes use labeled/spread field braces or `new { ... }`; expression-level `shape` is not supported
-- runtime-backed collection classes such as `Vector`, `Map`, `Array`, `LinkedList`, and `Set` use normal class construction; `Range(...)` is a stdlib factory
-- `Type { ... }` resolves through the available explicit `new(...)` declaration or implicit field-construction inputs
-- `Type(...)` resolves through explicit class `new(...)`, implicit public-field construction, named shape positional construction, or an intrinsic collection form
-- `{ field: value }` and `{ ...source }` use a unique expected class/shape target when available and otherwise infer an anonymous shape
-- `new { ... }` forces construction parsing; it uses a unique expected class/shape target when available and otherwise infers an anonymous shape
-- `new(...)` requires an exact constructible class or named-shape target supplied by context
-- contextual construction never chooses between overloaded concrete targets
-- `new` does not declare fields, methods, or interface implementations
-- class construction is nominal and constructor-gated; shape construction is structural
-- tuple values cannot construct classes or shapes; write `Point(...)`, `User(...)`, or construction fields
-- nested inner constructions must still name the target class explicitly, often by binding the inner value first, for example `leader = Person { name: "Ada", age: 10 }` and then `owner = Team { leader: leader }`
+payload = { x: 7 }
+fromValue = Holder(payload)     # one positional shape argument
+fromLiteral = Holder({ x: 7 }) # one positional shape argument
+named = Holder { payload }      # one named input using field punning
+```
 
 Explicit constructor rules:
 
@@ -1511,7 +1569,9 @@ Shape conversion rules:
 - ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
 - construction fields inside braces use `field: value`; bare `field` is shorthand for `field: field`
 - bare punned fields require `Type { field }` or `new { field }`; `{ field }` is a block
-- construction fields cannot include a type; put anonymous shape types on declarations and aliases
+- construction fields cannot include a type; put an anonymous shape type on a
+  binding, field, parameter, or return declaration, and use a named `shape`
+  declaration when the schema needs a reusable name
 - single-expression braces like `{ value }` are still block expressions, not anonymous shapes
 
 Shape equality is structural across shape declarations:
@@ -1552,6 +1612,11 @@ narrowed before comparison.
 | `Any` and a typed value | error; narrow first |
 | `Any` and `Any` | error; narrow first |
 | interface values | requires an explicit compatible `Eq` domain |
+
+Every equality path uses the same contract recursively. Shape fields, tuple
+items, union payloads, `Set` membership and deduplication, and `Map` keys invoke
+the participating type's declared equality. Collections never replace a
+class's `equals` method with direct comparison of its stored fields.
 
 `Hashed[T]` extends `Eq[T]` and declares `hash() Int`. Equal values must return
 the same hash. Every shape derives `Eq` structurally and derives `Hashed[Shape]`
@@ -1666,9 +1731,10 @@ user { name Str, age Int } = {
 }
 ```
 
-Construction literals always use `field: value`. The combined
-`field Type: value` form is invalid. Put the anonymous shape type on the
-binding, parameter, or return value, or introduce a named type alias.
+Explicitly labeled construction fields use `field: value`; a bare identifier
+uses field punning and means `field: field`. The combined `field Type: value`
+form is invalid. Put the anonymous shape type on the binding, parameter, or
+return value, or introduce a named `shape` declaration.
 
 ## Functions and Methods
 
@@ -1787,7 +1853,9 @@ Getter rules:
 - getters may declare local bindings
 - direct mutation of class or shape fields is rejected, including indexed
   mutation rooted in a field
-- `value.getter()` is rejected; write `value.getter`
+- a non-function getter value cannot be called; `value.getter()` is valid only
+  when `getter` returns a function, in which case member access reads the getter
+  and `()` invokes that returned function
 
 Getters may be declared by classes, shapes, interfaces, objects, and extension
 blocks. The current compiler enforces direct read-only field access. Proving
@@ -1797,8 +1865,8 @@ effect-analysis subsystem, not a local scan for assignment statements. Effect
 information can remain compiler-internal initially; user-facing effect syntax
 is a separate design decision.
 
-Calling a function returned by a getter remains ordinary expression
-composition:
+An argument list after getter access never invokes the getter itself. It calls
+the value returned by the getter, so function-valued getters compose normally:
 
 ```txt
 class Factory {
@@ -1880,7 +1948,7 @@ Reified generic functions and methods:
 
 ```txt
 def typeName[reified A](value A) Str =
-    typeOf[A].name() !
+    typeOf[A].name !
 
 def metadata[reified A]() Type[A] =
     typeOf[A]
@@ -2148,8 +2216,9 @@ the class body.
 - direct and indirect constructor-delegation cycles are rejected
 - in a class declaration, `new(...)` declares a constructor; in expression position, `new(...)` performs contextual construction
 - contextual `new(...)` is not constructor delegation; use `this(...)` or `this { ... }` to delegate
-- class call sites use braces for construction fields, for example `Person { name: "Ada", age: 10 }`
-- class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
+- explicitly targeted class call sites use braces for construction fields, for example `Person { name: "Ada", age: 10 }`
+- explicitly targeted class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
+- contextual class call sites use the target-selection forms defined in [Construction](#construction)
 - `this` is the instance receiver
 - instance fields on classes and named objects may be accessed bare when they are not shadowed
 - use `this.field` when a parameter/local shadows a field, for example `this.age`
@@ -2914,7 +2983,15 @@ Standalone nested blocks are valid expression statements:
 ## `defer`
 
 `defer` registers cleanup for the current callable. Deferred actions run in
-LIFO order when the enclosing function, method, or lambda returns.
+LIFO order whenever the enclosing function, method, or lambda exits normally
+or through a language-managed runtime error such as `panic`.
+
+All pending deferred actions are attempted even when one of them fails. When
+the callable body has already failed, that original diagnostic remains primary
+and cleanup failures are attached as notes. On an otherwise successful exit,
+the first cleanup failure is reported as the primary diagnostic and later
+cleanup failures are attached as notes. A hard process abort is outside this
+guarantee.
 
 `defer` is not block-bound. A `defer` inside an inner `{ ... }` block still runs
 when the enclosing callable exits.
@@ -4161,6 +4238,30 @@ let { usr, address } = user
 Use the same name-based rule after binding an item in a `for` body or a
 `for { ... } yield` `let` clause.
 
+## Numeric semantics
+
+`Int` is a signed 64-bit two's-complement integer. Integer arithmetic does not
+silently change representation:
+
+- `Int` versus `Int` arithmetic and ordering operate directly on 64-bit integers
+- integer `+`, `-`, `*`, and unary `-` wrap modulo 2^64 on overflow
+- integer `/` truncates toward zero and `%` has the sign of the dividend
+- integer division or remainder by zero is a runtime error
+- the overflowing `Int.MIN / -1` case wraps to `Int.MIN`; `Int.MIN % -1` is zero
+- integer literals outside the signed 64-bit range are rejected
+
+`Float` is an IEEE-754 binary64 value. Float arithmetic, division, remainder,
+and ordering follow IEEE-754 behavior. Division by zero may produce positive or
+negative infinity, `0.0 / 0.0` produces NaN, and NaN is unordered: every
+ordering comparison with NaN is false. Float equality with NaN is false and
+float inequality with NaN is true.
+
+Mixed `Int`/`Float` arithmetic and ordering widen the `Int` operand to `Float`;
+the result of mixed arithmetic is `Float`. That conversion can lose integer
+precision. Equality remains stricter: `==` and `!=` require the same static
+equality domain, so an `Int` and a `Float` are not directly comparable for
+equality.
+
 ## Operators
 
 Arithmetic:
@@ -4325,7 +4426,7 @@ Newline continuation:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `===`, `!==`, `<`, `<=`, `>`, `>=`
   - extraction/fallback operators: `??`
   - exact shape update introducer: `with`
-  - unary prefixes: unary `-`, `!`, `try`
+  - unary prefixes: unary `-`, `!`, `^`, `try`
   - runtime type check keywords: `is`, and contextual `not` after `is`
   - match arrow: `=>`
   - separators / chaining markers: `,`, `.`

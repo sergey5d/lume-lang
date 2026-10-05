@@ -8,8 +8,8 @@ interface Str {
     def nonEmpty Bool
     def compare(other Str) Int
     def runeAt(index Int) Option[Rune]
-    def expectRuneAt(index Int) Rune
     def split(separator Str) Vector[Str]
+    def splitRegex(pattern Str) Vector[Str]
     def trim() Str
     def indexOf(part Str) Int
 }

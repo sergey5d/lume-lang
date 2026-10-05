@@ -968,6 +968,10 @@ class Namespace {
     interface Reader { def read() Str }
     object Defaults { prefix Str = "v" }
     annotation Label { value Str }
+    type Key = Str
+    type Outcome =
+        class Parsed { text Str }
+        | object Empty {}
 
     def worker() Worker = Worker()
 }
@@ -992,7 +996,14 @@ class Namespace {
             ("Namespace.Reader", TypeKind::Interface),
             ("Namespace.Defaults", TypeKind::Object),
             ("Namespace.Label", TypeKind::Annotation),
+            ("Namespace.Outcome", TypeKind::Enum),
         ]
+    );
+    assert!(
+        program
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::TypeAlias(alias) if alias.name == "Namespace.Key"))
     );
 }
 
@@ -1015,12 +1026,39 @@ fn allows_named_declarations_in_every_named_declaration_kind() {
                     .any(|item| { matches!(item, Item::Type(decl) if decl.name == "Outer.Inner") })
             );
         }
+
+        let source = format!(
+            r#"{owner_kind} Outer {{
+    type Alias = Str
+    type Outcome =
+        class Present {{ value Alias }}
+        | object Missing {{}}
+}}"#
+        );
+        let result = parse(&source);
+        assert!(
+            result.diagnostics.is_empty(),
+            "failed to nest aliases/unions in {owner_kind}: {:#?}",
+            result.diagnostics
+        );
+        let program = result.program.expect("program");
+        assert!(
+            program
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::TypeAlias(alias) if alias.name == "Outer.Alias"))
+        );
+        assert!(program.items.iter().any(
+            |item| matches!(item, Item::Type(decl) if decl.name == "Outer.Outcome" && decl.kind == TypeKind::Enum)
+        ));
     }
 }
 
 #[test]
 fn rejects_named_declarations_inside_callable_bodies() {
     for declaration in [
+        "type Local = Str",
+        "type Local = class Present {} | object Missing {}",
         "class Local {}",
         "shape Local {}",
         "interface Local {}",

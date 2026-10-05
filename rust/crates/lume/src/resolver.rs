@@ -746,8 +746,51 @@ fn visibility_is_importable(visibility: Visibility, same_module: bool) -> bool {
     }
 }
 
+fn declaration_visibilities(decls: &TopLevelDecls) -> HashMap<String, Visibility> {
+    decls
+        .types
+        .iter()
+        .map(|(name, info)| (name.clone(), info.visibility))
+        .chain(
+            decls
+                .objects
+                .iter()
+                .map(|(name, info)| (name.clone(), info.visibility)),
+        )
+        .chain(
+            decls
+                .aliases
+                .iter()
+                .map(|(name, info)| (name.clone(), info.visibility)),
+        )
+        .collect()
+}
+
+fn declaration_path_is_importable(
+    name: &str,
+    visibility: Visibility,
+    same_module: bool,
+    visibilities: &HashMap<String, Visibility>,
+) -> bool {
+    if !visibility_is_importable(visibility, same_module) {
+        return false;
+    }
+    let mut path = name;
+    while let Some((parent, _)) = path.rsplit_once('.') {
+        if visibilities
+            .get(parent)
+            .is_some_and(|visibility| !visibility_is_importable(*visibility, same_module))
+        {
+            return false;
+        }
+        path = parent;
+    }
+    true
+}
+
 fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbol> {
     let decls = collect_top_level_decls(&module.program);
+    let visibilities = declaration_visibilities(&decls);
     let mut out = Vec::new();
     for (name, decl) in decls.functions {
         if visibility_is_importable(decl.visibility, same_module) {
@@ -772,7 +815,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
         });
     }
     for (name, info) in decls.types {
-        if visibility_is_importable(info.visibility, same_module) {
+        if declaration_path_is_importable(&name, info.visibility, same_module, &visibilities) {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -781,7 +824,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
         }
     }
     for (name, info) in decls.objects {
-        if visibility_is_importable(info.visibility, same_module) {
+        if declaration_path_is_importable(&name, info.visibility, same_module, &visibilities) {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -790,7 +833,7 @@ fn exported_symbols(module: &LoadedModule, same_module: bool) -> Vec<ImportSymbo
         }
     }
     for (name, alias) in decls.aliases {
-        if visibility_is_importable(alias.visibility, same_module) {
+        if declaration_path_is_importable(&name, alias.visibility, same_module, &visibilities) {
             out.push(ImportSymbol {
                 name,
                 alias: None,
@@ -832,6 +875,7 @@ fn resolve_imported_symbol(
     same_module: bool,
 ) -> Option<ImportedSymbol> {
     let decls = collect_top_level_decls(&module.program);
+    let visibilities = declaration_visibilities(&decls);
     if let Some(decl) = decls.functions.get(name) {
         if visibility_is_importable(decl.visibility, same_module) {
             return Some(ImportedSymbol {
@@ -853,7 +897,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(info) = decls.types.get(name) {
-        if visibility_is_importable(info.visibility, same_module) {
+        if declaration_path_is_importable(name, info.visibility, same_module, &visibilities) {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -867,7 +911,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(info) = decls.objects.get(name) {
-        if visibility_is_importable(info.visibility, same_module) {
+        if declaration_path_is_importable(name, info.visibility, same_module, &visibilities) {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -877,7 +921,7 @@ fn resolve_imported_symbol(
         }
     }
     if let Some(alias) = decls.aliases.get(name) {
-        if visibility_is_importable(alias.visibility, same_module) {
+        if declaration_path_is_importable(name, alias.visibility, same_module, &visibilities) {
             return Some(ImportedSymbol {
                 original_name: name.to_string(),
                 object_name: None,
@@ -1171,6 +1215,7 @@ impl<'a> Resolver<'a> {
                     .is_some_and(|imported| imported.name == current.name)
             });
             let decls = collect_top_level_decls(&module.program);
+            let visibilities = declaration_visibilities(&decls);
             let namespace = ModuleNamespace {
                 functions: decls
                     .functions
@@ -1190,17 +1235,38 @@ impl<'a> Resolver<'a> {
                 types: decls
                     .types
                     .into_iter()
-                    .filter(|(_, info)| visibility_is_importable(info.visibility, same_module))
+                    .filter(|(name, info)| {
+                        declaration_path_is_importable(
+                            name,
+                            info.visibility,
+                            same_module,
+                            &visibilities,
+                        )
+                    })
                     .collect(),
                 objects: decls
                     .objects
                     .into_iter()
-                    .filter(|(_, info)| visibility_is_importable(info.visibility, same_module))
+                    .filter(|(name, info)| {
+                        declaration_path_is_importable(
+                            name,
+                            info.visibility,
+                            same_module,
+                            &visibilities,
+                        )
+                    })
                     .collect(),
                 aliases: decls
                     .aliases
                     .into_iter()
-                    .filter(|(_, info)| visibility_is_importable(info.visibility, same_module))
+                    .filter(|(name, info)| {
+                        declaration_path_is_importable(
+                            name,
+                            info.visibility,
+                            same_module,
+                            &visibilities,
+                        )
+                    })
                     .collect(),
             };
             self.modules_by_alias.insert(alias.clone(), namespace);
@@ -1282,11 +1348,12 @@ impl<'a> Resolver<'a> {
         same_module: bool,
     ) {
         let prefix = format!("{original_name}.");
+        let visibilities = declaration_visibilities(declarations);
         for (name, info) in &declarations.types {
             let Some(suffix) = name.strip_prefix(&prefix) else {
                 continue;
             };
-            if visibility_is_importable(info.visibility, same_module) {
+            if declaration_path_is_importable(name, info.visibility, same_module, &visibilities) {
                 self.imported_types
                     .insert(format!("{local_name}.{suffix}"), info.clone());
             }
@@ -1295,8 +1362,17 @@ impl<'a> Resolver<'a> {
             let Some(suffix) = name.strip_prefix(&prefix) else {
                 continue;
             };
-            if visibility_is_importable(info.visibility, same_module) {
+            if declaration_path_is_importable(name, info.visibility, same_module, &visibilities) {
                 self.imported_objects
+                    .insert(format!("{local_name}.{suffix}"), info.clone());
+            }
+        }
+        for (name, info) in &declarations.aliases {
+            let Some(suffix) = name.strip_prefix(&prefix) else {
+                continue;
+            };
+            if declaration_path_is_importable(name, info.visibility, same_module, &visibilities) {
+                self.imported_aliases
                     .insert(format!("{local_name}.{suffix}"), info.clone());
             }
         }
@@ -1347,7 +1423,13 @@ impl<'a> Resolver<'a> {
             match item {
                 crate::ast::Item::Function(function) => self.resolve_function(function),
                 crate::ast::Item::TypeAlias(alias) => {
+                    if let Some((owner, _)) = alias.name.rsplit_once('.') {
+                        self.current_type_paths.push(owner.to_string());
+                    }
                     self.resolve_type_ref(Some(&alias.target));
+                    if alias.name.contains('.') {
+                        self.current_type_paths.pop();
+                    }
                 }
                 crate::ast::Item::Type(decl) => self.resolve_type_decl(decl),
                 crate::ast::Item::Extension(block) => self.resolve_extension(block),
@@ -3024,15 +3106,32 @@ impl<'a> Resolver<'a> {
     }
 
     fn lookup_alias(&self, name: &str) -> Option<&TypeAliasInfo> {
+        if let Some(info) = self.aliases.get(name) {
+            return Some(info);
+        }
+        if !name.contains('.')
+            && let Some(owner) = self.current_type_paths.last()
+        {
+            let mut scope = owner.as_str();
+            loop {
+                let candidate = format!("{scope}.{name}");
+                if let Some(info) = self.aliases.get(&candidate) {
+                    return Some(info);
+                }
+                let Some((parent, _)) = scope.rsplit_once('.') else {
+                    break;
+                };
+                scope = parent;
+            }
+        }
         if let Some((module, member)) = qualified_type_parts(name) {
             return self
                 .modules_by_alias
                 .get(module)
                 .and_then(|namespace| namespace.aliases.get(member));
         }
-        self.aliases
+        self.imported_aliases
             .get(name)
-            .or_else(|| self.imported_aliases.get(name))
             .or_else(|| self.ambient.aliases.get(name))
     }
 
@@ -3428,6 +3527,26 @@ def main() Namespace.Point = Namespace.Point(1)
     }
 
     #[test]
+    fn resolves_nested_aliases_and_declared_unions_lexically() {
+        let program = parse_inline(
+            r#"
+class Parser {
+    type Key = Str
+    type Outcome =
+        class Parsed { text Key }
+        | object Empty {}
+
+    def parse(text Key) Outcome = Outcome.Parsed(text)
+}
+
+def main() Parser.Outcome = Parser().parse("ok")
+"#,
+        );
+        let result = resolve_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
     fn nested_types_do_not_capture_enclosing_type_parameters() {
         let program = parse_inline(
             r#"
@@ -3608,6 +3727,46 @@ class Namespace {
         let result = resolve_path_with_options(&source, &ModuleLoadOptions { library_modules })
             .expect("resolve");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn inaccessible_parent_hides_public_nested_declarations() {
+        let temp = workspace_root().join("rust/target/resolver-nested-parent-visibility-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("support.lum"),
+            r#"
+module support
+
+private class Hidden {
+    class Public {}
+    type Alias = Str
+}
+"#,
+        )
+        .expect("write support module");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+module app
+use support
+
+def expose(value support.Hidden.Public) support.Hidden.Alias = "hidden"
+"#,
+        )
+        .expect("write consumer module");
+
+        let result = resolve_path(&source).expect("resolve consumer module");
+        let undefined = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.diagnostic.code == "undefined_type")
+            .count();
+        assert_eq!(undefined, 2, "{:#?}", result.diagnostics);
 
         let _ = fs::remove_dir_all(&temp);
     }

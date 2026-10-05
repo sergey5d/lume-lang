@@ -205,7 +205,12 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Type),
             "expected 'type' before type declaration",
         )?;
-        let (name, _) = self.expect_identifier("expected type alias name")?;
+        let (simple_name, _) = self.expect_identifier("expected type alias name")?;
+        let name = self
+            .type_path
+            .last()
+            .map(|owner| format!("{owner}.{simple_name}"))
+            .unwrap_or(simple_name);
         let generic_clause = self.parse_generic_clause()?;
         let union_with_bounds = if self.match_keyword(Keyword::With) {
             self.parse_interface_ref_list_after_with()?
@@ -264,17 +269,18 @@ impl<'a> Parser<'a> {
                 TokenKind::LBrace,
                 "expected '{' after type declaration kind",
             )?;
-            return self
-                .finish_type_decl_body(
-                    Vec::new(),
-                    visibility,
-                    kind,
-                    name,
-                    generic_clause,
-                    with_bounds,
-                    start,
-                )
-                .map(Item::Type);
+            self.type_path.push(name.clone());
+            let decl = self.finish_type_decl_body(
+                Vec::new(),
+                visibility,
+                kind,
+                name,
+                generic_clause,
+                with_bounds,
+                start,
+            );
+            self.type_path.pop();
+            return decl.map(Item::Type);
         }
         if matches!(
             self.current_kind(),
@@ -650,6 +656,17 @@ impl<'a> Parser<'a> {
 
             let member_visibility = self.parse_visibility();
             match self.current_kind() {
+                TokenKind::Keyword(Keyword::Type) if self.starts_type_alias_decl() => {
+                    if !member_annotations.is_empty() {
+                        self.error_at_current(
+                            "unexpected_annotation",
+                            "type declarations do not accept annotations before 'type'",
+                        );
+                        return None;
+                    }
+                    let nested = self.parse_type_alias_or_union_decl(member_visibility)?;
+                    self.nested_items.push(nested);
+                }
                 TokenKind::Keyword(Keyword::Annotation)
                 | TokenKind::Keyword(Keyword::Class)
                 | TokenKind::Keyword(Keyword::Shape)
@@ -749,6 +766,70 @@ impl<'a> Parser<'a> {
             members,
             span: start.cover(end),
         })
+    }
+
+    fn starts_type_alias_decl(&self) -> bool {
+        let mut index = self.index + 1;
+        if !matches!(
+            self.tokens.get(index).map(|token| token.kind),
+            Some(TokenKind::Identifier)
+        ) {
+            return false;
+        }
+        index += 1;
+
+        if matches!(
+            self.tokens.get(index).map(|token| token.kind),
+            Some(TokenKind::LBracket)
+        ) {
+            let mut depth = 0usize;
+            while let Some(token) = self.tokens.get(index) {
+                match token.kind {
+                    TokenKind::LBracket => depth += 1,
+                    TokenKind::RBracket => {
+                        depth -= 1;
+                        if depth == 0 {
+                            index += 1;
+                            break;
+                        }
+                    }
+                    TokenKind::Eof => return false,
+                    _ => {}
+                }
+                index += 1;
+            }
+        }
+
+        if matches!(
+            self.tokens.get(index).map(|token| token.kind),
+            Some(TokenKind::Keyword(Keyword::With))
+        ) {
+            index += 1;
+            let mut bracket_depth = 0usize;
+            let mut paren_depth = 0usize;
+            while let Some(token) = self.tokens.get(index) {
+                match token.kind {
+                    TokenKind::LBracket => bracket_depth += 1,
+                    TokenKind::RBracket => bracket_depth = bracket_depth.saturating_sub(1),
+                    TokenKind::LParen => paren_depth += 1,
+                    TokenKind::RParen => paren_depth = paren_depth.saturating_sub(1),
+                    TokenKind::Eq if bracket_depth == 0 && paren_depth == 0 => return true,
+                    TokenKind::Newline | TokenKind::RBrace | TokenKind::Eof
+                        if bracket_depth == 0 && paren_depth == 0 =>
+                    {
+                        return false;
+                    }
+                    _ => {}
+                }
+                index += 1;
+            }
+            return false;
+        }
+
+        matches!(
+            self.tokens.get(index).map(|token| token.kind),
+            Some(TokenKind::Eq)
+        )
     }
 
     pub(super) fn parse_extension_block(&mut self) -> Option<ExtensionBlock> {

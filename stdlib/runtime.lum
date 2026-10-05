@@ -87,7 +87,6 @@ interface Method with Annotated {
     def name Str
     def params [Param]
     def returnType Type[_]
-    def invoke(receiver Any, args [Any] vararg) Any
     def call(receiver Any, args [Any] vararg) Result[Any, ReflectionError]
 }
 

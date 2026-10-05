@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     Diagnostic, Span,
     ast::TypeKind,
-    interpreter::{Interpreter, Value, iterable_values, push_unique, values_equal},
+    interpreter::{Interpreter, Value, iterable_values},
     ir,
 };
 
@@ -57,6 +57,19 @@ fn set_items(receiver: &Value) -> Rc<RefCell<Vec<Value>>> {
     items.clone()
 }
 
+fn insert_unique(
+    interpreter: &mut Interpreter<'_>,
+    items: &Rc<RefCell<Vec<Value>>>,
+    value: Value,
+    span: Option<Span>,
+) -> Result<(), Diagnostic> {
+    let snapshot = items.borrow().clone();
+    if interpreter.value_index(&snapshot, &value, span)?.is_none() {
+        items.borrow_mut().push(value);
+    }
+    Ok(())
+}
+
 fn set_add(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
@@ -66,7 +79,7 @@ fn set_add(
     let [value] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Set.add expects 1 argument"));
     };
-    push_unique(&mut set_items(&receiver).borrow_mut(), value.clone());
+    insert_unique(interpreter, &set_items(&receiver), value.clone(), span)?;
     Ok(receiver)
 }
 
@@ -81,9 +94,8 @@ fn set_add_all(
     };
     let rhs = iterable_values(other.clone(), span, interpreter)?;
     let items = set_items(&receiver);
-    let mut items = items.borrow_mut();
     for value in rhs {
-        push_unique(&mut items, value);
+        insert_unique(interpreter, &items, value, span)?;
     }
     Ok(receiver)
 }
@@ -115,7 +127,7 @@ fn set_map(
     let mut out = Vec::new();
     for value in values {
         let mapped = interpreter.invoke_value(callback.clone(), vec![value], span)?;
-        push_unique(&mut out, mapped);
+        interpreter.push_unique(&mut out, mapped, span)?;
     }
     Ok(Value::set(out))
 }
@@ -134,7 +146,7 @@ fn set_flat_map(
     for value in values {
         let mapped = interpreter.invoke_value(callback.clone(), vec![value], span)?;
         for item in iterable_values(mapped, span, interpreter)? {
-            push_unique(&mut out, item);
+            interpreter.push_unique(&mut out, item, span)?;
         }
     }
     Ok(Value::set(out))
@@ -156,7 +168,7 @@ fn set_filter(
             .invoke_value(callback.clone(), vec![value.clone()], span)?
             .as_bool(interpreter, span, "Set.filter predicate")?
         {
-            push_unique(&mut out, value);
+            interpreter.push_unique(&mut out, value, span)?;
         }
     }
     Ok(Value::set(out))
@@ -267,11 +279,9 @@ fn set_contains(
     let [needle] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Set.contains expects 1 argument"));
     };
+    let values = set_items(&receiver).borrow().clone();
     Ok(Value::Bool(
-        set_items(&receiver)
-            .borrow()
-            .iter()
-            .any(|value| values_equal(value, needle)),
+        interpreter.value_index(&values, needle, span)?.is_some(),
     ))
 }
 

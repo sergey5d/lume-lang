@@ -573,6 +573,43 @@ fn canonicalize_nested_ty(ty: &mut Ty, owner: &str, names: &HashSet<String>) {
     }
 }
 
+fn canonicalize_nested_type_ref(reference: &mut TypeRef, owner: &str, names: &HashSet<String>) {
+    match reference {
+        TypeRef::Named { name, args, .. } => {
+            for arg in args {
+                canonicalize_nested_type_ref(arg, owner, names);
+            }
+            if let Some(canonical) =
+                lexical_nested_name(owner, name, |candidate| names.contains(candidate))
+            {
+                *name = canonical;
+            }
+        }
+        TypeRef::Tuple { fields, .. } => {
+            for field in fields {
+                canonicalize_nested_type_ref(&mut field.ty, owner, names);
+            }
+        }
+        TypeRef::Record { fields, .. } => {
+            for field in fields {
+                canonicalize_nested_type_ref(&mut field.ty, owner, names);
+            }
+        }
+        TypeRef::Function { params, ret, .. } => {
+            for param in params {
+                canonicalize_nested_type_ref(param, owner, names);
+            }
+            canonicalize_nested_type_ref(ret, owner, names);
+        }
+        TypeRef::Union { members, .. } => {
+            for member in members {
+                canonicalize_nested_type_ref(member, owner, names);
+            }
+        }
+        TypeRef::Wildcard { .. } => {}
+    }
+}
+
 fn lexical_nested_name(
     owner: &str,
     name: &str,
@@ -869,8 +906,14 @@ impl ModuleInfo {
             .types
             .keys()
             .chain(self.objects.keys())
+            .chain(self.aliases.keys())
             .cloned()
             .collect::<HashSet<_>>();
+        for (name, target) in &mut self.aliases {
+            if let Some((owner, _)) = name.rsplit_once('.') {
+                canonicalize_nested_type_ref(target, owner, &names);
+            }
+        }
         for sig in self.types.values_mut().chain(self.objects.values_mut()) {
             canonicalize_nested_type_sig(sig, &names);
         }
@@ -1216,17 +1259,33 @@ impl World {
         }
     }
 
-    fn lookup_imported_alias(&self, module: &ModuleInfo, name: &str) -> Option<(PathBuf, TypeRef)> {
-        let imported = module.symbol_imports.get(name)?;
-        if imported.kind != ImportedKind::TypeAlias {
+    fn lookup_imported_alias(
+        &self,
+        module: &ModuleInfo,
+        name: &str,
+    ) -> Option<(PathBuf, String, TypeRef)> {
+        let (import_name, suffix) = name
+            .split_once('.')
+            .map_or((name, None), |(root, suffix)| (root, Some(suffix)));
+        let imported = module.symbol_imports.get(import_name)?;
+        let original_name = suffix
+            .map(|suffix| format!("{}.{}", imported.original_name, suffix))
+            .unwrap_or_else(|| imported.original_name.clone());
+        if suffix.is_some()
+            && !matches!(
+                imported.kind,
+                ImportedKind::Type | ImportedKind::Interface | ImportedKind::Object
+            )
+            || suffix.is_none() && imported.kind != ImportedKind::TypeAlias
+        {
             return None;
         }
         let source = self.modules.get(&imported.module_path)?;
         source
             .aliases
-            .get(&imported.original_name)
+            .get(&original_name)
             .cloned()
-            .map(|target| (source.path.clone(), target))
+            .map(|target| (source.path.clone(), original_name, target))
     }
 
     fn lookup_imported_global(&self, module: &ModuleInfo, name: &str) -> Option<ValueInfo> {
@@ -1369,6 +1428,9 @@ impl<'a> Checker<'a> {
     }
 
     fn check_type_alias(&mut self, alias: &crate::ast::TypeAliasDecl) {
+        if let Some((owner, _)) = alias.name.rsplit_once('.') {
+            self.current_type_paths.push(owner.to_string());
+        }
         let mut visiting = vec![(self.module.path.clone(), alias.name.clone())];
         if self.type_ref_has_alias_cycle(&alias.target, self.module, &mut visiting) {
             self.add_error(
@@ -1376,6 +1438,9 @@ impl<'a> Checker<'a> {
                 format!("type alias '{}' contains a cycle", alias.name),
                 alias.span,
             );
+        }
+        if alias.name.contains('.') {
+            self.current_type_paths.pop();
         }
     }
 
@@ -5642,15 +5707,12 @@ impl<'a> Checker<'a> {
         sig.type_params.clear();
 
         let structural_record_arg = call_uses_structural_record_arg(args, uses_brace_syntax);
-        let parenthesized_record_arg =
-            constructor_uses_parenthesized_record_arg(self, args, uses_brace_syntax);
         self.check_named_type_constructor(
             &sig,
             args,
             span,
             uses_brace_syntax,
             structural_record_arg,
-            parenthesized_record_arg,
             expected,
             &[],
         );
@@ -6431,8 +6493,6 @@ impl<'a> Checker<'a> {
             return Some(Ty::Unknown);
         }
         let structural_record_arg = call_uses_structural_record_arg(args, uses_brace_syntax);
-        let parenthesized_record_arg =
-            constructor_uses_parenthesized_record_arg(self, args, uses_brace_syntax);
         match callee {
             Expr::Identifier { name, .. } => {
                 if name == "this" {
@@ -6445,7 +6505,6 @@ impl<'a> Checker<'a> {
                                 span,
                                 uses_brace_syntax,
                                 structural_record_arg,
-                                parenthesized_record_arg,
                                 expected,
                                 &explicit_type_args,
                             )
@@ -6505,7 +6564,6 @@ impl<'a> Checker<'a> {
                         span,
                         uses_brace_syntax,
                         structural_record_arg,
-                        parenthesized_record_arg,
                         expected,
                         &explicit_type_args,
                     ));
@@ -6517,7 +6575,6 @@ impl<'a> Checker<'a> {
                         span,
                         uses_brace_syntax,
                         structural_record_arg,
-                        parenthesized_record_arg,
                         expected,
                         &explicit_type_args,
                     ));
@@ -6529,7 +6586,6 @@ impl<'a> Checker<'a> {
                         span,
                         uses_brace_syntax,
                         structural_record_arg,
-                        parenthesized_record_arg,
                         expected,
                         &explicit_type_args,
                     ));
@@ -6541,7 +6597,6 @@ impl<'a> Checker<'a> {
                         span,
                         uses_brace_syntax,
                         structural_record_arg,
-                        parenthesized_record_arg,
                         expected,
                         &explicit_type_args,
                     ));
@@ -6561,7 +6616,6 @@ impl<'a> Checker<'a> {
                             span,
                             uses_brace_syntax,
                             structural_record_arg,
-                            parenthesized_record_arg,
                             expected,
                             &explicit_type_args,
                         ));
@@ -6580,7 +6634,6 @@ impl<'a> Checker<'a> {
                             span,
                             uses_brace_syntax,
                             structural_record_arg,
-                            parenthesized_record_arg,
                             expected,
                             &explicit_type_args,
                         ));
@@ -6592,7 +6645,6 @@ impl<'a> Checker<'a> {
                             span,
                             uses_brace_syntax,
                             structural_record_arg,
-                            parenthesized_record_arg,
                             expected,
                             &explicit_type_args,
                         ));
@@ -6902,7 +6954,6 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
         uses_brace_syntax: bool,
         structural_record_arg: bool,
-        parenthesized_record_arg: bool,
         expected: &Ty,
         explicit_type_args: &[Ty],
     ) -> Ty {
@@ -6939,18 +6990,6 @@ impl<'a> Checker<'a> {
             }
         }
         let sig = &instantiated_sig;
-
-        if parenthesized_record_arg {
-            self.add_error(
-                "no_matching_overload",
-                format!(
-                    "constructor syntax for '{}' does not accept anonymous shape arguments in '(...)'; use construction fields in braces or positional values directly",
-                    sig.name
-                ),
-                span,
-            );
-            return ret;
-        }
 
         self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
 
@@ -8571,30 +8610,23 @@ impl<'a> Checker<'a> {
                         )
                         .map(|_| case_name.as_str())
                 }),
-            [type_name, case_name] if type_name == enum_name => Some(case_name.as_str()),
-            [module_alias, type_name, case_name] => self
-                .world
-                .lookup_module_alias(self.module, module_alias)
-                .and_then(|module| module.types.get(type_name))
-                .filter(|sig| sig.name == enum_name)
-                .map(|_| case_name.as_str()),
-            _ => None,
+            _ => {
+                let case_name = path.last()?;
+                self.lookup_case_by_path(path)
+                    .filter(|case| matches!(&case.result, Ty::Named(name, _) if name == enum_name))
+                    .map(|_| case_name.as_str())
+            }
         }
     }
 
     fn lookup_case_by_path(&self, path: &[String]) -> Option<EnumCaseSig> {
-        match path {
-            [case_name] => self.world.lookup_enum_case(self.module, case_name),
-            [type_name, case_name] => self
-                .lookup_any_non_object_type(type_name)
-                .and_then(|sig| sig.enum_cases.get(case_name).cloned()),
-            [module_alias, type_name, case_name] => self
-                .world
-                .lookup_module_alias(self.module, module_alias)
-                .and_then(|module| module.types.get(type_name).cloned())
-                .and_then(|sig| sig.enum_cases.get(case_name).cloned()),
-            _ => None,
+        let (case_name, owner_path) = path.split_last()?;
+        if owner_path.is_empty() {
+            return self.world.lookup_enum_case(self.module, case_name);
         }
+        self.lookup_pattern_type_path(owner_path)
+            .filter(|sig| sig.kind == TypeKind::Enum)
+            .and_then(|sig| sig.enum_cases.get(case_name).cloned())
     }
 
     fn lookup_case_by_pattern(&self, path: &[String], scrutinee: &Ty) -> Option<EnumCaseSig> {
@@ -10588,10 +10620,23 @@ impl<'a> Checker<'a> {
         &self,
         module: Option<&ModuleInfo>,
         name: &str,
-    ) -> Option<(PathBuf, TypeRef)> {
+    ) -> Option<(PathBuf, String, TypeRef)> {
         if let Some(module) = module {
             if let Some(target) = module.aliases.get(name) {
-                return Some((module.path.clone(), target.clone()));
+                return Some((module.path.clone(), name.to_string(), target.clone()));
+            }
+            if module.path == self.module.path
+                && !name.contains('.')
+                && let Some(owner) = self
+                    .current_type_paths
+                    .last()
+                    .or_else(|| self.current_owner.as_ref().map(|owner| &owner.name))
+                && let Some(canonical) = lexical_nested_name(owner, name, |candidate| {
+                    module.aliases.contains_key(candidate)
+                })
+                && let Some(target) = module.aliases.get(&canonical)
+            {
+                return Some((module.path.clone(), canonical, target.clone()));
             }
             if let Some(imported) = self.world.lookup_imported_alias(module, name) {
                 return Some(imported);
@@ -10602,7 +10647,7 @@ impl<'a> Checker<'a> {
             .aliases
             .get(name)
             .cloned()
-            .map(|target| (PathBuf::from("<ambient>"), target))
+            .map(|target| (PathBuf::from("<ambient>"), name.to_string(), target))
     }
 
     fn module_for_alias_path(&self, path: &Path) -> Option<&ModuleInfo> {
@@ -10669,8 +10714,10 @@ impl<'a> Checker<'a> {
             TypeRef::Named { name, args, .. } => {
                 let (type_module, type_name) = self.qualified_type_context(module, name);
                 if args.is_empty() {
-                    if let Some((path, target)) = self.lookup_alias_target(type_module, type_name) {
-                        let key = (path.clone(), type_name.to_string());
+                    if let Some((path, alias_name, target)) =
+                        self.lookup_alias_target(type_module, type_name)
+                    {
+                        let key = (path.clone(), alias_name);
                         if visiting.contains(&key) {
                             return Ty::Unknown;
                         }
@@ -10734,10 +10781,12 @@ impl<'a> Checker<'a> {
                     return true;
                 }
                 let (type_module, type_name) = self.qualified_type_context(Some(module), name);
-                let Some((path, target)) = self.lookup_alias_target(type_module, type_name) else {
+                let Some((path, alias_name, target)) =
+                    self.lookup_alias_target(type_module, type_name)
+                else {
                     return false;
                 };
-                let key = (path.clone(), type_name.to_string());
+                let key = (path.clone(), alias_name);
                 if visiting.contains(&key) {
                     return true;
                 }
@@ -12942,19 +12991,6 @@ fn trailing_brace_call_has_lambda_arg(args: &[crate::ast::CallArg]) -> bool {
     }
 }
 
-fn constructor_uses_parenthesized_record_arg(
-    checker: &Checker<'_>,
-    args: &[crate::ast::CallArg],
-    uses_brace_syntax: bool,
-) -> bool {
-    !uses_brace_syntax
-        && matches!(
-            args,
-            [crate::ast::CallArg { name: None, value, .. }]
-                if matches!(checker.probe_expr_type(value), Ty::Record(_))
-        )
-}
-
 fn format_factory_help_args(args: &[crate::ast::CallArg]) -> Option<String> {
     if let [
         crate::ast::CallArg {
@@ -14149,6 +14185,51 @@ def main() Int {
         let result =
             check_path(workspace_root().join("examples/import_forms.lum")).expect("typecheck");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_imported_nested_aliases_and_declared_unions() {
+        let temp = workspace_root().join("rust/target/typecheck-nested-alias-import-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("model.lum"),
+            r#"
+module model
+
+class Parser {
+    type Text = Str
+    type Outcome =
+        class Parsed { text Text }
+        | object Empty {}
+
+    def parse(text Text) Outcome = Outcome.Parsed(text)
+}
+"#,
+        )
+        .expect("write model");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+module app
+
+use model/{Parser}
+
+def main() Str {
+    outcome Parser.Outcome = Parser().parse("ok")
+    return match outcome {
+        case Parser.Outcome.Parsed { text } => text
+        case Parser.Outcome.Empty => "empty"
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = check_path(&source).expect("typecheck");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let _ = fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -15534,26 +15615,23 @@ class Counter {
     }
 
     #[test]
-    fn rejects_parenthesized_anonymous_shape_type_construction() {
+    fn allows_parenthesized_anonymous_shape_constructor_arguments() {
         let program = parse_inline(
             r#"
-class User {
-    name Str
+class Holder {
+    payload { x Int }
 }
 
 def main() Unit {
-    _ User = User({ name: "Ada" })
+    payload = { x: 7 }
+    fromValue Holder = Holder(payload)
+    fromLiteral Holder = Holder({ x: 8 })
+    println(fromValue.payload.x, fromLiteral.payload.x)
 }
 "#,
         );
         let result = check_program(&program);
-        assert!(
-            result.diagnostics.iter().any(|diag| diag
-                .message
-                .contains("does not accept anonymous shape arguments")),
-            "{:#?}",
-            result.diagnostics
-        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]
@@ -18704,6 +18782,26 @@ def fromEither(value Either[Str, Int]) Int = value.orPanic()
             })
             .count();
         assert_eq!(removed, 3, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_removed_panic_only_helpers() {
+        let program = parse_inline(
+            r#"
+def rune(text Str) Rune = text.expectRuneAt(0)
+def reflection(method Method, receiver Any) Any = method.invoke(receiver)
+"#,
+        );
+        let result = check_program(&program);
+        for removed in ["expectRuneAt", "invoke"] {
+            assert!(
+                result.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code == "unknown_member" && diagnostic.message.contains(removed)
+                }),
+                "missing diagnostic for removed helper '{removed}': {:#?}",
+                result.diagnostics
+            );
+        }
     }
 
     #[test]

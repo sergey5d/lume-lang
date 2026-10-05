@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     Diagnostic, Span,
     ast::TypeKind,
-    interpreter::{Interpreter, Value, iterable_values, values_equal},
+    interpreter::{Interpreter, Value, iterable_values},
     ir,
 };
 
@@ -110,7 +110,7 @@ fn list_values(
 }
 
 fn values_match(
-    interpreter: &Interpreter<'_>,
+    interpreter: &mut Interpreter<'_>,
     left: &Value,
     right: &Value,
     span: Option<Span>,
@@ -118,7 +118,7 @@ fn values_match(
 ) -> Result<bool, Diagnostic> {
     interpreter.ensure_observable_value(left, span, context)?;
     interpreter.ensure_observable_value(right, span, context)?;
-    Ok(values_equal(left, right))
+    interpreter.values_equal(left, right, span)
 }
 
 fn list_append_mut(

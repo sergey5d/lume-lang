@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     Diagnostic, Span,
     ast::TypeKind,
-    interpreter::{Interpreter, Value, iterable_values, map_put_entry, values_equal},
+    interpreter::{Interpreter, Value, iterable_values},
     ir,
 };
 
@@ -76,11 +76,15 @@ fn map_put(
     if args.len() != 2 {
         return Err(interpreter.runtime_error(span, "Map.put expects 2 arguments"));
     }
-    map_put_entry(
-        &mut map_entries(&receiver).borrow_mut(),
-        args[0].clone(),
-        args[1].clone(),
-    );
+    let entries = map_entries(&receiver);
+    let snapshot = entries.borrow().clone();
+    let existing = interpreter.map_key_index(&snapshot, &args[0], span)?;
+    let mut entries = entries.borrow_mut();
+    if let Some(position) = existing {
+        entries[position].1 = args[1].clone();
+    } else {
+        entries.push((args[0].clone(), args[1].clone()));
+    }
     Ok(receiver)
 }
 
@@ -372,10 +376,10 @@ fn map_get(
     let [needle] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Map.get expects 1 argument"));
     };
-    let found = map_entries(&receiver)
-        .borrow()
-        .iter()
-        .find(|(key, _)| values_equal(key, needle))
+    let entries = map_entries(&receiver).borrow().clone();
+    let found = interpreter
+        .map_key_index(&entries, needle, span)?
+        .and_then(|position| entries.get(position))
         .map(|(_, value)| value.clone());
     Ok(match found {
         Some(value) => interpreter.option_some(value),
@@ -392,11 +396,9 @@ fn map_contains(
     let [needle] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Map.contains expects 1 argument"));
     };
+    let entries = map_entries(&receiver).borrow().clone();
     Ok(Value::Bool(
-        map_entries(&receiver)
-            .borrow()
-            .iter()
-            .any(|(key, _)| values_equal(key, needle)),
+        interpreter.map_key_index(&entries, needle, span)?.is_some(),
     ))
 }
 

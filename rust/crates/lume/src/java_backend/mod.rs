@@ -6478,8 +6478,13 @@ class Namespace {
     interface Reader { def read() Str }
     object Defaults { prefix Str = "worker:" }
     annotation Label { value Str }
+    type Name = Str
+    type Outcome =
+        class Present { value Name }
+        | object Missing {}
 
     def worker(name Str) Worker = Worker(name)
+    def outcome(name Name) Outcome = Outcome.Present(name)
 }
 
 class TextReader with Namespace.Reader {
@@ -6491,7 +6496,12 @@ def run() Str {
     namespace = Namespace()
     worker Namespace.Worker = namespace.worker("Ada")
     point Namespace.Point = Namespace.Point(7)
-    return Namespace.Defaults.prefix + worker.name + point.x.toStr() + TextReader().read()
+    outcome Namespace.Outcome = namespace.outcome("ok")
+    text = match outcome {
+        case Present { value } => value
+        case Missing => "missing"
+    }
+    return Namespace.Defaults.prefix + worker.name + point.x.toStr() + text + TextReader().read()
 }
 "#,
         )
@@ -6507,6 +6517,7 @@ def run() Str {
         assert!(out.join("demo/nested/NamespaceWorker.java").exists());
         assert!(out.join("demo/nested/NamespaceReader.java").exists());
         assert!(out.join("demo/nested/NamespaceLabel.java").exists());
+        assert!(out.join("demo/nested/NamespaceOutcome.java").exists());
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -6948,8 +6959,12 @@ def main() Unit {
 module demo/stringmethods
 
 def main() Unit {
-    parts Vector[Str] = "  alpha, beta  ".trim().split("\s*,\s*")
+    literal Vector[Str] = "a.b".split(".")
+    parts Vector[Str] = "  alpha, beta  ".trim().splitRegex("\s*,\s*")
     parts.add("gamma")
+    println(literal.size)
+    println(literal[0])
+    println(literal[1])
     println(parts.size)
     println(parts[0])
     println(parts[1])
@@ -6958,6 +6973,8 @@ def main() Unit {
     println("lume".nonEmpty)
     println("".nonEmpty)
     println("lume".isEmpty)
+    println("😀a".size)
+    println("😀a".runeAt(1)! == "a".runeAt(0)!)
 }
 "#,
         )
@@ -6974,6 +6991,9 @@ def main() Unit {
         let module = fs::read_to_string(out.join("demo/stringmethods/StringmethodsModule.java"))
             .expect("read module");
         assert!(module.contains("LumeRuntime.stringSplit"));
+        assert!(module.contains("LumeRuntime.stringSplitRegex"));
+        assert!(module.contains("LumeRuntime.stringRuneAt"));
+        assert!(module.contains("LumeRuntime.stringSize"));
         assert!(module.contains("LumeVector<String> parts"));
         assert!(module.contains("(\"\").isEmpty()"));
         assert!(module.contains("!(\"lume\").isEmpty()"));
@@ -6995,7 +7015,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "3\nalpha\nbeta\ngamma\ntrue\ntrue\nfalse\nfalse\n"
+            "2\na\nb\n3\nalpha\nbeta\ngamma\ntrue\ntrue\nfalse\nfalse\n2\ntrue\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -7460,6 +7480,10 @@ def main() Int {
             r#"
 module demo/parity
 
+class Holder {
+    payload { x Int }
+}
+
 def add(left Int, right Int) Int {
     result Int = left + right
     result
@@ -7496,6 +7520,22 @@ def main() Int {
         case -3.5 => "negative float"
         case _ => "other"
     })
+
+    low Int = 9007199254740992
+    high Int = 9007199254740993
+    println(low < high, high > low, high <= low)
+
+    maximum Int = 9223372036854775807
+    minimum Int = maximum + 1
+    println(minimum, minimum / -1, minimum % -1)
+
+    println(1.0 / 0.0 > 0.0, 0.0 / 0.0 < 0.0, 5.5 % 2.0)
+    println(high > 9007199254740992.0)
+
+    payload { x Int } = { x: 7 }
+    fromValue Holder = Holder(payload)
+    fromLiteral Holder = Holder({ x: 8 })
+    println(fromValue.payload.x, fromLiteral.payload.x)
 
     0
 }

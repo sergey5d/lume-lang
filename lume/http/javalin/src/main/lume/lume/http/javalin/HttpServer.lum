@@ -48,6 +48,46 @@ shape HttpError {
     contentType Str = "application/json"
 }
 
+private def dispatchController(method Method, controller Any, args [Any] vararg) Any =
+    method.call(controller, ...args)!
+
+private def dispatchGet(
+    ctx JavalinRawContext,
+    method Method,
+    controller Any,
+    contentType Str
+) Unit {
+    if method.params.size == 0 {
+        HttpResponder.render(ctx, dispatchController(method, controller), contentType)
+    } else {
+        HttpResponder.render(ctx, dispatchController(method, controller, JavalinHttpContext(ctx)), contentType)
+    }
+}
+
+private def dispatchBody(
+    ctx JavalinRawContext,
+    method Method,
+    controller Any,
+    contentType Str
+) Unit {
+    params [Param] = method.params
+    if params.size == 0 {
+        HttpResponder.render(ctx, dispatchController(method, controller), contentType)
+    } else {
+        if let Some { value as firstValue } = params.at(0) {
+            first Param = firstValue
+            paramType Type[_] = first.paramType
+            if paramType.name.getOr("") == "Context" {
+                HttpResponder.render(ctx, dispatchController(method, controller, JavalinHttpContext(ctx)), contentType)
+            } else {
+                HttpResponder.render(ctx, dispatchController(method, controller, ctx.body()), contentType)
+            }
+        } else {
+            HttpResponder.render(ctx, dispatchController(method, controller), contentType)
+        }
+    }
+}
+
 private class JavalinBackend {
     app Javalin
     port Int
@@ -65,11 +105,7 @@ private class JavalinBackend {
     def get(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.get(path, object with Handler {
             def handle(ctx JavalinRawContext) Unit {
-                if method.params.size == 0 {
-                    HttpResponder.render(ctx, method.invoke(controller), contentType)
-                } else {
-                    HttpResponder.render(ctx, method.invoke(controller, JavalinHttpContext(ctx)), contentType)
-                }
+                dispatchGet(ctx, method, controller, contentType)
             }
         })
 
@@ -79,22 +115,7 @@ private class JavalinBackend {
     def post(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.post(path, object with Handler {
             def handle(ctx JavalinRawContext) Unit {
-                params [Param] = method.params
-                if params.size == 0 {
-                    HttpResponder.render(ctx, method.invoke(controller), contentType)
-                } else {
-                    if let Some { value as firstValue } = params.at(0) {
-                        first Param = firstValue
-                        paramType Type[_] = first.paramType
-                        if paramType.name.getOr("") == "Context" {
-                            HttpResponder.render(ctx, method.invoke(controller, JavalinHttpContext(ctx)), contentType)
-                        } else {
-                            HttpResponder.render(ctx, method.invoke(controller, ctx.body()), contentType)
-                        }
-                    } else {
-                        HttpResponder.render(ctx, method.invoke(controller), contentType)
-                    }
-                }
+                dispatchBody(ctx, method, controller, contentType)
             }
         })
 
@@ -104,22 +125,7 @@ private class JavalinBackend {
     def put(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.put(path, object with Handler {
             def handle(ctx JavalinRawContext) Unit {
-                params [Param] = method.params
-                if params.size == 0 {
-                    HttpResponder.render(ctx, method.invoke(controller), contentType)
-                } else {
-                    if let Some { value as firstValue } = params.at(0) {
-                        first Param = firstValue
-                        paramType Type[_] = first.paramType
-                        if paramType.name.getOr("") == "Context" {
-                            HttpResponder.render(ctx, method.invoke(controller, JavalinHttpContext(ctx)), contentType)
-                        } else {
-                            HttpResponder.render(ctx, method.invoke(controller, ctx.body()), contentType)
-                        }
-                    } else {
-                        HttpResponder.render(ctx, method.invoke(controller), contentType)
-                    }
-                }
+                dispatchBody(ctx, method, controller, contentType)
             }
         })
 
@@ -129,22 +135,7 @@ private class JavalinBackend {
     def patch(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.patch(path, object with Handler {
             def handle(ctx JavalinRawContext) Unit {
-                params [Param] = method.params
-                if params.size == 0 {
-                    HttpResponder.render(ctx, method.invoke(controller), contentType)
-                } else {
-                    if let Some { value as firstValue } = params.at(0) {
-                        first Param = firstValue
-                        paramType Type[_] = first.paramType
-                        if paramType.name.getOr("") == "Context" {
-                            HttpResponder.render(ctx, method.invoke(controller, JavalinHttpContext(ctx)), contentType)
-                        } else {
-                            HttpResponder.render(ctx, method.invoke(controller, ctx.body()), contentType)
-                        }
-                    } else {
-                        HttpResponder.render(ctx, method.invoke(controller), contentType)
-                    }
-                }
+                dispatchBody(ctx, method, controller, contentType)
             }
         })
 
@@ -154,22 +145,7 @@ private class JavalinBackend {
     def delete(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.delete(path, object with Handler {
             def handle(ctx JavalinRawContext) Unit {
-                params [Param] = method.params
-                if params.size == 0 {
-                    HttpResponder.render(ctx, method.invoke(controller), contentType)
-                } else {
-                    if let Some { value as firstValue } = params.at(0) {
-                        first Param = firstValue
-                        paramType Type[_] = first.paramType
-                        if paramType.name.getOr("") == "Context" {
-                            HttpResponder.render(ctx, method.invoke(controller, JavalinHttpContext(ctx)), contentType)
-                        } else {
-                            HttpResponder.render(ctx, method.invoke(controller, ctx.body()), contentType)
-                        }
-                    } else {
-                        HttpResponder.render(ctx, method.invoke(controller), contentType)
-                    }
-                }
+                dispatchBody(ctx, method, controller, contentType)
             }
         })
 

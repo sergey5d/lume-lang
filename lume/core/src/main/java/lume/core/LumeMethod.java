@@ -72,7 +72,7 @@ public final class LumeMethod {
         return (String) LumeRuntime.extractSuccessValue(annotationType.name());
     }
 
-    public Object invoke(Object receiver, Object... args) {
+    private Object invoke(Object receiver, Object... args) {
         if (invoker == null) {
             throw new LumePanic("method '" + name + "' is not invokable");
         }

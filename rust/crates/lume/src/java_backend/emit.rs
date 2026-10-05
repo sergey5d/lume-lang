@@ -2742,7 +2742,7 @@ impl<'a> SourceBodyEmitter<'a> {
         let core::Expr::Call {
             callee,
             args,
-            style: _,
+            style,
             span,
         } = expr
         else {
@@ -2797,6 +2797,7 @@ impl<'a> SourceBodyEmitter<'a> {
             callee,
             &rewritten,
             *span,
+            *style,
             &rewritten_bindings,
         )?))
     }
@@ -5687,7 +5688,7 @@ impl<'a> SourceBodyEmitter<'a> {
             {
                 let receiver = self.emit_receiver_expr(receiver, bindings)?;
                 match name.as_str() {
-                    "size" => Some(format!("((long) ({receiver}).length())")),
+                    "size" => Some(format!("lume.core.LumeRuntime.stringSize({receiver})")),
                     "isEmpty" => Some(format!("({receiver}).isEmpty()")),
                     "nonEmpty" => Some(format!("!({receiver}).isEmpty()")),
                     _ => unreachable!(),
@@ -6106,9 +6107,12 @@ impl<'a> SourceBodyEmitter<'a> {
                 span,
             } => self.emit_match_expression(value, cases, *span, bindings),
             core::Expr::Call {
-                callee, args, span, ..
+                callee,
+                args,
+                style,
+                span,
             } => {
-                let emitted = self.emit_call(callee, args, *span, bindings);
+                let emitted = self.emit_call(callee, args, *span, *style, bindings);
                 if emitted.is_none() && std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
                     eprintln!(
                         "readable java cannot emit call in '{}': {:?}",
@@ -6623,7 +6627,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     value: expr.clone(),
                     span: *span,
                 }];
-                self.emit_call(&callee, &args, *span, bindings)
+                self.emit_call(&callee, &args, *span, core::CallStyle::Brace, bindings)
             }
             core::Expr::ContextualNew {
                 args, style, span, ..
@@ -6655,7 +6659,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         name: name.clone(),
                         span: *span,
                     };
-                    return self.emit_call(&callee, args, *span, bindings);
+                    return self.emit_call(&callee, args, *span, *style, bindings);
                 }
                 let ir::Type::Named { name, .. } = expected else {
                     return None;
@@ -7012,9 +7016,11 @@ impl<'a> SourceBodyEmitter<'a> {
         callee: &core::Expr,
         args: &[core::CallArg],
         span: crate::source::Span,
+        style: core::CallStyle,
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
-        if let core::Expr::Identifier { name, .. } = callee
+        if style == core::CallStyle::Brace
+            && let core::Expr::Identifier { name, .. } = callee
             && let [
                 core::CallArg {
                     value: core::Expr::RecordLiteral { fields, values, .. },
@@ -7034,12 +7040,12 @@ impl<'a> SourceBodyEmitter<'a> {
                     })
             })
         {
-            return self.emit_call(callee, fields, span, bindings);
+            return self.emit_call(callee, fields, span, core::CallStyle::Paren, bindings);
         }
-        if let Some(wrapped) = self.emit_reordered_call(callee, args, span, bindings) {
+        if let Some(wrapped) = self.emit_reordered_call(callee, args, span, style, bindings) {
             return Some(wrapped);
         }
-        self.emit_call_direct(callee, args, span, bindings)
+        self.emit_call_direct(callee, args, span, style, bindings)
     }
 
     fn emit_reordered_call(
@@ -7047,6 +7053,7 @@ impl<'a> SourceBodyEmitter<'a> {
         callee: &core::Expr,
         args: &[core::CallArg],
         span: crate::source::Span,
+        style: core::CallStyle,
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
         let call = self.source_call(span)?;
@@ -7157,6 +7164,7 @@ impl<'a> SourceBodyEmitter<'a> {
             &rewritten_callee,
             &rewritten_args,
             span,
+            style,
             &rewritten_bindings,
         )?;
         let result_ty = self.source_expr_type(span)?;
@@ -7185,6 +7193,7 @@ impl<'a> SourceBodyEmitter<'a> {
         callee: &core::Expr,
         args: &[core::CallArg],
         span: crate::source::Span,
+        style: core::CallStyle,
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
         if self
@@ -7201,26 +7210,29 @@ impl<'a> SourceBodyEmitter<'a> {
         match callee {
             core::Expr::Identifier {
                 name: callee_name, ..
-            } if matches!(
-                args,
-                [core::CallArg {
-                    value: core::Expr::RecordLiteral { .. },
-                    ..
-                }]
-            ) && matches!(
-                self.source_expr_type(span),
-                Some(ir::Type::Named { ref name, .. }) if name == callee_name
-            ) && self.bundle.ir.types.iter().any(|ty| {
-                ty.name == *callee_name
-                    && (ty.kind == TypeKind::Record
-                        || (ty.kind == TypeKind::Class
-                            && !ty.methods.iter().copied().any(|id| {
-                                self.bundle
-                                    .ir
-                                    .function(id)
-                                    .is_some_and(|function| function.name == "new")
-                            })))
-            }) =>
+            } if style == core::CallStyle::Brace
+                && matches!(
+                    args,
+                    [core::CallArg {
+                        value: core::Expr::RecordLiteral { .. },
+                        ..
+                    }]
+                )
+                && matches!(
+                    self.source_expr_type(span),
+                    Some(ir::Type::Named { ref name, .. }) if name == callee_name
+                )
+                && self.bundle.ir.types.iter().any(|ty| {
+                    ty.name == *callee_name
+                        && (ty.kind == TypeKind::Record
+                            || (ty.kind == TypeKind::Class
+                                && !ty.methods.iter().copied().any(|id| {
+                                    self.bundle
+                                        .ir
+                                        .function(id)
+                                        .is_some_and(|function| function.name == "new")
+                                })))
+                }) =>
             {
                 let [
                     core::CallArg {
@@ -7244,7 +7256,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     )
                 }) =>
             {
-                self.emit_call_direct(receiver, args, span, bindings)
+                self.emit_call_direct(receiver, args, span, style, bindings)
             }
             core::Expr::Identifier { name, .. } if name == "Any" && args.len() == 1 => {
                 self.emit_call_arg(&args[0], bindings)
@@ -7532,12 +7544,28 @@ impl<'a> SourceBodyEmitter<'a> {
                 Some(format!("lume.core.LumeRuntime.{method}({value})"))
             }
             core::Expr::Member { receiver, name, .. }
-                if name == "split"
+                if matches!(name.as_str(), "split" | "splitRegex")
+                    && args.len() == 1
+                    && self.is_java_string_receiver(receiver, bindings) =>
+            {
+                let helper = if name == "split" {
+                    "stringSplit"
+                } else {
+                    "stringSplitRegex"
+                };
+                Some(format!(
+                    "lume.core.LumeRuntime.{helper}({}, {})",
+                    self.emit_receiver_expr(receiver, bindings)?,
+                    self.emit_call_arg(&args[0], bindings)?
+                ))
+            }
+            core::Expr::Member { receiver, name, .. }
+                if name == "runeAt"
                     && args.len() == 1
                     && self.is_java_string_receiver(receiver, bindings) =>
             {
                 Some(format!(
-                    "lume.core.LumeRuntime.stringSplit({}, {})",
+                    "lume.core.LumeRuntime.stringRuneAt({}, {})",
                     self.emit_receiver_expr(receiver, bindings)?,
                     self.emit_call_arg(&args[0], bindings)?
                 ))
@@ -10683,9 +10711,9 @@ fn builtin_method_param_types(
 ) -> Option<Vec<ir::Type>> {
     if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
         return match (method, arg_len) {
-            ("split" | "indexOf" | "compare", 1) => Some(vec![ir::Type::Str]),
+            ("split" | "splitRegex" | "indexOf" | "compare", 1) => Some(vec![ir::Type::Str]),
             ("size" | "trim" | "isEmpty" | "nonEmpty", 0) => Some(Vec::new()),
-            ("runeAt" | "expectRuneAt", 1) => Some(vec![ir::Type::Int]),
+            ("runeAt", 1) => Some(vec![ir::Type::Int]),
             _ => None,
         };
     }
@@ -10753,12 +10781,11 @@ fn builtin_method_return_type(
 ) -> Option<ir::Type> {
     if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
         return match (method, arg_len) {
-            ("split", 1) => Some(ir::Type::list(ir::Type::Str)),
+            ("split" | "splitRegex", 1) => Some(ir::Type::list(ir::Type::Str)),
             ("trim", 0) => Some(ir::Type::Str),
             ("isEmpty" | "nonEmpty", 0) => Some(ir::Type::Bool),
             ("size", 0) | ("indexOf" | "compare", 1) => Some(ir::Type::Int),
             ("runeAt", 1) => Some(ir::Type::option(ir::Type::named("Rune"))),
-            ("expectRuneAt", 1) => Some(ir::Type::named("Rune")),
             _ => None,
         };
     }
