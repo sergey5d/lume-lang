@@ -3878,7 +3878,7 @@ def nested(value Option[Option[Int]]) Int = value!!
 }
 
 #[test]
-fn parses_contextual_pure_as_a_prefix_operator() {
+fn parses_option_wrap_as_a_prefix_operator() {
     let result = parse(
         r#"
 def optionValue() Option[Int] = ^5
@@ -3887,11 +3887,11 @@ def nestedValue() Option[Option[Int]] = ^^5
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 
-    let pure = parse_expr_only("^5");
+    let wrapped = parse_expr_only("^5");
     assert!(matches!(
-        pure,
+        wrapped,
         Expr::Unary {
-            op: UnaryOp::Pure,
+            op: UnaryOp::OptionWrap,
             expr,
             ..
         } if matches!(expr.as_ref(), Expr::Integer { raw, .. } if raw == "5")
@@ -3901,13 +3901,13 @@ def nestedValue() Option[Option[Int]] = ^^5
     assert!(matches!(
         nested,
         Expr::Unary {
-            op: UnaryOp::Pure,
+            op: UnaryOp::OptionWrap,
             expr,
             ..
         } if matches!(
             expr.as_ref(),
             Expr::Unary {
-                op: UnaryOp::Pure,
+                op: UnaryOp::OptionWrap,
                 ..
             }
         )

@@ -1425,7 +1425,7 @@ impl<'a> Resolver<'a> {
                 .is_some_and(|symbol| !symbol.mutable),
             Expr::Member { .. } => self.is_stable_annotation_member(expr),
             Expr::Unary {
-                op: crate::ast::UnaryOp::Pure,
+                op: crate::ast::UnaryOp::OptionWrap,
                 ..
             } => false,
             Expr::Unary { expr, .. } => self.is_annotation_static_value(expr),

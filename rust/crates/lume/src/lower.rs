@@ -4297,7 +4297,7 @@ impl<'a> FunctionLowerer<'a> {
             | Expr::Lambda { .. }
             | Expr::AnonymousObject { .. }
             | Expr::Unary {
-                op: ast::UnaryOp::Pure,
+                op: ast::UnaryOp::OptionWrap,
                 ..
             } => self.lower_expr_from_rvalue_with_expected(expr, Some(expected)),
             Expr::Identifier { .. } | Expr::Member { .. }
@@ -4941,9 +4941,10 @@ impl<'a> FunctionLowerer<'a> {
                     .unwrap_or(ir::Type::Unknown)
             }
             Expr::Unary {
-                op: ast::UnaryOp::Pure,
+                op: ast::UnaryOp::OptionWrap,
+                expr,
                 ..
-            } => ir::Type::Unknown,
+            } => ir::Type::option(self.infer_expr_type_with_overrides(expr, overrides)),
             Expr::Unary {
                 op: ast::UnaryOp::UnsafeExtract,
                 expr,
@@ -6417,18 +6418,22 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             Expr::Unary {
-                op: ast::UnaryOp::Pure,
+                op: ast::UnaryOp::OptionWrap,
                 expr,
                 ..
             } => {
-                let expected = expected?;
-                let (enum_name, case_name, success_ty) = pure_variant_ir(expected)?;
+                let payload_ty = match expected {
+                    Some(ir::Type::Named { name, args }) if name == "Option" && args.len() == 1 => {
+                        args[0].clone()
+                    }
+                    _ => self.infer_expr_type(expr),
+                };
                 Some(ir::RValue::Variant {
-                    enum_name: enum_name.to_string(),
-                    case_name: case_name.to_string(),
+                    enum_name: "Option".to_string(),
+                    case_name: "Some".to_string(),
                     fields: vec![ir::NamedOperand {
                         name: "value".to_string(),
-                        value: self.lower_expr_with_expected(expr, Some(&success_ty)),
+                        value: self.lower_expr_with_expected(expr, Some(&payload_ty)),
                     }],
                 })
             }
@@ -6445,7 +6450,7 @@ impl<'a> FunctionLowerer<'a> {
                 op: match op {
                     ast::UnaryOp::Neg => ir::UnaryOp::Neg,
                     ast::UnaryOp::Not => ir::UnaryOp::Not,
-                    ast::UnaryOp::Pure => unreachable!(),
+                    ast::UnaryOp::OptionWrap => unreachable!(),
                     ast::UnaryOp::UnsafeExtract => unreachable!(),
                 },
                 operand: self.lower_expr(expr),
@@ -9018,21 +9023,6 @@ fn unwrap_lifted_ir_type(ty: &ir::Type) -> Option<(LiftedIrFamily, ir::Type)> {
             args[1].clone(),
         )),
         ir::Type::Unknown => Some((LiftedIrFamily::Option, ir::Type::Unknown)),
-        _ => None,
-    }
-}
-
-fn pure_variant_ir(ty: &ir::Type) -> Option<(&'static str, &'static str, ir::Type)> {
-    match ty {
-        ir::Type::Named { name, args } if name == "Option" && args.len() == 1 => {
-            Some(("Option", "Some", args[0].clone()))
-        }
-        ir::Type::Named { name, args } if name == "Result" && args.len() == 2 => {
-            Some(("Result", "Ok", args[0].clone()))
-        }
-        ir::Type::Named { name, args } if name == "Either" && args.len() == 2 => {
-            Some(("Either", "Right", args[1].clone()))
-        }
         _ => None,
     }
 }

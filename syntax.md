@@ -3329,31 +3329,39 @@ iterable comprehensions; `Option`, `Result`, and `Either` comprehensions have no
 - `try` propagates the original failure.
 - `??` discards/replaces the failure with an explicit fallback.
 
-The prefix pure operator `^` injects a value into the success side of the
-lifted family required by the surrounding expected type:
+The prefix optional-wrapping operator `^` is an exact shorthand for `Some`:
 
 ```txt
 optional Int? = ^5
-result Result[Str, DbError] = ^"ready"
-either Either[AppError, Int] = ^42
+inferred = ^"ready" # Option[Str]
 ```
 
-It constructs `Some`, `Ok`, or `Right`, respectively. The expected type is
-required because the operand alone cannot identify which family to construct:
+It always constructs `Option`; it never selects `Ok` or `Right` from the
+surrounding type. Construct those alternatives explicitly:
 
 ```txt
-value = ^5 # error: add an Option, Result, or Either type annotation
+result Result[Int, DbError] = Ok(5)
+either Either[AppError, Int] = Right(42)
 ```
 
-The operator injects exactly one layer and checks its operand against that
-layer's success type. Repeating it explicitly injects multiple layers:
+An expected `Option[T]` may still supply `T` as context for the operand. It
+refines the payload type without changing the meaning of `^`:
+
+```txt
+point Point? = ^new(10, 20)
+```
+
+The operator evaluates its operand once and wraps exactly one layer. Repeating
+it explicitly wraps multiple layers:
 
 ```txt
 nested Option[Option[Int]] = ^^5
+nestedMissing Option[Option[Int]] = ^None
 ```
 
-`^` does not flatten an already lifted operand. Use `map`, `flatMap`, `try`, or
-`??` when transforming or extracting an existing lifted value.
+`^` does not flatten an existing `Option`, `Result`, or `Either`. Use `map`,
+`flatMap`, `try`, or `??` when transforming or extracting an existing lifted
+value.
 
 Unsafe extraction uses postfix `!`:
 
@@ -4187,7 +4195,7 @@ Other operators / constructs:
 - `is` and contextual `is not` for positive and negative runtime type checks
 - `<-` for `for` iteration and success-case extraction in `if let` and `let ... else`
 - `??` for extract-or-fallback through `Option`, `Result`, and `Either`
-- `^` for contextual pure injection into `Option`, `Result`, and `Either`
+- `^` as shorthand for wrapping a value in `Some`
 - `!` for unsafe extraction through `Option`, `Result`, and `Either`
 - `fn(...) T` for function types
 - `=>` for lambdas and by-name parameters

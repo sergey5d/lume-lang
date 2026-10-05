@@ -4827,10 +4827,10 @@ impl<'a> Checker<'a> {
             Expr::Break { span } => self.check_break_control_expr(*span),
             Expr::Continue { span } => self.check_continue_control_expr(*span),
             Expr::Unary {
-                op: crate::ast::UnaryOp::Pure,
+                op: crate::ast::UnaryOp::OptionWrap,
                 expr,
-                span,
-            } => self.check_pure_expr(expr, expected, *span),
+                ..
+            } => self.check_option_wrap_expr(expr, expected),
             Expr::Unary { op, expr, span } => {
                 let inner = self.check_expr(expr);
                 match op {
@@ -4858,7 +4858,7 @@ impl<'a> Checker<'a> {
                         self.require_bool(&inner, *span, "unary '!' expects Bool");
                         Ty::bool()
                     }
-                    crate::ast::UnaryOp::Pure => unreachable!(),
+                    crate::ast::UnaryOp::OptionWrap => unreachable!(),
                     crate::ast::UnaryOp::UnsafeExtract => {
                         let extracted = self.unwrap_inner_type(&inner);
                         if matches!(extracted, Ty::Unknown) && !matches!(inner, Ty::Unknown) {
@@ -8807,47 +8807,34 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_pure_expr(&mut self, value: &Expr, expected: &Ty, span: crate::source::Span) -> Ty {
-        let success = match expected {
+    fn check_option_wrap_expr(&mut self, value: &Expr, expected: &Ty) -> Ty {
+        let expected_payload = match expected {
             Ty::Named(name, args) if name == "Option" && args.len() == 1 => args.first().cloned(),
-            Ty::Named(name, args) if name == "Result" && args.len() == 2 => args.first().cloned(),
-            Ty::Named(name, args) if name == "Either" && args.len() == 2 => args.get(1).cloned(),
             _ => None,
         };
-        let Some(success) = success else {
-            self.check_expr(value);
-            if matches!(expected, Ty::Unknown) {
-                self.add_error(
-                    "pure_requires_context",
-                    "pure operator '^' requires an expected Option, Result, or Either type; add a type annotation",
-                    span,
-                );
-            } else {
-                self.add_error(
-                    "invalid_pure_context",
-                    format!(
-                        "pure operator '^' requires an expected Option, Result, or Either type, got '{}'",
-                        expected.describe()
-                    ),
-                    span,
-                );
-            }
-            return Ty::Unknown;
+
+        let actual = if let Some(payload) = expected_payload.as_ref() {
+            self.check_expr_against(value, payload)
+        } else {
+            self.check_expr(value)
         };
 
-        let actual = self.check_expr_against(value, &success);
-        self.require_assignable(
-            &actual,
-            &success,
-            value.span(),
-            "invalid_pure_value",
-            format!(
-                "pure value has type {} but the expected success type is {}",
-                self.diagnostic_type_phrase(&actual),
-                self.diagnostic_type_phrase(&success)
-            ),
-        );
-        expected.clone()
+        if let Some(payload) = expected_payload {
+            self.require_assignable(
+                &actual,
+                &payload,
+                value.span(),
+                "invalid_optional_wrap_value",
+                format!(
+                    "optional wrapping value has type {} but the expected Option payload type is {}",
+                    self.diagnostic_type_phrase(&actual),
+                    self.diagnostic_type_phrase(&payload)
+                ),
+            );
+            Ty::option(materialize_type(&payload))
+        } else {
+            Ty::option(actual)
+        }
     }
 
     fn list_element_type(&self, ty: &Ty) -> Option<Ty> {
@@ -18085,21 +18072,29 @@ def main() Unit {
     }
 
     #[test]
-    fn checks_contextual_pure_for_lifted_families() {
+    fn checks_option_wrap_as_some_only() {
         let program = parse_inline(
             r#"
+shape Point {
+    x Int
+    y Int
+}
+
 def optionValue() Option[Int] = ^5
-def resultValue() Result[Str, Int] = ^"ready"
-def eitherValue() Either[Bool, Int] = ^7
 def nestedValue() Option[Option[Int]] = ^^9
+def nestedNone() Option[Option[Int]] = ^None
 def choose(flag Bool) Option[Int] = if flag { ^1 } else { ^2 }
 def consume(value Option[Int]) Int = value ?? 0
 
 def main() Unit {
+    inferred = ^1
+    println(inferred! + 1)
     option Option[Int] = ^1
-    result Result[Int, Str] = ^2
-    either Either[Str, Int] = ^3
+    point Point? = ^new(2, 3)
+    result Result[Int, Str] = Ok(2)
+    either Either[Str, Int] = Right(3)
     println(consume(^4))
+    println(point!.x)
 }
 "#,
         );
@@ -18108,32 +18103,34 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_pure_without_a_lifted_expected_type() {
+    fn rejects_option_wrap_outside_option_contexts_and_wrong_payloads() {
         let program = parse_inline(
             r#"
-def missingContext() Unit {
-    value = ^5
-}
-
 def plainContext() Int = ^5
+def resultContext() Result[Int, Str] = ^5
+def eitherContext() Either[Str, Int] = ^5
 def wrongValue() Option[Int] = ^"five"
 "#,
         );
         let result = check_program(&program);
-        for code in [
-            "pure_requires_context",
-            "invalid_pure_context",
-            "invalid_pure_value",
-        ] {
-            assert!(
-                result
-                    .diagnostics
-                    .iter()
-                    .any(|diagnostic| diagnostic.code == code),
-                "missing {code}: {:#?}",
-                result.diagnostics
-            );
-        }
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "invalid_return_type")
+                .count(),
+            3,
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "invalid_optional_wrap_value"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

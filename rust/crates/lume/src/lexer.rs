@@ -774,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn lexes_contextual_pure_operator() {
+    fn lexes_option_wrap_operator() {
         let result = lex(&source("value Option[Int] = ^5\n"));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert!(

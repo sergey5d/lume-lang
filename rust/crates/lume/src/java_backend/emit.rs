@@ -6020,9 +6020,18 @@ impl<'a> SourceBodyEmitter<'a> {
                 span,
             } => {
                 match op {
-                    ast::UnaryOp::Pure => {
-                        let expected = self.source_expr_expected(*span)?;
-                        self.emit_pure_expr(operand, bindings, &expected)
+                    ast::UnaryOp::OptionWrap => {
+                        let option_ty = self
+                            .source_expr_expected(*span)
+                            .filter(|ty| {
+                                matches!(
+                                    ty,
+                                    ir::Type::Named { name, args }
+                                        if name == "Option" && args.len() == 1
+                                )
+                            })
+                            .or_else(|| self.source_expr_type(*span))?;
+                        self.emit_option_wrap_expr(operand, bindings, &option_ty)
                     }
                     ast::UnaryOp::Neg => {
                         let value = self.emit_expr(operand, bindings)?;
@@ -6551,10 +6560,10 @@ impl<'a> SourceBodyEmitter<'a> {
     ) -> Option<String> {
         match expr {
             core::Expr::Unary {
-                op: ast::UnaryOp::Pure,
+                op: ast::UnaryOp::OptionWrap,
                 expr: value,
                 ..
-            } => self.emit_pure_expr(value, bindings, expected),
+            } => self.emit_option_wrap_expr(value, bindings, expected),
             core::Expr::Lambda { params, body, span }
                 if params.iter().all(|param| param.destructure.is_none())
                     && matches!(expected, ir::Type::Function { .. }) =>
@@ -8416,24 +8425,20 @@ impl<'a> SourceBodyEmitter<'a> {
         ))
     }
 
-    fn emit_pure_expr(
+    fn emit_option_wrap_expr(
         &self,
         value: &core::Expr,
         bindings: &HashMap<String, String>,
         expected: &ir::Type,
     ) -> Option<String> {
-        let ir::Type::Named { name, .. } = expected else {
+        let ir::Type::Named { name, args } = expected else {
             return None;
         };
-        let case = match name.as_str() {
-            "Option" => "Some",
-            "Result" => "Ok",
-            "Either" => "Right",
-            _ => return None,
-        };
-        let success_ty = lifted_success_type(expected)?;
-        let value = self.emit_expr_against(value, bindings, &success_ty)?;
-        self.emit_core_enum_case(case, &[value])
+        if name != "Option" || args.len() != 1 {
+            return None;
+        }
+        let value = self.emit_expr_against(value, bindings, &args[0])?;
+        self.emit_core_enum_case("Some", &[value])
     }
 
     fn param_reference(&self, name: &str) -> Option<String> {

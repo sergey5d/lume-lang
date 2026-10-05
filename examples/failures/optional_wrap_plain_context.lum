@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*function 'value' returns 'Option\[Int\]' but is declared as 'Int'.*
+
+def value() Int = ^5

@@ -1,6 +1,0 @@
-# FAIL_REGEX:
-# .*pure operator '\^' requires an expected Option, Result, or Either type.*
-
-def main() Unit {
-    value = ^5
-}

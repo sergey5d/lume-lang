@@ -3065,34 +3065,43 @@ def main() Unit {
     }
 
     #[test]
-    fn generated_java_runs_contextual_pure_operator() {
+    fn generated_java_runs_option_wrap_operator() {
         if !command_available("javac") || !command_available("java") {
-            eprintln!("skipping pure operator Java test because a JDK tool is unavailable");
+            eprintln!("skipping option wrap Java test because a JDK tool is unavailable");
             return;
         }
 
-        let temp = temp_path("lume-java-pure-operator");
-        let source = temp.join("pure.lum");
+        let temp = temp_path("lume-java-option-wrap-operator");
+        let source = temp.join("option_wrap.lum");
         let out = temp.join("out");
         let classes = temp.join("classes");
         fs::create_dir_all(&temp).expect("create temp dir");
         fs::write(
             &source,
             r#"
-module demo/pure
+module demo/option_wrap
+
+shape Point {
+    x Int
+    y Int
+}
 
 def optionValue() Option[Int] = ^5
-def resultValue() Result[Str, Str] = ^"ready"
-def eitherValue() Either[Str, Int] = ^9
+def resultValue() Result[Str, Str] = Ok("ready")
+def eitherValue() Either[Str, Int] = Right(9)
 def nestedValue() Option[Option[Int]] = ^^11
+def pointValue() Point? = ^new(2, 3)
 def choose(flag Bool) Option[Int] = if flag { ^12 } else { ^0 }
 def consume(value Option[Int]) Int = value ?? 0
 
 def main() Unit {
+    inferred = ^6
     println(optionValue()!)
+    println(inferred!)
     println(resultValue()!)
     println(eitherValue()!)
     println(nestedValue()!!)
+    println(pointValue()!.x)
     println(choose(true)!)
     println(consume(^13))
 }
@@ -3103,8 +3112,8 @@ def main() Unit {
         let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 
-        let module =
-            fs::read_to_string(out.join("demo/pure/PureModule.java")).expect("read module");
+        let module = fs::read_to_string(out.join("demo/option_wrap/Option_wrapModule.java"))
+            .expect("read module");
         assert!(module.contains("new Option.Some"), "{module}");
         assert!(module.contains("new Result.Ok"), "{module}");
         assert!(module.contains("new Either.Right"), "{module}");
@@ -3121,12 +3130,12 @@ def main() Unit {
             Command::new("java")
                 .arg("-cp")
                 .arg(&classes)
-                .arg("demo.pure.PureMain"),
+                .arg("demo.option_wrap.Option_wrapMain"),
             "java",
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "5\nready\n9\n11\n12\n13\n"
+            "5\n6\nready\n9\n11\n2\n12\n13\n"
         );
 
         let _ = fs::remove_dir_all(temp);

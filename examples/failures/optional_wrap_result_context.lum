@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*function 'value' returns 'Option\[Int\]' but is declared as 'Result\[Int, Str\]'.*
+
+def value() Result[Int, Str] = ^5

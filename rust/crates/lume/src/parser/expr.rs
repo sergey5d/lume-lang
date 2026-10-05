@@ -1296,7 +1296,7 @@ impl<'a> Parser<'a> {
             let expr = self.parse_unary_expr()?;
             let span = start.cover(expr.span());
             return Some(Expr::Unary {
-                op: UnaryOp::Pure,
+                op: UnaryOp::OptionWrap,
                 expr: Box::new(expr),
                 span,
             });

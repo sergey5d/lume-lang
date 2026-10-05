@@ -1,4 +1,0 @@
-# FAIL_REGEX:
-# .*pure value has type 'Str' but the expected success type is 'Int'.*
-
-def value() Option[Int] = ^"five"

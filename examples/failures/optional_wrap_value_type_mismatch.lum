@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*optional wrapping value has type 'Str' but the expected Option payload type is 'Int'.*
+
+def value() Option[Int] = ^"five"
