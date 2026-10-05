@@ -46,6 +46,13 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_stmt(&mut self) -> Option<Stmt> {
         self.skip_newlines();
+        if self.starts_named_type_declaration_in_callable() {
+            self.error_at_current(
+                "nested_declaration_in_callable",
+                "named class, shape, interface, object, and annotation declarations are allowed only at module or declaration scope, not inside a callable body",
+            );
+            return None;
+        }
         match self.current_kind() {
             TokenKind::Keyword(Keyword::Def) => {
                 let function = self.parse_function_decl(Vec::new(), Visibility::Default)?;
@@ -122,6 +129,26 @@ impl<'a> Parser<'a> {
                 let span = expr.span();
                 Some(Stmt::Expr(ExprStmt { expr, span }))
             }
+        }
+    }
+
+    fn starts_named_type_declaration_in_callable(&self) -> bool {
+        let mut index = self.index;
+        if matches!(
+            self.tokens.get(index).map(|token| token.kind),
+            Some(TokenKind::Keyword(Keyword::Private | Keyword::Internal))
+        ) {
+            index += 1;
+        }
+        match self.tokens.get(index).map(|token| token.kind) {
+            Some(TokenKind::Keyword(
+                Keyword::Annotation | Keyword::Class | Keyword::Shape | Keyword::Interface,
+            )) => true,
+            Some(TokenKind::Keyword(Keyword::Object)) => self
+                .tokens
+                .get(index + 1)
+                .is_some_and(|token| token.kind == TokenKind::Identifier),
+            _ => false,
         }
     }
 

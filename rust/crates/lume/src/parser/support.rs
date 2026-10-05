@@ -145,6 +145,8 @@ impl<'a> Parser<'a> {
             index: start,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
+            type_path: self.type_path.clone(),
+            nested_items: Vec::new(),
         };
 
         let Some((_, name_span)) = parser.parse_callable_name("expected callable name") else {
@@ -183,6 +185,8 @@ impl<'a> Parser<'a> {
             index: start,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
+            type_path: self.type_path.clone(),
+            nested_items: Vec::new(),
         };
 
         let Some((_, name_span)) = parser.parse_callable_name("expected callable name") else {
@@ -268,6 +272,8 @@ impl<'a> Parser<'a> {
             index: start,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
+            type_path: self.type_path.clone(),
+            nested_items: Vec::new(),
         };
         if parser.parse_pattern().is_none() {
             return false;

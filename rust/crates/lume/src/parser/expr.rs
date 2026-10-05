@@ -626,6 +626,8 @@ impl<'a> Parser<'a> {
             index: self.index,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
+            type_path: self.type_path.clone(),
+            nested_items: Vec::new(),
         };
         let Some(_) = parser.parse_type_ref() else {
             return false;
@@ -1648,6 +1650,8 @@ impl<'a> Parser<'a> {
             index: self.index,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
+            type_path: self.type_path.clone(),
+            nested_items: Vec::new(),
         };
         let open = parser.current_span();
         parser.advance();
@@ -2083,6 +2087,8 @@ impl<'a> Parser<'a> {
                 index: lookahead + 1,
                 diagnostics: Vec::new(),
                 allow_trailing_block_call: self.allow_trailing_block_call,
+                type_path: self.type_path.clone(),
+                nested_items: Vec::new(),
             };
             if parser.parse_type_ref().is_some() && parser.at(TokenKind::Colon) {
                 return true;

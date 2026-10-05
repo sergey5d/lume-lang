@@ -203,6 +203,8 @@ impl<'a> Parser<'a> {
             index: 0,
             diagnostics: Vec::new(),
             allow_trailing_block_call: false,
+            type_path: self.type_path.clone(),
+            nested_items: Vec::new(),
         };
         let expr = parser.parse_expr()?;
         self.diagnostics.extend(parser.diagnostics);
@@ -233,6 +235,8 @@ impl<'a> Parser<'a> {
             index: 0,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
+            type_path: self.type_path.clone(),
+            nested_items: Vec::new(),
         };
         let expr = parser.parse_expr();
         parser.skip_newlines();

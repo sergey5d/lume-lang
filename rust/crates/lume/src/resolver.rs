@@ -1023,6 +1023,7 @@ struct Resolver<'a> {
     method_hint_scopes: Vec<HashSet<String>>,
     getter_hint_scopes: Vec<HashSet<String>>,
     binding_initializer_names: Vec<HashSet<String>>,
+    current_type_paths: Vec<String>,
     loop_depth: usize,
     current_constructor: bool,
 }
@@ -1057,6 +1058,7 @@ impl<'a> Resolver<'a> {
             method_hint_scopes: Vec::new(),
             getter_hint_scopes: Vec::new(),
             binding_initializer_names: Vec::new(),
+            current_type_paths: Vec::new(),
             loop_depth: 0,
             current_constructor: false,
         }
@@ -1209,6 +1211,13 @@ impl<'a> Resolver<'a> {
                 continue;
             };
             let decls = collect_top_level_decls(&module.program);
+            let same_module = self.module.program.module.as_ref().is_some_and(|current| {
+                module
+                    .program
+                    .module
+                    .as_ref()
+                    .is_some_and(|imported| imported.name == current.name)
+            });
             match symbol.kind {
                 ImportedKind::Function => {
                     let span = if let Some(object_name) = symbol.object_name.as_deref() {
@@ -1236,12 +1245,24 @@ impl<'a> Resolver<'a> {
                     if let Some(info) = decls.types.get(&symbol.original_name) {
                         self.imported_types.insert(local_name.clone(), info.clone());
                     }
+                    self.install_imported_nested_types(
+                        local_name,
+                        &symbol.original_name,
+                        &decls,
+                        same_module,
+                    );
                 }
                 ImportedKind::Object => {
                     if let Some(info) = decls.objects.get(&symbol.original_name) {
                         self.imported_objects
                             .insert(local_name.clone(), info.clone());
                     }
+                    self.install_imported_nested_types(
+                        local_name,
+                        &symbol.original_name,
+                        &decls,
+                        same_module,
+                    );
                 }
                 ImportedKind::TypeAlias => {
                     if let Some(info) = decls.aliases.get(&symbol.original_name) {
@@ -1249,6 +1270,34 @@ impl<'a> Resolver<'a> {
                             .insert(local_name.clone(), info.clone());
                     }
                 }
+            }
+        }
+    }
+
+    fn install_imported_nested_types(
+        &mut self,
+        local_name: &str,
+        original_name: &str,
+        declarations: &TopLevelDecls,
+        same_module: bool,
+    ) {
+        let prefix = format!("{original_name}.");
+        for (name, info) in &declarations.types {
+            let Some(suffix) = name.strip_prefix(&prefix) else {
+                continue;
+            };
+            if visibility_is_importable(info.visibility, same_module) {
+                self.imported_types
+                    .insert(format!("{local_name}.{suffix}"), info.clone());
+            }
+        }
+        for (name, info) in &declarations.objects {
+            let Some(suffix) = name.strip_prefix(&prefix) else {
+                continue;
+            };
+            if visibility_is_importable(info.visibility, same_module) {
+                self.imported_objects
+                    .insert(format!("{local_name}.{suffix}"), info.clone());
             }
         }
     }
@@ -1458,6 +1507,7 @@ impl<'a> Resolver<'a> {
 
     fn resolve_type_decl(&mut self, decl: &TypeDecl) {
         self.resolve_annotations(&decl.annotations);
+        self.current_type_paths.push(decl.name.clone());
         self.push_type_scope();
         for param in &decl.type_params {
             self.define_type_param(param);
@@ -1564,6 +1614,7 @@ impl<'a> Resolver<'a> {
         self.pop_field_hints();
         self.pop_scope();
         self.pop_type_scope();
+        self.current_type_paths.pop();
     }
 
     fn resolve_extension(&mut self, block: &ExtensionBlock) {
@@ -2788,6 +2839,7 @@ impl<'a> Resolver<'a> {
     fn lookup_object_info(&self, name: &str) -> Option<&TypeInfo> {
         self.objects
             .get(name)
+            .or_else(|| self.lookup_lexical_decl(&self.objects, name))
             .or_else(|| self.imported_objects.get(name))
     }
 
@@ -2808,8 +2860,8 @@ impl<'a> Resolver<'a> {
     fn is_name_defined(&self, name: &str) -> bool {
         self.lookup_value(name).is_some()
             || self.functions.contains_key(name)
-            || self.types.contains_key(name)
-            || self.objects.contains_key(name)
+            || self.lookup_type(name).is_some()
+            || self.lookup_object_info(name).is_some()
             || self.enum_case_values.contains_key(name)
             || self.imported_functions.contains_key(name)
             || self.imported_types.contains_key(name)
@@ -2928,16 +2980,47 @@ impl<'a> Resolver<'a> {
     }
 
     fn lookup_type(&self, name: &str) -> Option<&TypeInfo> {
+        if let Some(info) = self.types.get(name) {
+            return Some(info);
+        }
+        if let Some(info) = self.lookup_lexical_decl(&self.types, name) {
+            return Some(info);
+        }
         if let Some((module, member)) = qualified_type_parts(name) {
-            return self
+            if let Some(info) = self
                 .modules_by_alias
                 .get(module)
-                .and_then(|namespace| namespace.types.get(member));
+                .and_then(|namespace| namespace.types.get(member))
+            {
+                return Some(info);
+            }
         }
-        self.types
+        self.imported_types
             .get(name)
-            .or_else(|| self.imported_types.get(name))
             .or_else(|| self.ambient.types.get(name))
+    }
+
+    fn lookup_lexical_decl<'b>(
+        &self,
+        declarations: &'b HashMap<String, TypeInfo>,
+        name: &str,
+    ) -> Option<&'b TypeInfo> {
+        if name.contains('.') {
+            return None;
+        }
+        let owner = self.current_type_paths.last()?;
+        let mut scope = owner.as_str();
+        loop {
+            let candidate = format!("{scope}.{name}");
+            if let Some(info) = declarations.get(&candidate) {
+                return Some(info);
+            }
+            let Some((parent, _)) = scope.rsplit_once('.') else {
+                break;
+            };
+            scope = parent;
+        }
+        None
     }
 
     fn lookup_alias(&self, name: &str) -> Option<&TypeAliasInfo> {
@@ -3026,6 +3109,31 @@ impl<'a> Resolver<'a> {
 
     fn validate_module_segments(&self, segments: &[String]) -> Option<String> {
         let namespace = self.modules_by_alias.get(segments.first()?)?;
+        let member_path = segments.get(1..)?.join(".");
+        if namespace.types.contains_key(&member_path)
+            || namespace.objects.contains_key(&member_path)
+            || namespace.aliases.contains_key(&member_path)
+        {
+            return None;
+        }
+        if let Some((owner_path, member)) = member_path.rsplit_once('.') {
+            if let Some(object) = namespace.objects.get(owner_path) {
+                if object.methods.contains_key(member)
+                    || object.fields.iter().any(|field| field.name == member)
+                {
+                    return None;
+                }
+                return Some(format!(
+                    "object '{}.{}' has no visible field or method '{}'",
+                    segments[0], owner_path, member
+                ));
+            }
+            if let Some(ty) = namespace.types.get(owner_path) {
+                if ty.kind == TypeKind::Enum && ty.enum_cases.contains_key(member) {
+                    return None;
+                }
+            }
+        }
         match segments {
             [module, member] => {
                 if namespace.functions.contains_key(member)
@@ -3163,7 +3271,7 @@ fn type_ref_name(reference: &TypeRef) -> Option<&str> {
 
 fn qualified_type_parts(name: &str) -> Option<(&str, &str)> {
     let (module, member) = name.split_once('.')?;
-    (!module.is_empty() && !member.is_empty() && !member.contains('.')).then_some((module, member))
+    (!module.is_empty() && !member.is_empty()).then_some((module, member))
 }
 
 fn builtin_type_arity(name: &str) -> Option<usize> {
@@ -3303,6 +3411,44 @@ class Tracker {
     }
 
     #[test]
+    fn resolves_nested_types_lexically_and_by_qualified_name() {
+        let program = parse_inline(
+            r#"
+class Namespace {
+    shape Point { x Int }
+
+    def point(x Int) Point = Point(x)
+}
+
+def main() Namespace.Point = Namespace.Point(1)
+"#,
+        );
+        let result = resolve_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn nested_types_do_not_capture_enclosing_type_parameters() {
+        let program = parse_inline(
+            r#"
+class Container[T] {
+    shape Entry {
+        value T
+    }
+}
+"#,
+        );
+        let result = resolve_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "undefined_type" && diagnostic.message.contains("T")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn allows_annotation_literals_and_stable_constants() {
         let program = parse_inline(
             r#"
@@ -3421,6 +3567,48 @@ class Adder {
             .expect("resolve");
 
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolves_nested_types_through_selective_and_module_imports() {
+        let temp = workspace_root().join("rust/target/resolver-nested-type-import-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+use lib/nested
+use lib/nested/{Namespace}
+
+def selected() Namespace.Point = Namespace.Point(1)
+def qualified() nested.Namespace.Point = nested.Namespace.Point(2)
+"#,
+        )
+        .expect("write source");
+
+        let mut library_modules = HashMap::new();
+        library_modules.insert(
+            "lib/nested".to_string(),
+            LibraryModule {
+                program: parse_inline(
+                    r#"
+module nested
+
+class Namespace {
+    shape Point { x Int }
+}
+"#,
+                ),
+                typecheck_only_types: HashSet::new(),
+            },
+        );
+
+        let result = resolve_path_with_options(&source, &ModuleLoadOptions { library_modules })
+            .expect("resolve");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
         let _ = fs::remove_dir_all(&temp);
     }
 

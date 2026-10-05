@@ -598,7 +598,12 @@ impl<'a> Parser<'a> {
             }
         };
 
-        let (name, _) = self.expect_identifier("expected type name")?;
+        let (simple_name, _) = self.expect_identifier("expected type name")?;
+        let name = self
+            .type_path
+            .last()
+            .map(|owner| format!("{owner}.{simple_name}"))
+            .unwrap_or(simple_name);
         let generic_clause = self.parse_generic_clause()?;
         let with_bounds = if self.match_keyword(Keyword::With) {
             self.parse_interface_ref_list_after_with()?
@@ -607,7 +612,8 @@ impl<'a> Parser<'a> {
         };
         self.skip_newlines();
         self.consume(TokenKind::LBrace, "expected '{' after type declaration")?;
-        self.finish_type_decl_body(
+        self.type_path.push(name.clone());
+        let decl = self.finish_type_decl_body(
             annotations,
             visibility,
             kind,
@@ -615,7 +621,9 @@ impl<'a> Parser<'a> {
             generic_clause,
             with_bounds,
             start,
-        )
+        );
+        self.type_path.pop();
+        decl
     }
 
     fn finish_type_decl_body(
@@ -642,6 +650,14 @@ impl<'a> Parser<'a> {
 
             let member_visibility = self.parse_visibility();
             match self.current_kind() {
+                TokenKind::Keyword(Keyword::Annotation)
+                | TokenKind::Keyword(Keyword::Class)
+                | TokenKind::Keyword(Keyword::Shape)
+                | TokenKind::Keyword(Keyword::Object)
+                | TokenKind::Keyword(Keyword::Interface) => {
+                    let nested = self.parse_type_decl(member_annotations, member_visibility)?;
+                    self.nested_items.push(Item::Type(nested));
+                }
                 TokenKind::Identifier
                     if self.current().lexeme == "new"
                         && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::LBrace)) =>
@@ -1055,6 +1071,8 @@ impl<'a> Parser<'a> {
             index: self.index,
             diagnostics: Vec::new(),
             allow_trailing_block_call: self.allow_trailing_block_call,
+            type_path: self.type_path.clone(),
+            nested_items: Vec::new(),
         };
         let Some(return_type) = parser.parse_type_ref() else {
             return false;
@@ -1148,6 +1166,8 @@ impl<'a> Parser<'a> {
                     index: self.index,
                     diagnostics: Vec::new(),
                     allow_trailing_block_call: self.allow_trailing_block_call,
+                    type_path: self.type_path.clone(),
+                    nested_items: Vec::new(),
                 };
                 if parser.parse_type_ref().is_some() {
                     parser.skip_newlines();

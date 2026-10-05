@@ -2042,6 +2042,18 @@ struct SyntheticNameGroup {
     by_source: HashMap<usize, usize>,
 }
 
+fn source_member_segments(expr: &core::Expr) -> Option<Vec<String>> {
+    match expr {
+        core::Expr::Identifier { name, .. } => Some(vec![name.clone()]),
+        core::Expr::Member { receiver, name, .. } => {
+            let mut segments = source_member_segments(receiver)?;
+            segments.push(name.clone());
+            Some(segments)
+        }
+        _ => None,
+    }
+}
+
 impl<'a> SourceBodyEmitter<'a> {
     fn synthetic_id(&self, group: &'static str, source_id: usize) -> usize {
         let mut groups = self.synthetic_names.borrow_mut();
@@ -5507,6 +5519,19 @@ impl<'a> SourceBodyEmitter<'a> {
             {
                 Some(format!("{}.INSTANCE", self.names.named_type(name)))
             }
+            core::Expr::Member { .. }
+                if source_member_segments(expr).is_some_and(|segments| {
+                    let name = segments.join(".");
+                    self.bundle
+                        .ir
+                        .types
+                        .iter()
+                        .any(|ty| ty.name == name && ty.kind == TypeKind::Object)
+                }) =>
+            {
+                let name = source_member_segments(expr)?.join(".");
+                Some(format!("{}.INSTANCE", self.names.named_type(&name)))
+            }
             core::Expr::Identifier { name, .. } => bindings
                 .get(name)
                 .cloned()
@@ -8438,6 +8463,12 @@ impl<'a> SourceBodyEmitter<'a> {
                     .map(|param| ir::Type::TypeParam(param.clone()))
                     .collect(),
             });
+        }
+        if let Some(segments) = source_member_segments(expr) {
+            let name = segments.join(".");
+            if self.bundle.ir.types.iter().any(|ty| ty.name == name) {
+                return Some(ir::Type::named(name));
+            }
         }
         if let core::Expr::Identifier { name, .. } = expr {
             if let Some(local) = bindings.get(name).and_then(|reference| {

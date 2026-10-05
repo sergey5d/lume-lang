@@ -102,6 +102,7 @@ impl<'a> Lowerer<'a> {
     fn lower(&mut self) -> ir::Program {
         self.declare_top_level_items();
         self.define_items();
+        self.canonicalize_nested_ir_types();
         self.derive_value_bounds();
         self.lower_top_level_functions();
         self.lower_methods();
@@ -169,6 +170,58 @@ impl<'a> Lowerer<'a> {
                 && !ty.with_bounds.contains(&hashed)
             {
                 ty.with_bounds.push(hashed);
+            }
+        }
+    }
+
+    fn canonicalize_nested_ir_types(&mut self) {
+        let names = self
+            .program
+            .types
+            .iter()
+            .map(|ty| ty.name.clone())
+            .collect::<HashSet<_>>();
+        let owners = self
+            .program
+            .types
+            .iter()
+            .map(|ty| ty.name.clone())
+            .collect::<Vec<_>>();
+
+        for (index, owner) in owners.iter().enumerate() {
+            let method_ids = self.program.types[index].methods.clone();
+            let ty = &mut self.program.types[index];
+            for bound in &mut ty.with_bounds {
+                canonicalize_nested_ir_type(bound, owner, &names);
+            }
+            for field in &mut ty.fields {
+                canonicalize_nested_ir_type(&mut field.ty, owner, &names);
+            }
+            for case in &mut ty.enum_cases {
+                for field in &mut case.fields {
+                    canonicalize_nested_ir_type(&mut field.ty, owner, &names);
+                }
+            }
+            for method_id in method_ids {
+                let Some(method) = self.program.function_mut(method_id) else {
+                    continue;
+                };
+                canonicalize_nested_ir_type(&mut method.return_ty, owner, &names);
+                for local in &mut method.locals {
+                    canonicalize_nested_ir_type(&mut local.ty, owner, &names);
+                }
+                for condition in &mut method.generic_conditions {
+                    match condition {
+                        ir::GenericCondition::Bound { subject, bound } => {
+                            canonicalize_nested_ir_type(subject, owner, &names);
+                            canonicalize_nested_ir_type(bound, owner, &names);
+                        }
+                        ir::GenericCondition::Equal { left, right } => {
+                            canonicalize_nested_ir_type(left, owner, &names);
+                            canonicalize_nested_ir_type(right, owner, &names);
+                        }
+                    }
+                }
             }
         }
     }
@@ -918,6 +971,50 @@ impl<'a> FunctionLowerer<'a> {
             .expect("active lowered function")
     }
 
+    fn lexical_owner_name(&self) -> Option<String> {
+        if let ir::FunctionKind::Method { owner } = self.function().kind {
+            return self.program.types.get(owner.0).map(|ty| ty.name.clone());
+        }
+        self.capture_sources
+            .get("this")
+            .and_then(|source| match &source.ty {
+                ir::Type::Named { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+    }
+
+    fn canonical_declared_type_path(&self, path: &[String]) -> Option<String> {
+        let joined = path.join(".");
+        if declared_type_exists(self.program, &joined) {
+            return Some(joined);
+        }
+        if path.len() != 1 {
+            return None;
+        }
+        let owner = self.lexical_owner_name()?;
+        let names = self
+            .program
+            .types
+            .iter()
+            .map(|ty| ty.name.clone())
+            .collect::<HashSet<_>>();
+        lexical_nested_ir_name(&owner, &path[0], &names)
+    }
+
+    fn lower_type_ref(&self, reference: &TypeRef) -> ir::Type {
+        let mut ty = lower_type_ref_with_aliases(reference, self.type_aliases);
+        if let Some(owner) = self.lexical_owner_name() {
+            let names = self
+                .program
+                .types
+                .iter()
+                .map(|ty| ty.name.clone())
+                .collect::<HashSet<_>>();
+            canonicalize_nested_ir_type(&mut ty, &owner, &names);
+        }
+        ty
+    }
+
     fn add_local(
         &mut self,
         name: impl Into<String>,
@@ -1103,7 +1200,7 @@ impl<'a> FunctionLowerer<'a> {
                     let ty = local
                         .ty
                         .as_ref()
-                        .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                        .map(|ty| self.lower_type_ref(ty))
                         .unwrap_or_else(|| {
                             if destructure_single_value {
                                 ir::Type::Unknown
@@ -1246,7 +1343,7 @@ impl<'a> FunctionLowerer<'a> {
                     param
                         .ty
                         .as_ref()
-                        .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                        .map(|ty| self.lower_type_ref(ty))
                         .unwrap_or(ir::Type::Unknown)
                 })
                 .collect(),
@@ -1254,7 +1351,7 @@ impl<'a> FunctionLowerer<'a> {
                 function
                     .return_type
                     .as_ref()
-                    .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                    .map(|ty| self.lower_type_ref(ty))
                     .unwrap_or(if function.equals_body {
                         ir::Type::Unknown
                     } else {
@@ -1310,7 +1407,7 @@ impl<'a> FunctionLowerer<'a> {
             function
                 .return_type
                 .as_ref()
-                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                .map(|ty| self.lower_type_ref(ty))
                 .unwrap_or(if function.equals_body {
                     ir::Type::Unknown
                 } else {
@@ -1322,7 +1419,7 @@ impl<'a> FunctionLowerer<'a> {
             let source_ty = param
                 .ty
                 .as_ref()
-                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                .map(|ty| self.lower_type_ref(ty))
                 .unwrap_or(ir::Type::Unknown);
             let runtime_ty = if param.lazy {
                 lazy_storage_type(source_ty)
@@ -1493,7 +1590,7 @@ impl<'a> FunctionLowerer<'a> {
             nested_name,
             ir::FunctionKind::Lambda,
             return_type
-                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                .map(|ty| self.lower_type_ref(ty))
                 .unwrap_or(ir::Type::Unknown),
         );
         nested.span = Some(span);
@@ -1501,7 +1598,7 @@ impl<'a> FunctionLowerer<'a> {
             let source_ty = param
                 .ty
                 .as_ref()
-                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                .map(|ty| self.lower_type_ref(ty))
                 .unwrap_or(ir::Type::Unknown);
             let runtime_ty = if param.lazy {
                 lazy_storage_type(source_ty)
@@ -1563,7 +1660,7 @@ impl<'a> FunctionLowerer<'a> {
         ty.span = Some(span);
         ty.with_bounds = interfaces
             .iter()
-            .map(|interface| lower_type_ref_with_aliases(interface, self.type_aliases))
+            .map(|interface| self.lower_type_ref(interface))
             .collect();
         ty.fields = fields
             .iter()
@@ -1575,7 +1672,7 @@ impl<'a> FunctionLowerer<'a> {
                 ty: field
                     .ty
                     .as_ref()
-                    .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                    .map(|ty| self.lower_type_ref(ty))
                     .or_else(|| {
                         field
                             .initializer
@@ -1622,7 +1719,7 @@ impl<'a> FunctionLowerer<'a> {
                 method
                     .return_type
                     .as_ref()
-                    .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                    .map(|ty| self.lower_type_ref(ty))
                     .unwrap_or(ir::Type::Unknown),
             );
             function.annotations = lower_annotations(&method.annotations);
@@ -1650,7 +1747,7 @@ impl<'a> FunctionLowerer<'a> {
                 let source_ty = param
                     .ty
                     .as_ref()
-                    .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                    .map(|ty| self.lower_type_ref(ty))
                     .unwrap_or(ir::Type::Unknown);
                 let runtime_ty = if param.lazy {
                     lazy_storage_type(source_ty)
@@ -2730,7 +2827,7 @@ impl<'a> FunctionLowerer<'a> {
                     let ty = binding
                         .ty
                         .as_ref()
-                        .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                        .map(|ty| self.lower_type_ref(ty))
                         .unwrap_or(ir::Type::Unknown);
                     let local_id = self.add_local(
                         binding.name.clone(),
@@ -2927,7 +3024,7 @@ impl<'a> FunctionLowerer<'a> {
             let ty = binding
                 .ty
                 .as_ref()
-                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+                .map(|ty| self.lower_type_ref(ty))
                 .unwrap_or(ir::Type::Unknown);
             let local_id = self.add_local(binding.name.clone(), ty, false, ir::LocalKind::Binding);
             self.current_scope().insert(binding.name.clone(), local_id);
@@ -2948,7 +3045,7 @@ impl<'a> FunctionLowerer<'a> {
         let ty = binding
             .ty
             .as_ref()
-            .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+            .map(|ty| self.lower_type_ref(ty))
             .unwrap_or(ir::Type::Unknown);
         let local_id = self.add_local(
             binding.name.clone(),
@@ -3020,7 +3117,7 @@ impl<'a> FunctionLowerer<'a> {
         let ty = binding
             .ty
             .as_ref()
-            .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
+            .map(|ty| self.lower_type_ref(ty))
             .unwrap_or(ir::Type::Unknown);
         let local_id = self.add_local(binding.name.clone(), ty, false, ir::LocalKind::Binding);
         self.current_scope().insert(binding.name.clone(), local_id);
@@ -3317,7 +3414,7 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             Pattern::Type { name, target, span } => {
-                let ty = lower_type_ref_with_aliases(target, &self.type_aliases);
+                let ty = self.lower_type_ref(target);
                 let condition = self.emit_temp_from_rvalue(
                     ir::RValue::TypeTest {
                         operand: scrutinee.clone(),
@@ -3636,7 +3733,7 @@ impl<'a> FunctionLowerer<'a> {
     fn whole_pattern_binding_type(&self, pattern: &Pattern, scrutinee: &ir::Operand) -> ir::Type {
         match pattern {
             Pattern::Alias { inner, .. } => self.whole_pattern_binding_type(inner, scrutinee),
-            Pattern::Type { target, .. } => lower_type_ref_with_aliases(target, &self.type_aliases),
+            Pattern::Type { target, .. } => self.lower_type_ref(target),
             Pattern::Record { path, .. } if !path.is_empty() => {
                 match self.lookup_record_pattern_kind(path) {
                     Some(ConstructorPatternKind::EnumCase { case_name, .. }) => self
@@ -3705,11 +3802,11 @@ impl<'a> FunctionLowerer<'a> {
         if let Some(ty) = self.enum_case_field_type(&scrutinee_ty, path, field_name, index) {
             return ty;
         }
-        let Some(type_name) = path.last() else {
+        let Some(type_name) = self.canonical_declared_type_path(path) else {
             return ir::Type::Unknown;
         };
         let Some(ty) = self.program.types.iter().find(|ty| {
-            ty.name == *type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+            ty.name == type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
         }) else {
             return ir::Type::Unknown;
         };
@@ -3754,11 +3851,11 @@ impl<'a> FunctionLowerer<'a> {
         if let Some(ty) = self.enum_case_field_type(&scrutinee_ty, path, field_name, 0) {
             return ty;
         }
-        let Some(type_name) = path.last() else {
+        let Some(type_name) = self.canonical_declared_type_path(path) else {
             return ir::Type::Unknown;
         };
         let Some(ty) = self.program.types.iter().find(|ty| {
-            ty.name == *type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+            ty.name == type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
         }) else {
             return ir::Type::Unknown;
         };
@@ -3841,15 +3938,12 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lookup_object_pattern_type(&self, path: &[String]) -> Option<ir::Type> {
-        let type_name = match path {
-            [name] | [_, name] => name,
-            _ => return None,
-        };
+        let type_name = self.canonical_declared_type_path(path)?;
         self.program
             .types
             .iter()
-            .any(|ty| ty.kind == ast::TypeKind::Object && ty.name == *type_name)
-            .then(|| ir::Type::named(type_name.clone()))
+            .any(|ty| ty.kind == ast::TypeKind::Object && ty.name == type_name)
+            .then(|| ir::Type::named(type_name))
     }
 
     fn lookup_record_pattern_kind(&self, path: &[String]) -> Option<ConstructorPatternKind> {
@@ -4012,13 +4106,9 @@ impl<'a> FunctionLowerer<'a> {
         path: &[String],
         arity: usize,
     ) -> Option<(ir::Type, Vec<String>)> {
-        let type_name = match path {
-            [name] => name,
-            [_, name] => name,
-            _ => return None,
-        };
+        let type_name = self.canonical_declared_type_path(path)?;
         let ty = self.program.types.iter().find(|ty| {
-            ty.name == *type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+            ty.name == type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
         })?;
         let visible_fields = ty
             .fields
@@ -4029,7 +4119,7 @@ impl<'a> FunctionLowerer<'a> {
             return None;
         }
         Some((
-            ir::Type::named(type_name.clone()),
+            ir::Type::named(type_name),
             visible_fields
                 .iter()
                 .map(|field| field.name.clone())
@@ -4041,16 +4131,12 @@ impl<'a> FunctionLowerer<'a> {
         &self,
         path: &[String],
     ) -> Option<(ir::Type, Vec<String>)> {
-        let type_name = match path {
-            [name] => name,
-            [_, name] => name,
-            _ => return None,
-        };
+        let type_name = self.canonical_declared_type_path(path)?;
         let ty = self.program.types.iter().find(|ty| {
-            ty.name == *type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
+            ty.name == type_name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
         })?;
         Some((
-            ir::Type::named(type_name.clone()),
+            ir::Type::named(type_name),
             ty.fields
                 .iter()
                 .filter(|field| field.visibility != ast::Visibility::Private)
@@ -4281,6 +4367,21 @@ impl<'a> FunctionLowerer<'a> {
                         return ir::Operand::Copy(Box::new(place));
                     }
                     let path = vec![name.clone()];
+                    if let Some(canonical) = self.canonical_declared_type_path(&path)
+                        && self
+                            .program
+                            .types
+                            .iter()
+                            .any(|ty| ty.name == canonical && ty.kind == ast::TypeKind::Object)
+                    {
+                        return self.emit_temp_from_rvalue(
+                            ir::RValue::NamedValue {
+                                path: vec![canonical],
+                            },
+                            ir::Type::Unknown,
+                            Some(*span),
+                        );
+                    }
                     if is_named_runtime_value_path(self.program, &path) {
                         let path = unique_bare_enum_case_owner(self.program, name)
                             .map(|owner| vec![owner.to_string(), name.clone()])
@@ -4853,9 +4954,7 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|(_, inner)| inner)
                     .unwrap_or(ir::Type::Unknown)
             }
-            Expr::TypeOf { ty, .. } => {
-                ir_exact_runtime_type(lower_type_ref_with_aliases(ty, &self.type_aliases))
-            }
+            Expr::TypeOf { ty, .. } => ir_exact_runtime_type(self.lower_type_ref(ty)),
             Expr::Binary {
                 left, op, right, ..
             } => {
@@ -5164,11 +5263,11 @@ impl<'a> FunctionLowerer<'a> {
     ) -> Option<ir::Type> {
         let (callee, explicit_type_args) = self.split_generic_call_callee(callee);
         let path = expr_path(callee)?;
-        if path.len() == 1
-            && (declared_type_exists(self.program, &path[0])
-                || runtime_collection_constructor_name(&path[0]))
+        let declared_name = self.canonical_declared_type_path(&path);
+        if declared_name.is_some()
+            || (path.len() == 1 && runtime_collection_constructor_name(&path[0]))
         {
-            let name = &path[0];
+            let name = declared_name.as_ref().unwrap_or(&path[0]);
             let type_params = self
                 .program
                 .types
@@ -5338,7 +5437,7 @@ impl<'a> FunctionLowerer<'a> {
                 if local_info.mutable {
                     return None;
                 }
-                let ty = lower_type_ref_with_aliases(target, &self.type_aliases);
+                let ty = self.lower_type_ref(target);
                 if matches!(ty, ir::Type::Unknown | ir::Type::TypeParam(_)) {
                     return None;
                 }
@@ -5460,7 +5559,7 @@ impl<'a> FunctionLowerer<'a> {
                 };
             }
         }
-        lower_type_ref_with_aliases(target, &self.type_aliases)
+        self.lower_type_ref(target)
     }
 
     fn lookup_enum_case_type_by_path(&self, path: &[String]) -> Option<ir::Type> {
@@ -6222,6 +6321,10 @@ impl<'a> FunctionLowerer<'a> {
         }
         if let Some(path) = expr_path(expr) {
             if path.len() > 1 && is_named_runtime_value_path(self.program, &path) {
+                let path = self
+                    .canonical_declared_type_path(&path)
+                    .map(|name| vec![name])
+                    .unwrap_or(path);
                 return Some(ir::RValue::NamedValue { path });
             }
         }
@@ -6527,7 +6630,7 @@ impl<'a> FunctionLowerer<'a> {
                     Some(ir::RValue::Use(operand))
                 } else {
                     Some(ir::RValue::TypeOf {
-                        ty: lower_type_ref_with_aliases(ty, &self.type_aliases),
+                        ty: self.lower_type_ref(ty),
                     })
                 }
             }
@@ -7606,6 +7709,9 @@ impl<'a> FunctionLowerer<'a> {
 
     fn lower_callee(&mut self, callee: &Expr) -> ir::Callee {
         if let Some(path) = expr_path(callee) {
+            if let Some(name) = self.canonical_declared_type_path(&path) {
+                return ir::Callee::Named { path: vec![name] };
+            }
             if path.len() == 1 {
                 let name = &path[0];
                 if name == "this" && self.function().name == "new" {
@@ -7730,13 +7836,13 @@ impl<'a> FunctionLowerer<'a> {
         let Some(path) = expr_path(callee) else {
             return false;
         };
-        if path.len() != 1 {
+        let Some(name) = self.canonical_declared_type_path(&path) else {
             return false;
-        }
+        };
         self.program
             .types
             .iter()
-            .find(|ty| ty.name == path[0] && ty.kind == ast::TypeKind::Class)
+            .find(|ty| ty.name == name && ty.kind == ast::TypeKind::Class)
             .is_some_and(|ty| {
                 ty.methods.iter().copied().any(|id| {
                     self.program
@@ -7757,11 +7863,11 @@ impl<'a> FunctionLowerer<'a> {
         let Some(path) = expr_path(callee) else {
             return false;
         };
-        if path.len() != 1 {
+        let Some(name) = self.canonical_declared_type_path(&path) else {
             return false;
-        }
+        };
         self.program.types.iter().any(|ty| {
-            ty.name == path[0]
+            ty.name == name
                 && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
                 && !ty.methods.iter().copied().any(|id| {
                     self.program
@@ -8055,10 +8161,7 @@ impl<'a> FunctionLowerer<'a> {
         };
         (
             receiver.as_ref(),
-            type_args
-                .iter()
-                .map(|ty| lower_type_ref_with_aliases(ty, self.type_aliases))
-                .collect(),
+            type_args.iter().map(|ty| self.lower_type_ref(ty)).collect(),
         )
     }
 
@@ -8387,6 +8490,60 @@ fn lower_type_ref_with_aliases(
     type_aliases: &HashMap<String, TypeRef>,
 ) -> ir::Type {
     lower_type_ref_inner(reference, type_aliases, &mut HashSet::new())
+}
+
+fn canonicalize_nested_ir_type(ty: &mut ir::Type, owner: &str, names: &HashSet<String>) {
+    match ty {
+        ir::Type::Named { name, args } => {
+            for arg in args {
+                canonicalize_nested_ir_type(arg, owner, names);
+            }
+            if let Some(canonical) = lexical_nested_ir_name(owner, name, names) {
+                *name = canonical;
+            }
+        }
+        ir::Type::Union(members) | ir::Type::Tuple(members) => {
+            for member in members {
+                canonicalize_nested_ir_type(member, owner, names);
+            }
+        }
+        ir::Type::Record(fields) => {
+            for field in fields {
+                canonicalize_nested_ir_type(&mut field.ty, owner, names);
+            }
+        }
+        ir::Type::Function { params, ret } => {
+            for param in params {
+                canonicalize_nested_ir_type(param, owner, names);
+            }
+            canonicalize_nested_ir_type(ret, owner, names);
+        }
+        ir::Type::Unknown
+        | ir::Type::Never
+        | ir::Type::Unit
+        | ir::Type::Bool
+        | ir::Type::Int
+        | ir::Type::Float
+        | ir::Type::Str
+        | ir::Type::TypeParam(_) => {}
+    }
+}
+
+fn lexical_nested_ir_name(owner: &str, name: &str, names: &HashSet<String>) -> Option<String> {
+    if name.contains('.') {
+        return names.contains(name).then(|| name.to_string());
+    }
+    let mut scope = owner;
+    loop {
+        let candidate = format!("{scope}.{name}");
+        if names.contains(&candidate) {
+            return Some(candidate);
+        }
+        let Some((parent, _)) = scope.rsplit_once('.') else {
+            return None;
+        };
+        scope = parent;
+    }
 }
 
 fn lower_type_ref_inner(
@@ -10387,6 +10544,15 @@ fn is_named_runtime_value_path(program: &ir::Program, path: &[String]) -> bool {
         return false;
     }
 
+    let qualified = path.join(".");
+    if program
+        .types
+        .iter()
+        .any(|ty| ty.name == qualified && ty.kind == ast::TypeKind::Object)
+    {
+        return true;
+    }
+
     if path.len() >= 2 && explicit_enum_case_value_exists(program, &path[0], &path[1]) {
         return true;
     }
@@ -10403,6 +10569,9 @@ fn is_named_runtime_value_path(program: &ir::Program, path: &[String]) -> bool {
 fn is_named_runtime_callee_path(program: &ir::Program, path: &[String]) -> bool {
     if path.is_empty() {
         return false;
+    }
+    if declared_type_exists(program, &path.join(".")) {
+        return true;
     }
     if matches!(path, [owner, method] if ((owner == "Int" || owner == "Float") && method == "parse")
         || (owner == "Option" && method == "when"))

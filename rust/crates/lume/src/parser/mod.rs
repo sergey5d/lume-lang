@@ -30,6 +30,8 @@ struct Parser<'a> {
     index: usize,
     diagnostics: Vec<Diagnostic>,
     allow_trailing_block_call: bool,
+    type_path: Vec<String>,
+    nested_items: Vec<Item>,
 }
 
 #[derive(Clone, Copy)]
@@ -46,6 +48,8 @@ impl<'a> Parser<'a> {
             index: 0,
             diagnostics: Vec::new(),
             allow_trailing_block_call: true,
+            type_path: Vec::new(),
+            nested_items: Vec::new(),
         }
     }
 
@@ -78,6 +82,11 @@ impl<'a> Parser<'a> {
             let before = self.index;
             if let Some(item) = self.parse_item() {
                 items.push(item);
+                self.nested_items.sort_by_key(|item| match item {
+                    Item::Type(decl) => decl.name.matches('.').count(),
+                    _ => 0,
+                });
+                items.append(&mut self.nested_items);
             } else {
                 self.synchronize_item();
                 if self.index == before && !self.at(TokenKind::Eof) {

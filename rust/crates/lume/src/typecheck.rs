@@ -493,6 +493,107 @@ fn expand_aliases_in_type_sig(sig: &mut TypeSig, aliases: &HashMap<String, TypeR
     }
 }
 
+fn canonicalize_nested_type_sig(sig: &mut TypeSig, names: &HashSet<String>) {
+    let owner = sig.name.clone();
+    for condition in &mut sig.generic_conditions {
+        match condition {
+            GenericConditionSig::Bound { subject, bound } => {
+                canonicalize_nested_ty(subject, &owner, names);
+                canonicalize_nested_ty(bound, &owner, names);
+            }
+            GenericConditionSig::Equal { left, right } => {
+                canonicalize_nested_ty(left, &owner, names);
+                canonicalize_nested_ty(right, &owner, names);
+            }
+        }
+    }
+    for bound in &mut sig.with_bounds {
+        canonicalize_nested_ty(bound, &owner, names);
+    }
+    for field in &mut sig.fields {
+        canonicalize_nested_ty(&mut field.ty, &owner, names);
+    }
+    for overloads in sig.methods.values_mut() {
+        for method in overloads {
+            for condition in &mut method.generic_conditions {
+                match condition {
+                    GenericConditionSig::Bound { subject, bound } => {
+                        canonicalize_nested_ty(subject, &owner, names);
+                        canonicalize_nested_ty(bound, &owner, names);
+                    }
+                    GenericConditionSig::Equal { left, right } => {
+                        canonicalize_nested_ty(left, &owner, names);
+                        canonicalize_nested_ty(right, &owner, names);
+                    }
+                }
+            }
+            for param in &mut method.params {
+                canonicalize_nested_ty(&mut param.ty, &owner, names);
+            }
+            canonicalize_nested_ty(&mut method.ret, &owner, names);
+        }
+    }
+    for case in sig.enum_cases.values_mut() {
+        for param in &mut case.params {
+            canonicalize_nested_ty(&mut param.ty, &owner, names);
+        }
+        canonicalize_nested_ty(&mut case.result, &owner, names);
+    }
+}
+
+fn canonicalize_nested_ty(ty: &mut Ty, owner: &str, names: &HashSet<String>) {
+    match ty {
+        Ty::Named(name, args) => {
+            for arg in args {
+                canonicalize_nested_ty(arg, owner, names);
+            }
+            if let Some(canonical) =
+                lexical_nested_name(owner, name, |candidate| names.contains(candidate))
+            {
+                *name = canonical;
+            }
+        }
+        Ty::Union(members) | Ty::Tuple(members) => {
+            for member in members {
+                canonicalize_nested_ty(member, owner, names);
+            }
+        }
+        Ty::Record(fields) => {
+            for (_, field) in fields {
+                canonicalize_nested_ty(field, owner, names);
+            }
+        }
+        Ty::Function(params, ret) => {
+            for param in params {
+                canonicalize_nested_ty(param, owner, names);
+            }
+            canonicalize_nested_ty(ret, owner, names);
+        }
+        Ty::Unknown | Ty::Wildcard | Ty::Capture(_) | Ty::Never | Ty::TypeParam(_) => {}
+    }
+}
+
+fn lexical_nested_name(
+    owner: &str,
+    name: &str,
+    mut exists: impl FnMut(&str) -> bool,
+) -> Option<String> {
+    if name.contains('.') {
+        return exists(name).then(|| name.to_string());
+    }
+    let mut scope = owner;
+    loop {
+        let candidate = format!("{scope}.{name}");
+        if exists(&candidate) {
+            return Some(candidate);
+        }
+        let Some((parent, _)) = scope.rsplit_once('.') else {
+            return None;
+        };
+        scope = parent;
+    }
+}
+
 fn canonicalize_qualified_function_sig(
     sig: &mut FunctionSig,
     owner: &ModuleInfo,
@@ -565,9 +666,6 @@ fn canonicalize_qualified_ty(
             let Some((module_alias, member)) = name.split_once('.') else {
                 return;
             };
-            if member.contains('.') {
-                return;
-            }
             let Some(target) = owner
                 .imports
                 .get(module_alias)
@@ -762,7 +860,20 @@ impl ModuleInfo {
             }
         }
 
+        self.canonicalize_nested_types_in_signatures();
         self.expand_aliases_in_signatures();
+    }
+
+    fn canonicalize_nested_types_in_signatures(&mut self) {
+        let names = self
+            .types
+            .keys()
+            .chain(self.objects.keys())
+            .cloned()
+            .collect::<HashSet<_>>();
+        for sig in self.types.values_mut().chain(self.objects.values_mut()) {
+            canonicalize_nested_type_sig(sig, &names);
+        }
     }
 
     fn expand_aliases_in_signatures(&mut self) {
@@ -1068,19 +1179,38 @@ impl World {
     }
 
     fn lookup_imported_type(&self, module: &ModuleInfo, name: &str) -> Option<TypeSig> {
-        let imported = module.symbol_imports.get(name)?;
+        let (import_name, suffix) = name
+            .split_once('.')
+            .map_or((name, None), |(root, suffix)| (root, Some(suffix)));
+        let imported = module.symbol_imports.get(import_name)?;
+        let original_name = suffix
+            .map(|suffix| format!("{}.{}", imported.original_name, suffix))
+            .unwrap_or_else(|| imported.original_name.clone());
+        if suffix.is_some()
+            && matches!(
+                imported.kind,
+                ImportedKind::Type | ImportedKind::Interface | ImportedKind::Object
+            )
+        {
+            let source = self.modules.get(&imported.module_path)?;
+            return source
+                .types
+                .get(&original_name)
+                .cloned()
+                .or_else(|| source.objects.get(&original_name).cloned());
+        }
         match imported.kind {
             ImportedKind::Type | ImportedKind::Interface => self
                 .modules
                 .get(&imported.module_path)?
                 .types
-                .get(&imported.original_name)
+                .get(&original_name)
                 .cloned(),
             ImportedKind::Object => self
                 .modules
                 .get(&imported.module_path)?
                 .objects
-                .get(&imported.original_name)
+                .get(&original_name)
                 .cloned(),
             _ => None,
         }
@@ -1197,6 +1327,7 @@ struct Checker<'a> {
     capture_labels: HashMap<usize, String>,
     globals: HashMap<String, ValueInfo>,
     anonymous_types: HashMap<String, TypeSig>,
+    current_type_paths: Vec<String>,
 }
 
 impl<'a> Checker<'a> {
@@ -1219,6 +1350,7 @@ impl<'a> Checker<'a> {
             capture_labels: HashMap::new(),
             globals: HashMap::new(),
             anonymous_types: HashMap::new(),
+            current_type_paths: Vec::new(),
         }
     }
 
@@ -1383,6 +1515,7 @@ impl<'a> Checker<'a> {
         let Some(type_sig) = self.lookup_type_local(&decl.name) else {
             return;
         };
+        self.current_type_paths.push(decl.name.clone());
         for param in &decl.type_params {
             if param.reified {
                 self.add_error(
@@ -1525,6 +1658,7 @@ impl<'a> Checker<'a> {
         self.check_type_field_initializers(decl, &type_sig);
 
         self.pop_type_params();
+        self.current_type_paths.pop();
     }
 
     fn check_implicit_constructor_contract(&mut self, decl: &TypeDecl) {
@@ -6415,6 +6549,24 @@ impl<'a> Checker<'a> {
                 None
             }
             Expr::Member { receiver, name, .. } => {
+                if let Some(path) = expr_path_for_known_value(callee) {
+                    let qualified = path.join(".");
+                    if let Some(sig) = self
+                        .lookup_type_local(&qualified)
+                        .or_else(|| self.world.lookup_imported_type(self.module, &qualified))
+                    {
+                        return Some(self.check_named_type_constructor(
+                            &sig,
+                            args,
+                            span,
+                            uses_brace_syntax,
+                            structural_record_arg,
+                            parenthesized_record_arg,
+                            expected,
+                            &explicit_type_args,
+                        ));
+                    }
+                }
                 if let Some(module) = module_alias_and_member(callee).and_then(|(alias, member)| {
                     self.world
                         .lookup_module_alias(self.module, &alias)
@@ -7562,17 +7714,25 @@ impl<'a> Checker<'a> {
                 .or_else(|| self.lookup_unique_module_type(name))
                 .or_else(|| self.lookup_any_object(name))
                 .or_else(|| self.world.ambient.types.get(name).cloned()),
-            Expr::Member { .. } => module_alias_and_member(callee).and_then(|(alias, member)| {
-                self.world
-                    .lookup_module_alias(self.module, &alias)
-                    .and_then(|module| {
-                        module
-                            .types
-                            .get(&member)
-                            .cloned()
-                            .or_else(|| module.objects.get(&member).cloned())
+            Expr::Member { .. } => expr_path_for_known_value(callee)
+                .map(|path| path.join("."))
+                .and_then(|name| {
+                    self.lookup_type_local(&name)
+                        .or_else(|| self.world.lookup_imported_type(self.module, &name))
+                })
+                .or_else(|| {
+                    module_alias_and_member(callee).and_then(|(alias, member)| {
+                        self.world
+                            .lookup_module_alias(self.module, &alias)
+                            .and_then(|module| {
+                                module
+                                    .types
+                                    .get(&member)
+                                    .cloned()
+                                    .or_else(|| module.objects.get(&member).cloned())
+                            })
                     })
-            }),
+                }),
             _ => None,
         };
 
@@ -7580,6 +7740,17 @@ impl<'a> Checker<'a> {
     }
 
     fn static_member_value_type(&self, receiver: &Expr, name: &str, expected: &Ty) -> Option<Ty> {
+        if let Some(mut path) = expr_path_for_known_value(receiver) {
+            path.push(name.to_string());
+            let qualified = path.join(".");
+            if let Some(sig) = self
+                .lookup_object_local(&qualified)
+                .or_else(|| self.world.lookup_imported_type(self.module, &qualified))
+                .filter(|sig| sig.kind == TypeKind::Object)
+            {
+                return Some(Ty::Named(sig.name, Vec::new()));
+            }
+        }
         let Expr::Identifier {
             name: type_name, ..
         } = receiver
@@ -8440,14 +8611,8 @@ impl<'a> Checker<'a> {
     }
 
     fn lookup_object_pattern(&self, path: &[String]) -> Option<TypeSig> {
-        match path {
-            [name] => self.lookup_any_object(name),
-            [module_alias, name] => self
-                .world
-                .lookup_module_alias(self.module, module_alias)
-                .and_then(|module| module.objects.get(name).cloned()),
-            _ => None,
-        }
+        let sig = self.lookup_pattern_type_path(path)?;
+        (sig.kind == TypeKind::Object).then_some(sig)
     }
 
     fn whole_pattern_binding_type(&self, pattern: &Pattern, scrutinee: &Ty) -> Ty {
@@ -8509,20 +8674,7 @@ impl<'a> Checker<'a> {
     }
 
     fn lookup_destructured_type_pattern(&self, path: &[String]) -> Option<(Ty, Vec<Ty>)> {
-        let sig = match path {
-            [name] => self.lookup_any_type(name),
-            [module_alias, name] => self
-                .world
-                .lookup_module_alias(self.module, module_alias)
-                .and_then(|module| {
-                    module
-                        .types
-                        .get(name)
-                        .cloned()
-                        .or_else(|| module.objects.get(name).cloned())
-                }),
-            _ => None,
-        }?;
+        let sig = self.lookup_pattern_type_path(path)?;
         if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
             return None;
         }
@@ -8596,20 +8748,7 @@ impl<'a> Checker<'a> {
             return Some((true, case.result, fields));
         }
 
-        let sig = match path {
-            [name] => self.lookup_any_type(name),
-            [module_alias, name] => self
-                .world
-                .lookup_module_alias(self.module, module_alias)
-                .and_then(|module| {
-                    module
-                        .types
-                        .get(name)
-                        .cloned()
-                        .or_else(|| module.objects.get(name).cloned())
-                }),
-            _ => None,
-        }?;
+        let sig = self.lookup_pattern_type_path(path)?;
         if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
             return None;
         }
@@ -8636,6 +8775,27 @@ impl<'a> Checker<'a> {
             })
             .collect();
         Some((false, target, fields))
+    }
+
+    fn lookup_pattern_type_path(&self, path: &[String]) -> Option<TypeSig> {
+        let joined = path.join(".");
+        if let Some(sig) = self.lookup_any_type(&joined) {
+            return Some(sig);
+        }
+        let (module_alias, nested_path) = path.split_first()?;
+        if nested_path.is_empty() {
+            return None;
+        }
+        let name = nested_path.join(".");
+        self.world
+            .lookup_module_alias(self.module, module_alias)
+            .and_then(|module| {
+                module
+                    .types
+                    .get(&name)
+                    .cloned()
+                    .or_else(|| module.objects.get(&name).cloned())
+            })
     }
 
     fn unwrap_inner_type(&self, ty: &Ty) -> Ty {
@@ -10291,10 +10451,49 @@ impl<'a> Checker<'a> {
             .get(name)
             .cloned()
             .or_else(|| self.module.objects.get(name).cloned())
+            .or_else(|| self.lookup_lexical_type(name))
     }
 
     fn lookup_object_local(&self, name: &str) -> Option<TypeSig> {
-        self.module.objects.get(name).cloned()
+        self.module
+            .objects
+            .get(name)
+            .cloned()
+            .or_else(|| self.lookup_lexical_object(name))
+    }
+
+    fn lookup_lexical_type(&self, name: &str) -> Option<TypeSig> {
+        if name.contains('.') {
+            return None;
+        }
+        let owner = self
+            .current_type_paths
+            .last()
+            .or_else(|| self.current_owner.as_ref().map(|owner| &owner.name))?;
+        lexical_nested_name(owner, name, |candidate| {
+            self.module.types.contains_key(candidate) || self.module.objects.contains_key(candidate)
+        })
+        .and_then(|candidate| {
+            self.module
+                .types
+                .get(&candidate)
+                .cloned()
+                .or_else(|| self.module.objects.get(&candidate).cloned())
+        })
+    }
+
+    fn lookup_lexical_object(&self, name: &str) -> Option<TypeSig> {
+        if name.contains('.') {
+            return None;
+        }
+        let owner = self
+            .current_type_paths
+            .last()
+            .or_else(|| self.current_owner.as_ref().map(|owner| &owner.name))?;
+        lexical_nested_name(owner, name, |candidate| {
+            self.module.objects.contains_key(candidate)
+        })
+        .and_then(|candidate| self.module.objects.get(&candidate).cloned())
     }
 
     fn lookup_unique_module_type(&self, name: &str) -> Option<TypeSig> {
@@ -10464,9 +10663,6 @@ impl<'a> Checker<'a> {
         let Some((module_alias, member)) = name.split_once('.') else {
             return (module, name);
         };
-        if member.contains('.') {
-            return (module, name);
-        }
         let Some(owner) =
             module.and_then(|module| self.world.lookup_module_alias(module, module_alias))
         else {
@@ -13371,15 +13567,9 @@ fn runtime_type_ref_has_arguments(reference: &TypeRef) -> bool {
 }
 
 fn module_alias_and_member(expr: &Expr) -> Option<(String, String)> {
-    match expr {
-        Expr::Member { receiver, name, .. } => {
-            let Expr::Identifier { name: alias, .. } = receiver.as_ref() else {
-                return None;
-            };
-            Some((alias.clone(), name.clone()))
-        }
-        _ => None,
-    }
+    let path = expr_path_for_known_value(expr)?;
+    let (alias, member) = path.split_first()?;
+    (!member.is_empty()).then(|| (alias.clone(), member.join(".")))
 }
 
 #[cfg(test)]

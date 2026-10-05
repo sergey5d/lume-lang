@@ -6453,6 +6453,56 @@ def main() Unit {
     }
 
     #[test]
+    fn emits_nested_named_declarations_and_qualified_object_access() {
+        let temp = temp_path("lume-java-nested-declarations");
+        let source = temp.join("nested_declarations.lum");
+        let out = temp.join("out");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/nested
+
+class Namespace {
+    shape Point { x Int }
+    class Worker { name Str }
+    interface Reader { def read() Str }
+    object Defaults { prefix Str = "worker:" }
+    annotation Label { value Str }
+
+    def worker(name Str) Worker = Worker(name)
+}
+
+class TextReader with Namespace.Reader {
+    def read() Str = "!"
+}
+
+@Namespace.Label { value: "entry" }
+def run() Str {
+    namespace = Namespace()
+    worker Namespace.Worker = namespace.worker("Ada")
+    point Namespace.Point = Namespace.Point(7)
+    return Namespace.Defaults.prefix + worker.name + point.x.toStr() + TextReader().read()
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let module =
+            fs::read_to_string(out.join("demo/nested/NestedModule.java")).expect("read module");
+        assert!(module.contains("NamespaceDefaults.INSTANCE.prefix"));
+        assert!(out.join("demo/nested/NamespacePoint.java").exists());
+        assert!(out.join("demo/nested/NamespaceWorker.java").exists());
+        assert!(out.join("demo/nested/NamespaceReader.java").exists());
+        assert!(out.join("demo/nested/NamespaceLabel.java").exists());
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_exposes_lume_type_descriptors() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java metadata test because javac/java is not available");

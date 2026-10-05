@@ -959,6 +959,87 @@ class Counter {
 }
 
 #[test]
+fn parses_named_declarations_nested_in_declaration_bodies() {
+    let result = parse(
+        r#"
+class Namespace {
+    class Worker {}
+    shape Point { x Int }
+    interface Reader { def read() Str }
+    object Defaults { prefix Str = "v" }
+    annotation Label { value Str }
+
+    def worker() Worker = Worker()
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let type_names = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Type(decl) => Some((decl.name.as_str(), decl.kind)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        type_names,
+        vec![
+            ("Namespace", TypeKind::Class),
+            ("Namespace.Worker", TypeKind::Class),
+            ("Namespace.Point", TypeKind::Record),
+            ("Namespace.Reader", TypeKind::Interface),
+            ("Namespace.Defaults", TypeKind::Object),
+            ("Namespace.Label", TypeKind::Annotation),
+        ]
+    );
+}
+
+#[test]
+fn allows_named_declarations_in_every_named_declaration_kind() {
+    for owner_kind in ["class", "shape", "interface", "object", "annotation"] {
+        for nested_kind in ["class", "shape", "interface", "object", "annotation"] {
+            let source = format!("{owner_kind} Outer {{\n    {nested_kind} Inner {{}}\n}}");
+            let result = parse(&source);
+            assert!(
+                result.diagnostics.is_empty(),
+                "failed to nest {nested_kind} in {owner_kind}: {:#?}",
+                result.diagnostics
+            );
+            let program = result.program.expect("program");
+            assert!(
+                program
+                    .items
+                    .iter()
+                    .any(|item| { matches!(item, Item::Type(decl) if decl.name == "Outer.Inner") })
+            );
+        }
+    }
+}
+
+#[test]
+fn rejects_named_declarations_inside_callable_bodies() {
+    for declaration in [
+        "class Local {}",
+        "shape Local {}",
+        "interface Local {}",
+        "object Local {}",
+        "annotation Local {}",
+    ] {
+        let result = parse(&format!("def main() Unit {{\n    {declaration}\n}}"));
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "nested_declaration_in_callable"),
+            "expected callable-local declaration error for {declaration}, got {:#?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
 fn rejects_removed_impl_syntax() {
     let result = parse("impl Counter {}");
     assert!(

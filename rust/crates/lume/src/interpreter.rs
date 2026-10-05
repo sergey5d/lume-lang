@@ -6496,6 +6496,65 @@ mod tests {
     }
 
     #[test]
+    fn runs_named_declarations_nested_in_other_declarations() {
+        let program = lower_inline(
+            r#"
+            class Namespace {
+                shape Point {
+                    x Int
+                }
+
+                class Worker {
+                    name Str
+
+                    def point(x Int) Point = Point(x)
+                }
+
+                interface Reader {
+                    def read() Str
+                }
+
+                object Defaults {
+                    prefix Str = "worker:"
+                }
+
+                annotation Label {
+                    value Str
+                }
+
+                def worker(name Str) Worker = Worker(name)
+                def point(x Int) Point = Point(x)
+                def workerName(worker Worker) Str = match worker {
+                    case Worker { name } => name
+                }
+            }
+
+            def qualifiedWorkerName(worker Namespace.Worker) Str = match worker {
+                case Namespace.Worker { name } => name
+            }
+
+            class TextReader with Namespace.Reader {
+                def read() Str = "!"
+            }
+
+            @Namespace.Label { value: "entry" }
+            def run() Str {
+                namespace = Namespace()
+                worker Namespace.Worker = namespace.worker("Ada")
+                point Namespace.Point = worker.point(7)
+                direct Namespace.Point = Namespace.Point(1)
+                return Namespace.Defaults.prefix + namespace.workerName(worker) +
+                    qualifiedWorkerName(worker) + (point.x + direct.x).toStr() + TextReader().read()
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.return_value.as_deref(), Some("worker:AdaAda8!"));
+    }
+
+    #[test]
     fn runs_getter_methods_through_member_access() {
         let program = lower_inline(
             r#"

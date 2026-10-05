@@ -719,6 +719,62 @@ type OptionX[T] =
     | object NoneX {}
 ```
 
+### Nested Declarations
+
+Named `class`, `shape`, `interface`, `object`, and `annotation` declarations may
+appear inside any other named declaration of those kinds:
+
+```txt
+class Parser {
+    shape Position {
+        line Int
+        column Int
+    }
+
+    private class State {
+        position Position
+    }
+
+    interface Input {
+        def read() Str?
+    }
+
+    object Defaults {
+        maximumDepth Int = 100
+    }
+
+    annotation Rule {
+        name Str
+    }
+}
+```
+
+Inside the enclosing declaration, use the short name such as `Position`.
+Outside it, use the qualified name such as `Parser.Position`. Normal visibility
+rules still apply.
+
+Nesting is lexical organization only. A nested declaration:
+
+- is not an instance field and does not affect the enclosing constructor,
+  storage, equality, or hashing
+- does not capture an enclosing `this`, value, or generic parameter
+- must declare and receive its own dependencies and generic parameters
+- retains its ordinary semantics; in particular, a nested named `object` is one
+  singleton rather than one value per enclosing instance
+
+Named declarations are not allowed in functions, methods, constructors,
+getters, lambdas, or nested executable blocks:
+
+```txt
+def process() Unit {
+    shape Entry { value Int } # invalid
+}
+```
+
+Anonymous shape construction, anonymous `object` expressions, lambdas, and
+local functions remain valid in callable bodies because they construct values
+or declare callables without introducing a named type declaration.
+
 Arbitrary statements such as `if`, `for`, `match`, `defer`, or expression statements are not valid at top level. Put executable code inside a function such as `def main() Unit { ... }`.
 
 ## Variable Declarations
