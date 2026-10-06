@@ -4127,11 +4127,15 @@ impl<'a> SourceBodyEmitter<'a> {
             if !clauses.is_empty() {
                 return None;
             }
-            return Some((
-                self.emit_expr(condition, bindings)?,
-                bindings.clone(),
-                binding_types.clone(),
-            ));
+            let emitted = self.emit_expr(condition, bindings)?;
+            let mut next_bindings = bindings.clone();
+            let mut next_types = binding_types.clone();
+            self.apply_positive_condition_narrowing(
+                condition,
+                &mut next_bindings,
+                &mut next_types,
+            )?;
+            return Some((emitted, next_bindings, next_types));
         }
 
         let mut conditions = Vec::new();
@@ -4141,6 +4145,11 @@ impl<'a> SourceBodyEmitter<'a> {
             match clause {
                 core::IfConditionClause::Expr(condition) => {
                     conditions.push(self.emit_expr(condition, &clause_bindings)?);
+                    self.apply_positive_condition_narrowing(
+                        condition,
+                        &mut clause_bindings,
+                        &mut clause_types,
+                    )?;
                 }
                 core::IfConditionClause::Let(clause) => {
                     let value_ty = match self.expr_type_with_binding_types(
@@ -4201,6 +4210,35 @@ impl<'a> SourceBodyEmitter<'a> {
             return None;
         }
         Some((conditions.join(" && "), clause_bindings, clause_types))
+    }
+
+    fn apply_positive_condition_narrowing(
+        &self,
+        condition: &core::Expr,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+    ) -> Option<()> {
+        let core::Expr::Is { left, target, .. } = condition else {
+            return Some(());
+        };
+        let core::Expr::Identifier { name, .. } = left.as_ref() else {
+            return Some(());
+        };
+        let target_ty = type_ref_to_ir(target);
+        if matches!(target_ty, ir::Type::Unknown | ir::Type::Never)
+            || is_named_builtin(&target_ty, "Any")
+        {
+            return Some(());
+        }
+        let source_ty = self.expr_type_with_binding_types(left, bindings, binding_types)?;
+        let source = self.emit_expr(left, bindings)?;
+        let tested = self.pattern_test_value(&source, &source_ty, &target_ty);
+        bindings.insert(
+            name.clone(),
+            format!("(({}) {tested})", self.names.value_type(&target_ty)),
+        );
+        binding_types.insert(name.clone(), target_ty);
+        Some(())
     }
 
     fn emit_assignment_target(
@@ -4631,13 +4669,14 @@ impl<'a> SourceBodyEmitter<'a> {
                 let target = type_ref_to_ir(target);
                 let java_type = self.names.value_type(&target);
                 let raw_java_type = java_type.split('<').next().unwrap_or(&java_type);
+                let tested_value = self.pattern_test_value(value, value_ty, &target);
                 let mut bindings = parent_bindings.clone();
                 let mut binding_types = parent_binding_types.clone();
                 if let Some(name) = name.as_ref().filter(|name| name.as_str() != "_") {
                     let binding = if target == *value_ty {
                         value.to_string()
                     } else {
-                        format!("(({java_type}) {value})")
+                        format!("(({java_type}) {tested_value})")
                     };
                     bindings.insert(name.clone(), binding);
                     binding_types.insert(name.clone(), target.clone());
@@ -4646,7 +4685,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     condition: if target == *value_ty {
                         "true".to_string()
                     } else {
-                        format!("{value} instanceof {raw_java_type}")
+                        format!("{tested_value} instanceof {raw_java_type}")
                     },
                     bindings,
                     binding_types,
@@ -4684,6 +4723,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         case_name,
                         fields,
                         value,
+                        value_ty,
                         index,
                         parent_bindings,
                         parent_binding_types,
@@ -4933,7 +4973,7 @@ impl<'a> SourceBodyEmitter<'a> {
         let raw_type = java_type.split('<').next().unwrap_or(&java_type);
         format!(
             "{raw_type} {}",
-            self.synthetic_name("match", "case", source_id)
+            self.synthetic_name("match", "subject", source_id)
         )
     }
 
@@ -5117,6 +5157,7 @@ impl<'a> SourceBodyEmitter<'a> {
         type_name: &str,
         fields: &[ast::RecordPatternField],
         value: &str,
+        value_ty: &ir::Type,
         index: usize,
         parent_bindings: &HashMap<String, String>,
         parent_binding_types: &HashMap<String, ir::Type>,
@@ -5134,6 +5175,11 @@ impl<'a> SourceBodyEmitter<'a> {
             return None;
         }
         let java_type = self.names.named_type(type_name);
+        let target_ty = ir::Type::Named {
+            name: type_name.to_string(),
+            args: vec![ir::Type::Unknown; ty.type_params.len()],
+        };
+        let value = self.pattern_test_value(value, value_ty, &target_ty);
         let case_local = self.synthetic_name("match", "case", index);
         let needs_case_local = fields
             .iter()
@@ -5195,6 +5241,14 @@ impl<'a> SourceBodyEmitter<'a> {
             bindings,
             binding_types,
         })
+    }
+
+    fn pattern_test_value(&self, value: &str, source: &ir::Type, target: &ir::Type) -> String {
+        if source != target && self.is_shape_type(source) && self.is_shape_type(target) {
+            format!("((Object) {value})")
+        } else {
+            value.to_string()
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5677,6 +5731,11 @@ impl<'a> SourceBodyEmitter<'a> {
                     Some(format!("lume.core.LumeVector.of({})", items.join(", ")))
                 }
             }
+            core::Expr::RecordUpdate {
+                receiver,
+                patch,
+                span,
+            } => self.emit_record_update(receiver, patch, *span, bindings),
             core::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
             core::Expr::Member { receiver, name, .. } if name == "runtimeType" => Some(format!(
                 "lume.core.LumeRuntime.runtimeTypeOf({})",
@@ -5733,7 +5792,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     && JavaIrSupport::new(self.bundle, self.function, self.names)
                         .type_has_getter_for_receiver(&receiver_ty, name)
                 {
-                    let receiver = self.emit_expr(receiver, bindings)?;
+                    let receiver = self.emit_receiver_expr(receiver, bindings)?;
                     return Some(format!("{receiver}.{}()", java_member_name(name)));
                 }
                 if matches!(
@@ -5748,7 +5807,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     }
                     return None;
                 }
-                let receiver_expr = self.emit_expr(receiver, bindings)?;
+                let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
                 let member = java_member_name(name);
                 let receiver_ty = self.expr_type(receiver, bindings).or_else(|| {
                     if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
@@ -5810,7 +5869,6 @@ impl<'a> SourceBodyEmitter<'a> {
                 receiver, index, ..
             } => {
                 let receiver_expr = self.emit_expr(receiver, bindings)?;
-                let index_expr = self.emit_expr(index, bindings)?;
                 match self.expr_type(receiver, bindings)? {
                     ir::Type::Tuple(items) => {
                         let tuple_index = static_tuple_index(index)?;
@@ -5823,6 +5881,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     ir::Type::Named { name, args }
                         if matches!(name.as_str(), "Vector" | "Array") && args.len() == 1 =>
                     {
+                        let index_expr = self.emit_expr(index, bindings)?;
                         let result_ty = self
                             .expr_type(expr, bindings)
                             .unwrap_or_else(|| args[0].clone());
@@ -5832,6 +5891,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         ))
                     }
                     ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
+                        let index_expr = self.emit_expr_against(index, bindings, &args[0])?;
                         Some(format!("{receiver_expr}.get({index_expr})"))
                     }
                     _ => None,
@@ -5839,6 +5899,7 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             core::Expr::Is { left, target, .. } => {
                 let value = self.emit_expr(left, bindings)?;
+                let source_ty = self.expr_type(left, bindings)?;
                 if let TypeRef::Named { name, args, .. } = target
                     && args.is_empty()
                 {
@@ -5877,6 +5938,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 if matches!(target, ir::Type::Record(_)) {
                     return None;
                 }
+                let tested_value = self.pattern_test_value(&value, &source_ty, &target);
                 let erased = match target {
                     ir::Type::Named { name, .. } => ir::Type::Named {
                         name,
@@ -5891,7 +5953,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 };
                 let java_type = self.names.value_type(&erased);
                 let raw_java_type = java_type.split('<').next().unwrap_or(&java_type);
-                Some(format!("{value} instanceof {raw_java_type}"))
+                Some(format!("{tested_value} instanceof {raw_java_type}"))
             }
             core::Expr::TypeOf { ty, .. } => {
                 if let TypeRef::Named { name, args, .. } = ty
@@ -6725,8 +6787,223 @@ impl<'a> SourceBodyEmitter<'a> {
                 };
                 self.emit_expr(&call, bindings)
             }
-            _ => self.emit_expr(expr, bindings),
+            _ => {
+                if let Some(source_ty) = self.expr_type(expr, bindings)
+                    && source_ty != *expected
+                    && let Some(projection) =
+                        self.emit_shape_projection(expected, expr, &source_ty, bindings)
+                {
+                    return Some(projection);
+                }
+                self.emit_expr(expr, bindings)
+            }
         }
+    }
+
+    fn emit_record_update(
+        &self,
+        receiver: &core::Expr,
+        patch: &core::Expr,
+        span: crate::source::Span,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let core::Expr::RecordLiteral { fields: patch, .. } = patch else {
+            return None;
+        };
+        let receiver_ty = self.expr_type(receiver, bindings)?;
+        let receiver_expr = self.emit_expr(receiver, bindings)?;
+        let receiver_local = self.synthetic_name("shapeUpdate", "shape", span.start);
+        let mut update_bindings = bindings.clone();
+        update_bindings.insert(receiver_local.clone(), receiver_local.clone());
+
+        let construction = match &receiver_ty {
+            ir::Type::Named { name, args } => {
+                let ty = self
+                    .bundle
+                    .ir
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == *name && ty.kind == TypeKind::Record)?;
+                let substitution = ty
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                let values = ty
+                    .fields
+                    .iter()
+                    .filter(|field| field.visibility != Visibility::Private)
+                    .map(|field| {
+                        if let Some(replacement) = patch
+                            .iter()
+                            .find(|candidate| candidate.name.as_deref() == Some(&field.name))
+                        {
+                            self.emit_expr_against(
+                                &replacement.value,
+                                &update_bindings,
+                                &substitute_java_emit_type(&field.ty, &substitution),
+                            )
+                        } else {
+                            Some(format!(
+                                "{receiver_local}.{}()",
+                                java_member_name(&field.name)
+                            ))
+                        }
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                let generic = (!args.is_empty()).then_some("<>").unwrap_or("");
+                format!(
+                    "new {}{generic}({})",
+                    self.names.named_type(name),
+                    values.join(", ")
+                )
+            }
+            ir::Type::Record(fields) => {
+                let mut parts = Vec::with_capacity(fields.len() * 2);
+                for field in fields {
+                    parts.push(java_string_literal(&field.name));
+                    if let Some(replacement) = patch
+                        .iter()
+                        .find(|candidate| candidate.name.as_deref() == Some(&field.name))
+                    {
+                        parts.push(self.emit_expr_against(
+                            &replacement.value,
+                            &update_bindings,
+                            &field.ty,
+                        )?);
+                    } else {
+                        parts.push(format!(
+                            "(({}) ((lume.core.LumeShape) {receiver_local}).get({}))",
+                            self.names.value_type(&field.ty),
+                            java_string_literal(&field.name)
+                        ));
+                    }
+                }
+                format!("lume.core.LumeShape.of({})", parts.join(", "))
+            }
+            _ => return None,
+        };
+        Some(format!(
+            "((java.util.function.Supplier<{}>) () -> {{ {} {receiver_local} = {receiver_expr}; return {construction}; }}).get()",
+            self.names.value_type(&receiver_ty),
+            self.names.value_type(&receiver_ty)
+        ))
+    }
+
+    fn emit_shape_projection(
+        &self,
+        target: &ir::Type,
+        source: &core::Expr,
+        source_ty: &ir::Type,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let ir::Type::Named {
+            name: target_name,
+            args: target_args,
+        } = target
+        else {
+            return None;
+        };
+        let target_def = self
+            .bundle
+            .ir
+            .types
+            .iter()
+            .find(|ty| ty.name == *target_name && ty.kind == TypeKind::Record)?;
+        let target_subst = target_def
+            .type_params
+            .iter()
+            .cloned()
+            .zip(target_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        let target_fields = target_def
+            .fields
+            .iter()
+            .filter(|field| field.visibility != Visibility::Private)
+            .collect::<Vec<_>>();
+
+        let source_fields = match source_ty {
+            ir::Type::Named {
+                name: source_name,
+                args: source_args,
+            } => {
+                let source_def = self
+                    .bundle
+                    .ir
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == *source_name && ty.kind == TypeKind::Record)?;
+                let source_subst = source_def
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(source_args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                source_def
+                    .fields
+                    .iter()
+                    .filter(|field| field.visibility != Visibility::Private)
+                    .map(|field| {
+                        (
+                            field.name.clone(),
+                            substitute_java_emit_type(&field.ty, &source_subst),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>()
+            }
+            ir::Type::Record(fields) => fields
+                .iter()
+                .map(|field| (field.name.clone(), field.ty.clone()))
+                .collect::<HashMap<_, _>>(),
+            _ => return None,
+        };
+        if target_fields.iter().any(|field| {
+            source_fields.get(&field.name)
+                != Some(&substitute_java_emit_type(&field.ty, &target_subst))
+        }) {
+            return None;
+        }
+
+        let source_expr = self.emit_expr(source, bindings)?;
+        let source_local = self.synthetic_name("shapeProjection", "shape", source.span().start);
+        let direct = matches!(source, core::Expr::Identifier { .. });
+        let access_base = if direct {
+            source_expr.clone()
+        } else {
+            source_local.clone()
+        };
+        let args = target_fields
+            .iter()
+            .map(|field| {
+                let field_ty = substitute_java_emit_type(&field.ty, &target_subst);
+                match source_ty {
+                    ir::Type::Record(_) => format!(
+                        "(({}) ((lume.core.LumeShape) {access_base}).get({}))",
+                        self.names.value_type(&field_ty),
+                        java_string_literal(&field.name)
+                    ),
+                    ir::Type::Named { .. } => {
+                        format!("({access_base}).{}()", java_member_name(&field.name))
+                    }
+                    _ => unreachable!("shape projection source checked above"),
+                }
+            })
+            .collect::<Vec<_>>();
+        let generic = (!target_args.is_empty()).then_some("<>").unwrap_or("");
+        let projection = format!(
+            "new {}{generic}({})",
+            self.names.named_type(target_name),
+            args.join(", ")
+        );
+        if direct {
+            return Some(projection);
+        }
+        Some(format!(
+            "((java.util.function.Supplier<{}>) () -> {{ {} {source_local} = {source_expr}; return {projection}; }}).get()",
+            self.names.value_type(target),
+            self.names.value_type(source_ty)
+        ))
     }
 
     fn emit_record_literal_against(

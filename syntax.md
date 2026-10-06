@@ -1063,8 +1063,8 @@ Use `{ ...point, ...dot, x: point.x }` to resolve only `x`, or
 `base with patch` updates existing fields on a named or anonymous shape.
 `patch` must also be a statically known named or anonymous shape. Every field in
 `patch` must already exist on `base`, and each patch field type must be
-assignable to the corresponding base field type. The result keeps the same
-shape view as `base`, and the source value is not mutated.
+assignable to the corresponding base field type. The result has the same shape
+as `base`, and the source value is not mutated.
 
 Classes do not support `with`. Copying a class implicitly would create unclear
 object-identity, private-state, resource, and constructor-invariant semantics.
@@ -1261,10 +1261,10 @@ declarations and shape alternatives inside declared unions. Expression-level
 `shape with Interface { ... }` are invalid. Use field braces, `new { ... }`,
 and `object with Interface { ... }` respectively.
 
-An expected named-shape type can project a wider shape by visible field name.
-This includes expected types flowing through generic callbacks such as
-`Option.map`. Given `StoredRollup` with all `Rollup` fields plus additional
-fields, these forms all construct the same narrower `Rollup` value:
+Construction can project a wider shape by visible field name. This includes
+expected types flowing through generic callbacks such as `Option.map`. Given
+`StoredRollup` with all `Rollup` fields plus additional fields, these forms all
+construct the same narrower `Rollup` value:
 
 ```txt
 def named() Rollup? = source().map(r => Rollup { ...r })
@@ -1277,9 +1277,39 @@ def contextualNew() Rollup? = source().map(r => new { ...r })
 required target fields must exist with assignable types; extra source fields
 are discarded rather than copied into the narrower result.
 
-Width projection applies to fields supplied by a spread or by assignment from
-an existing structural value. Every explicit construction entry must name an
-accepted field or constructor input, so likely misspellings are rejected:
+Assignment from a wider shape materializes a new value of the target shape. It
+copies only the target fields by name and permanently discards extra fields:
+
+```txt
+stored = StoredRollup { total: 7, label: "week", internalId: 99 }
+rollup Rollup = stored
+
+rollup.total       # valid
+rollup.internalId  # error: not present in Rollup
+rollup.runtimeType # Rollup
+```
+
+Projection is a shallow copy. Field bindings are copied into the new shape;
+nested classes and mutable collections retain their existing references. The
+source value itself is unchanged.
+
+The same projection rule applies to parameter passing, returns, casts, and
+collection storage. The projected value has no hidden source shape and cannot
+later be narrowed back to it:
+
+```txt
+point Point = Point3D(1, 2, 3)
+point.z # error: Point does not expose z
+
+match point {
+    case Point3D { z } => println(z) # does not match
+    case _ => println(point.runtimeType.name !) # Point
+}
+```
+
+Spreading a projected value sees only the fields retained by that value.
+Every explicit construction entry must name an accepted field or constructor
+input, so likely misspellings are rejected:
 
 ```txt
 larger = { x: 1, y: 2, yy: 3 }
@@ -1615,7 +1645,7 @@ Shape conversion rules:
 - shape-to-shape assignment is structural by field names and field types
 - class-to-shape is allowed through visible fields
 - shape-to-interface follows the shape's explicit `with Interface` bounds
-- class-to-interface-through-shape is not automatic; assign the class value to an explicit shape view first
+- class-to-interface-through-shape is not automatic; project the class value to an explicit shape first
 - class fields inaccessible at the conversion site are not visible to shape conversion
 - an already-created shape value does not implicitly become a class; use a class constructor
 - tuple-to-shape and tuple-to-class are not allowed; use named shape construction, class constructors, or anonymous construction fields
@@ -1633,7 +1663,7 @@ Shape equality is structural across shape declarations:
 - field declaration order may differ
 - the right operand is converted to the left operand's shape by field name, then ordinary value equality is applied
 - unlike shape assignment, equality does not ignore extra fields
-- width-compatible shapes must first be explicitly projected through shape assignment
+- width-compatible shapes must first be projected through a narrower typed binding, parameter, return, cast, or collection element type
 - generated Java shape records define field-based `equals` and matching `hashCode` methods; hash inputs are ordered by field name so declaration order does not change the hash
 
 ```txt
@@ -1645,7 +1675,10 @@ Point(1, 2) == Position(2, 1) # true: fields match by name
 Point(1, 2) == Point3D(1, 2, 3) # error: schemas differ
 
 point2d Point = Point3D(1, 2, 3)
-point2d == Point(1, 2) # true after explicit projection
+point2d.runtimeType.name ! # Point
+point2d == Point(1, 2)     # true
+point2d === Point(1, 2)    # true: both values now have the Point schema
+point2d is Point3D         # false: z was discarded
 ```
 
 Other equality domains are nominal. The operands must have the same normalized
@@ -1658,7 +1691,7 @@ narrowed before comparison.
 | --- | --- |
 | same shape schema | field equality |
 | different shape names, same schema | field equality by name |
-| width-compatible shape schemas | error; project explicitly first |
+| width-compatible shape schemas | error; project to a common narrower shape first |
 | class and shape | error; project explicitly before erasure |
 | same class with `Eq[Class]` | declared class equality |
 | different classes | error |

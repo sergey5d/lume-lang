@@ -16701,7 +16701,7 @@ def main() Int {
     }
 
     #[test]
-    fn allows_shape_with_interface_after_explicit_shape_view() {
+    fn allows_shape_with_interface_after_explicit_shape_projection() {
         let program = parse_inline(
             r#"
 interface Named {
@@ -16734,7 +16734,7 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_class_to_interface_through_shape_without_explicit_shape_view() {
+    fn rejects_class_to_interface_through_shape_without_explicit_shape_projection() {
         let program = parse_inline(
             r#"
 interface Named {

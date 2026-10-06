@@ -1828,11 +1828,23 @@ impl<'a> Interpreter<'a> {
                 self.get_member(base, name, span)
             }
             ir::RValue::Index { base, index } => {
+                let base_ty = frame
+                    .and_then(|frame| self.operand_declared_type(frame.function, base))
+                    .cloned();
                 let base = self.eval_operand_ref(frame, base, span)?;
-                let index = self.eval_operand_ref(frame, index, span)?;
+                let mut index = self.eval_operand_ref(frame, index, span)?;
+                if let Some(ir::Type::Named { name, args }) = base_ty
+                    && name == "Map"
+                    && args.len() == 2
+                {
+                    index = self.coerce_value_to_type(index, &args[0]);
+                }
                 self.index_value(base, index, span)
             }
-            ir::RValue::Cast { operand, .. } => self.eval_operand_ref(frame, operand, span),
+            ir::RValue::Cast { operand, ty } => {
+                let value = self.eval_operand_ref(frame, operand, span)?;
+                Ok(self.coerce_value_to_type(value, ty))
+            }
             ir::RValue::TypeTest { operand, ty } => {
                 let operand = self.eval_operand_ref(frame, operand, span)?;
                 Ok(Value::Bool(self.value_matches_type(&operand, ty)))
@@ -2764,8 +2776,17 @@ impl<'a> Interpreter<'a> {
                 self.get_member(base, name, span)
             }
             ir::Place::Index { base, index } => {
+                let base_ty = frame
+                    .and_then(|frame| self.operand_declared_type(frame.function, base))
+                    .cloned();
                 let base = self.eval_operand_ref(frame, base, span)?;
-                let index = self.eval_operand_ref(frame, index, span)?;
+                let mut index = self.eval_operand_ref(frame, index, span)?;
+                if let Some(ir::Type::Named { name, args }) = base_ty
+                    && name == "Map"
+                    && args.len() == 2
+                {
+                    index = self.coerce_value_to_type(index, &args[0]);
+                }
                 if let Value::Map(entries) = &base {
                     self.ensure_observable_value(&index, span, "map lookup key")?;
                     let entries = entries.borrow().clone();
@@ -2828,11 +2849,82 @@ impl<'a> Interpreter<'a> {
                 self.set_member(base, name, value, span)
             }
             ir::Place::Index { base, index } => {
+                let collection_ty = self.operand_declared_type(frame.function, base).cloned();
                 let base = self.eval_operand(frame, base, span)?;
-                let index = self.eval_operand(frame, index, span)?;
+                let mut index = self.eval_operand(frame, index, span)?;
+                let mut value = value;
+                if let Some(ir::Type::Named { name, args }) = collection_ty {
+                    if name == "Map" && args.len() == 2 {
+                        index = self.coerce_value_to_type(index, &args[0]);
+                        value = self.coerce_value_to_type(value, &args[1]);
+                    } else if matches!(name.as_str(), "Array" | "Vector") && args.len() == 1 {
+                        value = self.coerce_value_to_type(value, &args[0]);
+                    }
+                }
                 self.set_index(base, index, value, span)
             }
         }
+    }
+
+    fn operand_declared_type(
+        &self,
+        function: ir::FunctionId,
+        operand: &ir::Operand,
+    ) -> Option<&ir::Type> {
+        let place = match operand {
+            ir::Operand::Copy(place) | ir::Operand::Move(place) => place.as_ref(),
+            ir::Operand::Const(_) => return None,
+        };
+        match place {
+            ir::Place::Local(id) => self
+                .program
+                .function(function)
+                .and_then(|function| function.locals.get(id.0))
+                .map(|local| &local.ty),
+            ir::Place::Global(id) => self.program.globals.get(id.0).map(|global| &global.ty),
+            ir::Place::Field { .. } | ir::Place::Index { .. } => None,
+        }
+    }
+
+    fn coerce_collection_method_args(
+        &self,
+        receiver_ty: Option<&ir::Type>,
+        method: &str,
+        mut args: Vec<Value>,
+    ) -> Vec<Value> {
+        let Some(ir::Type::Named { name, args: types }) = receiver_ty else {
+            return args;
+        };
+
+        let mut coerce = |index: usize, ty: &ir::Type| {
+            if let Some(value) = args.get_mut(index) {
+                *value = self.coerce_value_to_type(value.clone(), ty);
+            }
+        };
+
+        match (name.as_str(), method) {
+            ("Vector" | "Array" | "LinkedList", "append" | "add" | "contains")
+                if types.len() == 1 =>
+            {
+                coerce(0, &types[0]);
+            }
+            ("Vector" | "Array" | "LinkedList", "setAt" | "insertAt") if types.len() == 1 => {
+                coerce(1, &types[0]);
+            }
+            ("Set", "add" | "contains") if types.len() == 1 => {
+                coerce(0, &types[0]);
+            }
+            ("Map", "put") if types.len() == 2 => {
+                coerce(0, &types[0]);
+                coerce(1, &types[1]);
+            }
+            ("Map", "get" | "contains") if types.len() == 2 => {
+                coerce(0, &types[0]);
+            }
+            _ => {}
+        }
+
+        args
     }
 
     fn invoke_callee(
@@ -2850,6 +2942,10 @@ impl<'a> Interpreter<'a> {
                 self.invoke_value(callee, args, span)
             }
             ir::Callee::Method { receiver, method } => {
+                let receiver_ty = frame
+                    .and_then(|frame| self.operand_declared_type(frame.function, receiver))
+                    .cloned();
+                let args = self.coerce_collection_method_args(receiver_ty.as_ref(), method, args);
                 let receiver = self.eval_operand_ref(frame, receiver, span)?;
                 self.invoke_method(receiver, method, args, span)
             }
@@ -7693,6 +7789,90 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "7\n7\n7\n7\n7\n7\n7\n");
+    }
+
+    #[test]
+    fn shape_width_assignment_materializes_projected_shape() {
+        let program = lower_inline(
+            r#"
+            shape Point {
+                x Int
+                y Int
+            }
+
+            shape Point3D {
+                x Int
+                y Int
+                z Int
+            }
+
+            shape WiderItems {
+                x Int
+                items [Int]
+                z Int
+            }
+
+            shape Items {
+                x Int
+                items [Int]
+            }
+
+            def view(point Point) Point = point
+
+            def main() Unit {
+                first3d = Point3D(1, 2, 3)
+                second3d = Point3D(1, 2, 99)
+                first Point = view(first3d)
+                second Point = second3d
+                concrete = Point(1, 2)
+
+                println(first == second)
+                println(first === second)
+                println(first == concrete)
+                println(first === concrete)
+                println(first.runtimeType.name !)
+                match first {
+                    case Point3D { z } => println(z)
+                    case _ => println("missing")
+                }
+                if first is Point3D {
+                    println(first.z)
+                }
+
+                values [Point: Str] = []
+                values[first3d] := "first"
+                values[second3d] := "second"
+                println(values.size, values[first3d]!)
+
+                points Set[Point] = Set()
+                points.add(first3d)
+                points.add(second3d)
+                println(points.size)
+                println(values.contains(first3d))
+
+                projected Point = Point { ...first }
+                contextual Point = { ...first }
+                forced Point = new { ...first }
+                updated = first with { x: 4 }
+                println(projected === concrete)
+                println(contextual === concrete)
+                println(forced === concrete)
+                println(updated === Point(4, 2))
+
+                wider = WiderItems(1, [1], 3)
+                items Items = wider
+                wider.items.add(2)
+                println(items.items.size)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "true\ntrue\ntrue\ntrue\nPoint\nmissing\n1 second\n1\ntrue\ntrue\ntrue\ntrue\ntrue\n2\n"
+        );
     }
 
     #[test]

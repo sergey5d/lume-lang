@@ -6809,6 +6809,121 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_materializes_shape_width_projection() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java shape-projection test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-shape-projection-copy");
+        let source = temp.join("shape_projection_copy.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/shapeprojectioncopy
+
+shape Point {
+    x Int
+    y Int
+}
+
+shape Point3D {
+    x Int
+    y Int
+    z Int
+}
+
+shape WiderItems {
+    x Int
+    items [Int]
+    z Int
+}
+
+shape Items {
+    x Int
+    items [Int]
+}
+
+def view(point Point) Point = point
+
+def main() Unit {
+    first3d = Point3D(1, 2, 3)
+    second3d = Point3D(1, 2, 99)
+    first Point = view(first3d)
+    second Point = second3d
+    concrete = Point(1, 2)
+
+    println(first == second)
+    println(first === second)
+    println(first == concrete)
+    println(first === concrete)
+    println(first.runtimeType.name !)
+    match first {
+        case Point3D { z } => println(z)
+        case _ => println("missing")
+    }
+    if first is Point3D {
+        println(first.z)
+    }
+
+    values [Point: Str] = []
+    values[first3d] := "first"
+    values[second3d] := "second"
+    println(values.size, values[first3d]!)
+
+    points Set[Point] = Set()
+    points.add(first3d)
+    points.add(second3d)
+    println(points.size)
+    println(values.contains(first3d))
+
+    projected Point = Point { ...first }
+    contextual Point = { ...first }
+    forced Point = new { ...first }
+    updated = first with { x: 4 }
+    println(projected === concrete)
+    println(contextual === concrete)
+    println(forced === concrete)
+    println(updated === Point(4, 2))
+
+    wider = WiderItems(1, [1], 3)
+    items Items = wider
+    wider.items.add(2)
+    println(items.items.size)
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.shapeprojectioncopy.ShapeprojectioncopyMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "true\ntrue\ntrue\ntrue\nPoint\nmissing\n1 second\n1\ntrue\ntrue\ntrue\ntrue\ntrue\n2\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_compiles_generic_list_appends() {
         if !command_available("javac") {
             eprintln!("skipping Java generic list append test because javac is not available");
