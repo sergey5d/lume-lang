@@ -3499,6 +3499,12 @@ optional Int? = ^5
 inferred = ^"ready" # Option[Str]
 ```
 
+In a pattern, the same spelling performs the corresponding `Some` match:
+
+```txt
+let ^value = optional else return
+```
+
 It always constructs `Option`; it never selects `Ok` or `Right` from the
 surrounding type. Construct those alternatives explicitly:
 
@@ -4000,6 +4006,7 @@ Supported pattern families:
 - case alternatives: `case A | B => ...`
 - tuple patterns: `(x, y)`
 - zero-payload cases and singletons: `None`, `Pending`, `Ready`
+- optional payload shorthand: `^value`, equivalent to `Some(value)`
 - unary named-data patterns: `Some(x)`, `Box(item)`
 - named-field record patterns: `User { name }`, `Some { value }`
 - unheaded record patterns for statically known values: `{ name, age }`
@@ -4112,6 +4119,27 @@ case Err(error) => ...
 case Box(item) => ...
 case UserId(id) => ...
 ```
+
+Because prefix `^` constructs `Some` in expressions, it also matches `Some`
+in pattern positions:
+
+```txt
+let ^value = maybeValue else return
+
+if let ^value = maybeValue {
+    println(value)
+}
+
+match maybeValue {
+    case ^value => println(value)
+    case None => ()
+}
+```
+
+`^pattern` is exactly shorthand for `Some(pattern)`. It accepts any nested
+pattern, supports whole-pattern aliases, and composes one layer at a time, so
+`^^value` matches `Some(Some(value))`. The source must have a compatible
+`Option` type, and refutable `let` forms still require an `else` fallback.
 
 `Type(pattern)` accepts one complete nested pattern, not merely a binding:
 

@@ -3737,6 +3737,35 @@ def describe(reading Reading) Str = match reading {
 }
 
 #[test]
+fn parses_option_wrap_pattern_shorthand() {
+    let (pattern, diagnostics) = parse_pattern_only("^User { name } as present");
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    assert!(matches!(
+        pattern,
+        Pattern::Alias { inner, name, .. }
+            if name == "present"
+                && matches!(
+                    inner.as_ref(),
+                    Pattern::Constructor { path, args, parenthesized: true, .. }
+                        if path == &vec!["Option".to_string(), "Some".to_string()]
+                            && matches!(args.as_slice(), [Pattern::Record { path, fields, .. }]
+                                if path == &vec!["User".to_string()] && fields.len() == 1)
+                )
+    ));
+
+    let (nested, diagnostics) = parse_pattern_only("^^item");
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    assert!(matches!(
+        nested,
+        Pattern::Constructor { path, args, .. }
+            if path == vec!["Option".to_string(), "Some".to_string()]
+                && matches!(args.as_slice(), [Pattern::Constructor { path, args, .. }]
+                    if path == &vec!["Option".to_string(), "Some".to_string()]
+                        && matches!(args.as_slice(), [Pattern::Binding { name, .. }] if name == "item"))
+    ));
+}
+
+#[test]
 fn rejects_non_numeric_negated_patterns() {
     let result = parse(
         r#"

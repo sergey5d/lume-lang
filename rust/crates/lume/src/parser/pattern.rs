@@ -265,6 +265,7 @@ impl<'a> Parser<'a> {
                 path: vec![name],
                 args: Vec::new(),
                 parenthesized: false,
+                option_shorthand: false,
                 span,
             },
             other => other,
@@ -358,6 +359,19 @@ impl<'a> Parser<'a> {
                         expr: Box::new(inner),
                         span,
                     },
+                    span,
+                })
+            }
+            TokenKind::Caret => {
+                let start = self.current_span();
+                self.advance();
+                let inner = self.parse_pattern_primary_at_depth(depth + 1)?;
+                let span = start.cover(inner.span());
+                Some(Pattern::Constructor {
+                    path: vec!["Option".to_string(), "Some".to_string()],
+                    args: vec![inner],
+                    parenthesized: true,
+                    option_shorthand: true,
                     span,
                 })
             }
@@ -480,6 +494,7 @@ impl<'a> Parser<'a> {
                         path,
                         args,
                         parenthesized: true,
+                        option_shorthand: false,
                         span: start.cover(close),
                     });
                 }
@@ -490,6 +505,7 @@ impl<'a> Parser<'a> {
                         path,
                         args: Vec::new(),
                         parenthesized: false,
+                        option_shorthand: false,
                         span: start.cover(end),
                     })
                 }

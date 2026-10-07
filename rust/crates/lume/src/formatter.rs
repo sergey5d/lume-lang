@@ -1,4 +1,4 @@
-use crate::{Diagnostic, SourceFile, Token, TokenKind, lex, parse_program};
+use crate::{Diagnostic, Keyword, SourceFile, Token, TokenKind, lex, parse_program};
 
 const INDENT: &str = "    ";
 
@@ -189,15 +189,18 @@ fn normalize_horizontal_spacing(
 ) -> String {
     let mut output = String::with_capacity(end.saturating_sub(start));
     let mut cursor = start;
+    let mut previous_token = None;
 
-    for token in tokens {
+    for (index, token) in tokens.iter().enumerate() {
         if token.span.start < start || token.span.end > end {
             continue;
         }
 
         let gap = &source[cursor..token.span.start];
         if gap.chars().all(|ch| matches!(ch, ' ' | '\t')) {
-            if !gap.is_empty() && token.kind != TokenKind::Colon {
+            if !gap.is_empty()
+                && should_preserve_horizontal_gap(previous_token, token, tokens, index)
+            {
                 output.push(' ');
             }
         } else {
@@ -205,10 +208,55 @@ fn normalize_horizontal_spacing(
         }
         output.push_str(&source[token.span.start..token.span.end]);
         cursor = token.span.end;
+        previous_token = Some(*token);
     }
 
     output.push_str(&source[cursor..end]);
     output
+}
+
+fn should_preserve_horizontal_gap(
+    previous: Option<&Token>,
+    current: &Token,
+    tokens: &[&Token],
+    current_index: usize,
+) -> bool {
+    let Some(previous) = previous else {
+        return false;
+    };
+
+    if matches!(
+        current.kind,
+        TokenKind::RParen
+            | TokenKind::RBracket
+            | TokenKind::Comma
+            | TokenKind::Dot
+            | TokenKind::Colon
+    ) || matches!(
+        previous.kind,
+        TokenKind::LParen | TokenKind::LBracket | TokenKind::Dot | TokenKind::Caret
+    ) {
+        return false;
+    }
+
+    if current.kind == TokenKind::LParen && can_end_callee(previous.kind) {
+        return is_parenthesized_getter_return(tokens, current_index);
+    }
+
+    true
+}
+
+fn can_end_callee(kind: TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Identifier | TokenKind::RParen | TokenKind::RBracket | TokenKind::Bang
+    )
+}
+
+fn is_parenthesized_getter_return(tokens: &[&Token], lparen_index: usize) -> bool {
+    lparen_index >= 2
+        && tokens[lparen_index - 1].kind == TokenKind::Identifier
+        && tokens[lparen_index - 2].kind == TokenKind::Keyword(Keyword::Def)
 }
 
 fn nesting_after_leading_closers(
@@ -424,12 +472,12 @@ mod tests {
     #[test]
     fn normalizes_horizontal_spacing_without_changing_literals_or_comments() {
         let result = format(
-            "class Aggregator {\nprivate rollupMap [Str :  [Record]] = []\nprivate  recordMap [Str: Record] = []\ndef coordinates  (Int, Int) = (1, 2)\ndef label() Str {\nmessage  =  \"keep  spaces\" # keep  comment spacing\nmessage\n}\n}\n",
+            "class Aggregator {\nprivate rollupMap [Str :  [Record]] = []\nprivate  recordMap [Str: Record] = []\ndef coordinates  (Int, Int) = ( 1, 2 )\ndef label() Str {\nmessage  =  \"keep  spaces\" # keep  comment spacing\nprintln( \"kind\", message )\nmessage\n}\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "class Aggregator {\n    private rollupMap [Str: [Record]] = []\n    private recordMap [Str: Record] = []\n    def coordinates (Int, Int) = (1, 2)\n    def label() Str {\n        message = \"keep  spaces\" # keep  comment spacing\n        message\n    }\n}\n"
+            "class Aggregator {\n    private rollupMap [Str: [Record]] = []\n    private recordMap [Str: Record] = []\n    def coordinates (Int, Int) = (1, 2)\n    def label() Str {\n        message = \"keep  spaces\" # keep  comment spacing\n        println(\"kind\", message)\n        message\n    }\n}\n"
         );
     }
 

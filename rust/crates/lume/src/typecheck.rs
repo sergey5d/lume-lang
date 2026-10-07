@@ -8403,8 +8403,25 @@ impl<'a> Checker<'a> {
                 path,
                 args,
                 parenthesized,
+                option_shorthand,
                 ..
             } => {
+                if *option_shorthand
+                    && !matches!(scrutinee, Ty::Named(name, args) if name == "Option" && args.len() == 1)
+                {
+                    for pattern in args {
+                        self.bind_pattern(pattern, &Ty::Unknown);
+                    }
+                    self.add_error(
+                        "invalid_option_pattern",
+                        format!(
+                            "option pattern shorthand '^pattern' requires an Option source, got '{}'",
+                            scrutinee.describe()
+                        ),
+                        pattern.span(),
+                    );
+                    return;
+                }
                 let case_name = path.last().cloned().unwrap_or_default();
                 if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
                     let extractable = self.enum_case_extractable_params(&case);
@@ -18289,6 +18306,31 @@ def wrongValue() Option[Int] = ^"five"
                 .diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.code == "invalid_optional_wrap_value"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_option_pattern_shorthand_for_non_option_union() {
+        let program = parse_inline(
+            r#"
+type Other =
+    class Some { value Int }
+    | object Missing {}
+
+def read(value Other) Int = match value {
+    case ^item => item
+    case _ => 0
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_option_pattern"
+                    && diagnostic.message.contains("requires an Option source")
+            }),
             "{:#?}",
             result.diagnostics
         );

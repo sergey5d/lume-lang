@@ -3093,6 +3093,12 @@ def nestedValue() Option[Option[Int]] = ^^11
 def pointValue() Point? = ^new(2, 3)
 def choose(flag Bool) Option[Int] = if flag { ^12 } else { ^0 }
 def consume(value Option[Int]) Int = value ?? 0
+def read(value Option[Int]) Int {
+    let {
+        ^item = value
+    } else return 0
+    item
+}
 
 def main() Unit {
     inferred = ^6
@@ -3104,6 +3110,7 @@ def main() Unit {
     println(pointValue()!.x)
     println(choose(true)!)
     println(consume(^13))
+    println(read(^14))
 }
 "#,
         )
@@ -3135,7 +3142,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "5\n6\nready\n9\n11\n2\n12\n13\n"
+            "5\n6\nready\n9\n11\n2\n12\n13\n14\n"
         );
 
         let _ = fs::remove_dir_all(temp);

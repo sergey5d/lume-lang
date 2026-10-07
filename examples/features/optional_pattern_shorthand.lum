@@ -1,0 +1,43 @@
+# EXPECT:
+# let 5
+# if let 5
+# while let 5
+# for let 6
+# match 5 5
+# nested 7
+
+def main() Unit {
+    left Int? = ^5
+
+    let {
+        ^a = left
+    } else return
+    println("let", a)
+
+    if let ^b = left {
+        println("if let", b)
+    }
+
+    var current = left
+    while let ^c = current {
+        println("while let", c)
+        current := None
+    }
+
+    options [Int?] = [^6, None]
+    for option <- options {
+        let ^value = option else continue
+        println("for let", value)
+    }
+
+    match left {
+        case ^d as present => println("match", d, present.value)
+        case None => ()
+    }
+
+    nested Option[Int?] = ^^7
+    match nested {
+        case ^^value => println("nested", value)
+        case _ => ()
+    }
+}

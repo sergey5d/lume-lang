@@ -574,6 +574,7 @@ pub enum Pattern {
         path: Vec<String>,
         args: Vec<Pattern>,
         parenthesized: bool,
+        option_shorthand: bool,
         span: Span,
     },
 }
