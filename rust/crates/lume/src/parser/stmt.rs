@@ -828,7 +828,10 @@ impl<'a> Parser<'a> {
         }
 
         if self.at(TokenKind::LBrace) {
-            return self.parse_block().map(MatchCaseBody::Block);
+            return self.parse_expression_brace_body().map(|body| match body {
+                ExpressionBraceBody::Construction(expr) => MatchCaseBody::Expr(expr),
+                ExpressionBraceBody::Block(block) => MatchCaseBody::Block(block),
+            });
         }
 
         let checkpoint = self.checkpoint();

@@ -1224,8 +1224,11 @@ impl<'a> Parser<'a> {
         }
         self.consume(TokenKind::Eq, "expected '=' or '{' before callable body")?;
         self.skip_newlines();
-        if self.at(TokenKind::LBrace) && !self.looks_like_brace_record_literal(false) {
-            return self.parse_block().map(CallableBody::Block);
+        if self.at(TokenKind::LBrace) {
+            return self.parse_expression_brace_body().map(|body| match body {
+                ExpressionBraceBody::Construction(expr) => CallableBody::Expr(expr),
+                ExpressionBraceBody::Block(block) => CallableBody::Block(block),
+            });
         }
         if let Some(assignment) = self.try_parse_assignment_stmt() {
             let span = assignment.span;

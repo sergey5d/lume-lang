@@ -2791,6 +2791,92 @@ def user() { name Str, age Int } = { name: "Ada", age: 10 }
 }
 
 #[test]
+fn classifies_braces_consistently_in_expression_bodies() {
+    let result = parse(
+        r#"
+shape Point {
+    x Int
+    y Int
+}
+
+def fromCallable(value Int) Point = {
+    x: value
+    y: 0
+}
+
+def run(flag Bool, fallback Point, values [Int]) Unit {
+    mapper fn(Int) Point = value => {
+        x: value
+        y: 0
+    }
+    selected Point = match flag {
+        case true => { x: 1, y: 2 }
+        case false => { ...fallback }
+    }
+    points [Point] = for value <- values yield {
+        x: value
+        y: 0
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+
+    let Item::Function(callable) = &program.items[1] else {
+        panic!("expected callable function");
+    };
+    assert!(matches!(
+        callable.body,
+        CallableBody::Expr(Expr::RecordLiteral { .. })
+    ));
+
+    let Item::Function(run) = &program.items[2] else {
+        panic!("expected run function");
+    };
+    let CallableBody::Block(body) = &run.body else {
+        panic!("expected run block body");
+    };
+
+    let Stmt::Binding(mapper) = &body.statements[0] else {
+        panic!("expected mapper binding");
+    };
+    assert!(matches!(
+        &mapper.values[0],
+        Expr::Lambda {
+            body: LambdaBody::Expr(expr),
+            ..
+        } if matches!(expr.as_ref(), Expr::RecordLiteral { .. })
+    ));
+
+    let Stmt::Binding(selected) = &body.statements[1] else {
+        panic!("expected selected binding");
+    };
+    let Expr::Match { cases, .. } = &selected.values[0] else {
+        panic!("expected match expression");
+    };
+    assert!(
+        cases
+            .iter()
+            .all(|case| matches!(case.body, MatchCaseBody::Expr(Expr::RecordLiteral { .. })))
+    );
+
+    let Stmt::Binding(points) = &body.statements[2] else {
+        panic!("expected points binding");
+    };
+    let Expr::ForYield { yield_body, .. } = &points.values[0] else {
+        panic!("expected for-yield expression");
+    };
+    assert!(matches!(
+        yield_body.statements.as_slice(),
+        [Stmt::Expr(ExprStmt {
+            expr: Expr::RecordLiteral { .. },
+            ..
+        })]
+    ));
+}
+
+#[test]
 fn parses_if_expression_and_calls() {
     let result = parse(
         r#"

@@ -1,0 +1,49 @@
+# EXPECT:
+# origin 0 0
+# lambda 7 0
+# match 1 2
+# yield 8 0
+# spread 3 4
+# 0
+
+shape Point {
+    x Int
+    y Int
+}
+
+def origin() Point = {
+    x: 0
+    y: 0
+}
+
+def choose(flag Bool, fallback Point) Point = match flag {
+    case true => { x: 1, y: 2 }
+    case false => { ...fallback }
+}
+
+def main() Int {
+    start = origin()
+    println("origin", start.x, start.y)
+
+    mapper fn(Int) Point = value => {
+        x: value
+        y: 0
+    }
+    mapped = mapper(7)
+    println("lambda", mapped.x, mapped.y)
+
+    fallback = Point(3, 4)
+    selected = choose(true, fallback)
+    println("match", selected.x, selected.y)
+
+    points = for value <- [8] yield {
+        x: value
+        y: 0
+    }
+    first = points[0]
+    println("yield", first.x, first.y)
+
+    spread = choose(false, fallback)
+    println("spread", spread.x, spread.y)
+    0
+}

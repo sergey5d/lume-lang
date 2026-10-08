@@ -1637,6 +1637,30 @@ consume { value =>
 }
 ```
 
+The same classification applies anywhere a brace-delimited expression body is
+accepted: after a callable-body `=`, a lambda `=>`, a match-case `=>`, and
+`yield`. Labeled fields and spreads are construction expressions in every one
+of those positions:
+
+```txt
+def origin() Point = { x: 0, y: 0 }
+
+mapper = value => { x: value, y: 0 }
+
+point Point = match ready {
+    case true => { x: 1, y: 2 }
+    case false => { ...fallback }
+}
+
+points = for value <- values yield {
+    x: value
+    y: 0
+}
+```
+
+Braces belonging to a declaration or control-flow construct remain that
+construct's body. Ambiguous punning still requires `new { x, y }`.
+
 Shape conversion rules:
 - field names and field types must match at compile time
 - extra fields are allowed when passing a value to a narrower shape

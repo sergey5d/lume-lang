@@ -108,13 +108,10 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_lambda_body(&mut self) -> Option<LambdaBody> {
         if self.at(TokenKind::LBrace) {
-            if self.looks_like_brace_record_literal(false) {
-                return self
-                    .parse_brace_record_literal_expr()
-                    .map(Box::new)
-                    .map(LambdaBody::Expr);
-            }
-            return self.parse_block().map(LambdaBody::Block);
+            return self.parse_expression_brace_body().map(|body| match body {
+                ExpressionBraceBody::Construction(expr) => LambdaBody::Expr(Box::new(expr)),
+                ExpressionBraceBody::Block(block) => LambdaBody::Block(block),
+            });
         }
         self.skip_newlines();
         let Some(first) = self.parse_stmt() else {
@@ -347,7 +344,8 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_yield_body_block(&mut self) -> Option<Block> {
         if self.at(TokenKind::LBrace) {
-            self.parse_block()
+            self.parse_expression_brace_body()
+                .map(ExpressionBraceBody::into_block)
         } else {
             if self.at(TokenKind::Newline) {
                 self.error_at_current(
@@ -2025,20 +2023,24 @@ impl<'a> Parser<'a> {
                 self.with_trailing_block_calls_allowed(|parser| parser.parse_group_or_tuple_expr())
             }
             TokenKind::LBrace => self.with_trailing_block_calls_allowed(|parser| {
-                if parser.looks_like_brace_record_literal(false) {
-                    parser.parse_brace_record_literal_expr()
-                } else {
-                    let block = parser.parse_block()?;
-                    Some(Expr::Block {
-                        span: block.span,
-                        body: block,
-                    })
-                }
+                parser
+                    .parse_expression_brace_body()
+                    .map(ExpressionBraceBody::into_expr)
             }),
             _ => {
                 self.error_at_current("expected_expression", "expected expression");
                 None
             }
+        }
+    }
+
+    pub(super) fn parse_expression_brace_body(&mut self) -> Option<ExpressionBraceBody> {
+        debug_assert!(self.at(TokenKind::LBrace));
+        if self.looks_like_brace_record_literal(false) {
+            self.parse_brace_record_literal_expr()
+                .map(ExpressionBraceBody::Construction)
+        } else {
+            self.parse_block().map(ExpressionBraceBody::Block)
         }
     }
 

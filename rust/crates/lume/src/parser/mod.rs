@@ -34,6 +34,36 @@ struct Parser<'a> {
     nested_items: Vec<Item>,
 }
 
+enum ExpressionBraceBody {
+    Construction(Expr),
+    Block(Block),
+}
+
+impl ExpressionBraceBody {
+    fn into_expr(self) -> Expr {
+        match self {
+            Self::Construction(expr) => expr,
+            Self::Block(block) => Expr::Block {
+                span: block.span,
+                body: block,
+            },
+        }
+    }
+
+    fn into_block(self) -> Block {
+        match self {
+            Self::Construction(expr) => {
+                let span = expr.span();
+                Block {
+                    statements: vec![Stmt::Expr(ExprStmt { expr, span })],
+                    span,
+                }
+            }
+            Self::Block(block) => block,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Checkpoint {
     index: usize,
