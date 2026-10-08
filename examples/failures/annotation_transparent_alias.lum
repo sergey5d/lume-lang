@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*transparent type alias 'UserId' cannot be annotated because it introduces no runtime metadata.*
+
+annotation Serializable {}
+
+@Serializable
+type UserId = Int

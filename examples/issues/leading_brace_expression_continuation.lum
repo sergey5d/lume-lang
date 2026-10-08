@@ -1,0 +1,47 @@
+# EXPECT:
+# read 1
+# invoke 2
+# extract 3
+# increment 5
+# choose 5 0
+# lambda 6
+# yield 7 8
+
+module leading_brace_expression_continuation
+
+def readX() Int =
+    { x: 1 }.x
+
+def invoke() Int =
+    { callback: () => 2 }.callback()
+
+def extract() Int =
+    { value: Some(3) }.value!
+
+def increment() Int =
+    { x: 4 }.x + 1
+
+def choose(flag Bool) Int = match flag {
+    case true => { x: 5 }.x
+    case false => 0
+}
+
+def lambdaRead() Int {
+    reader fn() Int = () => { x: 6 }.x
+    reader()
+}
+
+def yieldRead() [Int] =
+    for value <- [7, 8] yield { x: value }.x
+
+def main() Unit {
+    projected = yieldRead()
+
+    println("read", readX())
+    println("invoke", invoke())
+    println("extract", extract())
+    println("increment", increment())
+    println("choose", choose(true), choose(false))
+    println("lambda", lambdaRead())
+    println("yield", projected[0], projected[1])
+}

@@ -201,6 +201,7 @@ pub struct MatchCase {
     pub pattern: Pattern,
     pub guard: Option<Expr>,
     pub body: MatchCaseBody,
+    pub remaining_alternatives: usize,
     pub span: Span,
 }
 

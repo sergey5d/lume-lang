@@ -1,0 +1,12 @@
+# IGNORE
+
+module models
+
+shape Point {
+    x Int
+    y Int
+}
+
+class Box[T] {
+    value T
+}

@@ -1,0 +1,21 @@
+# EXPECT:
+# annotations true
+
+module annotation_targets_declared_unions
+
+annotation Serializable {}
+annotation Payload {}
+
+@Serializable
+type Outcome =
+    @Payload
+    class Success { value Str }
+    | @Payload object Cancelled {}
+
+def main() Unit {
+    outcome Outcome = Outcome.Success("ok")
+    match outcome {
+        case Outcome.Success(value) => println("annotations", value == "ok")
+        case Outcome.Cancelled => println("cancelled")
+    }
+}

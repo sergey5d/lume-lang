@@ -442,6 +442,8 @@ pub struct MatchCase {
     pub pattern: Pattern,
     pub guard: Option<Expr>,
     pub body: MatchCaseBody,
+    /// Number of `|` alternatives after this pattern in the same written case.
+    pub remaining_alternatives: usize,
     pub span: Span,
 }
 

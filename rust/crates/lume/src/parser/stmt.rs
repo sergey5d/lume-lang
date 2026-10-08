@@ -734,12 +734,14 @@ impl<'a> Parser<'a> {
                 MatchCaseBody::Block(block) => block.span,
                 MatchCaseBody::Expr(expr) => expr.span(),
             };
-            for pattern in patterns {
+            let alternative_count = patterns.len();
+            for (index, pattern) in patterns.into_iter().enumerate() {
                 cases.push(MatchCase {
                     span: pattern.span().cover(end),
                     pattern,
                     guard: guard.clone(),
                     body: body.clone(),
+                    remaining_alternatives: alternative_count - index - 1,
                 });
             }
             self.skip_newlines();
@@ -759,10 +761,12 @@ impl<'a> Parser<'a> {
         }
 
         if self.at(TokenKind::LBrace) {
-            return self.parse_expression_brace_body().map(|body| match body {
-                ExpressionBraceBody::Construction(expr) => MatchCaseBody::Expr(expr),
-                ExpressionBraceBody::Block(block) => MatchCaseBody::Block(block),
-            });
+            return self
+                .parse_expression_brace_body_with_continuation()
+                .map(|body| match body {
+                    ExpressionBraceBody::Construction(expr) => MatchCaseBody::Expr(expr),
+                    ExpressionBraceBody::Block(block) => MatchCaseBody::Block(block),
+                });
         }
 
         let checkpoint = self.checkpoint();

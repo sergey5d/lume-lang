@@ -3154,29 +3154,32 @@ impl<'a> FunctionLowerer<'a> {
         let scrutinee = self.lower_expr(&stmt.value);
         let join_block = self.add_block();
         self.current_block = self.current_block.or(Some(self.function().entry));
+        let first_case_block = self.current_block.expect("match entry block");
+        let mut case_blocks = vec![first_case_block];
+        case_blocks.extend((1..stmt.cases.len()).map(|_| self.add_block()));
+        case_blocks.push(join_block);
+
+        if stmt.cases.is_empty() {
+            self.terminate(ir::Terminator::goto(join_block));
+        }
 
         for (index, case) in stmt.cases.iter().enumerate() {
+            self.current_block = Some(case_blocks[index]);
             let body_block = self.add_block();
-            let fail_block = if index + 1 == stmt.cases.len() {
-                join_block
-            } else {
-                self.add_block()
-            };
+            let pattern_fail_block = case_blocks[index + 1];
+            let guard_fail_index = (index + case.remaining_alternatives + 1).min(stmt.cases.len());
+            let guard_fail_block = case_blocks[guard_fail_index];
             self.lower_match_case(
                 scrutinee.clone(),
                 case,
                 body_block,
-                fail_block,
+                pattern_fail_block,
+                guard_fail_block,
                 None,
                 join_block,
                 stmt.span,
                 None,
             );
-            self.current_block = Some(fail_block);
-        }
-
-        if self.current_block.is_some() && self.current_block != Some(join_block) {
-            self.terminate(ir::Terminator::goto(join_block));
         }
         self.current_block = Some(join_block);
     }
@@ -3201,23 +3204,36 @@ impl<'a> FunctionLowerer<'a> {
         let result = self.add_temp(expected.cloned().unwrap_or(ir::Type::Unknown));
         let join_block = self.add_block();
         self.current_block = self.current_block.or(Some(self.function().entry));
+        let first_case_block = self.current_block.expect("match entry block");
+        let mut case_blocks = vec![first_case_block];
+        case_blocks.extend((1..cases.len()).map(|_| self.add_block()));
+        let unmatched_block = self.add_block();
+        case_blocks.push(unmatched_block);
 
-        for case in cases {
+        if cases.is_empty() {
+            self.terminate(ir::Terminator::goto(unmatched_block));
+        }
+
+        for (index, case) in cases.iter().enumerate() {
+            self.current_block = Some(case_blocks[index]);
             let body_block = self.add_block();
-            let fail_block = self.add_block();
+            let pattern_fail_block = case_blocks[index + 1];
+            let guard_fail_index = (index + case.remaining_alternatives + 1).min(cases.len());
+            let guard_fail_block = case_blocks[guard_fail_index];
             self.lower_match_case(
                 scrutinee.clone(),
                 case,
                 body_block,
-                fail_block,
+                pattern_fail_block,
+                guard_fail_block,
                 Some(result),
                 join_block,
                 span,
                 expected,
             );
-            self.current_block = Some(fail_block);
         }
 
+        self.current_block = Some(unmatched_block);
         if let Some(block) = self.current_block_mut() {
             block.push(ir::Statement {
                 span: Some(span),
@@ -3238,7 +3254,8 @@ impl<'a> FunctionLowerer<'a> {
         scrutinee: ir::Operand,
         case: &core::MatchCase,
         body_block: ir::BlockId,
-        fail_block: ir::BlockId,
+        pattern_fail_block: ir::BlockId,
+        guard_fail_block: ir::BlockId,
         result_target: Option<ir::LocalId>,
         join_block: ir::BlockId,
         span: Span,
@@ -3253,7 +3270,7 @@ impl<'a> FunctionLowerer<'a> {
                 kind: ir::TerminatorKind::Branch {
                     condition,
                     then_block: guard_block,
-                    else_block: fail_block,
+                    else_block: pattern_fail_block,
                 },
             });
             self.current_block = Some(guard_block);
@@ -3265,7 +3282,7 @@ impl<'a> FunctionLowerer<'a> {
                 kind: ir::TerminatorKind::Branch {
                     condition,
                     then_block: body_block,
-                    else_block: fail_block,
+                    else_block: guard_fail_block,
                 },
             });
             self.pop_scope();
@@ -3275,7 +3292,7 @@ impl<'a> FunctionLowerer<'a> {
                 kind: ir::TerminatorKind::Branch {
                     condition,
                     then_block: body_block,
-                    else_block: fail_block,
+                    else_block: pattern_fail_block,
                 },
             });
         }
@@ -10953,6 +10970,30 @@ mod tests {
         let main = ir.function(ir::FunctionId(1)).expect("main function");
         assert_eq!(main.params.len(), 0);
         assert!(!main.blocks.is_empty());
+    }
+
+    #[test]
+    fn preserves_declared_union_and_alternative_annotations() {
+        let program = parse_inline(
+            r#"
+            annotation Serializable {}
+            annotation Payload {}
+
+            @Serializable
+            type Outcome =
+                @Payload class Success { value Str }
+                | @Payload object Cancelled {}
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let outcome = ir.types.iter().find(|ty| ty.name == "Outcome").unwrap();
+        assert_eq!(outcome.annotations[0].name, "Serializable");
+        assert_eq!(outcome.enum_cases.len(), 2);
+        assert_eq!(outcome.enum_cases[0].annotations[0].name, "Payload");
+        assert_eq!(outcome.enum_cases[1].annotations[0].name, "Payload");
     }
 
     #[test]

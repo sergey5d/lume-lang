@@ -1,0 +1,34 @@
+# EXPECT:
+# short tuple 3 7
+# short record Ada Lin
+# grouped 3 7
+# loop 10
+
+module short_for_yield_destructuring
+
+shape User {
+    name Str
+    age Int
+}
+
+def main() Unit {
+    pairs = [(1, 2), (3, 4)]
+    users = [User("Ada", 36), User("Lin", 28)]
+
+    sums = for let (left, right) <- pairs yield left + right
+    names = for let { name } <- users yield name
+
+    grouped = for {
+        let (left, right) <- pairs
+    } yield left + right
+
+    var loopTotal = 0
+    for let (left, right) <- pairs {
+        loopTotal += left + right
+    }
+
+    println("short tuple", sums[0], sums[1])
+    println("short record", names[0], names[1])
+    println("grouped", grouped[0], grouped[1])
+    println("loop", loopTotal)
+}

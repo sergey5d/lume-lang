@@ -3475,6 +3475,25 @@ impl<'a> SourceBodyEmitter<'a> {
             return Some(());
         }
 
+        if statement
+            .cases
+            .iter()
+            .any(|case| case.remaining_alternatives > 0)
+        {
+            return self.emit_match_statement_with_alternatives(
+                out,
+                statement,
+                &match_local,
+                &value_ty,
+                indent,
+                bindings,
+                binding_types,
+                used_locals,
+                loop_depth,
+                branches_return,
+            );
+        }
+
         for (index, case) in statement.cases.iter().enumerate() {
             let matched = self.match_case_pattern(
                 &case.pattern,
@@ -3549,6 +3568,141 @@ impl<'a> SourceBodyEmitter<'a> {
         out.push_str(indent);
         out.push_str("}\n");
         Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_match_statement_with_alternatives(
+        &self,
+        out: &mut String,
+        statement: &core::MatchStmt,
+        match_local: &str,
+        value_ty: &ir::Type,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+        branches_return: bool,
+    ) -> Option<()> {
+        let done = self.synthetic_name("match", "done", statement.span.start);
+        out.push_str(indent);
+        out.push_str("boolean ");
+        out.push_str(&done);
+        out.push_str(" = false;\n");
+
+        let mut group_start = 0;
+        while group_start < statement.cases.len() {
+            let group_end = match_case_group_end(&statement.cases, group_start);
+            out.push_str(indent);
+            out.push_str("if (!");
+            out.push_str(&done);
+            out.push_str(") {\n");
+
+            for (offset, case) in statement.cases[group_start..group_end].iter().enumerate() {
+                let index = group_start + offset;
+                let matched = self.match_case_pattern(
+                    &case.pattern,
+                    match_local,
+                    value_ty,
+                    statement.span.start + index,
+                    bindings,
+                    binding_types,
+                )?;
+                let pattern_indent = format!("{indent}    ");
+                out.push_str(&pattern_indent);
+                if offset > 0 {
+                    out.push_str("else ");
+                }
+                out.push_str("if (");
+                out.push_str(&matched.condition);
+                out.push_str(") {\n");
+
+                let action_indent = format!("{pattern_indent}    ");
+                let body_indent = if let Some(guard) = &case.guard {
+                    out.push_str(&action_indent);
+                    out.push_str("if (");
+                    out.push_str(&self.emit_expr(guard, &matched.bindings)?);
+                    out.push_str(") {\n");
+                    format!("{action_indent}    ")
+                } else {
+                    action_indent.clone()
+                };
+
+                out.push_str(&body_indent);
+                out.push_str(&done);
+                out.push_str(" = true;\n");
+                self.emit_match_statement_case_body(
+                    out,
+                    case,
+                    &body_indent,
+                    &matched.bindings,
+                    &matched.binding_types,
+                    used_locals,
+                    loop_depth,
+                    branches_return,
+                )?;
+
+                if case.guard.is_some() {
+                    out.push_str(&action_indent);
+                    out.push_str("}\n");
+                }
+                out.push_str(&pattern_indent);
+                out.push_str("}\n");
+            }
+
+            out.push_str(indent);
+            out.push_str("}\n");
+            group_start = group_end;
+        }
+
+        out.push_str(indent);
+        out.push_str("if (!");
+        out.push_str(&done);
+        out.push_str(") {\n");
+        out.push_str(&format!(
+            "{indent}    throw new IllegalStateException(\"non-exhaustive Lume match\");\n"
+        ));
+        out.push_str(indent);
+        out.push_str("}\n");
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_match_statement_case_body(
+        &self,
+        out: &mut String,
+        case: &core::MatchCase,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+        branches_return: bool,
+    ) -> Option<()> {
+        let mut branch_bindings = bindings.clone();
+        let mut branch_types = binding_types.clone();
+        match &case.body {
+            core::MatchCaseBody::Expr(expr) if branches_return => {
+                self.emit_returning_expr(out, expr, indent, &branch_bindings, &branch_types)
+            }
+            core::MatchCaseBody::Expr(core::Expr::Unit { .. }) => Some(()),
+            core::MatchCaseBody::Expr(expr) => {
+                out.push_str(indent);
+                out.push_str(&self.emit_expr(expr, &branch_bindings)?);
+                out.push_str(";\n");
+                Some(())
+            }
+            core::MatchCaseBody::Block(block) => self.emit_statement_block(
+                out,
+                block,
+                indent,
+                &mut branch_bindings,
+                &mut branch_types,
+                used_locals,
+                branches_return,
+                loop_depth,
+            ),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4523,6 +4677,18 @@ impl<'a> SourceBodyEmitter<'a> {
             out.push_str("}\n");
             return Some(());
         }
+        if cases.iter().any(|case| case.remaining_alternatives > 0) {
+            return self.emit_match_return_with_alternatives(
+                out,
+                cases,
+                &match_local,
+                &value_ty,
+                span,
+                indent,
+                bindings,
+                binding_types,
+            );
+        }
         for (index, case) in cases.iter().enumerate() {
             let matched = self.match_case_pattern(
                 &case.pattern,
@@ -4571,6 +4737,69 @@ impl<'a> SourceBodyEmitter<'a> {
             })?;
             out.push_str(indent);
             out.push_str("}\n");
+        }
+        out.push_str(indent);
+        out.push_str("throw new IllegalStateException(\"non-exhaustive Lume match\");\n");
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_match_return_with_alternatives(
+        &self,
+        out: &mut String,
+        cases: &[core::MatchCase],
+        match_local: &str,
+        value_ty: &ir::Type,
+        span: crate::source::Span,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+    ) -> Option<()> {
+        let mut group_start = 0;
+        while group_start < cases.len() {
+            let group_end = match_case_group_end(cases, group_start);
+            for (offset, case) in cases[group_start..group_end].iter().enumerate() {
+                let index = group_start + offset;
+                let matched = self.match_case_pattern(
+                    &case.pattern,
+                    match_local,
+                    value_ty,
+                    span.start + index,
+                    bindings,
+                    binding_types,
+                )?;
+                out.push_str(indent);
+                if offset > 0 {
+                    out.push_str("else ");
+                }
+                out.push_str("if (");
+                out.push_str(&matched.condition);
+                out.push_str(") {\n");
+                let action_indent = format!("{indent}    ");
+                let body_indent = if let Some(guard) = &case.guard {
+                    out.push_str(&action_indent);
+                    out.push_str("if (");
+                    out.push_str(&self.emit_expr(guard, &matched.bindings)?);
+                    out.push_str(") {\n");
+                    format!("{action_indent}    ")
+                } else {
+                    action_indent.clone()
+                };
+                self.emit_match_case_body(
+                    out,
+                    &case.body,
+                    &body_indent,
+                    &matched.bindings,
+                    &matched.binding_types,
+                )?;
+                if case.guard.is_some() {
+                    out.push_str(&action_indent);
+                    out.push_str("}\n");
+                }
+                out.push_str(indent);
+                out.push_str("}\n");
+            }
+            group_start = group_end;
         }
         out.push_str(indent);
         out.push_str("throw new IllegalStateException(\"non-exhaustive Lume match\");\n");
@@ -4885,7 +5114,7 @@ impl<'a> SourceBodyEmitter<'a> {
         parent_bindings: &HashMap<String, String>,
         parent_binding_types: &HashMap<String, ir::Type>,
     ) -> Option<Vec<JavaSwitchCase>> {
-        if cases.is_empty() {
+        if cases.is_empty() || cases.iter().any(|case| case.remaining_alternatives > 0) {
             return None;
         }
 
@@ -6267,6 +6496,17 @@ impl<'a> SourceBodyEmitter<'a> {
             out.push_str("            };\n        }).get()");
             return Some(out);
         }
+        if cases.iter().any(|case| case.remaining_alternatives > 0) {
+            return self.emit_match_expression_with_alternatives(
+                value,
+                cases,
+                span,
+                bindings,
+                &value_ty,
+                &result_ty,
+                &match_local,
+            );
+        }
         let mut out = format!(
             "((java.util.function.Supplier<{}>) () -> {{\n            {} {match_local} = {};\n",
             self.names.value_type(&result_ty),
@@ -6320,6 +6560,71 @@ impl<'a> SourceBodyEmitter<'a> {
                     })?,
             );
             out.push_str(";\n            }\n");
+        }
+        out.push_str(
+            "            throw new IllegalStateException(\"non-exhaustive Lume match\");\n        }).get()",
+        );
+        Some(out)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_match_expression_with_alternatives(
+        &self,
+        value: &core::Expr,
+        cases: &[core::MatchCase],
+        span: crate::source::Span,
+        bindings: &HashMap<String, String>,
+        value_ty: &ir::Type,
+        result_ty: &ir::Type,
+        match_local: &str,
+    ) -> Option<String> {
+        let mut out = format!(
+            "((java.util.function.Supplier<{}>) () -> {{\n            {} {match_local} = {};\n",
+            self.names.value_type(result_ty),
+            self.names.value_type(value_ty),
+            self.emit_expr(value, bindings)?
+        );
+        let mut group_start = 0;
+        while group_start < cases.len() {
+            let group_end = match_case_group_end(cases, group_start);
+            for (offset, case) in cases[group_start..group_end].iter().enumerate() {
+                let index = group_start + offset;
+                let matched = self.match_case_pattern(
+                    &case.pattern,
+                    match_local,
+                    value_ty,
+                    span.start + index,
+                    bindings,
+                    &HashMap::new(),
+                )?;
+                out.push_str("            ");
+                if offset > 0 {
+                    out.push_str("else ");
+                }
+                out.push_str("if (");
+                out.push_str(&matched.condition);
+                out.push_str(") {\n");
+                let body_indent = if let Some(guard) = &case.guard {
+                    out.push_str("                if (");
+                    out.push_str(&self.emit_expr(guard, &matched.bindings)?);
+                    out.push_str(") {\n");
+                    "                    "
+                } else {
+                    "                "
+                };
+                let core::MatchCaseBody::Expr(body) = &case.body else {
+                    return None;
+                };
+                out.push_str(body_indent);
+                out.push_str("return ");
+                out.push_str(&self.emit_expr_against(body, &matched.bindings, result_ty)?);
+                out.push_str(";\n");
+                if case.guard.is_some() {
+                    out.push_str("                }\n");
+                }
+                out.push_str("            }\n");
+            }
+            group_start = group_end;
         }
         out.push_str(
             "            throw new IllegalStateException(\"non-exhaustive Lume match\");\n        }).get()",
@@ -9231,6 +9536,10 @@ struct JavaSwitchCase {
     guard: Option<String>,
     total: bool,
     matched: MatchedCase,
+}
+
+fn match_case_group_end(cases: &[core::MatchCase], start: usize) -> usize {
+    (start + cases[start].remaining_alternatives + 1).min(cases.len())
 }
 
 fn java_wildcard_type_args(count: usize) -> String {

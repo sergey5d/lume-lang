@@ -8132,6 +8132,35 @@ mod tests {
     }
 
     #[test]
+    fn evaluates_or_pattern_guard_once_per_written_case() {
+        let program = lower_inline(
+            r#"
+            class Guard {
+                var calls Int = 0
+
+                def allowed() Bool {
+                    this.calls += 1
+                    false
+                }
+            }
+
+            def main() Unit {
+                tracker = Guard {}
+                result = match (0, 0) {
+                    case (0, _) | (_, 0) if tracker.allowed() => "accepted"
+                    case _ => "rejected"
+                }
+                println(result, tracker.calls)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "rejected 1\n");
+    }
+
+    #[test]
     fn runs_negative_numeric_literal_patterns() {
         let program = lower_inline(
             r#"

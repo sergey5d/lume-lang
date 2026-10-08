@@ -492,6 +492,7 @@ fn desugar_match_case(case: &ast::MatchCase) -> core::MatchCase {
             ast::MatchCaseBody::Block(block) => core::MatchCaseBody::Block(desugar_block(block)),
             ast::MatchCaseBody::Expr(expr) => core::MatchCaseBody::Expr(desugar_expr(expr)),
         },
+        remaining_alternatives: case.remaining_alternatives,
         span: case.span,
     }
 }

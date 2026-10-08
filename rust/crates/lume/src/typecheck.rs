@@ -7940,6 +7940,12 @@ impl<'a> Checker<'a> {
     }
 
     fn brace_call_type_sig(&self, callee: &Expr) -> Option<TypeSig> {
+        let callee = match callee {
+            Expr::Index {
+                receiver, index, ..
+            } if type_arg_refs_from_expr(index).is_some() => receiver.as_ref(),
+            _ => callee,
+        };
         let class_sig = match callee {
             Expr::Identifier { name, .. } => self
                 .lookup_type_local(name)
@@ -14446,6 +14452,74 @@ def main() Int {
     }
 
     #[test]
+    fn checks_punned_qualified_and_generic_constructors() {
+        let temp = workspace_root().join("rust/target/typecheck-constructor-target-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("models.lum"),
+            r#"
+module models
+
+shape Point {
+    x Int
+    y Int
+}
+
+class Box[T] {
+    value T
+}
+"#,
+        )
+        .expect("write models");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+module app
+
+use models
+use models/{Point as ModelPoint, Box as ModelBox}
+
+shape Point {
+    x Int
+    y Int
+}
+
+class Outer {
+    shape Point {
+        x Int
+        y Int
+    }
+}
+
+class Box[T] {
+    value T
+}
+
+def main() Unit {
+    x = 1
+    y = 2
+    value = 3
+
+    local = Point { x, y }
+    qualified = models.Point { x, y }
+    nested = Outer.Point { x, y }
+    generic = Box[Int] { value }
+    qualifiedGeneric = models.Box[Int] { value }
+    aliased = ModelPoint { x, y }
+    aliasedGeneric = ModelBox[Int] { value }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = check_path(&source).expect("typecheck");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
     fn checks_imported_nested_aliases_and_declared_unions() {
         let temp = workspace_root().join("rust/target/typecheck-nested-alias-import-test");
         let _ = fs::remove_dir_all(&temp);
@@ -17690,6 +17764,27 @@ def main(value) Int {
     }
 
     #[test]
+    fn rejects_refutable_pattern_in_short_for_yield_generator() {
+        let program = parse_inline(
+            r#"
+def values(options [Int?]) [Int] =
+    for let Some(value) <- options yield value
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "refutable_for_pattern"
+                    && diag
+                        .message
+                        .contains("for pattern must be irrefutable for value of type 'Option[Int]'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn rejects_continue_in_lifted_for_yield() {
         let cases = [
             (
@@ -19115,6 +19210,45 @@ def main() Unit {
     label Str = item.label
     total Int = point.total
     println(label, total, item.repeated)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_getters_with_collection_function_and_anonymous_shape_return_types() {
+        let program = parse_inline(
+            r#"
+interface Accessors {
+    def counts [Str: Int]
+    def rows [[Int]]
+    def optionalValues [Int?]
+    def callbacks [fn(Int) Int]
+    def position { x Int, y Int }
+}
+
+class Values with Accessors {
+    private storedCounts [Str: Int] = []
+    private storedRows [[Int]] = []
+    private storedOptionalValues [Int?] = []
+    private storedCallbacks [fn(Int) Int] = []
+
+    def counts [Str: Int] = this.storedCounts
+    def rows [[Int]] = this.storedRows
+    def optionalValues [Int?] = this.storedOptionalValues
+    def callbacks [fn(Int) Int] = this.storedCallbacks
+    def position { x Int, y Int } = { x: 1, y: 2 }
+}
+
+def read(values Accessors) Unit {
+    counts [Str: Int] = values.counts
+    rows [[Int]] = values.rows
+    optionalValues [Int?] = values.optionalValues
+    callbacks [fn(Int) Int] = values.callbacks
+    position { x Int, y Int } = values.position
+    println(counts.size, rows.size, optionalValues.size, callbacks.size, position.x)
 }
 "#,
         );

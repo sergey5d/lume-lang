@@ -108,10 +108,12 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_lambda_body(&mut self) -> Option<LambdaBody> {
         if self.at(TokenKind::LBrace) {
-            return self.parse_expression_brace_body().map(|body| match body {
-                ExpressionBraceBody::Construction(expr) => LambdaBody::Expr(Box::new(expr)),
-                ExpressionBraceBody::Block(block) => LambdaBody::Block(block),
-            });
+            return self
+                .parse_expression_brace_body_with_continuation()
+                .map(|body| match body {
+                    ExpressionBraceBody::Construction(expr) => LambdaBody::Expr(Box::new(expr)),
+                    ExpressionBraceBody::Block(block) => LambdaBody::Block(block),
+                });
         }
         self.skip_newlines();
         let Some(first) = self.parse_stmt() else {
@@ -201,6 +203,8 @@ impl<'a> Parser<'a> {
         let bindings = if self.at(TokenKind::LBrace) {
             self.consume(TokenKind::LBrace, "expected '{' after 'for'")?;
             self.parse_for_binding_block()?
+        } else if self.match_keyword(Keyword::Let) {
+            vec![self.parse_for_let_generator_head()?]
         } else {
             let binding = self.parse_plain_for_generator_binding()?;
             self.consume_for_generator_arrow()?;
@@ -344,7 +348,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_yield_body_block(&mut self) -> Option<Block> {
         if self.at(TokenKind::LBrace) {
-            self.parse_expression_brace_body()
+            self.parse_expression_brace_body_with_continuation()
                 .map(ExpressionBraceBody::into_block)
         } else {
             if self.at(TokenKind::Newline) {
@@ -2142,6 +2146,17 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub(super) fn parse_expression_brace_body_with_continuation(
+        &mut self,
+    ) -> Option<ExpressionBraceBody> {
+        debug_assert!(self.at(TokenKind::LBrace));
+        if self.looks_like_brace_record_literal(false) {
+            self.parse_expr().map(ExpressionBraceBody::Construction)
+        } else {
+            self.parse_block().map(ExpressionBraceBody::Block)
+        }
+    }
+
     pub(super) fn looks_like_brace_record_literal(&self, allow_empty: bool) -> bool {
         if !self.at(TokenKind::LBrace) {
             return false;
@@ -2238,13 +2253,15 @@ impl<'a> Parser<'a> {
                 .chars()
                 .next()
                 .is_some_and(|ch| ch.is_ascii_uppercase()),
-            Expr::Member { receiver, name, .. } => {
-                Self::is_constructor_like_expr(receiver)
-                    && name
-                        .chars()
-                        .next()
-                        .is_some_and(|ch| ch.is_ascii_uppercase())
-            }
+            // Qualification does not change whether the final path segment is a
+            // constructor target. In particular, module aliases are commonly lowercase.
+            Expr::Member { name, .. } => name
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_uppercase()),
+            // Explicit generic application is represented as an index expression until
+            // type checking resolves it. Preserve the receiver's constructor syntax.
+            Expr::Index { receiver, .. } => Self::is_constructor_like_expr(receiver),
             _ => false,
         }
     }

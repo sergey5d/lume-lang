@@ -1,0 +1,51 @@
+# EXPECT:
+# local 10 20
+# module 10 20
+# nested 10 20
+# generic 30
+# module generic 30
+# alias 10 20
+# generic alias 30
+
+module constructor_punning_qualified_and_generic_targets
+
+use models
+use models/{Point as ModelPoint, Box as ModelBox}
+
+shape Point {
+    x Int
+    y Int
+}
+
+class Outer {
+    shape Point {
+        x Int
+        y Int
+    }
+}
+
+class Box[T] {
+    value T
+}
+
+def main() Unit {
+    x = 10
+    y = 20
+    value = 30
+
+    local = Point { x, y }
+    qualified = models.Point { x, y }
+    nested = Outer.Point { x, y }
+    generic = Box[Int] { value }
+    qualifiedGeneric = models.Box[Int] { value }
+    aliased = ModelPoint { x, y }
+    aliasedGeneric = ModelBox[Int] { value }
+
+    println("local", local.x, local.y)
+    println("module", qualified.x, qualified.y)
+    println("nested", nested.x, nested.y)
+    println("generic", generic.value)
+    println("module generic", qualifiedGeneric.value)
+    println("alias", aliased.x, aliased.y)
+    println("generic alias", aliasedGeneric.value)
+}

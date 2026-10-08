@@ -934,6 +934,52 @@ def run(pairs Vector[(Int, Int)], users Vector[User]) [Int] {
 }
 
 #[test]
+fn parses_short_for_yield_with_let_destructuring_generator() {
+    let result = parse(
+        r#"
+def tupleSums(pairs [(Int, Int)]) [Int] =
+    for let (left, right) <- pairs yield left + right
+
+def ages(users [User]) [Int] =
+    for let { age } <- users yield age
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+
+    match &program.items[0] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Expr(Expr::ForYield { bindings, .. }) => {
+                assert_eq!(bindings.len(), 1);
+                assert!(matches!(
+                    &bindings[0].pattern,
+                    Some(Pattern::Tuple { elements, .. }) if elements.len() == 2
+                ));
+                assert!(bindings[0].iterable.is_some());
+            }
+            other => panic!("expected for-yield expression body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+
+    match &program.items[1] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Expr(Expr::ForYield { bindings, .. }) => {
+                assert_eq!(bindings.len(), 1);
+                assert!(matches!(
+                    &bindings[0].pattern,
+                    Some(Pattern::Record { path, fields, .. })
+                        if path.is_empty() && fields.len() == 1
+                ));
+                assert!(bindings[0].iterable.is_some());
+            }
+            other => panic!("expected for-yield expression body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_for_yield_let_refutable_generator_pattern() {
     let result = parse(
         r#"
@@ -1511,6 +1557,61 @@ def health() Str = "ok"
 }
 
 #[test]
+fn parses_annotations_on_declared_unions_and_their_alternatives() {
+    let result = parse(
+        r#"
+annotation Serializable {}
+annotation Payload {}
+
+@Serializable
+type Outcome =
+    @Payload
+    class Success { value Str }
+    | @Payload object Cancelled {}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Type(outcome) = &program.items[2] else {
+        panic!("expected declared union");
+    };
+    assert_eq!(outcome.kind, TypeKind::Enum);
+    assert_eq!(outcome.annotations.len(), 1);
+    let cases = outcome
+        .members
+        .iter()
+        .filter_map(|member| match member {
+            TypeMember::Case(case) => Some(case),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(cases.len(), 2);
+    assert!(cases.iter().all(|case| case.annotations.len() == 1));
+}
+
+#[test]
+fn rejects_annotations_on_transparent_type_aliases() {
+    let result = parse(
+        r#"
+annotation Serializable {}
+
+@Serializable
+type UserId = Int
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "invalid_alias_annotation"
+                && diagnostic
+                    .message
+                    .contains("introduces no runtime metadata")
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn parses_methods_in_named_object_body() {
     let result = parse(
         r#"
@@ -2061,6 +2162,36 @@ fn parses_shape_literal_forms() {
         "expected class(...) rejection, got diagnostics: {:#?}",
         result.diagnostics
     );
+}
+
+#[test]
+fn parses_punned_qualified_and_generic_constructors() {
+    for source in [
+        "Point { x, y }",
+        "models.Point { x, y }",
+        "Outer.Point { x, y }",
+        "Box[Int] { value }",
+        "models.Box[Int] { value }",
+        "ModelPoint { x, y }",
+        "ModelBox[Int] { value }",
+    ] {
+        let Expr::Call {
+            args,
+            uses_brace_syntax,
+            ..
+        } = parse_expr_only(source)
+        else {
+            panic!("expected brace constructor call for {source}");
+        };
+        assert!(uses_brace_syntax, "expected brace syntax for {source}");
+        assert!(matches!(
+            args.as_slice(),
+            [CallArg {
+                value: Expr::RecordLiteral { fields, values, .. },
+                ..
+            }] if !fields.is_empty() && values.is_empty()
+        ));
+    }
 }
 
 #[test]
@@ -3033,6 +3164,56 @@ def run(flag Bool, fallback Point, values [Int]) Unit {
             expr: Expr::RecordLiteral { .. },
             ..
         })]
+    ));
+}
+
+#[test]
+fn continues_expression_parsing_after_leading_brace_construction() {
+    let result = parse(
+        r#"
+def readX() Int =
+    { x: 1 }.x
+
+def invoke() Int =
+    { callback: () => 2 }.callback()
+
+def extract() Int =
+    { value: Some(3) }.value!
+
+def increment() Int =
+    { x: 4 }.x + 1
+
+def choose(flag Bool) Int = match flag {
+    case true => { x: 5 }.x
+    case false => 0
+}
+
+def run(values [Int]) Unit {
+    mapper fn() Int = () => { x: 6 }.x
+    projected [Int] = for value <- values yield { x: value }.x
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+
+    let Item::Function(read_x) = &program.items[0] else {
+        panic!("expected readX function");
+    };
+    assert!(matches!(
+        read_x.body,
+        CallableBody::Expr(Expr::Member { .. })
+    ));
+
+    let Item::Function(choose) = &program.items[4] else {
+        panic!("expected choose function");
+    };
+    let CallableBody::Expr(Expr::Match { cases, .. }) = &choose.body else {
+        panic!("expected match expression body");
+    };
+    assert!(matches!(
+        cases[0].body,
+        MatchCaseBody::Expr(Expr::Member { .. })
     ));
 }
 
@@ -4044,6 +4225,9 @@ def run(size Size) Str = match size {
     match &function.body {
         CallableBody::Expr(Expr::Match { cases, .. }) => {
             assert_eq!(cases.len(), 3);
+            assert_eq!(cases[0].remaining_alternatives, 1);
+            assert_eq!(cases[1].remaining_alternatives, 0);
+            assert_eq!(cases[2].remaining_alternatives, 0);
             assert!(matches!(
                 &cases[0].pattern,
                 Pattern::Constructor { path, .. } if path == &vec!["Size".to_string(), "Small".to_string()]
@@ -6217,6 +6401,83 @@ class Box {
         getters[1].return_type,
         Some(TypeRef::Named { ref name, ref args, .. }) if name == "Vector" && args.len() == 1
     ));
+}
+
+#[test]
+fn getters_accept_collection_function_and_anonymous_shape_return_types() {
+    let result = parse(
+        r#"
+interface Accessors {
+    def counts [Str: Int]
+    def rows [[Int]]
+    def optionalValues [Int?]
+    def callbacks [fn(Int) Int]
+    def position { x Int, y Int }
+}
+
+class Values {
+    private storedCounts [Str: Int] = []
+    private storedRows [[Int]] = []
+    private storedOptionalValues [Int?] = []
+    private storedCallbacks [fn(Int) Int] = []
+
+    def counts [Str: Int] = this.storedCounts
+    def rows [[Int]] = this.storedRows
+    def optionalValues [Int?] = this.storedOptionalValues
+    def callbacks [fn(Int) Int] = this.storedCallbacks
+    def position { x Int, y Int } = { x: 1, y: 2 }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+
+    for item in &program.items {
+        let Item::Type(decl) = item else {
+            continue;
+        };
+        let getters = decl
+            .members
+            .iter()
+            .filter_map(|member| match member {
+                TypeMember::Method(method) => Some(method),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(getters.len(), 5);
+        assert!(getters.iter().all(|getter| getter.getter));
+        assert!(getters.iter().all(|getter| getter.type_params.is_empty()));
+
+        assert!(matches!(
+            getters[0].return_type,
+            Some(TypeRef::Named { ref name, ref args, .. })
+                if name == "Map" && args.len() == 2
+        ));
+        assert!(matches!(
+            getters[1].return_type,
+            Some(TypeRef::Named { ref name, ref args, .. })
+                if name == "Vector"
+                    && matches!(args.as_slice(), [TypeRef::Named { name, args, .. }]
+                        if name == "Vector" && args.len() == 1)
+        ));
+        assert!(matches!(
+            getters[2].return_type,
+            Some(TypeRef::Named { ref name, ref args, .. })
+                if name == "Vector"
+                    && matches!(args.as_slice(), [TypeRef::Named { name, args, .. }]
+                        if name == "Option" && args.len() == 1)
+        ));
+        assert!(matches!(
+            getters[3].return_type,
+            Some(TypeRef::Named { ref name, ref args, .. })
+                if name == "Vector"
+                    && matches!(args.as_slice(), [TypeRef::Function { .. }])
+        ));
+        assert!(matches!(
+            getters[4].return_type,
+            Some(TypeRef::Record { ref fields, .. }) if fields.len() == 2
+        ));
+    }
 }
 
 #[test]

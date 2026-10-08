@@ -107,14 +107,7 @@ impl<'a> Parser<'a> {
                 Some(Item::Function(function))
             }
             TokenKind::Keyword(Keyword::Type) => {
-                if !annotations.is_empty() {
-                    self.error_at_current(
-                        "unexpected_annotation",
-                        "type declarations do not accept annotations before 'type'",
-                    );
-                    return None;
-                }
-                self.parse_type_alias_or_union_decl(visibility)
+                self.parse_type_alias_or_union_decl(annotations, visibility)
             }
             TokenKind::Keyword(Keyword::Annotation)
             | TokenKind::Keyword(Keyword::Class)
@@ -200,7 +193,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_type_alias_or_union_decl(&mut self, visibility: Visibility) -> Option<Item> {
+    fn parse_type_alias_or_union_decl(
+        &mut self,
+        annotations: Vec<Annotation>,
+        visibility: Visibility,
+    ) -> Option<Item> {
         let start = self.consume(
             TokenKind::Keyword(Keyword::Type),
             "expected 'type' before type declaration",
@@ -219,6 +216,7 @@ impl<'a> Parser<'a> {
         };
         self.consume(TokenKind::Eq, "expected '=' after type alias name")?;
         self.skip_newlines();
+        let first_variant_annotations = self.parse_annotations()?;
         let removed_type_decl_kind = match self.current_kind() {
             TokenKind::Keyword(Keyword::Annotation) => Some((TypeKind::Annotation, "annotation")),
             TokenKind::Keyword(Keyword::Class) => Some((TypeKind::Class, "class")),
@@ -271,7 +269,7 @@ impl<'a> Parser<'a> {
             )?;
             self.type_path.push(name.clone());
             let decl = self.finish_type_decl_body(
-                Vec::new(),
+                annotations.clone(),
                 visibility,
                 kind,
                 name,
@@ -288,11 +286,38 @@ impl<'a> Parser<'a> {
         ) || self.at_keyword(Keyword::Shape)
         {
             return self.parse_inline_union_decl(
+                annotations,
+                first_variant_annotations,
                 visibility,
                 name,
                 generic_clause,
                 union_with_bounds,
                 start,
+            );
+        }
+        if !first_variant_annotations.is_empty() {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "unexpected_annotation",
+                    "annotations after '=' are valid only on declared-union alternatives",
+                    first_variant_annotations[0].span,
+                )
+                .with_help(
+                    "place the annotation before a 'class', 'shape', or 'object' union alternative",
+                ),
+            );
+        }
+        if !annotations.is_empty() {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "invalid_alias_annotation",
+                    format!(
+                        "transparent type alias '{}' cannot be annotated because it introduces no runtime metadata",
+                        name
+                    ),
+                    annotations[0].span,
+                )
+                .with_help("annotate a declared union or a class, shape, object, interface, or annotation declaration instead"),
             );
         }
         if !union_with_bounds.is_empty() {
@@ -331,6 +356,8 @@ impl<'a> Parser<'a> {
 
     fn parse_inline_union_decl(
         &mut self,
+        annotations: Vec<Annotation>,
+        first_variant_annotations: Vec<Annotation>,
         visibility: Visibility,
         name: String,
         generic_clause: ParsedGenericClause,
@@ -338,8 +365,13 @@ impl<'a> Parser<'a> {
         start: Span,
     ) -> Option<Item> {
         let mut members = Vec::new();
+        let mut next_variant_annotations = Some(first_variant_annotations);
         loop {
             self.skip_newlines();
+            let variant_annotations = match next_variant_annotations.take() {
+                Some(annotations) => annotations,
+                None => self.parse_annotations()?,
+            };
             let (kind, variant_start) = match self.current_kind() {
                 TokenKind::Keyword(Keyword::Class) => {
                     let span = self.current_span();
@@ -394,7 +426,7 @@ impl<'a> Parser<'a> {
                 ));
             }
             members.push(TypeMember::Case(EnumCaseDecl {
-                annotations: Vec::new(),
+                annotations: variant_annotations,
                 kind,
                 name: variant_name,
                 fields,
@@ -422,7 +454,7 @@ impl<'a> Parser<'a> {
             })
             .unwrap_or(start);
         Some(Item::Type(TypeDecl {
-            annotations: Vec::new(),
+            annotations,
             visibility,
             kind: TypeKind::Enum,
             name,
@@ -548,7 +580,7 @@ impl<'a> Parser<'a> {
             ));
         }
         let params = self.parse_param_list()?;
-        let return_type = if self.callable_body_starts_here() {
+        let return_type = if self.callable_body_starts_here(false) {
             None
         } else {
             self.parse_optional_return_type()
@@ -663,14 +695,8 @@ impl<'a> Parser<'a> {
             let member_visibility = self.parse_visibility();
             match self.current_kind() {
                 TokenKind::Keyword(Keyword::Type) if self.starts_type_alias_decl() => {
-                    if !member_annotations.is_empty() {
-                        self.error_at_current(
-                            "unexpected_annotation",
-                            "type declarations do not accept annotations before 'type'",
-                        );
-                        return None;
-                    }
-                    let nested = self.parse_type_alias_or_union_decl(member_visibility)?;
+                    let nested =
+                        self.parse_type_alias_or_union_decl(member_annotations, member_visibility)?;
                     self.nested_items.push(nested);
                 }
                 TokenKind::Keyword(Keyword::Annotation)
@@ -1059,22 +1085,14 @@ impl<'a> Parser<'a> {
             span
         };
         let (name, name_span) = self.parse_callable_name("expected method name")?;
-        let generic_checkpoint = self.checkpoint();
-        let candidate_generic_clause = self.parse_generic_clause()?;
-        let generic_is_method_clause = !candidate_generic_clause.params.is_empty()
-            || !candidate_generic_clause.conditions.is_empty();
-        let generic_is_followed_by_params = self.at(TokenKind::LParen);
-        let generic_is_followed_by_getter_return = generic_is_method_clause
-            && !self.callable_body_starts_here()
-            && self.can_start_type_ref();
         let generic_clause =
-            if generic_is_followed_by_params || generic_is_followed_by_getter_return {
-                candidate_generic_clause
+            if self.at(TokenKind::LBracket) && spans_touch(name_span, self.current_span()) {
+                self.parse_generic_clause()?
             } else {
-                self.restore(generic_checkpoint);
                 ParsedGenericClause::default()
             };
-        let has_generic_clause = self.index > generic_checkpoint.index;
+        let has_generic_clause =
+            !generic_clause.params.is_empty() || !generic_clause.conditions.is_empty();
         let head_end = if has_generic_clause {
             self.previous_span()
         } else {
@@ -1108,7 +1126,7 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_param_list()?
         };
-        let return_type = if self.callable_body_starts_here() {
+        let return_type = if self.callable_body_starts_here(allow_signature_only && getter) {
             None
         } else {
             self.parse_optional_return_type()
@@ -1241,10 +1259,12 @@ impl<'a> Parser<'a> {
         self.consume(TokenKind::Eq, "expected '=' or '{' before callable body")?;
         self.skip_newlines();
         if self.at(TokenKind::LBrace) {
-            return self.parse_expression_brace_body().map(|body| match body {
-                ExpressionBraceBody::Construction(expr) => CallableBody::Expr(expr),
-                ExpressionBraceBody::Block(block) => CallableBody::Block(block),
-            });
+            return self
+                .parse_expression_brace_body_with_continuation()
+                .map(|body| match body {
+                    ExpressionBraceBody::Construction(expr) => CallableBody::Expr(expr),
+                    ExpressionBraceBody::Block(block) => CallableBody::Block(block),
+                });
         }
         if let Some(assignment) = self.try_parse_assignment_stmt() {
             let span = assignment.span;
@@ -1257,7 +1277,7 @@ impl<'a> Parser<'a> {
         Some(CallableBody::Expr(expr))
     }
 
-    fn callable_body_starts_here(&self) -> bool {
+    fn callable_body_starts_here(&self, allow_signature_only_return: bool) -> bool {
         match self.next_significant_token().kind {
             TokenKind::Eq => true,
             TokenKind::LBrace => {
@@ -1271,7 +1291,17 @@ impl<'a> Parser<'a> {
                 };
                 if parser.parse_type_ref().is_some() {
                     parser.skip_newlines();
-                    return !matches!(parser.current_kind(), TokenKind::Eq | TokenKind::LBrace);
+                    if matches!(parser.current_kind(), TokenKind::Eq | TokenKind::LBrace) {
+                        return false;
+                    }
+                    if allow_signature_only_return
+                        && matches!(
+                            parser.current_kind(),
+                            TokenKind::Newline | TokenKind::RBrace | TokenKind::Eof
+                        )
+                    {
+                        return false;
+                    }
                 }
                 true
             }

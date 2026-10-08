@@ -7621,9 +7621,23 @@ class Holder {
     payload { x Int }
 }
 
+class GuardTracker {
+    var calls Int = 0
+
+    def allowed() Bool {
+        this.calls += 1
+        false
+    }
+}
+
 def add(left Int, right Int) Int {
     result Int = left + right
     result
+}
+
+def choose(tracker GuardTracker) Str = match (0, 0) {
+    case (0, _) | (_, 0) if tracker.allowed() => "accepted"
+    case _ => "rejected"
 }
 
 def main() Int {
@@ -7673,6 +7687,22 @@ def main() Int {
     fromValue Holder = Holder(payload)
     fromLiteral Holder = Holder({ x: 8 })
     println(fromValue.payload.x, fromLiteral.payload.x)
+
+    expressionTracker = GuardTracker {}
+    expressionResult = match (0, 0) {
+        case (0, _) | (_, 0) if expressionTracker.allowed() => "accepted"
+        case _ => "rejected"
+    }
+    println(expressionResult, expressionTracker.calls)
+
+    returnTracker = GuardTracker {}
+    println(choose(returnTracker), returnTracker.calls)
+
+    statementTracker = GuardTracker {}
+    match (0, 0) {
+        case (0, _) | (_, 0) if statementTracker.allowed() => println("accepted")
+        case _ => println("statement rejected", statementTracker.calls)
+    }
 
     0
 }

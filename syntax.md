@@ -703,11 +703,30 @@ Calls, constructors, indexing, mutable object fields, ordinary instance field re
 
 Supported annotation targets:
 
-- top-level `def`, `type`, `annotation`, `interface`, `class`, `shape`, `object`
+- top-level and nested `annotation`, `interface`, `class`, `shape`, and `object`
+- declared unions introduced by `type Name = class ... | object ...`
 - fields
 - methods
 - interface methods
 - declared-union alternatives
+
+Transparent aliases do not introduce runtime metadata and cannot be annotated:
+
+```txt
+@Serializable
+type UserId = Int # invalid
+```
+
+Declared unions and their alternatives do introduce runtime metadata, so both
+levels may carry annotations:
+
+```txt
+@Serializable
+type Outcome =
+    @Payload
+    class Success { value Str }
+    | @Payload object Cancelled {}
+```
 
 Module declaration:
 
@@ -1207,6 +1226,34 @@ user = User { name, age }
 
 point = Point { x }          # valid: punned identifier means `x: x`
 point = Point { makeX() }    # invalid: arbitrary expressions need a field label
+```
+
+Qualification and explicit generic arguments do not change named-field
+construction. Only the final path segment names the type; preceding segments
+may be lowercase module aliases:
+
+```txt
+point = models.Point { x, y }
+nested = Outer.Point { x, y }
+box = Box[Int] { value }
+qualifiedBox = models.Box[Int] { value }
+aliased = ModelPoint { x, y }
+```
+
+Name resolution verifies that the complete target denotes a constructible type;
+qualification and explicit generic arguments do not alter that decision.
+
+Classifying leading braces as construction selects the first expression; it does
+not terminate the surrounding expression body. Postfix and infix syntax continue
+normally in callable bodies, lambdas, match cases, and `yield` bodies:
+
+```txt
+def readX() Int = { x: 1 }.x
+
+def choose(flag Bool) Int = match flag {
+    case true => { x: 1 }.x
+    case false => 0
+}
 ```
 
 Contextual class construction applies only to the fresh brace construction
@@ -1915,6 +1962,29 @@ def values [Int] = items               # getter returning a vector
 
 def callback() fn() Int = action       # method returning a function
 def callback fn() Int = action         # getter returning a function
+```
+
+Getters use the ordinary type grammar, including bracket collection shorthand
+and anonymous shape types:
+
+```txt
+def counts [Str: Int] = counters
+def rows [[Int]] = nestedRows
+def optionalValues [Int?] = values
+def callbacks [fn(Int) Int] = handlers
+
+interface Positioned {
+    def position { x Int, y Int }
+}
+```
+
+Whitespace before a bracket also carries the normal declaration distinction. A
+bracket touching the callable name begins a generic clause; a separated bracket
+begins a getter return type:
+
+```txt
+def map[T](value T) T = value          # generic method
+def values [Int] = items               # getter returning Vector[Int]
 ```
 
 Function and method parameter lists must touch the callable name, or the final
@@ -3823,6 +3893,26 @@ items = for item <- [1, 2, 3] yield {
 }
 ```
 
+The short yield form uses the same generator-binding grammar as an ordinary
+loop. Use `for let` for an irrefutable tuple or shape pattern:
+
+```txt
+sums = for let (left, right) <- pairs yield left + right
+
+names = for let { name } <- users yield name
+```
+
+This has the same generator capability as the grouped form:
+
+```txt
+sums = for {
+    let (left, right) <- pairs
+} yield left + right
+```
+
+Refutable generator patterns remain invalid in every form. Extract or match
+inside the body instead.
+
 Multi-clause yield form:
 
 ```txt
@@ -4065,6 +4155,21 @@ result = match value {
     case Size.Large => "large"
 }
 ```
+
+Alternatives are tried from left to right. Once one alternative matches, the
+shared guard is evaluated exactly once. If the guard is false, matching proceeds
+to the next written case rather than trying another alternative from the same
+case:
+
+```txt
+result = match pair {
+    case (0, _) | (_, 0) if allowed() => "accepted"
+    case _ => "rejected"
+}
+```
+
+For `(0, 0)`, `allowed()` is called once even though both alternatives could
+match.
 
 Vector patterns can be used in `match` cases:
 
