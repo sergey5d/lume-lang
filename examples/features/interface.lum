@@ -6,10 +6,10 @@ interface Named {
 }
 
 class Person with Named {
-    name Str
+    storedName Str
 
     def name() Str =
-        this.name
+        this.storedName
 }
 
 
@@ -17,6 +17,6 @@ def describe(value Named) Str =
     value.name()
 
 def main() Unit {
-    person Person = Person { name: "Ada" }
+    person Person = Person { storedName: "Ada" }
     println("interface", describe(person))
 }

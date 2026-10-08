@@ -309,6 +309,30 @@ struct TypeNarrowing {
     ty: Ty,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemberNamespaceKind {
+    Field,
+    Getter,
+    Method,
+}
+
+impl MemberNamespaceKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Field => "stored field",
+            Self::Getter => "getter",
+            Self::Method => "method",
+        }
+    }
+
+    fn conflicts_with(self, other: Self) -> bool {
+        !matches!(
+            (self, other),
+            (Self::Field, Self::Field) | (Self::Method, Self::Method)
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ParamSig {
     name: String,
@@ -1387,6 +1411,7 @@ struct Checker<'a> {
     globals: HashMap<String, ValueInfo>,
     anonymous_types: HashMap<String, TypeSig>,
     current_type_paths: Vec<String>,
+    reported_member_name_collisions: HashSet<String>,
 }
 
 impl<'a> Checker<'a> {
@@ -1410,6 +1435,7 @@ impl<'a> Checker<'a> {
             globals: HashMap::new(),
             anonymous_types: HashMap::new(),
             current_type_paths: Vec::new(),
+            reported_member_name_collisions: HashSet::new(),
         }
     }
 
@@ -1580,6 +1606,7 @@ impl<'a> Checker<'a> {
         let Some(type_sig) = self.lookup_type_local(&decl.name) else {
             return;
         };
+        self.check_declared_member_name_collisions(decl);
         self.current_type_paths.push(decl.name.clone());
         for param in &decl.type_params {
             if param.reified {
@@ -1746,6 +1773,76 @@ impl<'a> Checker<'a> {
 
         self.pop_type_params();
         self.current_type_paths.pop();
+    }
+
+    fn check_declared_member_name_collisions(&mut self, decl: &TypeDecl) {
+        let mut members = HashMap::<String, (MemberNamespaceKind, crate::source::Span)>::new();
+
+        for member in &decl.members {
+            let entries = match member {
+                TypeMember::Field(field) => {
+                    vec![(&field.name, MemberNamespaceKind::Field, field.span)]
+                }
+                TypeMember::Method(method) => vec![(
+                    &method.name,
+                    if method.getter {
+                        MemberNamespaceKind::Getter
+                    } else {
+                        MemberNamespaceKind::Method
+                    },
+                    method.span,
+                )],
+                TypeMember::Case(case) => case
+                    .fields
+                    .iter()
+                    .map(|field| (&field.name, MemberNamespaceKind::Field, field.span))
+                    .collect(),
+            };
+
+            for (name, kind, span) in entries {
+                if let Some((previous_kind, _)) = members.get(name).copied() {
+                    if previous_kind.conflicts_with(kind) {
+                        self.report_member_name_collision(
+                            &decl.name,
+                            name,
+                            previous_kind,
+                            kind,
+                            span,
+                        );
+                    }
+                } else {
+                    members.insert(name.clone(), (kind, span));
+                }
+            }
+        }
+    }
+
+    fn report_member_name_collision(
+        &mut self,
+        owner: &str,
+        name: &str,
+        previous: MemberNamespaceKind,
+        current: MemberNamespaceKind,
+        span: crate::source::Span,
+    ) {
+        let key = format!("{owner}::{name}");
+        if !self.reported_member_name_collisions.insert(key) {
+            return;
+        }
+        let message = if previous == MemberNamespaceKind::Getter
+            && current == MemberNamespaceKind::Getter
+        {
+            format!(
+                "getter '{name}' is declared more than once on '{owner}'; getters cannot be overloaded"
+            )
+        } else {
+            format!(
+                "member '{name}' on '{owner}' is declared as both a {} and a {}; stored fields, getters, and methods must use distinct names",
+                previous.label(),
+                current.label()
+            )
+        };
+        self.add_error("member_name_collision", message, span);
     }
 
     fn check_implicit_constructor_contract(&mut self, decl: &TypeDecl) {
@@ -2091,6 +2188,7 @@ impl<'a> Checker<'a> {
             );
             return;
         }
+        self.check_extension_member_name_collisions(target_name, &type_sig, block);
         let previous_extension_target = self.current_extension_target.clone();
         self.current_extension_target = Some(target_name.to_string());
         self.push_type_params_with_conditions(
@@ -2110,6 +2208,66 @@ impl<'a> Checker<'a> {
         }
         self.pop_type_params();
         self.current_extension_target = previous_extension_target;
+    }
+
+    fn check_extension_member_name_collisions(
+        &mut self,
+        target_name: &str,
+        type_sig: &TypeSig,
+        block: &ExtensionBlock,
+    ) {
+        let mut checked = HashSet::new();
+        for method in &block.methods {
+            if !checked.insert(method.name.as_str()) {
+                continue;
+            }
+            let current_kind = if method.getter {
+                MemberNamespaceKind::Getter
+            } else {
+                MemberNamespaceKind::Method
+            };
+            if type_sig
+                .fields
+                .iter()
+                .any(|field| field.name == method.name)
+            {
+                self.report_member_name_collision(
+                    target_name,
+                    &method.name,
+                    MemberNamespaceKind::Field,
+                    current_kind,
+                    method.span,
+                );
+                continue;
+            }
+
+            let declared = type_sig.methods.get(&method.name).into_iter().flatten();
+            let extensions = self
+                .module
+                .extensions
+                .get(target_name)
+                .and_then(|methods| methods.get(&method.name))
+                .into_iter()
+                .flatten();
+            let overloads = declared.chain(extensions).collect::<Vec<_>>();
+            if overloads.len() <= 1 || !overloads.iter().any(|candidate| candidate.getter) {
+                continue;
+            }
+            let previous_kind = if current_kind == MemberNamespaceKind::Method
+                || overloads.iter().all(|candidate| candidate.getter)
+            {
+                MemberNamespaceKind::Getter
+            } else {
+                MemberNamespaceKind::Method
+            };
+            self.report_member_name_collision(
+                target_name,
+                &method.name,
+                previous_kind,
+                current_kind,
+                method.span,
+            );
+        }
     }
 
     fn check_method(&mut self, method: &MethodDecl, owner: &TypeSig) {
@@ -18962,6 +19120,82 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_member_names_shared_across_fields_getters_and_methods() {
+        let program = parse_inline(
+            r#"
+class FieldAndMethod {
+    label Str
+    def label() Str = this.label
+}
+
+class FieldAndGetter {
+    value Int
+    def value Int = this.value
+}
+
+class GetterAndMethod {
+    def status Str = "ready"
+    def status(verbose Bool) Str = if verbose { "ready" } else { "" }
+}
+
+class RepeatedGetter {
+    def name Str = "first"
+    def name Str = "second"
+}
+"#,
+        );
+        let result = check_program(&program);
+        let collisions = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "member_name_collision")
+            .count();
+        assert_eq!(collisions, 4, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_ordinary_method_overloads_with_the_same_name() {
+        let program = parse_inline(
+            r#"
+class Formatter {
+    def format(value Int) Str = value.toStr()
+    def format(value Str) Str = value
+}
+
+def main(formatter Formatter) Unit {
+    println(formatter.format(1), formatter.format("one"))
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_extension_members_that_collide_with_fields_or_getters() {
+        let program = parse_inline(
+            r#"
+class Item {
+    label Str
+    def status Str = "ready"
+}
+
+ext Item {
+    def label() Str = this.label
+    def status(verbose Bool) Str = if verbose { this.status } else { "" }
+}
+"#,
+        );
+        let result = check_program(&program);
+        let collisions = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "member_name_collision")
+            .count();
+        assert_eq!(collisions, 2, "{:#?}", result.diagnostics);
     }
 
     #[test]

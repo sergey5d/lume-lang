@@ -267,7 +267,9 @@ fn freely_mixes_boolean_and_let_condition_clauses() {
     let result = parse(
         r#"
 def choose(ready Bool, maybe Int?) Int {
-    if ready && let first <- maybe && first > 0 {
+    if ready &&
+        let first <- maybe &&
+        first > 0 {
         println(first)
     }
 
@@ -275,11 +277,15 @@ def choose(ready Bool, maybe Int?) Int {
         println(second)
     }
 
-    while ready && let current <- maybe && current > 0 {
+    while ready &&
+        let current <- maybe &&
+        current > 0 {
         break
     }
 
-    return if ready && let selected <- maybe && selected > 0 {
+    return if ready &&
+        let selected <- maybe &&
+        selected > 0 {
         selected
     } else {
         0
@@ -445,6 +451,54 @@ def choose(a Bool, b Bool, c Bool) Int {
             })] if matches!(right.as_ref(), Expr::Binary { op: BinaryOp::And, .. })
         )
     ));
+}
+
+#[test]
+fn requires_grouped_disjunctions_with_extraction_clauses() {
+    let invalid = [
+        "def run(cached Bool, ready Bool, maybeUser User?) Unit { if cached || ready && let user <- maybeUser { println(user) } }",
+        "def run(ready Bool, overrideEnabled Bool, maybeUser User?) Unit { if let user <- maybeUser && user.active || overrideEnabled { println(user) } }",
+        "def run(cached Bool, ready Bool, maybeUser User?) Unit { while cached || ready && let user <- maybeUser { println(user) break } }",
+        "def run(cached Bool, ready Bool, maybeUser User?) Int = if cached || ready && let user <- maybeUser { 1 } else { 0 }",
+    ];
+
+    for source in invalid {
+        let result = parse(source);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "ambiguous_condition_grouping"),
+            "expected grouping diagnostic for {source:?}, got {:#?}",
+            result.diagnostics
+        );
+    }
+
+    let grouped = parse(
+        r#"
+def run(cached Bool, ready Bool, overrideEnabled Bool, maybeUser User?) Unit {
+    if (cached || ready) && let user <- maybeUser {
+        println(user)
+    }
+
+    if let user <- maybeUser && (user.active || overrideEnabled) {
+        println(user)
+    }
+
+    while (cached || ready) && let user <- maybeUser {
+        println(user)
+        break
+    }
+
+    value = if let user <- maybeUser && (user.active || overrideEnabled) {
+        user
+    } else {
+        return
+    }
+}
+"#,
+    );
+    assert!(grouped.diagnostics.is_empty(), "{:#?}", grouped.diagnostics);
 }
 
 #[test]
@@ -1506,6 +1560,62 @@ value = object {
 }
 
 #[test]
+fn anonymous_members_allow_method_overloads_but_reject_other_name_collisions() {
+    let overloaded = parse(
+        r#"
+def main() Unit {
+    formatter = object {
+        def format(value Int) Str = value.toStr()
+        def format(value Str) Str = value
+    }
+}
+"#,
+    );
+    assert!(
+        overloaded.diagnostics.is_empty(),
+        "{:#?}",
+        overloaded.diagnostics
+    );
+
+    for source in [
+        r#"
+def main() Unit {
+    value = object {
+        label Str = "x"
+        def label() Str = this.label
+    }
+}
+"#,
+        r#"
+def main() Unit {
+    value = object {
+        def label Str = "x"
+        def label() Str = this.label
+    }
+}
+"#,
+        r#"
+def main() Unit {
+    value = object {
+        def label Str = "x"
+        def label Str = "y"
+    }
+}
+"#,
+    ] {
+        let result = parse(source);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "member_name_collision"),
+            "expected member collision for {source:?}, got {:#?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
 fn allows_member_order_with_anonymous_fields_after_methods() {
     for source in [
         r#"object {
@@ -2087,7 +2197,7 @@ fn parses_bracket_map_literal_as_map_construction() {
 }
 
 #[test]
-fn rejects_singleton_tuples_in_values_types_and_patterns() {
+fn rejects_singleton_tuples_as_trailing_commas() {
     for source in [
         "def main() Unit { value = (1,) }",
         "def main() Unit { value (Int,) = 1 }",
@@ -2098,11 +2208,61 @@ fn rejects_singleton_tuples_in_values_types_and_patterns() {
             result
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code == "singleton_tuple"),
-            "expected singleton tuple diagnostic for {source:?}, got {:#?}",
+                .any(|diagnostic| diagnostic.code == "trailing_comma"),
+            "expected trailing comma diagnostic for {source:?}, got {:#?}",
             result.diagnostics
         );
     }
+}
+
+#[test]
+fn rejects_trailing_commas_outside_construction_literals() {
+    let cases = [
+        "class Box[T,] { value T }",
+        "class Box[T when T with Eq[T],] { value T }",
+        "def identity(value Int,) Int = value",
+        "def useCallback(callback fn(Int,) Int) Int = callback(1)",
+        "type Pair = (Int, Str,)",
+        "class Box[T] { value T }\ndef main() Unit { box Box[Int,] = Box(1) }",
+        "def consume(left Int, right Int) Unit {}\ndef main() Unit { consume(1, 2,) }",
+        "def main() Unit { pair = (1, 2,) }",
+        "def main() Unit { mapper = (left, right,) => left + right }",
+        "def main() Unit { let (left, right,) = (1, 2) }",
+        "def main(value Int?) Unit { match value { case Some(item,) => println(item) case None => () } }",
+        "def main(values [Int]) Unit { match values { case [left, right,] => println(left + right) case _ => () } }",
+        "class User { name Str age Int }\ndef main(user User) Unit { match user { case User { name, } => println(name) case _ => () } }",
+        "use app/models/{User, Account,}",
+        "interface First {}\ninterface Second {}\nclass Both with First, Second, {}",
+        "def main() Unit { value { left Int, right Int, } = { left: 1, right: 2 } }",
+        "class Pair { left Int right Int new(left Int, right Int,) { this.left = left this.right = right } }",
+        "def main(values [[Int]]) Unit { value = values[0, 1,] }",
+    ];
+
+    for source in cases {
+        let result = parse(source);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "trailing_comma"),
+            "expected trailing comma diagnostic for {source:?}, got {:#?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
+fn allows_trailing_commas_in_collection_and_brace_construction_literals() {
+    let result = parse(
+        r#"
+def main() Unit {
+    values = [1, 2,]
+    lookup = ["left": 1, "right": 2,]
+    point = { x: 10, y: 20, }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]
@@ -3182,6 +3342,118 @@ def run(user User) Str {
         Pattern::Record { path, fields, .. }
             if path.is_empty() && fields.len() == 2
     ));
+}
+
+#[test]
+fn distinguishes_headless_record_conditions_from_grouped_let_clauses() {
+    let result = parse(
+        r#"
+def run(user User, maybeUser User?, maybeLeft Int?, maybeRight Int?) Unit {
+    if let { age: 18 } = user {
+        println("eighteen")
+    }
+    while let { age: 18 } = user {
+        break
+    }
+    if let {
+        left <- maybeLeft
+        right <- maybeRight
+    } {
+        println(left + right)
+    }
+    if let { age } as matched <- maybeUser {
+        println(age, matched.age)
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function");
+    };
+    let CallableBody::Block(body) = &function.body else {
+        panic!("expected block body");
+    };
+
+    let Stmt::If(if_stmt) = &body.statements[0] else {
+        panic!("expected if statement");
+    };
+    assert!(matches!(
+        if_stmt.condition_clauses.as_slice(),
+        [IfConditionClause::Let(RefutableClause {
+            pattern: Pattern::Record { path, fields, .. },
+            ..
+        })] if path.is_empty() && fields.len() == 1
+    ));
+
+    let Stmt::While(while_stmt) = &body.statements[1] else {
+        panic!("expected while statement");
+    };
+    assert!(matches!(
+        while_stmt.condition_clauses.as_slice(),
+        [IfConditionClause::Let(RefutableClause {
+            pattern: Pattern::Record { path, fields, .. },
+            ..
+        })] if path.is_empty() && fields.len() == 1
+    ));
+
+    let Stmt::If(grouped_if) = &body.statements[2] else {
+        panic!("expected grouped if statement");
+    };
+    assert_eq!(grouped_if.condition_clauses.len(), 2);
+    assert!(
+        grouped_if
+            .condition_clauses
+            .iter()
+            .all(|clause| matches!(clause, IfConditionClause::Let(_)))
+    );
+
+    let Stmt::If(extracted_if) = &body.statements[3] else {
+        panic!("expected extracted record if statement");
+    };
+    assert!(matches!(
+        extracted_if.condition_clauses.as_slice(),
+        [IfConditionClause::Let(RefutableClause {
+            pattern: Pattern::Extract { inner, .. },
+            ..
+        })] if matches!(
+            inner.as_ref(),
+            Pattern::Alias { inner, name, .. }
+                if name == "matched"
+                    && matches!(inner.as_ref(), Pattern::Record { path, fields, .. }
+                        if path.is_empty() && fields.len() == 1)
+        )
+    ));
+}
+
+#[test]
+fn parses_typed_wildcards_in_nested_patterns() {
+    let cases = [
+        "Some(_ Int)",
+        "(_ Int, _)",
+        "[_ Int]",
+        "User { age: _ Int }",
+    ];
+
+    for source in cases {
+        let (pattern, diagnostics) = parse_pattern_only(source);
+        assert!(diagnostics.is_empty(), "{source}: {diagnostics:#?}");
+        let nested = match &pattern {
+            Pattern::Constructor { args, .. } => &args[0],
+            Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => &elements[0],
+            Pattern::Record { fields, .. } => &fields[0].pattern,
+            other => panic!("expected nested pattern for {source}, got {other:#?}"),
+        };
+        assert!(matches!(
+            nested,
+            Pattern::Type {
+                name: None,
+                target: TypeRef::Named { name, .. },
+                ..
+            } if name == "Int"
+        ));
+    }
 }
 
 #[test]
@@ -4476,7 +4748,7 @@ def main() Unit {
 }
 
 #[test]
-fn rejects_trailing_block_lambda_head_on_next_line() {
+fn parses_trailing_block_lambda_head_on_next_line() {
     let result = parse(
         r#"
 def make() Unit = values.map {
@@ -4484,13 +4756,7 @@ def make() Unit = values.map {
 }
 "#,
     );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_trailing_lambda" && diag.message.contains("same line as '{'")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]
@@ -5136,6 +5402,60 @@ def main() Unit {
     merged = {
         ...named
         ...located
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn parses_newline_continuation_after_assignment_and_extraction_operators() {
+    let result = parse(
+        r#"
+def run(maybe Int?, values [Int], pairs [(Int, Int)]) Unit {
+    var total = 0
+    total :=
+        10
+    total +=
+        5
+    total -=
+        3
+    total *=
+        2
+    total /=
+        4
+    total %=
+        4
+
+    let item <-
+        maybe
+    else return
+
+    let {
+        grouped <-
+            maybe
+    }
+    else return
+
+    if let selected <-
+        maybe && selected > 0 {
+        println(selected)
+    }
+
+    while let current <-
+        maybe && current > 0 {
+        break
+    }
+
+    for value <-
+        values {
+        total += value
+    }
+
+    for let (left, right) <-
+        pairs {
+        total += left + right
     }
 }
 "#,

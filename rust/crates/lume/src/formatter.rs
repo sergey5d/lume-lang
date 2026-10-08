@@ -435,13 +435,12 @@ mod tests {
 
     #[test]
     fn aligns_comma_separated_entries_and_closing_delimiters() {
-        let result = format(
-            "def main() Unit {\nvalues = Vector(\n1,\n2,\n)\npoint = {\nx: 1,\ny: 2\n}\n}\n",
-        );
+        let result =
+            format("def main() Unit {\nvalues = [\n1,\n2,\n]\npoint = {\nx: 1,\ny: 2\n}\n}\n");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def main() Unit {\n    values = Vector(\n        1,\n        2,\n    )\n    point = {\n        x: 1,\n        y: 2\n    }\n}\n"
+            "def main() Unit {\n    values = [\n        1,\n        2,\n    ]\n    point = {\n        x: 1,\n        y: 2\n    }\n}\n"
         );
     }
 

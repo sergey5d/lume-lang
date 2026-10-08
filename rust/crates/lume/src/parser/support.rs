@@ -49,6 +49,16 @@ impl<'a> Parser<'a> {
         while self.match_token(TokenKind::Newline) {}
     }
 
+    pub(super) fn report_trailing_comma(&mut self, comma: Span, context: &'static str) {
+        self.diagnostics.push(Diagnostic::error(
+            "trailing_comma",
+            format!(
+                "trailing commas are allowed only in bracket collection and brace construction literals; remove the trailing comma from {context}"
+            ),
+            comma,
+        ));
+    }
+
     pub(super) fn consume(&mut self, kind: TokenKind, message: &'static str) -> Option<Span> {
         if self.match_token(kind) {
             Some(self.previous_span())
@@ -281,6 +291,58 @@ impl<'a> Parser<'a> {
         matches!(parser.current_kind(), TokenKind::Eq | TokenKind::LeftArrow)
     }
 
+    pub(super) fn is_headless_record_pattern_assignment_start(&self) -> bool {
+        if !self.at(TokenKind::LBrace) {
+            return false;
+        }
+        let mut index = self.index;
+        let mut depth = 0usize;
+        loop {
+            let Some(token) = self.tokens.get(index) else {
+                return false;
+            };
+            match token.kind {
+                TokenKind::LBrace => depth += 1,
+                TokenKind::RBrace => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        index += 1;
+                        break;
+                    }
+                }
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+            index += 1;
+        }
+        while self
+            .tokens
+            .get(index)
+            .is_some_and(|token| token.kind == TokenKind::Newline)
+        {
+            index += 1;
+        }
+        if self
+            .tokens
+            .get(index)
+            .is_some_and(|token| token.kind == TokenKind::Keyword(Keyword::As))
+        {
+            index += 1;
+            if !self
+                .tokens
+                .get(index)
+                .is_some_and(|token| token.kind == TokenKind::Identifier)
+            {
+                return false;
+            }
+            index += 1;
+        }
+        matches!(
+            self.tokens.get(index).map(|token| token.kind),
+            Some(TokenKind::Eq | TokenKind::LeftArrow)
+        )
+    }
+
     pub(super) fn parenthesized_for_generator_header(&self) -> bool {
         if !self.at(TokenKind::LParen) {
             return false;
@@ -332,6 +394,26 @@ impl<'a> Parser<'a> {
         self.scan_if_condition_segment_end(start, true)
     }
 
+    pub(super) fn find_top_level_or(&self, start: usize, end: usize) -> Option<Span> {
+        let mut paren_depth = 0isize;
+        let mut brace_depth = 0isize;
+        let mut bracket_depth = 0isize;
+        for token in &self.tokens[start..end] {
+            let at_top_level = paren_depth == 0 && brace_depth == 0 && bracket_depth == 0;
+            match token.kind {
+                TokenKind::OrOr if at_top_level => return Some(token.span),
+                TokenKind::LParen => paren_depth += 1,
+                TokenKind::RParen => paren_depth = paren_depth.saturating_sub(1),
+                TokenKind::LBrace => brace_depth += 1,
+                TokenKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
+                TokenKind::LBracket => bracket_depth += 1,
+                TokenKind::RBracket => bracket_depth = bracket_depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        None
+    }
+
     fn scan_if_condition_segment_end(&self, start: usize, stop_at_any_and: bool) -> usize {
         let mut i = start;
         let mut paren_depth = 0isize;
@@ -369,9 +451,12 @@ impl<'a> Parser<'a> {
                 TokenKind::AndAnd
                     if at_top_level
                         && (stop_at_any_and
-                            || self.tokens.get(i + 1).is_some_and(|next| {
-                                next.kind == TokenKind::Keyword(Keyword::Let)
-                            })) =>
+                            || self.tokens[i + 1..]
+                                .iter()
+                                .find(|next| next.kind != TokenKind::Newline)
+                                .is_some_and(|next| {
+                                    next.kind == TokenKind::Keyword(Keyword::Let)
+                                })) =>
                 {
                     break;
                 }

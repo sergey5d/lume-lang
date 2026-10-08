@@ -6,14 +6,14 @@ interface Named {
 }
 
 class Person with Named {
-    name Str
+    storedName Str
 
     def name() Str =
-        this.name
+        this.storedName
 }
 
 
 def main() Unit {
-    person Person = Person { name: "Ada" }
+    person Person = Person { storedName: "Ada" }
     println("with", person.name())
 }

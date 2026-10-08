@@ -218,6 +218,8 @@ impl<'a> Parser<'a> {
                 return self.parse_single_let_pattern_stmt(start);
             }
             let (clauses, clauses_end) = self.parse_refutable_clause_block("let")?;
+            let else_checkpoint = self.checkpoint();
+            self.skip_newlines();
             if self.match_keyword(Keyword::Else) {
                 let else_block = self.parse_block_or_inline_stmt_body("let else")?;
                 let end = else_block.span;
@@ -229,6 +231,7 @@ impl<'a> Parser<'a> {
                     span: start.cover(end),
                 }));
             }
+            self.restore(else_checkpoint);
             if let Some(clause) = clauses
                 .iter()
                 .find(|clause| Self::pattern_contains_extract(&clause.pattern))
@@ -260,14 +263,9 @@ impl<'a> Parser<'a> {
             );
             return None;
         }
-        if operator != "=" && self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                format!("expected expression on same line after \"{operator}\""),
-            );
-            return None;
-        }
         let value = self.parse_expr()?;
+        let else_checkpoint = self.checkpoint();
+        self.skip_newlines();
         if self.match_keyword(Keyword::Else) {
             let else_block = self.parse_block_or_inline_stmt_body("let else")?;
             let end = else_block.span;
@@ -279,6 +277,7 @@ impl<'a> Parser<'a> {
                 span: start.cover(end),
             }));
         }
+        self.restore(else_checkpoint);
         if Self::pattern_contains_extract(&pattern) {
             self.diagnostics.push(Diagnostic::error(
                 "missing_let_extract_fallback",
@@ -445,6 +444,12 @@ impl<'a> Parser<'a> {
     ) -> Option<Vec<Binding>> {
         let mut bindings = vec![self.parse_brace_destructure_binding(mutable)?];
         while self.match_token(TokenKind::Comma) {
+            let comma = self.previous_span();
+            self.skip_newlines();
+            if self.at(TokenKind::RBrace) {
+                self.report_trailing_comma(comma, "brace destructuring pattern");
+                break;
+            }
             bindings.push(self.parse_brace_destructure_binding(mutable)?);
         }
         Some(bindings)
@@ -453,6 +458,12 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_binding_list(&mut self, mutable: bool) -> Option<Vec<Binding>> {
         let mut bindings = vec![self.parse_binding(mutable)?];
         while self.match_token(TokenKind::Comma) {
+            let comma = self.previous_span();
+            self.skip_newlines();
+            if self.at(TokenKind::Eq) {
+                self.report_trailing_comma(comma, "binding list");
+                break;
+            }
             bindings.push(self.parse_binding(mutable)?);
         }
         Some(bindings)
@@ -463,12 +474,8 @@ impl<'a> Parser<'a> {
         while self.match_token(TokenKind::Comma) {
             let comma = self.previous_span();
             self.skip_newlines();
-            if bindings.len() == 1 && self.at(TokenKind::RParen) {
-                self.diagnostics.push(Diagnostic::error(
-                    "singleton_tuple",
-                    "singleton tuple patterns are not supported; remove the trailing comma or destructure the full tuple arity, for example 'let (x, _, _) = tuple3'",
-                    comma,
-                ));
+            if self.at(TokenKind::RParen) {
+                self.report_trailing_comma(comma, "tuple destructuring pattern");
                 break;
             }
             bindings.push(self.parse_binding(mutable)?);
@@ -506,68 +513,9 @@ impl<'a> Parser<'a> {
         self.at(TokenKind::Identifier)
     }
 
-    fn is_headless_record_pattern_assignment_start(&self) -> bool {
-        if !self.at(TokenKind::LBrace) {
-            return false;
-        }
-        let mut index = self.index;
-        let mut depth = 0usize;
-        loop {
-            let Some(token) = self.tokens.get(index) else {
-                return false;
-            };
-            match token.kind {
-                TokenKind::LBrace => depth += 1,
-                TokenKind::RBrace => {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
-                        index += 1;
-                        break;
-                    }
-                }
-                TokenKind::Eof => return false,
-                _ => {}
-            }
-            index += 1;
-        }
-        while self
-            .tokens
-            .get(index)
-            .is_some_and(|token| token.kind == TokenKind::Newline)
-        {
-            index += 1;
-        }
-        if self
-            .tokens
-            .get(index)
-            .is_some_and(|token| token.kind == TokenKind::Keyword(Keyword::As))
-        {
-            index += 1;
-            if !self
-                .tokens
-                .get(index)
-                .is_some_and(|token| token.kind == TokenKind::Identifier)
-            {
-                return false;
-            }
-            index += 1;
-        }
-        matches!(
-            self.tokens.get(index).map(|token| token.kind),
-            Some(TokenKind::Eq | TokenKind::LeftArrow)
-        )
-    }
-
     pub(super) fn parse_for_let_generator_head(&mut self) -> Option<ForBinding> {
         let pattern = self.parse_pattern()?;
         self.consume_for_generator_arrow()?;
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                "expected expression on same line after \"<-\"",
-            );
-            return None;
-        }
         let iterable = self.parse_expr_without_trailing_block_call()?;
         let end = iterable.span();
         Some(ForBinding {
@@ -604,16 +552,6 @@ impl<'a> Parser<'a> {
             self.restore(checkpoint);
             return None;
         };
-        if !matches!(operator, AssignOp::Assign) && self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                format!(
-                    "expected expression on same line after \"{}\"",
-                    self.tokens[self.index.saturating_sub(1)].lexeme
-                ),
-            );
-            return None;
-        }
         let Some(values) = self.parse_expr_list() else {
             self.restore(checkpoint);
             return None;
@@ -715,13 +653,6 @@ impl<'a> Parser<'a> {
             let binding = self.parse_plain_for_generator_binding()?;
             let target_span = binding.span;
             self.consume_for_generator_arrow()?;
-            if self.at(TokenKind::Newline) {
-                self.error_at_current(
-                    "expected_expression",
-                    "expected expression on same line after \"<-\"",
-                );
-                return None;
-            }
             let iterable = self.parse_expr_without_trailing_block_call()?;
             ForBinding {
                 span: target_span.cover(iterable.span()),

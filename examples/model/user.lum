@@ -7,15 +7,11 @@ module user
 class Person {
     name Str
     age Int
-
-    def name() Str = this.name
-
-    def age() Int = this.age
 }
 
 
 def main() Unit {
     person = Person { name: "Ada", age: 36 }
-    println(person.name())
-    println(person.age())
+    println(person.name)
+    println(person.age)
 }

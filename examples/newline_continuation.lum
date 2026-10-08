@@ -12,6 +12,14 @@
 # match stmt 9
 # update Ada 42
 # merge Ada Tampa
+# mutation 2
+# extract 9
+# grouped extract 8
+# conditional extract 4
+# conditional chain 6
+# for continuation 6
+# for let continuation 5
+# lambda continuation 8 9
 # total 80
 
 def helper() Int =
@@ -86,6 +94,61 @@ def main() Unit {
         ...located
     }
 
+    var mutation = 0
+    mutation :=
+        10
+    mutation +=
+        5
+    mutation -=
+        3
+    mutation *=
+        2
+    mutation /=
+        4
+    mutation %=
+        4
+
+    let extracted <-
+        Some(9)
+    else return
+
+    let {
+        groupedExtracted <-
+            Some(8)
+    }
+    else return
+
+    var conditionalExtractedValue = 0
+    if let conditionalExtracted <-
+        Some(4) && conditionalExtracted > 0 {
+        conditionalExtractedValue := conditionalExtracted
+    }
+
+    var conditionalChain = 0
+    if true &&
+        let chained <- Some(6) &&
+        chained > 0 {
+        conditionalChain := chained
+    }
+
+    var continuedFor = 0
+    for value <-
+        [1, 2, 3] {
+        continuedFor +=
+            value
+    }
+
+    var continuedForLet = 0
+    for let (left, right) <-
+        [(2, 3)] {
+        continuedForLet +=
+            left + right
+    }
+
+    lambdaContinuation = [7, 8].map {
+        value => value + 1
+    }
+
     helperValue Int = helper()
 
     total Int = sum +
@@ -112,5 +175,13 @@ def main() Unit {
     println("match stmt", fromMatchStmt)
     println("update", updated.name, updated.age)
     println("merge", merged.name, merged.location)
+    println("mutation", mutation)
+    println("extract", extracted)
+    println("grouped extract", groupedExtracted)
+    println("conditional extract", conditionalExtractedValue)
+    println("conditional chain", conditionalChain)
+    println("for continuation", continuedFor)
+    println("for let continuation", continuedForLet)
+    println("lambda continuation", lambdaContinuation[0], lambdaContinuation[1])
     println("total", total)
 }

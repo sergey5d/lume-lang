@@ -495,6 +495,12 @@ impl<'a> Parser<'a> {
             if !self.match_token(TokenKind::Comma) {
                 break;
             }
+            let comma = self.previous_span();
+            self.skip_newlines();
+            if self.at(TokenKind::RBrace) {
+                self.report_trailing_comma(comma, "use symbol list");
+                break;
+            }
         }
         let end = self.consume(TokenKind::RBrace, "expected '}' after use symbol list")?;
         Some((symbols, open.cover(end)))
@@ -943,7 +949,12 @@ impl<'a> Parser<'a> {
                 if !self.match_token(TokenKind::Comma) {
                     break;
                 }
+                let comma = self.previous_span();
                 self.skip_newlines();
+                if self.at(TokenKind::RParen) {
+                    self.report_trailing_comma(comma, "constructor parameter list");
+                    break;
+                }
             }
         }
         self.consume(
@@ -964,7 +975,12 @@ impl<'a> Parser<'a> {
             params.push(self.parse_constructor_param(TokenKind::RBrace)?);
             self.skip_newlines();
             if self.match_token(TokenKind::Comma) {
+                let comma = self.previous_span();
                 self.skip_newlines();
+                if self.at(TokenKind::RBrace) {
+                    self.report_trailing_comma(comma, "constructor parameter block");
+                    break;
+                }
             }
         }
         self.consume(

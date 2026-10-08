@@ -53,14 +53,7 @@ impl<'a> Parser<'a> {
         &mut self,
         owner: &'static str,
     ) -> Option<RefutableClause> {
-        let (pattern, operator) = self.parse_refutable_pattern_head(owner)?;
-        if operator != "=" && self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                format!("expected expression on same line after \"{operator}\""),
-            );
-            return None;
-        }
+        let (pattern, _) = self.parse_refutable_pattern_head(owner)?;
         let value = self.parse_expr_without_trailing_block_call()?;
         let span = pattern.span().cover(value.span());
         Some(RefutableClause {
@@ -74,14 +67,7 @@ impl<'a> Parser<'a> {
         &mut self,
         owner: &'static str,
     ) -> Option<RefutableClause> {
-        let (pattern, operator) = self.parse_refutable_pattern_head(owner)?;
-        if operator != "=" && self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "expected_expression",
-                format!("expected expression on same line after \"{operator}\""),
-            );
-            return None;
-        }
+        let (pattern, _) = self.parse_refutable_pattern_head(owner)?;
         let value = self.parse_if_condition_let_value()?;
         let span = pattern.span().cover(value.span());
         Some(RefutableClause {
@@ -135,9 +121,13 @@ impl<'a> Parser<'a> {
             "if let"
         };
         let mut clauses = Vec::new();
+        let mut has_extraction_clause = false;
+        let mut ungrouped_disjunctions = Vec::new();
         loop {
             if self.match_keyword(Keyword::Let) {
-                if self.at(TokenKind::LBrace) {
+                has_extraction_clause = true;
+                if self.at(TokenKind::LBrace) && !self.is_headless_record_pattern_assignment_start()
+                {
                     let (grouped, _) = self.parse_refutable_clause_block(let_owner)?;
                     clauses.extend(grouped.into_iter().map(IfConditionClause::Let));
                 } else {
@@ -154,29 +144,35 @@ impl<'a> Parser<'a> {
                 );
                 return None;
             } else {
-                clauses.push(IfConditionClause::Expr(self.parse_if_condition_expr()?));
+                let start = self.index;
+                let end = self.scan_if_condition_expr_end(start);
+                if let Some(span) = self.find_top_level_or(start, end) {
+                    ungrouped_disjunctions.push(span);
+                }
+                clauses.push(IfConditionClause::Expr(
+                    self.parse_condition_expr_until(end)?,
+                ));
             }
 
             if !self.match_token(TokenKind::AndAnd) {
                 break;
             }
-            if self.at(TokenKind::Newline) {
-                self.error_at_current(
-                    "expected_expression",
-                    "expected expression on same line after \"&&\"",
-                );
-                return None;
+            self.skip_newlines();
+        }
+        if has_extraction_clause {
+            for span in ungrouped_disjunctions {
+                self.diagnostics.push(Diagnostic::error(
+                    "ambiguous_condition_grouping",
+                    "disjunctions in conditions with extraction clauses must be parenthesized; group the '||' expression to make the sequential clause boundary explicit",
+                    span,
+                ));
             }
         }
         Some(clauses)
     }
 
-    pub(super) fn parse_if_condition_expr(&mut self) -> Option<Expr> {
-        let end = self.scan_if_condition_expr_end(self.index);
-        self.parse_condition_expr_until(end)
-    }
-
     fn parse_if_condition_let_value(&mut self) -> Option<Expr> {
+        self.skip_newlines();
         let end = self.scan_if_condition_let_value_end(self.index);
         self.parse_condition_expr_until(end)
     }
@@ -292,8 +288,7 @@ impl<'a> Parser<'a> {
             TokenKind::Identifier if self.is_placeholder_identifier() => {
                 let start = self.current_span();
                 self.advance();
-                if depth == 0
-                    && self.binding_type_starts_on_same_line(start)
+                if self.binding_type_starts_on_same_line(start)
                     && matches!(
                         self.current_kind(),
                         TokenKind::Identifier | TokenKind::LBrace
@@ -413,11 +408,7 @@ impl<'a> Parser<'a> {
                 let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RParen) {
-                    self.diagnostics.push(Diagnostic::error(
-                        "singleton_tuple",
-                        "singleton tuple patterns are not supported; remove the trailing comma or destructure the full tuple arity, for example 'let (x, _, _) = tuple3'",
-                        comma,
-                    ));
+                    self.report_trailing_comma(comma, "tuple pattern");
                     self.consume(TokenKind::RParen, "expected ')' after tuple pattern")?;
                     return Some(first);
                 }
@@ -425,6 +416,12 @@ impl<'a> Parser<'a> {
                 loop {
                     elements.push(self.parse_pattern_at_depth(depth + 1)?);
                     if !self.match_token(TokenKind::Comma) {
+                        break;
+                    }
+                    let comma = self.previous_span();
+                    self.skip_newlines();
+                    if self.at(TokenKind::RParen) {
+                        self.report_trailing_comma(comma, "tuple pattern");
                         break;
                     }
                 }
@@ -472,6 +469,12 @@ impl<'a> Parser<'a> {
                         loop {
                             args.push(self.parse_pattern_at_depth(depth + 1)?);
                             if !self.match_token(TokenKind::Comma) {
+                                break;
+                            }
+                            let comma = self.previous_span();
+                            self.skip_newlines();
+                            if self.at(TokenKind::RParen) {
+                                self.report_trailing_comma(comma, "constructor pattern");
                                 break;
                             }
                         }
@@ -587,6 +590,7 @@ impl<'a> Parser<'a> {
             });
 
             let separated_by_comma = self.match_token(TokenKind::Comma);
+            let mut comma = separated_by_comma.then(|| self.previous_span());
             let separated_by_newline = if !separated_by_comma {
                 self.match_token(TokenKind::Newline)
             } else {
@@ -594,10 +598,17 @@ impl<'a> Parser<'a> {
             };
             self.skip_newlines();
             if separated_by_newline {
-                self.match_token(TokenKind::Comma);
+                if self.match_token(TokenKind::Comma) {
+                    comma = Some(self.previous_span());
+                }
                 self.skip_newlines();
             }
             if self.at(TokenKind::RBrace) || self.at(TokenKind::Eof) {
+                if self.at(TokenKind::RBrace) {
+                    if let Some(comma) = comma {
+                        self.report_trailing_comma(comma, "record pattern");
+                    }
+                }
                 break;
             }
             if !separated_by_comma && !separated_by_newline {
@@ -633,12 +644,25 @@ impl<'a> Parser<'a> {
                         span: rest_start.cover(name_span),
                     });
                     self.skip_newlines();
+                    if self.match_token(TokenKind::Comma) {
+                        let comma = self.previous_span();
+                        self.skip_newlines();
+                        if self.at(TokenKind::RBracket) {
+                            self.report_trailing_comma(comma, "list pattern");
+                        }
+                    }
                     break;
                 }
 
-                elements.push(self.parse_list_pattern_element(depth + 1)?);
+                elements.push(self.parse_pattern_at_depth(depth + 1)?);
                 self.skip_newlines();
                 if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+                let comma = self.previous_span();
+                self.skip_newlines();
+                if self.at(TokenKind::RBracket) {
+                    self.report_trailing_comma(comma, "list pattern");
                     break;
                 }
             }
@@ -649,28 +673,6 @@ impl<'a> Parser<'a> {
             rest,
             span: start.cover(end),
         })
-    }
-
-    fn parse_list_pattern_element(&mut self, depth: usize) -> Option<Pattern> {
-        let checkpoint = self.checkpoint();
-        if self.at(TokenKind::Identifier) || self.is_placeholder_identifier() {
-            let (name, start) = self.expect_binding_name("expected vector pattern")?;
-            if self.binding_type_starts_on_same_line(start)
-                && matches!(
-                    self.current_kind(),
-                    TokenKind::Identifier | TokenKind::LBrace
-                )
-            {
-                let target = self.parse_pattern_type_ref()?;
-                return Some(Pattern::Type {
-                    name: (name != "_").then_some(name),
-                    span: start.cover(target.span()),
-                    target,
-                });
-            }
-        }
-        self.restore(checkpoint);
-        self.parse_pattern_at_depth(depth)
     }
 }
 

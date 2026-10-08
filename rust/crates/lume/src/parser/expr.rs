@@ -691,7 +691,8 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let mut fields = Vec::new();
         let mut methods = Vec::new();
-        let mut member_names = Vec::<(String, Span)>::new();
+        let mut field_names = Vec::<(String, Span)>::new();
+        let mut method_names = Vec::<(String, bool, Span)>::new();
 
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let annotations = self.parse_annotations()?;
@@ -706,22 +707,50 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 if let Some((_, previous)) =
-                    member_names.iter().find(|(name, _)| name == &method.name)
+                    field_names.iter().find(|(name, _)| name == &method.name)
                 {
                     self.diagnostics.push(
                         Diagnostic::error(
-                            "duplicate_shape_member",
-                            format!("duplicate anonymous shape member '{}'", method.name),
+                            "member_name_collision",
+                            format!(
+                                "anonymous shape member '{}' is declared as both a stored field and a {}; stored fields, getters, and methods must use distinct names",
+                                method.name,
+                                if method.getter { "getter" } else { "method" }
+                            ),
                             method.span,
                         )
                         .with_note(format!(
-                            "the first '{}' member is at line {}",
+                            "the '{}' field is at line {}",
                             method.name, previous.start_pos.line
                         )),
                     );
-                } else {
-                    member_names.push((method.name.clone(), method.span));
+                } else if let Some((_, previous_getter, previous)) = method_names
+                    .iter()
+                    .find(|(name, getter, _)| name == &method.name && (method.getter || *getter))
+                {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "member_name_collision",
+                            if method.getter && *previous_getter {
+                                format!(
+                                    "anonymous shape getter '{}' is declared more than once; getters cannot be overloaded",
+                                    method.name
+                                )
+                            } else {
+                                format!(
+                                    "anonymous shape member '{}' is declared as both a getter and a method; getters and methods must use distinct names",
+                                    method.name
+                                )
+                            },
+                            method.span,
+                        )
+                        .with_note(format!(
+                            "the previous '{}' declaration is at line {}",
+                            method.name, previous.start_pos.line
+                        )),
+                    );
                 }
+                method_names.push((method.name.clone(), method.getter, method.span));
                 methods.push(method);
                 self.skip_newlines();
                 continue;
@@ -770,7 +799,7 @@ impl<'a> Parser<'a> {
                 return None;
             };
             let field_span = name_span.cover(initializer.span());
-            if let Some((_, previous)) = member_names.iter().find(|(member, _)| member == &name) {
+            if let Some((_, previous)) = field_names.iter().find(|(member, _)| member == &name) {
                 self.diagnostics.push(
                     Diagnostic::error(
                         "duplicate_shape_member",
@@ -782,8 +811,26 @@ impl<'a> Parser<'a> {
                         name, previous.start_pos.line
                     )),
                 );
+            } else if let Some((_, getter, previous)) =
+                method_names.iter().find(|(member, _, _)| member == &name)
+            {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "member_name_collision",
+                        format!(
+                            "anonymous shape member '{}' is declared as both a {} and a stored field; stored fields, getters, and methods must use distinct names",
+                            name,
+                            if *getter { "getter" } else { "method" }
+                        ),
+                        field_span,
+                    )
+                    .with_note(format!(
+                        "the '{}' callable is at line {}",
+                        name, previous.start_pos.line
+                    )),
+                );
             } else {
-                member_names.push((name.clone(), field_span));
+                field_names.push((name.clone(), field_span));
             }
             fields.push(FieldDecl {
                 annotations,
@@ -796,17 +843,20 @@ impl<'a> Parser<'a> {
             });
 
             let separated_by_comma = self.match_token(TokenKind::Comma);
+            let comma = separated_by_comma.then(|| self.previous_span());
             let separated_by_newline = if separated_by_comma {
                 false
             } else {
                 self.match_token(TokenKind::Newline)
             };
             self.skip_newlines();
-            if !separated_by_comma
-                && !separated_by_newline
-                && !self.at(TokenKind::RBrace)
-                && !self.at(TokenKind::Eof)
-            {
+            if self.at(TokenKind::RBrace) {
+                if let Some(comma) = comma {
+                    self.report_trailing_comma(comma, "anonymous object body");
+                }
+                break;
+            }
+            if !separated_by_comma && !separated_by_newline && !self.at(TokenKind::Eof) {
                 self.error_at_current(
                     "unexpected_token",
                     "expected ',' or newline between anonymous shape members",
@@ -882,7 +932,8 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let mut fields = Vec::new();
         let mut methods = Vec::new();
-        let mut member_names = Vec::<(String, Span)>::new();
+        let mut field_names = Vec::<(String, Span)>::new();
+        let mut method_names = Vec::<(String, bool, Span)>::new();
 
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let annotations = self.parse_annotations()?;
@@ -897,22 +948,50 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 if let Some((_, previous)) =
-                    member_names.iter().find(|(name, _)| name == &method.name)
+                    field_names.iter().find(|(name, _)| name == &method.name)
                 {
                     self.diagnostics.push(
                         Diagnostic::error(
-                            "duplicate_object_member",
-                            format!("duplicate anonymous object member '{}'", method.name),
+                            "member_name_collision",
+                            format!(
+                                "anonymous object member '{}' is declared as both a stored field and a {}; stored fields, getters, and methods must use distinct names",
+                                method.name,
+                                if method.getter { "getter" } else { "method" }
+                            ),
                             method.span,
                         )
                         .with_note(format!(
-                            "the first '{}' member is at line {}",
+                            "the '{}' field is at line {}",
                             method.name, previous.start_pos.line
                         )),
                     );
-                } else {
-                    member_names.push((method.name.clone(), method.span));
+                } else if let Some((_, previous_getter, previous)) = method_names
+                    .iter()
+                    .find(|(name, getter, _)| name == &method.name && (method.getter || *getter))
+                {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "member_name_collision",
+                            if method.getter && *previous_getter {
+                                format!(
+                                    "anonymous object getter '{}' is declared more than once; getters cannot be overloaded",
+                                    method.name
+                                )
+                            } else {
+                                format!(
+                                    "anonymous object member '{}' is declared as both a getter and a method; getters and methods must use distinct names",
+                                    method.name
+                                )
+                            },
+                            method.span,
+                        )
+                        .with_note(format!(
+                            "the previous '{}' declaration is at line {}",
+                            method.name, previous.start_pos.line
+                        )),
+                    );
                 }
+                method_names.push((method.name.clone(), method.getter, method.span));
                 methods.push(method);
             } else {
                 let field = self.parse_field_decl(annotations, visibility)?;
@@ -927,7 +1006,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 if let Some((_, previous)) =
-                    member_names.iter().find(|(name, _)| name == &field.name)
+                    field_names.iter().find(|(name, _)| name == &field.name)
                 {
                     self.diagnostics.push(
                         Diagnostic::error(
@@ -940,8 +1019,26 @@ impl<'a> Parser<'a> {
                             field.name, previous.start_pos.line
                         )),
                     );
+                } else if let Some((_, getter, previous)) =
+                    method_names.iter().find(|(name, _, _)| name == &field.name)
+                {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "member_name_collision",
+                            format!(
+                                "anonymous object member '{}' is declared as both a {} and a stored field; stored fields, getters, and methods must use distinct names",
+                                field.name,
+                                if *getter { "getter" } else { "method" }
+                            ),
+                            field.span,
+                        )
+                        .with_note(format!(
+                            "the '{}' callable is at line {}",
+                            field.name, previous.start_pos.line
+                        )),
+                    );
                 } else {
-                    member_names.push((field.name.clone(), field.span));
+                    field_names.push((field.name.clone(), field.span));
                 }
                 fields.push(field);
             }
@@ -1484,9 +1581,14 @@ impl<'a> Parser<'a> {
                         return None;
                     };
                     if self.match_token(TokenKind::Comma) {
+                        let mut comma = self.previous_span();
                         let mut items = vec![index];
                         loop {
                             self.skip_newlines();
+                            if self.at(TokenKind::RBracket) {
+                                self.report_trailing_comma(comma, "index list");
+                                break;
+                            }
                             items.push(self.with_trailing_block_calls_allowed(|parser| {
                                 parser.parse_slice_bound()
                             })?);
@@ -1494,6 +1596,7 @@ impl<'a> Parser<'a> {
                             if !self.match_token(TokenKind::Comma) {
                                 break;
                             }
+                            comma = self.previous_span();
                         }
                         let tuple_span = items
                             .first()
@@ -1534,7 +1637,7 @@ impl<'a> Parser<'a> {
             if self.allow_trailing_block_call && self.at(TokenKind::LBrace) {
                 let start = expr.span();
                 let open_span = self.current_span();
-                let arg = if let Some(arg) = self.parse_trailing_lambda_block_arg(open_span) {
+                let arg = if let Some(arg) = self.parse_trailing_lambda_block_arg() {
                     arg
                 } else if self.looks_like_brace_record_literal(true)
                     || Self::is_constructor_like_expr(&expr)
@@ -1542,7 +1645,7 @@ impl<'a> Parser<'a> {
                     self.parse_brace_record_literal_expr()?
                 } else {
                     let block = self.parse_block()?;
-                    if !self.validate_trailing_lambda_block(&block, open_span) {
+                    if !self.validate_trailing_lambda_block(&block) {
                         self.diagnostics.push(Diagnostic::error(
                             "invalid_trailing_lambda",
                         "trailing lambda syntax requires an explicit parameter arrow; write '{ () => ... }' for zero-argument callbacks",
@@ -1588,13 +1691,10 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_trailing_lambda_block_arg(&mut self, open_span: Span) -> Option<Expr> {
+    fn parse_trailing_lambda_block_arg(&mut self) -> Option<Expr> {
         let checkpoint = self.checkpoint();
         let start = self.consume(TokenKind::LBrace, "expected '{'")?;
-        if self.current_span().start_pos.line != open_span.start_pos.line {
-            self.restore(checkpoint);
-            return None;
-        }
+        self.skip_newlines();
         let Some((params, lambda_start)) = self.parse_lambda_head() else {
             self.restore(checkpoint);
             return None;
@@ -1651,10 +1751,9 @@ impl<'a> Parser<'a> {
             type_path: self.type_path.clone(),
             nested_items: Vec::new(),
         };
-        let open = parser.current_span();
         parser.advance();
-        parser.current_span().start_pos.line == open.start_pos.line
-            && parser.parse_lambda_head().is_some()
+        parser.skip_newlines();
+        parser.parse_lambda_head().is_some()
     }
 
     fn parse_lambda_head(&mut self) -> Option<(Vec<LambdaParam>, Span)> {
@@ -1731,7 +1830,12 @@ impl<'a> Parser<'a> {
             };
             params.push(param);
             while self.match_token(TokenKind::Comma) {
+                let comma = self.previous_span();
                 self.skip_newlines();
+                if self.at(TokenKind::RParen) {
+                    self.report_trailing_comma(comma, "lambda parameter list");
+                    break;
+                }
                 let Some(param) = self.parse_lambda_param(params.len()) else {
                     self.restore(checkpoint);
                     return None;
@@ -1809,24 +1913,16 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn validate_trailing_lambda_block(&mut self, block: &Block, open_span: Span) -> bool {
+    fn validate_trailing_lambda_block(&mut self, block: &Block) -> bool {
         let [
             Stmt::Expr(ExprStmt {
-                expr: Expr::Lambda { span, .. },
+                expr: Expr::Lambda { .. },
                 ..
             }),
         ] = block.statements.as_slice()
         else {
             return false;
         };
-
-        if span.start_pos.line != open_span.start_pos.line {
-            self.diagnostics.push(Diagnostic::error(
-                "invalid_trailing_lambda",
-                "trailing lambda parameters must start on the same line as '{'",
-                *span,
-            ));
-        }
         true
     }
 
@@ -1877,8 +1973,10 @@ impl<'a> Parser<'a> {
             if !self.match_token(TokenKind::Comma) {
                 break;
             }
+            let comma = self.previous_span();
             self.skip_newlines();
             if self.at(TokenKind::RParen) {
+                self.report_trailing_comma(comma, "call argument list");
                 break;
             }
             let _ = start;
@@ -2343,11 +2441,7 @@ impl<'a> Parser<'a> {
             let mut items = vec![first];
             self.skip_newlines();
             if self.at(TokenKind::RParen) {
-                self.diagnostics.push(Diagnostic::error(
-                    "singleton_tuple",
-                    "singleton tuple values are not supported; remove the trailing comma to use the value directly",
-                    comma,
-                ));
+                self.report_trailing_comma(comma, "tuple expression");
                 let end = self.consume(TokenKind::RParen, "expected ')' after tuple literal")?;
                 return Some(Expr::Group {
                     inner: Box::new(items.pop()?),
@@ -2356,8 +2450,10 @@ impl<'a> Parser<'a> {
             }
             items.push(self.parse_expr()?);
             while self.match_token(TokenKind::Comma) {
+                let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RParen) {
+                    self.report_trailing_comma(comma, "tuple expression");
                     break;
                 }
                 items.push(self.parse_expr()?);

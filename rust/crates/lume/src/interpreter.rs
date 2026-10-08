@@ -8181,7 +8181,7 @@ mod tests {
             def main() Unit {
                 users = Vector(
                     SecretUser("Sergey", "secret-1", "Tampa"),
-                    SecretUser("Ada", "secret-2", "London"),
+                    SecretUser("Ada", "secret-2", "London")
                 )
 
                 for user <- users {

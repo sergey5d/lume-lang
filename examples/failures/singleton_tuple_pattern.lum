@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*singleton tuple patterns are not supported.*
+# .*trailing commas are allowed only in bracket collection and brace construction literals.*
 
 def main() Unit {
     let (value,) = (1, 2)

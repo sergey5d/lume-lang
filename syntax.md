@@ -2494,9 +2494,22 @@ Supported callable references:
 - bound `this` method, such as `this.mapUser`
 - bound named-object method, such as `User.toDto`
 
-Fields still win over methods when names collide. A member field whose value is
-already a function is passed as that function value, not eta-expanded as a
-method reference.
+Stored fields, computed getters, and methods share one member-name namespace.
+A type cannot reuse a name across those categories, including through an
+`ext` block, so member access and callable references never need
+field-versus-method precedence:
+
+```txt
+class Amount {
+    label Str
+
+    def label() Str = this.label  # invalid: field/method collision
+}
+```
+
+Ordinary methods may still overload one another. Getters cannot be overloaded
+and cannot share a name with an ordinary method. A function-valued field remains
+an ordinary field value and can be called normally.
 
 Block lambda:
 
@@ -2536,10 +2549,14 @@ mapper = item => {
 A formatter may correct suspicious indentation, but indentation alone does not
 change scope or make a program invalid.
 
-Trailing lambda call syntax is also allowed when passing a lambda as an argument. The trailing brace body must contain an explicit lambda head with `=>`, and that lambda head must start on the same line as the opening `{`:
+Trailing lambda call syntax is also allowed when passing a lambda as an argument. The trailing brace body must contain an explicit lambda head with `=>`. Layout before that head is insignificant:
 
 ```txt
 items.map { x => x + 1 }
+
+items.map {
+    x => x + 1
+}
 
 items.repeat { () => 5 }
 
@@ -3003,6 +3020,26 @@ Collection literals are distinguished by their contents and spread sources:
 [...map]              # map copy
 ```
 
+Trailing commas are permitted only in bracket collection literals and brace
+construction literals:
+
+```txt
+values = [1, 2,]
+lookup = ["left": 1, "right": 2,]
+point = { x: 10, y: 20, }
+```
+
+They are rejected in every other comma-separated form, including declarations,
+generic clauses, calls, function types, tuples, and patterns:
+
+```txt
+def process(name Str, amount Int,) Unit {}  # invalid
+fn(Int,) Int                                # invalid
+Box[Int,]                                  # invalid
+(1, 2,)                                    # invalid
+let (left, right,) = pair                  # invalid
+```
+
 An empty `[]` literal contains no elements that identify its collection family
 or type arguments. It therefore requires an immediate expected vector or map
 type:
@@ -3038,8 +3075,8 @@ Tuple literal:
 pair (Str, Int) = ("a", 1)
 ```
 
-Tuples always contain at least two elements. Singleton tuple values, types, and
-patterns are all invalid:
+Tuples always contain at least two elements. The general trailing-comma rule
+also rejects singleton tuple spellings:
 
 ```txt
 value = (1,)                 # invalid; use 1
@@ -3258,11 +3295,18 @@ result = if value > 0 {
 
 Statement `if`, expression `if`, and `while` use the same condition grammar.
 Boolean expressions keep the ordinary operator precedence in every context,
-so `a || b && c` always means `a || (b && c)`. Extraction clauses may be mixed
-with Boolean segments in either order by writing `&& let`:
+so a Boolean-only condition such as `a || b && c` means `a || (b && c)`.
+Extraction clauses may be mixed with Boolean segments in either order by
+writing `&& let`:
 
 ```txt
 if ready && let user <- maybeUser && user.active {
+    println(user.name)
+}
+
+if ready &&
+    let user <- maybeUser &&
+    user.active {
     println(user.name)
 }
 
@@ -3274,6 +3318,28 @@ name = if ready && let user <- maybeUser {
     user.name
 } else {
     "unknown"
+}
+```
+
+When a condition contains an extraction clause, every disjunction in its
+Boolean segments must be parenthesized. This makes the sequential clause
+boundary explicit:
+
+```txt
+if (cached || ready) && let user <- maybeUser {
+    println(user.name)
+}
+
+if let user <- maybeUser && (user.active || overrideEnabled) {
+    println(user.name)
+}
+```
+
+This visually familiar but misleading form is rejected:
+
+```txt
+if cached || ready && let user <- maybeUser {  # invalid
+    println(user.name)
 }
 ```
 
@@ -3618,6 +3684,19 @@ if let {
 }
 ```
 
+A headless record pattern remains one condition rather than a grouped clause
+block when its closing brace is followed by `=` or `<-`:
+
+```txt
+if let { age: 18 } = user {
+    println("eighteen")
+}
+
+while let { status: Active } = user {
+    process(user)
+}
+```
+
 And grouped clauses can use `<-` too:
 
 ```txt
@@ -3630,8 +3709,10 @@ if let {
 ```
 
 Condition clauses can be chained so later clauses can use earlier bindings.
-An outer `&& let` begins another extraction clause, while ordinary Boolean
-segments retain the usual `&&`-before-`||` precedence:
+An outer `&& let` begins another extraction clause. Boolean segments retain
+ordinary operator precedence, but any `||` in a condition that also contains
+an extraction clause must be grouped explicitly. Newlines after `&&` do not
+change clause recognition:
 
 ```txt
 if let Some { value as left } = maybeLeft && let Ok { value as right } = compute() && right > left {
@@ -3641,10 +3722,21 @@ if let Some { value as left } = maybeLeft && let Ok { value as right } = compute
 if ready && let left <- maybeLeft && left > 0 {
     println(left)
 }
+
+if ready &&
+    let left <- maybeLeft &&
+    left > 0 {
+    println(left)
+}
+
+if (cached || ready) && let user <- maybeUser && (user.active || overrideEnabled) {
+    println(user.name)
+}
 ```
 
 Extraction clauses are joined with `&&`; `||` remains an ordinary Boolean
-operator inside a Boolean segment.
+operator inside a Boolean segment but requires parentheses in a mixed
+condition.
 
 ## `for`
 
@@ -4176,6 +4268,18 @@ case Ok(value Worker) => ...
 case Some(x) as some => println(x, some.value)
 ```
 
+Typed wildcard patterns compose at every nesting depth. Replacing a binding
+name with `_` discards that binding without changing the available pattern
+forms:
+
+```txt
+case _ Int => ...
+case Some(_ Int) => ...
+case (_ Int, _) => ...
+case [_ Int, _ Str] => ...
+case User { age: _ Int } => ...
+```
+
 Aliasing a unary union-alternative pattern retains that concrete alternative view,
 so the complete alias exposes the matched fields while the nested pattern
 continues to bind or test its payload.
@@ -4570,7 +4674,9 @@ Newline continuation:
   - match arrow: `=>`
   - separators / chaining markers: `,`, `.`
 - Delimited forms allow layout after opening delimiters and after commas, but they do not make leading binary/update operators valid by themselves.
-- Binding/function/method `=` may start its expression on the same line or the next indented line.
+- Operators that require a right-hand expression may start that expression on
+  the same line or the next indented line: `=`, `:=`, `+=`, `-=`, `*=`, `/=`,
+  `%=`, and `<-`.
 - Named function and method declarations require `def` and have three accepted body forms:
   - `def name(...) { ... }` for block bodies, with implicit `Unit` when the return type is omitted
   - `def name(...) = { ... }` for block bodies whose return type is inferred when omitted
@@ -4582,6 +4688,14 @@ Newline continuation:
 ```txt
 a =
     1 + 2
+
+var total = 0
+total +=
+    calculateTotal()
+
+let item <-
+    findItem()
+else return
 ```
 
 - while this stays valid:

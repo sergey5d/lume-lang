@@ -1,0 +1,56 @@
+# EXPECT:
+# if record
+# while record
+# option wildcard
+# tuple wildcard
+# list wildcard
+# record wildcard
+# 0
+
+shape User {
+    name Str
+    age Int
+}
+
+shape Box {
+    value Any
+}
+
+def main() Int {
+    user = User("Ada", 18)
+    if let { age: 18 } = user {
+        println("if record")
+    }
+
+    var checking = true
+    while let { age: 18 } = user && checking {
+        println("while record")
+        checking := false
+    }
+
+    maybe Option[Any] = Some(Any(5))
+    match maybe {
+        case Some(_ Int) => println("option wildcard")
+        case Some(_) => ()
+        case None => ()
+    }
+
+    pair (Any, Str) = (Any(5), "value")
+    match pair {
+        case (_ Int, _) => println("tuple wildcard")
+        case _ => ()
+    }
+
+    values [Any] = [Any(5)]
+    match values {
+        case [_ Int] => println("list wildcard")
+        case _ => ()
+    }
+
+    box = Box(Any(5))
+    match box {
+        case Box { value: _ Int } => println("record wildcard")
+        case _ => ()
+    }
+    0
+}
