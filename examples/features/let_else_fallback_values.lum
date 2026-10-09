@@ -5,11 +5,10 @@
 # arrow fallback
 # record Ada 3
 # record fallback1 fallback2
-# tuple Ada 3
-# tuple positional1 positional2
+# pair Ada 3
+# pair positional1 positional2
 # new new1 new2
 # grouped left right
-# grouped tuple a fallback c fallback
 # grouped shape a fallback c fallback
 
 class SomeClass {
@@ -35,25 +34,18 @@ def recordFallback(value Any) Str {
     field1 + " " + length
 }
 
-def tupleFallback(value Any) Str {
-    let SomeClass { field1, field2 } = value else ("positional1", "positional2")
-    field1 + " " + field2
+def pairFallback(value Option[(Str, Str)]) Str {
+    let Some(pair) = value else ("positional1", "positional2")
+    pair[0] + " " + pair[1]
 }
 
 def contextualNewFallback(value Any) Str {
-    let SomeClass { field1, field2 as length } = value else new {
-        field1: "new1"
-        length: "new2"
+    let SomeClass { field1, field2 as length } = value else {
+        field1 = "new1"
+        length = "new2"
+        new { field1, length }
     }
     field1 + " " + length
-}
-
-def groupedTuple(left Str?, right Str?) Str {
-    let {
-        a <- left
-        c <- right
-    } else ("a fallback", "c fallback")
-    a + " " + c
 }
 
 def groupedShape(left Str?, right Str?) Str {
@@ -77,11 +69,10 @@ def main() Unit {
     missing Any = 0
     println("record", recordFallback(present))
     println("record", recordFallback(missing))
-    println("tuple", tupleFallback(present))
-    println("tuple", tupleFallback(missing))
+    println("pair", pairFallback(Some(("Ada", "3"))))
+    println("pair", pairFallback(None))
     println("new", contextualNewFallback(missing))
 
-    println("grouped", groupedTuple(Some("left"), Some("right")))
-    println("grouped tuple", groupedTuple(None, Some("unused")))
+    println("grouped", groupedShape(Some("left"), Some("right")))
     println("grouped shape", groupedShape(Some("unused"), None))
 }

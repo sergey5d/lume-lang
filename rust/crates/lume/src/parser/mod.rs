@@ -35,14 +35,14 @@ struct Parser<'a> {
 }
 
 enum ExpressionBraceBody {
-    Construction(Expr),
+    Expression(Expr),
     Block(Block),
 }
 
 impl ExpressionBraceBody {
     fn into_expr(self) -> Expr {
         match self {
-            Self::Construction(expr) => expr,
+            Self::Expression(expr) => expr,
             Self::Block(block) => Expr::Block {
                 span: block.span,
                 body: block,
@@ -52,7 +52,7 @@ impl ExpressionBraceBody {
 
     fn into_block(self) -> Block {
         match self {
-            Self::Construction(expr) => {
+            Self::Expression(expr) => {
                 let span = expr.span();
                 Block {
                     statements: vec![Stmt::Expr(ExprStmt { expr, span })],

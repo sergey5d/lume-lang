@@ -3961,12 +3961,12 @@ def main() Unit {
     position Position = new(3, 4)
     anonymous = new { x, y }
     empty = new {}
-    bareEmpty = {}
+    structural {} = {}
     emptyWorker EmptyWorker = {}
     emptySet Set[Str] = {}
     nothing Unit = {}
     callback fn() Unit = () => {}
-    shapeCallback = () => {}
+    shapeCallback = () => new {}
     callbackResult = { ...shapeCallback(), value: 4 }
     callback()
     widened Any = new { x, y }
@@ -4369,12 +4369,9 @@ def scalarFallback(value Int?) Int {
     item
 }
 
-def tupleFallback(left Int?, right Int?) Int {
-    let {
-        a <- left
-        b <- right
-    } else (5, 6)
-    a + b
+def tupleFallback(value Option[(Int, Int)]) Int {
+    let Some(pair) = value else (5, 6)
+    pair[0] + pair[1]
 }
 
 def shapeFallback(left Int?, right Int?) Int {
@@ -4391,7 +4388,7 @@ def shapeFallback(left Int?, right Int?) Int {
 def main() Int =
     explicit(Some(4)) + pair(Some(2), Some(3)) + pair(Some(2), None) +
         prefix([Some(1), Some(2), None, Some(9)]) + scalarFallback(None) +
-        tupleFallback(None, Some(99)) + shapeFallback(Some(99), None)
+        tupleFallback(None) + shapeFallback(Some(99), None)
 "#,
         )
         .expect("write source");

@@ -1140,12 +1140,12 @@ Field braces construct values. Parsing is entirely syntactic:
 { field: value }  # construction
 { ...source }     # construction
 { value }         # block expression
-{}                # empty construction expression
+{}                # empty construction; requires an expected target
 ```
 
 The type checker then applies the construction fields to a unique concrete
-class or named-shape target supplied by context. Without such a target, the
-fields infer an anonymous shape:
+class or named-shape target supplied by context. Without such a target,
+nonempty labeled fields or spreads infer an anonymous shape:
 
 ```txt
 point Point = {
@@ -1165,17 +1165,44 @@ anonymous = {
 
 copy = { ...source }
 
-empty = {}                 # empty anonymous shape
 nothing Unit = {}          # Unit, equivalent to ()
 user EmptyUser = {}        # zero-argument contextual construction
 names [Str] = {}           # zero-argument Vector construction
+
+empty = {}                 # error: no construction target
+empty = new {}             # empty anonymous shape
 ```
 
 Empty braces use the expected type when one exists. A concrete class, named
 shape, or collection target invokes its normal zero-argument construction and
 must satisfy the same constructor/default rules as any other call. Expected
-`Unit` produces `()`. Without an expected type, `{}` infers an empty anonymous
-shape; it is not silently defaulted to `Unit`.
+`Unit` produces `()`, and an explicit anonymous shape type supplies a structural
+target. `Any`, an interface, a union, or no expected type does not identify a
+construction target. In those contexts, use `()` for Unit or `new {}` to
+construct an empty anonymous shape explicitly:
+
+```txt
+unknown Any = {}       # error: Any is not a concrete target
+unknown Any = new {}   # empty shape, then widened to Any
+empty {} = {}          # explicit empty structural target
+point { x Int } = {}   # error: required field x is missing
+```
+
+An exact empty callable body has one deliberate default: it produces `Unit`.
+This applies to direct bodies and unannotated `=` bodies:
+
+```txt
+def noop() {}
+def noop2() = {}
+```
+
+An explicit return type remains an expected construction target, so these are
+different:
+
+```txt
+def createCache() Cache = {} # construct Cache
+def createCache() Cache {}   # error: empty Unit body does not return Cache
+```
 
 Context can flow from a typed binding, return type, indexed assignment, or a
 single known function parameter:
@@ -1288,16 +1315,30 @@ aliased = ModelPoint { x, y }
 Name resolution verifies that the complete target denotes a constructible type;
 qualification and explicit generic arguments do not alter that decision.
 
-Classifying leading braces as construction selects the first expression; it does
-not terminate the surrounding expression body. Postfix and infix syntax continue
-normally in callable bodies, lambdas, match cases, and `yield` bodies:
+Classifying leading braces selects the first expression; it does not terminate
+the surrounding expression body. In callable bodies, lambdas, and match cases,
+construction and ordinary block expressions continue through normal postfix and
+infix parsing:
 
 ```txt
 def readX() Int = { x: 1 }.x
+def answer() Int = { 40 } + 2
+def render() Str = { 42 }.toStr()
 
 def choose(flag Bool) Int = match flag {
-    case true => { x: 1 }.x
+    case true => { 40 } + 2
     case false => 0
+}
+```
+
+A bare block with no following operation remains a block body, and a direct
+callable body without `=` remains unchanged:
+
+```txt
+def calculation() = { 40 }
+
+def procedure() {
+    println("done")
 }
 ```
 
@@ -1694,7 +1735,7 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 { field: value }                 # contextual or anonymous field construction
 { ...source }                    # anonymous or contextual shape/class construction
 { expr }                         # block expression
-{}                               # empty contextual or anonymous construction
+{}                               # empty contextual construction; target required
 Type { field: value }            # brace field construction or union payload
 Type { field }                   # brace construction with a punned field
 call { x => ... }                # trailing lambda
@@ -1709,7 +1750,8 @@ new {}                           # empty anonymous or contextual construction
 
 Single-expression braces such as `{ value }` are block expressions, not
 anonymous shapes. Use `new { value }` when `value` is a punned field. Bare `{}`
-is empty construction; `new {}` is the equivalent explicit spelling.
+is empty construction and requires an expected target; `new {}` explicitly
+constructs an empty anonymous shape when no target exists.
 
 Braces that a declaration or control-flow construct requires remain body
 delimiters rather than expressions:
@@ -1717,7 +1759,8 @@ delimiters rather than expressions:
 ```txt
 class Marker {}                  # empty declaration body
 def noop() Unit {}               # empty callable body
-def noopValue() Unit = {}        # Unit-valued construction expression
+def noop2() = {}                 # inferred empty callable body; Unit
+def noopValue() Unit = {}        # expected Unit produces ()
 def make() EmptyUser = {}        # zero-argument construction expression
 ```
 
@@ -1931,8 +1974,8 @@ point Point = (1, 2)                   # invalid: tuple -> named shape
 anon { x Int, y Int } = new(1, 2)      # invalid: positional new cannot target an anonymous shape
 unknown = new(1, 2)                    # invalid: no concrete expected target
 user User = { name: "Ada", age: 10 }   # contextual class construction
-empty = {}                              # empty anonymous shape
-explicitEmpty = new {}                  # equivalent explicit spelling
+empty = {}                              # invalid: no construction target
+explicitEmpty = new {}                  # empty anonymous shape
 nothing Unit = {}                       # Unit from expected type
 ```
 
@@ -3611,23 +3654,29 @@ let {
 }
 ```
 
-When the fallback supplies values, it is evaluated lazily only after a failed
-match. A pattern with one binding accepts one assignable fallback value:
+When the fallback supplies a value, it is evaluated lazily only after a failed
+match. A pattern with one binding accepts one assignable fallback value. A tuple
+is still one value when that binding itself has a tuple type:
 
 ```txt
 let item <- maybeItem else defaultItem
+
+let Some(pair) = maybePair else (1, 2)
 ```
 
-A pattern or grouped extraction with multiple bindings accepts either an exact
-positional tuple or a shape whose fields exactly match the introduced local
-names:
+A pattern or grouped extraction with multiple bindings requires a shape whose
+fields exactly match the introduced local names:
 
 ```txt
-let User { name, label as title } = value else ("Unknown", "Untitled")
-
 let User { name, label as title } = value else {
     name: "Unknown"
     title: "Untitled"
+}
+
+let User { name, value } = candidate else {
+    name = defaultName
+    value = defaultValue
+    new { name, value }
 }
 
 let {
@@ -3639,10 +3688,15 @@ let {
 }
 ```
 
-Tuple values map to bindings in pattern order. Shape values map by the local
-binding names, including aliases (`title` above), not by source field names.
-The tuple arity and shape field set must match exactly, and every fallback value
-must be assignable to its corresponding binding type.
+Shape values map by local binding names, including aliases (`title` above), not
+by source field names. The shape field set must match exactly, and every field
+must be assignable to its corresponding binding type. A tuple is never
+distributed positionally across multiple bindings:
+
+```txt
+let User { name, value } = candidate else (defaultName, defaultValue)
+# error: use a shape with fields {name, value}
+```
 
 `let ... else` remains statement-oriented:
 - the pattern is matched against the right-hand value
@@ -4334,7 +4388,8 @@ Every `match` branch must start with `case`.
 
 Every case must have an explicit body after `=>`: an expression, `()` for Unit,
 or a nonempty block. In an expression body, `{}` is empty construction and uses
-the match expression's expected type when one exists.
+the match expression's expected type. Without a concrete target, use `()` for
+Unit or `new {}` for an empty anonymous shape.
 
 ```txt
 match value {

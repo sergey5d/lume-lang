@@ -3418,9 +3418,6 @@ impl<'a> SourceBodyEmitter<'a> {
             let _ = name;
         } else {
             let expected = match &tail.expr {
-                core::Expr::TupleLiteral { .. } => {
-                    ir::Type::Tuple(materialized.iter().map(|(_, _, ty)| ty.clone()).collect())
-                }
                 core::Expr::RecordLiteral { .. }
                 | core::Expr::ContextualNew {
                     style: core::CallStyle::Brace,
@@ -3451,12 +3448,8 @@ impl<'a> SourceBodyEmitter<'a> {
             out.push_str(" = ");
             out.push_str(&value);
             out.push_str(";\n");
-            let tuple = matches!(expected, ir::Type::Tuple(_));
-            for (index, (name, java_name, ty)) in materialized.iter().enumerate() {
-                let access = if tuple {
-                    let accessor = tuple_accessor_name(&format!("_{}", index + 1))?;
-                    format!("{fallback_value}.{accessor}()")
-                } else if matches!(expected, ir::Type::Record(_)) {
+            for (name, java_name, ty) in &materialized {
+                let access = if matches!(expected, ir::Type::Record(_)) {
                     format!(
                         "(({}) ((lume.core.LumeShape) {fallback_value}).get({}))",
                         self.names.value_type(ty),
@@ -9865,6 +9858,12 @@ impl<'a> SourceBodyEmitter<'a> {
             returns_tail,
             0,
         )?;
+        if returns_tail
+            && block.statements.is_empty()
+            && is_java_void_type(&self.function.return_ty)
+        {
+            out.push_str("            return lume.core.LumeUnit.INSTANCE;\n");
+        }
         out.push_str("        }");
         Some(out)
     }

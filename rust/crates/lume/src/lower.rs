@@ -2192,9 +2192,6 @@ impl<'a> FunctionLowerer<'a> {
                     _ => None,
                 });
             match tail {
-                Some(Expr::TupleLiteral { .. }) => Some(ir::Type::Tuple(
-                    bindings.iter().map(|binding| binding.ty.clone()).collect(),
-                )),
                 Some(Expr::RecordLiteral { .. })
                 | Some(Expr::ContextualNew {
                     style: core::CallStyle::Brace,
@@ -2240,17 +2237,11 @@ impl<'a> FunctionLowerer<'a> {
                 },
             });
         } else {
-            let tuple = matches!(self.operand_type(&value), Some(ir::Type::Tuple(_)));
-            for (index, binding) in bindings.iter().enumerate() {
-                let field_name = if tuple {
-                    format!("_{}", index + 1)
-                } else {
-                    binding.name.clone()
-                };
+            for binding in bindings {
                 let field = self.emit_temp_from_rvalue(
                     ir::RValue::Field {
                         base: value.clone(),
-                        name: field_name,
+                        name: binding.name.clone(),
                     },
                     binding.ty.clone(),
                     Some(block.span),

@@ -755,7 +755,7 @@ impl<'a> Parser<'a> {
         if self.at_match_case_body_boundary() {
             self.error_at_current(
                 "expected_match_case_body",
-                "expected match case body; use '()' for Unit or '{}' for empty construction",
+                "expected match case body; use '()' for Unit or 'new {}' for an empty shape",
             );
             return None;
         }
@@ -764,7 +764,7 @@ impl<'a> Parser<'a> {
             return self
                 .parse_expression_brace_body_with_continuation()
                 .map(|body| match body {
-                    ExpressionBraceBody::Construction(expr) => MatchCaseBody::Expr(expr),
+                    ExpressionBraceBody::Expression(expr) => MatchCaseBody::Expr(expr),
                     ExpressionBraceBody::Block(block) => MatchCaseBody::Block(block),
                 });
         }

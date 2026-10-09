@@ -3673,8 +3673,6 @@ impl<'a> Checker<'a> {
             return;
         }
 
-        let tuple_expected =
-            Ty::Tuple(bindings.iter().map(|(_, value)| value.ty.clone()).collect());
         let record_expected = Ty::Record(
             bindings
                 .iter()
@@ -3698,7 +3696,6 @@ impl<'a> Checker<'a> {
             return;
         }
         let expected = match tail {
-            Some(Expr::TupleLiteral { .. }) => Some(&tuple_expected),
             Some(Expr::RecordLiteral { .. })
             | Some(Expr::ContextualNew {
                 uses_brace_syntax: true,
@@ -3715,29 +3712,9 @@ impl<'a> Checker<'a> {
             return;
         }
         match &actual {
-            Ty::Tuple(items) if items.len() == bindings.len() => {
-                for ((name, value), actual) in bindings.iter().zip(items) {
-                    self.require_assignable(
-                        actual,
-                        &value.ty,
-                        block.span,
-                        "invalid_let_else_fallback",
-                        format!(
-                            "tuple fallback value for '{}' has type '{}' but expects '{}'",
-                            name,
-                            actual.describe(),
-                            value.ty.describe()
-                        ),
-                    );
-                }
-            }
-            Ty::Tuple(items) => self.add_error(
+            Ty::Tuple(_) => self.add_error(
                 "invalid_let_else_fallback",
-                format!(
-                    "tuple fallback supplies {} values but the pattern introduces {} bindings",
-                    items.len(),
-                    bindings.len()
-                ),
+                "positional tuple fallbacks are not allowed for multiple let bindings; use a shape whose fields match the binding names",
                 block.span,
             ),
             _ if self.shape_target_fields(&actual).is_some() => {
@@ -3786,8 +3763,7 @@ impl<'a> Checker<'a> {
             _ => self.add_error(
                 "invalid_let_else_fallback",
                 format!(
-                    "let else fallback for {} bindings must produce a {}-element tuple or a shape with fields {{{}}}, got '{}'",
-                    bindings.len(),
+                    "let else fallback for {} bindings must produce a shape with fields {{{}}}, got '{}'",
                     bindings.len(),
                     bindings
                         .iter()
@@ -5137,6 +5113,22 @@ impl<'a> Checker<'a> {
                     }];
                     return self.check_contextual_new_expr(&args, true, span, expected);
                 }
+                if fields.is_empty() && values.is_empty() {
+                    if matches!(expected, Ty::Record(_)) {
+                        return Ty::Record(Vec::new());
+                    }
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "missing_empty_construction_target",
+                            "empty construction '{}' requires an expected concrete type",
+                            expr.span(),
+                        )
+                        .with_help(
+                            "use '()' for Unit, 'new {}' for an empty shape, or specify the intended construction type",
+                        ),
+                    );
+                    return Ty::Unknown;
+                }
                 if !fields.is_empty() {
                     let expected_fields = match expected {
                         Ty::Record(fields) => fields.as_slice(),
@@ -6047,6 +6039,13 @@ impl<'a> Checker<'a> {
                         "'new { ... }' requires construction fields".to_string(),
                     );
                 };
+                if matches!(
+                    record,
+                    Expr::RecordLiteral { fields, values, .. }
+                        if fields.is_empty() && values.is_empty()
+                ) {
+                    return Ty::Record(Vec::new());
+                }
                 let record_expected = if matches!(expected, Ty::Record(_)) {
                     expected
                 } else {
@@ -17044,31 +17043,77 @@ class EmptyClass {}
 
 class DefaultedClass {
     value Int = 7
+
+    def noop() = {}
+}
+
+class ExplicitEmpty {
+    new() = {}
 }
 
 shape EmptyShape {}
 
 def noop() Unit = {}
+def noop2() = {}
 
 def makeEmpty() EmptyClass = {}
+
+def accept(value EmptyClass) Unit = ()
 
 def main() Unit {
     instance EmptyClass = {}
     defaulted DefaultedClass = {}
+    explicit = ExplicitEmpty()
     marker EmptyShape = {}
     values Vector[Str] = {}
     lookup Map[Str, Int] = {}
     set Set[Str] = {}
     nothing Unit = {}
-    anonymous = {}
+    anonymous = new {}
+    structural {} = {}
+    widened Any = new {}
+    accept({})
+    result Unit = noop2()
+    methodResult Unit = defaulted.noop()
     callback fn() Unit = () => {}
-    shapeCallback = () => {}
+    shapeCallback = () => new {}
     callbackResult = { ...shapeCallback(), value: 1 }
 }
 "#,
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_empty_construction_without_a_concrete_target() {
+        let program = parse_inline(
+            r#"
+interface Marker {}
+
+def main() Unit {
+    untyped = {}
+    widened Any = {}
+    abstract Marker = {}
+}
+"#,
+        );
+        let result = check_program(&program);
+        let diagnostics = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "missing_empty_construction_target")
+            .collect::<Vec<_>>();
+        assert_eq!(diagnostics.len(), 3, "{:#?}", result.diagnostics);
+        assert!(diagnostics.iter().all(|diagnostic| {
+            diagnostic
+                .message
+                .contains("requires an expected concrete type")
+                && diagnostic
+                    .helps
+                    .iter()
+                    .any(|help| help.contains("use '()' for Unit"))
+        }));
     }
 
     #[test]
@@ -17646,6 +17691,63 @@ def main() Unit {
                     && diag
                         .message
                         .contains("fallback for 'item' has type 'Unit' but expects 'Int'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_single_value_and_named_shape_let_else_fallbacks() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+    value Int
+}
+
+def main() Unit {
+    maybePair Option[(Int, Int)] = None
+    let Some(pair) = maybePair else (1, 2)
+
+    candidate Any = 0
+    let User { name, value } = candidate else {
+        name = "fallback"
+        value = 22
+        new { name, value }
+    }
+
+    OS.println(pair, name, value)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_positional_tuple_for_multiple_let_else_bindings() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+    value Int
+}
+
+def main() Unit {
+    candidate Any = 0
+    let User { name, value } = candidate else ("fallback", 22)
+    OS.println(name, value)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_let_else_fallback"
+                    && diag
+                        .message
+                        .contains("positional tuple fallbacks are not allowed")
             }),
             "{:#?}",
             result.diagnostics

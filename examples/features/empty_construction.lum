@@ -1,0 +1,31 @@
+# EXPECT:
+# 7
+# 7
+
+shape Marker {}
+
+class Cache {
+    value Int = 7
+}
+
+def noop() {}
+
+def noop2() = {}
+
+def createCache() Cache = {}
+
+def accept(cache Cache) Int = cache.value
+
+def main() Unit {
+    cache Cache = {}
+    marker Marker = {}
+    structural {} = {}
+    nothing Unit = {}
+    explicitUnit = ()
+    widened Any = new {}
+
+    noop()
+    noop2()
+    println(cache.value)
+    println(accept({}))
+}

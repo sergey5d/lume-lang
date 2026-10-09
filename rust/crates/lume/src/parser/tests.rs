@@ -2282,7 +2282,13 @@ fn parses_empty_braces_as_construction_in_expression_positions() {
 class Empty {}
 
 def expressionBody() Empty = {}
+def inferredUnit() = {}
 def blockBody() Unit {}
+
+def lambdas() Unit {
+    unitCallback = () => {}
+    shapeCallback = () => new {}
+}
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -2298,9 +2304,45 @@ def blockBody() Unit {}
     ));
 
     let Item::Function(block_body) = &program.items[2] else {
+        panic!("expected inferredUnit function");
+    };
+    assert!(!block_body.equals_body);
+    assert!(matches!(
+        block_body.body,
+        CallableBody::Block(ref block) if block.statements.is_empty()
+    ));
+
+    let Item::Function(block_body) = &program.items[3] else {
         panic!("expected blockBody function");
     };
     assert!(matches!(block_body.body, CallableBody::Block(_)));
+
+    let Item::Function(lambdas) = &program.items[4] else {
+        panic!("expected lambdas function");
+    };
+    let CallableBody::Block(body) = &lambdas.body else {
+        panic!("expected lambdas block body");
+    };
+    let Stmt::Binding(unit_callback) = &body.statements[0] else {
+        panic!("expected unit callback binding");
+    };
+    assert!(matches!(
+        unit_callback.values.as_slice(),
+        [Expr::Lambda {
+            body: LambdaBody::Block(block),
+            ..
+        }] if block.statements.is_empty()
+    ));
+    let Stmt::Binding(shape_callback) = &body.statements[1] else {
+        panic!("expected shape callback binding");
+    };
+    assert!(matches!(
+        shape_callback.values.as_slice(),
+        [Expr::Lambda {
+            body: LambdaBody::Expr(expr),
+            ..
+        }] if matches!(expr.as_ref(), Expr::ContextualNew { .. })
+    ));
 }
 
 #[test]
@@ -3252,6 +3294,87 @@ def run(values [Int]) Unit {
 }
 
 #[test]
+fn continues_expression_parsing_after_leading_block_expression() {
+    let result = parse(
+        r#"
+def answer() Int =
+    { 40 } + 2
+
+def render() Str =
+    { 42 }.toStr()
+
+def choose(flag Bool) Int = match flag {
+    case true => { 40 } + 2
+    case false => 0
+}
+
+def calculation() = {
+    40
+}
+
+def run() Unit {
+    mapper fn() Int = () => { 40 } + 2
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+
+    let Item::Function(answer) = &program.items[0] else {
+        panic!("expected answer function");
+    };
+    assert!(matches!(
+        &answer.body,
+        CallableBody::Expr(Expr::Binary {
+            left,
+            op: BinaryOp::Add,
+            ..
+        }) if matches!(left.as_ref(), Expr::Block { .. })
+    ));
+
+    let Item::Function(render) = &program.items[1] else {
+        panic!("expected render function");
+    };
+    assert!(matches!(render.body, CallableBody::Expr(Expr::Call { .. })));
+
+    let Item::Function(choose) = &program.items[2] else {
+        panic!("expected choose function");
+    };
+    let CallableBody::Expr(Expr::Match { cases, .. }) = &choose.body else {
+        panic!("expected match expression body");
+    };
+    assert!(matches!(
+        cases[0].body,
+        MatchCaseBody::Expr(Expr::Binary {
+            op: BinaryOp::Add,
+            ..
+        })
+    ));
+
+    let Item::Function(calculation) = &program.items[3] else {
+        panic!("expected calculation function");
+    };
+    assert!(matches!(calculation.body, CallableBody::Block(_)));
+
+    let Item::Function(run) = &program.items[4] else {
+        panic!("expected run function");
+    };
+    let CallableBody::Block(body) = &run.body else {
+        panic!("expected run block body");
+    };
+    let Stmt::Binding(mapper) = &body.statements[0] else {
+        panic!("expected mapper binding");
+    };
+    assert!(matches!(
+        &mapper.values[0],
+        Expr::Lambda {
+            body: LambdaBody::Expr(expr),
+            ..
+        } if matches!(expr.as_ref(), Expr::Binary { op: BinaryOp::Add, .. })
+    ));
+}
+
+#[test]
 fn parses_if_expression_and_calls() {
     let result = parse(
         r#"
@@ -3431,12 +3554,16 @@ class SomeClass {
     field2 Str
 }
 
-def run(value Any, left Str?, right Str?) Unit {
+def run(value Any, left Str?, right Str?, maybePair (Str, Str)?) Unit {
     let SomeClass { field1, field2 as length } = value else {
         field1: "fallback"
         length: "fallback"
     }
-    let SomeClass { field1 as first, field2 as second } = value else ("left", "right")
+    let SomeClass { field1 as first, field2 as second } = value else new {
+        first: "left"
+        second: "right"
+    }
+    let Some(pair) = maybePair else ("left", "right")
     let item <- left else "fallback"
     let {
         a <- left
@@ -3445,7 +3572,7 @@ def run(value Any, left Str?, right Str?) Unit {
         a: "left"
         c: "right"
     }
-    println(field1, length, first, second, item, a, c)
+    println(field1, length, first, second, pair, item, a, c)
 }
 "#,
     );
@@ -3467,17 +3594,27 @@ def run(value Any, left Str?, right Str?) Unit {
             ..
         })]
     ));
-    let Stmt::LetElse(tuple) = &body.statements[1] else {
-        panic!("expected tuple fallback")
+    let Stmt::LetElse(named) = &body.statements[1] else {
+        panic!("expected named fallback")
     };
     assert!(matches!(
-        tuple.else_block.statements.as_slice(),
+        named.else_block.statements.as_slice(),
+        [Stmt::Expr(ExprStmt {
+            expr: Expr::ContextualNew { .. },
+            ..
+        })]
+    ));
+    let Stmt::LetElse(single_tuple) = &body.statements[2] else {
+        panic!("expected single tuple-valued fallback")
+    };
+    assert!(matches!(
+        single_tuple.else_block.statements.as_slice(),
         [Stmt::Expr(ExprStmt {
             expr: Expr::TupleLiteral { .. },
             ..
         })]
     ));
-    let Stmt::LetElse(grouped) = &body.statements[3] else {
+    let Stmt::LetElse(grouped) = &body.statements[4] else {
         panic!("expected grouped fallback")
     };
     assert_eq!(grouped.clauses.len(), 2);

@@ -585,8 +585,14 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_optional_return_type()
         };
-        let equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
-        let body = self.parse_callable_body()?;
+        let mut equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
+        let mut body = self.parse_callable_body()?;
+        if equals_body && return_type.is_none() {
+            if let Some(block) = empty_construction_callable_block(&body) {
+                body = CallableBody::Block(block);
+                equals_body = false;
+            }
+        }
         let end = body.span();
         Some(FunctionDecl {
             annotations,
@@ -943,8 +949,12 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_constructor_param_list()?
         };
-        let equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
-        let body = self.parse_callable_body()?;
+        let mut equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
+        let mut body = self.parse_callable_body()?;
+        if let Some(block) = empty_construction_callable_block(&body) {
+            body = CallableBody::Block(block);
+            equals_body = false;
+        }
         let end = body.span();
         Some(MethodDecl {
             annotations,
@@ -1151,8 +1161,8 @@ impl<'a> Parser<'a> {
                 start,
             ));
         }
-        let equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
-        let body = if self.at(TokenKind::LBrace) || self.at(TokenKind::Eq) {
+        let mut equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
+        let mut body = if self.at(TokenKind::LBrace) || self.at(TokenKind::Eq) {
             Some(self.parse_callable_body()?)
         } else if allow_signature_only {
             None
@@ -1160,6 +1170,12 @@ impl<'a> Parser<'a> {
             self.error_at_current("expected_method_body", "expected method body");
             return None;
         };
+        if equals_body && return_type.is_none() {
+            if let Some(block) = body.as_ref().and_then(empty_construction_callable_block) {
+                body = Some(CallableBody::Block(block));
+                equals_body = false;
+            }
+        }
         let end = body
             .as_ref()
             .map(CallableBody::span)
@@ -1262,7 +1278,7 @@ impl<'a> Parser<'a> {
             return self
                 .parse_expression_brace_body_with_continuation()
                 .map(|body| match body {
-                    ExpressionBraceBody::Construction(expr) => CallableBody::Expr(expr),
+                    ExpressionBraceBody::Expression(expr) => CallableBody::Expr(expr),
                     ExpressionBraceBody::Block(block) => CallableBody::Block(block),
                 });
         }
@@ -1308,6 +1324,24 @@ impl<'a> Parser<'a> {
             _ => false,
         }
     }
+}
+
+fn empty_construction_callable_block(body: &CallableBody) -> Option<Block> {
+    let CallableBody::Expr(Expr::RecordLiteral {
+        fields,
+        values,
+        span,
+    }) = body
+    else {
+        return None;
+    };
+    if !fields.is_empty() || !values.is_empty() {
+        return None;
+    }
+    Some(Block {
+        statements: Vec::new(),
+        span: *span,
+    })
 }
 
 fn type_body_constructor_message(kind: TypeKind, name: &str) -> String {

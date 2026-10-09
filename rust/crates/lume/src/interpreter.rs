@@ -8356,6 +8356,7 @@ mod tests {
             shape Marker {}
 
             def noop() Unit = {}
+            def noop2() = {}
 
             def main() Unit {
                 counter Counter = {}
@@ -8365,13 +8366,16 @@ mod tests {
                 lookup Map[Str, Int] = {}
                 set Set[Str] = {}
                 nothing Unit = {}
-                anonymous = {}
+                anonymous = new {}
+                structural {} = {}
+                widened Any = new {}
                 extended = { ...anonymous, value: 2 }
                 callback fn() Unit = () => {}
-                shapeCallback = () => {}
+                shapeCallback = () => new {}
                 callbackResult = { ...shapeCallback(), value: 3 }
                 callback()
                 noop()
+                noop2()
 
                 println(counter.value, defaulted.value, marker == Marker())
                 println(
@@ -10431,6 +10435,17 @@ $name
     fn runs_composed_control_flow_expressions() {
         let program = lower_inline(
             r#"
+            def answer() Int =
+                { 40 } + 2
+
+            def render() Str =
+                { 42 }.toStr()
+
+            def choose(flag Bool) Int = match flag {
+                case true => { 40 } + 2
+                case false => 0
+            }
+
             def main() Unit {
                 ifValue = if true { 10 } else { 20 } - 1
                 matchValue = match false {
@@ -10442,13 +10457,16 @@ $name
                 OS.println(ifValue)
                 OS.println(matchValue)
                 OS.println(rightIf)
+                OS.println(answer())
+                OS.println(render())
+                OS.println(choose(true))
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "9\n19\n3\n");
+        assert_eq!(run.output, "9\n19\n3\n42\n42\n42\n");
     }
 
     #[test]

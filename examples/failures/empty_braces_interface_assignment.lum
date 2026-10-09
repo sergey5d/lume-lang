@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*cannot assign value of type '\{\}' to target of type 'Named'.*
+# .*empty construction '\{\}' requires an expected concrete type.*
 
 interface Named {
     def name Str
