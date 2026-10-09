@@ -755,7 +755,7 @@ impl<'a> Parser<'a> {
         if self.at_match_case_body_boundary() {
             self.error_at_current(
                 "expected_match_case_body",
-                "expected match case body; use '()' for Unit or 'new {}' for an empty shape",
+                "expected expression after '=>'; use '()' for a Unit-valued match case",
             );
             return None;
         }

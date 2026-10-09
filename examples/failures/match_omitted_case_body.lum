@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*expected match case body; use '\(\)' for Unit or 'new \{\}' for an empty shape.*
+# .*expected expression after '=>'; use '\(\)' for a Unit-valued match case.*
 
 def main() Int =
     match Some(1) {
